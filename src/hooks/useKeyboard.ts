@@ -169,6 +169,8 @@ export function useKeyboard(): void {
       // otherwise could not be closed from the keyboard at all (pre-class
       // smoke test, 2026-10-16). A field that uses Escape itself (the chat
       // line's mention list) says so with preventDefault, and keeps it.
+      // In a game nothing of cyberspace's is on screen, so Escape closes none of it out of sight.
+      if (useGame.getState().session) return
       if (escapeKey(event)) return
       // Cyberspace TV is watching only: no key moves, zooms or commits.
       if (useTv.getState().on) return

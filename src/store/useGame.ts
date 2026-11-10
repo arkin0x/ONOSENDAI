@@ -26,7 +26,9 @@ import { useCyberspace, type CyberspaceState } from './useCyberspace'
 import { useWalk } from './useWalk'
 import { openBracket, positionHex, type ActionEvent } from '../lib/events'
 import { teleportTemplate } from '../lib/games/bracket'
-import { gameFor } from '../lib/games/registry'
+import { canLeave, gameFor } from '../lib/games/registry'
+import { useWorkshop } from './useWorkshop'
+import { tvIsOn } from './tvOn'
 import { gamesEnabled } from '../lib/games/flag'
 import { TUTORIAL_GAME } from '../lib/games/tutorialGame'
 import { inRegion, stepIn, type WorldShard } from '../lib/games/play'
@@ -58,7 +60,7 @@ export interface GameState {
   /** The last thing worth saying: a refusal, or a record that did not get signed. */
   message: string | null
   /** Enter `game` from where you stand. Null when in, else the words it was refused with. */
-  enter: (game: GameDef) => Promise<string | null>
+  enter: (game: GameDef) => Promise<string | null>  // null only once you are in
   /** Back into the game whose bracket is open at your head (after a reload), signing nothing. */
   resume: () => boolean
   /** Leave the game: exit-virtual, and the view as it was. Null when out, else why not. */
@@ -73,6 +75,11 @@ export interface GameState {
 /** Refusals of in-game mode itself, in words. */
 export const GAMES_OFF_MESSAGE = 'Games are off on this device.'
 export const WALK_BUSY_MESSAGE = 'Finish your walk first.'
+export const GAME_NOT_HERE_MESSAGE = 'This game is not one ONOSENDAI plays.'
+export const GAME_ALREADY_MESSAGE = 'A game is already open, or on its way.'
+export const COVERED_MESSAGE = 'Close the workshop or TV first.'
+/** Something threw where a refusal was expected: said, never left hanging (review of #660). */
+const failed = (err: unknown): string => `Something went wrong: ${err instanceof Error ? err.message : String(err)}`
 
 function snapshotView(): ViewSnapshot {
   const s = useCyberspace.getState()
@@ -112,12 +119,20 @@ export const useGame = create<GameState>((set, get) => {
   }
 
   /** Sign a teleport from `from` to `to` inside the open game; the game goes on either way (DECK-0002 §6), and a failed record is said. */
-  const teleport = async (game: GameDef, to: Position, from: Position | null, busy: 'arriving' | 'teleporting'): Promise<void> => {
+  const teleport = async (game: GameDef, entryId: string, to: Position, from: Position | null, busy: 'arriving' | 'teleporting'): Promise<void> => {
     set({ busy })
-    const signed = await useCyberspace.getState().signGameAction(game, (links) => teleportTemplate({ ...links, toHex: hexAt(game, to), ...(from ? { fromHex: hexAt(game, from) } : {}) }))
-    const now = get().session
-    if (now && now.game.pubkey === game.pubkey) set({ session: { ...now, at: { ...to } } })
-    set({ busy: null, message: 'refused' in signed ? `The teleport was not signed: ${signed.refused}` : null })
+    let note: string | null = null
+    try {
+      const signed = await useCyberspace.getState().signGameAction(game, entryId, (links) => teleportTemplate({ ...links, toHex: hexAt(game, to), ...(from ? { fromHex: hexAt(game, from) } : {}) }))
+      if ('refused' in signed) note = `The teleport was not signed: ${signed.refused}`
+    } catch (err) {
+      note = `The teleport was not signed: ${failed(err)}`
+    } finally {
+      // Only for the session it was signed in: one that ended meanwhile (an exit elsewhere, an identity switch) hears nothing of it.
+      const now = get().session
+      if (now && now.entryId === entryId) set({ session: { ...now, at: { ...to } }, message: note })
+      set({ busy: null })
+    }
   }
 
   return {
@@ -127,17 +142,26 @@ export const useGame = create<GameState>((set, get) => {
 
     enter: async (game) => {
       if (!gamesEnabled()) return GAMES_OFF_MESSAGE
-      if (get().session || get().busy) return null
-      if (walkBusy()) { set({ message: WALK_BUSY_MESSAGE }); return WALK_BUSY_MESSAGE }
+      if (get().session || get().busy) return GAME_ALREADY_MESSAGE
+      const refuse = (why: string): string => { set({ message: why }); return why }
+      if (walkBusy()) return refuse(WALK_BUSY_MESSAGE)
+      if (useWorkshop.getState().open || tvIsOn()) return refuse(COVERED_MESSAGE)
       const snapshot = snapshotView()
       set({ busy: 'entering', message: null })
-      const entered = await useCyberspace.getState().enterGame(game)
-      if ('refused' in entered) { set({ busy: null, message: entered.refused }); return entered.refused }
-      const session: GameSession = { game, entryId: entered.event.id, at: { ...game.start }, world: null, worldError: null, snapshot }
-      set({ session })
+      let entryId: string
+      try {
+        const entered = await useCyberspace.getState().enterGame(game)
+        if ('refused' in entered) { set({ busy: null }); return refuse(entered.refused) }
+        entryId = entered.event.id
+      } catch (err) {
+        set({ busy: null })
+        return refuse(failed(err))
+      }
+      const session: GameSession = { game, entryId, at: { ...game.start }, world: null, worldError: null, snapshot }
+      set({ session, busy: null })
       readWorld(session)
       // The arrival (DECK-0002 §2.2): through the game, to its start.
-      await teleport(game, game.start, null, 'arriving')
+      await teleport(game, entryId, game.start, null, 'arriving')
       return null
     },
 
@@ -155,11 +179,17 @@ export const useGame = create<GameState>((set, get) => {
 
     exit: async () => {
       const session = get().session
-      if (get().busy) return null
-      const game = session?.game ?? gameFor(openBracket(useCyberspace.getState().actions())?.game?.pubkey)
-      if (!game) return null
+      if (get().busy) return GAME_ALREADY_MESSAGE
+      // A game played here, or one this client ever played: never stranded by the switch (registry canLeave).
+      const open = openBracket(useCyberspace.getState().actions())
+      if (!session && !canLeave(open?.game?.pubkey)) return GAME_NOT_HERE_MESSAGE
       set({ busy: 'exiting', message: null })
-      const left = await useCyberspace.getState().exitGame(session ? hexAt(game, session.at) : undefined)
+      let left: Awaited<ReturnType<CyberspaceState['exitGame']>>
+      try {
+        left = await useCyberspace.getState().exitGame(session?.entryId ?? open?.id, session ? hexAt(session.game, session.at) : undefined)
+      } catch (err) {
+        left = { refused: failed(err) }
+      }
       if ('refused' in left) { set({ busy: null, message: left.refused }); return left.refused }
       set({ session: null, busy: null })
       // The view you entered from, exactly (DECK-0002 §7). The base position
@@ -170,11 +200,12 @@ export const useGame = create<GameState>((set, get) => {
 
     step: (axis, dir) => {
       const { session, busy } = get()
-      if (!session || busy || !session.world) return
+      // No world, or one that could not be read: no walls are known, so nobody moves.
+      if (!session || busy || !session.world || session.worldError) return
       const r = stepIn(session.game, session.at, axis, dir, session.world)
       if (!r.moved) return
       set({ session: { ...session, at: r.at } })
-      if (r.pad) void teleport(session.game, r.pad.to, r.at, 'teleporting')
+      if (r.pad) void teleport(session.game, session.entryId, r.pad.to, r.at, 'teleporting')
     },
 
     hide: () => { if (!get().busy) set({ session: null }) },
@@ -200,10 +231,12 @@ export { gamesEnabled }
 useCyberspace.subscribe((s, prev) => {
   const session = useGame.getState().session
   if (!session) return
-  if (s.identity.pubkey !== prev.identity.pubkey) { useGame.setState({ session: null, busy: null }); return }
+  if (s.identity.pubkey !== prev.identity.pubkey) { useGame.setState({ session: null, busy: null, message: null }); return }
   if (s.events === prev.events) return
   const open = openBracket(useCyberspace.getState().actions())
-  if (open?.id !== session.entryId && useGame.getState().busy !== 'exiting') useGame.setState({ session: null, message: 'The game was left from another tab or device.' })
+  if (open?.id === session.entryId || useGame.getState().busy === 'exiting') return
+  const respawned = s.genesisId !== prev.genesisId
+  useGame.setState({ session: null, message: respawned ? 'Your respawn left the game.' : 'Your chain is no longer in this game: it was left, or changed, from another tab or device.' })
 })
 
 // DEV window handle, the house pattern (__store): the game session, for the LOCAL browser smoke (scripts/game-smoke.mjs).

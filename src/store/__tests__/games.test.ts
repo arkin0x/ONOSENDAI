@@ -31,9 +31,9 @@ if (typeof localStorage === 'undefined') {
 }
 
 import { firstBreak, type NostrEvent } from '../../lib/events'
-import { GAME_NEEDS_CHAIN_MESSAGE, GAME_NOT_OPEN_MESSAGE, IN_GAME_HERE_MESSAGE, GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove } from '../useCyberspace'
+import { GAME_CHOOSE_FIRST_MESSAGE, GAME_OTHER_BRACKET_MESSAGE, GAME_NEEDS_CHAIN_MESSAGE, GAME_NOT_OPEN_MESSAGE, IN_GAME_HERE_MESSAGE, GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
-import { GAMES_OFF_MESSAGE, enterTutorialDungeon, recordedPosition, useGame } from '../useGame'
+import { GAMES_OFF_MESSAGE, GAME_ALREADY_MESSAGE, enterTutorialDungeon, recordedPosition, useGame } from '../useGame'
 import { TUTORIAL_GAME } from '../../lib/games/tutorialGame'
 import { teleportTemplate } from '../../lib/games/bracket'
 import { positionHex } from '../../lib/events'
@@ -105,11 +105,11 @@ describe('entering, playing and leaving (store, DECK-0002 §2, §4, §7)', () =>
     const here = S().coordHex()
     await S().enterGame(TUTORIAL_GAME)
     const entry = last()
-    const tp = await S().signGameAction(TUTORIAL_GAME, (links) => teleportTemplate({ ...links, toHex: positionHex(TUTORIAL_GAME.start, 1) }))
+    const tp = await S().signGameAction(TUTORIAL_GAME, entry.id, (links) => teleportTemplate({ ...links, toHex: positionHex(TUTORIAL_GAME.start, 1) }))
     expect('event' in tp).toBe(true)
     expect(S().actions().slice(-1)[0].role).toBe('virtual')
     expect(whyNoMove(S().actions())).toBe(IN_GAME_HERE_MESSAGE)
-    const out = await S().exitGame(positionHex(TUTORIAL_GAME.start, 1))
+    const out = await S().exitGame(entry.id, positionHex(TUTORIAL_GAME.start, 1))
     expect('event' in out).toBe(true)
     const exit = last()
     expect(tagOf(exit, 'A')?.[1]).toBe('exit-virtual')
@@ -134,14 +134,13 @@ describe('entering, playing and leaving (store, DECK-0002 §2, §4, §7)', () =>
     expect(S().events.length).toBe(count)
     await S().exitGame()
     expect(await S().exitGame()).toEqual({ refused: GAME_NOT_OPEN_MESSAGE })
-    expect(await S().signGameAction(TUTORIAL_GAME, (l) => teleportTemplate({ ...l, toHex: positionHex(TUTORIAL_GAME.start, 1) }))).toEqual({ refused: GAME_NOT_OPEN_MESSAGE })
+    expect(await S().signGameAction(TUTORIAL_GAME, 'ab'.repeat(32), (l) => teleportTemplate({ ...l, toHex: positionHex(TUTORIAL_GAME.start, 1) }))).toEqual({ refused: GAME_NOT_OPEN_MESSAGE })
     useCyberspace.setState({ events: [], genesisId: '', prevEventId: '' })
     expect(await S().enterGame(TUTORIAL_GAME)).toEqual({ refused: GAME_NEEDS_CHAIN_MESSAGE })
   })
 
-  it('with games off, the game is not this client\'s: a chain inside it reads as held by another client', async () => {
-    await S().enterGame(TUTORIAL_GAME)
-    localStorage.removeItem('onosendai:games')
+  it('a game ONOSENDAI never played reads as held by another client, as before', async () => {
+    await S().enterGame({ ...TUTORIAL_GAME, pubkey: 'ef'.repeat(32) })
     expect(whyNoMove(S().actions())).toBe(GAME_HOLDS_MESSAGE)
   })
 })
@@ -171,7 +170,8 @@ describe('in-game mode (useGame)', () => {
     await enterTutorialDungeon()
     await worldLoaded()
     const start = TUTORIAL_GAME.start
-    // The hall's far end is sealed behind the start, its plug at 32.5 from the base: the last gibson short of it is 31.
+    // The hall's far end is sealed behind the start, its plug's face at 32.5 from the base. A player at 31 is drawn at
+    // 31.5, the gibson's centre; a step to 32 would end on the face itself, which meets it (walkWalls stepLimit).
     for (let i = 0; i < 10; i++) G().step('z', 1)
     expect(G().session!.at.z).toBe(TUTORIAL_GAME.region.base.z + 31n)
     for (let i = 0; i < 5; i++) G().step('z', -1)
@@ -227,5 +227,59 @@ describe('in-game mode (useGame)', () => {
     await enterTutorialDungeon()
     await S().exitGame()
     expect(G().session).toBeNull()
+  })
+
+  it('a second ENTER while one is open is refused in words, not reported as success', async () => {
+    await enterTutorialDungeon()
+    expect(await enterTutorialDungeon()).toBe(GAME_ALREADY_MESSAGE)
+  })
+
+  it('with the switch turned off on this device, a game ONOSENDAI played can still be left (never stranded)', async () => {
+    await enterTutorialDungeon()
+    useGame.setState({ session: null })
+    localStorage.removeItem('onosendai:games')
+    expect(G().resume()).toBe(false)
+    expect(whyNoMove(S().actions())).toBe(IN_GAME_HERE_MESSAGE)
+    expect(await G().exit()).toBeNull()
+    expect(tagOf(last(), 'A')?.[1]).toBe('exit-virtual')
+    expect(whyNoMove(S().actions())).toBeNull()
+  })
+
+  it('a world that could not be read moves nobody: no walls are known', async () => {
+    await enterTutorialDungeon()
+    await worldLoaded()
+    useGame.setState({ session: { ...G().session!, worldError: 'unreadable' } })
+    const at = G().session!.at
+    G().step('z', -1)
+    expect(G().session!.at).toEqual(at)
+  })
+})
+
+describe('what the review of #660 found untested', () => {
+  it('a hop is refused inside a game through the real proof path, and signs nothing', async () => {
+    await S().enterGame(TUTORIAL_GAME)
+    const count = S().events.length
+    await land(1n)
+    expect(S().events.length).toBe(count)
+    expect(S().proof.message).toBe(IN_GAME_HERE_MESSAGE)
+  })
+
+  it('a choice waiting between two versions of the chain comes first', async () => {
+    useCyberspace.setState({ chainConflict: { relayEvents: [] } as never })
+    expect(await S().enterGame(TUTORIAL_GAME)).toEqual({ refused: GAME_CHOOSE_FIRST_MESSAGE })
+    useCyberspace.setState({ chainConflict: null })
+  })
+
+  it('an exit or game action for a bracket that is no longer the open one is refused', async () => {
+    await S().enterGame(TUTORIAL_GAME)
+    const first = last().id
+    await S().exitGame(first)
+    await S().enterGame(TUTORIAL_GAME)
+    const second = last().id
+    const count = S().events.length
+    expect(await S().exitGame(first)).toEqual({ refused: GAME_OTHER_BRACKET_MESSAGE })
+    expect(await S().signGameAction(TUTORIAL_GAME, first, (l) => teleportTemplate({ ...l, toHex: positionHex(TUTORIAL_GAME.start, 1) }))).toEqual({ refused: GAME_OTHER_BRACKET_MESSAGE })
+    expect(S().events.length).toBe(count)
+    expect('event' in await S().exitGame(second)).toBe(true)
   })
 })

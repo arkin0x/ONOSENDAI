@@ -15,6 +15,12 @@
  * - Standing on a pad sends you to its destination: the mechanic cyberspace
  *   does not have. That is a `teleport` on the chain (DECK-0002 §4.1).
  * - A step never leaves the region.
+ *
+ * Known limit (review of #660): walls are built from each shard's own faces,
+ * without the objects it places by reference and without the stand-on-Earth
+ * pose a dataspace shard can carry. The tutorial dungeon has neither (inline
+ * pieces, in ideaspace). A game whose world uses them needs walkWalls' part
+ * resolution and placedPose here first, or its walls will not hold.
  */
 
 import type { ShardModel } from 'sno-core/shards'

@@ -140,6 +140,12 @@ function PadButton({ press, label, onPress }: { press: Press; label: ReactNode; 
 }
 
 export function GameView(): JSX.Element | null {
+  const entryId = useGame((s) => s.session?.entryId ?? null)
+  // One component per session, so its look and its notes start fresh each time (review of #660).
+  return entryId ? <GameScreen key={entryId} /> : null
+}
+
+function GameScreen(): JSX.Element | null {
   const session = useGame((s) => s.session)
   const busy = useGame((s) => s.busy)
   const message = useGame((s) => s.message)
@@ -169,8 +175,11 @@ export function GameView(): JSX.Element | null {
       e.preventDefault()
       onPress(p)
     }
+    // A focused button presses on Space's keyup: UP must never press EXIT GAME (review of #660).
+    const up = (e: KeyboardEvent): void => { if (e.code === 'Space' || e.code === 'Enter') e.preventDefault() }
     window.addEventListener('keydown', down)
-    return () => window.removeEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up) }
   }, [session !== null])
 
   // Drag to look: yaw with the horizontal, pitch with the vertical, kept above the floor and below straight down.
@@ -205,7 +214,7 @@ export function GameView(): JSX.Element | null {
       <div className="gameview__bar">
         <span className="gameview__name">{game.name}</span>
         {status && <span className="gameview__status">{status}</span>}
-        <button className="gameview__exit" disabled={busy !== null} onClick={() => { void leave() }}>EXIT GAME</button>
+        <button className="gameview__exit" disabled={busy !== null} onClick={(e) => { e.currentTarget.blur(); void leave() }}>EXIT GAME</button>
       </div>
       {(message || worldError) && (
         <p className="gameview__note" role="status">

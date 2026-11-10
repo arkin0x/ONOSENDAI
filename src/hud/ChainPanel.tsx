@@ -36,7 +36,7 @@ import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release
 import { useCyberspace } from '../store/useCyberspace'
 import { enterTutorialDungeon, gamesEnabled, useGame } from '../store/useGame'
 import { TUTORIAL_GAME } from '../lib/games/tutorialGame'
-import { gameFor } from '../lib/games/registry'
+import { canLeave, gameFor } from '../lib/games/registry'
 import { useBuilder, walkChain } from '../store/useBuilder'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { Explanation } from './Explanation'
@@ -52,6 +52,7 @@ export function ChainPanel(): JSX.Element {
   const events = useCyberspace((s) => s.events)
   // Why the last ENTER GAME was refused, while no game is on screen to say it.
   const gameNote = useGame((s) => (s.session ? null : s.message))
+  const entering = useGame((s) => s.busy === 'entering')
   const published = useCyberspace((s) => s.published)
   const publishError = useCyberspace((s) => s.publishError)
   const live = useCyberspace((s) => s.live)
@@ -232,6 +233,12 @@ export function ChainPanel(): JSX.Element {
           IN A GAME: {gameFor(game.game?.pubkey)?.name}. You stand where you entered it until you leave it.
           <button className="tag tag--tap" onClick={() => useGame.getState().resume()}>BACK INTO THE GAME</button>
         </p>
+      ) : game && canLeave(game.game?.pubkey) ? (
+        // A game ONOSENDAI once played, not here now: it can still be left (registry canLeave).
+        <p className="notice notice--game">
+          IN A GAME that ONOSENDAI played. You stand where you entered it until you leave it.{gameNote ? ` ${gameNote}` : ''}
+          <button className="tag tag--tap" onClick={() => { void useGame.getState().exit() }}>LEAVE THE GAME</button>
+        </p>
       ) : game ? (
         // Below the publishing states, which are choices waiting on you; this
         // one waits on the game's client (store GAME_HOLDS_MESSAGE).
@@ -250,7 +257,7 @@ export function ChainPanel(): JSX.Element {
           until the first-arrival tutorial offers it (DECK-0002 §2). */}
       {gamesEnabled() && !game && events.length > 0 && (
         <p className="notice notice--game">
-          {TUTORIAL_GAME.name}{gameNote ? `: ${gameNote}` : ''}
+          {TUTORIAL_GAME.name}{entering ? ': ENTERING' : gameNote ? `: ${gameNote}` : ''}
           <button className="tag tag--tap" onClick={() => { void enterTutorialDungeon() }}>ENTER GAME</button>
         </p>
       )}

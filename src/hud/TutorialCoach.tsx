@@ -49,7 +49,8 @@ export function TutorialCoach(): JSX.Element | null {
 
   // The control a step points at wears the /demo tour's pulsing ring
   // (styles.css .demo-pulse) while the step waits; nothing is clicked.
-  const highlight = shown && !done ? step?.scene?.highlight : undefined
+  // A step with no wait points for as long as it is up; one that waits, until it is done.
+  const highlight = shown && (!done || !step?.wait) ? step?.scene?.highlight : undefined
   useEffect(() => {
     if (!highlight) return
     let marked: Element[] = []
@@ -128,10 +129,13 @@ export function TutorialCoach(): JSX.Element | null {
         {step.image && <img className="tutorial__image" src={step.image.src} alt={step.image.alt} />}
         {step.explain && explaining && <p className="demo__caption tutorial__explain">{step.explain}</p>}
       </div>
-      {step.wait && (
+      {step.wait ? (
         <div className={`demo__wait ${done ? 'is-done' : ''}`} aria-live="polite">
           <span>{done ? '✓ Done' : stageError ?? step.hint ?? 'Your turn.'}</span>
         </div>
+      ) : step.hint && (
+        // A step that waits on nothing still says where to go next (the menu, for a ride or an agent).
+        <div className="demo__wait"><span>{step.hint}</span></div>
       )}
       <div className="demo__foot">
         {step.action && (

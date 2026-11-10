@@ -369,4 +369,27 @@ describe('the engine', () => {
     runTutorialEffect('test-action')
     expect(runs).toBe(1)
   })
+  it('a step that needs WALK goes back to the WALK step when not walking, and SKIP on that step passes over it', () => {
+    useCyberspace.setState({ walking: false })
+    useTutorial.setState({ script: { steps: [
+      { id: 'walk', title: 'W', caption: 'w', wait: 'walk' },
+      { id: 'run', title: 'R', caption: 'r', needsWalk: 'walk' },
+      { id: 'after', title: 'A', caption: 'a' },
+    ] } })
+    // Resumed on RUN without WALK (a reload never keeps it): back to WALK.
+    useTutorial.getState().start({ at: 'run' })
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('walk')
+    // SKIP on WALK: past RUN, which needs it.
+    useTutorial.getState().next()
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('after')
+  })
+
+  it('plants the tutorial tree: the plant step names the DNA the SEED composer offers, and the bud step shows its picture', async () => {
+    const { TUTORIAL_DNA, TUTORIAL_BUD_PICTURE } = await import('../../tutorial/dna')
+    const ids = TUTORIAL_SCRIPT.steps.map((st) => st.id)
+    expect(ids.slice(ids.indexOf('take'), ids.indexOf('to-course') + 1)).toEqual(['take', 'to-plot', 'plant', 'bud', 'to-course'])
+    const plant = TUTORIAL_SCRIPT.steps.find((st) => st.id === 'plant')!
+    expect(plant.hint).toContain(TUTORIAL_DNA.name.toUpperCase())
+    expect(TUTORIAL_SCRIPT.steps.find((st) => st.id === 'bud')!.image?.src).toBe(TUTORIAL_BUD_PICTURE)
+  })
 })

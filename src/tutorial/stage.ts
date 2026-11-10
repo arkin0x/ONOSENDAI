@@ -53,7 +53,6 @@ const PIECES: Record<CoursePart['piece'], unknown> = {
   'plat-square-6': platSquare6,
   'plat-square-4': platSquare4,
   'line-start-4x2': lineStart,
-  'line-finish-8x2': lineFinish,
   'trampoline-4': trampoline,
   'flag-checkered': flagCheckered,
   'catch-floor': CATCH_FLOOR,
@@ -67,7 +66,7 @@ const FINISH_KIT: Array<[unknown, string]> = [[platSquare4, 'platform'], [padBou
 const REGION_REQUIRES = 'the key of a place'
 
 /** Bump when what a stage holds changes, so a kept stage from before is staged again. */
-export const STAGE_VERSION = 3
+export const STAGE_VERSION = 4
 
 /** One player's stage, by pubkey. */
 export const STAGE_PREFIX = 'onosendai:tutorial:stage:'

@@ -41,7 +41,8 @@ import { useTutorialStage } from '../director'
 import { guideBagsFor } from '../guideBags'
 import { GUIDE_KEY } from '../guide'
 import { TUTORIAL_SCRIPT } from '../script'
-import { START_STAND, courseToWorld } from '../course'
+import { PLOT_STAND, START_STAND, courseToWorld } from '../course'
+import { toWorld } from '../layout'
 import { useWalk } from '../../store/useWalk'
 
 const pubkey = (): string => useCyberspace.getState().identity.pubkey
@@ -157,24 +158,35 @@ describe('the director', () => {
     expect(useTutorial.getState().done).toBe(false)
     head(want)
     expect(useTutorial.getState().done).toBe(true)
-    go('gravity')
-    await staged()
     useWalk.setState({ gravity: false })
     useCyberspace.setState({ walking: true })
+    go('gravity')
+    await staged()
     expect(useTutorial.getState().done).toBe(false)
     useWalk.setState({ gravity: true })
     expect(useTutorial.getState().done).toBe(true)
     useCyberspace.setState({ walking: false })
     go('run')
     await staged()
+    // RUN needs WALK: resumed without it, the tutorial goes back to the WALK step.
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('walk')
+    useCyberspace.setState({ walking: true })
+    go('run')
+    await staged()
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('run')
+    // Found but not standing on the deck (a bounce flew through its region): not yet.
     useShards.setState({ discovered: { ...useShards.getState().discovered, [stage!.ids.finishChest]: {} as never } })
+    expect(useTutorial.getState().done).toBe(false)
+    head(courseToWorld(layout!.frame, [0, 10, 31]))
     expect(useTutorial.getState().done).toBe(true)
+    useCyberspace.setState({ walking: false })
     go('finish')
     await staged()
     expect(useTutorial.getState().done).toBe(false)
     useInventory.setState({ items: { [stage!.ids.finishContents[2]]: { id: stage!.ids.finishContents[2] } as never } })
     expect(useTutorial.getState().done).toBe(true)
     useCyberspace.setState({ events: [], position: useCyberspace.getState().position })
+    useWalk.setState({ gravity: false })
   })
 
   it('counts the workshop once it was opened and closed again, and OPEN WORKSHOP opens it only when tapped', async () => {
@@ -190,5 +202,27 @@ describe('the director', () => {
     expect(useTutorial.getState().done).toBe(false)
     useWorkshop.getState().closeWorkshop()
     expect(useTutorial.getState().done).toBe(true)
+  })
+
+  it('counts the plot reached and a seed of the player\'s own planted, lining the cursor up on the dirt', async () => {
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    const { layout } = useTutorialStage.getState()
+    useTutorial.getState().start({ at: 'to-plot' })
+    await staged()
+    const stand = toWorld(layout!.frame, PLOT_STAND.f, PLOT_STAND.r, PLOT_STAND.u)
+    expect(useCyberspace.getState().cursor).toEqual(stand)
+    expect(useTutorial.getState().done).toBe(false)
+    useCyberspace.setState({ events: [{ id: 'e', tags: [] } as never], position: stand, headPlane: layout!.plane })
+    expect(useTutorial.getState().done).toBe(true)
+    useShards.setState({ mine: [{ eventId: 'old', type: 'seed' } as never] })
+    useTutorial.getState().start({ at: 'plant' })
+    expect(useTutorial.getState().done).toBe(false)
+    useShards.setState({ mine: [{ eventId: 'old', type: 'seed' } as never, { eventId: 'x', type: 'shard' } as never] })
+    expect(useTutorial.getState().done).toBe(false)
+    useShards.setState({ mine: [{ eventId: 'old', type: 'seed' } as never, { eventId: 'new', type: 'seed' } as never] })
+    expect(useTutorial.getState().done).toBe(true)
+    useShards.setState({ mine: [] })
+    useCyberspace.setState({ events: [] })
   })
 })

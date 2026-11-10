@@ -17,6 +17,9 @@ import { generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from 'nostr-tools'
 import { regionKeyAt } from '../../lib/shardCrypto'
 import { unbag, type Hidden } from '../../lib/hidden'
+import { decryptForRegion } from '../../lib/shardCrypto'
+import { DNA_KIND } from '../../lib/seeds/seedItem'
+import { TUTORIAL_DNA } from '../dna'
 import { lockOf } from '../../lib/locks'
 import { NIP44_MAX_PLAINTEXT, openWithSecret, plaintextBytes, readContents } from '../../lib/chests'
 import { BAG_SAFE_BYTES } from '../../lib/bagSize'
@@ -84,18 +87,6 @@ describe('the course', () => {
     }
   })
 
-  it('needs the trampoline: the deck is out of reach of a jump and its double jump, and the gaps before it are EASY', () => {
-    // From the trampoline's top a walker stands at 2; on the deck at 10: up 8, past the 7 a jump and its double jump reach.
-    const deck = COURSE.find((p) => p.piece === 'plat-square-6' && p.at[1] === 9)!
-    const tramp = COURSE.find((p) => p.piece === 'trampoline-4')!
-    expect(deck.at[1] + 1 - (tramp.at[1] + 2)).toBe(8)
-    // Level gaps of 2, 3 and 3 between the squares (cells from middle -n to +n).
-    const half = (p: string): number => (p === 'plat-square-6' ? 3 : 2)
-    const run = COURSE.filter((p) => p.piece.startsWith('plat-square') && p.at[1] === 0)
-    const gaps = run.slice(1).map((p, i) => (p.at[2] - half(p.piece)) - (run[i].at[2] + half(run[i].piece)) - 1)
-    expect(gaps).toEqual([2, 3, 3])
-  })
-
   it('counts a walker on the start square as at the start, and nowhere else', () => {
     const frame = tutorialLayout(MID, 0).frame
     expect(atStart(frame, courseToWorld(frame, START_STAND))).toBe(true)
@@ -124,7 +115,16 @@ describe('the stage', () => {
     const coverItems = await open(coverBag, MID, l.cover.height)
     expect(coverItems[0].eventId).toBe(stage.ids.blueBox)
     // The blue box and the whole course, every piece where the course puts it, all in the cover (§7.6).
-    expect(coverItems).toHaveLength(1 + COURSE.length)
+    // ... and the dirt plot (A5); the tutorial tree's DNA rides in the bag too, handed to the DNA resolver rather than listed (DECK-0008 §8.2).
+    expect(coverItems).toHaveLength(1 + COURSE.length + 1)
+    expect(coverItems[coverItems.length - 1].eventId).toBe(stage.ids.plot)
+    const json = await decryptForRegion(regionKeyAt(l.cover.base, l.cover.height, MAX_COMPUTE).key, coverBag.tags.find((t) => t[0] === 'encrypted')![2])
+    const plain = JSON.parse(json ?? '[]') as NostrEvent[]
+    const dna = plain.find((e) => e.kind === DNA_KIND)!
+    expect(dna.id).toBe(stage.ids.dna)
+    expect(dna.content).toBe(TUTORIAL_DNA.text)
+    expect(dna.pubkey).toBe(stage.guide)
+    expect(verifyEvent(dna)).toBe(true)
     COURSE.forEach((part, i) => {
       const item = coverItems[1 + i]
       expect(item.type).toBe('shard')

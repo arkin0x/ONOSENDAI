@@ -57,6 +57,28 @@ export function registerTutorialEffect(name: string, effect: TutorialEffect): vo
   TUTORIAL_EFFECTS.set(name, effect)
 }
 
+/** Run a registered effect once, for a coach button (TutorialStep `action`); what it returns to undo is not kept. */
+export function runTutorialEffect(name: string): void {
+  try { TUTORIAL_EFFECTS.get(name)?.() } catch (err) { console.warn('[tutorial] action failed:', err) }
+}
+
+/**
+ * What a choice does that a step cannot (TutorialChoice `when`): the dungeon
+ * enters a game (Track C, the Games DECK). Unregistered, the choice is not
+ * offered. `run` happens after the tutorial ends, as the player's own choice.
+ */
+export interface TutorialChoiceRun { run: () => void }
+const TUTORIAL_CHOICES = new Map<string, TutorialChoiceRun>()
+
+export function registerTutorialChoice(name: string, choice: TutorialChoiceRun): void {
+  TUTORIAL_CHOICES.set(name, choice)
+}
+
+/** Whether a choice is offered: no `when`, or one registered under it. */
+export function choiceOffered(c: { when?: string }): boolean {
+  return !c.when || TUTORIAL_CHOICES.has(c.when)
+}
+
 /** Watch for a step's wait: a tutorial watcher when one is registered under its name, else the /demo engine's. */
 function watchWait(wait: TutorialWait, onDone: () => void): () => void {
   const own = TUTORIAL_WATCHERS.get(wait)
@@ -133,6 +155,8 @@ interface TutorialState {
   start: (opts?: { at?: string; restart?: boolean }) => void
   /** NEXT (or SKIP on a step still waiting); on the last step, FINISH. */
   next: () => void
+  /** A choice on a modal step (TutorialChoice): its branch step, or its registered run after the tutorial ends. */
+  choose: (choiceId: string) => void
   /** End the run for this player, kept as finished or skipped. */
   end: (how: 'finished' | 'skipped') => void
   /** Put it away without ending it (another identity, the /demo tour): the next load resumes. */
@@ -208,10 +232,26 @@ export const useTutorial = create<TutorialState>((set, get) => {
       if (!s.active) return
       const step = s.script.steps[s.index]
       if (step?.gate && !s.done) return
-      const i = s.index + 1
+      // A branch's NEXT is FINISH; on the way through, branches are passed over.
+      let i = step?.branch ? s.script.steps.length : s.index + 1
+      while (i < s.script.steps.length && s.script.steps[i].branch) i++
       if (i < s.script.steps.length) enter(i)
       // Past the last step with its wait still to do is a skip, not a finish.
       else get().end(step?.wait && !s.done ? 'skipped' : 'finished')
+    },
+
+    choose: (choiceId) => {
+      const s = get()
+      if (!s.active) return
+      const choice = s.script.steps[s.index]?.choices?.find((c) => c.id === choiceId)
+      if (!choice || !choiceOffered(choice)) return
+      const run = choice.when ? TUTORIAL_CHOICES.get(choice.when) : undefined
+      if (choice.step) {
+        const at = s.script.steps.findIndex((st) => st.id === choice.step)
+        if (at >= 0) { enter(at); return }
+      }
+      get().end('finished')
+      if (run) { try { run.run() } catch (err) { console.warn('[tutorial] choice failed:', err) } }
     },
 
     end: (how) => {

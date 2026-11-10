@@ -10425,3 +10425,7 @@ html.tv-broadcast body { overflow: hidden; }
 .tutorial-card__go { align-self: stretch; justify-content: center; min-height: 40px; }
 .tutorial__explain { color: var(--dim); font-size: 12px; }
 .tutorial-restart { margin: 4px 0 8px; }
+.tutorial-choice { flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; min-height: 0; height: auto; text-align: left; }
+.tutorial-choice__label { color: var(--accent); font-weight: 600; letter-spacing: 0.08em; }
+.tutorial-choice__about { color: var(--dim); font-size: 11px; letter-spacing: 0; text-transform: none; }
+.tutorial-card__go--done { justify-content: center; }

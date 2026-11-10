@@ -17,7 +17,8 @@
  *     (useArrival: where they stand, as their chain's head says);
  *   - 'gravity': WALK with GRAVITY on;
  *   - 'see-finish' and 'take-finish': the finish chest found (the scan does
- *     it as they land on the deck), and something from it taken.
+ *     it as they land on the deck), and something from it taken;
+ *   - 'workshop': the workshop opened and closed again.
  * Nothing here opens or takes anything (owner, 2026-10-26).
  */
 
@@ -30,6 +31,8 @@ import { useShards } from '../store/useShards'
 import { useOpenedChests, openedKey } from '../store/useOpenedChests'
 import { useInventory } from '../store/useInventory'
 import { useWalk } from '../store/useWalk'
+import { useWorkshop } from '../store/useWorkshop'
+import { viewEarth } from '../hud/HyperspacePanel'
 import { START_STAND, atStart, courseToWorld } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import type { Position } from '../lib/space'
@@ -211,3 +214,18 @@ registerTutorialWatcher('take-finish', (onDone) => watchUntil(() => {
 
 /** The course step lines the cursor up on the start square, so one COMMIT moves you there. */
 registerTutorialEffect('aim-start', aimOnce((layout) => courseToWorld(layout.frame, START_STAND)))
+
+/** The workshop opened, and closed again: the player has been in it (the next step comes up as they come out). */
+registerTutorialWatcher('workshop', (onDone) => {
+  let been = useWorkshop.getState().open
+  return watchUntil(() => {
+    if (useWorkshop.getState().open) { been = true; return false }
+    return been
+  }, onDone, [(l) => useWorkshop.subscribe((s, prev) => { if (s.open !== prev.open) l() })])
+})
+
+/** OPEN WORKSHOP in the coach: the same workshop the menu's button opens, on the newest model. */
+registerTutorialEffect('open-workshop', () => { useWorkshop.getState().openWorkshop() })
+
+/** Earth through the free view (the view menu's EARTH): looking costs nothing; only BOARD costs work or sats (T9). */
+registerTutorialEffect('view-earth', () => { viewEarth() })

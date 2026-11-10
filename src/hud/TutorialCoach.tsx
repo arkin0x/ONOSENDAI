@@ -12,7 +12,8 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronRight, ChevronUp, X } from 'lucide-react'
-import { useTutorial } from '../store/useTutorial'
+import { choiceOffered, runTutorialEffect, useTutorial } from '../store/useTutorial'
+import { useWorkshop } from '../store/useWorkshop'
 import { useDemo } from '../store/useDemo'
 import { useCover } from '../hooks/useCover'
 import { useEscape } from '../hooks/useEscape'
@@ -28,11 +29,13 @@ export function TutorialCoach(): JSX.Element | null {
   const script = useTutorial((s) => s.script)
   // The guide's things could not be staged: said where the instruction goes.
   const stageError = useTutorialStage((s) => s.error)
-  // Never over the /demo tour (useTutorial pauses for it; this is the frame between).
+  // Never over the /demo tour (useTutorial pauses for it; this is the frame between),
+  // nor over the workshop, which has the screen while it is open.
   const touring = useDemo((s) => s.active)
+  const workshop = useWorkshop((s) => s.open)
   const step = script.steps[index]
   const modal = step?.modal === true
-  const shown = active && !touring && !!step
+  const shown = active && !touring && !workshop && !!step
   const ref = useRef<HTMLDivElement | null>(null)
   const coverRef = useCover('top', shown && !modal && !minimized)
   const panelRef = useCallback((el: HTMLDivElement | null) => { ref.current = el; coverRef(el) }, [coverRef])
@@ -82,7 +85,13 @@ export function TutorialCoach(): JSX.Element | null {
           </div>
           <h2 className="modal__title">{step.title}</h2>
           <p className="demo__caption"><CaptionText caption={caption} /></p>
-          <button ref={go} className="demo__btn demo__btn--next tutorial-card__go" onClick={t.next}>{step.go ?? (last ? 'FINISH' : 'NEXT')}</button>
+          {step.choices?.filter(choiceOffered).map((c) => (
+            <button key={c.id} className="demo__btn tutorial-choice" onClick={() => t.choose(c.id)}>
+              <span className="tutorial-choice__label">{c.label}</span>
+              <span className="tutorial-choice__about">{c.about}</span>
+            </button>
+          ))}
+          <button ref={go} className={`demo__btn tutorial-card__go ${step.choices ? 'tutorial-card__go--done' : 'demo__btn--next'}`} onClick={t.next}>{step.go ?? (last ? 'FINISH' : 'NEXT')}</button>
         </div>
       </div>,
       document.body,
@@ -124,11 +133,14 @@ export function TutorialCoach(): JSX.Element | null {
         </div>
       )}
       <div className="demo__foot">
+        {step.action && (
+          <button className="demo__btn demo__btn--next tutorial__action" onClick={() => runTutorialEffect(step.action!.effect)}>{step.action.label}</button>
+        )}
         {step.explain && (
           <button className={`demo__btn ${explaining ? 'is-on' : ''}`} onClick={() => t.setExplaining(!explaining)} aria-pressed={explaining}>EXPLAIN</button>
         )}
         <button className={`demo__btn demo__btn--next ${waiting && !held ? 'is-skip' : ''}`} onClick={t.next} disabled={held} title={held ? step.hint : undefined}>
-          {last && !waiting ? 'FINISH' : waiting && !held ? 'SKIP' : 'NEXT'} <ChevronRight size={14} aria-hidden />
+          {(last || step.branch) && !waiting ? 'FINISH' : waiting && !held ? 'SKIP' : 'NEXT'} <ChevronRight size={14} aria-hidden />
         </button>
       </div>
     </div>

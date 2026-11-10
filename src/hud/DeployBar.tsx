@@ -97,6 +97,7 @@ import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, r
 import { useEscape } from '../hooks/useEscape'
 import { useCover } from '../hooks/useCover'
 import { fitCause, fitHeight, fitHeightAll, outsideAt, reachGibsons, type FitPoint } from '../lib/deployFit'
+import { seedHideHeight } from '../lib/seeds/plant'
 import { CHEST_LOOKS, DOOR_LOOKS, LOOK_LABELS } from '../lib/looks'
 import { LookPicker } from './LookPicker'
 import { SHALLOW_WARN, shallowBag, shallowExplain } from '../lib/shallowBag'
@@ -233,6 +234,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   const status = useShards((s) => s.deployStatus)
   const error = useShards((s) => s.deployError)
   const note = useShards((s) => s.deployNote)
+  const mining = useShards((s) => s.deployMining)
   const ask = useShards((s) => s.deployAsk)
   const live = useCyberspace((s) => s.live)
   const cloudMode = useCyberspace((s) => s.cloudPrefs.mode)
@@ -364,12 +366,20 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
     }
     return { points, elsewhere }
   }, [pending, plane])
-  // What the height is fitted to: a shard's own reach, or the chest's look
-  // and aimed contents, so its region holds the whole model it wears.
-  const fitting = !!shard || !!lookModel || aimed.points.length > 0
+  // A seed hides where the automatic discovery finds it (owner ruling
+  // 2026-11-10): the smallest height from 3 to 12 whose cube holds this DNA's
+  // own bloom at day 31 (SeedCompose measures it), 12 when none does, and the
+  // bloom draws past its cube. + still hides it higher, by hand. It used to fit
+  // the 64 units every bloom is held to, a 128-gibson span that straddles some
+  // power-of-two boundary near most points, so the height climbed to wherever
+  // the nearest one ended (13 at the owner's spot every time).
+  const seedFit = pending?.type === 'seed' ? seedHideHeight(pending.seed.reach, cursor, step, ceiling) : null
+  // What the height is fitted to: a shard's own reach, the chest's look and
+  // aimed contents, so its region holds the whole model it wears, or a seed's bloom.
+  const fitting = !!shard || !!lookModel || aimed.points.length > 0 || seedFit !== null
   const fitH = useMemo(
-    () => (shard ? fitHeight(shard, unit, cursor, step, 0, ceiling) : lookModel || aimed.points.length > 0 ? fitHeightAll(fitShape ? reachGibsons(fitShape, unit) : 0n, aimed.points, cursor, step, 0, ceiling) : null),
-    [shard, lookModel, fitShape, unit, cursor, step, ceiling, aimed],
+    () => (shard ? fitHeight(shard, unit, cursor, step, 0, ceiling) : seedFit !== null ? seedFit : lookModel || aimed.points.length > 0 ? fitHeightAll(fitShape ? reachGibsons(fitShape, unit) : 0n, aimed.points, cursor, step, 0, ceiling) : null),
+    [shard, lookModel, fitShape, unit, cursor, step, ceiling, aimed, seedFit],
   )
   useEffect(() => {
     // Once placed, its height is fixed with its place, whatever the cursor does while the modal is filled.
@@ -386,7 +396,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
     useShards.setState({ deployHeightAuto: false })
     useShards.getState().setDeployHeight(into)
   }, [lined, into])
-  const fit: { auto: boolean; height: number | null; cause: 'size' | 'edge' | 'contents' } = { auto: heightAuto && fitting, height: fitH, cause: fitModel ? fitCause(fitModel, unit, fitH, ceiling) : 'contents' }
+  const fit: { auto: boolean; height: number | null; cause: 'size' | 'edge' | 'contents' } = { auto: heightAuto && fitting, height: fitH, cause: fitModel ? fitCause(fitModel, unit, fitH, ceiling) : seedFit !== null ? 'size' : 'contents' }
   // Aimed contents the region at this height does not hold: they stand at the chest when it opens (revealedIn).
   const outside = aimed.points.length + aimed.elsewhere === 0 ? 0 : outsideAt(deployPoint(cursor, step, height), height, aimed.points) + aimed.elsewhere
   // STEP changes only the build cursor: in BUILD mode, its view drivable, not
@@ -460,7 +470,8 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
           </button>
         )}
         {/* Once hiding, it finishes where it was placed: CANCEL would only pretend. */}
-        <button className="deploybar__cancel" disabled={working} title={working ? 'Already hiding; it finishes where you placed it' : placed ? 'Stop placing this one; Esc leaves build mode' : undefined} onClick={() => useShards.getState().cancelDeploy(true)}>CANCEL</button>
+        {/* Except while a seed's work is mining: nothing is signed yet, so CANCEL stops it (DECK-0008 §7). */}
+        <button className="deploybar__cancel" disabled={working && !mining} title={mining ? 'Stop mining; nothing is hidden' : working ? 'Already hiding; it finishes where you placed it' : placed ? 'Stop placing this one; Esc leaves build mode' : undefined} onClick={() => useShards.getState().cancelDeploy(true)}>CANCEL</button>
       </div>
 
       {error && <div className="deploybar__row notice">{error}</div>}

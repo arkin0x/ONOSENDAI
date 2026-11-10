@@ -21,6 +21,9 @@
  *     lib/chests.ts; here the chest is read as an item like any other.
  *   - hidden audio, kind 1063 (DECK-0007): a NIP-94 file event naming an
  *     encrypted file on Blossom, with its key (lib/audioItem.ts).
+ *   - a seed, kind 3351 (DECK-0008): one planting of a DNA, whose bloom every
+ *     reader grows (lib/seeds/). A DNA, kind 3350, carried in the same bag is
+ *     handed to the DNA resolver and is not an item of its own.
  * All five carry their coordinate in a `C` tag, decoded on discovery, and the
  * NIP-70 `-` tag (arkinox, 2026-10-20): they only ever live inside bags, and
  * a relay that honours `-` accepts the event only from its author, so no
@@ -67,6 +70,7 @@ import { mentionTags } from './mentions'
 import { cashuTokensAsWritten } from './cashu'
 import { countNftLinks, NFT_WORDS, replaceNftLinks } from './nftLink'
 import { AUDIO_KIND, audioItemOf, type AudioItem } from './audioItem'
+import { DNA_KIND, SEED_KIND, noteBagDna, seedItemOf, type SeedItem } from './seeds/seedItem'
 import { SEALED_KIND, openSealed, rememberSealed, sealedAddress, sealedEventRefusal, sealedItemOf, sealedPayload, sealedRefParts } from './sealed'
 
 /** The location-encrypted envelope (spec §8.6). */
@@ -226,7 +230,7 @@ export function referenceTo(object: NostrEvent, at: Position, plane: Plane, rela
  */
 export const MAX_MESSAGE_LENGTH = 10_000
 
-export type HiddenType = 'shard' | 'message' | 'key' | 'chest' | 'audio'
+export type HiddenType = 'shard' | 'message' | 'key' | 'chest' | 'audio' | 'seed'
 
 /** What a key item carries, read out of its event (B1 §2.1). */
 export interface KeyItem {
@@ -365,6 +369,8 @@ export interface ItemBody {
   key?: KeyItem
   chest?: ChestItem
   audio?: AudioItem
+  /** A seed (DECK-0008 §8.2), read with every check before its DNA. */
+  seed?: SeedItem
 }
 
 /**
@@ -399,6 +405,13 @@ export function readItem(inner: Pick<NostrEvent, 'kind' | 'content' | 'tags' | '
     const audio = audioItemOf(inner)
     return audio ? { type: 'audio', audio } : null
   }
+  if (inner.kind === SEED_KIND) {
+    // Its tags and its work at the base price, before anything is fetched for it (DECK-0008 §8.2).
+    const ev = inner as Pick<NostrEvent, 'kind' | 'content' | 'tags' | 'id'> & Partial<Pick<NostrEvent, 'pubkey' | 'created_at'>>
+    if (typeof ev.pubkey !== 'string' || typeof ev.created_at !== 'number') return null
+    const seed = seedItemOf({ id: ev.id, kind: ev.kind, pubkey: ev.pubkey, created_at: ev.created_at, tags: ev.tags, content: ev.content })
+    return seed ? { type: 'seed', seed } : null
+  }
   return null
 }
 
@@ -413,11 +426,12 @@ export function messagePreview(text: string, max = 32): string {
 }
 
 /** What a hidden thing is called in a row, a chip or a ghost: a message's preview, else its name. */
-export function hiddenLabel(h: Pick<ItemBody, 'type' | 'text' | 'shard' | 'key' | 'chest' | 'audio'>, max = 32): string {
+export function hiddenLabel(h: Pick<ItemBody, 'type' | 'text' | 'shard' | 'key' | 'chest' | 'audio' | 'seed'>, max = 32): string {
   if (h.type === 'message') return messagePreview(h.text ?? '', max)
   if (h.type === 'audio') return h.audio?.title ?? 'audio'
   if (h.type === 'key') return h.key?.name ?? 'key'
   if (h.type === 'chest') return h.chest?.name ?? 'chest'
+  if (h.type === 'seed') return h.seed?.title || 'seed'
   return h.shard?.name ?? 'shard'
 }
 
@@ -466,6 +480,7 @@ export interface Hidden {
   key?: KeyItem
   chest?: ChestItem
   audio?: AudioItem
+  seed?: SeedItem
   /**
    * Set when the item was hidden by reference: the entry itself, which is what
    * a rewrite of the bag must carry forward. `inner` is then the referenced
@@ -810,7 +825,7 @@ export const DEFAULT_BAG_SETTINGS: BagSettings = { heightTag: true, hint: null, 
  * keys, chests, hidden audio, and the cashu tokens and nonfungible.cash claim links (NFTs,
  * lib/nftLink) written in its messages.
  */
-export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number; audio: number; door: number }
+export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number; audio: number; door: number; seed: number; dna: number }
 
 /**
  * What a bag holds, counted as spec §7.7 counts (Contents). An inline item by
@@ -822,7 +837,7 @@ export interface BagContents { shard: number; message: number; key: number; ches
  * sealed entry whose item was never read, counts as nothing.
  */
 export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): BagContents {
-  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0, door: 0 }
+  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0, door: 0, seed: 0, dna: 0 }
   for (const entry of inners) {
     let e: Pick<Rumor, 'kind' | 'content' | 'tags'>
     if (isReference(entry)) {
@@ -838,6 +853,9 @@ export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: Re
     // A door counts as `door`, never as `chest` (spec §7.7, #82); what its room holds is never counted.
     else if (e.kind === CHEST_KIND) { if (isDoor(e.tags)) out.door++; else out.chest++ }
     else if (e.kind === AUDIO_KIND) out.audio++
+    // Seeds and the DNAs hidden with them (DECK-0008 §8.2, Contents).
+    else if (e.kind === SEED_KIND) out.seed++
+    else if (e.kind === DNA_KIND) out.dna++
   }
   return out
 }
@@ -848,7 +866,7 @@ export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: Re
  * it keeps the order spec §7.7 gives; `door` (DECK-0004 §3.7, spec #82)
  * after it, for the same reason.
  */
-export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft', 'audio', 'door'] as const
+export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft', 'audio', 'door', 'seed', 'dna'] as const
 
 /**
  * The public tags a bag's contents settings write (arkinox, 2026-10-18:
@@ -1037,6 +1055,11 @@ interface BagFacts { height: number; bag: BagSettings; room?: { doorId: string }
 function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFacts, heightKnown = true, origin?: RegionOrigin): Hidden | null {
   // By the same key that wrapped it, and signed, or a message sealed as a
   // rumor (innerAuthentic).
+  // A DNA carried for the seeds planted from it (DECK-0008 §8.1, Public or
+  // hidden): the bag is where a reader looks for it first (§8.2). One of
+  // another author's is placed unchanged, signed by them, so it is not held
+  // to the bag's signer; the resolver checks its id and signature itself.
+  if (inner && typeof inner === 'object' && inner.kind === DNA_KIND) { noteBagDna(inner as NostrEvent); return null }
   if (!innerAuthentic(inner, outer.pubkey)) return null
 
   const coordHex = tag(inner, 'C')

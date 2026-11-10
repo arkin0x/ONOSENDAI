@@ -40,6 +40,7 @@ import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { bearingOf, csDirection, frameOf, placedPose, snapOffered, type V3 } from '../lib/pose'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { lookModelOf, sealingDoor, useShards } from '../store/useShards'
+import { seedDraftName } from '../store/plantSeed'
 import { messagePreview } from '../lib/hidden'
 import { ShardMesh } from './ShardMesh'
 import { regionBox } from '../lib/clip'
@@ -136,14 +137,14 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // A message ghosts as a dim note that follows the cursor; a key, a chest
   // and hidden audio ghost as their mark and name, the way the world draws
   // them once hidden.
-  if (pending?.type === 'message' || pending?.type === 'key' || (pending?.type === 'chest' && !shard) || pending?.type === 'audio') {
+  if (pending?.type === 'message' || pending?.type === 'key' || (pending?.type === 'chest' && !shard) || pending?.type === 'audio' || pending?.type === 'seed') {
     return (
       <>
       {/* Hidden audio's sphere: full volume inside, a one-shot's trigger zone (AudioSphereGhost). */}
       {pending.type === 'audio' && <AudioSphereGhost landingAt={landingAt} />}
       {sealed}
       <WorldLabel
-        text={pending.type === 'message' ? messagePreview(pending.text, 40) : pending.type === 'key' ? `⚷ ${pending.key.name}` : pending.type === 'audio' ? `AUDIO · ${pending.audio.title}` : `▣ ${pending.name}`}
+        text={pending.type === 'message' ? messagePreview(pending.text, 40) : pending.type === 'key' ? `⚷ ${pending.key.name}` : pending.type === 'audio' ? `AUDIO · ${pending.audio.title}` : pending.type === 'seed' ? `SEED · ${seedDraftName(pending.seed)}` : `▣ ${pending.name}`}
         color="#ffd27d"
         follow={landingAt}
         align="center"

@@ -15,12 +15,21 @@
  *
  * A gibson has no size of its own at walking scale, so one is chosen here:
  * the walker's gibson is GIBSON_METRES, about 0.147 m. It is the scale at
- * which the ruled jump (JUMP_HEIGHT 3 gibsons, about JUMP_HANG_S 0.6 s in the
- * air) is exactly Earth's standard gravity, 9.80665 m/s^2: 3 gibsons is a
- * 0.44 m standing jump, which a person does in 0.6 s. At that scale a Maze
- * Kit riser of 1 gibson is a 15 cm stair step and a 16-gibson tile is 2.35 m,
- * so the kit's own proportions agree with it. WALK_GRAVITY is then about
- * 66.7 gibsons/s^2: a drop of one tile takes 0.69 s, a 48-gibson shaft 1.2 s.
+ * which the first ruled jump (3 gibsons, about 0.6 s in the air; ruling D5 of
+ * 2026-10-24) is exactly Earth's standard gravity, 9.80665 m/s^2: 3 gibsons
+ * is a 0.44 m standing jump, which a person does in 0.6 s. At that scale a
+ * Maze Kit riser of 1 gibson is a 15 cm stair step and a 16-gibson tile is
+ * 2.35 m, so the kit's own proportions agree with it. WALK_GRAVITY is then
+ * about 66.7 gibsons/s^2: a drop of one tile takes 0.69 s, a 48-gibson shaft
+ * 1.2 s.
+ *
+ * Gravity stays exactly that; only the jump changed (arkinox's play test of
+ * 2026-11-10: "maybe jump should do 5 Gibsons instead of 3. let's try
+ * that"). JUMP_HEIGHT is 5 gibsons (0.74 m), off the floor at JUMP_SPEED,
+ * about 25.8 gibsons/s, and about JUMP_HANG_S 0.775 s in the air. Pressed
+ * again in the air, JUMP is a double jump (the same play test): one more of
+ * DOUBLE_JUMP_HEIGHT, 3 gibsons, from wherever you are, once per time in the
+ * air (store/useWalk.ts).
  *
  * No terminal velocity. A person's (about 55 m/s, 374 gibsons/s here) is
  * reached only after hundreds of metres; a maze-scale drop of 48 gibsons
@@ -40,22 +49,32 @@
 import { clampAxis, type Position } from '../lib/space'
 import { stepLimit, underSolid, type WallItem } from './walkWalls'
 
-/** How high a jump rises, in gibsons. */
-export const JUMP_HEIGHT = 3
-
-/** How long a jump that lands where it left is in the air, in seconds. */
-export const JUMP_HANG_S = 0.6
-
-/** Down, in gibsons/s^2: the ruled jump at Earth's gravity (8h / T^2), about 66.7. */
-export const WALK_GRAVITY = (8 * JUMP_HEIGHT) / (JUMP_HANG_S * JUMP_HANG_S)
-
-/** A jump's speed off the floor, in gibsons/s (4h / T): 20. */
-export const JUMP_SPEED = (4 * JUMP_HEIGHT) / JUMP_HANG_S
+/**
+ * Down, in gibsons/s^2: the first ruled jump (3 gibsons, 0.6 s in the air:
+ * 8h / T^2) at Earth's gravity, about 66.7. Fixed: a higher jump is a faster
+ * launch, never a different gravity.
+ */
+export const WALK_GRAVITY = (8 * 3) / (0.6 * 0.6)
 
 /** The speed off the floor, in gibsons/s, that rises `h` gibsons (sqrt(2 g h)): JUMP_SPEED for JUMP_HEIGHT. */
 export function launchSpeed(h: number): number {
   return h > 0 ? Math.sqrt(2 * WALK_GRAVITY * h) : 0
 }
+
+/** How high a jump rises, in gibsons (play test of 2026-11-10; it was 3). */
+export const JUMP_HEIGHT = 5
+
+/** A jump's speed off the floor, in gibsons/s (sqrt(2 g h)): about 25.8. */
+export const JUMP_SPEED = launchSpeed(JUMP_HEIGHT)
+
+/** How long a jump that lands where it left is in the air, in seconds (2 v / g): about 0.775. */
+export const JUMP_HANG_S = (2 * JUMP_SPEED) / WALK_GRAVITY
+
+/** How high a double jump rises above where it was pressed, in gibsons. */
+export const DOUBLE_JUMP_HEIGHT = 3
+
+/** A double jump's upward speed, in gibsons/s: set to this, not added (sqrt(2 g h)), 20. */
+export const DOUBLE_JUMP_SPEED = launchSpeed(DOUBLE_JUMP_HEIGHT)
 
 /** Standard gravity, m/s^2. */
 export const STANDARD_GRAVITY = 9.80665

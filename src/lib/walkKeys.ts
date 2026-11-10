@@ -16,7 +16,7 @@
  * | A / D | left / right | the side arrows |
  * | Space or R | up one cell | JUMP |
  * | C or F | down one cell | DOWN |
- * | W or S with A or D held | 45 degrees to that side of the way you face | FORWARD or BACK held with a side arrow, or FORWARD pressed near either end |
+ * | W or S with A or D held | 45 degrees to that side of the way you face | FORWARD or BACK held with a side arrow |
  *
  * Forward and back go the way you face, snapped to 8 directions: a diagonal
  * when the facing is 22.5 to 45 degrees off the nearest axis, one step on

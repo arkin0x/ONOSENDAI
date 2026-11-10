@@ -38,12 +38,16 @@
  *
  * WALK's keys walk while held, from the press on, and what is held
  * combines (store/walkHold.ts; play test of 2026-11-10): FORWARD or BACK
- * held with a side arrow goes 45 degrees to that side, and FORWARD's own
- * ends (LEAN_ZONE of its width each, marked off) do it with one thumb.
- * Slide the thumb along FORWARD while holding and the walk veers with it,
- * once it is LEAN_SLOP_PX past a line, so a thumb resting on one never
- * turns the walk back and forth (a hop a turn). Each key is its own hold:
- * JUMP pressed with FORWARD held is a running jump, and FORWARD walks on.
+ * held with a side arrow goes 45 degrees to that side. FORWARD itself is
+ * plain forward (its diagonal end zones went after the next play test, the
+ * same day). Each key is its own hold: JUMP pressed with FORWARD held is a
+ * running jump, and FORWARD walks on.
+ *
+ * JUMP and DOWN stand on the left (arkinox, 2026-11-10: "move jump/down to
+ * the left side above the menu button and below the LOOK sphere"), at the
+ * height they had in the pad's bottom row, so a jump is the left thumb's
+ * and the walk the right's. The right keeps a compact cluster: GRAVITY,
+ * FORWARD, and the sides with BACK.
  */
 
 import { useEffect, useState, type ReactNode } from 'react'
@@ -67,7 +71,7 @@ import { useCover } from '../hooks/useCover'
 import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
 import { canFly, useViewFly } from '../lib/viewFly'
 import { flyHold } from './ViewFlyButtons'
-import { heldBy, holdEnd, holdEndAll, holdMove, holdStart } from '../store/walkHold'
+import { holdEnd, holdEndAll, holdStart } from '../store/walkHold'
 import { walkHeldDir, type HeldDir } from '../lib/walkKeys'
 
 /**
@@ -99,8 +103,8 @@ export interface PadKey {
   fly?: 1 | -1
   /** WALK: the direction this key holds while pressed (store/walkHold.ts). */
   hold?: HeldDir
-  /** WALK's FORWARD: pressed in either end zone it also holds that side, a diagonal. */
-  lean?: boolean
+  /** WALK's JUMP and DOWN: drawn on the left of the screen, over the menu button, not in the pad. */
+  left?: boolean
   /** The aria-label, when it says more than the title. */
   label?: string
 }
@@ -121,66 +125,32 @@ export interface PadKey {
  * pressed just before the landing, or every landing while held
  * (store/useWalk.ts (E), ruled D5),
  * so it stays on: on a phone it is the only way to absorb one (review of
- * #649). With gravity off, JUMP and DOWN are one cell up and down.
+ * #649). JUMP pressed again in the air is a double jump (store/useWalk.ts
+ * (F)). With gravity off, JUMP and DOWN are one cell up and down. Both
+ * stand on the left of the screen (`left`), the rest in the pad.
  * The forward and reverse arrows are the pair VIEW's fly keys wear too
  * (hud/ui/FlyArrows.tsx).
  *
- * Each key holds its direction while pressed (store/walkHold.ts), and
- * FORWARD leans: its end zones hold forward and that side, a diagonal.
+ * Each key holds its direction while pressed (store/walkHold.ts).
  */
 export function walkPad(gravity: boolean, move: (name: MoveName) => () => void): PadKey[] {
   const key = (name: MoveName): Pick<PadKey, 'act' | 'hold'> => ({ act: move(name), hold: walkHeldDir(name) })
   return [
-    { cell: 'forward', glyph: <ForwardArrow3D size={26} />, sub: 'FORWARD', title: 'Forward (W)', label: 'Forward (W); its ends go diagonally', ...key('away'), lean: true },
+    { cell: 'forward', glyph: <ForwardArrow3D size={26} />, sub: 'FORWARD', title: 'Forward (W)', ...key('away') },
     { cell: 'left', glyph: '◀', title: 'Left (A)', ...key('left') },
     { cell: 'backward', glyph: <ReverseArrow3D size={20} />, sub: 'BACK', title: 'Backward (S)', ...key('toward') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', ...key('right') },
-    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R)' : 'Jump: up one cell (Space or R)', ...key('up') },
-    { cell: 'down', glyph: '▼', title: gravity ? 'Down: hold to absorb a bounce (C or F)' : 'Down one cell (C or F)', ...key('down') },
+    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space). Press again in the air to double jump.' : 'Jump: up one cell (Space or R)', ...key('up'), left: true },
+    { cell: 'down', glyph: '▼', title: gravity ? 'Down: hold to absorb a bounce (C or F)' : 'Down one cell (C or F)', ...key('down'), left: true },
   ]
-}
-
-/** A pointer on a pad key, as much of it as a lean reads. */
-interface PadPointer {
-  clientX?: number
-  currentTarget?: { getBoundingClientRect?: () => { left: number; width: number } } | null
-}
-
-/** Each end zone of FORWARD, as a share of its width (ruled in review of #651: straight on is the big middle). */
-export const LEAN_ZONE = 0.22
-
-/** How far past a zone's line a sliding thumb must go, in CSS pixels, before the lean changes. */
-export const LEAN_SLOP_PX = 8
-
-/**
- * Which side a press on a leaning key holds, from where the thumb is across
- * it: its left LEAN_ZONE left, its right LEAN_ZONE right, the middle neither.
- * A thumb slid past either end keeps that end's side. `was`, the side held
- * so far, holds until the thumb is LEAN_SLOP_PX outside its zone, so a thumb
- * resting on a line does not flip the walk's heading every beat (each flip a
- * turn, and a turn a hop).
- */
-export function padLean(e: PadPointer, was?: -1 | 0 | 1): -1 | 0 | 1 {
-  const r = e.currentTarget?.getBoundingClientRect?.()
-  if (!r || !(r.width > 0) || typeof e.clientX !== 'number') return was ?? 0
-  const x = e.clientX - r.left
-  const left = r.width * LEAN_ZONE
-  const right = r.width * (1 - LEAN_ZONE)
-  const plain = x < left ? -1 : x > right ? 1 : 0
-  if (was === undefined || plain === was) return plain
-  // How far outside the zone it held so far.
-  const out = was === -1 ? x - left : was === 1 ? right - x : x < left ? left - x : x - right
-  return out >= LEAN_SLOP_PX ? plain : was
 }
 
 /**
  * A WALK key's handlers: held from pointerdown to pointerup, pointercancel
- * or leave, walking all the while (store/walkHold.ts). A leaning key reads
- * the thumb's place on the press and as it slides.
+ * or leave, walking all the while (store/walkHold.ts).
  */
 export function padHold(b: PadKey): {
   onPointerDown: (e: React.PointerEvent) => void
-  onPointerMove?: (e: React.PointerEvent) => void
   onPointerUp: () => void
   onPointerCancel: () => void
   onPointerLeave: () => void
@@ -189,16 +159,14 @@ export function padHold(b: PadKey): {
 } {
   const source = `pad:${b.cell}`
   const hold = b.hold ?? { fwd: 0, strafe: 0, vert: 0 }
-  const dir = (e: PadPointer, was?: -1 | 0 | 1): HeldDir => (b.lean ? { ...hold, strafe: padLean(e, was) } : hold)
   const end = (): void => holdEnd(source)
   return {
     onPointerDown: (e) => {
       // Keeps the press off the canvas, and off a scroll or a synthetic click.
       e.preventDefault()
       e.stopPropagation()
-      holdStart(source, dir(e))
+      holdStart(source, hold)
     },
-    ...(b.lean ? { onPointerMove: (e: React.PointerEvent) => { const was = heldBy(source); if (was) holdMove(source, dir(e, was.strafe)) } } : {}),
     onPointerUp: end,
     onPointerCancel: end,
     onPointerLeave: end,
@@ -322,6 +290,30 @@ export function TouchControls(): JSX.Element {
     { cell: 'zoomin', glyph: '−', title: 'Finer scale (E)', act: scale(-1), disabled: scaleExp <= 0, scale: true },
   ]
 
+  const padKey = (b: PadKey): JSX.Element => (
+    <button
+      key={b.cell}
+      className={
+        `touchpad__key touchpad__key--${b.cell}${b.hint ? ' is-zoomhint' : ''}` +
+        // Emptied rather than removed: the cell keeps its place in the
+        // grid, so the scale keys and the readout stay exactly where the
+        // hand already knows to find them.
+        (!atHead && !b.scale ? ' is-standdown' : '')
+      }
+      title={b.title}
+      aria-label={b.label ?? b.title}
+      disabled={b.disabled}
+      {...(walking && b.hold ? padHold(b) : flies && b.fly ? flyHold('pad', b.fly) : bind(b.act))}
+    >
+      {b.glyph}
+      {b.sub && <span className="touchpad__sub">{b.sub}</span>}
+    </button>
+  )
+  // WALK's JUMP and DOWN, on the left over the menu button (walkPad `left`).
+  // Not while placing, when the deploy bar docks in that corner, nor off
+  // your head, where the pad stands its direction keys down.
+  const leftKeys = deploying || !atHead ? [] : pad.filter((b) => b.left)
+
   return (
     <>
       <div ref={padRef} className={`touchpad touchpad--mode-${mode}${atHead ? '' : ' touchpad--scale'}${opsUp && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk' : 'Move cursor and change scale'}>
@@ -372,27 +364,7 @@ export function TouchControls(): JSX.Element {
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().setGravity(!gravity) }}
           >GRAVITY</button>
         )}
-        {pad.map((b) => (
-          <button
-            key={b.cell}
-            className={
-              `touchpad__key touchpad__key--${b.cell}${b.hint ? ' is-zoomhint' : ''}` +
-              // Emptied rather than removed: the cell keeps its place in the
-              // grid, so the scale keys and the readout stay exactly where the
-              // hand already knows to find them.
-              (!atHead && !b.scale ? ' is-standdown' : '')
-            }
-            title={b.title}
-            aria-label={b.label ?? b.title}
-            disabled={b.disabled}
-            {...(walking && b.hold ? padHold(b) : flies && b.fly ? flyHold('pad', b.fly) : bind(b.act))}
-          >
-            {/* FORWARD's ends go diagonally: each end zone marked off, with its mark. */}
-            {b.lean && <><span className="touchpad__zone touchpad__zone--left" aria-hidden>◤</span><span className="touchpad__zone touchpad__zone--right" aria-hidden>◥</span></>}
-            {b.glyph}
-            {b.sub && <span className="touchpad__sub">{b.sub}</span>}
-          </button>
-        ))}
+        {pad.filter((b) => !b.left).map(padKey)}
         {/* The hub doubles as the scale readout and its reset: a tap returns
             to 2^0, the finest scale. Hiding the pad lives on the canvas tap,
             where it always also lived, so nothing is lost to the reset.
@@ -409,6 +381,12 @@ export function TouchControls(): JSX.Element {
           }}
         >2^{scaleExp}</button>}
       </div>
+
+      {leftKeys.length > 0 && (
+        <div className="walkside" role="group" aria-label="Jump and down">
+          {leftKeys.map(padKey)}
+        </div>
+      )}
 
       {opsUp && <div ref={opsRef} className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
         <button

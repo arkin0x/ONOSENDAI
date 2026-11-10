@@ -3753,7 +3753,8 @@ kbd {
 .orbsquare.walklook {
   position: fixed;
   left: var(--menu-left);
-  bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));
+  /* Above WALK's JUMP and DOWN (.walkside), a gap over them. */
+  bottom: calc(var(--walkside-bottom) + var(--walkside-key) + var(--routeov-gap));
   z-index: 100;
   width: 112px;
   height: 112px;
@@ -3767,7 +3768,7 @@ kbd {
   .orbsquare.walklook .benchorb--inside { padding-bottom: 6px; }
   .app:has(.hosaka-pulse) .walklook {
     left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));
-    bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));
+    bottom: calc(var(--walkside-bottom) + var(--walkside-key) + var(--routeov-gap));
   }
 }
 
@@ -9768,25 +9769,25 @@ a.feed__act { text-decoration: none; }
  *
  * WALK's own keys (TouchControls walkPad; arkinox, 2026-11-02): no scale.
  * FORWARD is one large key across the row FAR, up and NEAR held, taller than
- * the rest; BACKWARD stands where down was, under it; JUMP takes + and the
- * readout's cells, and DOWN takes -'s. */
+ * the rest; BACKWARD stands where down was, under it, between the sides.
+ * JUMP and DOWN have gone to the left of the screen (.walkside; arkinox,
+ * 2026-11-10), so the pad is those three rows and nothing more: anchored at
+ * the bottom, the sides and BACK now stand where JUMP and DOWN stood. */
 .touchpad--mode-walk {
-  grid-template-rows: 22px 54px 38px 38px;
+  grid-template-rows: 22px 54px 38px;
   grid-template-areas:
     "gravity gravity  gravity"
     "forward forward  forward"
-    "left    backward right"
-    "jump    jump     down";
+    "left    backward right";
 }
 /* A pin to remove gets its row back. The pad is anchored at the bottom, so no key moves. */
 .touchpad--mode-walk:has(> .touchpad__key--pin) {
-  grid-template-rows: 22px 38px 54px 38px 38px;
+  grid-template-rows: 22px 38px 54px 38px;
   grid-template-areas:
     "gravity gravity  gravity"
     "pin     .        ."
     "forward forward  forward"
-    "left    backward right"
-    "jump    jump     down";
+    "left    backward right";
 }
 .touchpad__key--forward,
 .touchpad__key--backward {
@@ -9794,24 +9795,7 @@ a.feed__act { text-decoration: none; }
   gap: 2px;
   color: var(--fg, #c8f5ff);
 }
-.touchpad__key--forward { grid-area: forward; position: relative; }
-/* FORWARD's ends go diagonally (store/walkHold.ts): each end zone, 22% of
- * its width (TouchControls LEAN_ZONE), marked off by a dashed edge, with a
- * small mark in its top corner. */
-.touchpad__zone {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 22%;
-  padding-top: 4px;
-  font-size: 8px;
-  line-height: 1;
-  color: var(--dim, #7fa6bd);
-  pointer-events: none;
-  box-sizing: border-box;
-}
-.touchpad__zone--left { left: 0; padding-left: 5px; text-align: left; border-right: 1px dashed rgba(255, 120, 150, 0.45); }
-.touchpad__zone--right { right: 0; padding-right: 5px; text-align: right; border-left: 1px dashed rgba(255, 120, 150, 0.45); }
+.touchpad__key--forward { grid-area: forward; }
 .touchpad__key--backward { grid-area: backward; }
 .touchpad__key--backward .touchpad__sub { font-size: 6px; }
 .touchpad__key--jump {
@@ -9822,7 +9806,56 @@ a.feed__act { text-decoration: none; }
 }
 /* A WALK key that is off reads as off rather than as broken. (DOWN under
  * GRAVITY is on: it absorbs a bounce.) */
-.touchpad--mode-walk .touchpad__key:disabled { opacity: 0.35; cursor: default; }
+.touchpad--mode-walk .touchpad__key:disabled,
+.walkside .touchpad__key:disabled { opacity: 0.35; cursor: default; }
+
+/* JUMP and DOWN on the left (TouchControls walkPad `left`; arkinox,
+ * 2026-11-10: "move jump/down to the left side above the menu button and
+ * below the LOOK sphere ... at the same screen height they are currently
+ * at"). The same two cells and the same width they had as the pad's bottom
+ * row, at the same height (the pad's 92px), on the menu button's left edge;
+ * the LOOK ball stands a gap above them (.orbsquare.walklook). While a
+ * HOSAKA job runs its mark breathes in that spot above the menu button, so
+ * the row steps right of it, at the same height. */
+:root {
+  --walkside-bottom: 92px;
+  --walkside-key: 38px;
+  /* Three 38px cells and two 4px gaps, the pad's own width. */
+  --walkside-width: 122px;
+}
+.walkside {
+  position: fixed;
+  left: var(--menu-left);
+  bottom: var(--walkside-bottom);
+  z-index: 103;
+  display: grid;
+  grid-template-columns: repeat(3, var(--walkside-key));
+  grid-template-rows: var(--walkside-key);
+  gap: 4px;
+  grid-template-areas: "jump jump down";
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.app:has(.hosaka-pulse) .walkside {
+  left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));
+}
+.walkside .touchpad__key { touch-action: none; }
+.walkside .touchpad__key:not(:active) {
+  background-image: linear-gradient(rgba(255, 59, 107, 0.18), rgba(255, 59, 107, 0.18));
+  border-color: rgba(255, 59, 107, 0.4);
+}
+/* From 641px wide the open chat stands at the bottom beside the menu button
+   and the controls stay up beside it (store/usePad.ts CHAT_COVERS_PAD): it
+   starts past the row instead of over it, and past the LOOK ball above it. */
+@media (min-width: 641px) {
+  .app:has(.walkside) .chatdock {
+    left: calc(var(--menu-left) + var(--walkside-width) + var(--routeov-gap));
+  }
+  .app:has(.hosaka-pulse):has(.walkside) .chatdock {
+    left: calc(var(--menu-left) + var(--menu-size) + var(--walkside-width) + 2 * var(--routeov-gap));
+  }
+}
 .touchpad__key--gravity {
   grid-area: gravity;
   font-size: 9px;

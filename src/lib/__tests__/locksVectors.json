@@ -139,5 +139,5 @@
   "lock_secret": "58098a0d5eef6d75d8196b68b0ec34a4a3a52a6d02d6fa6caa65d34ee875d8db",
   "lock": "24bd8076a3714248ee856dd201625a29f065b1d52a71d789ce5ae9f512a10a22"
  },
- "source": "arkin0x/cyberspace#93 at 730eec9, decks/kinds-vectors.json, section locks (region_n dropped for size)"
+ "source": "arkin0x/cyberspace master (spec #93 merged, 7782ed3), decks/kinds-vectors.json, section locks (region_n dropped for size); identical to 730eec9"
 }

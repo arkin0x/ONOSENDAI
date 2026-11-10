@@ -235,8 +235,13 @@ function GameScreen(): JSX.Element | null {
     const release = (code: string): void => { const t = held.get(code); if (t !== undefined) { clearInterval(t); held.delete(code) } }
     const releaseAll = (): void => { for (const code of [...held.keys()]) release(code) }
     const down = (e: KeyboardEvent): void => {
+      // macOS sends no keyup for a key let go while Cmd is down: Cmd ends every hold, as WALK's hold does (store/walkHold.ts).
+      if (e.key === 'Meta') { releaseAll(); return }
       if (e.metaKey || e.ctrlKey || e.altKey) return
-      if ((e.target as HTMLElement | null)?.closest?.('input, textarea, [contenteditable="true"]')) return
+      const target = e.target as HTMLElement | null
+      if (target?.closest?.('input, textarea, [contenteditable="true"]')) return
+      // Enter on a focused button presses that button (EXIT GAME among them), never TAKE or OPEN (review of #668).
+      if (e.code === 'Enter' && target?.closest?.('button')) return
       if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) onPress('up'); return }
       if (e.code === 'KeyE' || e.code === 'Enter') { e.preventDefault(); if (!e.repeat) act(); return }
       const p = dirs[e.code]
@@ -248,13 +253,20 @@ function GameScreen(): JSX.Element | null {
     }
     // A focused button presses on Space's keyup: JUMP must never press EXIT GAME (review of #660).
     const up = (e: KeyboardEvent): void => {
+      if (e.key === 'Meta') { releaseAll(); return }
       release(e.code)
-      if (e.code === 'Space' || e.code === 'Enter') e.preventDefault()
+      if (e.code === 'Space') e.preventDefault()
     }
+    const hidden = (): void => { if (document.visibilityState === 'hidden') releaseAll() }
     window.addEventListener('keydown', down)
     window.addEventListener('keyup', up)
     window.addEventListener('blur', releaseAll)
-    return () => { releaseAll(); window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', releaseAll) }
+    document.addEventListener('visibilitychange', hidden)
+    return () => {
+      releaseAll()
+      window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', releaseAll)
+      document.removeEventListener('visibilitychange', hidden)
+    }
   }, [session !== null])
 
   // Drag to look: yaw with the horizontal, pitch with the vertical, kept above the floor and below straight down.

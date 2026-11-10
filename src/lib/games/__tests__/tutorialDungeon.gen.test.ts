@@ -24,7 +24,7 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
@@ -32,7 +32,7 @@ import { fromPayload } from 'sno-core/shards'
 import { bagTemplate, shardInnerTemplate } from '../../hidden'
 import { hexToBytes } from '../../events'
 import { BAG_SAFE_BYTES, signedBytes } from '../../bagSize'
-import { TUTORIAL_DUNGEON_LAYOUT, TUTORIAL_ENTRY, TUTORIAL_GAME } from '../tutorialGame'
+import { TUTORIAL_DEV_PUBKEY, TUTORIAL_DUNGEON_LAYOUT, TUTORIAL_ENTRY, TUTORIAL_GAME } from '../tutorialGame'
 import { inRegion } from '../play'
 import { ENTRY_TAG, worldKey } from '../world'
 
@@ -53,9 +53,13 @@ describe('the tutorial dungeon (generator)', () => {
   it.skipIf(!asked)('signs the dungeon bag and writes it', async () => {
     const sk = secretFrom(process.env.TUTORIAL_KEY ?? process.env.TUTORIAL_DEV_KEY ?? '')
     const pubkey = getPublicKey(sk)
-    const dev = pubkey === TUTORIAL_GAME.pubkey
-    const out = dev ? join(__dirname, '..', 'tutorialDungeon.fixture.json') : process.env.TUTORIAL_OUT
+    // The DEV key by its own constant, never by TUTORIAL_GAME.pubkey: once the owner's key is the game's, his bag
+    // must still go to TUTORIAL_OUT, dated now, and never into the DEV fixture (review of #668).
+    const dev = pubkey === TUTORIAL_DEV_PUBKEY
+    const fixture = resolve(__dirname, '..', 'tutorialDungeon.fixture.json')
+    const out = dev ? fixture : process.env.TUTORIAL_OUT
     if (!out) throw new Error('This key is not the DEV key: say where to write its bag with TUTORIAL_OUT.')
+    if (!dev && resolve(out) === fixture) throw new Error('The DEV fixture is only ever signed by the DEV key: write this bag elsewhere.')
     const dir = process.env.TUTORIAL_PIECES ?? ''
     // The DEV fixture at one fixed moment, so a regenerated bag differs only in its signatures; the owner's bag now.
     const createdAt = dev ? 1_794_300_000 : Math.floor(Date.now() / 1000)

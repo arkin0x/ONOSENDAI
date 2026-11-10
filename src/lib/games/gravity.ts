@@ -179,7 +179,9 @@ export function tick(game: Rules, body: Body, now: number, world: readonly World
     at = next
     cur++
   }
-  while (cur > want || (!rising && cur === want && standing(game, at, world))) {
+  // Only past the top does the player come down or land: a rising arc never lowers them. A double jump pressed while
+  // falling starts rising from a gibson just over the arc (where a fall stands you), and must not dip first (review of #668).
+  while (!rising && (cur > want || (cur === want && standing(game, at, world)))) {
     if (standing(game, at, world)) return { body: { at, arc: null, doubled: false }, landed: true }
     at = up(at, -1)
     cur--

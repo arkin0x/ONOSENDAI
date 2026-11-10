@@ -361,6 +361,9 @@ useCyberspace.subscribe((s, prev) => {
   const open = openBracket(useCyberspace.getState().actions())
   if (open?.id === session.entryId || useGame.getState().busy === 'exiting') return
   const respawned = s.genesisId !== prev.genesisId
+  // That bracket is over, so its key, gate and clock are of no more use here (review of #668). An identity switch, above,
+  // keeps them: that identity's game can still be gone back into.
+  saveProgress(session.entryId, null)
   useGame.setState({ session: null, message: respawned ? 'Your respawn left the game.' : 'Your chain is no longer in this game: it was left, or changed, from another tab or device.' })
 })
 

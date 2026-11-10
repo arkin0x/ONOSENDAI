@@ -76,6 +76,20 @@ describe('gravity in a game', () => {
     expect(b.arc).not.toBeNull()
   })
 
+  it('a double jump pressed while falling rises from where you are, never dipping first (review of #668)', () => {
+    // Walk off a high ledge: the fall stands you a gibson over the arc. A double jump then must not lower you, nor land you.
+    const w = [floorAt(10), put(P(32, 30, 32), [-8, -1, -8], [-1, 0, -1])]
+    let b: Body = { at: P(32, 31, 32), arc: { from: base.y + 31n, y0: 0, v0: 0, t0: 0 }, doubled: false }
+    for (let t = 16; t <= 160; t += 16) b = tick(game, b, t, w).body
+    const before = rel(b)[1]
+    b = jump(game, b, 170, w)
+    expect(b.doubled).toBe(true)
+    let low = before
+    for (let t = 176; t <= 400; t += 16) { const r = tick(game, b, t, w); expect(r.landed).toBe(false); b = r.body; low = Math.min(low, rel(b)[1]) }
+    expect(low).toBe(before)
+    expect(rel(b)[1]).toBeGreaterThan(before)
+  })
+
   it('a ceiling ends the rise, and the fall begins there at rest', () => {
     const lid = [floorAt(10), put(P(32, 14, 32), [-8, 0, -8], [8, 1, 8])]
     const { top, body } = fly(jump(game, stand(32, 11, 32), 0, lid), 0, lid)

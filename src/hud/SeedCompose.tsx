@@ -37,7 +37,9 @@ import { useCalibration } from '../lib/calibration'
 import { minerCount } from '../lib/avatarWorker'
 import { describeDuration } from '../lib/avatarMine'
 import { STARTER_CAPS, STARTER_DNAS } from '../lib/seeds/starterDnas'
-import { bloomReachGibsons, dnaTextRefusal, miningSeconds, PREVIEW_DAYS, previewRequest, readDnaText, seedHideHeight, SEED_HIDE_MAX } from '../lib/seeds/plant'
+import { bloomReachGibsons, dnaTextRefusal, miningSeconds, PREVIEW_DAYS, previewRequest, readDnaText, seedHideFor, SEED_HIDE_MAX, type SeedFit } from '../lib/seeds/plant'
+import type { Position } from '../lib/space'
+import type { Plane } from 'cyberspace-core'
 import { MAX_COMPUTE_HEIGHT } from '../store/useCyberspace'
 import { growInWorker } from '../lib/seeds/growClient'
 import { bloomShard } from '../lib/seeds/bloomShard'
@@ -76,24 +78,36 @@ function usePreview(text: string, ok: boolean, caps: Caps, coord: string, scale:
   return shard
 }
 
-/** How far this DNA's bloom reaches at day 31 where it lands, in gibsons with a margin (plant.ts bloomReachGibsons). */
-function useReach(text: string, ok: boolean, caps: Caps, coord: string, scale: number): number | undefined {
-  const [reach, setReach] = useState<number | undefined>(undefined)
+/**
+ * The hide height SEED finds here (plant.ts seedHideFor): each height's own
+ * landing point, the bloom grown there at day 31 in the worker, the smallest
+ * from 3 to 12 that holds it. With the point the preview grows at, so the
+ * preview is the bloom that lands.
+ */
+function useSeedFit(text: string, ok: boolean, caps: Caps, cursor: Position, plane: Plane, step: number, scale: number): { fit: SeedFit | undefined; point: Position; state: 'pending' | 'done' | 'failed' } {
+  const fallback = useMemo(() => deployPoint(cursor, step, SEED_HIDE_MAX), [cursor, step])
+  const [result, setResult] = useState<{ fit: SeedFit | undefined; point: Position; state: 'pending' | 'done' | 'failed' }>({ fit: undefined, point: fallback, state: 'pending' })
   const tip = useHyperspace((s) => s.tipHeight)
   useEffect(() => {
-    setReach(undefined)
+    setResult({ fit: undefined, point: fallback, state: ok ? 'pending' : 'done' })
     if (!ok) return
     let stale = false
     const timer = setTimeout(() => {
       const now = trustedTip() ?? tip ?? 975_300
-      const req = previewRequest({ text, caps, coord, scale, tip: now, day: PREVIEW_DAYS, hashOf: (h) => headerBook.hash(h) ?? getStopByHeight(h)?.blockHash })
-      void growInWorker({ ...req, key: 'preview-reach' }).then((answer) => {
-        if (!stale && answer.type === 'bloom') setReach(bloomReachGibsons(answer.buffers.positions, scale))
-      }, () => undefined)
+      const reachAt = async (p: Position): Promise<number | undefined> => {
+        const req = previewRequest({ text, caps, coord: positionHex(p, plane), scale, tip: now, day: PREVIEW_DAYS, hashOf: (h) => headerBook.hash(h) ?? getStopByHeight(h)?.blockHash })
+        const answer = await growInWorker({ ...req, key: 'preview-reach' })
+        return answer.type === 'bloom' ? bloomReachGibsons(answer.buffers.positions, scale) : undefined
+      }
+      seedHideFor(cursor, plane, step, MAX_COMPUTE_HEIGHT, reachAt).then((r) => {
+        if (stale) return
+        const fit = r.reach !== undefined ? { height: r.height, reach: r.reach, cursor: positionHex(cursor, plane), step } : undefined
+        setResult({ fit, point: r.point, state: fit ? 'done' : 'failed' })
+      }, () => { if (!stale) setResult({ fit: undefined, point: fallback, state: 'failed' }) })
     }, 120)
     return () => { stale = true; clearTimeout(timer) }
-  }, [text, ok, caps, coord, scale, tip])
-  return reach
+  }, [text, ok, caps, cursor, plane, step, scale, tip, fallback])
+  return result
 }
 
 export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
@@ -109,18 +123,17 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
   const cursor = useCyberspace((s) => s.cursor)
   const plane = useCyberspace(buildPlane)
   const step = useCyberspace(buildStepOf)
-  // Where the seed lands, as the deploy places it: the build cursor's cell (at the tallest automatic height,
-  // which is the same point whenever the build step is that height or finer).
-  const coord = useMemo(() => positionHex(deployPoint(cursor, step, SEED_HIDE_MAX), plane), [cursor, plane, step])
   const sha256PerSec = useCalibration((s) => s.sha256PerSec)
 
   const text = pick === 'paste' ? pasted : STARTER_DNAS[pick].text
   const refusal = pick === 'paste' && !pasted.trim() ? null : dnaTextRefusal(text)
   const ok = refusal === null && text.trim() !== ''
   const caps: Caps = (capsPick ?? (pick === 'paste' ? 'small' : 'large')) === 'small' ? BASE_CAPS : STARTER_CAPS
+  // Where the seed lands, at the height it will hide at, and that height.
+  const seedFit = useSeedFit(text, ok, caps, cursor, plane, step, scale)
+  const coord = useMemo(() => positionHex(seedFit.point, plane), [seedFit.point, plane])
   const preview = usePreview(text, ok, caps, coord, scale, day)
-  const reach = useReach(text, ok, caps, coord, scale)
-  const hideHeight = seedHideHeight(reach, cursor, step, MAX_COMPUTE_HEIGHT)
+  const hideHeight = seedFit.fit?.height ?? Math.min(SEED_HIDE_MAX, MAX_COMPUTE_HEIGHT)
   const price = capsPrice(caps) ?? 0
   const seconds = miningSeconds(price, sha256PerSec ?? null, minerCount())
 
@@ -138,7 +151,7 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
 
   const plant = (): void => {
     if (!ok) return
-    useShards.getState().startDeploySeed({ text, caps, scale, title: '', ...(reach !== undefined ? { reach } : {}) })
+    useShards.getState().startDeploySeed({ text, caps, scale, title: '', ...(seedFit.fit ? { fit: seedFit.fit } : {}) })
     onDone()
   }
 
@@ -185,12 +198,12 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
         PRICE {price} BITS · {seconds === null ? 'MINING TIME UNKNOWN UNTIL CALIBRATED' : `${describeDuration(seconds).toUpperCase()} TO MINE HERE`}
       </p>
       <p className="seedc__price" title="Seeds hide at 12 or lower so anyone looking nearby finds them. Raise it on the next bar to hide one.">
-        HIDE HEIGHT {reach === undefined && ok ? '…' : hideHeight}
+        HIDE HEIGHT {seedFit.state === 'pending' && ok ? '…' : hideHeight}
       </p>
 
       <div className="shards__actions">
         <button className="avatars__go" onClick={onDone}>CANCEL</button>
-        <button className="avatars__go" disabled={!ok} onClick={plant} title="Aim it at the build cursor; its work is mined when you hide it">PLANT ▸</button>
+        <button className="avatars__go" disabled={!ok || seedFit.state === 'pending'} onClick={plant} title="Aim it at the build cursor; its work is mined when you hide it">PLANT ▸</button>
       </div>
       <Explanation>
         <ul className="buildbar__explain">

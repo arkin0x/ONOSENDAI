@@ -13,11 +13,11 @@
 
 import { BASE_CAPS, BLOCKS_PER_GENERATION, capsPrice, clockHeight, sha256Hex, tryParseDna, workOk, type Caps } from 'sno-core/seeds'
 import type { GrowRequest } from './growJob'
-import { fitHeightAll } from '../deployFit'
+import { fitHeightAll, fitsAt } from '../deployFit'
+import { deployPoint, type Position } from '../space'
 import { expectedTries, triesPerSec } from '../avatarMine'
 import { positionHex, type EventTemplate, type NostrEvent } from '../events'
 import type { Plane } from 'cyberspace-core'
-import type { Position } from '../space'
 import { DNA_KIND, SEED_KIND } from './seedItem'
 
 /** What the SEED composer hands the deploy. */
@@ -29,8 +29,21 @@ export interface SeedDraft {
   scale: number
   /** The planter's name for this planting, or empty. */
   title: string
-  /** How far its bloom reaches at day 31, in gibsons with a margin (bloomReachGibsons): what its hide height fits. */
-  reach?: number
+  /**
+   * Its hide height as SEED found it (seedHideFor), for the cursor and step it
+   * was measured at. Anywhere else (the cursor moved, AGAIN) the deploy hides
+   * it at SEED_HIDE_MAX, findable, and the bloom draws past its cube.
+   */
+  fit?: SeedFit
+}
+
+/** A hide height measured for one spot: the build cursor (as a coordinate) and step it holds for. */
+export interface SeedFit {
+  height: number
+  /** The bloom's reach at the landing point of that height, in gibsons with the margin. */
+  reach: number
+  cursor: string
+  step: number
 }
 
 /** The DNA's price in bits, or null when its caps are out of range. */
@@ -181,6 +194,39 @@ export function bloomReachGibsons(positions: ArrayLike<number>, scale: number): 
  * machine's key ceiling. Without a reach (the preview not grown yet) it is
  * SEED_HIDE_MAX.
  */
+/**
+ * The automatic hide height of a seed at the build cursor, measuring the bloom
+ * where it would really land at each height: a height below the build step
+ * lands it in a smaller cell's centre (space.ts deployPoint), on other soil,
+ * so each distinct landing point is grown once (`reachAt`). The smallest
+ * height from SEED_HIDE_MIN whose cube holds the bloom grown at its own
+ * point; SEED_HIDE_MAX when none does (owner ruling 2026-11-10).
+ */
+export async function seedHideFor(cursor: Position, plane: Plane, step: number, ceiling: number, reachAt: (point: Position) => Promise<number | undefined>): Promise<{ height: number; point: Position; reach: number | undefined }> {
+  const max = Math.max(0, Math.min(SEED_HIDE_MAX, ceiling))
+  const measured = new Map<string, number | undefined>()
+  const at = async (p: Position): Promise<number | undefined> => {
+    const k = positionHex(p, plane)
+    if (!measured.has(k)) measured.set(k, await reachAt(p))
+    return measured.get(k)
+  }
+  for (let h = Math.min(SEED_HIDE_MIN, max); h <= max; h++) {
+    const point = deployPoint(cursor, step, h)
+    const reach = await at(point)
+    if (reach !== undefined && fitsAt(point, BigInt(Math.max(0, Math.ceil(reach))), h)) return { height: h, point, reach }
+  }
+  const point = deployPoint(cursor, step, max)
+  return { height: max, point, reach: await at(point) }
+}
+
+/** The hide height a deploy uses: SEED found it for this very cursor and step, else SEED_HIDE_MAX. Never above the ceiling. */
+export function seedDraftHeight(fit: SeedFit | undefined, cursor: Position, plane: Plane, step: number, ceiling: number): number {
+  const max = Math.max(0, Math.min(SEED_HIDE_MAX, ceiling))
+  if (!fit || fit.cursor !== positionHex(cursor, plane) || fit.step !== step) return max
+  return Math.min(fit.height, max)
+}
+
+/** The same rule from one reach, measured once (tests, and the hide heights reported in #657). */
 export function seedHideHeight(reach: number | undefined, cursor: Position, step: number, ceiling: number): number {
   const max = Math.max(0, Math.min(SEED_HIDE_MAX, ceiling))
   if (reach === undefined || !Number.isFinite(reach)) return max

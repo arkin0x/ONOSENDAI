@@ -11,13 +11,14 @@ import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import { fromPayload } from 'sno-core/shards'
 import { BASE_CAPS, growBloom, parseDna, tryParseDna, workOk } from 'sno-core/seeds'
 import { STARTER_CAPS, STARTER_DNAS } from '../seeds/starterDnas'
-import { bloomReachGibsons, seedHideHeight, SEED_HIDE_MAX, SEED_HIDE_MIN, dnaMatches, dnaTemplate, dnaTextRefusal, readDnaText, draftPrice, miningSeconds, previewHash, previewRequest, seedTemplate, seedWorkHolds, PREVIEW_DAYS } from '../seeds/plant'
+import { bloomReachGibsons, seedDraftHeight, seedHideFor, seedHideHeight, SEED_HIDE_MAX, SEED_HIDE_MIN, dnaMatches, dnaTemplate, dnaTextRefusal, readDnaText, draftPrice, miningSeconds, previewHash, previewRequest, seedTemplate, seedWorkHolds, PREVIEW_DAYS } from '../seeds/plant'
 import { mineChunk, nonceTagged } from '../avatarMine'
 import { seedItemOf } from '../seeds/seedItem'
 import { GrowCache, handleGrow } from '../seeds/growJob'
 import { bloomShard } from '../seeds/bloomShard'
 import { checkDna } from '../seeds/dnaStore'
 import { fitHeightAll } from '../deployFit'
+import { deployPoint } from '../space'
 import { miningNote } from '../../store/plantSeed'
 import { positionHex, type NostrEvent } from '../events'
 import { planterSk, vectorBlocks, vectors } from './seedsFixture'
@@ -165,6 +166,35 @@ describe('the hide height (owner ruling 2026-11-10)', () => {
     expect(seedHideHeight(64, nearEdge, 0, 9)).toBe(9)
     // A tiny bloom in the middle of nowhere still hides at 3 at least.
     expect(seedHideHeight(1, { x: (1n << 40n) + 4n, y: (1n << 40n) + 4n, z: (1n << 40n) + 4n }, 0, 20)).toBe(3)
+  })
+
+  it('each height is judged with the bloom grown at its own landing point', async () => {
+    // A build step of 2^8: below it the seed lands at the centre of a smaller cell, on other soil.
+    const asked: string[] = []
+    const reachAt = async (p: { x: bigint; y: bigint; z: bigint }): Promise<number> => {
+      asked.push(positionHex(p, 1))
+      // The bloom at the 2^3 and 2^4 points is too large for those cubes; at the 2^5 point it is small.
+      return p.x === deployPoint(nearEdge, 8, 5).x ? 6 : 40
+    }
+    const got = await seedHideFor(nearEdge, 1, 8, 20, reachAt)
+    expect(got.height).toBe(5)
+    expect(got.point).toEqual(deployPoint(nearEdge, 8, 5))
+    expect(got.reach).toBe(6)
+    // Each distinct point grown once.
+    expect(new Set(asked).size).toBe(asked.length)
+    // Nothing fits: 12, at its own point.
+    const none = await seedHideFor(nearEdge, 1, 0, 20, async () => 100_000)
+    expect(none.height).toBe(SEED_HIDE_MAX)
+  })
+
+  it('the deploy uses the height SEED found only for that cursor and step; anywhere else 12', () => {
+    const fit = { height: 5, reach: 6, cursor: positionHex(nearEdge, 1), step: 8 }
+    expect(seedDraftHeight(fit, nearEdge, 1, 8, 20)).toBe(5)
+    expect(seedDraftHeight(fit, { ...nearEdge, x: nearEdge.x + 1n }, 1, 8, 20)).toBe(SEED_HIDE_MAX)
+    expect(seedDraftHeight(fit, nearEdge, 1, 4, 20)).toBe(SEED_HIDE_MAX)
+    expect(seedDraftHeight(fit, nearEdge, 0, 8, 20)).toBe(SEED_HIDE_MAX)
+    expect(seedDraftHeight(undefined, nearEdge, 1, 8, 20)).toBe(SEED_HIDE_MAX)
+    expect(seedDraftHeight(fit, nearEdge, 1, 8, 4)).toBe(4)
   })
 
   it('reach: the farthest vertex, in gibsons at the scale, with a quarter and two gibsons more', () => {

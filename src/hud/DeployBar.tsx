@@ -97,7 +97,7 @@ import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, r
 import { useEscape } from '../hooks/useEscape'
 import { useCover } from '../hooks/useCover'
 import { fitCause, fitHeight, fitHeightAll, outsideAt, reachGibsons, type FitPoint } from '../lib/deployFit'
-import { seedHideHeight } from '../lib/seeds/plant'
+import { seedDraftHeight } from '../lib/seeds/plant'
 import { CHEST_LOOKS, DOOR_LOOKS, LOOK_LABELS } from '../lib/looks'
 import { LookPicker } from './LookPicker'
 import { SHALLOW_WARN, shallowBag, shallowExplain } from '../lib/shallowBag'
@@ -368,12 +368,13 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   }, [pending, plane])
   // A seed hides where the automatic discovery finds it (owner ruling
   // 2026-11-10): the smallest height from 3 to 12 whose cube holds this DNA's
-  // own bloom at day 31 (SeedCompose measures it), 12 when none does, and the
-  // bloom draws past its cube. + still hides it higher, by hand. It used to fit
+  // own bloom at day 31 where it lands (SeedCompose measures it for this cursor
+  // and step; anywhere else, AGAIN included, it is 12), 12 when none does, and
+  // the bloom draws past its cube. + still hides it higher, by hand. It used to fit
   // the 64 units every bloom is held to, a 128-gibson span that straddles some
   // power-of-two boundary near most points, so the height climbed to wherever
   // the nearest one ended (13 at the owner's spot every time).
-  const seedFit = pending?.type === 'seed' ? seedHideHeight(pending.seed.reach, cursor, step, ceiling) : null
+  const seedFit = pending?.type === 'seed' ? seedDraftHeight(pending.seed.fit, cursor, plane, step, ceiling) : null
   // What the height is fitted to: a shard's own reach, the chest's look and
   // aimed contents, so its region holds the whole model it wears, or a seed's bloom.
   const fitting = !!shard || !!lookModel || aimed.points.length > 0 || seedFit !== null

@@ -127,7 +127,7 @@ export async function plantedTemplate(pending: { type: 'seed'; seed: SeedDraft }
   const draft = pending.seed
   const refusal = dnaTextRefusal(draft.text)
   const price = draftPrice(draft)
-  if (refusal || price === null) throw new Error(refusal ?? 'Its caps are out of range.')
+  if (refusal || price === null) throw new Error(refusal ?? 'Its size limit is out of range.')
   o.note('Getting the DNA ready')
   const dna = await dnaFor(draft, o.owner, o.live, o.createdAt, o.sign)
   // The writer's clock block (§4.2): the tip this client trusts, NTH's newest verified anchor, asked

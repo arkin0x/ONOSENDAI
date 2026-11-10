@@ -4,7 +4,11 @@
  * A seed is an item in a bag; its bloom is never published, so every reader
  * grows it (store/useBlooms.ts) and draws it as a shard standing at the
  * seed's `C`, one model unit 2^scale gibsons (§5.6), with the same placement,
- * clip, budget and tap target as any shard (WorldShards PlacedShard). Only
+ * budget and tap target as any shard (WorldShards PlacedShard). Unlike a
+ * shard it is never cut at its bag's cube: seeds hide at a findable height
+ * (12 at most by default), and a bloom that grows past that cube is drawn
+ * whole (owner ruling 2026-11-10: "I'm fine with blooms growing outside of
+ * their height region because we want people to be able to find them"). Only
  * the seeds whose `C` names the view's plane are shown: one bag holds a
  * region and its twin in the other plane (spec §7.6 Planes).
  *
@@ -24,8 +28,11 @@ import { bloomShard } from '../lib/seeds/bloomShard'
 import type { ShardModel } from 'sno-core/shards'
 import type { NostrEvent } from '../lib/events'
 import { PlacedShard, placeShard, useSteadied, type PlacedShardDraw } from './WorldShards'
+import type { Box } from '../lib/clip'
 
 const REACH = GRID_RADIUS * 8
+/** A box that holds everything: a bloom is drawn whole, past its bag's cube (owner ruling 2026-11-10). */
+const UNBOUNDED: Box = { min: [-Infinity, -Infinity, -Infinity], max: [Infinity, Infinity, Infinity] }
 
 /** The bead a seed stands as before its bloom is drawn: half a unit across, the palette's green (index 168). */
 function seedMark(unit: number): ShardModel {
@@ -80,7 +87,7 @@ export function WorldSeeds({ axes }: { axes: ViewAxes }): JSX.Element | null {
 
   const fresh = useMemo<PlacedShardDraw[]>(() => {
     const origin = alignedOrigin(anchor, scaleExp)
-    return near.map(({ w, seed }) => placeShard({ ...w, shard: views[seed.id]?.shard ?? markFor(seed.scale) }, origin, scaleExp, axes))
+    return near.map(({ w, seed }) => ({ ...placeShard({ ...w, shard: views[seed.id]?.shard ?? markFor(seed.scale) }, origin, scaleExp, axes), clip: UNBOUNDED }))
   }, [near, views, anchor, scaleExp, axes])
   const placed = useSteadied(fresh)
 

@@ -60,10 +60,59 @@ export const SETTLE_ROUNDS = 12
 
 /**
  * The effective planted height of a seed at `clock`, fetching the headers it
- * needs into `book` (at most SETTLE_ROUNDS fetches). A header asked for and
- * not found leaves it `pending` with `waiting` set.
+ * needs into `book` (at most SETTLE_ROUNDS fetches a clock). A header asked
+ * for and not found leaves it `pending` with `waiting` set, unless the seed
+ * can be judged below the run of missing headers (settlePlanted).
  */
 export async function settlePlanted(stated: number, createdAt: number, clock: number, book: HeaderBook, fetch: HeaderFetch): Promise<PlantedState> {
+  let result = await settleAt(stated, createdAt, clock, book, fetch)
+  for (let gaps = 0; gaps < GAPS_CROSSED && result.state === 'pending' && result.waiting && result.missingHeader !== undefined; gaps++) {
+    const bottom = await gapBottom(result.missingHeader, book, fetch)
+    if (bottom === null) return result
+    const lower = await settleAt(stated, createdAt, bottom, book, fetch)
+    // Settled at the lower clock: its E and F are those of every later clock (§4.2), so they stand.
+    if (lower.state !== 'pending') return lower
+    // Not settled there: the seed is younger than the gap, and needs the headers in it.
+    if (!lower.waiting) return result
+    result = lower
+  }
+  return result
+}
+
+/**
+ * How many runs of missing headers settlePlanted looks beneath. Blocks
+ * 975,227 to 975,255 are one today: the header blobs end at 975,226 and NTH's
+ * anchors carry their `header` tag from 975,256 on.
+ */
+export const GAPS_CROSSED = 3
+/** The longest run of missing headers looked across, in blocks. */
+export const GAP_SPAN = 400
+
+/**
+ * Why a seed can be judged below a gap (§4.2). It is settled at clock `c` once
+ * MTP(c) > created_at + 7200; from then on no block above `c` can have a header
+ * time at or below created_at + 7200, so E and F found at `c` are the ones a
+ * reader holding every header finds at any later clock, the real one
+ * included. The headers in the gap are then not needed: nothing in it can be
+ * E or F. Judged at the highest clock below the gap that the reader holds,
+ * with sno-core's own effectivePlantedHeight, nothing is stepped over.
+ */
+async function gapBottom(missing: number, book: HeaderBook, fetch: HeaderFetch): Promise<number | null> {
+  let h = missing
+  for (let i = 0; i < GAP_SPAN && h > 10; i++, h--) {
+    if (book.has(h)) return h
+    if (book.isAbsent(h)) continue
+    const window: number[] = []
+    for (let k = Math.max(0, h - 40); k <= h; k++) window.push(k)
+    await fetch(window)
+    if (book.has(h)) return h
+    // Neither held nor known to be absent: no answer either way, so nothing is judged.
+    if (!book.isAbsent(h)) return null
+  }
+  return null
+}
+
+async function settleAt(stated: number, createdAt: number, clock: number, book: HeaderBook, fetch: HeaderFetch): Promise<PlantedState> {
   const time = (h: number): number | undefined => book.time(h)
   let result: PlantedState = effectivePlantedHeight(stated, createdAt, clock, time)
   if (result.state !== 'pending' || result.missingHeader === undefined) return result

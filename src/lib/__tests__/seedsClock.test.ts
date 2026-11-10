@@ -158,6 +158,40 @@ describe('the planted height, clamped with injected headers (§4.2)', () => {
     })
   }
 
+  describe('below a run of missing headers (975,227 to 975,255 today)', () => {
+    // The vectors' header times, then one every ten minutes to a later clock, and a run of 29 nobody has.
+    const longer = new Map(times)
+    for (let h = 970620; h <= 971050; h++) longer.set(h, 1791544000 + (h - 970620) * 600)
+    // 29 blocks where the gallop down from the clock looks (clock - 256), as the real gap does today.
+    const holed = new Map(longer)
+    for (let h = 970734; h <= 970762; h++) holed.delete(h)
+    const clock = 971000
+
+    it('a seed settled below the gap is judged there: the same E, F and height as with every header', async () => {
+      for (const c of vectors.clamp.cases.filter((x: { effective: unknown }) => x.effective !== 'none')) {
+        const full = new HeaderBook()
+        const whole = await settlePlanted(c.stated, c.created_at, clock, full, fetcher(full, longer))
+        const book = new HeaderBook()
+        const got = await settlePlanted(c.stated, c.created_at, clock, book, fetcher(book, holed))
+        expect(whole, JSON.stringify(whole)).toMatchObject({ state: 'settled', height: c.effective, E: c.E, F: c.F })
+        expect(got).toEqual(whole)
+        // It did meet the gap on the way down, and judged beneath it.
+        expect(book.isAbsent(970762)).toBe(true)
+      }
+    })
+
+    it('a seed above the gap is judged as ever; one planted in it waits for blocks', async () => {
+      const book = new HeaderBook()
+      // Planted above the gap: judged at the clock as ever.
+      const got = await settlePlanted(970900, longer.get(970900)! + 300, clock, book, fetcher(book, holed))
+      expect(got).toMatchObject({ state: 'settled', height: 970900 })
+      // Planted inside it: its E and F lie in the gap, so it waits.
+      const young = new HeaderBook()
+      const inGap = await settlePlanted(970745, longer.get(970745)! + 300, clock, young, fetcher(young, holed))
+      expect(inGap).toMatchObject({ state: 'pending', waiting: true })
+    })
+  })
+
   it('a header nobody has: pending, waiting for blocks, never a failure', async () => {
     const c = vectors.clamp.cases[0]
     const holed = new Map(times)

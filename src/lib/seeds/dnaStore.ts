@@ -47,9 +47,9 @@ export function checkDna(ev: NostrEvent, id: string, verify: (ev: NostrEvent) =>
   if (!signed) return { state: 'invalid', id, error: 'Its signature does not verify.' }
   if (ev.content === '') return { state: 'mixed', id, author: ev.pubkey, event: ev }
   const caps = capsFromTags(ev.tags)
-  if (!caps) return { state: 'invalid', id, error: 'Its caps tag is malformed.' }
+  if (!caps) return { state: 'invalid', id, error: 'Its size limit is malformed.' }
   const price = capsPrice(caps)
-  if (price === null) return { state: 'invalid', id, error: 'Its caps are out of range.' }
+  if (price === null) return { state: 'invalid', id, error: 'Its size limit is out of range.' }
   const parsed = tryParseDna(ev.content)
   if (!parsed.ok) return { state: 'invalid', id, error: parsed.error }
   return { state: 'ok', id, author: ev.pubkey, text: ev.content, name: parsed.dna.name, species: parsed.dna.species, caps, price, event: ev }

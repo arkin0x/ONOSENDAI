@@ -6,7 +6,8 @@
  * around its `created_at` decide its floor and ceiling. The hyperspace index
  * holds block hashes but no times, so the times come from two places:
  *
- *   - the header blobs (lib/hyperspace/headerSync.ts), which end at 971,999.
+ *   - the header blobs (lib/hyperspace/headerSync.ts), which end where the
+ *     manifest says (975,226 since nth#10).
  *     A blob's records rebuild every 80-byte header, and the chain of their
  *     hashes must end at the manifest's checkpoint for the blob's last block,
  *     itself checked against the embedded checkpoints (blobChainTimes);

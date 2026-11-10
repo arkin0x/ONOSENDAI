@@ -22,6 +22,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { closeScrubber, useHyperspace } from '../store/useHyperspace'
 import { useTv } from '../store/useTv'
 import { useWorkshop } from '../store/useWorkshop'
+import { useGame } from '../store/useGame'
 import { useShards } from '../store/useShards'
 import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
 import { useChat } from '../store/useChat'
@@ -86,7 +87,7 @@ export function escapeKey(event: Pick<KeyboardEvent, 'code' | 'defaultPrevented'
  * covered and the workshop shut, so the bench keeps its own Z (undo).
  */
 export function walkKeyDown(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey' | 'preventDefault'> & { repeat?: boolean }): boolean {
-  if (!useCyberspace.getState().walking || walkMenuCovering() || useWorkshop.getState().open) return false
+  if (!useCyberspace.getState().walking || walkMenuCovering() || useWorkshop.getState().open || useGame.getState().session) return false
   const step = walkMove(event)
   if (step) {
     event.preventDefault()
@@ -168,6 +169,8 @@ export function useKeyboard(): void {
       // otherwise could not be closed from the keyboard at all (pre-class
       // smoke test, 2026-10-16). A field that uses Escape itself (the chat
       // line's mention list) says so with preventDefault, and keeps it.
+      // In a game nothing of cyberspace's is on screen, so Escape closes none of it out of sight.
+      if (useGame.getState().session) return
       if (escapeKey(event)) return
       // Cyberspace TV is watching only: no key moves, zooms or commits.
       if (useTv.getState().on) return
@@ -187,6 +190,8 @@ export function useKeyboard(): void {
       // their shortcuts with a control focused.
       if ((event.code === 'Space' || event.key === 'Enter') && (event.target as HTMLElement | null)?.closest?.('button, a[href], select, summary, [role="switch"], [role="checkbox"], [role="button"], [role="menuitem"], [role="tab"]')) return
       if (useWorkshop.getState().open) return
+      // In a game its own keys answer (game/GameView.tsx): nothing here moves you in cyberspace meanwhile.
+      if (useGame.getState().session) return
 
       const store = useCyberspace.getState()
       // What is on screen, which under free orbit is not the snapped frame.

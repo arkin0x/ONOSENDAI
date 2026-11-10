@@ -18,7 +18,7 @@ if (typeof localStorage === 'undefined') {
 import type { Hidden } from '../../lib/hidden'
 import { tvFresh } from '../useTv'
 import { useMutes } from '../useMutes'
-import { listeningPlane } from '../useChat'
+import { linesInPlane, listeningPlane, type ChatLine } from '../useChat'
 import { wherePlanes } from '../../hud/LootDetail'
 import { openedTitle } from '../../hud/DiscoveredPanel'
 
@@ -41,6 +41,15 @@ describe('the plane chat listens in', () => {
   })
   it('spectating, in free view or in your history, the plane the view is in', () => {
     expect(listeningPlane({ atHead: () => false, headPlane: 0, anchorPlane: 1 })).toBe(1)
+  })
+})
+
+describe('the chat dock shows the listening plane\'s talk', () => {
+  it('keeps lines of this plane and lines that name none, and leaves out the other plane\'s', () => {
+    const line = (id: string, plane?: 0 | 1): ChatLine => ({ id, from: 'f'.repeat(64), text: id, at: 1, region: 'r', height: 12, mine: false, ...(plane === undefined ? {} : { plane }) })
+    const lines = [line('d', 0), line('i', 1), line('old')]
+    expect(linesInPlane(lines, 0).map((l) => l.id)).toEqual(['d', 'old'])
+    expect(linesInPlane(lines, 1).map((l) => l.id)).toEqual(['i', 'old'])
   })
 })
 

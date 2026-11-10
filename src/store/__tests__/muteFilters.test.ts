@@ -47,6 +47,8 @@ let identityBefore: ReturnType<typeof useCyberspace.getState>['identity']
 
 beforeEach(() => {
   identityBefore = useCyberspace.getState().identity
+  // The finds below are said in plane 0; the store's own planes come from a random identity's spawn. Pinned, so the plane filters (spec §7.6 Planes) do not make this test a coin flip.
+  useCyberspace.setState({ anchorPlane: 0, headPlane: 0, plane: 0 })
   useCyberspace.setState({ identity: { ...identityBefore, pubkey: ME } })
   useMutes.setState({ muted })
 })

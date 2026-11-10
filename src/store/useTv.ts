@@ -57,6 +57,7 @@ import { cleanText } from '../lib/tv/text'
 import { FIT_CELLS, fitScale, scaleAt, zoomPlan, type ZoomStep } from '../lib/tv/zoom'
 import { useMutes } from './useMutes'
 import { withoutMuted } from '../lib/muteList'
+import { setTvOn } from './tvOn'
 
 /** Where an avatar stands on the tape, and since when. */
 export interface TvAvatar {
@@ -1256,6 +1257,10 @@ export const useTv = create<TvState>((set, get) => ({
     } catch { /* no history here */ }
   },
 }))
+
+// Whether TV is on, for store/useCeremony, which may not import this module (store/tvOn.ts).
+setTvOn(useTv.getState().on)
+useTv.subscribe((s) => setTvOn(s.on))
 
 /** TV from a button: on a new history entry of its own, so Back leaves it. */
 export function startTvInPlace(): void {

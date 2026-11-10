@@ -17,6 +17,7 @@ import { GRID_HALF, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from './useCyberspace'
 import { findHidden, useShards } from './useShards'
 import { useMutes } from './useMutes'
+import { tvIsOn } from './tvOn'
 
 export interface FoundChip {
   id: string
@@ -65,8 +66,9 @@ interface CeremonyState {
   /**
    * Finds opened in the other plane than the one the view is in: one bag
    * holds a region and its twin (spec §7.6 Planes), so a scan opens both
-   * planes' entries. Each waits here for its own plane, and gets its
-   * ceremony when the view goes there (watchPlane).
+   * planes' entries. Each waits here, at most PENDING_MAX of them, and gets
+   * its ceremony when the view stands in its region in its plane
+   * (releasePending).
    */
   pending: Hidden[]
   /** Items just opened by a scan; starts their decode and raises the chip. */
@@ -99,24 +101,43 @@ function watchReturns(): void {
   })
 }
 
+/** How many finds wait for their own plane at most; the oldest go first. */
+export const PENDING_MAX = 64
+
+/** Whether a view at `anchor` in `plane` stands in a find's region, in its plane. */
+function standsIn(h: Pick<Hidden, 'at' | 'height' | 'plane'>, anchor: { x: bigint; y: bigint; z: bigint }, plane: Plane): boolean {
+  const s = BigInt(h.height)
+  return h.plane === plane && anchor.x >> s === h.at.x >> s && anchor.y >> s === h.at.y >> s && anchor.z >> s === h.at.z >> s
+}
+
 /**
- * A find waiting in `pending` gets its ceremony when the view enters its
- * plane, if it is still among the finds (a delete or a retraction since
- * leaves it out). Watched from the first find set aside.
+ * Give the finds waiting in `pending` their ceremony where they are: when
+ * the view stands inside a find's region, in its plane, at your head or in
+ * a view you drive. Never while TV is on, whose shots move the view to
+ * other people's places, and never spectating or in your history. A find no
+ * longer among the finds (deleted or retracted since) is let go silently.
  */
+export function releasePending(): void {
+  const pending = useCeremony.getState().pending
+  if (pending.length === 0 || tvIsOn()) return
+  const cs = useCyberspace.getState()
+  if (!cs.canDrive()) return
+  const ready = pending.filter((h) => standsIn(h, cs.anchor, cs.anchorPlane))
+  if (ready.length === 0) return
+  useCeremony.setState({ pending: pending.filter((h) => !ready.includes(h)) })
+  const discovered = useShards.getState().discovered
+  const still = ready.filter((h) => discovered[h.eventId])
+  if (still.length > 0) useCeremony.getState().mark(still)
+}
+
+/** Watched from the first find set aside: every move of the view may bring one into place. */
 let watchingPlane = false
 function watchPlane(): void {
   if (watchingPlane) return
   watchingPlane = true
   useCyberspace.subscribe((s, prev) => {
-    if (s.anchorPlane === prev.anchorPlane) return
-    const pending = useCeremony.getState().pending
-    if (pending.length === 0) return
-    const discovered = useShards.getState().discovered
-    const ready = pending.filter((h) => h.plane === s.anchorPlane)
-    useCeremony.setState({ pending: pending.filter((h) => h.plane !== s.anchorPlane) })
-    const still = ready.filter((h) => discovered[h.eventId])
-    if (still.length > 0) useCeremony.getState().mark(still)
+    if (s.anchor === prev.anchor && s.anchorPlane === prev.anchorPlane) return
+    releasePending()
   })
 }
 
@@ -159,12 +180,12 @@ export const useCeremony = create<CeremonyState>((set, get) => ({
 
   mark: (opened) => {
     // A find in the other plane is not here: no decode, no chip, until the
-    // view is in its plane (watchPlane). An entry with no C took the plane
+    // view stands in its region in its plane (releasePending). An entry with no C took the plane
     // it was read from, so it is here.
     const { here: found, elsewhere } = byViewPlane(opened, useCyberspace.getState().anchorPlane)
     if (elsewhere.length > 0) {
       const waiting = new Set(get().pending.map((h) => h.eventId))
-      set({ pending: [...get().pending, ...elsewhere.filter((h) => !waiting.has(h.eventId))] })
+      set({ pending: [...get().pending, ...elsewhere.filter((h) => !waiting.has(h.eventId))].slice(-PENDING_MAX) })
       watchPlane()
     }
     // The tour's district shows only its curators' things (useShards

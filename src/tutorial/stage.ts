@@ -8,13 +8,15 @@
  * and never sent to a relay. The bags go to tutorial/guideBags.ts, where the
  * discovery scan opens them as a stranger's.
  *
- * Two bags so far:
- *   - the covering bag (tutorial/layout.ts cover): the blue box, seen from
- *     the spawn;
+ * Three bags:
+ *   - the covering bag (tutorial/layout.ts cover): the blue box and the
+ *     bounce course (tutorial/course.ts), seen from the spawn;
  *   - the box bag (the blue box's own height-3 region): the treasure chest,
  *     locked to that region (DECK-0004 §3.8, the region's lock), so whoever
  *     stands in the box carries the key that opens it (store/useKeyring). In
- *     it: a shard, a message and the welcome item.
+ *     it: a shard, a message and the welcome item;
+ *   - the finish bag (the finish deck's height-3 region): the finish chest,
+ *     locked the same way, with course pieces to build a course of your own.
  *
  * The welcome item is a placeholder signed by the guide key until the owner
  * publishes theirs; theirs then goes in as their own signed event, which a
@@ -32,14 +34,37 @@ import { DEFAULT_BAG_SETTINGS, HIDDEN_KIND, bagTemplate, chestInnerTemplate, key
 import { forgeKey, sealEntries } from '../lib/chests'
 import { lockOf } from '../lib/locks'
 import type { Position } from '../lib/space'
-import { BOX_HEIGHT, toWorld, type TutorialLayout } from './layout'
+import { BOX_HEIGHT, regionBase, toWorld, type TutorialLayout } from './layout'
+import { BACK_STEP, CATCH_FLOOR, COURSE, FINISH_CHEST, courseToWorld, type CoursePart } from './course'
 import trophyPayload from './pieces/trophy.json'
+import platSquare6 from './pieces/plat-square-6.json'
+import platSquare4 from './pieces/plat-square-4.json'
+import lineStart from './pieces/line-start-4x2.json'
+import lineFinish from './pieces/line-finish-8x2.json'
+import trampoline from './pieces/trampoline-4.json'
+import flagCheckered from './pieces/flag-checkered.json'
+import padBounce from './pieces/pad-bounce-2.json'
+
+/** Each course piece's payload, by its name in tutorial/course.ts. */
+const PIECES: Record<CoursePart['piece'], unknown> = {
+  'plat-square-6': platSquare6,
+  'plat-square-4': platSquare4,
+  'line-start-4x2': lineStart,
+  'line-finish-8x2': lineFinish,
+  'trampoline-4': trampoline,
+  'flag-checkered': flagCheckered,
+  'catch-floor': CATCH_FLOOR,
+  'back-step': BACK_STEP,
+}
+
+/** What the finish chest holds: pieces to build a course of your own. */
+const FINISH_KIT: Array<[unknown, string]> = [[platSquare4, 'platform'], [padBounce, 'bounce-pad'], [trampoline, 'trampoline'], [lineStart, 'start-line'], [lineFinish, 'finish-line']]
 
 /** What a region-locked chest says opens it, as the composer writes it (hud/RegionLockPicker REGION_REQUIRES). */
 const REGION_REQUIRES = 'the key of a place'
 
 /** Bump when what a stage holds changes, so a kept stage from before is staged again. */
-export const STAGE_VERSION = 1
+export const STAGE_VERSION = 2
 
 /** One player's stage, by pubkey. */
 export const STAGE_PREFIX = 'onosendai:tutorial:stage:'
@@ -57,6 +82,10 @@ export interface StageIds {
   chestContents: string[]
   /** The box region's lookup id. */
   boxLookup: string
+  /** The finish chest's event id, what is in it, and its region's lookup id. */
+  finishChest: string
+  finishContents: string[]
+  finishLookup: string
 }
 
 export interface Stage {
@@ -77,6 +106,8 @@ export const STAGE_TEXT = {
   message: 'You found it. Whatever you TAKE is yours, in your ITEMS.',
   welcomeName: 'Welcome',
   welcomeAbout: 'Your first day in cyberspace.',
+  finishName: 'Finish chest',
+  finishMessage: 'Pieces for a course of your own. Place them in BUILD.',
 } as const
 
 /** The blue box: a see-through cube filling the box region, nothing a walker bumps into. */
@@ -139,24 +170,42 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
   // The chest sits in the box, a little toward the near side, so it shows from the way in.
   const chestAt = toWorld(frame, 3, 3, 3)
 
-  const [coverKey, boxKey] = await Promise.all([keyAt(cover.base, cover.height), keyAt(b, BOX_HEIGHT)])
+  // The finish chest, on the deck, in the deck's own height-3 region (course.ts).
+  const finishAt = courseToWorld(frame, FINISH_CHEST)
+  const finishBase = regionBase(finishAt, BOX_HEIGHT)
 
-  // The chest's contents, each placed at the chest, sealed to the box region's lock.
-  const lock = lockOf(boxKey.key)
-  if (!lock) throw new Error('This region has no lock.')
+  const [coverKey, boxKey, finishKey] = await Promise.all([keyAt(cover.base, cover.height), keyAt(b, BOX_HEIGHT), keyAt(finishBase, BOX_HEIGHT)])
+
+  /** A chest at `at`, sealed to the lock of the region whose key is `key`, holding `contents`. */
+  const chestOf = (name: string, key: Uint8Array, at: Position, contents: BagEntry[]): NostrEvent => {
+    const lock = lockOf(key)
+    if (!lock) throw new Error('This region has no lock.')
+    const sealed = sealEntries(contents, lock.pubkey)
+    const item: ChestItem = { name, lockPubkey: lock.pubkey, senderPubkey: sealed.senderPubkey, requires: REGION_REQUIRES, payload: sealed.payload }
+    return sign(chestInnerTemplate(item, at, plane, createdAt))
+  }
+
+  // The treasure chest's contents, each placed at the chest, sealed to the box region's lock.
   const trophy = sign(shardInnerTemplate(pieceModel(trophyPayload, 'tutorial-trophy'), chestAt, plane, createdAt))
   const message = rumorOf(messageInnerTemplate(STAGE_TEXT.message, chestAt, plane, createdAt), guide)
   const welcome = sign(keyInnerTemplate(welcomeItem(), chestAt, plane, createdAt))
   const contents: BagEntry[] = [trophy, message, welcome]
-  const sealed = sealEntries(contents, lock.pubkey)
-  const chestItem: ChestItem = { name: STAGE_TEXT.chestName, lockPubkey: lock.pubkey, senderPubkey: sealed.senderPubkey, requires: REGION_REQUIRES, payload: sealed.payload }
-  const chest = sign(chestInnerTemplate(chestItem, chestAt, plane, createdAt))
+  const chest = chestOf(STAGE_TEXT.chestName, boxKey.key, chestAt, contents)
+
+  // The finish chest's: pieces to build with, and a line on what they are for.
+  const finishContents: BagEntry[] = [
+    ...FINISH_KIT.map(([payload, id]) => sign(shardInnerTemplate(pieceModel(payload, `tutorial-${id}`), finishAt, plane, createdAt))),
+    rumorOf(messageInnerTemplate(STAGE_TEXT.finishMessage, finishAt, plane, createdAt), guide),
+  ]
+  const finishChest = chestOf(STAGE_TEXT.finishName, finishKey.key, finishAt, finishContents)
 
   const blueBox = sign(shardInnerTemplate(blueBoxModel(), boxMiddle, plane, createdAt))
+  const course = COURSE.map((part, i) => sign(shardInnerTemplate(pieceModel(PIECES[part.piece], `tutorial-course-${i}`), courseToWorld(frame, part.at), plane, createdAt)))
 
   const bags = await Promise.all([
-    sealBag(sign, [blueBox], coverKey.key, coverKey.lookupId, cover.height, createdAt, cover.base, plane),
+    sealBag(sign, [blueBox, ...course], coverKey.key, coverKey.lookupId, cover.height, createdAt, cover.base, plane),
     sealBag(sign, [chest], boxKey.key, boxKey.lookupId, BOX_HEIGHT, createdAt, b, plane),
+    sealBag(sign, [finishChest], finishKey.key, finishKey.lookupId, BOX_HEIGHT, createdAt, finishBase, plane),
   ])
 
   return {
@@ -165,8 +214,21 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
     guide,
     at: spawnTag(layout),
     bags,
-    ids: { blueBox: blueBox.id, chest: chest.id, chestContents: [trophy.id, message.id, welcome.id], boxLookup: boxKey.lookupId },
+    ids: {
+      blueBox: blueBox.id,
+      chest: chest.id,
+      chestContents: contents.map(entryId),
+      boxLookup: boxKey.lookupId,
+      finishChest: finishChest.id,
+      finishContents: finishContents.map(entryId),
+      finishLookup: finishKey.lookupId,
+    },
   }
+}
+
+/** An entry's id as ITEMS files it: a signed event's own, a rumor's hash (which rumorOf sets as its id). */
+function entryId(e: BagEntry): string {
+  return (e as NostrEvent).id
 }
 
 /** A layout's spawn as a stage names it. */
@@ -181,7 +243,7 @@ export function readStage(player: string, guide: string, at: string): Stage | nu
     if (!raw) return null
     const s = JSON.parse(raw) as Partial<Stage>
     if (s.v !== STAGE_VERSION || s.player !== player || s.guide !== guide || s.at !== at) return null
-    if (!Array.isArray(s.bags) || !s.ids || typeof s.ids.chest !== 'string' || !Array.isArray(s.ids.chestContents)) return null
+    if (!Array.isArray(s.bags) || !s.ids || typeof s.ids.chest !== 'string' || !Array.isArray(s.ids.chestContents) || typeof s.ids.finishChest !== 'string' || !Array.isArray(s.ids.finishContents)) return null
     return s as Stage
   } catch { return null }
 }

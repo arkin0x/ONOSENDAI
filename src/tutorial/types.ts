@@ -26,9 +26,11 @@ export type TutorialWait = Exclude<DemoAction, 'spawn'> | TutorialAction
 
 /**
  * The tutorial's own waits, one per staged thing (tutorial/director.ts):
- * the treasure chest found, opened by hand, and something in it taken.
+ * the treasure chest found, opened by hand, and something in it taken; the
+ * course's start reached, gravity on in WALK, the finish chest found and
+ * something in it taken.
  */
-export type TutorialAction = 'see-chest' | 'open-chest' | 'take'
+export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-start' | 'gravity' | 'see-finish' | 'take-finish'
 
 export interface TutorialStep {
   /** Unique across the script; also what a player's saved progress names. */

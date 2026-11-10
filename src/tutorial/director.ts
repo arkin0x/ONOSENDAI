@@ -12,7 +12,12 @@
  *   - 'see-chest': the treasure chest has been found (the scan revealed it,
  *     which it does by itself as the player enters the blue box);
  *   - 'open-chest': the player opened it, by hand (useOpenedChests);
- *   - 'take': something from it is in their ITEMS.
+ *   - 'take': something from it is in their ITEMS;
+ *   - 'at-start': the player stands on the course's start square
+ *     (useArrival: where they stand, as their chain's head says);
+ *   - 'gravity': WALK with GRAVITY on;
+ *   - 'see-finish' and 'take-finish': the finish chest found (the scan does
+ *     it as they land on the deck), and something from it taken.
  * Nothing here opens or takes anything (owner, 2026-10-26).
  */
 
@@ -24,6 +29,8 @@ import { spawnPlace } from '../store/useDemo'
 import { useShards } from '../store/useShards'
 import { useOpenedChests, openedKey } from '../store/useOpenedChests'
 import { useInventory } from '../store/useInventory'
+import { useWalk } from '../store/useWalk'
+import { START_STAND, atStart, courseToWorld } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import type { Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
@@ -134,6 +141,51 @@ registerTutorialEffect('aim-box', () => {
     aimed = true
     const b = layout.frame.boxBase
     aimAt({ x: b.x + 4n, y: b.y + 4n, z: b.z + 4n })
+  }
+  aim()
+  return aimed ? undefined : useTutorialStage.subscribe(aim)
+})
+
+/**
+ * Arrival (T7): `inside` is true of where the player stands, their chain's
+ * head, in the plane they stand in. One mechanism for the start square and
+ * anything else a step waits to be reached.
+ */
+function watchArrival(inside: (at: Position, layout: TutorialLayout) => boolean, onDone: () => void): () => void {
+  return watchUntil(() => {
+    const layout = useTutorialStage.getState().layout
+    const cs = useCyberspace.getState()
+    return !!layout && cs.events.length > 0 && cs.headPlane === layout.plane && inside(cs.position, layout)
+  }, onDone, [onStage, (l) => useCyberspace.subscribe((s, prev) => { if (s.position !== prev.position || s.headPlane !== prev.headPlane) l() })])
+}
+
+registerTutorialWatcher('at-start', (onDone) => watchArrival((at, layout) => atStart(layout.frame, at), onDone))
+
+registerTutorialWatcher('gravity', (onDone) => watchUntil(
+  () => useCyberspace.getState().walking && useWalk.getState().gravity,
+  onDone,
+  [(l) => useCyberspace.subscribe((s, prev) => { if (s.walking !== prev.walking) l() }), (l) => useWalk.subscribe(l)],
+))
+
+registerTutorialWatcher('see-finish', (onDone) => watchUntil(() => {
+  const id = useTutorialStage.getState().stage?.ids.finishChest
+  return !!id && !!useShards.getState().discovered[id]
+}, onDone, [onStage, (l) => useShards.subscribe((s, prev) => { if (s.discovered !== prev.discovered) l() })]))
+
+registerTutorialWatcher('take-finish', (onDone) => watchUntil(() => {
+  const ids = useTutorialStage.getState().stage?.ids.finishContents ?? []
+  const items = useInventory.getState().items
+  return ids.some((id) => { const it = items[id]; return !!it && !it.cleared })
+}, onDone, [onStage, (l) => useInventory.subscribe((s, prev) => { if (s.items !== prev.items) l() })]))
+
+/** The course step lines the cursor up on the start square, so one COMMIT moves you there. */
+registerTutorialEffect('aim-start', () => {
+  let aimed = false
+  const aim = (): void => {
+    const layout = useTutorialStage.getState().layout
+    if (aimed || !layout) return
+    aimed = true
+    aimAt(courseToWorld(layout.frame, START_STAND))
   }
   aim()
   return aimed ? undefined : useTutorialStage.subscribe(aim)

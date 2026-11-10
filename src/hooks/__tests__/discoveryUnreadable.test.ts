@@ -18,6 +18,8 @@ let ei = 0
 let ri = 0
 vi.mock('react', () => ({
   useRef: (v: unknown) => { refs[ri] ??= { current: v }; return refs[ri++] },
+  // The tutorial guide's version (useDiscovery): never bumped here.
+  useState: (v: unknown) => [v, () => {}],
   useEffect: (fn: () => void | (() => void), deps?: unknown[]) => {
     const k = ei++
     const prev = effects[k]

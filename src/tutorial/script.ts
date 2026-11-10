@@ -8,6 +8,10 @@
  */
 
 import type { TutorialScript, TutorialStep } from './types'
+import { TUTORIAL_BUD_PICTURE, TUTORIAL_DNA } from './dna'
+
+/** The tutorial tree's name as the SEED composer shows it. */
+const TREE = TUTORIAL_DNA.name.toUpperCase()
 
 export const WELCOME: TutorialStep = {
   id: 'welcome',
@@ -50,6 +54,35 @@ export const TAKE: TutorialStep = {
   scene: { target: 'keep', highlight: '.foundchip' },
   explain: 'What you take goes in your ITEMS, in the menu. A shard you take can be placed in the world, built with, or changed in the workshop.',
   wait: 'take',
+}
+
+/** To the dirt plot (A5): one COMMIT, the cursor already on it. */
+export const TO_PLOT: TutorialStep = {
+  id: 'to-plot',
+  title: 'The dirt',
+  caption: 'There was a seed in the chest. See the dirt? Go stand on it.',
+  hint: 'Tap COMMIT to move there.',
+  scene: { target: 'self' },
+  wait: 'at-plot',
+  effect: 'aim-plot',
+}
+
+/** Plant it: BUILD, SEED, the tree, PLANT, then place it on the dirt. Planting is the player's, mined on their device. */
+export const PLANT: TutorialStep = {
+  id: 'plant',
+  title: 'Plant it',
+  caption: `Go into BUILD and plant the ${TREE} on the dirt.`,
+  hint: `BUILD (B), SEED, ${TREE}, PLANT, then place it here.`,
+  explain: 'A seed is yours: you sign it and do a little work for it on this device, and it stays where you plant it. Everyone who finds it grows the same tree, a little more every day.',
+  wait: 'plant',
+}
+
+/** The bud preview: a reason to come back. */
+export const BUD: TutorialStep = {
+  id: 'bud',
+  title: 'It grows',
+  caption: 'It will grow over time. Check back later.',
+  image: { src: TUTORIAL_BUD_PICTURE, alt: `The ${TUTORIAL_DNA.name} as it starts to bud` },
 }
 
 /** To the start of the course: one COMMIT, the cursor already on the start square. */
@@ -152,5 +185,5 @@ export const AGENTS: TutorialStep = {
 }
 
 export const TUTORIAL_SCRIPT: TutorialScript = {
-  steps: [WELCOME, BOX, OPEN, TAKE, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, EARTH, AGENTS],
+  steps: [WELCOME, BOX, OPEN, TAKE, TO_PLOT, PLANT, BUD, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, EARTH, AGENTS],
 }

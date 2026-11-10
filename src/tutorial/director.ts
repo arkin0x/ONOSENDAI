@@ -18,7 +18,8 @@
  *   - 'gravity': WALK with GRAVITY on;
  *   - 'see-finish' and 'take-finish': the finish chest found (the scan does
  *     it as they land on the deck), and something from it taken;
- *   - 'workshop': the workshop opened and closed again.
+ *   - 'workshop': the workshop opened and closed again;
+ *   - 'at-plot' and 'plant': at the dirt plot, and a seed of their own planted.
  * Nothing here opens or takes anything (owner, 2026-10-26).
  */
 
@@ -33,7 +34,8 @@ import { useInventory } from '../store/useInventory'
 import { useWalk } from '../store/useWalk'
 import { useWorkshop } from '../store/useWorkshop'
 import { viewEarth } from '../hud/HyperspacePanel'
-import { START_STAND, atStart, courseToWorld } from './course'
+import { PLOT_STAND, START_STAND, atStart, courseToWorld, onPlot } from './course'
+import { toWorld } from './layout'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import type { Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
@@ -229,3 +231,20 @@ registerTutorialEffect('open-workshop', () => { useWorkshop.getState().openWorks
 
 /** Earth through the free view (the view menu's EARTH): looking costs nothing; only BOARD costs work or sats (T9). */
 registerTutorialEffect('view-earth', () => { viewEarth() })
+
+/** At the dirt plot (A5): standing on it, as the chain's head says. */
+registerTutorialWatcher('at-plot', (onDone) => watchArrival((at, layout) => onPlot(layout.frame, at), onDone))
+
+/**
+ * A seed planted (A5): a seed of the player's own in their rows that was not
+ * there when the step came up. Planting is theirs: BUILD, SEED, PLANT, and
+ * the deploy that mines its work (the Seeds client, store/useShards).
+ */
+registerTutorialWatcher('plant', (onDone) => {
+  const seeds = (): string[] => useShards.getState().mine.filter((d) => d.type === 'seed').map((d) => d.eventId)
+  const before = new Set(seeds())
+  return watchUntil(() => seeds().some((id) => !before.has(id)), onDone, [(l) => useShards.subscribe((s, prev) => { if (s.mine !== prev.mine) l() })])
+})
+
+/** The plot step lines the cursor up on the dirt, so one COMMIT moves you there. */
+registerTutorialEffect('aim-plot', aimOnce((layout) => toWorld(layout.frame, PLOT_STAND.f, PLOT_STAND.r, PLOT_STAND.u)))

@@ -2,32 +2,25 @@
  * BlossomServer.tsx: where an upload goes, one picker for every upload
  * (a profile picture, hidden audio).
  *
- * Your own server list (kind 10063, BUD-03) comes first, then a few public
- * servers that take browser uploads (lib/blossom DEFAULT_BLOSSOM_SERVERS); a
- * server you type is remembered on this device, and so is the last one an
- * upload went to. Moved out of ProfileModal unchanged when hidden audio
+ * The last server used comes first, then servers you typed, your own server
+ * list (kind 10063, BUD-03), and a few public servers that take browser uploads (lib/blossom DEFAULT_BLOSSOM_SERVERS). A
+ * server you type sticks once it answers an upload: it stays in the list on
+ * this device, marked "(yours)", and the picker starts on it (owner
+ * 2026-11-10, lib/blossomChoice). Moved out of ProfileModal when hidden audio
  * needed the same choice (2026-10-23).
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { GENERAL_RELAYS } from '../lib/contacts'
 import type { NostrEvent } from '../lib/events'
 import { queryAny, relaySet } from '../lib/relay'
 import { DEFAULT_BLOSSOM_SERVERS, SERVER_LIST_KIND, normalizeServer, serversFromList } from '../lib/blossom'
+import { initialServer, readChoice, rememberServer, serverAfterList, serverOptions, type StoredChoice } from '../lib/blossomChoice'
 
-const SERVER_KEY = 'onosendai:blossom-server'
 /** The select's value for "type a server". */
 const CUSTOM = 'custom'
 /** How long to wait on the relays for your server list. */
 const LIST_WAIT_MS = 5000
-
-function savedServer(): string | null {
-  try {
-    return normalizeServer(localStorage.getItem(SERVER_KEY) ?? '')
-  } catch {
-    return null
-  }
-}
 
 /** Where your server list lives: the general relays, and yours. */
 export function serverListRelays(): string[] {
@@ -43,7 +36,11 @@ export interface BlossomChoice {
   setCustom: (s: string) => void
   /** The server an upload goes to now, or null while "another server" holds nothing usable. */
   chosen: () => string | null
-  /** An upload went there: the next picker starts on it. */
+  /**
+   * The server answered an upload (took it, or refused it): it stays in the
+   * list on this device and the next picker starts on it (owner 2026-11-10).
+   * Not for a server that never answered.
+   */
   remember: (server: string) => void
   /** Your kind 10063, from a query the caller made (ProfileModal asks for it with your kind 0). */
   adopt: (list: NostrEvent | null) => void
@@ -52,18 +49,32 @@ export interface BlossomChoice {
 /**
  * The picker's state. With `fetchList` it reads your server list (kind
  * 10063) itself, for `pubkey`; without, the caller hands it over (`adopt`).
+ * Servers you typed and used are kept on this device per key (lib/blossomChoice).
  */
 export function useBlossomChoice(pubkey: string, fetchList: boolean): BlossomChoice {
-  const [servers, setServers] = useState<string[]>(DEFAULT_BLOSSOM_SERVERS)
-  const [server, setServer] = useState<string>(() => savedServer() ?? DEFAULT_BLOSSOM_SERVERS[0])
+  const [stored, setStored] = useState<StoredChoice>(() => readChoice(pubkey))
+  const [mine, setMine] = useState<string[]>([])
+  const [server, setServerState] = useState<string>(() => initialServer(readChoice(pubkey), []))
   const [custom, setCustom] = useState('')
+  // The person picked from the select: a list that arrives later leaves it be.
+  const picked = useRef(false)
+  // Another key: its own servers, its own choice.
+  const shownFor = useRef(pubkey)
+  useEffect(() => {
+    if (shownFor.current === pubkey) return
+    shownFor.current = pubkey
+    const next = readChoice(pubkey)
+    picked.current = false
+    setStored(next)
+    setMine([])
+    setServerState(initialServer(next, []))
+    setCustom('')
+  }, [pubkey])
 
   const adopt = (list: NostrEvent | null): void => {
-    const mine = serversFromList(list)
-    if (mine.length === 0) return
-    setServers([...mine, ...DEFAULT_BLOSSOM_SERVERS.filter((s) => !mine.includes(s))])
-    // Your own first server is the default unless this device already chose one.
-    if (!savedServer()) setServer(mine[0])
+    const fromList = serversFromList(list)
+    setMine(fromList)
+    setServerState((current) => serverAfterList(current, readChoice(pubkey), fromList, picked.current))
   }
 
   useEffect(() => {
@@ -84,13 +95,18 @@ export function useBlossomChoice(pubkey: string, fetchList: boolean): BlossomCho
   }, [pubkey, fetchList])
 
   return {
-    servers,
+    servers: serverOptions(stored, mine),
     server,
-    setServer,
+    setServer: (s) => { picked.current = true; setServerState(s) },
     custom,
     setCustom,
     chosen: () => (server === CUSTOM ? normalizeServer(custom) : server),
-    remember: (target) => { try { localStorage.setItem(SERVER_KEY, target) } catch { /* private mode */ } },
+    remember: (target) => {
+      const next = rememberServer(pubkey, target)
+      setStored(next)
+      // The typed server is an option now: the select shows it, not the field.
+      if (next.last) { setServerState(next.last); setCustom('') }
+    },
     adopt,
   }
 }

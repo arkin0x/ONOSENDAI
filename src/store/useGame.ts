@@ -2,14 +2,19 @@
  * useGame.ts - in-game mode (DECK-0002 §2.3): your own player inside a game
  * this client implements.
  *
- * ENTER publishes enter-virtual from where you stand, then the game's arrival,
- * a `teleport` to its start: you go there through the game, not across
- * cyberspace. While you are in, the game's world is drawn in place of
- * cyberspace (game/GameView.tsx), and a press moves you one gibson by the
- * game's own rules (lib/games/play.ts), on this device, signing nothing. A pad
- * signs a `teleport`. EXIT publishes exit-virtual, which puts you back where
- * you entered (spec §8.11.4 rule 2), and the view comes back exactly as it was
- * when you entered: the same place, zoom, look and mode (DECK-0002 §7).
+ * ENTER publishes enter-virtual from where you stand, and nothing else: you
+ * appear at the game's entry point by virtue of entering (DECK-0002 §2.2,
+ * owner's ruling 2026-11-10), the `C` of the world item with the `entry` tag,
+ * while your position in cyberspace stays where you entered from. While you
+ * are in, the game defines every action (§2.3). The tutorial dungeon's are
+ * its own choice, not the DECK's: the game's world is drawn in place of
+ * cyberspace (game/GameView.tsx), a press moves you one gibson by its rules
+ * (lib/games/play.ts) on this device, signing nothing, and a pad signs a
+ * `teleport`. Its run is not anchored (DECK-0002 §6.1): its steps are not
+ * events anyone keeps, so an anchor would commit to nothing checkable.
+ * EXIT publishes exit-virtual, which puts you back where you entered (spec
+ * §8.11.4 rule 2), and the view comes back exactly as it was when you
+ * entered: the same place, zoom, look and mode (DECK-0002 §7).
  *
  * Every event goes through the store's own signing (useCyberspace enterGame,
  * signGameAction, exitGame), which confirms the head first and queues it like
@@ -17,8 +22,8 @@
  *
  * A chain whose head is inside a game this client implements, after a reload
  * or from another tab, can be gone back into (resume) or left (exit); the
- * chain alone says which game, from where, and the last game position on the
- * record.
+ * chain alone says which game and from where; you are shown at the last game
+ * position on the record, or at the entry point when there is none.
  */
 
 import { create } from 'zustand'
@@ -43,8 +48,10 @@ export interface GameSession {
   game: GameDef
   /** The enter-virtual that opened the bracket. */
   entryId: string
-  /** Your game position (DECK-0002 §3): never a position in cyberspace. */
-  at: Position
+  /** Your game position (DECK-0002 §3): never a position in cyberspace. Null until the world is read, which says where the entry point is. */
+  at: Position | null
+  /** Where a resumed session puts you once the world is read: the last game position on the record (recordedPosition); null for the entry point. */
+  resumeAt: Position | null
   /** The world's shards, null while they load. */
   world: WorldShard[] | null
   /** Why the world could not be read, if it could not. */
@@ -56,7 +63,7 @@ export interface GameSession {
 export interface GameState {
   session: GameSession | null
   /** What is being signed now, if anything: nothing else is asked while it is. */
-  busy: 'entering' | 'arriving' | 'teleporting' | 'exiting' | null
+  busy: 'entering' | 'teleporting' | 'exiting' | null
   /** The last thing worth saying: a refusal, or a record that did not get signed. */
   message: string | null
   /** Enter `game` from where you stand. Null when in, else the words it was refused with. */
@@ -92,8 +99,8 @@ function walkBusy(): boolean {
   return w.queue.length > 0 || w.open !== null || w.running !== null || w.falling
 }
 
-/** The last game position on the record inside the bracket opened by `entry`: its newest `teleport` or `move` with a `C` (DECK-0002 §4). */
-export function recordedPosition(chain: ActionEvent[], entry: ActionEvent, game: Pick<GameDef, 'region' | 'start'>): Position {
+/** The last game position on the record inside the bracket opened by `entry`: its newest `teleport` or `move` with a `C` (DECK-0002 §4), or null when there is none (you are at the entry point). */
+export function recordedPosition(chain: ActionEvent[], entry: ActionEvent, game: Pick<GameDef, 'region'>): Position | null {
   const from = chain.indexOf(entry)
   for (let i = chain.length - 1; i > from; i--) {
     const a = chain[i]
@@ -101,7 +108,7 @@ export function recordedPosition(chain: ActionEvent[], entry: ActionEvent, game:
     const p = a.declared.position
     if (a.declared.plane === game.region.plane && inRegion(game, p)) return { ...p }
   }
-  return { ...game.start }
+  return null
 }
 
 /** Your game position as the `C` of a game action. */
@@ -113,17 +120,19 @@ export const useGame = create<GameState>((set, get) => {
   /** Start reading the world of `session`'s game; lands only while that session stands. */
   const readWorld = (session: GameSession): void => {
     loadWorld(session.game).then(
-      (world) => { if (get().session?.entryId === session.entryId) set({ session: { ...get().session!, world, worldError: world.length ? null : 'This game has no world yet.' } }) },
-      (err) => { if (get().session?.entryId === session.entryId) set({ session: { ...get().session!, world: [], worldError: err instanceof Error ? err.message : String(err) } }) },
+      // You appear at the entry point by virtue of having entered (DECK-0002 §2.2), or where the record left you.
+      (world) => { const now = get().session; if (now?.entryId === session.entryId) set({ session: { ...now, world: world.shards, at: now.at ?? now.resumeAt ?? world.entry, worldError: world.shards.length ? null : 'This game has no world yet.' } }) },
+      // No world: a resumed player is still drawn where the record left them; nobody moves without walls (step).
+      (err) => { const now = get().session; if (now?.entryId === session.entryId) set({ session: { ...now, world: [], at: now.at ?? now.resumeAt, worldError: err instanceof Error ? err.message : String(err) } }) },
     )
   }
 
-  /** Sign a teleport from `from` to `to` inside the open game; the game goes on either way (DECK-0002 §6), and a failed record is said. */
-  const teleport = async (game: GameDef, entryId: string, to: Position, from: Position | null, busy: 'arriving' | 'teleporting'): Promise<void> => {
+  /** Sign a pad's teleport from `from` to `to` inside the open game; the tutorial game goes on either way (its own choice), and a failed record is said. */
+  const teleport = async (game: GameDef, entryId: string, to: Position, from: Position, busy: 'teleporting'): Promise<void> => {
     set({ busy })
     let note: string | null = null
     try {
-      const signed = await useCyberspace.getState().signGameAction(game, entryId, (links) => teleportTemplate({ ...links, toHex: hexAt(game, to), ...(from ? { fromHex: hexAt(game, from) } : {}) }))
+      const signed = await useCyberspace.getState().signGameAction(game, entryId, (links) => teleportTemplate({ ...links, toHex: hexAt(game, to), fromHex: hexAt(game, from) }))
       if ('refused' in signed) note = `The teleport was not signed: ${signed.refused}`
     } catch (err) {
       note = `The teleport was not signed: ${failed(err)}`
@@ -157,11 +166,10 @@ export const useGame = create<GameState>((set, get) => {
         set({ busy: null })
         return refuse(failed(err))
       }
-      const session: GameSession = { game, entryId, at: { ...game.start }, world: null, worldError: null, snapshot }
+      // No arrival is signed: entering is the arrival (DECK-0002 §2.2). The world says where the entry point is.
+      const session: GameSession = { game, entryId, at: null, resumeAt: null, world: null, worldError: null, snapshot }
       set({ session, busy: null })
       readWorld(session)
-      // The arrival (DECK-0002 §2.2): through the game, to its start.
-      await teleport(game, entryId, game.start, null, 'arriving')
       return null
     },
 
@@ -171,7 +179,7 @@ export const useGame = create<GameState>((set, get) => {
       const open = openBracket(chain)
       const game = gameFor(open?.game?.pubkey)
       if (!open || !game || !useCyberspace.getState().atHead()) return false
-      const session: GameSession = { game, entryId: open.id, at: recordedPosition(chain, open, game), world: null, worldError: null, snapshot: null }
+      const session: GameSession = { game, entryId: open.id, at: null, resumeAt: recordedPosition(chain, open, game), world: null, worldError: null, snapshot: null }
       set({ session, message: null })
       readWorld(session)
       return true
@@ -186,7 +194,7 @@ export const useGame = create<GameState>((set, get) => {
       set({ busy: 'exiting', message: null })
       let left: Awaited<ReturnType<CyberspaceState['exitGame']>>
       try {
-        left = await useCyberspace.getState().exitGame(session?.entryId ?? open?.id, session ? hexAt(session.game, session.at) : undefined)
+        left = await useCyberspace.getState().exitGame(session?.entryId ?? open?.id, (session?.at ?? session?.resumeAt) ? hexAt(session!.game, (session!.at ?? session!.resumeAt)!) : undefined)
       } catch (err) {
         left = { refused: failed(err) }
       }
@@ -201,7 +209,7 @@ export const useGame = create<GameState>((set, get) => {
     step: (axis, dir) => {
       const { session, busy } = get()
       // No world, or one that could not be read: no walls are known, so nobody moves.
-      if (!session || busy || !session.world || session.worldError) return
+      if (!session || busy || !session.world || session.worldError || !session.at) return
       const r = stepIn(session.game, session.at, axis, dir, session.world)
       if (!r.moved) return
       set({ session: { ...session, at: r.at } })

@@ -34,7 +34,7 @@ import { firstBreak, type NostrEvent } from '../../lib/events'
 import { GAME_CHOOSE_FIRST_MESSAGE, GAME_OTHER_BRACKET_MESSAGE, GAME_NEEDS_CHAIN_MESSAGE, GAME_NOT_OPEN_MESSAGE, IN_GAME_HERE_MESSAGE, GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
 import { GAMES_OFF_MESSAGE, GAME_ALREADY_MESSAGE, enterTutorialDungeon, recordedPosition, useGame } from '../useGame'
-import { TUTORIAL_GAME } from '../../lib/games/tutorialGame'
+import { TUTORIAL_ENTRY, TUTORIAL_GAME } from '../../lib/games/tutorialGame'
 import { teleportTemplate } from '../../lib/games/bracket'
 import { positionHex } from '../../lib/events'
 
@@ -55,7 +55,7 @@ async function land(dx: bigint): Promise<void> {
 
 /** Wait for the world to load (the fixture is a dynamic import). */
 async function worldLoaded(): Promise<void> {
-  for (let i = 0; i < 200 && G().session && G().session!.world === null; i++) await new Promise((r) => setTimeout(r, 10))
+  for (let i = 0; i < 200 && G().session && (G().session!.world === null || G().session!.at === null); i++) await new Promise((r) => setTimeout(r, 10))
 }
 
 let fresh: Pick<ReturnType<typeof S>, 'events' | 'prevEventId' | 'genesisId' | 'published' | 'position' | 'plane' | 'headPlane' | 'positionHistory' | 'chain'> | null = null
@@ -105,11 +105,11 @@ describe('entering, playing and leaving (store, DECK-0002 §2, §4, §7)', () =>
     const here = S().coordHex()
     await S().enterGame(TUTORIAL_GAME)
     const entry = last()
-    const tp = await S().signGameAction(TUTORIAL_GAME, entry.id, (links) => teleportTemplate({ ...links, toHex: positionHex(TUTORIAL_GAME.start, 1) }))
+    const tp = await S().signGameAction(TUTORIAL_GAME, entry.id, (links) => teleportTemplate({ ...links, toHex: positionHex(TUTORIAL_ENTRY, 1) }))
     expect('event' in tp).toBe(true)
     expect(S().actions().slice(-1)[0].role).toBe('virtual')
     expect(whyNoMove(S().actions())).toBe(IN_GAME_HERE_MESSAGE)
-    const out = await S().exitGame(entry.id, positionHex(TUTORIAL_GAME.start, 1))
+    const out = await S().exitGame(entry.id, positionHex(TUTORIAL_ENTRY, 1))
     expect('event' in out).toBe(true)
     const exit = last()
     expect(tagOf(exit, 'A')?.[1]).toBe('exit-virtual')
@@ -134,7 +134,7 @@ describe('entering, playing and leaving (store, DECK-0002 §2, §4, §7)', () =>
     expect(S().events.length).toBe(count)
     await S().exitGame()
     expect(await S().exitGame()).toEqual({ refused: GAME_NOT_OPEN_MESSAGE })
-    expect(await S().signGameAction(TUTORIAL_GAME, 'ab'.repeat(32), (l) => teleportTemplate({ ...l, toHex: positionHex(TUTORIAL_GAME.start, 1) }))).toEqual({ refused: GAME_NOT_OPEN_MESSAGE })
+    expect(await S().signGameAction(TUTORIAL_GAME, 'ab'.repeat(32), (l) => teleportTemplate({ ...l, toHex: positionHex(TUTORIAL_ENTRY, 1) }))).toEqual({ refused: GAME_NOT_OPEN_MESSAGE })
     useCyberspace.setState({ events: [], genesisId: '', prevEventId: '' })
     expect(await S().enterGame(TUTORIAL_GAME)).toEqual({ refused: GAME_NEEDS_CHAIN_MESSAGE })
   })
@@ -152,33 +152,37 @@ describe('in-game mode (useGame)', () => {
     expect(G().session).toBeNull()
   })
 
-  it('ENTER signs the entry and the arrival, at the start, and loads the world from the fixture', async () => {
+  it('ENTER signs only the entry; you appear at the entry point the world marks, by virtue of entering (DECK-0002 §2.2)', async () => {
+    const count = S().events.length
+    const here = S().coordHex()
     expect(await enterTutorialDungeon()).toBeNull()
-    const s = G().session!
-    expect(s.at).toEqual(TUTORIAL_GAME.start)
-    const arrival = last()
-    expect(tagOf(arrival, 'A')?.[1]).toBe('teleport')
-    expect(tagOf(arrival, 'C')?.[1]).toBe(positionHex(TUTORIAL_GAME.start, 1))
-    expect(tagOf(arrival, 'c')).toBeUndefined()
+    // One event: the entry. No arrival is published.
+    expect(S().events.length).toBe(count + 1)
+    expect(tagOf(last(), 'A')?.[1]).toBe('enter-virtual')
+    expect(G().session!.at).toBeNull()
     await worldLoaded()
-    // Two chambers of three tiles and two pads.
-    expect(G().session!.world).toHaveLength(5)
+    expect(G().session!.at).toEqual(TUTORIAL_ENTRY)
+    // Two chambers of three tiles, two pads and the entry marker.
+    expect(G().session!.world).toHaveLength(6)
+    expect(S().events.length).toBe(count + 1)
+    // The base position stays where you entered from.
+    expect(S().coordHex()).toBe(here)
     expect(firstBreak(S().actions())).toBeNull()
   })
 
   it('walls hold; the hall leads to the pad, which teleports you to the other chamber and signs it', async () => {
     await enterTutorialDungeon()
     await worldLoaded()
-    const start = TUTORIAL_GAME.start
+    const start = TUTORIAL_ENTRY
     // The hall's far end is sealed behind the start, its plug's face at 32.5 from the base. A player at 31 is drawn at
     // 31.5, the gibson's centre; a step to 32 would end on the face itself, which meets it (walkWalls stepLimit).
     for (let i = 0; i < 10; i++) G().step('z', 1)
-    expect(G().session!.at.z).toBe(TUTORIAL_GAME.region.base.z + 31n)
+    expect(G().session!.at!.z).toBe(TUTORIAL_GAME.region.base.z + 31n)
     for (let i = 0; i < 5; i++) G().step('z', -1)
-    expect(G().session!.at.z).toBe(start.z)
+    expect(G().session!.at!.z).toBe(start.z)
     // The hall's wall two and a half gibsons to the side.
     for (let i = 0; i < 4; i++) G().step('x', 1)
-    expect(G().session!.at.x).toBe(start.x + 2n)
+    expect(G().session!.at!.x).toBe(start.x + 2n)
     G().step('x', -1)
     G().step('x', -1)
     const count = S().events.length
@@ -211,16 +215,18 @@ describe('in-game mode (useGame)', () => {
     expect(whyNoMove(S().actions())).toBeNull()
   })
 
-  it('resume after a reload: back at the last game position on the record, signing nothing', async () => {
+  it('resume after a reload: back at the entry point when nothing is on the record, signing nothing', async () => {
     await enterTutorialDungeon()
     useGame.setState({ session: null })
     const count = S().events.length
     expect(G().resume()).toBe(true)
-    expect(G().session!.at).toEqual(TUTORIAL_GAME.start)
+    await worldLoaded()
+    // Nothing on the record yet: back at the entry point.
+    expect(G().session!.at).toEqual(TUTORIAL_ENTRY)
     expect(S().events.length).toBe(count)
     const chain = S().actions()
     const entry = chain.find((a) => a.role === 'enter')!
-    expect(recordedPosition(chain, entry, TUTORIAL_GAME)).toEqual(TUTORIAL_GAME.start)
+    expect(recordedPosition(chain, entry, TUTORIAL_GAME)).toBeNull()
   })
 
   it('a bracket closed elsewhere ends in-game mode', async () => {
@@ -278,8 +284,33 @@ describe('what the review of #660 found untested', () => {
     const second = last().id
     const count = S().events.length
     expect(await S().exitGame(first)).toEqual({ refused: GAME_OTHER_BRACKET_MESSAGE })
-    expect(await S().signGameAction(TUTORIAL_GAME, first, (l) => teleportTemplate({ ...l, toHex: positionHex(TUTORIAL_GAME.start, 1) }))).toEqual({ refused: GAME_OTHER_BRACKET_MESSAGE })
+    expect(await S().signGameAction(TUTORIAL_GAME, first, (l) => teleportTemplate({ ...l, toHex: positionHex(TUTORIAL_ENTRY, 1) }))).toEqual({ refused: GAME_OTHER_BRACKET_MESSAGE })
     expect(S().events.length).toBe(count)
     expect('event' in await S().exitGame(second)).toBe(true)
+  })
+
+  it('resume goes to the last game position on the record before the entry point (DECK-0002 §7)', async () => {
+    await enterTutorialDungeon()
+    await worldLoaded()
+    for (let i = 0; i < 30 && !G().busy; i++) G().step('z', -1)
+    for (let i = 0; i < 200 && G().busy; i++) await new Promise((r) => setTimeout(r, 5))
+    expect(G().session!.at).toEqual(TUTORIAL_GAME.pads[0].to)
+    useGame.setState({ session: null })
+    expect(G().resume()).toBe(true)
+    await worldLoaded()
+    expect(G().session!.at).toEqual(TUTORIAL_GAME.pads[0].to)
+  })
+
+  it('a world that fails to load: nobody moves, LEAVING still works, and the exit is valid', async () => {
+    const broken = { ...TUTORIAL_GAME, world: { kind: 'fixture' as const, load: async () => { throw new Error('relay down') } } }
+    expect(await G().enter(broken)).toBeNull()
+    for (let i = 0; i < 200 && G().session!.worldError === null; i++) await new Promise((r) => setTimeout(r, 5))
+    expect(G().session!.worldError).toBe('relay down')
+    expect(G().session!.at).toBeNull()
+    G().step('z', -1)
+    expect(G().session!.at).toBeNull()
+    expect(await G().exit()).toBeNull()
+    expect(tagOf(last(), 'A')?.[1]).toBe('exit-virtual')
+    expect(firstBreak(S().actions())).toBeNull()
   })
 })

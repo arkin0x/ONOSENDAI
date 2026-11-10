@@ -9507,6 +9507,7 @@ a.feed__act { text-decoration: none; }
 .chest__glyph--cashu { color: #f7931a; }
 .secret__badge--key { color: #e8c547; }
 .secret__badge--audio { color: #9fd0ff; }
+.secret__badge--seed { color: #6fe08a; }
 .chest__glyph--audio, .shards__type--audio { color: #9fd0ff; }
 
 /* Hidden audio's card in the item modal (AudioCard, DECK-0007): the note's
@@ -10417,3 +10418,13 @@ html.tv-broadcast body { overflow: hidden; }
   border: 0;
   cursor: pointer;
 }
+
+/* A seed's card (BloomCard, DECK-0008): the bloom turning, one line for its state, then its facts. */
+.bloom { display: flex; flex-direction: column; margin-bottom: 12px; }
+.bloom__state { margin: 0 0 10px; font-size: 12px; color: var(--fg); text-align: center; }
+.bloom__anyway { flex: none; width: 100%; margin-bottom: 12px; }
+.bloom__facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 12px; font-size: 12px; }
+.bloom__facts dt { font-size: 8px; letter-spacing: 0.16em; color: var(--dim); align-self: center; }
+.bloom__facts dd { margin: 0; color: var(--fg); overflow-wrap: anywhere; }
+.bloom__who { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.bloom__who .secret__label { flex: 0 0 64px; }

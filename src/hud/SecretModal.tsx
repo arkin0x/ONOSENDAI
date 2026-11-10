@@ -52,6 +52,7 @@ import { ChestBlock, KeyLine } from './ItemRows'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemFace } from './ItemIcon'
 import { CardSpin } from '../scene/CardSpin'
+import { BloomCard } from './BloomCard'
 import { drawnLook, lookOf } from '../lib/looks'
 import { openedByHand, useOpenedChests } from '../store/useOpenedChests'
 import { EventData } from './EventData'
@@ -160,7 +161,7 @@ export function SecretModal(): JSX.Element | null {
 
   const goTo = (): void => {
     close()
-    const label = item.type === 'message' ? name : item.type === 'key' ? item.keyItem?.name ?? 'key' : item.type === 'chest' ? item.chest?.name ?? 'chest' : item.type === 'audio' ? item.audio?.title ?? 'audio' : item.shard?.name ?? 'shard'
+    const label = item.type === 'message' ? name : item.type === 'key' ? item.keyItem?.name ?? 'key' : item.type === 'chest' ? item.chest?.name ?? 'chest' : item.type === 'audio' ? item.audio?.title ?? 'audio' : item.type === 'seed' ? 'seed' : item.shard?.name ?? 'shard'
     useCyberspace.getState().focusItem(item.at, item.plane, label, item.type === 'shard' ? item.shard?.unit ?? 0 : 0)
   }
   // Where it was found, for what is taken out of a chest here.
@@ -231,6 +232,9 @@ export function SecretModal(): JSX.Element | null {
             who={muteSubject(item)}
             moderation={audioModeration(item, author, mine, close)}
           />
+        ) : item.type === 'seed' ? (
+          // A seed's bloom, grown here, and what keeps it from growing (DECK-0008).
+          <BloomCard event={item.event} />
         ) : (
           <div className="secret__shard">
             <span className="secret__shard-name">{item.shard?.name}</span>

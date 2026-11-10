@@ -419,7 +419,12 @@ function waitedForWalls(again: () => void): boolean {
     void wallsBuilt().then(() => {
       if (againWhenBuilt !== mine) return
       againWhenBuilt = null
-      if (useCyberspace.getState().walking) mine()
+      if (!useCyberspace.getState().walking) return
+      mine()
+      // A fall that waited behind this move (one waits at a time: a turn of
+      // the view while a press waited) is asked for now too. Off a floor it
+      // begins; anywhere else it does nothing.
+      fallIfAirborne()
     })
   }
   return true
@@ -520,10 +525,10 @@ let fall: Fall | null = null
 
 /**
  * GRAVITY's down now: the axis nearest the screen's down, from the view
- * (lib/walkDown.ts viewDown), kept up to date with the view while walking
- * (refreshDown). -Y in the default view.
+ * (lib/walkDown.ts viewDown), kept up to date with every change of view
+ * (refreshDown, in the store's listener below). -Y in the default view.
  */
-let down: AxisDirection = WORLD_DOWN
+let down: AxisDirection = viewDown(useCyberspace.getState().view)
 
 /** GRAVITY's down now (lib/walkDown.ts), for the scene: read only. */
 export function walkDown(): Readonly<AxisDirection> {
@@ -828,7 +833,9 @@ function airPress(f: Fall, heading: WalkHeading): void {
   takeWallWait()
   const g = f.down
   const move = planWalkMove(at, heading, stepFor(scaleExp), stepperFor(f.items, true, g), { down: g })
-  if (waitedForWalls(() => { if (fall) airPress(fall, heading) })) return
+  // Made again once the walls are built, only under the same gravity: a turn
+  // of the view meanwhile can put the heading along the new down (review).
+  if (waitedForWalls(() => { if (fall && sameDir(fall.down, g)) airPress(fall, heading) })) return
   if (move.by) wallChip(move.by)
   if (!move.along || samePosition(move.to, at)) return
   const { axis, dir: sign } = move.along
@@ -993,12 +1000,13 @@ function eyeAlong(g: AxisDirection): void {
  * | in the air (a fall, a jump, a bounce's arc) | the arc ends at the whole gibson it has reached, and a fall from rest along the new down starts there; that point is a hop of its own when the fall resolves, as a mid-air press (B) is. A spent double jump stays spent |
  * | in the air, with a floor right under you along the new down | you land there, as (A) |
  * | standing, or walking | a floor is asked for along the new down; with none under you the fall begins, as off any edge |
+ * | in the air, with walls along the new down still on their way | the fall ends at the bend, a hop like any landing, and the fall along the new down begins once they are built: never through walls about to stand (review) |
  *
  * The speed the arc had is dropped: it was along the old down, and WALK has
- * no sideways speed to carry it as.
+ * no sideways speed to carry it as. Called when down has changed (refreshDown).
  */
 function turnGravity(): void {
-  if (!refreshDown() || !useWalk.getState().gravity) return
+  if (!useWalk.getState().gravity) return
   const f = fall
   if (!f) { fallIfAirborne(); return }
   const now = nowMs()
@@ -1006,13 +1014,15 @@ function turnGravity(): void {
   const g = down
   takeWallWait()
   const limit = fallLimit(at, f.items, affordIn(f.plane), g)
-  takeWallWait()
+  // The walls along the new down that are still on their way: asked again once built.
+  const waits = waitedForWalls(fallIfAirborne)
   // Where the path bends: a hop of its own when the fall resolves.
   if (!samePosition(at, f.anchor)) { f.waypoints.push(at); f.air = null }
   f.anchor = at
   f.down = g
   upInAirAt = null
   downInAirAt = null
+  if (waits) { endFall(at); return }
   if (limit.drop === 0n) { endFall(at, !limit.lands); return }
   f.h0 = heightOf(at, g)
   f.t0 = now
@@ -1087,6 +1097,8 @@ function pump(): void {
 // The walk follows the store: a landing, a failure, or leaving your head
 // (a spectation, a respawn, an identity switch, history) all arrive here.
 useCyberspace.subscribe((s, prev) => {
+  // Down follows the view whether or not you walk, so it is never stale.
+  const turned = s.view !== prev.view && refreshDown()
   if (!s.walking) return
   if (!s.atHead()) {
     // Off first, so nothing below comes back through here. The queue goes
@@ -1107,7 +1119,7 @@ useCyberspace.subscribe((s, prev) => {
     return
   }
   // Under gravity, down follows the view: a turn that changes it holds from now.
-  if (s.view !== prev.view) turnGravity()
+  if (turned) turnGravity()
   const w = useWalk.getState()
   // Your head moved mid-fall with none of the walk's own hops in flight:
   // another device's move, or a chain cut short. The fall's hops would start

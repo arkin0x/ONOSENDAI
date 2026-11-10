@@ -50,14 +50,14 @@ vi.mock('../../lib/relay', async (orig) => {
   return { ...mod, ...offlineRelay, publishMany: vi.fn(async () => ({ ok: true })), query: vi.fn(async () => []), queryAny: vi.fn(async () => []) }
 })
 
-import { newShard, type ShardModel } from 'sno-core/shards'
+import { newShard, toPayload, type ShardModel } from 'sno-core/shards'
 import { Vector3, type Quaternion } from 'three'
 import { useCyberspace } from '../useCyberspace'
 import { fallState, tickFall, useWalk, walkDown } from '../useWalk'
 import { useShards, type WorldItem } from '../useShards'
 import { useToast } from '../useToast'
 import { useWorkshop } from '../useWorkshop'
-import { clearWalls } from '../walkWalls'
+import { clearWalls, wallsBuilt } from '../walkWalls'
 import { DOUBLE_JUMP_SPEED, JUMP_HANG_S, JUMP_SPEED, WALK_GRAVITY, launchSpeed } from '../walkGravity'
 import { walkFall, walkFallUp } from '../../lib/walkEye'
 import { useCalibration } from '../../lib/calibration'
@@ -133,6 +133,22 @@ function world(start: Position, ...shards: ShardModel[]): WorldItem[] {
   const items: WorldItem[] = shards.map((shard, n) => ({ key: `w${n}-${shard.id}`, type: 'shard', at: { ...start }, plane, height: 84, mine: false, shard }))
   useShards.setState({ worldItems: () => items })
   return items
+}
+
+/** A shard of yours that carries `piece` in its own payload: its walls are built a task later (the first build is on its way). */
+function carrying(piece: ShardModel): ShardModel {
+  const me = useCyberspace.getState().identity.pubkey
+  const address = `33331:${me}:piece`
+  return withConstrain({ ...newShard('Carrier'), mode: 'solid', vertices: [], faces: [], author: me, refs: [['a', address]], parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }], objects: { [address]: toPayload(piece) } } as ShardModel, 'off')
+}
+
+/** A box of its own corners, `lo` to `hi`, across `g`: from `a` to `b` gibsons along `g`, `half` wide on the other two axes. */
+function across(g: AxisDirection, a: number, b: number, half = 3): [V3, V3] {
+  const lo: V3 = [-half, -half, -half]
+  const hi: V3 = [half, half, half]
+  lo[IDX[g.axis]] = Math.min(g.dir * a, g.dir * b)
+  hi[IDX[g.axis]] = Math.max(g.dir * a, g.dir * b)
+  return [lo, hi]
 }
 
 const bouncy = (s: ShardModel, bounce: unknown, springboard = false): ShardModel => ({ ...s, extra: { ...s.extra, bounce, ...(springboard ? { springboard: true } : {}) } })
@@ -427,5 +443,161 @@ describe('the default view, as before', () => {
     expect(JSON.stringify(fallState(), (_, v) => (typeof v === 'bigint' ? v.toString() : v))).toBe(before)
     fallOut()
     expect(useCyberspace.getState().cursor).toEqual(along(start, D('y', -1), 29))
+  })
+})
+
+describe('a turn of the view and walls still on their way (review)', () => {
+  it('a turn in the air toward a wall whose first build is on its way waits for it: the fall never passes it', async () => {
+    const plane = useCyberspace.getState().plane as WorldItem['plane']
+    // A floor 40 down, and a wall facing +X 64 off, carried (built a task later) in a small region the fall down never enters.
+    const items: WorldItem[] = [
+      { key: 'deep', type: 'shard', at: { ...start }, plane, height: 84, mine: false, shard: boxes('Deep', [slab(D('y', -1), 40)]) },
+      { key: 'carrier', type: 'shard', at: { x: start.x - 64n, y: start.y - 8n, z: start.z }, plane, height: 5, mine: true, shard: carrying(boxes('Wall', [[[-2, -6, -6], [0, 6, 6]]])) },
+    ]
+    useShards.setState({ worldItems: () => items })
+    walkIn(canonicalQuaternion())
+    frame(500)
+    useCyberspace.setState({ view: viewFor(D('x', -1)) })
+    // The fall ends at the bend while the wall is on its way, and the fall along -X begins once it is built.
+    const bend = { ...useCyberspace.getState().cursor }
+    expect(bend.x).toBe(start.x)
+    expect(fallState()).toBeNull()
+    await wallsBuilt()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(fallState()!.down).toEqual(D('x', -1))
+    fallOut()
+    expect(useCyberspace.getState().cursor).toEqual({ ...bend, x: start.x - 63n })
+  })
+
+  it('a press in the air waiting for walls is dropped if the view turns gravity before they are built', async () => {
+    useCyberspace.setState({ scaleExp: 6 })
+    const plane = useCyberspace.getState().plane as WorldItem['plane']
+    const items: WorldItem[] = [
+      { key: 'deep', type: 'shard', at: { ...start }, plane, height: 84, mine: false, shard: boxes('Deep', [[[-200, -401, -200], [200, -400, 200]]]) },
+      // Carried, 32 ahead (+Z, into the screen) in a region of 32: a press of 64 that way always enters it, and the fall down never does.
+      { key: 'carrier', type: 'shard', at: { x: start.x, y: start.y, z: start.z + 32n }, plane, height: 5, mine: true, shard: carrying(boxes('Far', [[[20, 20, 20], [21, 21, 21]]])) },
+      { key: 'wallz', type: 'shard', at: { ...start }, plane, height: 84, mine: false, shard: boxes('WallZ', [[[-200, -400, 30], [200, 50, 31]]]) },
+    ]
+    useShards.setState({ worldItems: () => items })
+    walkIn(canonicalQuaternion())
+    frame(200)
+    // 'away' is +Z, into the screen: it waits for the carried shard's walls.
+    const before = { ...useCyberspace.getState().cursor }
+    useWalk.getState().press('away')
+    expect(useCyberspace.getState().cursor).toEqual(before)
+    useCyberspace.getState().rotate('up')
+    expect(walkDown()).toEqual(D('z', 1))
+    const bend = { ...useCyberspace.getState().cursor }
+    await wallsBuilt()
+    await new Promise((r) => setTimeout(r, 0))
+    // The old press, now along gravity, never moves you along Z.
+    expect(useCyberspace.getState().cursor.z).toBe(bend.z)
+  })
+})
+
+describe('more under turned gravity (review)', () => {
+  describe.each(SIX.map((g) => [name(g), g] as const))('gravity %s', (_, g) => {
+    const forward = (view: Quaternion): AxisDirection => { const keys = keysFor(view); return { axis: keys.out.axis, dir: (keys.out.dir < 0 ? 1 : -1) } }
+
+    it('a riser of 1 ahead is climbed, up against it', () => {
+      const view = viewFor(g)
+      const w = forward(view)
+      world(start, boxes('Floor', [slab(g, 1)]), boxes('Riser', [slab(g, 0, { w, from: 1.5, to: 10 })]))
+      walkIn(view)
+      useWalk.getState().press('away')
+      useWalk.getState().press('away')
+      expect(useWalk.getState().falling).toBe(false)
+      expect(useCyberspace.getState().cursor).toEqual(along(along(start, w, 2), upOf(g), 1))
+    })
+
+    it('a drop of 2 ahead is stepped down, along it', () => {
+      const view = viewFor(g)
+      const w = forward(view)
+      world(start, boxes('Upper', [slab(g, 1, { w, from: -10, to: 0.5 })]), boxes('Lower', [slab(g, 3, { w, from: 0.5, to: 10 })]))
+      walkIn(view)
+      useWalk.getState().press('away')
+      expect(useWalk.getState().falling).toBe(false)
+      expect(useCyberspace.getState().cursor).toEqual(along(along(start, w, 1), g, 2))
+    })
+
+    it('a solid whose underside is in your plane refuses a jump', () => {
+      world(start, boxes('Floor', [slab(g, 1)]), boxes('Lid', [across(g, 0, -3)]))
+      walkIn(viewFor(g))
+      expect(useWalk.getState().falling).toBe(false)
+      useWalk.getState().press('up')
+      expect(fallState()).toBeNull()
+    })
+
+    it('the top of a solid in your plane holds you; its underside lets you fall away', () => {
+      world(start, boxes('Block', [across(g, 0, 2)]))
+      walkIn(viewFor(g))
+      expect(useWalk.getState().falling).toBe(false)
+      useWalk.getState().exit()
+      world(start, boxes('Block', [across(g, 0, -2)]), boxes('Floor', [slab(g, 6)]))
+      clearWalls()
+      walkIn(viewFor(g))
+      expect(useWalk.getState().falling).toBe(true)
+    })
+  })
+
+  it('a turn during a bounce\'s arc: the bend is one hop from the launch, and the fall goes on along the new down', async () => {
+    world(start, bouncy(boxes('Pad', [slab(D('y', -1), 1)]), 12), boxes('Wall', [[[-6, -2, -10], [-5, 30, 10]]]))
+    walkIn(canonicalQuaternion())
+    useWalk.getState().press('up')
+    for (let t = 0; t < 5000 && fallState() && fallState()!.v0 <= JUMP_SPEED + 1e-9; t += 16) frame(16)
+    expect(fallState()!.launch).toEqual(start)
+    frame(250)
+    useCyberspace.setState({ view: viewFor(D('x', -1)) })
+    const bend = fallState()!.anchor
+    expect(bend.y > start.y).toBe(true)
+    fallOut()
+    const landed = { ...bend, x: start.x - 4n }
+    expect(useCyberspace.getState().cursor).toEqual(landed)
+    // One hop straight from the launch to the landing, however it bent.
+    await vi.waitFor(() => expect(posted).toHaveLength(1))
+    expect(posted[0]).toMatchObject({ from: start, to: landed })
+  })
+
+  it('a turn after a press in the air: the press, the bend and the landing are a hop each', async () => {
+    world(start, boxes('Deep', [slab(D('y', -1), 40)]), boxes('Wall', [[[-60, -60, -6], [60, 10, -5]]]))
+    walkIn(canonicalQuaternion())
+    frame(300)
+    useWalk.getState().press('right')
+    const pressed = { ...useCyberspace.getState().cursor }
+    expect(pressed.x).toBe(start.x + 1n)
+    frame(300)
+    // Down becomes -Z: the wall 5 off along -Z is the floor.
+    useCyberspace.getState().rotate('down')
+    expect(walkDown()).toEqual(D('z', -1))
+    const bend = fallState()!.anchor
+    fallOut()
+    const landed = { ...bend, z: start.z - 4n }
+    expect(useCyberspace.getState().cursor).toEqual(landed)
+    await vi.waitFor(() => expect(posted).toHaveLength(1))
+    expect(posted[0]).toMatchObject({ from: start, to: pressed })
+    await land()
+    expect(posted[1]).toMatchObject({ from: pressed, to: bend })
+    await land()
+    expect(posted[2]).toMatchObject({ from: bend, to: landed })
+  })
+
+  it('gravity off in a turned view is WALK as it always was: Up steps along the screen\'s up, nothing falls', () => {
+    const view = viewFor(D('x', -1))
+    world(start)
+    useCyberspace.setState({ view })
+    useWalk.getState().setGravity(false)
+    useWalk.getState().enter()
+    const keys = viewAxes(view)
+    useCyberspace.setState({ screenAxes: keys })
+    useWalk.getState().press('up')
+    expect(useCyberspace.getState().cursor).toEqual(along(start, keys.up, 1))
+    expect(fallState()).toBeNull()
+  })
+
+  it('down follows the view while you are not walking too, so it is right the moment WALK begins', () => {
+    useCyberspace.setState({ view: viewFor(D('z', 1)) })
+    expect(walkDown()).toEqual(D('z', 1))
+    useCyberspace.setState({ view: canonicalQuaternion() })
+    expect(walkDown()).toEqual(D('y', -1))
   })
 })

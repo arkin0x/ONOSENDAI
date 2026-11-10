@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { explainUpload } from '../lib/blossom'
+import { explainUpload, serverAnswered } from '../lib/blossom'
 import { audioFileRefusal, audioTypeOf, iphoneMayNotPlay, sealAndUpload, type UploadedAudio } from '../lib/audioFile'
 import { MAX_AUDIO_TITLE, titleFromFileName, type AudioItem } from '../lib/audioItem'
 import { useBuilder } from '../store/useBuilder'
@@ -105,12 +105,15 @@ export function AudioUpload({ idPrefix, initial, submitLabel, onReady, onCancel 
     setStatus({ tone: 'note', text: `Encrypting and uploading to ${host}. Your signer may ask.` })
     try {
       const u = await sealAndUpload(file, target, (t) => useCyberspace.getState().signEvent(t, UPLOAD_SIGN_PATIENCE_MS))
-      if (gone.current) return
+      // Kept even when the form has closed: the upload went there.
       blossom.remember(target)
+      if (gone.current) return
       setUploaded(u)
       setStatus({ tone: 'ok', text: `Uploaded, encrypted, to ${host}.` })
       onReady(item(u), target)
     } catch (e) {
+      // The server answered, even with a no (one that wants a subscription): it sticks (owner 2026-11-10).
+      if (serverAnswered(e)) blossom.remember(target)
       if (!gone.current) setStatus({ tone: 'warn', text: explainUpload(e) })
     } finally {
       if (!gone.current) setBusy(false)

@@ -34,6 +34,9 @@ import { actionKind, actionLabel, firstBreak, openBracket } from '../lib/events'
 import { BrokenChainNotice } from './BrokenChain'
 import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
 import { useCyberspace } from '../store/useCyberspace'
+import { enterTutorialDungeon, gamesEnabled, useGame } from '../store/useGame'
+import { TUTORIAL_GAME } from '../lib/games/tutorialGame'
+import { canLeave, gameFor } from '../lib/games/registry'
 import { useBuilder, walkChain } from '../store/useBuilder'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { Explanation } from './Explanation'
@@ -47,6 +50,9 @@ export function ChainPanel(): JSX.Element {
   const prevEventId = useCyberspace((s) => s.prevEventId)
   const genesisId = useCyberspace((s) => s.genesisId)
   const events = useCyberspace((s) => s.events)
+  // Why the last ENTER GAME was refused, while no game is on screen to say it.
+  const gameNote = useGame((s) => (s.session ? null : s.message))
+  const entering = useGame((s) => s.busy === 'entering')
   const published = useCyberspace((s) => s.published)
   const publishError = useCyberspace((s) => s.publishError)
   const live = useCyberspace((s) => s.live)
@@ -221,6 +227,18 @@ export function ChainPanel(): JSX.Element {
           CHAIN CONFLICT: this identity has a chain on the relays as well as the one held here. Nothing moves until you choose.
           <button className="tag tag--tap" onClick={() => useChainUi.getState().setPromptAside(false)}>SHOW THE CHOICE</button>
         </p>
+      ) : game && gameFor(game.game?.pubkey) ? (
+        // A game ONOSENDAI plays (DECK-0002 §7): back into it, where EXIT GAME is.
+        <p className="notice notice--game">
+          IN A GAME: {gameFor(game.game?.pubkey)?.name}. You stand where you entered it until you leave it.
+          <button className="tag tag--tap" onClick={() => useGame.getState().resume()}>BACK INTO THE GAME</button>
+        </p>
+      ) : game && canLeave(game.game?.pubkey) ? (
+        // A game ONOSENDAI once played, not here now: it can still be left (registry canLeave).
+        <p className="notice notice--game">
+          IN A GAME that ONOSENDAI played. You stand where you entered it until you leave it.{gameNote ? ` ${gameNote}` : ''}
+          <button className="tag tag--tap" onClick={() => { void useGame.getState().exit() }}>LEAVE THE GAME</button>
+        </p>
       ) : game ? (
         // Below the publishing states, which are choices waiting on you; this
         // one waits on the game's client (store GAME_HOLDS_MESSAGE).
@@ -234,6 +252,15 @@ export function ChainPanel(): JSX.Element {
           <button className="tag tag--tap" onClick={() => useChainUi.getState().setExplaining(true)}>WHY</button>
         </p>
       ) : null}
+
+      {/* With games on (lib/games/flag.ts), a way into the tutorial dungeon
+          until the first-arrival tutorial offers it (DECK-0002 §2). */}
+      {gamesEnabled() && !game && events.length > 0 && (
+        <p className="notice notice--game">
+          {TUTORIAL_GAME.name}{entering ? ': ENTERING' : gameNote ? `: ${gameNote}` : ''}
+          <button className="tag tag--tap" onClick={() => { void enterTutorialDungeon() }}>ENTER GAME</button>
+        </p>
+      )}
 
       {/* Apart from the states above: a broken row is a fact about the chain
           itself, and it can stand alongside any of them. You stand frozen at

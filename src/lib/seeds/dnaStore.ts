@@ -63,8 +63,13 @@ export interface DnaSources {
   save: (ev: NostrEvent) => Promise<void>
 }
 
-/** How long a DNA nobody had is left before it is asked for again. */
-export const MISSING_RETRY_MS = 2 * 60_000
+/**
+ * How long a DNA nobody had is left before it is asked for again: 15 s, then
+ * twice as long each time, up to two minutes. A first miss is often a relay
+ * not signed in yet, or one taken for hung.
+ */
+export const MISSING_RETRY_MS = 15_000
+export const MISSING_RETRY_MAX_MS = 2 * 60_000
 /** How long ids wait to be asked for together. */
 export const BATCH_MS = 60
 
@@ -97,6 +102,8 @@ export class DnaResolver {
   /** DNAs this page holds without fetching: from a bag, or signed here. Never persisted. */
   private local = new Map<string, NostrEvent>()
   private missingAt = new Map<string, number>()
+  /** Misses in a row, by id: each waits twice as long as the one before. */
+  private misses = new Map<string, number>()
   private inflight = new Map<string, Promise<DnaVerdict>>()
   private queue = new Map<string, Array<(ev: NostrEvent | undefined) => void>>()
   private timer: ReturnType<typeof setTimeout> | null = null
@@ -122,7 +129,7 @@ export class DnaResolver {
     const was = this.verdicts.get(ev.id)
     if (was && was.state !== 'missing' && was.state !== 'fetching') return
     const v = checkDna(ev, ev.id, this.verify)
-    if (v.state === 'ok' || v.state === 'mixed') { this.set(v); this.missingAt.delete(ev.id) }
+    if (v.state === 'ok' || v.state === 'mixed') { this.set(v); this.missingAt.delete(ev.id); this.misses.delete(ev.id) }
   }
 
   /** Resolve a DNA: memory, then the bag's or this page's own, then IndexedDB, then relays. */
@@ -131,12 +138,18 @@ export class DnaResolver {
     const known = this.verdicts.get(id)
     if (known && known.state !== 'missing' && known.state !== 'fetching') return Promise.resolve(known)
     const at = this.missingAt.get(id)
-    if (known?.state === 'missing' && at !== undefined && this.now() - at < MISSING_RETRY_MS) return Promise.resolve(known)
+    if (known?.state === 'missing' && at !== undefined && this.now() - at < this.retryAfter(id)) return Promise.resolve(known)
     const running = this.inflight.get(id)
     if (running) return running
     const job = this.run(id).finally(() => { this.inflight.delete(id) })
     this.inflight.set(id, job)
     return job
+  }
+
+  /** How long after its last miss a DNA is asked for again. */
+  retryAfter(id: string): number {
+    const n = Math.max(1, this.misses.get(id) ?? 1)
+    return Math.min(MISSING_RETRY_MAX_MS, MISSING_RETRY_MS * 2 ** (n - 1))
   }
 
   onChange(listener: () => void): () => void {
@@ -156,6 +169,7 @@ export class DnaResolver {
     const fetched = await this.ask(id)
     if (!fetched) {
       this.missingAt.set(id, this.now())
+      this.misses.set(id, (this.misses.get(id) ?? 0) + 1)
       return this.settle(id, { state: 'missing', id }, false)
     }
     return this.settle(id, checkDna(fetched, id, this.verify), true)

@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { checkDna, DnaResolver, MISSING_RETRY_MS } from '../seeds/dnaStore'
+import { checkDna, DnaResolver, MISSING_RETRY_MAX_MS, MISSING_RETRY_MS } from '../seeds/dnaStore'
 import type { NostrEvent } from '../events'
 import { crystalDna, dnaOf } from './seedsFixture'
 
@@ -70,6 +70,15 @@ describe('resolving a DNA', () => {
     now = MISSING_RETRY_MS + 1
     await r.resolve(crystal.id)
     expect(fetch).toHaveBeenCalledTimes(2)
+    // Then twice as long: not yet at 15 s more, again at 30 s more; never past two minutes.
+    now += MISSING_RETRY_MS + 1
+    await r.resolve(crystal.id)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    now += MISSING_RETRY_MS
+    await r.resolve(crystal.id)
+    expect(fetch).toHaveBeenCalledTimes(3)
+    for (let i = 0; i < 6; i++) { now += MISSING_RETRY_MAX_MS + 1; await r.resolve(crystal.id) }
+    expect(r.retryAfter(crystal.id)).toBe(MISSING_RETRY_MAX_MS)
   })
 
   it('a relay that answers with another event under that id is not believed', async () => {

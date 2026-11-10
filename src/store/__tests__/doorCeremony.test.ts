@@ -57,6 +57,8 @@ function found(ev: NostrEvent) {
 
 beforeEach(() => {
   vi.useFakeTimers()
+  // The finds below are said in plane 1; the store's own planes come from a random identity's spawn. Pinned, so the plane filters (spec §7.6 Planes) do not make this test a coin flip.
+  useCyberspace.setState({ anchorPlane: 1, headPlane: 1, plane: 1 })
   localStorage.removeItem('onosendai:chests-opened')
   resetOpenedChests()
   resetCeremonySound()

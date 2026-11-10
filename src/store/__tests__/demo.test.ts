@@ -670,6 +670,8 @@ describe('the district shows only the curators\' things (2026-10-15)', () => {
   const STRANGER = 'ef'.repeat(32)
   let saved: Record<string, unknown> = {}
   beforeEach(() => {
+    // The finds below are said in plane 1; the store's own planes come from a random identity's spawn. Pinned, so the plane filters (spec §7.6 Planes) do not make this test a coin flip.
+    useCyberspace.setState({ anchorPlane: 1, headPlane: 1, plane: 1 })
     saved = useShards.getState().discovered
     const all = [thing(DEMO_CURATORS[0], 1), thing(DEMO_CURATORS[1], 2), thing(STRANGER, 3)]
     useShards.setState({ discovered: Object.fromEntries(all.map((t) => [t.eventId, t])) as never, scanning: false })

@@ -45,7 +45,9 @@
  *
  * Forward and backward go the way you face, snapped to 8 directions
  * (arkinox, RULED 2026-11-03; lib/walkSlide.ts, where the whole decision
- * is): near 45 degrees a press is one diagonal step, both axes in one hop,
+ * is), and so do the sides, along the facing's right (play test of
+ * 2026-11-10: they went along the screen's nearest axis), on the ground and
+ * in the air alike: near 45 degrees a press is one diagonal step, both axes in one hop,
  * allowed only when both side cells are open; blocked ahead while angled to
  * a side, it slides one step along the wall to that side. Each piece is a
  * walkStep, so stairs, walls and gravity hold exactly as for a straight step.
@@ -61,7 +63,7 @@
  * | a press walks you off a floor (higher than a step-down) | that press's segment closes where you step off, a normal hop, proved now; the fall starts there |
  * | the fall | nothing: an animation on this device at WALK_GRAVITY, with the geometry the walls knew when it began |
  * | (A) it lands on a floor that holds you | one hop, from where it left off to the landing |
- * | (B) a press moves you in mid-air | one hop to that mid-air point; the fall goes on from there |
+ * | (B) a press moves you in mid-air, the way you face as on the ground (a diagonal included) | one hop to that mid-air point; the fall goes on from there |
  * | (C) it reaches the last gibson a hop can afford | one hop there, and you hover |
  * | (D) gravity goes off mid-fall | one hop to where you are, and you float |
  * | Up (Space, R, the pad's up) standing | a jump of 3: back where it left, nothing; anywhere else, as a fall |
@@ -99,11 +101,12 @@ import { keepWalkLook } from '../lib/walkLook'
 import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { standing, walkStep, type WalkStep } from './walkStep'
-import { planWalkMove, walkHeading } from '../lib/walkSlide'
+import { planWalkMove, walkHeading, type Stepper, type WalkHeading } from '../lib/walkSlide'
 import { anyBounce, floorPad, stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
 import { JUMP_HEIGHT, JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, launchSpeed, loadGravity, reachedHeight, saveGravity } from './walkGravity'
 import { launchHeight } from '../lib/walkBounce'
 import { walkFacing, walkFall } from '../lib/walkEye'
+import { heldNow, holdReleaseAll } from './walkHold'
 
 /** What the LOSING SYNC warning waits for: this many moves not yet proven. */
 export const SYNC_WARN_AT = 3
@@ -160,7 +163,7 @@ export function segmentAffordable(from: Position, to: Position, plane: number): 
  * way, and for a diagonal the same two axes, in either order (review of
  * #594: facing 50 and then 40 is one diagonal, and one hop).
  */
-function sameHeading(open: WalkSegment, along: AxisDirection, side: AxisDirection | null): boolean {
+function sameHeading(open: Pick<WalkSegment, 'axis' | 'dir' | 'side'>, along: AxisDirection, side: AxisDirection | null): boolean {
   const same = (a: AxisDirection, b: AxisDirection): boolean => a.axis === b.axis && a.dir === b.dir
   const was = { axis: open.axis, dir: open.dir }
   if (!open.side || !side) return !open.side && !side && same(was, along)
@@ -262,6 +265,9 @@ export const useWalk = create<WalkState>((set, get) => ({
   stop: (message = null) => {
     const cs = useCyberspace.getState()
     clearSettle()
+    // Whatever is held stops walking too (review of #651): a STOP, or a step
+    // that did not land, is never walked on by a held key or pad key.
+    holdReleaseAll()
     // A fall not yet resolved has made nothing: it goes with the queue.
     dropFall()
     set({ queue: [], open: null, running: null, behind: 0 })
@@ -290,11 +296,15 @@ export const useWalk = create<WalkState>((set, get) => ({
     const axes = cs.screenAxes ?? cs.axes()
     const dir = moveDirection(axes, name)
     const gravity = get().gravity
-    // In the air: a level press is a move in mid-air (B); up and down do
-    // nothing, except just before landing on a bounce (E): Up adds a jump,
-    // Down absorbs it.
+    // A level press goes the way you face, snapped to 8 directions: a
+    // diagonal, or a slide along a wall you are angled into (lib/walkSlide.ts).
+    // With no facing to go by, the screen's axis, as always.
+    const heading = facingHeading(name, axes.up.axis, strafe)
+    // In the air: a level press is a move in mid-air (B), the same heading;
+    // up and down do nothing, except just before landing on a bounce (E):
+    // Up adds a jump, Down absorbs it.
     if (fall) {
-      if (dir.axis !== 'y') airPress(fall, dir.axis, dir.dir > 0 ? 1 : -1)
+      if (dir.axis !== 'y') airPress(fall, heading ?? { main: dir, side: null, lean: null })
       else if (dir.dir > 0) upInAirAt = nowMs()
       else downInAirAt = nowMs()
       return
@@ -304,24 +314,13 @@ export const useWalk = create<WalkState>((set, get) => ({
     // Under gravity Up is a jump, and Down does nothing: no flying (it only
     // keeps a springboard from launching you as you walk on, (E)).
     if (gravity && dir.axis === 'y') { if (dir.dir > 0) jump(from); else downInAirAt = nowMs(); return }
-    // Forward and backward go the way you face, snapped to 8 directions: a
-    // diagonal, or a slide along a wall you are angled into (lib/walkSlide.ts).
-    // With no facing to go by, the screen's axis, as always.
-    const heading = walkFacing.valid && (name === 'away' || name === 'toward')
-      ? walkHeading(walkFacing.forward, walkFacing.right, axes.up.axis, name === 'away' ? 1 : -1, strafe)
-      : null
     const length = stepFor(cs.scaleExp)
     const items = wallItemsAt(cs.plane, from)
     // A shard that constrains WALK (DECK-0003 §1.12, store/walkWalls.ts):
     // the step stops short of its face (a gibson short at a fine zoom), or does not go.
     // Standing on such a shard, a level step also climbs what is in its way
     // (2 gibsons at most) and settles onto a floor up to 2 below (store/walkStep.ts).
-    // Against the axis wall: nowhere to step.
-    const stepAlong = (at: Position, axis: AxisName, sign: 1 | -1, want: bigint): WalkStep => {
-      const edge = clampAxis(at[axis] + want * BigInt(sign))
-      const n = sign > 0 ? edge - at[axis] : at[axis] - edge
-      return n === 0n ? { to: at, by: null } : walkStep(at, axis, sign, n, items, gravity)
-    }
+    const stepAlong = stepperFor(items, gravity)
     takeWallWait()
     // Under gravity a diagonal also needs both side cells to hold you (lib/walkSlide.ts).
     const stands = gravity ? (at: Position): boolean => standing(at, items, true) : undefined
@@ -390,6 +389,31 @@ function waitedForWalls(again: () => void): boolean {
   return true
 }
 
+/**
+ * A level press's heading from the way you face (lib/walkSlide.ts
+ * walkHeading): forward and back along the facing, `strafe` a side held with
+ * them; a side alone along the facing's right. Null for up and down, and
+ * with no facing to go by, when a press takes the screen's axis.
+ */
+function facingHeading(name: MoveName, up: AxisName, strafe: -1 | 0 | 1): WalkHeading | null {
+  if (!walkFacing.valid) return null
+  if (name === 'away' || name === 'toward') return walkHeading(walkFacing.forward, walkFacing.right, up, name === 'away' ? 1 : -1, strafe)
+  if (name === 'right' || name === 'left') return walkHeading(walkFacing.right, walkFacing.forward, up, name === 'right' ? 1 : -1)
+  return null
+}
+
+/**
+ * WALK's straight step among `items`, as planWalkMove asks it: walkStep,
+ * with its stairs and walls. Against the axis wall: nowhere to step.
+ */
+function stepperFor(items: readonly WallItem[], gravity: boolean): Stepper<WallItem> {
+  return (at: Position, axis: AxisName, sign: 1 | -1, want: bigint): WalkStep => {
+    const edge = clampAxis(at[axis] + want * BigInt(sign))
+    const n = sign > 0 ? edge - at[axis] : at[axis] - edge
+    return n === 0n ? { to: at, by: null } : walkStep(at, axis, sign, n, items, gravity)
+  }
+}
+
 /** The open segment onto the queue. */
 function closeOpen(): void {
   const { open, queue } = useWalk.getState()
@@ -434,7 +458,7 @@ interface Fall {
   /** Seconds into the arc when `top` was set: a ceiling is met no earlier than that. */
   topSince: number
   /** The last mid-air press's heading and where its hop starts: a press the same way after it grows that hop. */
-  air: { axis: AxisName; dir: 1 | -1; from: Position } | null
+  air: { axis: AxisName; dir: 1 | -1; side?: AxisDirection; from: Position } | null
   /** The walls known when it began, or at its last bounce: the only geometry it meets. */
   items: WallItem[]
   plane: number
@@ -462,9 +486,9 @@ let downInAirAt: number | null = null
  * How long before a bounce's landing an Up or Down press in the air still
  * counts, in ms, measured from when the arc reached the floor (worked out
  * from the arc, not from the frame that saw it), so the window is the same
- * at any frame rate. The pad has no held state for Up or Down (only WASD
- * keyups are tracked), so "holding jump as you land" is read as a press just
- * before it; a held key's repeats keep it fresh. Of the two, the later wins.
+ * at any frame rate. Up or Down held as it lands (store/walkHold.ts, the
+ * keyboard's or the pad's) counts as pressed at the landing, so a held Down
+ * absorbs every landing while it is held. Of the two, the later wins.
  */
 export const BOUNCE_BOOST_MS = 250
 
@@ -536,7 +560,8 @@ function jump(from: Position): void {
  * a springboard, which launches on any arrival, a level walk onto a pad flush
  * with the floor included (arkinox, 2026-11-10). A fixed height launches;
  * "reflect" reflects a fall of 0, which is no launch, springboard or not. A
- * Down press within BOUNCE_BOOST_MS before the arrival absorbs it: you stand.
+ * Down press within BOUNCE_BOOST_MS before the arrival, or Down held
+ * (store/walkHold.ts), absorbs it: you stand.
  * Asked on every press under gravity, so it costs nothing until some wall
  * built has a bounce (walkWalls anyBounce), and it reads the walls the press
  * already gathered (`items`).
@@ -546,7 +571,7 @@ function jump(from: Position): void {
  */
 function padLaunch(at: Position, rose: boolean, items: WallItem[]): void {
   if (!anyBounce()) return
-  if (downInAirAt !== null && nowMs() - downInAirAt <= BOUNCE_BOOST_MS) return
+  if ((downInAirAt !== null && nowMs() - downInAirAt <= BOUNCE_BOOST_MS) || heldNow().vert < 0) return
   const cs = useCyberspace.getState()
   takeWallWait()
   const pad = floorPad(at, items)
@@ -647,8 +672,10 @@ function bounceOff(f: Fall, now: number): boolean {
   // When the arc reached the floor: the descending root of v0 t - g t^2 / 2 = bottom.
   const landAt = f.t0 + ((f.v0 + Math.sqrt(f.v0 * f.v0 - 2 * WALK_GRAVITY * f.bottomN)) / WALK_GRAVITY) * 1000
   const recent = (at: number | null): at is number => at !== null && at >= landAt - BOUNCE_BOOST_MS
-  const up = recent(upInAirAt) ? upInAirAt : null
-  const down = recent(downInAirAt) ? downInAirAt : null
+  // Up or Down held now (store/walkHold.ts): pressed at the landing.
+  const held = heldNow().vert
+  const up = held > 0 ? landAt : recent(upInAirAt) ? upInAirAt : null
+  const down = held < 0 ? landAt : recent(downInAirAt) ? downInAirAt : null
   // Down absorbs (D5): it lands, as (A). The later of Up and Down wins.
   if (down !== null && (up === null || down >= up)) return false
   // The walls where it landed, fresh: a bounce can go on for minutes, and its
@@ -715,24 +742,28 @@ function hopsOf(f: Fall, final: Position): Position[] {
 
 /**
  * (B) A level press in the air: one step from the whole gibson you have
- * been at, held by the walls as any step is. That point is a hop of its own
- * when the fall resolves, and the fall goes on from it as it was going.
- * Presses the same way, one after another, make one hop, as they do on the
- * ground (a held key's repeats are one move, not one each), while that hop
- * stays within the walk's budget.
+ * been at, the way you face as on the ground (a diagonal, or a slide along
+ * a wall you are angled into: lib/walkSlide.ts), held by the walls as any
+ * step is. Until the play test of 2026-11-10 it went along the screen's
+ * nearest axis, so a bounce course, walked mostly in the air, never went
+ * diagonally. That point is a hop of its own when the fall resolves, and
+ * the fall goes on from it as it was going. Presses the same way, one after
+ * another, make one hop, as they do on the ground (a held direction's
+ * presses are one move, not one each), while that hop stays within the
+ * walk's budget.
  */
-function airPress(f: Fall, axis: AxisName, sign: 1 | -1): void {
+function airPress(f: Fall, heading: WalkHeading): void {
   const scaleExp = useCyberspace.getState().scaleExp
   const now = nowMs()
   const at = reachedPoint(f, now)
-  const to = clampAxis(at[axis] + stepFor(scaleExp) * BigInt(sign))
-  if (to === at[axis]) return
   takeWallWait()
-  const step = walkStep(at, axis, sign, sign > 0 ? to - at[axis] : at[axis] - to, f.items, true)
-  if (waitedForWalls(() => { if (fall) airPress(fall, axis, sign) })) return
-  if (step.by) wallChip(step.by)
-  if (samePosition(step.to, at)) return
-  const p = { ...step.to }
+  const move = planWalkMove(at, heading, stepFor(scaleExp), stepperFor(f.items, true))
+  if (waitedForWalls(() => { if (fall) airPress(fall, heading) })) return
+  if (move.by) wallChip(move.by)
+  if (!move.along || samePosition(move.to, at)) return
+  const { axis, dir: sign } = move.along
+  const side = move.side
+  const p = { ...move.to }
   const afford = affordIn(f.plane)
   const rel = p.y - f.y0
   const limit = fallLimit(p, f.items, afford)
@@ -752,11 +783,11 @@ function airPress(f: Fall, axis: AxisName, sign: 1 | -1): void {
   f.bottom = rel - limit.drop
   f.lands = limit.lands
   const air = f.air
-  if (air && air.axis === axis && air.dir === sign && f.waypoints.length > 0 && segmentAffordable(air.from, p, f.plane)) {
+  if (air && sameHeading(air, move.along, side) && f.waypoints.length > 0 && segmentAffordable(air.from, p, f.plane)) {
     // The same way again: the hop from where the last one started grows to here.
     f.waypoints[f.waypoints.length - 1] = p
   } else {
-    f.air = { axis, dir: sign, from: f.anchor }
+    f.air = { axis, dir: sign, ...(side ? { side } : {}), from: f.anchor }
     f.waypoints.push(p)
   }
   f.anchor = p

@@ -60,7 +60,8 @@ describe('the pad\'s FAR and NEAR fly while held in VIEW', () => {
     const src = readFileSync('src/hud/TouchControls.tsx', 'utf8')
     expect(src).toMatch(/sub: 'FAR', title: 'Away from camera \(R\)', act: move\('away'\), fly: 1/)
     expect(src).toMatch(/sub: 'NEAR', title: 'Toward camera \(F\)', act: move\('toward'\), fly: -1/)
-    expect(src).toMatch(/\{\.\.\.\(flies && b\.fly \? flyHold\('pad', b\.fly\) : bind\(b\.act\)\)\}/)
+    // WALK's keys hold their walk first (store/walkHold.ts); FAR and NEAR are not WALK's.
+    expect(src).toMatch(/\{\.\.\.\(walking && b\.hold \? padHold\(b\) : flies && b\.fly \? flyHold\('pad', b\.fly\) : bind\(b\.act\)\)\}/)
     expect(src).toMatch(/const flies = useCyberspace\(\(s\) => canFly\(s, building\)\)/)
   })
 })

@@ -18,6 +18,12 @@
  * - a diagonal goes round one wall at its side, but never through a crack
  *   between two walls that meet at a corner;
  * - under GRAVITY a slide (not the way you face) never steps off a ledge;
+ * - edge safety (coordinator's ruling, 2026-11-10): under GRAVITY a diagonal
+ *   that would land with no floor takes a straight step that lands on one
+ *   instead, so facing outward on a straight walkway walks along it; with no
+ *   such step it goes on and falls; a diagonal steps down onto a floor 1 or
+ *   2 below where it lands; a press longer than 16 gibsons is not held back
+ *   by the floor check;
  * - with BOUNCE about, the ground diagonal is the same, and a diagonal step
  *   up onto a pad launches as a straight one does.
  */
@@ -258,6 +264,52 @@ describe('a 1-wide diagonal bridge under GRAVITY', () => {
     forward(1)
     expect(moved(start)).toEqual([12, 0, -12])
     expect(fallState()).not.toBeNull()
+  })
+})
+
+describe('edge safety under GRAVITY (coordinator\'s ruling, 2026-11-10)', () => {
+  /** Cells (0, -i): a straight walkway one gibson wide running -Z, nothing either side but a long drop. */
+  const walkway = (): ShardModel => tiles('Walkway', Array.from({ length: 14 }, (_, i): [number, number] => [0, -i]))
+
+  for (const deg of [30, -30, 45, 60]) {
+    it(`a straight 1-wide walkway, facing ${deg} outward: 10 presses along it, no fall, ONE hop`, async () => {
+      world(start, walkway(), pit())
+      walk(true)
+      face(deg)
+      const path = steps(10)
+      expect(path).toEqual(Array.from({ length: 10 }, (_, k): V3 => [0, 0, -(k + 1)]))
+      expect(fallState()).toBeNull()
+      expect(await landAll()).toBe(1)
+    })
+  }
+
+  it('gravity off, the same walkway facing 30: the diagonal, as on open floor (edge safety is only for GRAVITY)', () => {
+    world(start, walkway(), pit())
+    walk(false)
+    face(30)
+    forward(1)
+    expect(moved(start)).toEqual([1, 0, -1])
+  })
+
+  it('a diagonal bridge stepping down 1 a gibson past gaps: it steps down each time, no fall', async () => {
+    // Cell (i, -i) has its top i lower: a diagonal stair down, nothing either side.
+    world(start, boxes('Stair', 'all', Array.from({ length: 10 }, (_, i): [V3, V3] => [[i - 0.5, -2 - i, -i - 0.5], [i + 0.5, -1 - i, -i + 0.5]])), pit())
+    walk(true)
+    face(45)
+    const path = steps(6)
+    expect(path).toEqual(Array.from({ length: 6 }, (_, k): V3 => [k + 1, -(k + 1), -(k + 1)]))
+    expect(fallState()).toBeNull()
+    expect(await landAll()).toBe(1)
+  })
+
+  it('a press longer than 16 gibsons (2^5) is not held back by the floor check: it goes, and falls past the edge', () => {
+    // Floor to z -20, then a drop: a press of 32 lands past it.
+    world(start, boxes('Floor', 'all', [[[-40, -2, -20], [40, -1, 10]]]), pit())
+    walk(true)
+    useCyberspace.setState({ scaleExp: 5 })
+    face(40)
+    forward(1)
+    expect(moved(start)).toEqual([0, 0, -32])
   })
 })
 

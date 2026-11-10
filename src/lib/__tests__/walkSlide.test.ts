@@ -223,15 +223,19 @@ describe('a press among walls', () => {
     expect(rel(g.from, m.to)).toEqual([0, -32])
   })
 
-  it('under GRAVITY (stands) the side cells need no floor, and it stops where it walks off', () => {
+  it('under GRAVITY (stands) the side cells need no floor; a landing with no floor gives way to a straight step onto one; with none, it walks off', () => {
     const g = grid(['...', '...', '.@.'])
     // Only the start and the diagonal cell hold you: the sides are pits. A diagonal bridge, walked (2026-11-10).
     const floorAt = (cells: string[], o: Position = g.from) => (at: Position) => cells.includes(`${at.x - o.x},${at.z - o.z}`)
     const pits = planWalkMove(g.from, head(45)!, 1n, g.step, { stands: floorAt(['0,0', '1,-1']) })
     expect(pits).toMatchObject({ kind: 'diagonal' })
     expect(rel(g.from, pits.to)).toEqual([1, -1])
-    const sides = planWalkMove(g.from, head(45)!, 1n, g.step, { stands: floorAt(['0,0', '1,0', '0,-1']) })
-    expect(sides.kind).toBe('diagonal')
+    // Floor under the sides but not the diagonal cell: a straight step onto a floor instead (edge safety), main axis first.
+    const sides = planWalkMove(g.from, head(60)!, 1n, g.step, { stands: floorAt(['0,0', '1,0', '0,-1']) })
+    expect(sides).toMatchObject({ kind: 'slide', along: d('x', 1) })
+    expect(planWalkMove(g.from, head(30)!, 1n, g.step, { stands: floorAt(['0,0', '1,0', '0,-1']) })).toMatchObject({ kind: 'slide', along: d('z', -1) })
+    // Floor only where you stand: no straight step lands, so the diagonal, off the edge.
+    expect(planWalkMove(g.from, head(45)!, 1n, g.step, { stands: floorAt(['0,0']) })).toMatchObject({ kind: 'diagonal', to: { ...g.from, x: g.from.x + 1n, z: g.from.z - 1n } })
     // Two gibsons, the first diagonal cell off the floor: it ends there, where the fall starts.
     const big = grid(['....', '....', '@...'])
     const off = planWalkMove(big.from, head(45)!, 2n, big.step, { stands: floorAt(['0,0', '1,0', '0,-1'], big.from) })

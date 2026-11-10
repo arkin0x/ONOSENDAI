@@ -322,9 +322,21 @@ describe('a slide', () => {
 })
 
 describe('under GRAVITY', () => {
-  it('a diagonal off a floor\'s outside corner stops past the edge, and the fall starts there', () => {
+  it('a diagonal off a floor\'s outside corner takes a straight step that stays on the floor instead (edge safety, 2026-11-10)', () => {
     // A floor under the walker with its -Z, +X quarter cut away past half a gibson, and a floor 4 further down.
     world(start, boxes('Ledge', 'all', [[[-10, -2, -10], [0.5, -1, 10]], [[0.5, -2, -0.5], [10, -1, 10]]]), boxes('Low', 'all', [[[-10, -6, -10], [20, -5, 10]]]))
+    useWalk.getState().setGravity(true)
+    walk()
+    face(45)
+    forward(1)
+    const m = moved(start)
+    expect(Math.abs(m[0]) + Math.abs(m[2])).toBe(1)
+    expect(fallState()).toBeNull()
+  })
+
+  it('a diagonal off a floor with no straight step onto a floor walks off the way you face, and the fall starts there', () => {
+    // One gibson of floor, and a floor 4 further down.
+    world(start, boxes('Perch', 'all', [[[-0.5, -2, -0.5], [0.5, -1, 0.5]]]), boxes('Low', 'all', [[[-10, -6, -10], [20, -5, 10]]]))
     useWalk.getState().setGravity(true)
     walk()
     face(45)
@@ -335,14 +347,14 @@ describe('under GRAVITY', () => {
     expect(useWalk.getState().queue.map((p) => moved(start, p))).toEqual([[1, 0, -1]])
   })
 
-  it('a diagonal toward a ledge\'s edge walks off it the way you face, never a straight step (2026-11-10)', () => {
+  it('a diagonal toward a ledge\'s edge walks along it instead: the straight step that lands on the floor (edge safety, 2026-11-10)', () => {
     world(start, boxes('Ledge', 'all', [[[-10, -2, -10], [0.5, -1, 10]]]), boxes('Low', 'all', [[[-10, -6, -10], [20, -5, 10]]]))
     useWalk.getState().setGravity(true)
     walk()
     face(45)
-    forward(1)
-    expect(moved(start)).toEqual([1, 0, -1])
-    expect(fallState()).not.toBeNull()
+    forward(3)
+    expect(moved(start)).toEqual([0, 0, -3])
+    expect(fallState()).toBeNull()
   })
 })
 
@@ -410,6 +422,25 @@ describe('review of #594', () => {
 
   it('known limit: a post wholly inside one gibson\'s square, touching neither way round, is not seen (the walls are asked along axes)', () => {
     world(start, floor(), boxes('Post', 'all', [[[0.3, -1, -0.7], [0.7, 3, -0.3]]]))
+    walk()
+    face(45)
+    forward(1)
+    expect(moved(start)).toEqual([1, 0, -1])
+  })
+
+  it('known limit: a wall filling the shut side cell whose corner pokes into the square is passed, its drawn line up to about 0.7 gibson into the corner', () => {
+    // The wall fills x <= 0.9, z <= -0.1: the side cell (0, -1) is in it, its corner at (0.9, -0.1).
+    world(start, floor(), boxes('Corner', 'all', [[[-5, -1, -5], [0.9, 3, -0.1]]]))
+    walk()
+    face(45)
+    forward(1)
+    // Taken round the open side (+X, then -Z); the straight line's middle (0.5, -0.5) is inside the wall.
+    expect(moved(start)).toEqual([1, 0, -1])
+    useWalk.getState().exit()
+    useCyberspace.setState({ cursor: { ...start } })
+    // Its corner almost at the square's far edge (0.99, -0.01): 0.69 deep, still passed.
+    world(start, floor(), boxes('Corner', 'all', [[[-5, -1, -5], [0.99, 3, -0.01]]]))
+    clearWalls()
     walk()
     face(45)
     forward(1)

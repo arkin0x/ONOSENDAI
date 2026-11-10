@@ -23,9 +23,12 @@
  * | diagonal | the diagonal cell reachable round at least one side of its square, gibson by gibson | ONE step changing two axes: one hop, one chain event |
  * | diagonal | a side cell blocked by a wall, the other open | still the diagonal, round the open side (arkinox, 2026-11-10: a diagonal must not turn into steps along the grid) |
  * | diagonal | under GRAVITY, no floor under a side cell | still the diagonal: only where you land matters, so a 1-wide diagonal bridge is walked |
+ * | diagonal | under GRAVITY, a floor 1 or 2 down where it lands | it steps down onto it, as a straight step does |
+ * | diagonal | under GRAVITY, no floor where it lands | a straight step that lands on a floor instead (the side nearer your facing first), so facing a little outward on a straight walkway walks along it; if neither does, the diagonal, and the fall (edge safety, coordinator's ruling of 2026-11-10, the owner's to confirm) |
  * | diagonal | both side cells walls (a diagonal crack), or the diagonal cell a wall | no diagonal: a slide along a side that is open (the nearer to your facing first), else nothing |
  * | diagonal, a press longer than 16 gibsons | any | no diagonal: the straight step, or the slide |
- * | any slide, under GRAVITY | the side has no floor | not taken: a slide never walks you off a ledge sideways |
+ * | any slide, under GRAVITY, a press of 16 gibsons or less | the side has no floor | not taken: a slide never walks you off a ledge sideways |
+ * | any slide, under GRAVITY, a press longer than 16 | any | taken as before: a coarse step does no step-down, so it rarely lands standing, and checking would make it do nothing |
  *
  * Every move it makes is along an axis your heading leans toward, so a press
  * never takes you backward. Nothing here decides what a wall is.
@@ -143,6 +146,13 @@ const whole = (at: Position, r: StepResult<unknown>, d: AxisDirection, length: b
  */
 export const DIAGONAL_MAX = 16n
 
+/**
+ * Under GRAVITY, how far a diagonal settles down onto a floor where it lands,
+ * in gibsons: store/walkStep.ts STEP_DOWN_MAX, so a diagonal steps down a
+ * stair as a straight step does (lib may not import the store).
+ */
+export const DIAGONAL_SETTLE_MAX = 2n
+
 /** What the planner may also ask of the world. */
 export interface WalkPlanOptions {
   /**
@@ -167,20 +177,36 @@ export interface WalkPlanOptions {
  * GRAVITY the one that lands on a floor first). Both ways shut is a wall on
  * both sides or in the diagonal cell, and no diagonal. What `step` cannot see
  * is a wall inside one gibson's square that neither way round touches: a
- * post in the middle, or the corner of a wall beside the way taken, which
- * the step passes within half a gibson of. The walls are asked along axes
+ * post in the middle, or the corner of a wall that fills the shut side cell
+ * and pokes into the square. The way taken clears it, but the straight line
+ * the step is drawn along can run through it: measured, up to about 0.7
+ * gibson into the corner (1/sqrt 2: a corner almost at the square's far
+ * edge, the way taken just clear of it). The walls are asked along axes
  * only.
+ *
+ * Under GRAVITY a way round that ends in the air settles onto a floor up to
+ * DIAGONAL_SETTLE_MAX below, as a straight step's step-down does, and a
+ * diagonal that would still land with no floor gives way, on its first
+ * gibson, to a straight step that lands on one (main axis first); later in a
+ * coarse press it stops on the last gibson that stood. Only when no straight
+ * step lands on a floor does the diagonal go on, and the fall starts.
  *
  * Held part way, the diagonal stops on the last gibson it reached. Held on
  * its first gibson, or longer than DIAGONAL_MAX, it is no diagonal: the
  * straight step if it goes its whole way, else the slide along the side,
- * else whichever goes at all; under GRAVITY only one that lands on a floor.
+ * else whichever goes at all; under GRAVITY, for a press of up to 16
+ * gibsons, only one that lands on a floor.
  */
 export function planWalkMove<B>(from: Position, heading: WalkHeading, length: bigint, step: Stepper<B>, options: WalkPlanOptions = {}): WalkMove<B> {
   const { main, side, lean } = heading
   const { stands } = options
-  /** Under GRAVITY a slide lands on a floor or is not taken: it is not the way you face, so it never walks you off a ledge. */
-  const landsOk = (to: Position): boolean => !stands || stands(to)
+  /**
+   * Under GRAVITY a slide lands on a floor or is not taken: it is not the way
+   * you face, so it never walks you off a ledge. A press longer than
+   * DIAGONAL_MAX is not checked: walkStep does no step-down for it, so it
+   * seldom lands standing, and a check would make coarse presses do nothing.
+   */
+  const landsOk = (to: Position): boolean => !stands || length > DIAGONAL_MAX || stands(to)
   if (!side) {
     const ahead = step(from, main.axis, main.dir, length)
     if (!samePlace(ahead.to, from)) return { to: ahead.to, by: ahead.by, kind: 'straight', along: main, side: null }
@@ -196,7 +222,21 @@ export function planWalkMove<B>(from: Position, heading: WalkHeading, length: bi
     if (!whole(at, one, first, 1n)) return { by: one.by }
     const two = step(one.to, second.axis, second.dir, 1n)
     if (!whole(one.to, two, second, 1n)) return { by: two.by }
-    return { to: two.to }
+    return { to: settle(two.to) }
+  }
+  /**
+   * Under GRAVITY, `at` in the air settled onto a floor up to
+   * DIAGONAL_SETTLE_MAX below, by a straight step down `step` has cleared:
+   * a second leg from a side cell over a gap does no step-down of its own.
+   */
+  const settle = (at: Position): Position => {
+    if (!stands || stands(at)) return at
+    for (let k = 1n; k <= DIAGONAL_SETTLE_MAX; k++) {
+      const down = step(at, 'y', -1, k)
+      if (down.to.y !== at.y - k) break
+      if (stands(down.to)) return down.to
+    }
+    return at
   }
   /** One gibson diagonally from `at`, round whichever side is open, or what held it. */
   const oneGibson = (at: Position): { to: Position } | { by: B | null } => {
@@ -205,23 +245,37 @@ export function planWalkMove<B>(from: Position, heading: WalkHeading, length: bi
     if (open.length === 0) return { by: ways.map((w) => ('by' in w ? w.by : null)).find((b) => b !== null) ?? null }
     return { to: (stands && open.find(stands)) || open[0] }
   }
+  /** No diagonal: straight if that goes its whole way, else along the side; then whichever goes part way. Null when none goes (that lands, under GRAVITY). */
+  const straight = (): WalkMove<B> | null => {
+    const a = step(from, main.axis, main.dir, length)
+    const b = step(from, side.axis, side.dir, length)
+    const ways: Array<[StepResult<B>, AxisDirection, boolean]> = [[a, main, whole(from, a, main, length)], [b, side, whole(from, b, side, length)]]
+    const go = ways.find(([r, , open]) => open && landsOk(r.to)) ?? ways.find(([r]) => !samePlace(r.to, from) && landsOk(r.to))
+    return go ? { to: go[0].to, by: go[0].by, kind: 'slide', along: go[1], side: null } : null
+  }
   if (length <= DIAGONAL_MAX) {
     let at = from
     let by: B | null = null
     for (let n = 0n; n < length; n++) {
       const next = oneGibson(at)
       if (!('to' in next)) { by = next.by; break }
+      // Off an edge under gravity (edge safety): on the first gibson, a
+      // straight step that lands on a floor instead, if one does; later, the
+      // press stops on the last gibson that stood. Else on off the edge, and
+      // the fall starts there.
+      if (stands && !stands(next.to)) {
+        if (n > 0n) break
+        const safe = straight()
+        if (safe) return safe
+        at = next.to
+        break
+      }
       at = next.to
-      // Off an edge under gravity: the press ends here, and the fall starts.
-      if (stands && !stands(at)) break
     }
     if (!samePlace(at, from)) return { to: at, by, kind: 'diagonal', along: main, side }
   }
-  // No diagonal: straight if that goes its whole way, else along the side; then whichever goes part way.
+  const go = straight()
+  if (go) return go
   const a = step(from, main.axis, main.dir, length)
-  const b = step(from, side.axis, side.dir, length)
-  const ways: Array<[StepResult<B>, AxisDirection, boolean]> = [[a, main, whole(from, a, main, length)], [b, side, whole(from, b, side, length)]]
-  const go = ways.find(([r, , open]) => open && landsOk(r.to)) ?? ways.find(([r]) => !samePlace(r.to, from) && landsOk(r.to))
-  if (go) return { to: go[0].to, by: go[0].by, kind: 'slide', along: go[1], side: null }
-  return { to: from, by: a.by ?? b.by, kind: 'held', along: null, side: null }
+  return { to: from, by: a.by ?? step(from, side.axis, side.dir, length).by, kind: 'held', along: null, side: null }
 }

@@ -51,8 +51,10 @@
  * both axes in one hop, round whichever side of its square is open (refused
  * only by a wall on both sides or in the diagonal cell; under GRAVITY the
  * side cells need no floor, so a diagonal walkway is walked, play test of
- * 2026-11-10); blocked ahead while angled to a side, it slides one step
- * along the wall to that side, and under GRAVITY only onto a floor. Each piece is a
+ * 2026-11-10; it steps down onto a floor 1 or 2 below, and one that would
+ * land with no floor takes a straight step onto a floor instead, if there
+ * is one); blocked ahead while angled to a side, it slides one step along
+ * the wall to that side, and under GRAVITY only onto a floor. Each piece is a
  * walkStep, so stairs, walls and gravity hold exactly as for a straight step.
  * A diagonal heading is one segment like any other: a run of diagonal steps
  * is one hop, and a run of slides along one wall is one hop.

@@ -72,8 +72,14 @@ describe('which failed uploads still keep the server', () => {
   it('a refusal from the server (402, wants a subscription) keeps it; no answer does not', () => {
     expect(serverAnswered(new BlossomRefusal(402, 'subscription required'))).toBe(true)
     expect(serverAnswered(new BlossomRefusal(401, null))).toBe(true)
+    expect(serverAnswered(new BlossomRefusal(413, null))).toBe(true)
     expect(serverAnswered(new TypeError('Failed to fetch'))).toBe(false)
     expect(serverAnswered(new TransferTimeout('The server did not answer.'))).toBe(false)
     expect(serverAnswered(new Error('signer refused'))).toBe(false)
+  })
+
+  it('"no upload here" (404, 405, 501) is a wrong address, not kept', () => {
+    // Say, https://blossom.oslim.dev/upload pasted whole: the PUT goes to /upload/upload.
+    for (const status of [404, 405, 501]) expect(serverAnswered(new BlossomRefusal(status, null))).toBe(false)
   })
 })

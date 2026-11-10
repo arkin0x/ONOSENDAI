@@ -48,11 +48,7 @@ export function normalizeServer(input: string): string | null {
   try {
     const u = new URL(withScheme)
     const local = u.hostname === 'localhost' || /^127\.\d+\.\d+\.\d+$/.test(u.hostname)
-    if (u.protocol === 'http:' && !local) {
-      // http's own port means https's own port; any other port stays.
-      if (u.port === '80') u.port = ''
-      u.protocol = 'https:'
-    }
+    if (u.protocol === 'http:' && !local) u.protocol = 'https:'
     if (u.protocol !== 'https:' && !(u.protocol === 'http:' && local)) return null
     if (!u.hostname.includes('.') && !local) return null
     return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}`
@@ -221,13 +217,14 @@ export async function uploadBlob(server: string, file: Blob, sign: Sign, fetchIm
 }
 
 /**
- * The server itself answered the upload (a refusal, such as 402 for a server
+ * A Blossom server answered the upload with a refusal (such as 402 for one
  * that wants a subscription), so it is a real server the person meant: the
  * picker keeps it (owner 2026-11-10). Not when it could not be reached or
- * never answered.
+ * never answered, and not for "no upload here" (404, 405, 501): that is a
+ * wrong address, such as one pasted with /upload on the end.
  */
 export function serverAnswered(err: unknown): boolean {
-  return err instanceof BlossomRefusal
+  return err instanceof BlossomRefusal && err.status !== 404 && err.status !== 405 && err.status !== 501
 }
 
 /** What to tell a person when an upload fails. */

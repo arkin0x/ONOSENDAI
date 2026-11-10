@@ -34,9 +34,11 @@ describe('remembering a typed server', () => {
     expect(readChoice(PK, st)).toEqual({ last: OSLIM, typed: [OSLIM] })
   })
 
-  it('never makes it a default', () => {
-    rememberServer(PK, OSLIM, memory())
-    expect(DEFAULT_BLOSSOM_SERVERS).not.toContain(OSLIM)
+  it('a server from your kind 10063 is the last used, but not added to your typed ones', () => {
+    const st = memory()
+    rememberServer(PK, OSLIM, st)
+    rememberServer(PK, 'https://list1.example', st, true)
+    expect(readChoice(PK, st)).toEqual({ last: 'https://list1.example', typed: [OSLIM] })
   })
 
   it('puts the most recent first, each once, at most MAX_TYPED', () => {

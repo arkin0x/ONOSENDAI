@@ -75,12 +75,16 @@ export function readChoice(pubkey: string, storage: Store | null = store()): Sto
   }
 }
 
-/** `server` was used: it goes first, the default from now on, and joins your own unless it is a default. */
-export function rememberServer(pubkey: string, server: string, storage: Store | null = store()): StoredChoice {
+/**
+ * `server` was used: it goes first, the default from now on. It joins your
+ * typed ones unless it is a default or `fromList` (on your kind 10063, which
+ * already offers it; kept off the device's list so removing it there removes it here).
+ */
+export function rememberServer(pubkey: string, server: string, storage: Store | null = store(), fromList = false): StoredChoice {
   const before = readChoice(pubkey, storage)
   const url = normalizeServer(server)
   if (!url) return before
-  const typed = isDefault(url) ? before.typed : clean([url, ...before.typed], MAX_TYPED)
+  const typed = isDefault(url) || fromList ? before.typed : clean([url, ...before.typed], MAX_TYPED)
   const next = { last: url, typed }
   try { storage?.setItem(choiceKey(pubkey), JSON.stringify(next)) } catch { /* private mode, or full */ }
   return next

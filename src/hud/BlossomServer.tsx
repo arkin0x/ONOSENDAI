@@ -54,6 +54,8 @@ export interface BlossomChoice {
 export function useBlossomChoice(pubkey: string, fetchList: boolean): BlossomChoice {
   const [stored, setStored] = useState<StoredChoice>(() => readChoice(pubkey))
   const [mine, setMine] = useState<string[]>([])
+  // Read when an upload ends, which may be renders after it began.
+  const mineNow = useRef<string[]>([])
   const [server, setServerState] = useState<string>(() => initialServer(readChoice(pubkey), []))
   const [custom, setCustom] = useState('')
   // The person picked from the select: a list that arrives later leaves it be.
@@ -67,6 +69,7 @@ export function useBlossomChoice(pubkey: string, fetchList: boolean): BlossomCho
     picked.current = false
     setStored(next)
     setMine([])
+    mineNow.current = []
     setServerState(initialServer(next, []))
     setCustom('')
   }, [pubkey])
@@ -74,6 +77,7 @@ export function useBlossomChoice(pubkey: string, fetchList: boolean): BlossomCho
   const adopt = (list: NostrEvent | null): void => {
     const fromList = serversFromList(list)
     setMine(fromList)
+    mineNow.current = fromList
     setServerState((current) => serverAfterList(current, readChoice(pubkey), fromList, picked.current))
   }
 
@@ -102,7 +106,9 @@ export function useBlossomChoice(pubkey: string, fetchList: boolean): BlossomCho
     setCustom,
     chosen: () => (server === CUSTOM ? normalizeServer(custom) : server),
     remember: (target) => {
-      const next = rememberServer(pubkey, target)
+      // Kept for the key that uploaded; shown only if that key is still the one here.
+      const next = rememberServer(pubkey, target, undefined, mineNow.current.includes(normalizeServer(target) ?? ''))
+      if (shownFor.current !== pubkey) return
       setStored(next)
       // The typed server is an option now: the select shows it, not the field.
       if (next.last) { setServerState(next.last); setCustom('') }

@@ -10561,6 +10561,80 @@ html.tv-broadcast body { overflow: hidden; }
 .gamepad__btn--right { grid-column: 3; grid-row: 2; }
 .gamepad__btn--back { grid-column: 2; grid-row: 3; }
 .gamepad__lift .gamepad__btn { min-width: 72px; }
+.gamepad__btn--jump { min-width: 88px; height: 72px; letter-spacing: 0.08em; }
+.gamepad[hidden] { display: none; }
+
+/* The key door and the clock (lib/games/progress.ts): the clock and the key
+   on the bar, TAKE or OPEN above the pad by the key and the door, and the
+   exit card at the exit zone. */
+.gameview__clock {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(6, 14, 22, 0.82);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+
+.gameview__key {
+  display: inline-flex;
+  padding: 5px 7px;
+  border-radius: 8px;
+  border: 1px solid #ffd23f;
+  color: #ffd23f;
+  background: rgba(6, 14, 22, 0.82);
+}
+
+.gameview__act {
+  position: absolute;
+  left: 50%;
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 180px);
+  transform: translateX(-50%);
+}
+
+.gameview__actbtn {
+  padding: 12px 22px;
+  border-radius: 10px;
+  border: 1px solid #ffd23f;
+  background: rgba(6, 14, 22, 0.9);
+  color: #ffd23f;
+  font: inherit;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.gameview__actbtn:disabled { opacity: 0.5; cursor: default; }
+
+.gameview__locked {
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(6, 14, 22, 0.88);
+  color: var(--dim);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+}
+
+.gameview__card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 220px;
+  padding: 20px 24px;
+  border-radius: 12px;
+  border: 1px solid var(--game);
+  background: rgba(6, 14, 22, 0.94);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.gameview__cardtitle { color: var(--game); letter-spacing: 0.14em; font-size: 13px; }
+.gameview__cardtime { font-size: 34px; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+.gameview__exit--card { margin-left: 0; }
 
 .hyperbar--game { font-family: inherit; text-align: left; cursor: pointer; border-color: rgba(255, 122, 217, 0.6); }
 .hyperbar--game .hyperbar__label { color: var(--game); }

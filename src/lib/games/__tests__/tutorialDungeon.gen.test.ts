@@ -1,67 +1,74 @@
 /**
- * tutorialDungeon.gen.test.ts - the GENERATOR of the placeholder dungeon's
- * fixture (lib/games/tutorialDungeon.fixture.json), not a test. Skipped
- * unless asked for:
+ * tutorialDungeon.gen.test.ts - the GENERATOR of the tutorial dungeon's bag,
+ * not a test. Skipped unless asked for. Two uses, one builder:
+ *
+ * The DEV fixture (lib/games/tutorialDungeon.fixture.json), for LOCAL play:
  *
  *   GEN_TUTORIAL_DUNGEON=1 \
- *   TUTORIAL_PIECES=/data/Sync/agents/claude/onosendai/games-dungeon/pieces \
- *   TUTORIAL_DEV_KEY=/data/claude/secrets/onosendai-tutorial-game-DEV.hex \
+ *   TUTORIAL_PIECES=/data/Sync/agents/claude/onosendai/games-dungeon/v1/pieces \
+ *   TUTORIAL_KEY=/data/claude/secrets/onosendai-tutorial-game-DEV.hex \
  *   npx vitest run src/lib/games/__tests__/tutorialDungeon.gen.test.ts
  *
- * The pieces are Maze Kit payloads (main), built by build-pieces.ts beside
- * them: a dead end and a hall sealed at its far end (chamber A), a small room
- * with every door sealed (chamber B), and the AeroCarnival two-gibson teleport
- * pad, and an entry marker (an original flat ring) carrying the `entry` tag at
- * TUTORIAL_ENTRY (DECK-0002 §2.2). Each is placed where TUTORIAL_DUNGEON_LAYOUT says, as a shard item in
- * one bag sealed to the game's region with its key, and signed by the DEV key,
- * whose pubkey must be TUTORIAL_GAME's. It writes the file and sends nothing
- * anywhere: lib/relay is the offline relay in every test file.
+ * The owner's bag, signed by the game key he holds (DEPLOY.md): the same,
+ * with TUTORIAL_KEY his key's file (64 hex or an nsec) and TUTORIAL_OUT the
+ * file to write the signed bag to. It never writes the fixture for a key that
+ * is not TUTORIAL_GAME's, and never sends anything anywhere: lib/relay is the
+ * offline relay in every test file. He publishes the file himself.
+ *
+ * The pieces are Maze Kit payloads (main) and the key, built by
+ * games-dungeon/v1/build-pieces.ts. Each is placed where
+ * TUTORIAL_DUNGEON_LAYOUT says, as a shard item in one bag sealed to the
+ * game's region with its key, every item and the bag signed by the one key.
+ * First in the list is the entry marker (pieces/entry.json, an original flat
+ * star), inline, carrying the `entry` tag at TUTORIAL_ENTRY (DECK-0002 §2.2).
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
-import { fromPayload, newShard, type ShardModel, type ShardVertex } from 'sno-core/shards'
+import { nip19 } from 'nostr-tools'
+import { fromPayload } from 'sno-core/shards'
 import { bagTemplate, shardInnerTemplate } from '../../hidden'
 import { hexToBytes } from '../../events'
-import { TUTORIAL_DUNGEON_LAYOUT, TUTORIAL_ENTRY, TUTORIAL_GAME } from '../tutorialGame'
+import { BAG_SAFE_BYTES, signedBytes } from '../../bagSize'
+import { TUTORIAL_DEV_PUBKEY, TUTORIAL_DUNGEON_LAYOUT, TUTORIAL_ENTRY, TUTORIAL_GAME } from '../tutorialGame'
+import { inRegion } from '../play'
 import { ENTRY_TAG, worldKey } from '../world'
-import { withConstrain } from '../../walkConstrain'
 
 const asked = process.env.GEN_TUTORIAL_DUNGEON === '1'
 
-/**
- * The entry marker (DECK-0002 §2.2): an original flat ring on the hall's
- * floor, under the place a player appears on entering. Its item carries the
- * `entry` tag, and its `C` is the entry point. Walls never stop at it.
- */
-function entryMarker(): ShardModel {
-  const pink: [number, number, number] = [1, 0.48, 0.85]
-  const y = -1.9
-  const v = (x: number, z: number): ShardVertex => {
-    const at = [x, y, z].map((n) => { const p = Math.floor(n); return { p, t: Math.round((n - p) * 120) } })
-    return { p: [at[0].p, at[1].p, at[2].p], t: [at[0].t, at[1].t, at[2].t], c: pink }
+/** A secret key from a file: 64 hex, or an nsec. */
+function secretFrom(path: string): Uint8Array {
+  const raw = readFileSync(path, 'utf8').trim()
+  if (raw.startsWith('nsec1')) {
+    const d = nip19.decode(raw)
+    if (d.type !== 'nsec') throw new Error('not an nsec')
+    return d.data
   }
-  // An outer and an inner diamond, eight triangles between them.
-  const outer = [v(1, 0), v(0, 1), v(-1, 0), v(0, -1)]
-  const inner = [v(0.5, 0), v(0, 0.5), v(-0.5, 0), v(0, -0.5)]
-  const faces: Array<[number, number, number]> = []
-  for (let i = 0; i < 4; i++) {
-    const j = (i + 1) % 4
-    faces.push([i, 4 + j, j], [i, 4 + i, 4 + j])
-  }
-  return withConstrain({ ...newShard('Tutorial dungeon: entry'), unit: 0, mode: 'solid', vertices: [...outer, ...inner], faces }, 'off')
+  return hexToBytes(raw)
 }
 
-describe('the placeholder tutorial dungeon (generator)', () => {
-  it.skipIf(!asked)('signs the dungeon bag with the DEV key and writes the fixture', async () => {
-    const sk = hexToBytes(readFileSync(process.env.TUTORIAL_DEV_KEY ?? '', 'utf8').trim())
-    expect(getPublicKey(sk)).toBe(TUTORIAL_GAME.pubkey)
+describe('the tutorial dungeon (generator)', () => {
+  it.skipIf(!asked)('signs the dungeon bag and writes it', async () => {
+    const sk = secretFrom(process.env.TUTORIAL_KEY ?? process.env.TUTORIAL_DEV_KEY ?? '')
+    const pubkey = getPublicKey(sk)
+    // The DEV key by its own constant, never by TUTORIAL_GAME.pubkey: once the owner's key is the game's, his bag
+    // must still go to TUTORIAL_OUT, dated now, and never into the DEV fixture (review of #668).
+    const dev = pubkey === TUTORIAL_DEV_PUBKEY
+    const fixture = resolve(__dirname, '..', 'tutorialDungeon.fixture.json')
+    const out = dev ? fixture : process.env.TUTORIAL_OUT
+    if (!out) throw new Error('This key is not the DEV key: say where to write its bag with TUTORIAL_OUT.')
+    if (!dev && resolve(out) === fixture) throw new Error('The DEV fixture is only ever signed by the DEV key: write this bag elsewhere.')
     const dir = process.env.TUTORIAL_PIECES ?? ''
-    // One fixed moment, so a regenerated bag differs only in its signatures.
-    const createdAt = 1_794_300_000
+    // The DEV fixture at one fixed moment, so a regenerated bag differs only in its signatures; the owner's bag now.
+    const createdAt = dev ? 1_794_300_000 : Math.floor(Date.now() / 1000)
     const plane = TUTORIAL_GAME.region.plane
+    // Every piece inside the region, and the key and door coordinates as the rules name them.
+    for (const { at } of [...TUTORIAL_DUNGEON_LAYOUT, { at: TUTORIAL_ENTRY }]) expect(inRegion(TUTORIAL_GAME, at)).toBe(true)
+    const key = (p: { x: bigint; y: bigint; z: bigint }) => `${p.x},${p.y},${p.z}`
+    expect(TUTORIAL_DUNGEON_LAYOUT.filter((l) => key(l.at) === key(TUTORIAL_GAME.key!.at)).map((l) => l.piece)).toEqual(['key'])
+    expect(TUTORIAL_DUNGEON_LAYOUT.filter((l) => key(l.at) === key(TUTORIAL_GAME.door!.at)).map((l) => l.piece).sort()).toEqual(['gate-closed', 'gate-open'])
     const entries = TUTORIAL_DUNGEON_LAYOUT.map(({ piece, at }, i) => {
       const raw = JSON.parse(readFileSync(join(dir, `${piece}.json`), 'utf8'))
       const shard = fromPayload(raw, `tutorial-${piece}-${i}`)
@@ -69,14 +76,18 @@ describe('the placeholder tutorial dungeon (generator)', () => {
       return finalizeEvent(shardInnerTemplate(shard, at, plane, createdAt + i), sk)
     })
     // The entry point, first in the list (DECK-0002 §2.2: the first item with the tag counts).
-    const entryTemplate = shardInnerTemplate(entryMarker(), TUTORIAL_ENTRY, plane, createdAt + 50)
+    const marker = fromPayload(JSON.parse(readFileSync(join(dir, 'entry.json'), 'utf8')), 'tutorial-entry')
+    if (!marker) throw new Error('entry is not a shard')
+    const entryTemplate = shardInnerTemplate(marker, TUTORIAL_ENTRY, plane, createdAt + 50)
     entries.unshift(finalizeEvent({ ...entryTemplate, tags: [...entryTemplate.tags, [ENTRY_TAG]] }, sk))
-    const { key, lookupId } = worldKey(TUTORIAL_GAME)
-    const bag = finalizeEvent(await bagTemplate(entries, key, lookupId, TUTORIAL_GAME.region.height, createdAt + 100), sk)
-    const out = join(__dirname, '..', 'tutorialDungeon.fixture.json')
-    writeFileSync(out, JSON.stringify({
-      about: 'PLACEHOLDER tutorial dungeon: one bag signed by a DEV key, sealed to the tutorial game region. For LOCAL tests only; never on any relay. Generated by __tests__/tutorialDungeon.gen.test.ts.',
-      events: [bag],
-    }, null, 1) + '\n')
+    const { key: regionKey, lookupId } = worldKey(TUTORIAL_GAME)
+    const template = await bagTemplate(entries, regionKey, lookupId, TUTORIAL_GAME.region.height, createdAt + 100)
+    // Under the canonical relay's limit, with ONOSENDAI's margin (lib/bagSize.ts).
+    expect(signedBytes(template)).toBeLessThanOrEqual(BAG_SAFE_BYTES)
+    const bag = finalizeEvent(template, sk)
+    writeFileSync(out, JSON.stringify(dev
+      ? { about: 'The tutorial dungeon, signed by a DEV key, sealed to the tutorial game region. For LOCAL tests only; never on any relay. Generated by __tests__/tutorialDungeon.gen.test.ts.', events: [bag] }
+      : bag, null, dev ? 1 : 0) + '\n')
+    console.log(`wrote ${out}: bag ${bag.id}, ${signedBytes(template)} bytes, ${entries.length} items, signed by ${pubkey}`)
   })
 })

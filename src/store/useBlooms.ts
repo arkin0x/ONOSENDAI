@@ -14,6 +14,7 @@ import { create } from 'zustand'
 import { BloomEngine, type BloomView } from '../lib/seeds/bloomEngine'
 import { dnaResolver, fetchSeedHeaders, headerBook, refreshTrustedTip, trustedTip, TIP_REFRESH_MS } from '../lib/seeds/seedSources'
 import { deviceBudget, looksLikePhone } from '../lib/seeds/bloomBudget'
+import { MISSING_RETRY_MS } from '../lib/seeds/dnaStore'
 import { forgetInWorker, growInWorker } from '../lib/seeds/growClient'
 import type { SeedItem } from '../lib/seeds/seedItem'
 import { useHyperspace } from './useHyperspace'
@@ -79,6 +80,8 @@ function getEngine(): BloomEngine {
   if (typeof setInterval === 'function') setInterval(ask, TIP_REFRESH_MS)
   // A DNA arrived from a bag or a relay.
   dnaResolver.onChange(() => made.refreshAll((v) => !v || v.status === 'reading' || v.status === 'dna-missing'))
+  // A DNA not found is asked for again on the resolver's backoff (15 s doubling to two minutes), not only at the next block.
+  if (typeof setInterval === 'function') setInterval(() => made.refreshAll((v) => v?.status === 'dna-missing'), MISSING_RETRY_MS)
   return made
 }
 

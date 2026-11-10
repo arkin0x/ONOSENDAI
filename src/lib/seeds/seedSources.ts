@@ -23,7 +23,8 @@ import { DNA_KIND, setBagDnaSink } from './seedItem'
 
 /** The DNAs this page knows: one resolver for every seed. */
 export const dnaResolver = new DnaResolver({
-  fetch: (ids) => query({ ids, kinds: [DNA_KIND] }),
+  // A relay taken for hung is asked too: a few events by id, and a DNA may be on one relay only.
+  fetch: (ids) => query({ ids, kinds: [DNA_KIND] }, { evenHung: true }),
   ...idbDnaCache,
 })
 

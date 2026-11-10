@@ -46,6 +46,7 @@
  */
 
 import type { AxisDirection, AxisName, Position } from './space'
+import { WORLD_DOWN } from './walkDown'
 
 /** A diagonal is within this many degrees of 45 (RULED: +/-22.5). */
 export const DIAGONAL_HALF_DEG = 22.5
@@ -84,7 +85,8 @@ function flat(v: Vec3, up: AxisName): Vec3 | null {
 /**
  * The heading of a press from the way you face. `forward` and `right` are
  * where the camera looks and its right, in cyberspace axes; `up` is the axis
- * the walk treats as up (cyberspace Y under GRAVITY), and the press is in the
+ * the walk treats as up (under GRAVITY the axis of the walker's gravity,
+ * lib/walkDown.ts; else the screen's up), and the press is in the
  * plane across it. `fwd` is +1 for forward and -1 for backward, which mirrors
  * everything; `strafe` adds a side key held with it (+1 right, -1 left), so
  * W with D held is 45 degrees right of where you face. Null when the facing
@@ -162,6 +164,8 @@ export interface WalkPlanOptions {
    * slide, which is not the way you face, is taken only onto a floor.
    */
   stands?: (at: Position) => boolean
+  /** Under GRAVITY, which way is down (lib/walkDown.ts): a settle goes that way. Cyberspace -Y when absent. */
+  down?: AxisDirection
 }
 
 /**
@@ -200,6 +204,7 @@ export interface WalkPlanOptions {
 export function planWalkMove<B>(from: Position, heading: WalkHeading, length: bigint, step: Stepper<B>, options: WalkPlanOptions = {}): WalkMove<B> {
   const { main, side, lean } = heading
   const { stands } = options
+  const down = options.down ?? WORLD_DOWN
   /**
    * Under GRAVITY a slide lands on a floor or is not taken: it is not the way
    * you face, so it never walks you off a ledge. A press longer than
@@ -232,9 +237,9 @@ export function planWalkMove<B>(from: Position, heading: WalkHeading, length: bi
   const settle = (at: Position): Position => {
     if (!stands || stands(at)) return at
     for (let k = 1n; k <= DIAGONAL_SETTLE_MAX; k++) {
-      const down = step(at, 'y', -1, k)
-      if (down.to.y !== at.y - k) break
-      if (stands(down.to)) return down.to
+      const lower = step(at, down.axis, down.dir, k)
+      if (lower.to[down.axis] !== at[down.axis] + BigInt(down.dir) * k) break
+      if (stands(lower.to)) return lower.to
     }
     return at
   }

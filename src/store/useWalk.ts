@@ -61,7 +61,13 @@
  *
  * GRAVITY (arkinox, rulings of 2026-10-24; store/walkGravity.ts): off by
  * default and kept on this device, switched by Z, the pad's GRAVITY chip or
- * the View panel. With it on, down is cyberspace -Y:
+ * the View panel. With it on, down is the axis nearest the screen's down
+ * (lib/walkDown.ts; arkinox, 2026-11-10: "gravity always needs to be up and
+ * down relative to how the user is seeing the world"): cyberspace -Y in the
+ * default view and any view turned only left or right, along X or Z once the
+ * compass's view controls tip the view. Up, the floor, a jump, a bounce and
+ * the corner rule all go by it; a level press is in the plane across it. A
+ * turn of the view that changes it holds at once (turnGravity). Under it:
  *
  * | What happens | What the chain gets |
  * |---|---|
@@ -102,8 +108,8 @@ import { create } from 'zustand'
 import { estimateHopCost } from 'cyberspace-core'
 import { HOP_AXIS_BUDGET_MS, projectCantorMs, recommendedHopHeight, useCalibration } from '../lib/calibration'
 import { moveDirection, type MoveName } from '../lib/moves'
-import { clampAxis, levelQuaternion, stepFor, type AxisDirection, type AxisName, type Position } from '../lib/space'
-import { keepWalkLook } from '../lib/walkLook'
+import { clampAxis, stepFor, type AxisDirection, type AxisName, type Position } from '../lib/space'
+import { WORLD_DOWN, atHeight, heightOf, raised, sameDir, upOf, viewDown } from '../lib/walkDown'
 import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { standing, walkStep, type WalkStep } from './walkStep'
@@ -111,7 +117,7 @@ import { planWalkMove, walkHeading, type Stepper, type WalkHeading } from '../li
 import { anyBounce, floorPad, stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
 import { DOUBLE_JUMP_SPEED, JUMP_HEIGHT, JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, launchSpeed, loadGravity, reachedHeight, saveGravity } from './walkGravity'
 import { launchHeight } from '../lib/walkBounce'
-import { walkFacing, walkFall } from '../lib/walkEye'
+import { walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
 import { heldNow, holdReleaseAll } from './walkHold'
 
 /** What the LOSING SYNC warning waits for: this many moves not yet proven. */
@@ -243,7 +249,7 @@ export const useWalk = create<WalkState>((set, get) => ({
     useToast.getState().show({ label: 'GRAVITY', meta: on ? 'ON' : 'OFF', mark: 'walk', ms: BRIEF_TOAST_MS })
     // (D): the fall ends where it is, one hop there.
     if (!on) { if (fall) endFall(reachedPoint(fall, nowMs())); return }
-    levelView()
+    refreshDown()
     fallIfAirborne()
   },
 
@@ -264,7 +270,8 @@ export const useWalk = create<WalkState>((set, get) => ({
     clearSettle()
     dropFall()
     set({ queue: [], open: null, running: null, behind: 0 })
-    if (get().gravity) { levelView(); fallIfAirborne() }
+    refreshDown()
+    if (get().gravity) fallIfAirborne()
   },
 
   exit: () => {
@@ -308,16 +315,25 @@ export const useWalk = create<WalkState>((set, get) => ({
     const axes = cs.screenAxes ?? cs.axes()
     const dir = moveDirection(axes, name)
     const gravity = get().gravity
+    // Under gravity, down is the axis nearest the screen's down (lib/walkDown.ts).
+    const g = gravity ? down : WORLD_DOWN
+    // Under gravity Up and Down are JUMP and DOWN, whatever axis gravity is
+    // on; off, they are a step along the screen's up, as always.
+    const vertical = gravity ? name === 'up' || name === 'down' : dir.axis === 'y'
+    const rising = gravity ? name === 'up' : dir.dir > 0
     // A level press goes the way you face, snapped to 8 directions: a
     // diagonal, or a slide along a wall you are angled into (lib/walkSlide.ts).
-    // With no facing to go by, the screen's axis, as always.
-    const heading = facingHeading(name, axes.up.axis, strafe)
+    // With no facing to go by, the screen's axis, as always. Under gravity
+    // it is in the plane across gravity.
+    const heading = facingHeading(name, gravity ? g.axis : axes.up.axis, strafe)
+    // A level press with no facing that the screen's axes put along gravity: no flying.
+    if (gravity && !vertical && !heading && dir.axis === g.axis) return
     // In the air: a level press is a move in mid-air (B), the same heading;
     // up and down do nothing, except just before landing on a bounce (E):
     // Up adds a jump, Down absorbs it.
     if (fall) {
-      if (dir.axis !== 'y') airPress(fall, heading ?? { main: dir, side: null, lean: null })
-      else if (dir.dir > 0) upInAirAt = nowMs()
+      if (!vertical) airPress(fall, heading ?? { main: dir, side: null, lean: null })
+      else if (rising) upInAirAt = nowMs()
       else downInAirAt = nowMs()
       return
     }
@@ -325,18 +341,18 @@ export const useWalk = create<WalkState>((set, get) => ({
     const from = open?.end ?? queue[queue.length - 1] ?? cs.position
     // Under gravity Up is a jump, and Down does nothing: no flying (it only
     // keeps a springboard from launching you as you walk on, (E)).
-    if (gravity && dir.axis === 'y') { if (dir.dir > 0) jump(from); else downInAirAt = nowMs(); return }
+    if (gravity && vertical) { if (rising) jump(from); else downInAirAt = nowMs(); return }
     const length = stepFor(cs.scaleExp)
     const items = wallItemsAt(cs.plane, from)
     // A shard that constrains WALK (DECK-0003 §1.12, store/walkWalls.ts):
     // the step stops short of its face (a gibson short at a fine zoom), or does not go.
     // Standing on such a shard, a level step also climbs what is in its way
     // (2 gibsons at most) and settles onto a floor up to 2 below (store/walkStep.ts).
-    const stepAlong = stepperFor(items, gravity)
+    const stepAlong = stepperFor(items, gravity, g)
     takeWallWait()
     // Under gravity a diagonal ends where it walks off a floor, and a slide is taken only onto one (lib/walkSlide.ts).
-    const stands = gravity ? (at: Position): boolean => standing(at, items, true) : undefined
-    const move = planWalkMove(from, heading ?? { main: dir, side: null, lean: null }, length, stepAlong, { stands })
+    const stands = gravity ? (at: Position): boolean => standing(at, items, true, g) : undefined
+    const move = planWalkMove(from, heading ?? { main: dir, side: null, lean: null }, length, stepAlong, { stands, down: g })
     if (waitedForWalls(() => get().press(name, strafe))) return
     if (move.by) wallChip(move.by)
     if (!move.along || samePosition(move.to, from)) return
@@ -364,7 +380,7 @@ export const useWalk = create<WalkState>((set, get) => ({
     // Off a floor under gravity: this segment ends here, and the fall begins.
     if (gravity) fallIfAirborne()
     // Onto a bounce pad: a step up onto a fixed height, or any arrival onto a springboard, launches (E).
-    if (gravity && !fall) padLaunch(next, next.y > from.y, items)
+    if (gravity && !fall) padLaunch(next, heightOf(next, g) > heightOf(from, g), items)
   },
 
   settle: () => {
@@ -412,8 +428,9 @@ function waitedForWalls(again: () => void): boolean {
 /**
  * A level press's heading from the way you face (lib/walkSlide.ts
  * walkHeading): forward and back along the facing, `strafe` a side held with
- * them; a side alone along the facing's right. Null for up and down, and
- * with no facing to go by, when a press takes the screen's axis.
+ * them; a side alone along the facing's right, in the plane across `up`.
+ * Null for up and down, and with no facing to go by, when a press takes the
+ * screen's axis.
  */
 function facingHeading(name: MoveName, up: AxisName, strafe: -1 | 0 | 1): WalkHeading | null {
   if (!walkFacing.valid) return null
@@ -424,13 +441,14 @@ function facingHeading(name: MoveName, up: AxisName, strafe: -1 | 0 | 1): WalkHe
 
 /**
  * WALK's straight step among `items`, as planWalkMove asks it: walkStep,
- * with its stairs and walls. Against the axis wall: nowhere to step.
+ * with its stairs and walls, its floors under gravity `g`. Against the axis
+ * wall: nowhere to step.
  */
-function stepperFor(items: readonly WallItem[], gravity: boolean): Stepper<WallItem> {
+function stepperFor(items: readonly WallItem[], gravity: boolean, g: AxisDirection): Stepper<WallItem> {
   return (at: Position, axis: AxisName, sign: 1 | -1, want: bigint): WalkStep => {
     const edge = clampAxis(at[axis] + want * BigInt(sign))
     const n = sign > 0 ? edge - at[axis] : at[axis] - edge
-    return n === 0n ? { to: at, by: null } : walkStep(at, axis, sign, n, items, gravity)
+    return n === 0n ? { to: at, by: null } : walkStep(at, axis, sign, n, items, gravity, g)
   }
 }
 
@@ -454,15 +472,18 @@ function wallChip(by: WallItem): void {
 /**
  * A fall, or a jump, in the air. Module state, like the walls: it is read
  * every frame, and only its start and its end are the store's (`falling`).
- * Heights are whole gibsons from y0, where the arc started.
+ * Heights are whole gibsons up from h0, where the arc started, along its
+ * gravity `down` (lib/walkDown.ts heightOf).
  */
 interface Fall {
+  /** Which way it falls: the walker's gravity, from when the arc began or the view last turned it (turnGravity). */
+  down: AxisDirection
   /** Where the hop being fallen starts: the step-off point, the jump's floor, or the last mid-air move. */
   anchor: Position
   /** Mid-air moves so far (B), in order: one hop each, made when the fall resolves. */
   waypoints: Position[]
-  /** The arc: from y0 at t0 (ms), upward at v0 gibsons/s, down at WALK_GRAVITY. */
-  y0: bigint
+  /** The arc: from height h0 at t0 (ms), upward at v0 gibsons/s, down at WALK_GRAVITY. */
+  h0: bigint
   t0: number
   v0: number
   /** Its ceiling, and where it comes to rest: a floor (lands) or the last gibson a hop can afford. */
@@ -471,7 +492,7 @@ interface Fall {
   lands: boolean
   /** The highest whole gibson it rises to. */
   peak: number
-  /** top, bottom, and the anchor's height above y0, as numbers: what a frame reads, so it does no bigint arithmetic. */
+  /** top, bottom, and the anchor's height above h0, as numbers: what a frame reads, so it does no bigint arithmetic. */
   topN: number
   bottomN: number
   base: number
@@ -492,10 +513,30 @@ interface Fall {
 function syncFall(f: Fall): void {
   f.topN = Number(f.top)
   f.bottomN = Number(f.bottom)
-  f.base = Number(f.anchor.y - f.y0)
+  f.base = Number(heightOf(f.anchor, f.down) - f.h0)
 }
 
 let fall: Fall | null = null
+
+/**
+ * GRAVITY's down now: the axis nearest the screen's down, from the view
+ * (lib/walkDown.ts viewDown), kept up to date with the view while walking
+ * (refreshDown). -Y in the default view.
+ */
+let down: AxisDirection = WORLD_DOWN
+
+/** GRAVITY's down now (lib/walkDown.ts), for the scene: read only. */
+export function walkDown(): Readonly<AxisDirection> {
+  return down
+}
+
+/** Read down from the view again; a tie keeps the one it had. True when it changed. */
+function refreshDown(): boolean {
+  const next = viewDown(useCyberspace.getState().view, down)
+  if (sameDir(next, down)) return false
+  down = next
+  return true
+}
 
 const nowMs = (): number => performance.now()
 
@@ -528,14 +569,15 @@ export function fallState(): Readonly<Fall> | null {
  * Start a fall or a jump from `from`. The segment that brought you here
  * closes where the fall begins: a normal hop, proved now, like any other.
  */
-function beginFall(from: Position, v0: number, top: bigint, bottom: bigint, lands: boolean, items: WallItem[], plane: number): void {
+function beginFall(from: Position, v0: number, top: bigint, bottom: bigint, lands: boolean, items: WallItem[], plane: number, g: AxisDirection): void {
   clearSettle()
   const hadOpen = useWalk.getState().open !== null
   if (hadOpen) closeOpen()
-  fall = { anchor: { ...from }, waypoints: [], y0: from.y, t0: nowMs(), v0, top, bottom, lands, peak: arcPeak(v0, Number(top)), topN: 0, bottomN: 0, base: 0, topSince: 0, air: null, items, plane, launch: null, doubled: false }
+  fall = { down: g, anchor: { ...from }, waypoints: [], h0: heightOf(from, g), t0: nowMs(), v0, top, bottom, lands, peak: arcPeak(v0, Number(top)), topN: 0, bottomN: 0, base: 0, topSince: 0, air: null, items, plane, launch: null, doubled: false }
   syncFall(fall)
   walkFall.active = true
   walkFall.offset = 0
+  eyeAlong(g)
   useWalk.setState({ falling: true })
   useCyberspace.setState({ cursor: { ...from } })
   if (hadOpen) pump()
@@ -548,31 +590,33 @@ function fallIfAirborne(): void {
   if (!cs.walking || fall || !walk.gravity) return
   const from = walk.open?.end ?? walk.queue[walk.queue.length - 1] ?? cs.position
   const items = wallItemsAt(cs.plane, from)
+  const g = down
   takeWallWait()
-  const stands = standing(from, items, true)
-  const limit = stands ? null : fallLimit(from, items, affordIn(cs.plane))
+  const stands = standing(from, items, true, g)
+  const limit = stands ? null : fallLimit(from, items, affordIn(cs.plane), g)
   // A floor on its way: no fall through it; asked again once it is built.
   if (waitedForWalls(fallIfAirborne)) return
   if (stands || !limit) return
   // Hovering already: over a floor no hop from here can afford to reach.
   if (limit.drop === 0n) return
-  beginFall(from, 0, 0n, -limit.drop, limit.lands, items, cs.plane)
+  beginFall(from, 0, 0n, -limit.drop, limit.lands, items, cs.plane, g)
 }
 
-/** Up under gravity: a jump of JUMP_HEIGHT from the floor you stand on, under any ceiling. Off a floor, nothing. */
+/** Up under gravity: a jump of JUMP_HEIGHT from the floor you stand on, against gravity, under any ceiling. Off a floor, nothing. */
 function jump(from: Position): void {
   const cs = useCyberspace.getState()
   const items = wallItemsAt(cs.plane, from)
+  const g = down
   takeWallWait()
-  const stands = standing(from, items, true)
+  const stands = standing(from, items, true, g)
   if (waitedForWalls(() => jump(from))) return
   if (!stands) return
   const afford = affordIn(cs.plane)
-  const { rise, by } = jumpRise(from, items, afford)
+  const { rise, by } = jumpRise(from, items, afford, JUMP_HEIGHT, g)
   if (rise === 0n) { if (by) wallChip(by); return }
-  const limit = fallLimit(from, items, afford)
+  const limit = fallLimit(from, items, afford, g)
   if (waitedForWalls(() => jump(from))) return
-  beginFall(from, JUMP_SPEED, rise, -limit.drop, limit.lands, items, cs.plane)
+  beginFall(from, JUMP_SPEED, rise, -limit.drop, limit.lands, items, cs.plane, g)
 }
 
 /**
@@ -595,15 +639,16 @@ function padLaunch(at: Position, rose: boolean, items: WallItem[]): void {
   if (!anyBounce()) return
   if ((downInAirAt !== null && nowMs() - downInAirAt <= BOUNCE_BOOST_MS) || heldNow().vert < 0) return
   const cs = useCyberspace.getState()
+  const g = down
   takeWallWait()
-  const pad = floorPad(at, items)
+  const pad = floorPad(at, items, g)
   const h = rose || pad.springboard ? launchHeight(pad.bounce, 0, false, JUMP_HEIGHT) : 0
   if (takeWallWait() || h === 0) return
   const afford = affordIn(cs.plane)
-  const { rise } = jumpRise(at, items, afford, h)
-  const limit = fallLimit(at, items, afford)
+  const { rise } = jumpRise(at, items, afford, h, g)
+  const limit = fallLimit(at, items, afford, g)
   if (takeWallWait() || rise === 0n) return
-  beginFall(at, launchSpeed(h), rise, -limit.drop, limit.lands, items, cs.plane)
+  beginFall(at, launchSpeed(h), rise, -limit.drop, limit.lands, items, cs.plane, g)
   if (fall) fall.launch = { ...at }
 }
 
@@ -618,7 +663,7 @@ function meetCeiling(f: Fall, now: number): void {
   // before the ceiling was there: one met over a new column is met now.
   const hit = Math.max(f.topSince, (f.v0 - Math.sqrt(Math.max(0, f.v0 * f.v0 - 2 * WALK_GRAVITY * f.topN))) / WALK_GRAVITY)
   if ((now - f.t0) / 1000 < hit) return
-  f.y0 += f.top
+  f.h0 += f.top
   f.bottom -= f.top
   f.top = 0n
   f.t0 += hit * 1000
@@ -641,10 +686,10 @@ function arcAt(f: Fall, now: number): { r: number; rising: boolean } {
 function reachedPoint(f: Fall, now: number): Position {
   meetCeiling(f, now)
   const { r, rising } = arcAt(f, now)
-  let y = f.y0 + BigInt(reachedHeight(r, rising, f.peak))
-  if (y < f.y0 + f.bottom) y = f.y0 + f.bottom
-  if (y > f.y0 + f.top) y = f.y0 + f.top
-  return { ...f.anchor, y }
+  let h = f.h0 + BigInt(reachedHeight(r, rising, f.peak))
+  if (h < f.h0 + f.bottom) h = f.h0 + f.bottom
+  if (h > f.h0 + f.top) h = f.h0 + f.top
+  return atHeight(f.anchor, f.down, h)
 }
 
 /**
@@ -664,7 +709,7 @@ export function tickFall(now: number = nowMs()): boolean {
     // (E) on a floor that bounces: the fall goes on, launched.
     if (f.lands && bounceOff(f, now)) return true
     // (A) on the floor, or (C) at the last gibson a hop can afford.
-    endFall({ ...f.anchor, y: f.y0 + f.bottom }, !f.lands)
+    endFall(atHeight(f.anchor, f.down, f.h0 + f.bottom), !f.lands)
     return true
   }
   walkFall.offset = r - f.base
@@ -690,7 +735,8 @@ export function tickFall(now: number = nowMs()): boolean {
  * on its way.
  */
 function bounceOff(f: Fall, now: number): boolean {
-  const final: Position = { ...f.anchor, y: f.y0 + f.bottom }
+  const g = f.down
+  const final: Position = atHeight(f.anchor, g, f.h0 + f.bottom)
   // When the arc reached the floor: the descending root of v0 t - g t^2 / 2 = bottom.
   const landAt = f.t0 + ((f.v0 + Math.sqrt(f.v0 * f.v0 - 2 * WALK_GRAVITY * f.bottomN)) / WALK_GRAVITY) * 1000
   const recent = (at: number | null): at is number => at !== null && at >= landAt - BOUNCE_BOOST_MS
@@ -704,14 +750,14 @@ function bounceOff(f: Fall, now: number): boolean {
   // arcs meet what has loaded since the fall began. One still on its way: it lands.
   const items = wallItemsAt(f.plane, final)
   takeWallWait()
-  const b = floorPad(final, items).bounce
+  const b = floorPad(final, items, g).bounce
   // How far the fall came down: its arc's top, under any ceiling, above the landing.
   const fell = Math.min(arcApex(f.v0), f.topN) - f.bottomN
   const h = launchHeight(b, fell, up !== null, JUMP_HEIGHT)
   if (takeWallWait() || h === 0) return false
   const afford = affordIn(f.plane)
-  const { rise } = jumpRise(final, items, afford, h)
-  const limit = fallLimit(final, items, afford)
+  const { rise } = jumpRise(final, items, afford, h, g)
+  const limit = fallLimit(final, items, afford, g)
   if (takeWallWait() || rise === 0n) return false
   upInAirAt = null
   downInAirAt = null
@@ -722,7 +768,7 @@ function bounceOff(f: Fall, now: number): boolean {
   if (!(now - t0 <= (2 * v0 / WALK_GRAVITY) * 1000)) t0 = now
   f.anchor = final
   f.waypoints = []
-  f.y0 = final.y
+  f.h0 = heightOf(final, g)
   f.t0 = t0
   f.v0 = v0
   f.top = rise
@@ -780,7 +826,8 @@ function airPress(f: Fall, heading: WalkHeading): void {
   const now = nowMs()
   const at = reachedPoint(f, now)
   takeWallWait()
-  const move = planWalkMove(at, heading, stepFor(scaleExp), stepperFor(f.items, true))
+  const g = f.down
+  const move = planWalkMove(at, heading, stepFor(scaleExp), stepperFor(f.items, true, g), { down: g })
   if (waitedForWalls(() => { if (fall) airPress(fall, heading) })) return
   if (move.by) wallChip(move.by)
   if (!move.along || samePosition(move.to, at)) return
@@ -788,14 +835,15 @@ function airPress(f: Fall, heading: WalkHeading): void {
   const side = move.side
   const p = { ...move.to }
   const afford = affordIn(f.plane)
-  const rel = p.y - f.y0
-  const limit = fallLimit(p, f.items, afford)
+  const rel = heightOf(p, g) - f.h0
+  const limit = fallLimit(p, f.items, afford, g)
   const { r, rising } = arcAt(f, now)
   if (rising) {
     // What is left of the rise, under any ceiling over the new column.
     const left = Math.ceil(arcApex(f.v0) - Number(rel) - 1e-6)
-    const up = left > 0 ? stepLimit(p, 'y', 1, BigInt(left), f.items).reach : 0n
-    f.top = rel + (up > 0n ? affordableRise(p, up, afford) : 0n)
+    const lift = upOf(g)
+    const up = left > 0 ? stepLimit(p, lift.axis, lift.dir, BigInt(left), f.items).reach : 0n
+    f.top = rel + (up > 0n ? affordableRise(p, up, afford, g) : 0n)
     f.topSince = Math.max(0, (now - f.t0) / 1000)
     f.peak = arcPeak(f.v0, Number(f.top))
   } else {
@@ -853,19 +901,19 @@ function airJump(f: Fall, now: number): boolean {
   const { r, rising } = arcAt(f, now)
   // Never lower than the arc already goes: the faster of the two upward.
   const speed = Math.max(rising ? arcSpeed(f.v0, (now - f.t0) / 1000) : 0, DOUBLE_JUMP_SPEED)
-  // The whole gibson under the eye, as a height above y0, and how far over it the eye is.
+  // The whole gibson under the eye, as a height above h0, and how far over it the eye is.
   const base = Math.max(f.bottomN, Math.floor(r + 1e-6))
   const over = Math.max(0, r - base)
   const v0 = Math.sqrt(speed * speed + 2 * WALK_GRAVITY * over)
   const t0 = now - ((v0 - speed) / WALK_GRAVITY) * 1000
-  const y0 = f.y0 + BigInt(base)
-  const from: Position = { ...f.anchor, y: y0 }
+  const h0 = f.h0 + BigInt(base)
+  const from: Position = atHeight(f.anchor, f.down, h0)
   takeWallWait()
-  const { rise, by } = jumpRise(from, f.items, affordIn(f.plane), Math.ceil(arcApex(v0) - 1e-6))
+  const { rise, by } = jumpRise(from, f.items, affordIn(f.plane), Math.ceil(arcApex(v0) - 1e-6), f.down)
   if (takeWallWait()) return false
   if (rise === 0n) { if (by) wallChip(by); return false }
-  f.bottom = f.y0 + f.bottom - y0
-  f.y0 = y0
+  f.bottom = f.h0 + f.bottom - h0
+  f.h0 = h0
   f.t0 = t0
   f.v0 = v0
   f.top = rise
@@ -884,17 +932,17 @@ function bounceDue(f: Fall, now: number): boolean {
   if (d < 0) return false
   const landAt = f.t0 + ((f.v0 + Math.sqrt(d)) / WALK_GRAVITY) * 1000
   if (landAt - now > BOUNCE_BOOST_MS) return false
-  const final: Position = { ...f.anchor, y: f.y0 + f.bottom }
+  const final: Position = atHeight(f.anchor, f.down, f.h0 + f.bottom)
   takeWallWait()
-  const b = floorPad(final, wallItemsAt(f.plane, final)).bounce
+  const b = floorPad(final, wallItemsAt(f.plane, final), f.down).bounce
   takeWallWait()
   return b !== 0
 }
 
-/** How much of a rise of `up` from `p` a hop can afford. */
-function affordableRise(p: Position, up: bigint, afford: (from: Position, to: Position) => boolean): bigint {
+/** How much of a rise of `up` from `p`, against gravity `g`, a hop can afford. */
+function affordableRise(p: Position, up: bigint, afford: (from: Position, to: Position) => boolean, g: AxisDirection): bigint {
   let n = up
-  while (n > 0n && !afford(p, { ...p, y: p.y + n })) n--
+  while (n > 0n && !afford(p, raised(p, g, n))) n--
   return n
 }
 
@@ -915,7 +963,7 @@ function endFall(final: Position, hovering = false): void {
   const next = [...useWalk.getState().queue, ...hops]
   useWalk.setState({ falling: false, queue: next, behind: next.length })
   useCyberspace.setState({ cursor: { ...final } })
-  if (hovering && !standing(final, f.items, true)) useToast.getState().show({ label: 'HOVERING', meta: 'a hop past here is over the walk budget', mark: 'walk', ms: BRIEF_TOAST_MS * 2 })
+  if (hovering && !standing(final, f.items, true, f.down)) useToast.getState().show({ label: 'HOVERING', meta: 'a hop past here is over the walk budget', mark: 'walk', ms: BRIEF_TOAST_MS * 2 })
   pump()
 }
 
@@ -929,17 +977,55 @@ function dropFall(): void {
   if (useWalk.getState().falling) useWalk.setState({ falling: false })
 }
 
+/** The eye's fall (lib/walkEye.ts walkFallUp) runs up along the opposite of `g`. */
+function eyeAlong(g: AxisDirection): void {
+  walkFallUp.axis = g.axis
+  walkFallUp.dir = g.dir < 0 ? 1 : -1
+}
+
 /**
- * Under gravity the view is level: cyberspace +Y up on screen. A view
- * turned any other way is turned to the level one nearest it, and the
- * walker keeps looking the same way in cyberspace (lib/walkLook.ts).
+ * The view turned (arkinox, 2026-11-10: gravity follows the view, not the
+ * world). When that changes down (lib/walkDown.ts) under gravity, the new
+ * down holds from now:
+ *
+ * | Where you are | What a turn of the view does |
+ * |---|---|
+ * | in the air (a fall, a jump, a bounce's arc) | the arc ends at the whole gibson it has reached, and a fall from rest along the new down starts there; that point is a hop of its own when the fall resolves, as a mid-air press (B) is. A spent double jump stays spent |
+ * | in the air, with a floor right under you along the new down | you land there, as (A) |
+ * | standing, or walking | a floor is asked for along the new down; with none under you the fall begins, as off any edge |
+ *
+ * The speed the arc had is dropped: it was along the old down, and WALK has
+ * no sideways speed to carry it as.
  */
-function levelView(): void {
-  const cs = useCyberspace.getState()
-  const level = levelQuaternion(cs.view)
-  if (!level) return
-  keepWalkLook()
-  useCyberspace.setState({ view: level })
+function turnGravity(): void {
+  if (!refreshDown() || !useWalk.getState().gravity) return
+  const f = fall
+  if (!f) { fallIfAirborne(); return }
+  const now = nowMs()
+  const at = reachedPoint(f, now)
+  const g = down
+  takeWallWait()
+  const limit = fallLimit(at, f.items, affordIn(f.plane), g)
+  takeWallWait()
+  // Where the path bends: a hop of its own when the fall resolves.
+  if (!samePosition(at, f.anchor)) { f.waypoints.push(at); f.air = null }
+  f.anchor = at
+  f.down = g
+  upInAirAt = null
+  downInAirAt = null
+  if (limit.drop === 0n) { endFall(at, !limit.lands); return }
+  f.h0 = heightOf(at, g)
+  f.t0 = now
+  f.v0 = 0
+  f.top = 0n
+  f.bottom = -limit.drop
+  f.lands = limit.lands
+  f.peak = 0
+  f.topSince = 0
+  syncFall(f)
+  walkFall.offset = 0
+  eyeAlong(g)
+  useCyberspace.setState({ cursor: { ...at } })
 }
 
 /**
@@ -1020,8 +1106,8 @@ useCyberspace.subscribe((s, prev) => {
     useWalk.getState().stop()
     return
   }
-  // Under gravity the view stays level, whatever turned it.
-  if (s.view !== prev.view && useWalk.getState().gravity) levelView()
+  // Under gravity, down follows the view: a turn that changes it holds from now.
+  if (s.view !== prev.view) turnGravity()
   const w = useWalk.getState()
   // Your head moved mid-fall with none of the walk's own hops in flight:
   // another device's move, or a chain cut short. The fall's hops would start

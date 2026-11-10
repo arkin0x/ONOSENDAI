@@ -17,7 +17,8 @@
  *     (useArrival: where they stand, as their chain's head says);
  *   - 'gravity': WALK with GRAVITY on;
  *   - 'see-finish' and 'take-finish': the finish chest found (the scan does
- *     it as they land on the deck), and something from it taken.
+ *     it as they land on the deck), and something from it taken;
+ *   - 'workshop': the workshop opened and closed again.
  * Nothing here opens or takes anything (owner, 2026-10-26).
  */
 
@@ -30,6 +31,9 @@ import { useShards } from '../store/useShards'
 import { useOpenedChests, openedKey } from '../store/useOpenedChests'
 import { useInventory } from '../store/useInventory'
 import { useWalk } from '../store/useWalk'
+import { useWorkshop } from '../store/useWorkshop'
+import { markViewedStop, ownHyperspaceView } from '../store/useHyperspace'
+import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { START_STAND, atStart, courseToWorld, onDeck } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import type { Position } from '../lib/space'
@@ -217,3 +221,34 @@ registerTutorialWatcher('take-finish', (onDone) => watchUntil(() => {
 
 /** The course step lines the cursor up on the start square, so one COMMIT moves you there. */
 registerTutorialEffect('aim-start', aimOnce((layout) => courseToWorld(layout.frame, START_STAND)))
+
+/**
+ * The workshop opened, and closed again: the player has been in it (the next
+ * step comes up as they come out). DEPLOY closes the workshop and lines the
+ * shard up to place: the step waits until that is placed or dropped, so the
+ * next card never comes up over a placement and takes its keys.
+ */
+registerTutorialWatcher('workshop', (onDone) => {
+  let been = useWorkshop.getState().open
+  return watchUntil(() => {
+    if (useWorkshop.getState().open) { been = true; return false }
+    return been && useShards.getState().pending === null
+  }, onDone, [(l) => useWorkshop.subscribe((s, prev) => { if (s.open !== prev.open) l() }), (l) => useShards.subscribe((s, prev) => { if (s.pending !== prev.pending) l() })])
+})
+
+/** OPEN WORKSHOP in the coach: the same workshop the menu's button opens, on the newest model. */
+registerTutorialEffect('open-workshop', () => { useWorkshop.getState().openWorkshop() })
+
+/**
+ * Earth through the free view, as the view menu's EARTH shows it, but in the
+ * player's own plane: EARTH lines up dataspace for the next move (it is a
+ * dataspace place), and a newcomer in ideaspace would come back from the
+ * tutorial in the other plane with nothing they know around them. The view
+ * shows Earth's plane by itself, and RETURN puts the scene back in theirs.
+ * Looking costs nothing; only a ride does (T9).
+ */
+registerTutorialEffect('view-earth', () => {
+  ownHyperspaceView()
+  markViewedStop(null)
+  useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', EARTH_SCALE_EXP)
+})

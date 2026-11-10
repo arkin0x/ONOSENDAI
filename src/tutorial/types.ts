@@ -28,9 +28,9 @@ export type TutorialWait = Exclude<DemoAction, 'spawn'> | TutorialAction
  * The tutorial's own waits, one per staged thing (tutorial/director.ts):
  * the treasure chest found, opened by hand, and something in it taken; the
  * course's start reached, gravity on in WALK, the finish chest found and
- * something in it taken.
+ * something in it taken; the workshop opened and closed again.
  */
-export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-start' | 'gravity' | 'see-finish' | 'take-finish'
+export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-start' | 'gravity' | 'see-finish' | 'take-finish' | 'workshop'
 
 export interface TutorialStep {
   /** Unique across the script; also what a player's saved progress names. */
@@ -68,6 +68,32 @@ export interface TutorialStep {
   needsWalk?: string
   /** A registered effect run as the step comes up (store/useTutorial.ts registerTutorialEffect). */
   effect?: string
+  /** A button in the coach that runs a registered effect when tapped (OPEN WORKSHOP); nothing runs untapped. */
+  action?: { label: string; effect: string }
+  /**
+   * Reached only by a choice (`choices` on the step before it): NEXT on the
+   * way through the script passes over it, and its own NEXT is FINISH.
+   */
+  branch?: boolean
+  /**
+   * A modal step's choices, one button each, above its own button (which
+   * ends the run). A choice goes to its `step`, or runs what was registered
+   * for it (store/useTutorial.ts registerTutorialChoice); one that names
+   * `when` is shown only once something registered it (the dungeon, until
+   * the Games DECK lands).
+   */
+  choices?: TutorialChoice[]
+}
+
+export interface TutorialChoice {
+  id: string
+  label: string
+  /** One short line under the button. */
+  about: string
+  /** The branch step it goes to. */
+  step?: string
+  /** Shown only when a choice by this name is registered. */
+  when?: string
 }
 
 export interface TutorialScript {

@@ -32,7 +32,7 @@ vi.mock('../useCyberspace', async (orig) => {
 })
 
 import { MINTED_KEY, useCyberspace } from '../useCyberspace'
-import { ADVANCE_MS, isNewArrival, registerTutorialWatcher, useTutorial, watchFirstArrival } from '../useTutorial'
+import { ADVANCE_MS, choiceOffered, isNewArrival, registerTutorialChoice, registerTutorialEffect, registerTutorialWatcher, runTutorialEffect, useTutorial, watchFirstArrival } from '../useTutorial'
 import { useDemo } from '../useDemo'
 import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialFlag, noteLanding, readProgress, setTutorialSwitch, tutorialEnabled, tutorialSwitch, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
 import { useTv } from '../useTv'
@@ -321,6 +321,55 @@ describe('the engine', () => {
     expect(readProgress(pubkey())).toEqual({ step: 'only', ended: 'skipped' })
   })
 
+  it('branches: a choice goes to its step, NEXT on the way through passes over branches, a branch\'s NEXT finishes', () => {
+    useTutorial.setState({ script: { steps: [
+      { id: 'c', title: 'C', caption: 'c', modal: true, choices: [{ id: 'go-b', label: 'B', about: 'b', step: 'b' }] },
+      { id: 'b', title: 'B', caption: 'b', branch: true },
+      { id: 'after', title: 'A', caption: 'a' },
+    ] } })
+    useTutorial.getState().start()
+    useTutorial.getState().choose('go-b')
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('b')
+    useTutorial.getState().next()
+    expect(useTutorial.getState().active).toBe(false)
+    expect(readProgress(pubkey())).toEqual({ step: 'b', ended: 'finished' })
+    useTutorial.getState().start({ restart: true })
+    useTutorial.getState().next()
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('after')
+  })
+
+  it('a choice that names `when` is offered only once registered, and its run happens after the tutorial ends', async () => {
+    const dungeon = { id: 'd', label: 'D', about: 'd', when: 'test-dungeon' }
+    useTutorial.setState({ script: { steps: [{ id: 'c', title: 'C', caption: 'c', modal: true, choices: [dungeon] }] } })
+    expect(choiceOffered(dungeon)).toBe(false)
+    useTutorial.getState().start()
+    useTutorial.getState().choose('d')
+    // Not offered: nothing happens.
+    expect(useTutorial.getState().active).toBe(true)
+    let ran = false
+    registerTutorialChoice('test-dungeon', { run: () => { ran = useTutorial.getState().active === false } })
+    expect(choiceOffered(dungeon)).toBe(true)
+    useTutorial.getState().choose('d')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(ran).toBe(true)
+    expect(readProgress(pubkey())?.ended).toBe('finished')
+  })
+
+  it('the script offers HYPERSPACE and AGENTS, and the dungeon only once Track C registers it', () => {
+    const choice = TUTORIAL_SCRIPT.steps.find((st) => st.id === 'choice')!
+    expect(choice.choices!.filter(choiceOffered).map((c) => c.id)).toEqual(['hyperspace', 'agents'])
+    for (const c of choice.choices!) if (c.step) expect(TUTORIAL_SCRIPT.steps.find((st) => st.id === c.step)?.branch, c.id).toBe(true)
+  })
+
+  it('a coach button runs its effect only when tapped', () => {
+    let runs = 0
+    registerTutorialEffect('test-action', () => { runs++ })
+    useTutorial.setState({ script: { steps: [{ id: 'a', title: 'A', caption: 'a', action: { label: 'GO', effect: 'test-action' } }] } })
+    useTutorial.getState().start()
+    expect(runs).toBe(0)
+    runTutorialEffect('test-action')
+    expect(runs).toBe(1)
+  })
   it('a step that needs WALK goes back to the WALK step when not walking, and SKIP on that step passes over it', () => {
     useCyberspace.setState({ walking: false })
     useTutorial.setState({ script: { steps: [
@@ -334,5 +383,70 @@ describe('the engine', () => {
     // SKIP on WALK: past RUN, which needs it.
     useTutorial.getState().next()
     expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('after')
+  })
+
+  it('choice seams: a run with a step runs first then goes there; a run that fails leaves the card; a missing step changes nothing; a gate holds; a double tap does nothing twice', async () => {
+    let runs = 0
+    let fail = false
+    registerTutorialChoice('test-game', { run: async () => { runs++; if (fail) throw new Error('relay said no') } })
+    useTutorial.setState({ script: { steps: [
+      { id: 'c', title: 'C', caption: 'c', modal: true, choices: [{ id: 'g', label: 'G', about: 'g', when: 'test-game', step: 'inside' }, { id: 'lost', label: 'L', about: 'l', step: 'nowhere' }] },
+      { id: 'inside', title: 'I', caption: 'i', branch: true },
+    ] } })
+    useTutorial.getState().start()
+    useTutorial.getState().choose('lost')
+    expect(useTutorial.getState().index).toBe(0)
+    expect(useTutorial.getState().active).toBe(true)
+    fail = true
+    useTutorial.getState().choose('g')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(runs).toBe(1)
+    expect(useTutorial.getState().index).toBe(0)
+    fail = false
+    useTutorial.getState().choose('g')
+    useTutorial.getState().choose('g')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('inside')
+    useTutorial.getState().choose('g')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('inside')
+  })
+
+  it('a gated card takes no choice until its wait is done, and a registered choice redraws the coach', () => {
+    registerTutorialWatcher('never-2' as never, () => () => {})
+    useTutorial.setState({ script: { steps: [
+      { id: 'c', title: 'C', caption: 'c', wait: 'never-2' as never, gate: true, choices: [{ id: 'b', label: 'B', about: 'b', step: 'b' }] },
+      { id: 'b', title: 'B', caption: 'b', branch: true },
+    ] } })
+    useTutorial.getState().start()
+    useTutorial.getState().choose('b')
+    expect(useTutorial.getState().index).toBe(0)
+    const v = useTutorial.getState().choicesVersion
+    registerTutorialChoice('test-late', { run: () => {} })
+    expect(useTutorial.getState().choicesVersion).toBe(v + 1)
+  })
+
+  it('resumes into a branch, and another identity signing in on a branch ends the run as finished', async () => {
+    switchOn()
+    useTutorial.setState({ script: { steps: [{ id: 'c', title: 'C', caption: 'c' }, { id: 'agents', title: 'A', caption: 'a', branch: true }] } })
+    writeProgress(pubkey(), { step: 'agents' })
+    const stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('agents')
+    const was = useCyberspace.getState().identity
+    const me = pubkey()
+    useCyberspace.setState({ identity: { ...was, pubkey: 'e'.repeat(64) } })
+    expect(useTutorial.getState().active).toBe(false)
+    expect(readProgress(me)).toEqual({ step: 'agents', ended: 'finished' })
+    useCyberspace.setState({ identity: was })
+    stop()
+  })
+
+  it('counts progress along the way through, a branch being the end', async () => {
+    const { progressOf } = await import('../../hud/TutorialCoach')
+    const steps = [{}, {}, { branch: true }, {}, { branch: true }]
+    expect(progressOf(steps, 0)).toBeCloseTo(1 / 3)
+    expect(progressOf(steps, 3)).toBe(1)
+    expect(progressOf(steps, 2)).toBe(1)
   })
 })

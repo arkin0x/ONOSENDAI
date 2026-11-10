@@ -104,6 +104,25 @@ describe('the spec’s chest sealed to the h4 region’s lock', () => {
   })
 })
 
+describe('the spec’s door sealed to the h4 region’s lock, end to end (cyberspace#93 730eec9)', () => {
+  it('region key, lock, door secret, room key, room lookup id', () => {
+    const v = vectors.door
+    const event = v.event as NostrEvent
+    const door = chestItemOf(event)!
+    // The region key gives the lock the door is sealed to.
+    const lock = lockOfHex(vectors.region.location_key)!
+    expect(door.lockPubkey).toBe(lock.pubkey)
+    expect(lock.secretHex).toBe(v.opens_with_lock_secret)
+    // The lock secret opens it, to its one room entry.
+    const secret = doorSecretWithKey(door, lock.secretHex)
+    expect(secret).toBe(v.door_secret)
+    // Its own room is the region of its height holding its C: that region's key, not the lock's.
+    const key = roomKey(hexToBytes(v.door_region.location_key), hexToBytes(secret!))
+    expect(bytesToHex(key)).toBe(v.room_key)
+    expect(bytesToHex(sha256(key))).toBe(v.room_lookup_id)
+  })
+})
+
 describe('seal and open with a region key', () => {
   const regionKey = hexToBytes(vectors.region.location_key)
   const sk = generateSecretKey()

@@ -10,8 +10,11 @@
  * every visitor's scan computes too (1 to SCAN_MAX_HEIGHT); a larger region
  * comes from the keyring.
  *
- * Two warnings, one line each: a region that holds the chest opens for
- * whoever finds it, and a region nobody keeps the key of rarely opens.
+ * Warnings, one line each: a region that holds the chest opens for whoever
+ * finds it; a region where nothing is hidden (no key of yours there came from
+ * a scan that opened something) rarely opens, since nobody keeps its key; and
+ * a region on your own public chain (where you stand, a hop's key) is the
+ * first a guesser tries (DECK-0004 §3.8.6 item 5).
  *
  * A lock it was given (`kept`: a draft back from MOVE, or a chest of yours
  * being edited) stands until the hider changes something here.
@@ -59,7 +62,9 @@ export function RegionLockPicker({ spot, chestHeight, noun, kept, onLock }: {
   const [keyringId, setKeyringId] = useState(() => (start?.from === 'keyring' && start.lookupId ? start.lookupId : regions[0]?.lookupId ?? ''))
   // ME is where your avatar stood when you chose it, so walking does not move the lock.
   const [meAt, setMeAt] = useState<Position>(() => useCyberspace.getState().position)
-  const [touched, setTouched] = useState(!kept)
+  // A kept lock stands until something here changes, except one around THE CHEST:
+  // after MOVE the chest stands somewhere else, so its region is computed again.
+  const [touched, setTouched] = useState(!kept || kept.region?.from === 'chest')
   const [computed, setComputed] = useState<{ lookupId: string; base: Position; height: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -111,7 +116,11 @@ export function RegionLockPicker({ spot, chestHeight, noun, kept, onLock }: {
     ? (chosen ? { lookupId: chosen.lookupId, base: baseOf(chosen.base, chosen.height), height: chosen.height } : null)
     : computed ? { lookupId: computed.lookupId, base: computed.base, height: computed.height } : null
   const holdsIt = !!(touched && spot && region?.base && inRoom(region.base, region.height, spot.at))
-  const someoneKeeps = !!(region && keys[region.lookupId])
+  // Something is hidden there only when you hold its key because a scan opened something (design §4.2);
+  // a key from a hop of yours or from HOSAKA says nothing about what is there.
+  const foundThere = !!(region && keys[region.lookupId]?.source === 'scan')
+  // Where you stand, or a region your hops crossed: on your public chain, the first a guesser tries (DECK-0004 §3.8.6 item 5).
+  const onPath = from === 'me' || (from === 'keyring' && chosen?.source === 'hop')
 
   return (
     <div className="lock__region">
@@ -137,7 +146,8 @@ export function RegionLockPicker({ spot, chestHeight, noun, kept, onLock }: {
       {busy && <span className="chest__status" role="status">COMPUTING</span>}
       {error && <span className="chest__status" role="status">{error}</span>}
       {holdsIt && <span className="chest__status" role="status">This region holds the {noun}. Whoever finds it can open it.</span>}
-      {touched && region && !someoneKeeps && !holdsIt && <span className="chest__status" role="status">Nobody keeps this region’s key unless something is hidden there. Hide something there too, at this height.</span>}
+      {onPath && <span className="chest__status" role="status">On your public path: easy to guess.</span>}
+      {touched && region && !foundThere && !holdsIt && <span className="chest__status" role="status">Nobody keeps this region’s key unless something is hidden there. Hide something there too, at this height.</span>}
     </div>
   )
 }

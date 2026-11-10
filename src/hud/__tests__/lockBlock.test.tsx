@@ -36,6 +36,8 @@ vi.mock('../../lib/regionKeyOffThread', async () => {
   }
 })
 vi.mock('../../scene/CardSpin', () => ({ CardSpin: () => null }))
+// The KEYRING modal renders through a portal into document.body; here, the element itself.
+vi.mock('react-dom', async (importOriginal) => ({ ...(await importOriginal<typeof import('react-dom')>()), createPortal: (el: unknown) => el }))
 vi.mock('../../lib/relay', () => ({ onAuthChange: () => () => {}, signInFailed: () => false, publishMany: vi.fn(async () => ({ ok: true })), query: vi.fn(async () => []), queryAny: vi.fn(async () => []), queryEach: vi.fn(async () => []), relaySet: () => ['wss://relay.test'] }))
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
@@ -43,7 +45,7 @@ import type { NostrEvent } from '../../lib/events'
 import { openWithSecret, sealEntries } from '../../lib/chests'
 import { chestInnerTemplate, chestItemOf, messageInnerTemplate } from '../../lib/hidden'
 import { lockOfHex } from '../../lib/locks'
-import { mount, textOf, type Host, type Mounted } from '../../test/elementRoot'
+import { mount, settled, textOf, type Host, type Mounted } from '../../test/elementRoot'
 import { useBuilder } from '../../store/useBuilder'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
@@ -52,16 +54,30 @@ import { useShards, type MyDeployment } from '../../store/useShards'
 import { noteRoomKey, rebuildKeyringNow, resetKeyring } from '../../store/useKeyring'
 import { useStash } from '../stash'
 import { ChestCompose } from '../ChestCompose'
+import { SecretsModal } from '../SecretsModal'
+import { roomOf } from '../../lib/doors'
 import { ChestBlock } from '../ItemRows'
 
 const S = () => useShards.getState()
 const C = () => useCyberspace.getState()
 const CURSOR = { x: (1n << 70n) + 0x1d3c5a7f9n, y: (1n << 60n) + 0x2b4n, z: (1n << 72n) + 0x7e5n }
 const OTHER = '11'.repeat(32)
-const held = (keyHex: string, lookupId: string, height = 6): HeldKey => ({ lookupId, keyHex, height, base: { x: '0', y: '0', z: '0' }, plane: 0, source: 'scan', at: 1_790_000_000 })
+const held = (keyHex: string, lookupId: string, height = 6, source: HeldKey['source'] = 'scan'): HeldKey => ({ lookupId, keyHex, height, base: { x: '0', y: '0', z: '0' }, plane: 0, source, at: 1_790_000_000 })
 
-beforeEach(() => {
+/** A door of mine standing at `at`, its room of height `h`: a row as this device keeps it. */
+function myDoor(at: { x: bigint; y: bigint; z: bigint }, plane: 0 | 1, h: number, sk: Uint8Array): MyDeployment {
+  const lock = lockOfHex(OTHER)!.pubkey
+  const sealed = sealEntries([], lock)
+  const event = finalizeEvent(chestInnerTemplate({ name: 'Pump Door', lockPubkey: lock, senderPubkey: sealed.senderPubkey, requires: '', payload: sealed.payload, door: h }, at, plane, 1), sk) as NostrEvent
+  return { eventId: event.id, inner: event, type: 'chest', chest: chestItemOf(event)!, bagId: 'bag', at: { x: String(at.x), y: String(at.y), z: String(at.z) }, plane, height: h, lookupId: 'lk', keyHex: 'aa'.repeat(32), relays: [], createdAt: 1, published: false }
+}
+
+const IDENTITY = useCyberspace.getState().identity
+
+beforeEach(async () => {
   asked.length = 0
+  // Back to the first identity, and what a change of identity sets off allowed to finish first.
+  if (useCyberspace.getState().identity.pubkey !== IDENTITY.pubkey) { useCyberspace.setState({ identity: IDENTITY }); await settled() }
   resetKeyring()
   useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null })
   useSecrets.setState({ keys: {}, current: {} })
@@ -212,7 +228,7 @@ describe('OPEN on a chest locked to a region', () => {
     const { event, id } = regionChest()
     const m = await mount(<ChestBlock id={id} chest={chestItemOf(event)!} author={event.pubkey} verified place={null} />)
     expect(m.buttons('OPEN')).toHaveLength(1)
-    expect(text(m)).toContain('A key you carry fits: a region, height 4')
+    expect(text(m)).toMatch(/A key you carry fits: a region .+ away, kept/)
     await m.press('OPEN')
     await vi.waitFor(() => expect(text(m)).toContain('inside'))
     await m.unmount()
@@ -237,5 +253,132 @@ describe('OPEN on a chest locked to a region', () => {
     expect(text(m)).toContain('REQUIRES: the key of a place')
     expect(text(m)).not.toContain('A key you carry fits')
     await m.unmount()
+  })
+})
+
+describe('review of #648', () => {
+  it('3: "Nobody keeps" warns for a key from a hop or HOSAKA, not for one a scan opened something with', async () => {
+    useSecrets.setState({ keys: { hop: held(OTHER, 'hop', 6, 'hop') } })
+    let m = await openPlaced()
+    await m.press('REGION')
+    await m.press('KEYRING')
+    await vi.waitFor(() => expect(text(m)).toContain('Nobody keeps this region’s key unless something is hidden there.'))
+    await m.unmount()
+    S().cancelDeploy()
+    useSecrets.setState({ keys: { found: held(OTHER, 'found', 6, 'scan') } })
+    m = await openPlaced()
+    await m.press('REGION')
+    await m.press('KEYRING')
+    await vi.waitFor(() => expect(has(m, 'Region key from your keyring')).toBe(true))
+    expect(text(m)).not.toContain('Nobody keeps')
+    await m.unmount()
+    S().cancelDeploy()
+  })
+
+  it('6: the chain hint under ME and under a hop’s key, not THE CHEST nor a scan’s key', async () => {
+    const HINT = 'On your public path: easy to guess.'
+    useSecrets.setState({ keys: { hop: held(OTHER, 'hop', 6, 'hop'), found: { ...held('22'.repeat(32), 'found', 6, 'scan'), at: 1_700_000_000 } } })
+    const m = await openPlaced()
+    await m.press('REGION')
+    await vi.waitFor(() => expect(asked.length).toBeGreaterThan(0))
+    expect(text(m)).not.toContain(HINT)
+    await m.press(/^ME$/)
+    expect(text(m)).toContain(HINT)
+    await m.press('KEYRING')
+    // Newest first: the hop's key.
+    expect(text(m)).toContain(HINT)
+    ;(byLabel(m, 'Region key from your keyring').props.onChange as (e: unknown) => void)({ target: { value: 'found' } })
+    await vi.waitFor(() => expect(text(m)).not.toContain(HINT))
+    await m.unmount()
+    S().cancelDeploy()
+  })
+
+  it('9: after MOVE, a lock around THE CHEST is computed again where the chest now stands', async () => {
+    const m = await openPlaced()
+    await m.press('REGION')
+    await vi.waitFor(() => expect(asked).toHaveLength(1))
+    const first = asked[0].at
+    await m.press('MOVE')
+    await m.unmount()
+    const moved = { ...CURSOR, x: CURSOR.x + (1n << 20n) }
+    useCyberspace.setState({ position: moved, anchor: moved, cursor: moved })
+    S().placeChest()
+    const m2 = await mount(<ChestCompose onDone={() => undefined} />)
+    await vi.waitFor(() => expect(asked).toHaveLength(2))
+    const p = S().pending
+    expect(asked[1].at).toEqual(p?.type === 'chest' ? p.spot?.at : null)
+    expect(asked[1].at).not.toEqual(first)
+    await m2.unmount()
+    S().cancelDeploy()
+  })
+
+  it('8: a door is never offered its own room; a chest in room R locked to R says so', async () => {
+    // A door being placed, and a door of mine of the same room already there; the identity is its signer.
+    const sk = generateSecretKey()
+    useCyberspace.setState({ identity: { ...C().identity, pubkey: getPublicKey(sk) } })
+    // The new identity's rows load first, so they do not land over the door set below.
+    await settled()
+    S().startPlaceDoor()
+    S().setDeployHeight(4)
+    S().placeChest()
+    const p = S().pending
+    // In the plane the placement is in: the build cursor's, which follows the identity.
+    const spot = p?.type === 'chest' ? p.spot!.at : CURSOR
+    const plane = p?.type === 'chest' ? p.spot!.plane : 0
+    const door = myDoor(spot, plane, 4, sk)
+    useShards.setState({ mine: [door] })
+    noteRoomKey(C().identity.pubkey, { lookupId: 'own-room', keyHex: '33'.repeat(32), doorId: door.eventId, name: 'Pump Room' })
+    let m = await mount(<ChestCompose onDone={() => undefined} />)
+    expect(m.buttons('ROOM')).toHaveLength(0)
+    await m.unmount()
+    S().cancelDeploy()
+    // A chest placed inside that room, locked to it.
+    S().startPlaceChest({ name: 'Box', lock: null, requires: '', contents: [{ kind: 'message', text: 'x' }] })
+    S().setDeployHeight(4)
+    S().placeChest()
+    useShards.setState({ deployRoomSnap: { room: roomOf(spot, plane, 4), chosen: 4, kept: { up: false, follow: false, hint: null } } })
+    m = await mount(<ChestCompose onDone={() => undefined} />)
+    await m.press('ROOM')
+    await vi.waitFor(() => expect(text(m)).toContain('This chest stands in that room. Whoever opens the room opens it.'))
+    await m.unmount()
+    S().cancelDeploy()
+  })
+
+  it('10: EDIT opened before the keyring knew the lock shows REGION once it does', async () => {
+    const sk = generateSecretKey()
+    const at = { x: 1n, y: 2n, z: 3n }
+    const lock = lockOfHex(H4)!.pubkey
+    const msg = finalizeEvent(messageInnerTemplate('inside', at, 0, 1), sk) as NostrEvent
+    const sealed = sealEntries([msg], lock)
+    const event = finalizeEvent(chestInnerTemplate({ name: 'Grate', lockPubkey: lock, senderPubkey: sealed.senderPubkey, requires: 'the key of a place', payload: sealed.payload }, at, 0, 1), sk) as NostrEvent
+    useCyberspace.setState({ identity: { ...C().identity, pubkey: event.pubkey } })
+    await settled()
+    useShards.setState({ mine: [{ eventId: event.id, inner: event, type: 'chest', chest: chestItemOf(event)!, bagId: 'bag', at: { x: '1', y: '2', z: '3' }, plane: 0, height: 4, lookupId: 'lk', keyHex: 'aa'.repeat(32), relays: [], createdAt: 1, published: false, sealed: [msg] }] })
+    const m = await mount(<ChestCompose onDone={() => undefined} target={{ mode: 'edit', eventId: event.id, fields: true }} />)
+    expect(has(m, 'Seal to an item you hold or made')).toBe(true)
+    useSecrets.setState({ keys: { h4: held(H4, 'h4', 4) } })
+    rebuildKeyringNow()
+    await vi.waitFor(() => expect(m.buttons('REGION')[0]?.props['aria-checked']).toBe(true))
+    expect(has(m, 'Seal to an item you hold or made')).toBe(false)
+    expect(text(m)).toContain('sealed to a region')
+    await m.unmount()
+  })
+
+  it('12: the KEYRING header counts rooms, and says NO KEYS only with neither', async () => {
+    const m = await mount(<SecretsModal onClose={() => undefined} />)
+    expect(text(m)).toContain('NO KEYS')
+    noteRoomKey(C().identity.pubkey, { lookupId: 'r1', keyHex: '44'.repeat(32), doorId: 'd1', name: 'Pump Room' })
+    rebuildKeyringNow()
+    await vi.waitFor(() => expect(text(m)).toContain('1 ROOM'))
+    expect(text(m)).not.toContain('NO KEYS')
+    expect(text(m)).toContain('Pump Room')
+    await m.unmount()
+  })
+
+  it('12: the KEY ITEM paste still says it takes an npub', async () => {
+    const m = await openPlaced()
+    expect(String(byLabel(m, 'Seal to a pasted public key').props.placeholder)).toBe('an item public key (hex) or an npub')
+    await m.unmount()
+    S().cancelDeploy()
   })
 })

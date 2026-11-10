@@ -45,7 +45,7 @@ import type { Position } from '../lib/space'
 import { EVICT_PLACES_PER_PASS, EVICT_TO, SECRETS_BUDGET_BYTES, bytesOfAll, earnedToEvict, trimByCount } from '../lib/secrets/budget'
 import {
   describeError, evictPlaces, forgetPlace as forgetPlaceRow, forgetPlacesUpTo, migrateFromLocalStorage, openSecretsDb,
-  readKeys, readLegacyList, readTotals, recordPlace as recordPlaceRow, repairKeyBases, syncLegacy, writeKeys, type Totals,
+  readKeys, readLegacyList, readTotals, recordPlace as recordPlaceRow, repairKeyBases, syncLegacy, writeKeys, writeLocks, type Totals,
 } from '../lib/secrets/db'
 import { clearForgets, dropApplied, noteFallback, readBought, readFallback, repairBoughtBases, updateBought } from '../lib/secrets/backstop'
 import { attach, backendNow, fallBack, memory, run } from '../lib/secrets/vault'
@@ -94,6 +94,8 @@ export interface HeldKey {
   pollToken?: string
   /** The HOSAKA the job and its poll token belong to: the token is never sent anywhere else (review of #637). */
   jobApiUrl?: string
+  /** Its lock (DECK-0004 §3.8.1), stored once derived (§3.8.4), so a reload does not derive it again. */
+  lock?: string
 }
 
 /** A key being bought: what it is for, and how far along. */
@@ -170,6 +172,12 @@ interface SecretsState {
    * reads them again. The places themselves are not held in memory.
    */
   placesVersion: number
+  /**
+   * Bumped whenever places are taken away (FORGET, FORGET ALL PLACES, or the
+   * budget's eviction), so the keyring drops their keys at once rather than at
+   * its next unhurried read (store/useKeyring).
+   */
+  placesForgotten: number
   rescan: RescanStatus | null
   setRescan: (rescan: RescanStatus | null) => void
   /**
@@ -282,6 +290,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   keys: {},
   storage: { mode: 'loading', reason: null, bytes: 0, places: 0, placeKeys: 0, budget: SECRETS_BUDGET_BYTES, persisted: 'unasked', error: null, backstopError: null },
   placesVersion: 0,
+  placesForgotten: 0,
   rescan: null,
   buying: null,
   buyError: null,
@@ -356,14 +365,14 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   forgetPlace: async (id) => {
     if (backendNow() === 'idb') await persist((db) => forgetPlaceRow(db, id))
     else { memory.forget(id); memoryTotals() }
-    placesChanged()
+    placesChanged(true)
   },
 
   forgetAllPlaces: async () => {
     const now = Math.floor(Date.now() / 1000)
     if (backendNow() === 'idb') await persist((db) => forgetPlacesUpTo(db, now))
     else { memory.forgetUpTo(now); memoryTotals() }
-    placesChanged()
+    placesChanged(true)
   },
 
   setRescan: (rescan) => set({ rescan }),
@@ -567,8 +576,18 @@ function memoryTotals(): void {
   useSecrets.setState((s) => ({ storage: { ...s.storage, bytes: keyBytes + places.bytes, places: places.places, placeKeys: places.placeKeys } }))
 }
 
-function placesChanged(): void {
-  useSecrets.setState((s) => ({ placesVersion: s.placesVersion + 1 }))
+function placesChanged(removed = false): void {
+  useSecrets.setState((s) => ({ placesVersion: s.placesVersion + 1, ...(removed ? { placesForgotten: s.placesForgotten + 1 } : {}) }))
+}
+
+/**
+ * Store derived locks beside their keys, held keys and place keys alike
+ * (DECK-0004 §3.8.4), so a reload takes them as they are. IndexedDB only:
+ * elsewhere the session's cache is enough. Never adds or drops a key.
+ */
+export async function saveLocks(held: Array<{ lookupId: string; lock: string }>, places: Array<{ lookupId: string; lock: string }>): Promise<void> {
+  if (backendNow() !== 'idb' || (held.length === 0 && places.length === 0)) return
+  await persist((db) => writeLocks(db, held, places))
 }
 
 /**
@@ -589,7 +608,7 @@ async function evict(): Promise<void> {
       if (places > 0) {
         const { totals, removed } = await run((db) => evictPlaces(db, need, EVICT_PLACES_PER_PASS))
         useSecrets.setState((s) => ({ storage: { ...s.storage, bytes: totals.bytes, places: totals.places, placeKeys: totals.placeKeys } }))
-        placesChanged()
+        placesChanged(removed > 0)
         if (removed > 0) continue
       }
       const drop = earnedToEvict(useSecrets.getState().keys, need)

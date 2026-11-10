@@ -321,6 +321,21 @@ export function repairKeyBases(db: IDBDatabase, fixed: HeldKey[]): Promise<Total
 }
 
 /**
+ * Store derived locks beside their keys (DECK-0004 §3.8.4: a reader "SHOULD
+ * store it with the key"): held keys and place keys, by lookup id. A row not
+ * there, or one that already has this lock, is left alone; nothing is added or
+ * removed, so the counts stay and only the bytes grow.
+ */
+export function writeLocks(db: IDBDatabase, held: Array<{ lookupId: string; lock: string }>, places: Array<{ lookupId: string; lock: string }>): Promise<Totals> {
+  return tallied(db, [KEYS_STORE, PLACE_KEYS_STORE], false, (t) => {
+    const keys = t.store(KEYS_STORE)
+    for (const l of held) t.req(keys.get(l.lookupId), (was: HeldKey | undefined) => { if (was && was.lock !== l.lock) t.put(KEYS_STORE, { ...was, lock: l.lock }, was) })
+    const pk = t.store(PLACE_KEYS_STORE)
+    for (const l of places) t.req(pk.get(l.lookupId), (was: PlaceKey | undefined) => { if (was && was.lock !== l.lock) t.put(PLACE_KEYS_STORE, { ...was, lock: l.lock }, was) })
+  })
+}
+
+/**
  * Record a place and its keys. Standing on it again moves its time; a key
  * already stored is not stored again, only told the plane it was last
  * stood in.

@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '../events'
 import * as locks from '../locks'
-import { carriedLabel, indexKeyring, keyringOrder, LockCache, openingKeyOf, type CarriedKey } from '../keyringLocks'
+import { carriedLabel, deriveSlice, indexKeyring, keyringOrder, LockCache, openingKeyOf, planKeyring, type CarriedKey } from '../keyringLocks'
 
 const hexOf = (i: number): string => bytesToHex(sha256(new Uint8Array([i, 7])))
 const region = (i: number, from: 'held' | 'here' | 'stood' = 'held', at = i): CarriedKey => ({ kind: 'region', lookupId: `L${i}`, keyHex: hexOf(i), height: 4, from, at })
@@ -23,6 +23,42 @@ describe('LockCache', () => {
     expect(spy).toHaveBeenCalledTimes(1)
     expect(cache.size).toBe(1)
     spy.mockRestore()
+  })
+})
+
+describe('a lock stored beside its key', () => {
+  it('is taken as stored: no point multiplication, the secret from the hash', () => {
+    const k = region(1)
+    const lock = locks.lockOfHex(k.keyHex)!
+    const spy = vi.spyOn(locks, 'lockOfHex')
+    const cache = new LockCache()
+    const { byLock, todo } = planKeyring([{ ...k, lock: lock.pubkey }], cache)
+    expect(todo).toHaveLength(0)
+    expect(byLock.get(lock.pubkey)?.lock).toEqual(lock)
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+})
+
+describe('planKeyring and deriveSlice', () => {
+  it('index what is known at once, and derive the rest until the clock says stop, at least one per slice', () => {
+    const cache = new LockCache()
+    cache.derive(hexOf(0))
+    const keys = Array.from({ length: 6 }, (_, i) => region(i))
+    const { byLock, todo } = planKeyring(keys, cache)
+    expect(byLock.size).toBe(1)
+    expect(todo).toHaveLength(5)
+    // A clock already out of time still derives one.
+    let r = deriveSlice(todo, 0, cache, byLock, () => true)
+    expect(r.next).toBe(1)
+    expect(r.derived).toHaveLength(1)
+    expect(byLock.size).toBe(2)
+    let ticks = 0
+    r = deriveSlice(todo, r.next, cache, byLock, () => ++ticks >= 3)
+    expect(r.next).toBe(4)
+    r = deriveSlice(todo, r.next, cache, byLock, () => false)
+    expect(r.next).toBe(5)
+    expect(byLock.size).toBe(6)
   })
 })
 
@@ -58,9 +94,9 @@ describe('indexKeyring', () => {
     spy.mockRestore()
   })
 
-  it('rooms first, then held keys newest first, then here, then stood; one entry per key', () => {
-    const order = keyringOrder([region(1, 'stood'), region(2, 'here'), region(3, 'held', 10), region(4, 'held', 20), room(1), { ...region(3, 'stood') }])
-    expect(order.map((k) => k.lookupId)).toEqual(['R1', 'L4', 'L3', 'L2', 'L1'])
+  it('rooms first, then held keys newest first, then here, then stood in the order given (newest places first); one entry per key', () => {
+    const order = keyringOrder([region(1, 'stood'), region(5, 'stood'), region(2, 'here'), region(3, 'held', 10), region(4, 'held', 20), room(1), { ...region(3, 'stood') }])
+    expect(order.map((k) => k.lookupId)).toEqual(['R1', 'L4', 'L3', 'L2', 'L1', 'L5'])
   })
 
   it('caps the keys indexed, in priority order', () => {
@@ -82,5 +118,10 @@ describe('as an opening key, and the line under OPEN', () => {
     expect(carriedLabel({ ...region(1, 'here') })).toBe('the region you stand in, height 4')
     expect(carriedLabel({ ...region(1, 'stood') })).toBe('a region you stood in, height 4')
     expect(carriedLabel({ kind: 'region', lookupId: 'x', keyHex: hexOf(1), height: 8, from: 'held', at: Date.UTC(2026, 9, 12) / 1000 })).toBe('a region, height 8, kept 12 October')
+    // With its corner and where you are: how far it is.
+    const base = { x: 0n, y: 0n, z: 0n }
+    const far = carriedLabel({ kind: 'region', lookupId: 'x', keyHex: hexOf(1), height: 8, from: 'held', base, at: Date.UTC(2026, 9, 12) / 1000 }, { x: 128n + 1000n, y: 128n, z: 128n })
+    expect(far).toMatch(/^a region .+ away, kept 12 October$/)
+    expect(carriedLabel({ kind: 'region', lookupId: 'x', keyHex: hexOf(1), height: 8, from: 'stood', base }, { x: 128n, y: 128n, z: 128n })).toMatch(/^a region you stood in, .+ away$/)
   })
 })

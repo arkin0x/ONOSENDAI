@@ -1,5 +1,5 @@
 {
- "note": "DECK-0004 \u00a73.8. lock_secret = SHA-256(UTF-8(\"cyberspace:lock\") || key), valid when nonzero and below the curve order; lock = its BIP-340 x-only public key. preimage is the 47 hashed bytes. region_n is decimal, given for the height 4 region only. base is the region's aligned base on X, Y and Z, decimal. region_n carries no plane bit (CYBERSPACE_V2.md \u00a74.7), so the region with the same X, Y, Z and height in ideaspace has the same location key and the same lock.",
+ "note": "DECK-0004 \u00a73.8. lock_secret = SHA-256(UTF-8(\"cyberspace:lock\") || key), valid when nonzero and below the curve order; lock = its BIP-340 x-only public key. preimage is the 47 hashed bytes. region_n is decimal, given for the height 4 regions only. base is the region's aligned base on X, Y and Z, decimal. region_n carries no plane bit (CYBERSPACE_V2.md \u00a74.7), so the region with the same X, Y, Z and height in ideaspace has the same location key and the same lock.",
  "point": {
   "x": "19342813113834066796533383",
   "y": "19342813113834066795209804",
@@ -18,6 +18,7 @@
   "base_coordinate": "a92492492492492492492492492492492492492492492492c961a287c3500000",
   "location_key": "78d749966d5bd372baccaa7f72cc844af5ffed9ad4f4415bc95330f63aefe37a",
   "lookup_id": "4108bb43f7e359d1cd2a9fbe62688e45a9fbcfe4a1848046245695850728540a",
+  "ideaspace_base_coordinate": "a92492492492492492492492492492492492492492492492c961a287c3500001",
   "preimage": "637962657273706163653a6c6f636b78d749966d5bd372baccaa7f72cc844af5ffed9ad4f4415bc95330f63aefe37a",
   "lock_secret": "dd5ac16b2c785b35f32d1db9ba05ff985bfab7371c53aca7602b36b79477ce5d",
   "lock": "aca9d6fa2946087f2d8ae0d66d4156b15aaac8b4b3faa68b21dfc14a03b173d5"
@@ -73,6 +74,62 @@
    "sig": "399248571bafbdf60589c52c9cd4535914438d0c48947564761134b5363f189fa3a5572f9060b30025415a4f3f013b6a0b5cbb6749a7c2c42c26cee37ff5793d"
   }
  },
+ "door": {
+  "note": "A door at C, sealed to region.lock. Its own room is the height 4 region that holds C, so its room key uses that region's location key (door_region), not region.location_key.",
+  "door_region": {
+   "height": 4,
+   "plane": 0,
+   "base": [
+    "19342813127125118666892448",
+    "19342813119585780601271680",
+    "19342813060997114102794976"
+   ],
+   "base_coordinate": "c4924924924924924924920c53c81e9d260623340e5c3a75b6de6e4715cd0000",
+   "location_key": "0b4b24d2fe56cb82a468eb7151fbc21f4460a948463abb69a77463af904ed04f",
+   "lookup_id": "f81d756a3d0d42ae544e92de03cff4f690d5c8424b81c72c026edd909e62fa98"
+  },
+  "plaintext": "[[\"room\",\"5c10b87a8b7fb0c78045cbbf3d4b8103322926a841eff0d87f149a8d3fc4f6ce\"]]",
+  "nip44_nonce": "30d605087e114359fecb6a6f9b4d01a842216a699674f96af1570f7baa905cd6",
+  "conversation_key": "247196fc6aebf0517f1e3e165d60d35bd55dcfe01b7717afb215bc52978bb950",
+  "opens_with_lock_secret": "dd5ac16b2c785b35f32d1db9ba05ff985bfab7371c53aca7602b36b79477ce5d",
+  "event": {
+   "pubkey": "d6453e0ec7126a6c7e7d3732f8c836165fafadfdd1b661fee85bcf1066fd841c",
+   "created_at": 1791800000,
+   "kind": 3341,
+   "content": "AjDWBQh+EUNZ/stqb5tNAahCIWpplnT5avFXD3uqkFzW3nlX8y31h2FnEXKocSbRMbFSegvXzdZHFd3BfF/txzz0A7GVbRKwEXjISYoVLYPsG9sWKTrsX5jfjY6nNkK+1veASlJnkixOiLTHz/WebbEExo25HVQlsciEz8SqpubOZLWabB0Ht2FgiTG6Qdw1eBXGtdN6C87mSVp6aVF4sDiBVQ==",
+   "tags": [
+    [
+     "C",
+     "c4924924924924924924920c53c81e9d260623340e5c3a75b6de6e4715cd1724"
+    ],
+    [
+     "title",
+     "Cistern door"
+    ],
+    [
+     "lock",
+     "aca9d6fa2946087f2d8ae0d66d4156b15aaac8b4b3faa68b21dfc14a03b173d5",
+     "7f43785829caf0f9f5c6febe915aa0880e4a0606062754848e90142fd7d6d941"
+    ],
+    [
+     "requires",
+     "Where the old light turned"
+    ],
+    [
+     "door",
+     "4"
+    ],
+    [
+     "-"
+    ]
+   ],
+   "id": "794a11b64f0dfde75e6039719cafd6d1b72481a2de76810847768aaec928935d",
+   "sig": "7670f68b9c6ff49c616eedea4bd0cf636e9b528b064dbf6c0ca7ae923e2f176a024cf7b396c661a63b45072c08f68e0f4262d01bc73af1a4d2cf30d1d43e3bf6"
+  },
+  "door_secret": "5c10b87a8b7fb0c78045cbbf3d4b8103322926a841eff0d87f149a8d3fc4f6ce",
+  "room_key": "b13ad1c7705c82f4f3646035db2c1d2fcf4d4ef0d87d02a41ec221a54c6863f7",
+  "room_lookup_id": "bde7e68920a5cd267775efb01593d446b84364a26be7c1b3c5764f19460b9d2b"
+ },
  "room": {
   "location_key": "78d749966d5bd372baccaa7f72cc844af5ffed9ad4f4415bc95330f63aefe37a",
   "door_secret": "30efc02f532b5f7b117b23bae57036cbde2163eaf643ed2305017d3dad786649",
@@ -82,5 +139,5 @@
   "lock_secret": "58098a0d5eef6d75d8196b68b0ec34a4a3a52a6d02d6fa6caa65d34ee875d8db",
   "lock": "24bd8076a3714248ee856dd201625a29f065b1d52a71d789ce5ae9f512a10a22"
  },
- "source": "arkin0x/cyberspace#93 decks/kinds-vectors.json, section locks (region_n dropped for size)"
+ "source": "arkin0x/cyberspace#93 at 730eec9, decks/kinds-vectors.json, section locks (region_n dropped for size)"
 }

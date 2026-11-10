@@ -369,7 +369,7 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
           <button className="chest__act" onClick={() => void open()} disabled={busy || rereading} title={closedHere ? 'Open it again here. Its secret is kept on this device.' : `Decrypt it here with ${opensWith}`}>{busy || rereading ? 'OPENING' : 'OPEN'}</button>
         )}
       </div>
-      {offerOpen && !closedHere && carried && <span className="chest__fits">A key you carry fits: {carriedLabel(carried)}</span>}
+      {offerOpen && !closedHere && carried && <span className="chest__fits">A key you carry fits: {carriedLabel(carried, useCyberspace.getState().position)}</span>}
       {status && <span className="chest__status" role="status">{status}</span>}
       {shown && shown.length > 0 && <ChestContents entries={shown} from={from} place={place} />}
     </div>

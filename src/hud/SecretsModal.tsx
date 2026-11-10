@@ -40,7 +40,7 @@ import { SECRETS_MAX, useSecrets, heldList, type HeldKey, type Place, type Secre
 import { sizeLabel } from '../scene/SecretRegions'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { ConfirmModal } from './ConfirmModal'
-import { roomKeysNow, startKeyring, useKeyring } from '../store/useKeyring'
+import { useRoomKeys } from '../store/useKeyring'
 import { Explanation } from './Explanation'
 import { useEscape } from '../hooks/useEscape'
 import { regionKeyQuote } from '../lib/deployPlan'
@@ -57,6 +57,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   const placesVersion = useSecrets((s) => s.placesVersion)
   const rescan = useSecrets((s) => s.rescan)
   const discovered = useShards((s) => s.discovered)
+  const roomCount = useRoomKeys().length
   const position = useCyberspace((s) => s.position)
   const [forgetAll, setForgetAll] = useState(false)
   const [forgetPlaces, setForgetPlaces] = useState(false)
@@ -198,7 +199,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
       <div className="modal__card secrets__box" onPointerDown={(e) => e.stopPropagation()}>
         <header className="panel__head secrets__head">
           <h2><ItemIcon type="key" size={14} /> Keyring</h2>
-          <span className="tag">{list.length === 0 ? 'NO KEYS' : `${list.length} REGION${list.length === 1 ? '' : 'S'}`}</span>
+          <span className="tag">{list.length + roomCount === 0 ? 'NO KEYS' : [list.length > 0 ? `${list.length} REGION${list.length === 1 ? '' : 'S'}` : '', roomCount > 0 ? `${roomCount} ROOM${roomCount === 1 ? '' : 'S'}` : ''].filter(Boolean).join(' · ')}</span>
           <button className="targets__remove secrets__close" onClick={onClose} aria-label="Close" title="Close">✕</button>
         </header>
 
@@ -582,12 +583,7 @@ function formatBytes(n: number): string {
  * back whenever its door opens.
  */
 function RoomKeys(): JSX.Element | null {
-  startKeyring()
-  const version = useKeyring((s) => s.version)
-  const discovered = useShards((s) => s.discovered)
-  const mine = useShards((s) => s.mine)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const rooms = useMemo(() => roomKeysNow(), [version, discovered, mine])
+  const rooms = useRoomKeys()
   if (rooms.length === 0) return null
   return (
     <section className="secrets__section" aria-label="Rooms">

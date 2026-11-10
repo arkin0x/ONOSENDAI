@@ -795,23 +795,30 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   return middle && middle.reach < stop.reach ? middle : stop
 }
 
+/** The floor under a walker, as a bounce reads it (floorPad). */
+export interface Pad {
+  bounce: Bounce
+  springboard: boolean
+}
+
 /**
  * BOUNCE, EXPERIMENTAL (lib/walkBounce.ts): the `bounce` of the floor a
- * walker at `at` stands on: a launch height, `"reflect"`, or 0 for none. The floor is the one GRAVITY stands
- * on (stepLimit with `stand`: a blocking face less than a gibson below, or
+ * walker at `at` stands on (a launch height, `"reflect"`, or 0 for none) and
+ * its `springboard`. The floor is the one GRAVITY stands on (stepLimit with `stand`: a blocking face less than a gibson below, or
  * one in the walker's own plane with open space above), so it is always met
  * from above: a side face is parallel to the ray and a bottom face is never
  * under a walker standing, so neither ever bounces. The face right under the
  * walker decides, by the payload that owns it, among every shard: of two at
  * exactly the same height (a pad flush with a floor), the one that bounces.
  */
-export function floorBounce(at: Position, items: readonly WallItem[]): Bounce {
+export function floorPad(at: Position, items: readonly WallItem[]): Pad {
+  const none: Pad = { bounce: 0, springboard: false }
   const under = stepLimit(at, 'y', -1, 1n, items, true)
-  if (under.reach !== 0n || !under.by) return 0
+  if (under.reach !== 0n || !under.by) return none
   // A face in your own plane is under you only where stepLimit would stand you on it: open space above.
   const plane = openAbove(at, items)
   let best: number | null = null
-  let bounce: Bounce = 0
+  let pad = none
   for (const w of items) {
     if (w.inside || !regionReached(w, at, 'y', -1, 1n)) continue
     const e = entries.get(w.key)
@@ -820,14 +827,15 @@ export function floorBounce(at: Position, items: readonly WallItem[]): Bounce {
     const tol = tolerance(e, g, 1n)
     const hair = tolerance(e, g, 0n)
     const o: [number, number, number] = [Number(at.x - w.at.x) / g, Number(at.y - w.at.y) / g, -Number(at.z - w.at.z) / g]
-    const who: { bounce: Bounce } = { bounce: 0 }
+    const who: { bounce: Bounce; springboard?: boolean } = { bounce: 0 }
     const t = firstHit(e.mesh, o, 1, -1, (1 + tol) / g, (plane && hair < HAIR_MAX ? -hair : ON_FACE) / g, e.clip, who)
     if (t === null) continue
     const gib = t * g
-    // Nearest wins; a pad flush with the floor beside or under it (an exact tie) wins over the floor.
-    if (best === null || gib < best - TIE || (Math.abs(gib - best) <= TIE && bounce === 0)) { best = gib; bounce = who.bounce }
+    // Nearest wins; only a pad flush with a floor beside or under it (a tie within float rounding) wins over the floor.
+    const split = (who.bounce !== 0) !== (pad.bounce !== 0) && best !== null && Math.abs(gib - best) <= TIE
+    if (best === null || (split ? who.bounce !== 0 : gib < best)) { best = gib; pad = { bounce: who.bounce, springboard: !!who.springboard } }
   }
-  return bounce
+  return pad
 }
 
 /** Two floors this close, in gibsons, are flush: float error only. */

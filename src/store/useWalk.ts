@@ -69,7 +69,7 @@
  * | Up (Space, R, the pad's up) standing | a jump of 3: back where it left, nothing; anywhere else, as a fall |
  * | Down, or Up off a floor | nothing: no flying |
  * | (E) a landing on a face with `bounce` (EXPERIMENTAL, lib/walkBounce.ts) | the landing's hop, only when it is somewhere new: one hop straight from the landing before it, however you steered in the air, while that hop is affordable (else the steer points, as (B)); the launch is the next arc of the same fall, so bouncing in place makes nothing. Down just before the landing absorbs it: it lands as (A) |
- * | (E) a step up onto a fixed-height bounce pad | the step's segment closes there, a normal hop, and the launch is a jump from it: bouncing back onto the pad makes nothing more. A "reflect" pad does nothing on a step up: it fell from nowhere |
+ * | (E) a step up onto a fixed-height bounce pad, or any arrival onto a springboard (a level walk onto a flush pad included) | the walk segment closes there, a normal hop, and the launch is a jump from it: bouncing back onto the pad makes nothing more. A "reflect" pad does nothing on arrival, springboard or not: it fell from nowhere. Down just before absorbs it |
  *
  * The hops a fall makes are queued only when it resolves (A, C or D) or
  * bounces somewhere new (E), so none is proved or published while you are
@@ -102,7 +102,7 @@ import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { standing, walkStep, type WalkStep } from './walkStep'
 import { planWalkMove, walkHeading, type Stepper, type WalkHeading } from '../lib/walkSlide'
-import { floorBounce, stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
+import { floorPad, stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
 import { JUMP_HEIGHT, JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, launchSpeed, loadGravity, reachedHeight, saveGravity } from './walkGravity'
 import { launchHeight } from '../lib/walkBounce'
 import { walkFacing, walkFall } from '../lib/walkEye'
@@ -307,8 +307,9 @@ export const useWalk = create<WalkState>((set, get) => ({
     }
     const { queue, open } = get()
     const from = open?.end ?? queue[queue.length - 1] ?? cs.position
-    // Under gravity Up is a jump, and Down does nothing: no flying.
-    if (gravity && dir.axis === 'y') { if (dir.dir > 0) jump(from); return }
+    // Under gravity Up is a jump, and Down does nothing: no flying (it only
+    // keeps a springboard from launching you as you walk on, (E)).
+    if (gravity && dir.axis === 'y') { if (dir.dir > 0) jump(from); else downInAirAt = nowMs(); return }
     const length = stepFor(cs.scaleExp)
     const items = wallItemsAt(cs.plane, from)
     // A shard that constrains WALK (DECK-0003 §1.12, store/walkWalls.ts):
@@ -346,8 +347,8 @@ export const useWalk = create<WalkState>((set, get) => ({
     settleTimer = setTimeout(() => { settleTimer = null; get().settle() }, WALK_SETTLE_MS)
     // Off a floor under gravity: this segment ends here, and the fall begins.
     if (gravity) fallIfAirborne()
-    // Stepped up onto a fixed bounce pad: launched as if it had landed there (E).
-    if (gravity && !fall && next.y > from.y) stepLaunch(next)
+    // Onto a bounce pad: a step up onto a fixed height, or any arrival onto a springboard, launches (E).
+    if (gravity && !fall) padLaunch(next, next.y > from.y)
   },
 
   settle: () => {
@@ -474,7 +475,7 @@ const nowMs = (): number => performance.now()
 
 /** When Up was last pressed in the air (ms), or null: within BOUNCE_BOOST_MS before a bounce's landing it adds JUMP_HEIGHT. */
 let upInAirAt: number | null = null
-/** When Down was last pressed in the air (ms), or null: within BOUNCE_BOOST_MS before a bounce's landing it absorbs it (ruled D5: "Down absorbs"). */
+/** When Down was last pressed (ms), or null: within BOUNCE_BOOST_MS before a bounce's landing, or a walk onto a springboard, it absorbs it (ruled D5: "Down absorbs"). */
 let downInAirAt: number | null = null
 
 /**
@@ -549,18 +550,24 @@ function jump(from: Position): void {
 }
 
 /**
- * (E) A press that stepped up onto `at` (the stair step-up, store/walkStep.ts)
- * and stands on a bounce pad there: launched as if it had landed on it
- * (ruling of 2026-11-10). A fixed height launches; "reflect" reflects a fall
- * of 0, which is no launch. The launch is a jump of that height from `at`, so
- * the segment that brought you here closes as a normal hop (beginFall) and
- * every bounce after it, back onto the same pad, makes nothing.
+ * (E) A press that brought you onto `at`, standing on a bounce pad there:
+ * launched as if you had landed on it when it stepped you up onto it (`rose`,
+ * the stair step-up, store/walkStep.ts; ruling of 2026-11-10) or the pad is
+ * a springboard, which launches on any arrival, a level walk onto a pad flush
+ * with the floor included (arkinox, 2026-11-10). A fixed height launches;
+ * "reflect" reflects a fall of 0, which is no launch, springboard or not. A
+ * Down press within BOUNCE_BOOST_MS before the arrival absorbs it: you stand.
+ * The launch is a jump of that height from `at`, so the walk segment that
+ * brought you here closes there as a normal hop (beginFall) and every bounce
+ * after it, back onto the same pad, makes nothing.
  */
-function stepLaunch(at: Position): void {
+function padLaunch(at: Position, rose: boolean): void {
+  if (downInAirAt !== null && nowMs() - downInAirAt <= BOUNCE_BOOST_MS) return
   const cs = useCyberspace.getState()
   const items = wallItemsAt(cs.plane, at)
   takeWallWait()
-  const h = launchHeight(floorBounce(at, items), 0, false, JUMP_HEIGHT)
+  const pad = floorPad(at, items)
+  const h = rose || pad.springboard ? launchHeight(pad.bounce, 0, false, JUMP_HEIGHT) : 0
   if (takeWallWait() || h === 0) return
   const afford = affordIn(cs.plane)
   const { rise } = jumpRise(at, items, afford, h)
@@ -665,7 +672,7 @@ function bounceOff(f: Fall, now: number): boolean {
   // arcs meet what has loaded since the fall began. One still on its way: it lands.
   const items = wallItemsAt(f.plane, final)
   takeWallWait()
-  const b = floorBounce(final, items)
+  const b = floorPad(final, items).bounce
   // How far the fall came down: its arc's top, under any ceiling, above the landing.
   const fell = Math.min(arcApex(f.v0), f.topN) - f.bottomN
   const h = launchHeight(b, fell, up !== null, JUMP_HEIGHT)

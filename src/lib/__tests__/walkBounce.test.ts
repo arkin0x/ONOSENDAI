@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import { fromPayload, newShard, toPayload, type ShardModel } from 'sno-core/shards'
 import type { Placed } from 'sno-core/parts'
-import { BOUNCE_MAX, bounceOf, launchHeight, readBounce } from '../walkBounce'
+import { BOUNCE_MAX, bounceOf, launchHeight, readBounce, readSpringboard, springboardOf } from '../walkBounce'
 import { firstHit, wallMesh, withConstrain, type Constrain } from '../walkConstrain'
 
 /** A square plate two units across in the model's XZ plane at y = -3: a floor under the origin. */
@@ -45,6 +45,29 @@ describe('the field', () => {
       expect((toPayload(m) as { bounce?: unknown }).bounce).toBe(b)
     }
     expect(bounceOf(newShard('Plain'))).toBe(0)
+  })
+})
+
+describe('the springboard field', () => {
+  it('only true counts', () => {
+    expect(readSpringboard(true)).toBe(true)
+    for (const v of [undefined, null, false, 'true', 1, 'yes', [], {}]) expect(readSpringboard(v)).toBe(false)
+  })
+
+  it('rides through sno-core beside bounce', () => {
+    const m = fromPayload({ ...toPayload(newShard('Board')), bounce: 12, springboard: true }, 'x')!
+    expect(springboardOf(m)).toBe(true)
+    expect((toPayload(m) as { springboard?: unknown }).springboard).toBe(true)
+    expect(springboardOf(newShard('Plain'))).toBe(false)
+  })
+
+  it("a face's springboard is its owner's, as its bounce is", () => {
+    const board = (s: ShardModel): ShardModel => ({ ...s, extra: { ...s.extra, springboard: true } })
+    const who = { bounce: 0 as number | 'reflect', springboard: false as boolean | undefined }
+    firstHit(wallMesh(board(plate(12)), []), [0, 0, 0], 1, -1, 10, 1e-6, undefined, who)
+    expect(who).toEqual({ bounce: 12, springboard: true })
+    firstHit(wallMesh(plate(12), []), [0, 0, 0], 1, -1, 10, 1e-6, undefined, who)
+    expect(who).toEqual({ bounce: 12, springboard: false })
   })
 })
 
@@ -106,6 +129,16 @@ describe('whose bounce a face has: the payload that owns it', () => {
   it('on an exact tie, the face with a bounce wins, whichever comes first', () => {
     expect(down(wallMesh(host(), [part(plate()), part(plate(5))]))).toEqual({ t: 3, bounce: 5 })
     expect(down(wallMesh(host(), [part(plate(5)), part(plate())]))).toEqual({ t: 3, bounce: 5 })
+  })
+
+  it("a placed pad flush with the shard's own floor wins despite float rounding, and a real gap still loses", () => {
+    const m = wallMesh(plate(), [part(plate(9))])
+    // The placed pad a rounding hair lower than the floor: flush.
+    m.placements[0].f[13] -= 1e-12
+    expect(down(m).bounce).toBe(9)
+    // A millionth of a unit lower: a real gap, the floor is nearer.
+    m.placements[0].f[13] -= 1e-6
+    expect(down(m)).toEqual({ t: 3, bounce: 0 })
   })
 
   it('a face that does not collide is not there to bounce on', () => {

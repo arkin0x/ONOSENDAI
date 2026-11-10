@@ -16,6 +16,24 @@ import { regionKeyAt } from '../shardCrypto'
 import type { NostrEvent } from '../events'
 import type { GameDef } from './types'
 import type { WorldShard } from './play'
+import type { Position } from '../space'
+
+/** A game's world as read (DECK-0002 §5.1, §2.2): its shards, and the entry point. */
+export interface World {
+  shards: WorldShard[]
+  /** Where a player appears by virtue of entering. */
+  entry: Position
+}
+
+/** The tag that marks the world item whose `C` is the entry point (DECK-0002 §2.2). */
+export const ENTRY_TAG = 'entry'
+
+/** The centre of the region, the entry point of a world that marks none: its base plus 2^(H-1) on each axis. */
+export function regionCentre(game: Pick<GameDef, 'region'>): Position {
+  const { base, height } = game.region
+  const half = height === 0 ? 0n : 1n << BigInt(height - 1)
+  return { x: base.x + half, y: base.y + half, z: base.z + half }
+}
 
 /** The highest region this reads a key for: the cap DECK-0002 §5.2 suggests, so no game can ask a phone for a key it cannot compute. */
 export const WORLD_MAX_HEIGHT = 8
@@ -40,21 +58,24 @@ async function worldBags(game: GameDef, lookupId: string): Promise<NostrEvent[]>
 }
 
 /**
- * The world's shards. A bag is addressable, so of the bags with the region's
+ * The world: its shards and its entry point. A bag is addressable, so of the bags with the region's
  * `d` only the game key's newest counts, as for any author's place (spec
  * §7.6). Every bag is checked here whatever its source: signed by the game
  * key, a valid signature, the region's `d`.
  */
-export async function loadWorld(game: GameDef): Promise<WorldShard[]> {
+export async function loadWorld(game: GameDef): Promise<World> {
   const { key, lookupId } = worldKey(game)
   const bags = (await worldBags(game, lookupId))
     .filter((e) => e.kind === HIDDEN_KIND && e.pubkey === game.pubkey && dOf(e) === lookupId && verifyEvent(e))
     .sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : 1))
   const newest = bags[0]
-  if (!newest) return []
+  if (!newest) return { shards: [], entry: regionCentre(game) }
   const { base, height, plane } = game.region
-  const items = await unbag(newest, key, resolveReference, { at: base, plane }, height)
-  return items
-    .filter((it) => it.type === 'shard' && it.shard && it.plane === plane)
-    .map((it) => ({ key: it.eventId, shard: it.shard!, at: it.at, height: it.height }))
+  const items = (await unbag(newest, key, resolveReference, { at: base, plane }, height)).filter((it) => it.plane === plane)
+  // The first item in the bag's list that carries the entry tag (unbag keeps the list's order); the region's centre when none does.
+  const marked = items.find((it) => it.inner?.tags.some((t) => t[0] === ENTRY_TAG))
+  return {
+    shards: items.filter((it) => it.type === 'shard' && it.shard).map((it) => ({ key: it.eventId, shard: it.shard!, at: it.at, height: it.height })),
+    entry: marked ? { ...marked.at } : regionCentre(game),
+  }
 }

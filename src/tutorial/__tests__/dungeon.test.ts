@@ -64,7 +64,7 @@ describe('the DUNGEON choice', () => {
     localStorage.setItem(GAMES_KEY, '1')
     expect(registerDungeonChoice()).toBe(true)
     expect(offered()).toEqual(['hyperspace', 'dungeon', 'agents'])
-    // The game comes on screen before its arrival is signed: the card goes then, not after.
+    // The game comes on screen before its world is read: the card goes then, not after.
     entry.next = () => {
       useGame.setState({ session: { entryId: 'e'.repeat(64) } as unknown as GameSession })
       return new Promise(() => {})

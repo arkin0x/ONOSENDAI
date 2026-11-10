@@ -13,7 +13,8 @@
  *   loaded only when the game is entered, so it costs the main bundle nothing.
  *
  * The real game drops in here and nowhere else: its pubkey and relay hint, its
- * region, where it starts, its pads, and `world: { kind: 'relays' }`. Entering
+ * region, its pads, and `world: { kind: 'relays' }`; the entry point comes
+ * with the world, as the `entry` item of its bag (DECK-0002 §2.2). Entering
  * a game publishes the player's own enter-virtual, teleports and exit-virtual
  * (DECK-0002 §2, §4, §7), which name this pubkey, so the switch that lets
  * anyone enter (lib/games/flag.ts) stays OFF in production until it is real.
@@ -41,18 +42,24 @@ const at = (x: number, y: number, z: number) => ({ x: BASE.x + BigInt(x), y: BAS
 /** The dev key that signed the fixture (placeholder; see above). */
 export const TUTORIAL_DEV_PUBKEY = '718c171d3e5a21c631dfd33159befec43f8687efb91bd42802f380c4afd37663'
 
+/**
+ * Where a player appears by virtue of entering (DECK-0002 §2.2): in chamber
+ * A's hall, far enough from its sealed end for the camera to stand inside.
+ * The world carries it, as a small floor marker with the `entry` tag that the
+ * generator places here; this constant is only what the generator writes.
+ */
+export const TUTORIAL_ENTRY = at(8, 18, 26)
+
 export const TUTORIAL_GAME: GameDef = {
   pubkey: TUTORIAL_DEV_PUBKEY,
   relayHint: '',
   name: 'TUTORIAL DUNGEON',
   region: { base: BASE, height: 6, plane: 1 },
-  // Chamber A, in its hall, far enough from the sealed end for the camera to stand inside.
-  start: at(8, 18, 26),
   pads: [
     // Chamber A's pad, by the shrine: to chamber B, which nothing joins to A.
     { at: at(8, 17, 8), to: at(40, 18, 26) },
-    // Chamber B's pad: back to the start.
-    { at: at(40, 17, 21), to: at(8, 18, 26) },
+    // Chamber B's pad: back to where you entered.
+    { at: at(40, 17, 21), to: TUTORIAL_ENTRY },
   ],
   world: { kind: 'fixture', load: async () => (await import('./tutorialDungeon.fixture.json')).default.events },
 }

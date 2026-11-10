@@ -149,7 +149,7 @@ function GameScreen(): JSX.Element | null {
   const session = useGame((s) => s.session)
   const busy = useGame((s) => s.busy)
   const message = useGame((s) => s.message)
-  // Facing into cyberspace -Z at first: the tutorial dungeon's hall runs that way from the start.
+  // Facing into cyberspace -Z at first: the tutorial dungeon's hall runs that way from its entry point.
   const look = useRef<Look>({ yaw: Math.PI, pitch: 0.35 })
   const [exitFailed, setExitFailed] = useState(false)
 
@@ -192,7 +192,7 @@ function GameScreen(): JSX.Element | null {
     setExitFailed(refused !== null)
   }
 
-  const status = busy === 'entering' ? 'ENTERING' : busy === 'arriving' ? 'ARRIVING' : busy === 'teleporting' ? 'TELEPORTING' : busy === 'exiting' ? 'LEAVING' : world === null ? 'LOADING THE WORLD' : null
+  const status = busy === 'entering' ? 'ENTERING' : busy === 'teleporting' ? 'TELEPORTING' : busy === 'exiting' ? 'LEAVING' : world === null || at === null ? 'LOADING THE WORLD' : null
 
   return (
     <div className="gameview" role="application" aria-label={`${game.name}: in a game`}>
@@ -209,7 +209,8 @@ function GameScreen(): JSX.Element | null {
         onPointerUp={() => { drag.current = null }}
         onPointerCancel={() => { drag.current = null }}
       >
-        <GameCanvas game={game} world={world} at={at} look={look} />
+        {/* You appear at the entry point once the world says where it is (DECK-0002 §2.2). */}
+        {at && <GameCanvas game={game} world={world} at={at} look={look} />}
       </div>
       <div className="gameview__bar">
         <span className="gameview__name">{game.name}</span>

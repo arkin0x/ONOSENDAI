@@ -11,7 +11,8 @@
  * The pieces are Maze Kit payloads (main), built by build-pieces.ts beside
  * them: a dead end and a hall sealed at its far end (chamber A), a small room
  * with every door sealed (chamber B), and the AeroCarnival two-gibson teleport
- * pad. Each is placed where TUTORIAL_DUNGEON_LAYOUT says, as a shard item in
+ * pad, and an entry marker (an original flat ring) carrying the `entry` tag at
+ * TUTORIAL_ENTRY (DECK-0002 §2.2). Each is placed where TUTORIAL_DUNGEON_LAYOUT says, as a shard item in
  * one bag sealed to the game's region with its key, and signed by the DEV key,
  * whose pubkey must be TUTORIAL_GAME's. It writes the file and sends nothing
  * anywhere: lib/relay is the offline relay in every test file.
@@ -21,13 +22,38 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
-import { fromPayload } from 'sno-core/shards'
+import { fromPayload, newShard, type ShardModel, type ShardVertex } from 'sno-core/shards'
 import { bagTemplate, shardInnerTemplate } from '../../hidden'
 import { hexToBytes } from '../../events'
-import { TUTORIAL_DUNGEON_LAYOUT, TUTORIAL_GAME } from '../tutorialGame'
+import { TUTORIAL_DUNGEON_LAYOUT, TUTORIAL_ENTRY, TUTORIAL_GAME } from '../tutorialGame'
+import { ENTRY_TAG } from '../world'
+import { withConstrain } from '../../walkConstrain'
 import { worldKey } from '../world'
 
 const asked = process.env.GEN_TUTORIAL_DUNGEON === '1'
+
+/**
+ * The entry marker (DECK-0002 §2.2): an original flat ring on the hall's
+ * floor, under the place a player appears on entering. Its item carries the
+ * `entry` tag, and its `C` is the entry point. Walls never stop at it.
+ */
+function entryMarker(): ShardModel {
+  const pink: [number, number, number] = [1, 0.48, 0.85]
+  const y = -1.9
+  const v = (x: number, z: number): ShardVertex => {
+    const at = [x, y, z].map((n) => { const p = Math.floor(n); return { p, t: Math.round((n - p) * 120) } })
+    return { p: [at[0].p, at[1].p, at[2].p], t: [at[0].t, at[1].t, at[2].t], c: pink }
+  }
+  // An outer and an inner diamond, eight triangles between them.
+  const outer = [v(1, 0), v(0, 1), v(-1, 0), v(0, -1)]
+  const inner = [v(0.5, 0), v(0, 0.5), v(-0.5, 0), v(0, -0.5)]
+  const faces: Array<[number, number, number]> = []
+  for (let i = 0; i < 4; i++) {
+    const j = (i + 1) % 4
+    faces.push([i, 4 + j, j], [i, 4 + i, 4 + j])
+  }
+  return withConstrain({ ...newShard('Tutorial dungeon: entry'), unit: 0, mode: 'solid', vertices: [...outer, ...inner], faces }, 'off')
+}
 
 describe('the placeholder tutorial dungeon (generator)', () => {
   it.skipIf(!asked)('signs the dungeon bag with the DEV key and writes the fixture', async () => {
@@ -43,6 +69,9 @@ describe('the placeholder tutorial dungeon (generator)', () => {
       if (!shard) throw new Error(`${piece} is not a shard`)
       return finalizeEvent(shardInnerTemplate(shard, at, plane, createdAt + i), sk)
     })
+    // The entry point, first in the list (DECK-0002 §2.2: the first item with the tag counts).
+    const entryTemplate = shardInnerTemplate(entryMarker(), TUTORIAL_ENTRY, plane, createdAt + 50)
+    entries.unshift(finalizeEvent({ ...entryTemplate, tags: [...entryTemplate.tags, [ENTRY_TAG]] }, sk))
     const { key, lookupId } = worldKey(TUTORIAL_GAME)
     const bag = finalizeEvent(await bagTemplate(entries, key, lookupId, TUTORIAL_GAME.region.height, createdAt + 100), sk)
     const out = join(__dirname, '..', 'tutorialDungeon.fixture.json')

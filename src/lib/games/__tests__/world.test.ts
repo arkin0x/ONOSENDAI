@@ -10,7 +10,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure
 import { newShard } from 'sno-core/shards'
 import { bagTemplate, shardInnerTemplate } from '../../hidden'
 import type { NostrEvent } from '../../events'
-import { loadWorld, worldKey } from '../world'
+import { ENTRY_TAG, loadWorld, regionCentre, worldKey } from '../world'
 import { TUTORIAL_GAME } from '../tutorialGame'
 import type { GameDef } from '../types'
 
@@ -19,10 +19,15 @@ const stranger = generateSecretKey()
 const at = { ...TUTORIAL_GAME.region.base, x: TUTORIAL_GAME.region.base.x + 3n }
 const shard = (name: string) => ({ ...newShard(name), mode: 'points' as const, unit: 0, vertices: [{ p: [0, 0, 0] as [number, number, number], c: [1, 0, 0] as [number, number, number] }], faces: [] })
 
-async function bag(sk: Uint8Array, name: string, createdAt: number, lookupId?: string): Promise<NostrEvent> {
+/** A shard item at `where`, with the entry tag when `entry`. */
+function item(sk: Uint8Array, name: string, createdAt: number, where = at, entry = false): NostrEvent {
+  const t = shardInnerTemplate(shard(name), where, 1, createdAt)
+  return finalizeEvent(entry ? { ...t, tags: [...t.tags, [ENTRY_TAG]] } : t, sk)
+}
+
+async function bag(sk: Uint8Array, name: string, createdAt: number, lookupId?: string, inners?: NostrEvent[]): Promise<NostrEvent> {
   const { key, lookupId: d } = worldKey(TUTORIAL_GAME)
-  const inner = finalizeEvent(shardInnerTemplate(shard(name), at, 1, createdAt), sk)
-  return finalizeEvent(await bagTemplate([inner], key, lookupId ?? d, 6, createdAt), sk)
+  return finalizeEvent(await bagTemplate(inners ?? [item(sk, name, createdAt)], key, lookupId ?? d, 6, createdAt), sk)
 }
 
 const gameOf = (events: NostrEvent[]): GameDef => ({ ...TUTORIAL_GAME, pubkey: getPublicKey(gameSk), world: { kind: 'fixture', load: async () => events } })
@@ -33,8 +38,8 @@ describe('loading a game world', () => {
     const newest = await bag(gameSk, 'newest', 200)
     const theirs = await bag(stranger, 'theirs', 300)
     const world = await loadWorld(gameOf([old, theirs, newest]))
-    expect(world.map((w) => w.shard.name)).toEqual(['newest'])
-    expect(world[0].at).toEqual(at)
+    expect(world.shards.map((w) => w.shard.name)).toEqual(['newest'])
+    expect(world.shards[0].at).toEqual(at)
   })
 
   it('drops a forged bag and a bag of another place', async () => {
@@ -43,10 +48,26 @@ describe('loading a game world', () => {
     const forged = { ...JSON.parse(JSON.stringify(await bag(gameSk, 'forged', 400))), sig: 'ab'.repeat(64) }
     const elsewhere = await bag(gameSk, 'elsewhere', 500, 'cd'.repeat(32))
     const world = await loadWorld(gameOf([forged, elsewhere, good]))
-    expect(world.map((w) => w.shard.name)).toEqual(['good'])
+    expect(world.shards.map((w) => w.shard.name)).toEqual(['good'])
   })
 
-  it('an empty source is an empty world', async () => {
-    expect(await loadWorld(gameOf([]))).toEqual([])
+  it('an empty source is an empty world, entered at the region\'s centre', async () => {
+    expect(await loadWorld(gameOf([]))).toEqual({ shards: [], entry: regionCentre(TUTORIAL_GAME) })
+    const b = TUTORIAL_GAME.region.base
+    expect(regionCentre(TUTORIAL_GAME)).toEqual({ x: b.x + 32n, y: b.y + 32n, z: b.z + 32n })
+  })
+
+  it('the entry point is the C of the first item with the entry tag; none marked, the region\'s centre (DECK-0002 §2.2)', async () => {
+    const p1 = { ...at, z: at.z + 5n }
+    const p2 = { ...at, z: at.z + 9n }
+    const marked = await bag(gameSk, 'x', 100, undefined, [item(gameSk, 'plain', 100), item(gameSk, 'first', 101, p1, true), item(gameSk, 'second', 102, p2, true)])
+    expect((await loadWorld(gameOf([marked]))).entry).toEqual(p1)
+    const unmarked = await bag(gameSk, 'plain', 100)
+    expect((await loadWorld(gameOf([unmarked]))).entry).toEqual(regionCentre(TUTORIAL_GAME))
+  })
+
+  it('the bundled placeholder marks its entry point at TUTORIAL_ENTRY', async () => {
+    const { TUTORIAL_ENTRY } = await import('../tutorialGame')
+    expect((await loadWorld(TUTORIAL_GAME)).entry).toEqual(TUTORIAL_ENTRY)
   })
 })

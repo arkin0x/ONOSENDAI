@@ -92,7 +92,11 @@ await shot('1-cyberspace-before')
 // ENTER GAME (Track A's entry point).
 const refused = await page.evaluate(() => window.__enterTutorialDungeon())
 if (refused) await fail(`entry refused: ${refused}`)
-if (!await waitFor(() => game('g.session && g.session.world !== null && g.busy === null'), 30_000)) await fail('the world never loaded')
+if (!await waitFor(() => game('g.session && g.session.world !== null && g.session.at !== null && g.busy === null'), 30_000)) await fail('the world never loaded')
+// Entering is the arrival (DECK-0002 §2.2): one event on the chain, and the player at the world's entry point.
+const entryX = await game('g.session.at.x.toString()')
+const afterEntry = await store('s.actions().slice(-1)[0].name')
+if (afterEntry !== 'enter-virtual') await fail(`entering signed more than the entry: the head is ${afterEntry}`)
 await sleep(2500)
 await shot('2-in-game-start')
 
@@ -101,8 +105,8 @@ for (let i = 0; i < 12; i++) { await page.keyboard.press('w'); await sleep(120) 
 await sleep(1200)
 await shot('3-in-game-hall')
 // Until the pad takes you: chamber B has a pad of its own, back to the start.
-for (let i = 0; i < 12 && !(await game('g.busy || g.session.at.x !== g.session.game.start.x')); i++) { await page.keyboard.press('w'); await sleep(120) }
-if (!await waitFor(() => game('g.busy === null && g.session && g.session.at.x !== g.session.game.start.x'), 15_000)) await fail(`the pad did not teleport: ${await game('g.message')} at ${await game('g.session && [g.session.at.x - g.session.game.region.base.x, g.session.at.y - g.session.game.region.base.y, g.session.at.z - g.session.game.region.base.z].join(",")')} busy=${await game('g.busy')}`)
+for (let i = 0; i < 12 && !(await game(`g.busy || g.session.at.x.toString() !== "${entryX}"`)); i++) { await page.keyboard.press('w'); await sleep(120) }
+if (!await waitFor(() => game(`g.busy === null && g.session && g.session.at.x.toString() !== "${entryX}"`), 15_000)) await fail(`the pad did not teleport: ${await game('g.message')} at ${await game('g.session && [g.session.at.x - g.session.game.region.base.x, g.session.at.y - g.session.game.region.base.y, g.session.at.z - g.session.game.region.base.z].join(",")')} busy=${await game('g.busy')}`)
 await sleep(2000)
 await shot('4-in-game-chamber-b')
 
@@ -123,6 +127,6 @@ console.log(`view restored exactly: ${before === after}`)
 if (before !== after) console.log(`before ${before}\nafter  ${after}`)
 console.log(JSON.stringify({ stats, errors: errors.slice(0, 5) }))
 await browser.close()
-const ok = before === after && !roles.broken && stats.eventsSent === 0 && roles.roles.slice(-4).join(',') === 'enter:enter-virtual,virtual:teleport,virtual:teleport,exit:exit-virtual'
+const ok = before === after && !roles.broken && stats.eventsSent === 0 && roles.roles.slice(-3).join(',') === 'enter:enter-virtual,virtual:teleport,exit:exit-virtual'
 console.log(ok ? 'PASS' : 'FAIL')
 process.exit(ok ? 0 : 1)

@@ -18,23 +18,22 @@
 
 import { clockHeight } from 'sno-core/seeds'
 import { describeDuration, expectedTries, nonceTagged, type MineTemplate } from '../lib/avatarMine'
-import { mineInWorker, type AvatarMiner, type MineProgress } from '../lib/avatarWorker'
+import { MineCancelled, mineInWorker, type AvatarMiner, type MineProgress } from '../lib/avatarWorker'
 import { publishMany, query, relaySet } from '../lib/relay'
 import { attributed } from '../lib/client'
 import type { EventTemplate, NostrEvent } from '../lib/events'
 import type { Plane } from 'cyberspace-core'
 import type { Position } from '../lib/space'
-import { dnaMatches, dnaTemplate, draftPrice, dnaTextRefusal, seedTemplate, type SeedDraft } from '../lib/seeds/plant'
+import { dnaMatches, dnaTemplate, draftPrice, dnaTextRefusal, readDnaText, seedTemplate, type SeedDraft } from '../lib/seeds/plant'
 import { checkDna, idbDnaCache } from '../lib/seeds/dnaStore'
 import { dnaResolver, refreshTrustedTip, trustedTip } from '../lib/seeds/seedSources'
 import { DNA_KIND } from '../lib/seeds/seedItem'
-import { tryParseDna } from 'sno-core/seeds'
 
-/** The name a seed draft goes by: its DNA's, or its title. */
+/** The name a seed draft goes by: its DNA's, or its title. Parsed once per text (plant.ts readDnaText). */
 export function seedDraftName(draft: SeedDraft): string {
   if (draft.title.trim()) return draft.title.trim()
-  const read = tryParseDna(draft.text)
-  return read.ok ? read.dna.name : 'seed'
+  const read = readDnaText(draft.text)
+  return read.ok ? read.name : 'seed'
 }
 
 /** The miner: the avatar's NIP-13 workers. Replaced in tests, where there is no Worker. */
@@ -82,7 +81,12 @@ async function publishTo(ev: NostrEvent): Promise<string | null> {
 /** The DNA this seed plants, on the relays when live, and the relay hint its `dna` tag names. */
 export async function dnaFor(draft: SeedDraft, owner: string, live: boolean, createdAt: number, sign: (t: EventTemplate) => Promise<NostrEvent>): Promise<{ event: NostrEvent; hint: string }> {
   const key = keyOf(owner, draft)
-  let ev: NostrEvent | undefined = draft.dna && dnaMatches(draft.dna, draft.text, draft.caps) ? draft.dna : kept.get(key)
+  let ev: NostrEvent | undefined = kept.get(key)
+  // One of yours this device signed before, LOCAL or not, kept in IndexedDB: no second copy after a reload.
+  if (!ev) {
+    const stored = await idbDnaCache.all().catch(() => [] as NostrEvent[])
+    ev = stored.filter((e) => e.pubkey === owner && dnaMatches(e, draft.text, draft.caps) && checkDna(e, e.id).state === 'ok').sort((a, b) => a.created_at - b.created_at)[0]
+  }
   if (!ev && live) {
     // One of yours already out there with this text and these caps: no second copy.
     const yours = await query({ kinds: [DNA_KIND], authors: [owner], limit: 200 }).catch(() => [] as NostrEvent[])
@@ -109,6 +113,8 @@ export interface PlantContext {
   owner: string
   live: boolean
   sign: (t: EventTemplate) => Promise<NostrEvent>
+  /** Whether this planting is still the deploy lined up: once another replaces it, its mining stops. */
+  current: () => boolean
   note: (n: string) => void
   mining: (on: boolean) => void
 }
@@ -124,16 +130,23 @@ export async function plantedTemplate(pending: { type: 'seed'; seed: SeedDraft }
   if (refusal || price === null) throw new Error(refusal ?? 'Its caps are out of range.')
   o.note('Getting the DNA ready')
   const dna = await dnaFor(draft, o.owner, o.live, o.createdAt, o.sign)
-  // The writer's clock block (§4.2): the tip this client trusts, NTH's newest verified anchor, minus 6.
-  const tip = trustedTip() ?? await refreshTrustedTip()
+  // The writer's clock block (§4.2): the tip this client trusts, NTH's newest verified anchor, asked
+  // for now (a tab left idle may hold an old one), minus 6.
+  await refreshTrustedTip(null, Date.now(), true)
+  const tip = trustedTip()
   if (tip === null) throw new Error('No block yet to plant at. Try again in a moment.')
+  if (!o.current()) throw new MineCancelled()
   // Attributed before it is mined, as an avatar is (lib/client.ts): the signer adds no client tag to a
   // template that names one, so the work, done over every tag, still holds on what it signs.
   const template = attributed(seedTemplate({ dnaId: dna.event.id, relayHint: dna.hint, planted: clockHeight(tip), scale: draft.scale, at: o.at, plane: o.plane, title: draft.title, createdAt: o.createdAt }))
   o.note('Mining the seed')
   o.mining(true)
   const mineable: MineTemplate = { pubkey: o.owner, created_at: template.created_at, kind: template.kind, tags: template.tags, content: template.content }
-  const job = miner(mineable, price, (p) => o.note(miningNote(p, price)))
+  const job = miner(mineable, price, (p) => {
+    // Replaced by another deploy (BUILD stays up while it mines): stop, and say nothing on the new one's bar.
+    if (!o.current()) { job.cancel(); return }
+    o.note(miningNote(p, price))
+  })
   mining = { pending, cancel: job.cancel }
   try {
     const found = await job.done

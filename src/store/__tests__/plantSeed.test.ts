@@ -7,6 +7,7 @@
  * nothing signed or placed. The relays are mocks; the miner runs inline.
  */
 
+import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import anchor975256 from '../../lib/__tests__/vectors/nth-anchor-975256.json'
 
@@ -112,6 +113,44 @@ describe('planting a seed', () => {
     const seeds = useShards.getState().mine.filter((d) => d.type === 'seed').map((d) => seedItemOf(d.inner)!)
     expect(seeds).toHaveLength(2)
     expect(seeds[1].dnaId).toBe(dna.id)
+  })
+
+  it('LOCAL after a reload: the DNA signed before is found in IndexedDB and named again, not signed twice', async () => {
+    useShards.getState().startDeploySeed(draft)
+    await useShards.getState().deploy()
+    const first = seedItemOf(useShards.getState().mine.find((d) => d.type === 'seed')!.inner)!
+    // A reload forgets the session's DNAs; IndexedDB keeps them.
+    forgetKeptDnas()
+    await new Promise((r) => setTimeout(r, 50))
+    useShards.setState({ pending: { type: 'seed', seed: draft }, deployStatus: 'idle' })
+    useCyberspace.setState({ cursor: { ...useCyberspace.getState().cursor, x: useCyberspace.getState().cursor.x + 9000n } })
+    await useShards.getState().deploy()
+    const seeds = useShards.getState().mine.filter((d) => d.type === 'seed').map((d) => seedItemOf(d.inner)!)
+    expect(seeds).toHaveLength(2)
+    expect(seeds[1].dnaId).toBe(first.dnaId)
+  })
+
+  it('another deploy lined up while it mines stops the mining, and its bar is left alone', async () => {
+    let cancelled = false
+    let tick: ReturnType<typeof setInterval> | undefined
+    const slow: AvatarMiner = (_t, _target, onProgress) => {
+      let rejectIt: (e: Error) => void = () => {}
+      const done = new Promise<never>((_, rej) => { rejectIt = rej })
+      let tries = 0
+      tick = setInterval(() => { tries += 1000; onProgress({ tries, elapsedMs: tries }) }, 5)
+      return { done, cancel: () => { cancelled = true; clearInterval(tick); rejectIt(new MineCancelled()) } }
+    }
+    setSeedMiner(slow)
+    useShards.getState().startDeploySeed(draft)
+    const going = useShards.getState().deploy()
+    await vi.waitFor(() => expect(useShards.getState().deployMining).toBe(true))
+    useShards.getState().startDeployMessage('something else')
+    await going
+    expect(cancelled).toBe(true)
+    expect(useShards.getState().pending?.type).toBe('message')
+    expect(useShards.getState().deployNote ?? '').not.toMatch(/Mining/)
+    expect(useShards.getState().mine.some((d) => d.type === 'seed')).toBe(false)
+    clearInterval(tick)
   })
 
   it('CANCEL while mining: nothing signed, nothing placed, nothing said to have failed', async () => {

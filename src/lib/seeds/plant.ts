@@ -28,8 +28,6 @@ export interface SeedDraft {
   scale: number
   /** The planter's name for this planting, or empty. */
   title: string
-  /** The DNA event, once it is signed (or found on relays): reused for every later planting of the same text. */
-  dna?: NostrEvent
 }
 
 /** The DNA's price in bits, or null when its caps are out of range. */
@@ -37,10 +35,27 @@ export function draftPrice(draft: Pick<SeedDraft, 'caps'>): number | null {
   return capsPrice(draft.caps)
 }
 
+/** A DNA text read: its name, or why it is refused. */
+export type DnaTextRead = { ok: true; name: string } | { ok: false; error: string }
+
+/** The last few texts read: the deploy bar and its ghost ask on every cursor move, the composer on every slider move. */
+const readCache = new Map<string, DnaTextRead>()
+
+/** Read a DNA's text once (sno-core tryParseDna), and answer again from memory. */
+export function readDnaText(text: string): DnaTextRead {
+  const hit = readCache.get(text)
+  if (hit) return hit
+  const read = tryParseDna(text)
+  const out: DnaTextRead = read.ok ? { ok: true, name: read.dna.name } : { ok: false, error: read.error }
+  readCache.set(text, out)
+  while (readCache.size > 8) readCache.delete(readCache.keys().next().value as string)
+  return out
+}
+
 /** Why a pasted DNA cannot be planted, in the engine's words, or null when it can. */
 export function dnaTextRefusal(text: string): string | null {
   if (!text.trim()) return 'Paste or pick a DNA.'
-  const read = tryParseDna(text)
+  const read = readDnaText(text)
   return read.ok ? null : read.error
 }
 
@@ -54,10 +69,10 @@ function sameCaps(a: Caps, b: Caps): boolean {
  * a DNA published on its own is for anyone to plant.
  */
 export function dnaTemplate(text: string, caps: Caps, createdAt: number): EventTemplate {
-  const name = tryParseDna(text)
+  const name = readDnaText(text)
   const tags: string[][] = []
   if (!sameCaps(caps, BASE_CAPS)) tags.push(['caps', String(caps.vertices), String(caps.symbols), String(caps.generations)])
-  tags.push(['alt', `Seeds DNA${name.ok ? `: ${name.dna.name}` : ''} (DECK-0008). Plant it in cyberspace with ONOSENDAI.`])
+  tags.push(['alt', `Seeds DNA${name.ok ? `: ${name.name}` : ''} (DECK-0008). Plant it in cyberspace with ONOSENDAI.`])
   return { kind: DNA_KIND, created_at: createdAt, tags, content: text }
 }
 
@@ -78,7 +93,8 @@ export function seedTemplate(o: { dnaId: string; relayHint: string; planted: num
   const tags: string[][] = [['dna', o.dnaId, o.relayHint], ['planted', String(o.planted)]]
   if (o.scale !== 0) tags.push(['scale', String(o.scale)])
   tags.push(['C', positionHex(o.at, o.plane)])
-  const title = o.title.trim().replace(/\s+/g, ' ').slice(0, 64)
+  // At most 64 characters (§8.2), cut by code point so no pair is split.
+  const title = Array.from(o.title.trim().replace(/\s+/g, ' ')).slice(0, 64).join('')
   if (title) tags.push(['title', title])
   tags.push(['-'])
   return { kind: SEED_KIND, created_at: o.createdAt, tags, content: '' }

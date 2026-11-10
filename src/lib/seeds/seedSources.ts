@@ -121,11 +121,12 @@ export function trustedTip(): number | null {
 
 /**
  * Ask NTH for its newest anchors, unless asked within the last few seconds.
+ * `force` asks even when the tip is recent (planting states the clock block now).
  * `hint` is the hyperspace line's own tip (any key's anchors): when it is
  * higher than the trusted one, a block came and NTH is asked now.
  */
-export function refreshTrustedTip(hint: number | null = null, now = Date.now()): Promise<number | null> {
-  const stale = now - tipAt > TIP_REFRESH_MS
+export function refreshTrustedTip(hint: number | null = null, now = Date.now(), force = false): Promise<number | null> {
+  const stale = force || now - tipAt > TIP_REFRESH_MS
   const behind = hint !== null && (trusted === null || hint > trusted)
   if (tipJob || (!stale && !behind) || now - tipAt < 5_000) return tipJob ?? Promise.resolve(trusted)
   tipAt = now

@@ -11,7 +11,7 @@ import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import { fromPayload } from 'sno-core/shards'
 import { BASE_CAPS, growBloom, parseDna, tryParseDna, workOk } from 'sno-core/seeds'
 import { STARTER_CAPS, STARTER_DNAS } from '../seeds/starterDnas'
-import { dnaMatches, dnaTemplate, dnaTextRefusal, draftPrice, miningSeconds, previewHash, previewRequest, seedTemplate, seedWorkHolds, PREVIEW_DAYS } from '../seeds/plant'
+import { dnaMatches, dnaTemplate, dnaTextRefusal, readDnaText, draftPrice, miningSeconds, previewHash, previewRequest, seedTemplate, seedWorkHolds, PREVIEW_DAYS } from '../seeds/plant'
 import { mineChunk, nonceTagged } from '../avatarMine'
 import { seedItemOf } from '../seeds/seedItem'
 import { GrowCache, handleGrow } from '../seeds/growJob'
@@ -66,6 +66,13 @@ describe('the DNA event (§8.1)', () => {
     expect(checkDna(signed, signed.id)).toMatchObject({ state: 'ok', price: 21, name: 'fiddlehead' })
     expect(dnaMatches(signed, STARTER_DNAS[0].text, STARTER_CAPS)).toBe(true)
     expect(dnaMatches(signed, STARTER_DNAS[0].text, BASE_CAPS)).toBe(false)
+  })
+
+  it('a text is read once, and a title is cut by code point, never through a pair', () => {
+    expect(readDnaText(STARTER_DNAS[3].text)).toBe(readDnaText(STARTER_DNAS[3].text))
+    expect(readDnaText(STARTER_DNAS[3].text)).toEqual({ ok: true, name: 'willow' })
+    const long = seedTemplate({ dnaId: 'ab'.repeat(32), relayHint: '', planted: 1, scale: 0, at, plane: 0, title: `${'a'.repeat(63)}😀😀`, createdAt: 1 })
+    expect(long.tags.find((t) => t[0] === 'title')?.[1]).toBe(`${'a'.repeat(63)}😀`)
   })
 
   it('a pasted text is checked with the engine\'s own words', () => {

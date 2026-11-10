@@ -2934,6 +2934,8 @@ export const useShards = create<ShardsState>((set, get) => {
   const freshDeploy = {
     deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0] as Turns, deployFollow: false, deployConstrain: CONSTRAIN_DEFAULT,
     deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle' as const, deployError: null,
+    // A seed still mining for the deploy this replaces stops itself (plantSeed `current`); nothing of it stays on this bar.
+    deployNote: null, deployMining: false,
   }
 
   /**
@@ -3575,10 +3577,15 @@ export const useShards = create<ShardsState>((set, get) => {
       // A seed planted while LOCAL kept its DNA here: it goes out before the
       // bag, or no finder could grow the seed (DECK-0008 §8.2). A DNA this
       // device does not have was on the relays already.
+      const sentDnas = new Set<string>()
       for (const d of items) {
-        const dnaId = d.type === 'seed' && d.inner ? seedItemOf(d.inner)?.dnaId : undefined
-        if (!dnaId) continue
+        const seed = d.type === 'seed' && d.inner ? seedItemOf(d.inner) : null
+        const dnaId = seed?.dnaId
+        // Each DNA once; one another author planted from is theirs to publish, and was public when planted.
+        if (!dnaId || sentDnas.has(dnaId)) continue
+        sentDnas.add(dnaId)
         const v = await dnaResolver.resolve(dnaId)
+        if (v.state === 'ok' && v.author !== owner) continue
         if (v.state !== 'ok' && v.state !== 'mixed') continue
         const took = await republish(v.event)
         if (!took) {
@@ -4572,7 +4579,7 @@ export const useShards = create<ShardsState>((set, get) => {
         if (movedItem) innerTemplate = movedTemplate(movedItem.inner, at, plane, movedAt, { names: ['fade'], tags: audio.fade !== undefined ? [['fade', String(Math.max(0, Math.floor(audio.fade)))]] : [] })
         else if (!pending.reseal) innerTemplate = audioInnerTemplate(audio, at, plane, createdAt)
       } else if (pending.type === 'seed') {
-        // Its template is made, and its work mined, inside the try below, once nothing else can refuse the hide.
+        // Its template is made, and its work mined, inside the try below, once its key is in hand.
         if (dnaTextRefusal(pending.seed.text) !== null || draftPrice(pending.seed) === null) return
       } else {
         text = movedItem?.text ?? pending.text.trim()
@@ -4660,18 +4667,6 @@ export const useShards = create<ShardsState>((set, get) => {
           audio = { ...audio, ...(await resealCopy(audio, (t) => signAsOwner(t, AUDIO_SIGN_PATIENCE_MS), pending.server)) }
           innerTemplate = audioInnerTemplate(audio, at, plane, createdAt)
         }
-        // A seed: its DNA on the relays first when it is not there yet (free;
-        // LOCAL keeps it here), then the seed at the clock block, its work
-        // mined in workers at its DNA's price (DECK-0008 §7, §8.2). CANCEL
-        // still stops it while it mines: nothing is signed until the work is done.
-        let seedPrice: number | null = null
-        if (pending.type === 'seed') {
-          seedPrice = draftPrice(pending.seed)
-          const planted = await plantedTemplate(pending, { at, plane, createdAt, owner, live: cs.live, sign: signAsOwner, note: (n) => set({ deployNote: n }), mining: (on) => set({ deployMining: on }) })
-          if (get().pending !== pending) return
-          innerTemplate = planted
-          still()
-        }
         let rk: { key: Uint8Array; lookupId: string }
         if (heldRoom) {
           rk = heldRoom
@@ -4696,6 +4691,21 @@ export const useShards = create<ShardsState>((set, get) => {
         if (into?.secret && !heldRoom) {
           const key = roomKey(rk.key, hexToBytes(into.secret))
           rk = { key, lookupId: roomLookupIn(key, plane) }
+        }
+        // A seed: its DNA on the relays first when it is not there yet (free;
+        // LOCAL keeps it here), then the seed at the clock block, its work
+        // mined in workers at its DNA's price (DECK-0008 §7, §8.2). After the
+        // key, so a key that cannot be had wastes no work. CANCEL still stops
+        // it while it mines: nothing is signed until the work is done, and a
+        // deploy lined up in its place stops it too (plantSeed `current`).
+        let seedPrice: number | null = null
+        if (pending.type === 'seed') {
+          seedPrice = draftPrice(pending.seed)
+          const current = (): boolean => get().pending === pending
+          const planted = await plantedTemplate(pending, { at, plane, createdAt, owner, live: cs.live, sign: signAsOwner, current, note: (n) => { if (current()) set({ deployNote: n }) }, mining: (on) => { if (current()) set({ deployMining: on }) } })
+          if (!current()) return
+          innerTemplate = planted
+          still()
         }
         set({ deployNote: 'Sealing and publishing' })
         // A move of something already on the relays goes to the relays, LOCAL

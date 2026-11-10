@@ -82,9 +82,9 @@ describe('how a planted bloom stands (DECK-0008 §5.7)', () => {
     await useShards.getState().deploy()
     expect(useShards.getState().deployError).toBeNull()
     const first = useShards.getState().mine.find((d) => d.type === 'seed')!
-    // The bar turns in this client's model frame (Z negated): a quarter about X runs the other way in the tag, about Z the same.
-    expect(first.inner.tags.filter((t) => ['turn', 'up', 'spin'].includes(t[0]))).toEqual([['turn', '3', '0', '2'], ['up'], ['spin', '45']])
-    expect(seedItemOf(first.inner)!.stand).toEqual({ turn: [3, 0, 2], up: true, spin: 45 })
+    // TURN's quarter turns go out as they are: the spec turns in Cyberspace's axes, where the bar turns a shard.
+    expect(first.inner.tags.filter((t) => ['turn', 'up', 'spin'].includes(t[0]))).toEqual([['turn', '1', '0', '2'], ['up'], ['spin', '45']])
+    expect(seedItemOf(first.inner)!.stand).toEqual({ turn: [1, 0, 2], up: true, spin: 45 })
     expect(workOk(first.inner, 16)).toBe(true)
     // In ideaspace there is no Earth: the turn goes out, up and spin do not.
     useCyberspace.setState({ plane: 1, anchorPlane: 1, cursor: { ...useCyberspace.getState().cursor, x: useCyberspace.getState().cursor.x + 7000n } })
@@ -92,7 +92,17 @@ describe('how a planted bloom stands (DECK-0008 §5.7)', () => {
     useShards.setState({ deployTurn: [0, 1, 0], deployUp: true, deploySpin: 45 })
     await useShards.getState().deploy()
     const second = useShards.getState().mine.filter((d) => d.type === 'seed').at(-1)!
-    expect(seedItemOf(second.inner)!.stand).toEqual({ turn: [0, 3, 0], up: false, spin: 0 })
+    expect(seedItemOf(second.inner)!.stand).toEqual({ turn: [0, 1, 0], up: false, spin: 0 })
+  })
+
+  it('SNAP TO EARTH stays on when the height changes (a seed\'s snap does not wait for height 27)', () => {
+    useCyberspace.setState({ plane: 0, anchorPlane: 0, focus: null })
+    useShards.getState().startDeploySeed(draft)
+    useShards.getState().setDeployUp(true)
+    useShards.getState().setDeployHeight(9)
+    useShards.getState().setDeployHeight(5)
+    expect(useShards.getState().deployUp).toBe(true)
+    useShards.getState().cancelDeploy()
   })
 })
 

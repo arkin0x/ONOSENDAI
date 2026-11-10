@@ -11,7 +11,7 @@
  * point each frame, as the ghost does.
  */
 
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { BufferGeometry, Float32BufferAttribute, type Group } from 'three'
 import type { V3 } from '../lib/pose'
@@ -38,6 +38,8 @@ export function SeedArrows({ follow, up, front, length }: { follow: () => [numbe
     g.setAttribute('position', new Float32BufferAttribute([...arrowSegments(up, length), ...arrowSegments(front, length)], 3))
     return g
   }, [up, front, length])
+  // FINE ROTATION following the camera makes a new one each degree: the old goes when it is replaced.
+  useEffect(() => () => geometry.dispose(), [geometry])
   useFrame(() => {
     const p = follow()
     group.current?.position.set(p[0], p[1], p[2])

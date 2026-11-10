@@ -2,16 +2,17 @@
  * seedsOrientation.test.ts: how a bloom stands (DECK-0008 §5.7,
  * arkin0x/cyberspace#98; owner ruling 2026-11-10). The tags read as the
  * spec's vectors read them; they round-trip through the seed event; the
- * reader turns the bloom exactly as the spec turns its points (in the
- * payload's frame, X then Y then Z), and stands it on Earth only in
- * dataspace; the arrows point where the drawn bloom's +Y and +Z go.
+ * reader turns the bloom exactly as the spec turns its points (placed into
+ * Cyberspace's axes, Z negated, then X, Y and Z), and stands it on Earth only
+ * in dataspace; the arrows point where the drawn bloom's +Y and +Z go.
  */
 
 import { describe, expect, it } from 'vitest'
 import { ticksOf, toRender, posed } from 'sno-core/shards'
 import { ORIGINAL_CAPS, ORIGINAL_DNAS } from '../seeds/originalDnas'
 import { seedItemOf, standOf, UPRIGHT } from '../seeds/seedItem'
-import { modelTurnsOf, seedSnapOffered, standArrows, standBloom, standTags } from '../seeds/orientation'
+import { seedSnapOffered, standArrows, standBloom, standTags } from '../seeds/orientation'
+import { turnShard } from '../turn'
 import { previewRequest, seedTemplate } from '../seeds/plant'
 import { GrowCache, handleGrow } from '../seeds/growJob'
 import { bloomShard } from '../seeds/bloomShard'
@@ -38,9 +39,10 @@ const SPEC_TAGS: Array<[string[][], { turn: number[]; up: boolean; spin: number 
   [[['spin', '90.0']], null],
   [[['spin']], null],
   [[['turn', '2', '2', '2'], ['turn', 'x', 'y', 'z']], { turn: [2, 2, 2], up: false, spin: 0 }],
+  [[['spin', '90', 'x']], null],
 ]
 
-/** The spec's quarter turns, in the payload's frame (§5.7 step 2). */
+/** The spec's quarter turns, in Cyberspace's axes (§5.7 step 3). */
 const QUARTER = [([x, y, z]: number[]) => [x, -z, y], ([x, y, z]: number[]) => [z, y, -x], ([x, y, z]: number[]) => [-y, x, z]]
 const specTurn = (p: number[], turn: number[]): number[] => {
   let q = p
@@ -81,15 +83,15 @@ describe('the reader', () => {
   })()
   const plain = bloomShard(grown, 'oak', 0, 'b')
 
-  it('turns the bloom as the spec turns its points, for every set of quarter turns', () => {
+  it('turns the bloom as the spec turns its points: into Cyberspace\'s axes, then X, Y and Z', () => {
     for (const turn of [[1, 0, 0], [0, 1, 0], [0, 0, 1], [2, 0, 0], [1, 2, 3], [3, 3, 3], [0, 3, 2]] as Array<[number, number, number]>) {
       const p = grown.positions
-      const turnedPositions = new Int32Array(p.length)
-      for (let i = 0; i < p.length; i += 3) turnedPositions.set(specTurn([p[i], p[i + 1], p[i + 2]], turn), i)
-      const spec = bloomShard({ ...grown, positions: turnedPositions }, 'oak', 0, 'b')
+      const spec: number[][] = []
+      // §5.7 step 2, the payload's Z negated; step 3, the quarter turns.
+      for (let i = 0; i < p.length; i += 3) spec.push(specTurn([p[i], p[i + 1], 0 - p[i + 2]], turn).map((n) => n || 0))
       const ours = standBloom(plain, { turn, up: false, spin: 0 }, 1)
-      expect(ours.vertices.map((v) => ticksOf(v)), turn.join('')).toEqual(spec.vertices.map((v) => ticksOf(v)))
-      expect(ours.faces).toEqual(spec.faces)
+      expect(ours.vertices.map((v) => ticksOf(v)), turn.join('')).toEqual(spec)
+      expect(ours.faces).toEqual(plain.faces)
     }
   })
 
@@ -105,9 +107,9 @@ describe('the reader', () => {
     expect(seedSnapOffered(1)).toBe(false)
   })
 
-  it('the payload frame\'s turns and this client\'s are each other\'s inverse about X and Y, the same about Z', () => {
-    expect(modelTurnsOf([1, 1, 1])).toEqual([3, 3, 1])
-    expect(modelTurnsOf(modelTurnsOf([1, 2, 3]))).toEqual([1, 2, 3])
+  it('the tag\'s turns are TURN\'s as the bar sets them: a seed turns exactly as a shard does', () => {
+    const shard = { ...plain, id: 's' }
+    expect(standBloom(shard, { turn: [1, 2, 3], up: false, spin: 0 }, 1).vertices).toEqual(turnShard(shard, [1, 2, 3]).vertices)
   })
 })
 
@@ -121,7 +123,7 @@ describe('the arrows', () => {
       // A unit point on the bloom's own +Y and +Z, turned as the shard is, posed and drawn as ShardMesh draws it.
       const drawn = (d: [number, number, number]): number[] => {
         const shard = { id: 'x', name: 'x', unit: 0, extent: 8, mode: 'solid' as const, vertices: [{ p: d, c: [1, 1, 1] as [number, number, number] }], faces: [], up: false, spin: 0, updatedAt: 0 }
-        const t = standBloom(shard, { turn: modelTurnsOf(turns), up: false, spin: 0 }, 1).vertices[0]
+        const t = standBloom(shard, { turn: turns, up: false, spin: 0 }, 1).vertices[0]
         return toRender(posed(ticksOf(t), pose))
       }
       expect(up.map((n) => Math.round(n * 1e9))).toEqual(drawn([0, 1, 0]).map((n) => Math.round(n * 1e9)))

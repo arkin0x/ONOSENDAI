@@ -84,7 +84,8 @@ export async function dnaFor(draft: SeedDraft, owner: string, live: boolean, cre
   if (draft.dnaId) {
     const v = await dnaResolver.resolve(draft.dnaId)
     if (v.state !== 'ok' || !dnaMatches(v.event, draft.text, draft.caps)) throw new Error('The original DNA is not on your relays yet. Try again in a moment.')
-    return { event: v.event, hint: relaySet()[0] ?? '' }
+    // No relay named that this client has not seen take it: the hint MAY be empty (§8.2).
+    return { event: v.event, hint: '' }
   }
   const key = keyOf(owner, draft)
   let ev: NostrEvent | undefined = kept.get(key)
@@ -105,7 +106,8 @@ export async function dnaFor(draft: SeedDraft, owner: string, live: boolean, cre
   void idbDnaCache.save(ev)
   if (!live) return { event: ev, hint: '' }
   const there = await query({ ids: [ev.id] }).catch(() => [] as NostrEvent[])
-  if (there.some((e) => e.id === ev!.id)) return { event: ev, hint: relaySet()[0] ?? '' }
+  // Already out there, on some relay of yours; which one is not known, so no hint (§8.2 lets it be empty).
+  if (there.some((e) => e.id === ev!.id)) return { event: ev, hint: '' }
   const took = await publishTo(ev)
   if (!took) throw new Error('No relay took the DNA. Try again when one is reachable.')
   return { event: ev, hint: took }

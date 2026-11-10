@@ -53,7 +53,7 @@ export function standOf(tags: readonly (readonly string[])[]): SeedStand | null 
   }
   let spin = 0
   if (s) {
-    if (typeof s[1] !== 'string' || !DECIMAL.test(s[1]) || Number(s[1]) > 359) return null
+    if (s.length !== 2 || typeof s[1] !== 'string' || !DECIMAL.test(s[1]) || Number(s[1]) > 359) return null
     spin = Number(s[1])
   }
   const up = first('up') !== undefined
@@ -96,7 +96,8 @@ export function seedItemOf(ev: SeedEventLike): SeedItem | null {
   const read = readSeed({ id: ev.id, tags, pubkey: ev.pubkey, created_at: ev.created_at, kind: ev.kind, content: ev.content })
   if (!read.ok) return null
   // A malformed turn or spin makes it a seed this client cannot read (§5.7), skipped like any other malformed tag.
-  const stand = standOf(tags)
+  // Read from the event's own tags: a turn or spin holding anything but a decimal string is malformed, not absent.
+  const stand = standOf(ev.tags)
   if (!stand) return null
   return { ...read.seed, id: ev.id, planter: ev.pubkey, createdAt: ev.created_at, tags, stand }
 }

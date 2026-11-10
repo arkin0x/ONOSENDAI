@@ -11,11 +11,12 @@
  * shard's (TURN, SNAP TO EARTH, FINE ROTATION; DECK-0003 §1.7 `up` and
  * `spin`), and so are the controls and the store's deploy fields.
  *
- * Frames: the tag's turns are in the payload's frame. This client's model
- * frame is the payload's with Z negated (sno-core fromPayload's flipZ), and
- * lib/turn.ts turns in the model frame, so a quarter turn about X or Y runs
- * the other way there and one about Z the same way (modelTurnsOf). A test
- * holds the two equal on a real bloom.
+ * Frames: the spec turns and stands a bloom in Cyberspace's axes, after the
+ * payload's Z is negated as DECK-0003 §2 places every object. That is this
+ * client's model frame (sno-core fromPayload's flipZ), where lib/turn.ts
+ * turns every shard and pose.ts stands it, so the tag's turns are the deploy
+ * bar's TURN as it is, and the front is model +Z, which SPIN's bearing
+ * measures. A test holds the reader to the spec's maps on a real bloom.
  */
 
 import type { Plane } from 'cyberspace-core'
@@ -35,12 +36,6 @@ export function standTags(stand: SeedStand, plane: Plane): string[][] {
     if (stand.spin !== 0) out.push(['spin', String(stand.spin)])
   }
   return out
-}
-
-/** Turns in the payload's frame (the tag) as lib/turn.ts's model-frame turns; its own inverse, so it maps back as well. */
-export function modelTurnsOf(turn: Turns): Turns {
-  const m = (n: number): number => ((n % 4) + 4) % 4
-  return [m(4 - m(turn[0])), m(4 - m(turn[1])), m(turn[2])]
 }
 
 /**
@@ -68,7 +63,7 @@ const stood = new WeakMap<ShardModel, Map<string, ShardModel>>()
  */
 export function standBloom(shard: ShardModel, stand: SeedStand, plane: Plane): ShardModel {
   const up = standsOnEarth(stand, plane)
-  const turns = modelTurnsOf(stand.turn)
+  const turns: Turns = [stand.turn[0], stand.turn[1], stand.turn[2]]
   if (!up && turns.every((n) => n === 0)) return shard
   const key = `${turns.join('.')}|${up ? stand.spin : '-'}`
   let byKey = stood.get(shard)
@@ -82,13 +77,13 @@ export function standBloom(shard: ShardModel, stand: SeedStand, plane: Plane): S
 
 /**
  * The bloom's up (+Y) and front (+Z) as the scene draws them: turned by the
- * deploy bar's model-frame turns, through the pose the bloom will stand in
+ * deploy bar's TURN, through the pose the bloom will stand in
  * (pose.ts placedPose), then into render axes as every shard's points go
  * (sno-core toRender: Z negated). Unit length.
  */
-export function standArrows(modelTurns: Turns, pose: Pose): { up: V3; front: V3 } {
+export function standArrows(turns: Turns, pose: Pose): { up: V3; front: V3 } {
   const render = (d: V3): V3 => {
-    const p = applyPose(pose, turnDirection(d, modelTurns))
+    const p = applyPose(pose, turnDirection(d, turns))
     return [p[0], p[1], 0 - p[2]]
   }
   return { up: render([0, 1, 0]), front: render([0, 0, 1]) }

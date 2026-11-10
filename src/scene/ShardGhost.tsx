@@ -123,9 +123,10 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // Ride the live cursor, like the cursor cube does, rather than a React commit.
   useFrame((state) => {
     const g = group.current
-    if (!g) return
+    // A seed has no mesh group (its ghost is its label and arrows), but its FINE ROTATION follows the camera all the same.
+    if (!g && pending?.type !== 'seed') return
     const b = landingAt()
-    g.position.set(b[0], b[1], b[2])
+    g?.position.set(b[0], b[1], b[2])
 
     // FINE ROTATION: the camera owns the spin. The direction from the camera
     // to the ghost is the way you are looking; read into cyberspace axes and

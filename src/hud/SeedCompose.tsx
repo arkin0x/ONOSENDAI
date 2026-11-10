@@ -11,9 +11,15 @@
  * it. PLANT ▸ hands it to the deploy (useShards `startDeploySeed`), which
  * mines the work at COMMIT, once its place and time are fixed.
  *
- * Caps (§7): the starters' (8,000 vertices, 6,000 symbols, 40 days; 21 bits)
- * or the free caps (2,048, 2,048, 32 days; 16 bits). A starter defaults to
- * its own, a pasted DNA to the free caps; a bloom stops growing at its caps.
+ * Caps (§7), shown to people as the SIZE LIMIT (owner, 2026-11-10: "size
+ * limit" reads at once; the code and the DNA's `caps` tag keep the spec's
+ * word): the starters' (8,000 vertices, 6,000 symbols, 40 days; 21 bits) or
+ * the free caps (2,048, 2,048, 32 days; 16 bits). A starter defaults to its
+ * own, a pasted DNA to the free caps; a bloom stops growing at its caps.
+ *
+ * The bloom at day 31, grown where the seed lands, says how far it reaches;
+ * that sizes its hide height, from 3 to 12 (owner ruling 2026-11-10), shown
+ * here and carried to the deploy (plant.ts seedHideHeight).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -26,13 +32,13 @@ import { useShards } from '../store/useShards'
 import { useHyperspace, getStopByHeight } from '../store/useHyperspace'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { deployPoint } from '../lib/space'
-import { fitHeightAll } from '../lib/deployFit'
 import { positionHex } from '../lib/events'
 import { useCalibration } from '../lib/calibration'
 import { minerCount } from '../lib/avatarWorker'
 import { describeDuration } from '../lib/avatarMine'
 import { STARTER_CAPS, STARTER_DNAS } from '../lib/seeds/starterDnas'
-import { dnaTextRefusal, miningSeconds, PREVIEW_DAYS, previewRequest, readDnaText } from '../lib/seeds/plant'
+import { bloomReachGibsons, dnaTextRefusal, miningSeconds, PREVIEW_DAYS, previewRequest, readDnaText, seedHideHeight, SEED_HIDE_MAX } from '../lib/seeds/plant'
+import { MAX_COMPUTE_HEIGHT } from '../store/useCyberspace'
 import { growInWorker } from '../lib/seeds/growClient'
 import { bloomShard } from '../lib/seeds/bloomShard'
 import { headerBook, trustedTip } from '../lib/seeds/seedSources'
@@ -40,12 +46,12 @@ import { headerBook, trustedTip } from '../lib/seeds/seedSources'
 /** The largest DNA text a written DNA may be (DECK-0008 §3.1), so an import reads no more. */
 const MAX_DNA_BYTES = 8192
 /**
- * The largest scale offered. A seed hides at the height that holds the largest
- * bloom its scale allows (64 units a side, DeployBar seedReach), about scale
- * plus 9; past 11 that is above what this machine computes (2^20), and the
- * key would be bought from HOSAKA.
+ * The largest scale offered: 2^30 gibsons a unit, about a hand's width. The
+ * hide height no longer grows with the scale (12 at most, owner ruling
+ * 2026-11-10), so no scale sends the bag's key to HOSAKA; a bloom larger than
+ * its cube draws past it.
  */
-const MAX_SCALE = 11
+const MAX_SCALE = 30
 
 /** The bloom a DNA grows at the cursor, at a day of the past month, grown in the worker. */
 function usePreview(text: string, ok: boolean, caps: Caps, coord: string, scale: number, day: number): ShardModel | null {
@@ -70,6 +76,26 @@ function usePreview(text: string, ok: boolean, caps: Caps, coord: string, scale:
   return shard
 }
 
+/** How far this DNA's bloom reaches at day 31 where it lands, in gibsons with a margin (plant.ts bloomReachGibsons). */
+function useReach(text: string, ok: boolean, caps: Caps, coord: string, scale: number): number | undefined {
+  const [reach, setReach] = useState<number | undefined>(undefined)
+  const tip = useHyperspace((s) => s.tipHeight)
+  useEffect(() => {
+    setReach(undefined)
+    if (!ok) return
+    let stale = false
+    const timer = setTimeout(() => {
+      const now = trustedTip() ?? tip ?? 975_300
+      const req = previewRequest({ text, caps, coord, scale, tip: now, day: PREVIEW_DAYS, hashOf: (h) => headerBook.hash(h) ?? getStopByHeight(h)?.blockHash })
+      void growInWorker({ ...req, key: 'preview-reach' }).then((answer) => {
+        if (!stale && answer.type === 'bloom') setReach(bloomReachGibsons(answer.buffers.positions, scale))
+      }, () => undefined)
+    }, 120)
+    return () => { stale = true; clearTimeout(timer) }
+  }, [text, ok, caps, coord, scale, tip])
+  return reach
+}
+
 export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
   // A starter by index, or the pasted text.
   const [pick, setPick] = useState<number | 'paste'>(0)
@@ -83,11 +109,9 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
   const cursor = useCyberspace((s) => s.cursor)
   const plane = useCyberspace(buildPlane)
   const step = useCyberspace(buildStepOf)
-  // Where the seed lands, as the deploy places it: the build cursor's cell, at the height that holds its bloom.
-  const coord = useMemo(() => {
-    const height = fitHeightAll(64n << BigInt(scale), [], cursor, step, 0, 120) ?? 0
-    return positionHex(deployPoint(cursor, step, height), plane)
-  }, [cursor, plane, step, scale])
+  // Where the seed lands, as the deploy places it: the build cursor's cell (at the tallest automatic height,
+  // which is the same point whenever the build step is that height or finer).
+  const coord = useMemo(() => positionHex(deployPoint(cursor, step, SEED_HIDE_MAX), plane), [cursor, plane, step])
   const sha256PerSec = useCalibration((s) => s.sha256PerSec)
 
   const text = pick === 'paste' ? pasted : STARTER_DNAS[pick].text
@@ -95,6 +119,8 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
   const ok = refusal === null && text.trim() !== ''
   const caps: Caps = (capsPick ?? (pick === 'paste' ? 'small' : 'large')) === 'small' ? BASE_CAPS : STARTER_CAPS
   const preview = usePreview(text, ok, caps, coord, scale, day)
+  const reach = useReach(text, ok, caps, coord, scale)
+  const hideHeight = seedHideHeight(reach, cursor, step, MAX_COMPUTE_HEIGHT)
   const price = capsPrice(caps) ?? 0
   const seconds = miningSeconds(price, sha256PerSec ?? null, minerCount())
 
@@ -112,7 +138,7 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
 
   const plant = (): void => {
     if (!ok) return
-    useShards.getState().startDeploySeed({ text, caps, scale, title: '' })
+    useShards.getState().startDeploySeed({ text, caps, scale, title: '', ...(reach !== undefined ? { reach } : {}) })
     onDone()
   }
 
@@ -150,13 +176,16 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <span className="seedc__value">2^{scale}</span>
         <button className="seedc__step" onClick={() => setScale((u) => Math.min(MAX_SCALE, u + 1))} disabled={scale === MAX_SCALE} aria-label="Larger scale">+</button>
       </div>
-      <div className="seedc__row" role="group" aria-label="Caps">
-        <span className="secret__label">CAPS</span>
+      <div className="seedc__row" role="group" aria-label="Size limit">
+        <span className="secret__label seedc__label--wide">SIZE LIMIT</span>
         <button aria-pressed={caps === BASE_CAPS} className={`seedc__pick ${caps === BASE_CAPS ? 'is-on' : ''}`} onClick={() => setCapsPick('small')} title="2,048 vertices, 2,048 symbols, 32 days">SMALL</button>
         <button aria-pressed={caps === STARTER_CAPS} className={`seedc__pick ${caps === STARTER_CAPS ? 'is-on' : ''}`} onClick={() => setCapsPick('large')} title="8,000 vertices, 6,000 symbols, 40 days">LARGE</button>
       </div>
       <p className="seedc__price">
         PRICE {price} BITS · {seconds === null ? 'MINING TIME UNKNOWN UNTIL CALIBRATED' : `${describeDuration(seconds).toUpperCase()} TO MINE HERE`}
+      </p>
+      <p className="seedc__price" title="Seeds hide at 12 or lower so anyone looking nearby finds them. Raise it on the next bar to hide one.">
+        HIDE HEIGHT {reach === undefined && ok ? '…' : hideHeight}
       </p>
 
       <div className="shards__actions">

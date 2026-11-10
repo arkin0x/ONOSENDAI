@@ -13,6 +13,7 @@
 
 import { BASE_CAPS, BLOCKS_PER_GENERATION, capsPrice, clockHeight, sha256Hex, tryParseDna, workOk, type Caps } from 'sno-core/seeds'
 import type { GrowRequest } from './growJob'
+import { fitHeightAll } from '../deployFit'
 import { expectedTries, triesPerSec } from '../avatarMine'
 import { positionHex, type EventTemplate, type NostrEvent } from '../events'
 import type { Plane } from 'cyberspace-core'
@@ -28,6 +29,8 @@ export interface SeedDraft {
   scale: number
   /** The planter's name for this planting, or empty. */
   title: string
+  /** How far its bloom reaches at day 31, in gibsons with a margin (bloomReachGibsons): what its hide height fits. */
+  reach?: number
 }
 
 /** The DNA's price in bits, or null when its caps are out of range. */
@@ -143,4 +146,43 @@ export function previewRequest(o: { text: string; caps: Caps; coord: string; sca
     hashes[h] = typeof real === 'string' && /^[0-9a-f]{64}$/.test(real) ? real : previewHash(h)
   }
   return { key: 'preview', dna: o.text, seed: { coord: o.coord, planted, scale: o.scale, caps: o.caps }, clock, hashes, maxSteps: Number.MAX_SAFE_INTEGER }
+}
+
+/**
+ * The automatic hide height runs from 3 to 12 (owner ruling 2026-11-10):
+ * at 12 or lower the automatic discovery finds a seed ("I don't like that
+ * things planted above height 12 won't be findable unless people are digging
+ * for them"). A planter who wants a seed hidden picks a higher height by hand,
+ * as for any item.
+ */
+export const SEED_HIDE_MIN = 3
+export const SEED_HIDE_MAX = 12
+/** What a bloom's reach is grown by when its hide height is fitted: a quarter, and two gibsons. */
+export const REACH_MARGIN = 1.25
+export const REACH_PAD_GIBSONS = 2
+
+/**
+ * How far a drawn bloom reaches from its seed, in gibsons, with the margin:
+ * its farthest vertex (positions in ticks, 120 a unit) at 2^scale gibsons a
+ * unit. Measured on the bloom at day 31 (the preview's last day), it sizes the
+ * cube to this DNA, never to the 64 units every bloom is held to.
+ */
+export function bloomReachGibsons(positions: ArrayLike<number>, scale: number): number {
+  let r2 = 0
+  for (let i = 0; i + 2 < positions.length; i += 3) r2 = Math.max(r2, positions[i] ** 2 + positions[i + 1] ** 2 + positions[i + 2] ** 2)
+  return Math.ceil((Math.sqrt(r2) / 120) * 2 ** scale * REACH_MARGIN) + REACH_PAD_GIBSONS
+}
+
+/**
+ * The automatic hide height of a seed: the smallest from SEED_HIDE_MIN to
+ * SEED_HIDE_MAX whose aligned cube holds its bloom's reach around where it
+ * lands (lib/deployFit fitHeightAll); SEED_HIDE_MAX when none does, and then
+ * the bloom draws past its cube (owner ruling 2026-11-10). Never above this
+ * machine's key ceiling. Without a reach (the preview not grown yet) it is
+ * SEED_HIDE_MAX.
+ */
+export function seedHideHeight(reach: number | undefined, cursor: Position, step: number, ceiling: number): number {
+  const max = Math.max(0, Math.min(SEED_HIDE_MAX, ceiling))
+  if (reach === undefined || !Number.isFinite(reach)) return max
+  return fitHeightAll(BigInt(Math.max(0, Math.ceil(reach))), [], cursor, step, Math.min(SEED_HIDE_MIN, max), max) ?? max
 }

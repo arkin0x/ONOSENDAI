@@ -10464,3 +10464,4 @@ html.tv-broadcast body { overflow: hidden; }
 }
 .seedc__step:disabled { opacity: 0.35; cursor: default; }
 .seedc__price { margin: 2px 0 4px; font-size: 9px; letter-spacing: 0.1em; color: var(--dim); }
+.seedc__row .seedc__label--wide { flex: 0 0 auto; margin-right: 4px; }

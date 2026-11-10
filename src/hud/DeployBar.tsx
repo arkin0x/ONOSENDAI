@@ -97,6 +97,7 @@ import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, r
 import { useEscape } from '../hooks/useEscape'
 import { useCover } from '../hooks/useCover'
 import { fitCause, fitHeight, fitHeightAll, outsideAt, reachGibsons, type FitPoint } from '../lib/deployFit'
+import { seedHideHeight } from '../lib/seeds/plant'
 import { CHEST_LOOKS, DOOR_LOOKS, LOOK_LABELS } from '../lib/looks'
 import { LookPicker } from './LookPicker'
 import { SHALLOW_WARN, shallowBag, shallowExplain } from '../lib/shallowBag'
@@ -365,17 +366,20 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
     }
     return { points, elsewhere }
   }, [pending, plane])
-  // A seed's bloom grows after it is hidden, so its region holds the largest
-  // bloom its scale allows: every position is held to 64 units of 2^scale
-  // gibsons on each axis (DECK-0008 §3.8), and a bloom is clipped to its bag's
-  // cube as a shard is (§5.6), so nothing it ever grows is cut.
-  const seedReach = pending?.type === 'seed' ? 64n << BigInt(pending.seed.scale) : null
+  // A seed hides where the automatic discovery finds it (owner ruling
+  // 2026-11-10): the smallest height from 3 to 12 whose cube holds this DNA's
+  // own bloom at day 31 (SeedCompose measures it), 12 when none does, and the
+  // bloom draws past its cube. + still hides it higher, by hand. It used to fit
+  // the 64 units every bloom is held to, a 128-gibson span that straddles some
+  // power-of-two boundary near most points, so the height climbed to wherever
+  // the nearest one ended (13 at the owner's spot every time).
+  const seedFit = pending?.type === 'seed' ? seedHideHeight(pending.seed.reach, cursor, step, ceiling) : null
   // What the height is fitted to: a shard's own reach, the chest's look and
   // aimed contents, so its region holds the whole model it wears, or a seed's bloom.
-  const fitting = !!shard || !!lookModel || aimed.points.length > 0 || seedReach !== null
+  const fitting = !!shard || !!lookModel || aimed.points.length > 0 || seedFit !== null
   const fitH = useMemo(
-    () => (shard ? fitHeight(shard, unit, cursor, step, 0, ceiling) : seedReach !== null ? fitHeightAll(seedReach, [], cursor, step, 0, ceiling) : lookModel || aimed.points.length > 0 ? fitHeightAll(fitShape ? reachGibsons(fitShape, unit) : 0n, aimed.points, cursor, step, 0, ceiling) : null),
-    [shard, lookModel, fitShape, unit, cursor, step, ceiling, aimed, seedReach],
+    () => (shard ? fitHeight(shard, unit, cursor, step, 0, ceiling) : seedFit !== null ? seedFit : lookModel || aimed.points.length > 0 ? fitHeightAll(fitShape ? reachGibsons(fitShape, unit) : 0n, aimed.points, cursor, step, 0, ceiling) : null),
+    [shard, lookModel, fitShape, unit, cursor, step, ceiling, aimed, seedFit],
   )
   useEffect(() => {
     // Once placed, its height is fixed with its place, whatever the cursor does while the modal is filled.
@@ -392,7 +396,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
     useShards.setState({ deployHeightAuto: false })
     useShards.getState().setDeployHeight(into)
   }, [lined, into])
-  const fit: { auto: boolean; height: number | null; cause: 'size' | 'edge' | 'contents' } = { auto: heightAuto && fitting, height: fitH, cause: fitModel ? fitCause(fitModel, unit, fitH, ceiling) : seedReach !== null ? 'size' : 'contents' }
+  const fit: { auto: boolean; height: number | null; cause: 'size' | 'edge' | 'contents' } = { auto: heightAuto && fitting, height: fitH, cause: fitModel ? fitCause(fitModel, unit, fitH, ceiling) : seedFit !== null ? 'size' : 'contents' }
   // Aimed contents the region at this height does not hold: they stand at the chest when it opens (revealedIn).
   const outside = aimed.points.length + aimed.elsewhere === 0 ? 0 : outsideAt(deployPoint(cursor, step, height), height, aimed.points) + aimed.elsewhere
   // STEP changes only the build cursor: in BUILD mode, its view drivable, not

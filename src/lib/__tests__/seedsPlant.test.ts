@@ -11,12 +11,13 @@ import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import { fromPayload } from 'sno-core/shards'
 import { BASE_CAPS, growBloom, parseDna, tryParseDna, workOk } from 'sno-core/seeds'
 import { STARTER_CAPS, STARTER_DNAS } from '../seeds/starterDnas'
-import { dnaMatches, dnaTemplate, dnaTextRefusal, readDnaText, draftPrice, miningSeconds, previewHash, previewRequest, seedTemplate, seedWorkHolds, PREVIEW_DAYS } from '../seeds/plant'
+import { bloomReachGibsons, seedHideHeight, SEED_HIDE_MAX, SEED_HIDE_MIN, dnaMatches, dnaTemplate, dnaTextRefusal, readDnaText, draftPrice, miningSeconds, previewHash, previewRequest, seedTemplate, seedWorkHolds, PREVIEW_DAYS } from '../seeds/plant'
 import { mineChunk, nonceTagged } from '../avatarMine'
 import { seedItemOf } from '../seeds/seedItem'
 import { GrowCache, handleGrow } from '../seeds/growJob'
 import { bloomShard } from '../seeds/bloomShard'
 import { checkDna } from '../seeds/dnaStore'
+import { fitHeightAll } from '../deployFit'
 import { miningNote } from '../../store/plantSeed'
 import { positionHex, type NostrEvent } from '../events'
 import { planterSk, vectorBlocks, vectors } from './seedsFixture'
@@ -143,5 +144,49 @@ describe('the preview', () => {
     expect(zero.hashes).toEqual({})
     const { answer } = handleGrow({ type: 'grow', id: 2, ...zero }, new GrowCache())
     expect(answer.type === 'bloom' && answer.growth.generation).toBe(0)
+  })
+})
+
+describe('the hide height (owner ruling 2026-11-10)', () => {
+  // Thirty gibsons past a 2^12 boundary on x, far from any larger one: where the owner stood.
+  const nearEdge = { x: (1n << 40n) + 4096n * 77n + 30n, y: (1n << 41n) + 1000n, z: (1n << 42n) + 1000n }
+
+  it('the old fit, 64 units each way, climbed past 12 near a boundary: this is why it read 13', () => {
+    expect(fitHeightAll(64n, [], nearEdge, 0, 0, 20)).toBe(13)
+  })
+
+  it('sized to the bloom: the smallest of 3 to 12 that holds it, 12 when none does, never above', () => {
+    expect(seedHideHeight(15, nearEdge, 0, 20)).toBeGreaterThanOrEqual(SEED_HIDE_MIN)
+    expect(seedHideHeight(15, nearEdge, 0, 20)).toBeLessThan(12)
+    expect(seedHideHeight(64, nearEdge, 0, 20)).toBe(SEED_HIDE_MAX)
+    expect(seedHideHeight(10_000, nearEdge, 0, 20)).toBe(SEED_HIDE_MAX)
+    expect(seedHideHeight(undefined, nearEdge, 0, 20)).toBe(SEED_HIDE_MAX)
+    // Never above this machine's key ceiling.
+    expect(seedHideHeight(64, nearEdge, 0, 9)).toBe(9)
+    // A tiny bloom in the middle of nowhere still hides at 3 at least.
+    expect(seedHideHeight(1, { x: (1n << 40n) + 4n, y: (1n << 40n) + 4n, z: (1n << 40n) + 4n }, 0, 20)).toBe(3)
+  })
+
+  it('reach: the farthest vertex, in gibsons at the scale, with a quarter and two gibsons more', () => {
+    expect(bloomReachGibsons(new Int32Array([0, 0, 0, 1200, 0, 0]), 0)).toBe(Math.ceil(10 * 1.25) + 2)
+    expect(bloomReachGibsons(new Int32Array([0, 1200, 0]), 3)).toBe(Math.ceil(80 * 1.25) + 2)
+  })
+
+  it('the six starters at three spots, measured on their day-31 preview, all hide at 3 to 12', () => {
+    const spots = [
+      { x: (1n << 40n) + 123_457n, y: (1n << 41n) + 987_651n, z: (1n << 42n) + 55_555n },
+      nearEdge,
+      { x: 9_999_999_999n, y: 77_777_777_777n, z: 123_456_789n },
+    ]
+    for (const d of STARTER_DNAS) {
+      for (const at of spots) {
+        const req = previewRequest({ text: d.text, caps: STARTER_CAPS, coord: positionHex(at, 1), scale: 0, tip: 975_400, day: PREVIEW_DAYS, hashOf: () => undefined })
+        const { answer } = handleGrow({ type: 'grow', id: 1, ...req }, new GrowCache())
+        if (answer.type !== 'bloom') throw new Error(answer.type)
+        const h = seedHideHeight(bloomReachGibsons(answer.buffers.positions, 0), at, 0, 20)
+        expect(h, `${d.name}`).toBeGreaterThanOrEqual(3)
+        expect(h, `${d.name}`).toBeLessThanOrEqual(12)
+      }
+    }
   })
 })

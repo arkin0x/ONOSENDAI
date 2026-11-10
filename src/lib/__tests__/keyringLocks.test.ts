@@ -1,0 +1,151 @@
+/**
+ * keyringLocks.test.ts: the keyring's locks, by lock (DECK-0004 §3.8). Each
+ * key derived once, a budget per pass with the rest pending, the priority
+ * order, one entry per key, and the line under OPEN.
+ */
+import { describe, expect, it, vi } from 'vitest'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex } from '../events'
+import * as locks from '../locks'
+import { carriedLabel, deriveSlice, indexKeyring, keyringOrder, LockCache, openingKeyOf, planKeyring, type CarriedKey } from '../keyringLocks'
+
+const hexOf = (i: number): string => bytesToHex(sha256(new Uint8Array([i, 7])))
+const region = (i: number, from: 'held' | 'here' | 'stood' = 'held', at = i): CarriedKey => ({ kind: 'region', lookupId: `L${i}`, keyHex: hexOf(i), height: 4, from, at })
+const room = (i: number): CarriedKey => ({ kind: 'room', lookupId: `R${i}`, keyHex: hexOf(100 + i), name: `Room ${i}`, doorId: `D${i}` })
+
+describe('LockCache', () => {
+  it('derives each key once', () => {
+    const spy = vi.spyOn(locks, 'lockOfHex')
+    const cache = new LockCache()
+    const a = cache.derive(hexOf(1))
+    const b = cache.derive(hexOf(1).toUpperCase())
+    expect(a).toEqual(b)
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(cache.size).toBe(1)
+    spy.mockRestore()
+  })
+})
+
+describe('a lock stored beside its key', () => {
+  it('is taken as stored: no point multiplication, the secret from the hash', () => {
+    const k = region(1)
+    const lock = locks.lockOfHex(k.keyHex)!
+    const spy = vi.spyOn(locks, 'lockOfHex')
+    const cache = new LockCache()
+    const { byLock, todo } = planKeyring([{ ...k, lock: lock.pubkey }], cache)
+    expect(todo).toHaveLength(0)
+    expect(byLock.get(lock.pubkey)?.lock).toEqual(lock)
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+})
+
+describe('seeding thousands of stored locks at startup (re-review of #648)', () => {
+  it('computes nothing: no hash, no multiplication, until a secret is read, then once', () => {
+    const keys = Array.from({ length: 4_400 }, (_, i) => region(i % 256 + 256 * Math.floor(i / 256)))
+    // Stored locks: any well-formed public key will do for the count; one real one is checked below.
+    const real = locks.lockOfHex(keys[0].keyHex)!
+    const stored = keys.map((k, i) => ({ ...k, keyHex: bytesToHex(sha256(new Uint8Array([i >> 8, i & 255, 3]))), lookupId: `S${i}`, lock: i === 0 ? real.pubkey : bytesToHex(sha256(new Uint8Array([i >> 8, i & 255, 4]))) }))
+    stored[0] = { ...stored[0], keyHex: keys[0].keyHex }
+    const hash = vi.spyOn(locks, 'lockSecret')
+    const derive = vi.spyOn(locks, 'lockOfHex')
+    const cache = new LockCache()
+    const { byLock, todo } = planKeyring(stored, cache)
+    expect(todo).toHaveLength(0)
+    expect(byLock.size).toBe(4_400)
+    expect(hash).not.toHaveBeenCalled()
+    expect(derive).not.toHaveBeenCalled()
+    // Opening with it reads the secret: computed then, and right.
+    const opening = openingKeyOf(byLock.get(real.pubkey)!)
+    expect(opening.secretHex).toBe(real.secretHex)
+    expect(byLock.get(real.pubkey)!.lock.secretHex).toBe(real.secretHex)
+    expect(hash).toHaveBeenCalledTimes(1)
+    hash.mockRestore(); derive.mockRestore()
+  })
+})
+
+describe('planKeyring and deriveSlice', () => {
+  it('index what is known at once, and derive the rest until the clock says stop, at least one per slice', () => {
+    const cache = new LockCache()
+    cache.derive(hexOf(0))
+    const keys = Array.from({ length: 6 }, (_, i) => region(i))
+    const { byLock, todo } = planKeyring(keys, cache)
+    expect(byLock.size).toBe(1)
+    expect(todo).toHaveLength(5)
+    // A clock already out of time still derives one.
+    let r = deriveSlice(todo, 0, cache, byLock, () => true)
+    expect(r.next).toBe(1)
+    expect(r.derived).toHaveLength(1)
+    expect(byLock.size).toBe(2)
+    let ticks = 0
+    r = deriveSlice(todo, r.next, cache, byLock, () => ++ticks >= 3)
+    expect(r.next).toBe(4)
+    r = deriveSlice(todo, r.next, cache, byLock, () => false)
+    expect(r.next).toBe(5)
+    expect(byLock.size).toBe(6)
+  })
+})
+
+describe('indexKeyring', () => {
+  it('maps each lock to its key', () => {
+    const cache = new LockCache()
+    const keys = [region(1), region(2), room(1)]
+    const { byLock, pending } = indexKeyring(keys, cache, Infinity)
+    expect(pending).toBe(0)
+    for (const k of keys) {
+      const lock = locks.lockOfHex(k.keyHex)!
+      expect(byLock.get(lock.pubkey)?.key).toEqual(k)
+      expect(byLock.get(lock.pubkey)?.lock).toEqual(lock)
+    }
+  })
+
+  it('derives at most the budget per pass; the rest wait, and later passes finish them', () => {
+    const cache = new LockCache()
+    const keys = Array.from({ length: 10 }, (_, i) => region(i))
+    const first = indexKeyring(keys, cache, 4)
+    expect(first.byLock.size).toBe(4)
+    expect(first.pending).toBe(6)
+    const second = indexKeyring(keys, cache, 4)
+    expect(second.byLock.size).toBe(8)
+    expect(second.pending).toBe(2)
+    const third = indexKeyring(keys, cache, 4)
+    expect(third.byLock.size).toBe(10)
+    expect(third.pending).toBe(0)
+    // Nothing new to derive: free.
+    const spy = vi.spyOn(locks, 'lockOfHex')
+    expect(indexKeyring(keys, cache, 0).byLock.size).toBe(10)
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('rooms first, then held keys newest first, then here, then stood in the order given (newest places first); one entry per key', () => {
+    const order = keyringOrder([region(1, 'stood'), region(5, 'stood'), region(2, 'here'), region(3, 'held', 10), region(4, 'held', 20), room(1), { ...region(3, 'stood') }])
+    expect(order.map((k) => k.lookupId)).toEqual(['R1', 'L4', 'L3', 'L2', 'L1', 'L5'])
+  })
+
+  it('caps the keys indexed, in priority order', () => {
+    const cache = new LockCache()
+    const { byLock } = indexKeyring([region(1, 'stood'), room(1), region(2, 'held')], cache, Infinity, 2)
+    expect([...byLock.values()].map((e) => e.key.lookupId).sort()).toEqual(['L2', 'R1'])
+  })
+})
+
+describe('as an opening key, and the line under OPEN', () => {
+  it('is a lock, never an ITEMS row', () => {
+    const k = region(1)
+    const lock = locks.lockOfHex(k.keyHex)!
+    expect(openingKeyOf({ lock, key: k })).toEqual({ id: 'lock:region:L1', itemPubkey: lock.pubkey, secretHex: lock.secretHex, carried: k })
+  })
+
+  it('says which key fits, in a few words', () => {
+    expect(carriedLabel(room(1))).toBe('a room you opened, Room 1')
+    expect(carriedLabel({ ...region(1, 'here') })).toBe('the region you stand in, height 4')
+    expect(carriedLabel({ ...region(1, 'stood') })).toBe('a region you stood in, height 4')
+    expect(carriedLabel({ kind: 'region', lookupId: 'x', keyHex: hexOf(1), height: 8, from: 'held', at: Date.UTC(2026, 9, 12) / 1000 })).toBe('a region, height 8, kept 12 October')
+    // With its corner and where you are: how far it is.
+    const base = { x: 0n, y: 0n, z: 0n }
+    const far = carriedLabel({ kind: 'region', lookupId: 'x', keyHex: hexOf(1), height: 8, from: 'held', base, at: Date.UTC(2026, 9, 12) / 1000 }, { x: 128n + 1000n, y: 128n, z: 128n })
+    expect(far).toMatch(/^a region .+ away, kept 12 October$/)
+    expect(carriedLabel({ kind: 'region', lookupId: 'x', keyHex: hexOf(1), height: 8, from: 'stood', base }, { x: 128n, y: 128n, z: 128n })).toMatch(/^a region you stood in, .+ away$/)
+  })
+})

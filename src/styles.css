@@ -9447,6 +9447,13 @@ a.feed__act { text-decoration: none; }
 /* A found keypair item: its line, then TAKE at the row's end. */
 .keyline { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
 .chest__status { font-size: 9px; line-height: 1.4; color: var(--warn); }
+/* Under OPEN: which key you carry fits (DECK-0004 §3.8). */
+.chest__fits { font-size: 9px; line-height: 1.4; color: var(--ok); }
+/* The LOCK block: one for chests and doors. */
+.lock { display: flex; flex-direction: column; gap: 4px; }
+.lock .legend__label { margin: 0; }
+.lock__note { font-size: 9px; line-height: 1.4; opacity: 0.7; }
+.lock__region { display: flex; flex-direction: column; gap: 4px; }
 /* Why REMOVE FROM CHEST could not, under the item modal's actions. */
 .secret__status { margin: 6px 0 0; font-size: 10px; line-height: 1.4; color: var(--warn); }
 .chest__contents {

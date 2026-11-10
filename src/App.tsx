@@ -27,6 +27,8 @@ import { startCoordRoute } from './store/useCoordRoute'
 import { DemoCoach } from './hud/DemoCoach'
 import { TutorialCoach } from './hud/TutorialCoach'
 import { watchFirstArrival } from './store/useTutorial'
+// The tutorial's staged things and the waits on them (registered on load; stages only while it runs).
+import './tutorial/director'
 import { GameView } from './game/GameView'
 import { GameChip } from './hud/GameChip'
 import { TvScreen } from './hud/TvScreen'

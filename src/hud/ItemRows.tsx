@@ -27,6 +27,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useProfile } from '../hooks/useProfile'
+import { isGuideAuthor } from '../tutorial/guideBags'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry, type Opener } from '../lib/chests'
 import { positionOf, useShards } from '../store/useShards'
@@ -65,6 +66,7 @@ export function Unsigned(): JSX.Element {
 export function useWho(pubkey: string): string {
   const me = useCyberspace((s) => s.identity.pubkey)
   const profile = useProfile(pubkey || null)
+  if (isGuideAuthor(pubkey)) return 'the tutorial'
   return pubkey === me ? 'you' : profileLabel(profile, safeNpub(pubkey))
 }
 

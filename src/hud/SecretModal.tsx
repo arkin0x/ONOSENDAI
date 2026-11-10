@@ -34,6 +34,7 @@ import { Comments } from './Comments'
 import { Reactions } from './Reactions'
 import { itemKind } from '../lib/comments'
 import { useProfile } from '../hooks/useProfile'
+import { isGuideAuthor } from '../tutorial/guideBags'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { editable, movable as movableDep, muteSubject, rowLoss, useShards, type WorldItem } from '../store/useShards'
@@ -96,6 +97,8 @@ export function SecretModal(): JSX.Element | null {
   const me = useCyberspace((s) => s.identity.pubkey)
   const targeted = useCyberspace((s) => (item?.author ? !!s.targets[item.author] : false))
   const author = item?.author ?? ''
+  // Something the tutorial's guide key sealed (tutorial/guideBags.ts).
+  const guided = isGuideAuthor(author)
   const profile = useProfile(author || null)
   const [copied, setCopied] = useState(false)
   // REMOVE FROM CHEST, for a thing revealed from a chest of yours: whether it
@@ -252,6 +255,13 @@ export function SecretModal(): JSX.Element | null {
             TEST DISCOVERY stays in METADATA (WireData). */}
         {wire && <PublishRow dep={wire} />}
 
+        {guided ? (
+          // Left by the tutorial's guide key: no profile, no one to tell, nothing that names it in an event (tutorial/guideBags.ts).
+          <div className="secret__creator">
+            <span className="secret__label">Left by</span>
+            <div className="secret__person-text"><span className="secret__name">the tutorial</span></div>
+          </div>
+        ) : (<>
         <div className="secret__creator">
           <span className="secret__label">Left by</span>
           <div className="secret__person">
@@ -280,6 +290,7 @@ export function SecretModal(): JSX.Element | null {
         {item.author && item.lookupId && (
           <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.lineage ?? item.key, type: item.type, target: item.target, at: item.at, height: item.height, bagKeyHex: item.bagKeyHex }} />
         )}
+        </>)}
 
         {/* The actions between two rules: the comments above, the event data
             below (arkinox, 2026-10-20). */}
@@ -293,7 +304,7 @@ export function SecretModal(): JSX.Element | null {
               {copied ? 'COPIED' : item.type === 'shard' ? 'COPY TO WORKSHOP' : 'COPY TEXT'}
             </button>
           )}
-          {!mine && (
+          {!mine && !guided && (
             <>
               <button className={`secret__act ${targeted ? 'is-on' : ''}`} onClick={target}><Target size={ICON} strokeWidth={2.25} aria-hidden />{targeted ? 'TARGETED' : 'TARGET'} CREATOR</button>
               <button className="secret__act" onClick={watch}><TvMinimal size={ICON} strokeWidth={2.25} aria-hidden />SPECTATE</button>

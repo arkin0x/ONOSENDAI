@@ -12,9 +12,10 @@
  * nothing to recompute until then.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { query } from '../lib/relay'
-import { HIDDEN_KIND, type Hidden } from '../lib/hidden'
+import { HIDDEN_KIND, unbag, type Hidden } from '../lib/hidden'
+import type { NostrEvent } from 'nostr-tools'
 import { unbagRemembered } from '../lib/foundCache'
 import { bagsToOpen } from '../lib/bagVersions'
 import { hexToBytes } from '../lib/events'
@@ -25,6 +26,7 @@ import { resolveReference } from '../lib/references'
 import { useSecrets, type CurrentKey } from '../store/useSecrets'
 import { useTv } from '../store/useTv'
 import type { RegionRequest, RegionResponse } from '../workers/region.worker'
+import { guideBagsFor, onGuideBags } from '../tutorial/guideBags'
 
 /** The aligned base of a value at a height: what decides "same region". */
 function base(v: bigint, h: number): bigint {
@@ -45,6 +47,11 @@ export function useDiscovery(): void {
   const worker = useRef<Worker | null>(null)
   const lastSig = useRef<string | null>(null)
   const reqId = useRef(0)
+  // The tutorial guide's bags on this device (tutorial/guideBags.ts): when
+  // they change, where you stand is scanned again, so a blue box staged
+  // around you appears without a step.
+  const [guideVersion, setGuideVersion] = useState(0)
+  useEffect(() => onGuideBags(() => { lastSig.current = null; setGuideVersion((v) => v + 1) }), [])
 
   useEffect(() => {
     worker.current = new Worker(new URL('../workers/region.worker.ts', import.meta.url), { type: 'module' })
@@ -126,44 +133,45 @@ export function useDiscovery(): void {
         void useSecrets.getState().recordPlace(anchor, cs.headPlane, [...keys].map(([lookupId, keyHex]) => ({ lookupId, keyHex, height: heights.get(lookupId) ?? 0 })))
       }
 
-      // A superseded scan must not write stale finds.
-      const sent = await query({ kinds: [HIDDEN_KIND], '#d': [...keys.keys()] })
-      if (id !== reqId.current) return
-      // One version per bag, the newest, none its author deleted: relays hold
-      // different versions, and opening all of them drew what a DELETE took
-      // out (lib/bagVersions.ts; arkinox, 2026-11-03).
-      const { bags: events, deletions } = await bagsToOpen(sent, query, useShards.getState().ownDoorAddresses(keys.keys()))
-      if (id !== reqId.current) return
-
-      const found = []
-      const opened: string[] = []
-      // Bags that did not open with their key: not current, so what an older
-      // version of one gave stays (lib/hidden.ts BagUnreadable).
-      const unread = new Set<string>()
-      for (const ev of events) {
-        // A scan superseded while it opens its list stops opening it: the
-        // newer one is opening the same bags, and its finds are the ones
-        // kept. What already opened still holds its keys, below.
-        if (id !== reqId.current) break
-        const region = ev.tags.find((t) => t[0] === 'd')?.[1]
-        const keyHex = region ? keys.get(region) : undefined
-        if (!keyHex || !region) continue
-        // One envelope holds a bag; unbag flattens it to items.
-        // A reference without its own point is drawn at the base of this region.
-        // The height is the key's own, so a bag whose hider left `h` off
-        // (spec §8.6, arkinox 2026-10-01) is read at its true size.
-        const height = heights.get(region) ?? 0
-        const h = BigInt(height)
-        const origin = { at: { x: (anchor.x >> h) << h, y: (anchor.y >> h) << h, z: (anchor.z >> h) << h }, plane }
-        let items: Hidden[]
-        try {
-          items = await unbagRemembered(ev, hexToBytes(keyHex), resolveReference, origin, height)
-        } catch {
-          unread.add(ev.id)
-          continue
+      /**
+       * Open these bags with this scan's keys: the finds, the regions that
+       * opened something, and the bags that did not open with their key (not
+       * current, so what an older version of one gave stays: lib/hidden.ts
+       * BagUnreadable).
+       */
+      const openBags = async (events: readonly NostrEvent[], guideIds: ReadonlySet<string> = new Set()): Promise<{ found: Hidden[]; opened: string[]; unread: Set<string> }> => {
+        const found: Hidden[] = []
+        const opened: string[] = []
+        const unread = new Set<string>()
+        for (const ev of events) {
+          // A scan superseded while it opens its list stops opening it: the
+          // newer one is opening the same bags, and its finds are the ones
+          // kept. What already opened still holds its keys, below.
+          if (id !== reqId.current) break
+          const region = ev.tags.find((t) => t[0] === 'd')?.[1]
+          const keyHex = region ? keys.get(region) : undefined
+          if (!keyHex || !region) continue
+          // One envelope holds a bag; unbag flattens it to items.
+          // A reference without its own point is drawn at the base of this region.
+          // The height is the key's own, so a bag whose hider left `h` off
+          // (spec §8.6, arkinox 2026-10-01) is read at its true size.
+          const height = heights.get(region) ?? 0
+          const h = BigInt(height)
+          const origin = { at: { x: (anchor.x >> h) << h, y: (anchor.y >> h) << h, z: (anchor.z >> h) << h }, plane }
+          let items: Hidden[]
+          try {
+            // A tutorial guide's bag is opened and forgotten: never kept in
+            // the found bags, which outlive the tutorial and ask relays about
+            // their authors (lib/foundCache.ts).
+            items = guideIds.has(ev.id) ? await unbag(ev, hexToBytes(keyHex), resolveReference, origin, height) : await unbagRemembered(ev, hexToBytes(keyHex), resolveReference, origin, height)
+          } catch {
+            unread.add(ev.id)
+            continue
+          }
+          if (items.length > 0) opened.push(region)
+          found.push(...items)
         }
-        if (items.length > 0) opened.push(region)
-        found.push(...items)
+        return { found, opened, unread }
       }
 
       /*
@@ -186,7 +194,8 @@ export function useDiscovery(): void {
        * as real as one found at your head. What it cannot be is a place, and
        * places are only recorded at your head, above.
        */
-      if (opened.length > 0) {
+      const holdOpened = (opened: readonly string[]): void => {
+        if (opened.length === 0) return
         const now = Math.floor(Date.now() / 1000)
         useSecrets.getState().hold(opened.map((region) => ({
           lookupId: region,
@@ -202,6 +211,36 @@ export function useDiscovery(): void {
           at: now,
         })))
       }
+
+      // The tutorial guide's bags here (tutorial/guideBags.ts; first-arrival
+      // tutorial design, D1), opened at once, as if a relay had sent them:
+      // a slow relay must not keep a newcomer's chest away. Filed now and
+      // again with the relays' answer below, where they join it after the
+      // relays' own checks: never asked about, never sent anywhere.
+      const guided = guideBagsFor(keys.keys())
+      const guideIds = new Set(guided.map((g) => g.id))
+      if (guided.length > 0) {
+        const early = await openBags(guided, guideIds)
+        if (id !== reqId.current) return
+        holdOpened(early.opened)
+        const fresh = useShards.getState().freshOf(early.found)
+        // A guide bag staged again (RESTART) replaces what the one before it gave.
+        useShards.getState().dropStale(guided, [], early.found)
+        useShards.getState().addDiscovered(early.found)
+        useCeremony.getState().mark(fresh)
+      }
+
+      // A superseded scan must not write stale finds.
+      const sent = await query({ kinds: [HIDDEN_KIND], '#d': [...keys.keys()] })
+      if (id !== reqId.current) return
+      // One version per bag, the newest, none its author deleted: relays hold
+      // different versions, and opening all of them drew what a DELETE took
+      // out (lib/bagVersions.ts; arkinox, 2026-11-03).
+      const { bags: relayBags, deletions } = await bagsToOpen(sent, query, useShards.getState().ownDoorAddresses(keys.keys()))
+      if (id !== reqId.current) return
+      const events = guided.length > 0 ? [...relayBags, ...guided] : relayBags
+      const { found, opened, unread } = await openBags(events, guideIds)
+      holdOpened(opened)
       if (id === reqId.current) {
         // Asked before addDiscovered, which records these as seen.
         const fresh = useShards.getState().freshOf(found)
@@ -226,5 +265,5 @@ export function useDiscovery(): void {
     w.postMessage(request)
 
     return () => w.removeEventListener('message', onMessage)
-  }, [anchor, tvOn])
+  }, [anchor, tvOn, guideVersion])
 }

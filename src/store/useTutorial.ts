@@ -44,6 +44,19 @@ export function registerTutorialWatcher(name: string, watcher: TutorialWatcher):
   TUTORIAL_WATCHERS.set(name, watcher)
 }
 
+/**
+ * Something a step does as it comes up, beyond its scene (TutorialStep
+ * `effect`): lining the cursor up on a staged place, say. Registered by name
+ * next to what it is about (registerTutorialEffect); returns what undoes it.
+ */
+export type TutorialEffect = () => (() => void) | void
+
+const TUTORIAL_EFFECTS = new Map<string, TutorialEffect>()
+
+export function registerTutorialEffect(name: string, effect: TutorialEffect): void {
+  TUTORIAL_EFFECTS.set(name, effect)
+}
+
 /** Watch for a step's wait: a tutorial watcher when one is registered under its name, else the /demo engine's. */
 function watchWait(wait: TutorialWait, onDone: () => void): () => void {
   const own = TUTORIAL_WATCHERS.get(wait)
@@ -156,6 +169,10 @@ export const useTutorial = create<TutorialState>((set, get) => {
       }))
     }
     if (step.aim && !get().done) aimCursor(step.aim)
+    const effect = step.effect ? TUTORIAL_EFFECTS.get(step.effect) : undefined
+    if (effect) {
+      try { const undo = effect(); if (undo) stepCleanups.push(undo) } catch (err) { console.warn('[tutorial] step effect failed:', err) }
+    }
   }
 
   const stop = (): void => {

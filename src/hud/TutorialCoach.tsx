@@ -17,6 +17,7 @@ import { useDemo } from '../store/useDemo'
 import { useCover } from '../hooks/useCover'
 import { useEscape } from '../hooks/useEscape'
 import { CaptionText, useCoachOffsets } from './DemoCoach'
+import { useTutorialStage } from '../tutorial/director'
 
 export function TutorialCoach(): JSX.Element | null {
   const active = useTutorial((s) => s.active)
@@ -25,6 +26,8 @@ export function TutorialCoach(): JSX.Element | null {
   const minimized = useTutorial((s) => s.minimized)
   const explaining = useTutorial((s) => s.explaining)
   const script = useTutorial((s) => s.script)
+  // The guide's things could not be staged: said where the instruction goes.
+  const stageError = useTutorialStage((s) => s.error)
   // Never over the /demo tour (useTutorial pauses for it; this is the frame between).
   const touring = useDemo((s) => s.active)
   const step = script.steps[index]
@@ -40,6 +43,26 @@ export function TutorialCoach(): JSX.Element | null {
   const go = useRef<HTMLButtonElement | null>(null)
   useEscape('modal', shown && modal, () => useTutorial.getState().next())
   useEffect(() => { if (shown && modal) go.current?.focus() }, [shown, modal, index])
+
+  // The control a step points at wears the /demo tour's pulsing ring
+  // (styles.css .demo-pulse) while the step waits; nothing is clicked.
+  const highlight = shown && !done ? step?.scene?.highlight : undefined
+  useEffect(() => {
+    if (!highlight) return
+    let marked: Element[] = []
+    const mark = (): void => {
+      for (const el of marked) el.classList.remove('demo-pulse')
+      marked = Array.from(document.querySelectorAll(highlight))
+      for (const el of marked) el.classList.add('demo-pulse')
+    }
+    mark()
+    // The control may come and go (a chip appears once something is found):
+    // looked for again after the page changes, at most once a frame.
+    let frame = 0
+    const mo = new MutationObserver(() => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; mark() }) })
+    mo.observe(document.body, { childList: true, subtree: true })
+    return () => { mo.disconnect(); if (frame) cancelAnimationFrame(frame); for (const el of marked) el.classList.remove('demo-pulse') }
+  }, [highlight])
 
   if (!shown || !step) return null
   const t = useTutorial.getState()
@@ -97,7 +120,7 @@ export function TutorialCoach(): JSX.Element | null {
       </div>
       {step.wait && (
         <div className={`demo__wait ${done ? 'is-done' : ''}`} aria-live="polite">
-          <span>{done ? '✓ Done' : step.hint ?? 'Your turn.'}</span>
+          <span>{done ? '✓ Done' : stageError ?? step.hint ?? 'Your turn.'}</span>
         </div>
       )}
       <div className="demo__foot">

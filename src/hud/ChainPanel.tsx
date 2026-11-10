@@ -34,6 +34,8 @@ import { actionKind, actionLabel, firstBreak, openBracket } from '../lib/events'
 import { BrokenChainNotice } from './BrokenChain'
 import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
 import { useCyberspace } from '../store/useCyberspace'
+import { useGame } from '../store/useGame'
+import { gameFor } from '../lib/games/registry'
 import { useBuilder, walkChain } from '../store/useBuilder'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { Explanation } from './Explanation'
@@ -220,6 +222,12 @@ export function ChainPanel(): JSX.Element {
         <p className="notice">
           CHAIN CONFLICT: this identity has a chain on the relays as well as the one held here. Nothing moves until you choose.
           <button className="tag tag--tap" onClick={() => useChainUi.getState().setPromptAside(false)}>SHOW THE CHOICE</button>
+        </p>
+      ) : game && gameFor(game.game?.pubkey) ? (
+        // A game ONOSENDAI plays (DECK-0002 §7): back into it, where EXIT GAME is.
+        <p className="notice notice--game">
+          IN A GAME: {gameFor(game.game?.pubkey)?.name}. You stand where you entered it until you leave it.
+          <button className="tag tag--tap" onClick={() => useGame.getState().resume()}>BACK INTO THE GAME</button>
         </p>
       ) : game ? (
         // Below the publishing states, which are choices waiting on you; this

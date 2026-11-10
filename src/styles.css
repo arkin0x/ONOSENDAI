@@ -10417,3 +10417,135 @@ html.tv-broadcast body { overflow: hidden; }
   border: 0;
   cursor: pointer;
 }
+
+/* In-game mode (game/GameView.tsx, DECK-0002 §2.3): the game's world full
+   screen over cyberspace, its bar on top, its pad at the bottom. Pink, the
+   colour of play everywhere it is drawn (palette GAME). Over the workshop's
+   layer: a game is entered from cyberspace, never from the bench. */
+.gameview {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  touch-action: none;
+}
+
+.gameview__canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.gameview__bar {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.gameview__name {
+  padding: 6px 10px;
+  border: 1px solid var(--game);
+  border-radius: 8px;
+  color: var(--game);
+  background: rgba(6, 14, 22, 0.82);
+  letter-spacing: 0.08em;
+  font-size: 12px;
+}
+
+.gameview__status {
+  color: var(--game);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  opacity: 0.8;
+}
+
+.gameview__exit {
+  margin-left: auto;
+  pointer-events: auto;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--game);
+  background: rgba(6, 14, 22, 0.9);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.gameview__exit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.gameview__note {
+  position: absolute;
+  top: calc(max(12px, env(safe-area-inset-top)) + 46px);
+  left: 16px;
+  right: 16px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(6, 14, 22, 0.88);
+  border: 1px solid rgba(255, 122, 217, 0.5);
+  font-size: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.gamepad {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  pointer-events: none;
+}
+
+.gamepad__dirs {
+  display: grid;
+  grid-template-columns: repeat(3, 52px);
+  grid-template-rows: repeat(3, 52px);
+  gap: 4px;
+}
+
+.gamepad__lift {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gamepad__btn {
+  pointer-events: auto;
+  min-width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 122, 217, 0.55);
+  background: rgba(6, 14, 22, 0.75);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  -webkit-touch-callout: none;
+  user-select: none;
+  touch-action: none;
+}
+
+.gamepad__btn:active { background: rgba(255, 122, 217, 0.25); }
+.gamepad__btn--forward { grid-column: 2; grid-row: 1; }
+.gamepad__btn--left { grid-column: 1; grid-row: 2; }
+.gamepad__btn--right { grid-column: 3; grid-row: 2; }
+.gamepad__btn--back { grid-column: 2; grid-row: 3; }
+.gamepad__lift .gamepad__btn { min-width: 72px; }
+
+.hyperbar--game { font-family: inherit; text-align: left; cursor: pointer; border-color: rgba(255, 122, 217, 0.6); }
+.hyperbar--game .hyperbar__label { color: var(--game); }

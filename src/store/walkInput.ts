@@ -18,6 +18,7 @@
 
 import { modalUp } from '../hooks/useEscape'
 import { useCyberspace } from './useCyberspace'
+import { useGame } from './useGame'
 import { useWorkshop } from './useWorkshop'
 
 /**
@@ -53,5 +54,5 @@ function typing(): boolean {
  * which a focused text field also closes; the pad is never typing.
  */
 export function walkInputOpen(keys = false): boolean {
-  return useCyberspace.getState().walking && !menuCovering && !modalUp() && !useWorkshop.getState().open && !(keys && typing()) && !closers.some((closed) => closed())
+  return useCyberspace.getState().walking && !menuCovering && !modalUp() && !useWorkshop.getState().open && !useGame.getState().session && !(keys && typing()) && !closers.some((closed) => closed())
 }

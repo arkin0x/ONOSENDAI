@@ -47,9 +47,14 @@
  * (arkinox, RULED 2026-11-03; lib/walkSlide.ts, where the whole decision
  * is), and so do the sides, along the facing's right (play test of
  * 2026-11-10: they went along the screen's nearest axis), on the ground and
- * in the air alike: near 45 degrees a press is one diagonal step, both axes in one hop,
- * allowed only when both side cells are open; blocked ahead while angled to
- * a side, it slides one step along the wall to that side. Each piece is a
+ * in the air alike: from 22.5 to 67.5 degrees a press is one diagonal step,
+ * both axes in one hop, round whichever side of its square is open (refused
+ * only by a wall on both sides or in the diagonal cell; under GRAVITY the
+ * side cells need no floor, so a diagonal walkway is walked, play test of
+ * 2026-11-10; it steps down onto a floor 1 or 2 below, and one that would
+ * land with no floor takes a straight step onto a floor instead, if there
+ * is one); blocked ahead while angled to a side, it slides one step along
+ * the wall to that side, and under GRAVITY only onto a floor. Each piece is a
  * walkStep, so stairs, walls and gravity hold exactly as for a straight step.
  * A diagonal heading is one segment like any other: a run of diagonal steps
  * is one hop, and a run of slides along one wall is one hop.
@@ -322,7 +327,7 @@ export const useWalk = create<WalkState>((set, get) => ({
     // (2 gibsons at most) and settles onto a floor up to 2 below (store/walkStep.ts).
     const stepAlong = stepperFor(items, gravity)
     takeWallWait()
-    // Under gravity a diagonal also needs both side cells to hold you (lib/walkSlide.ts).
+    // Under gravity a diagonal ends where it walks off a floor, and a slide is taken only onto one (lib/walkSlide.ts).
     const stands = gravity ? (at: Position): boolean => standing(at, items, true) : undefined
     const move = planWalkMove(from, heading ?? { main: dir, side: null, lean: null }, length, stepAlong, { stands })
     if (waitedForWalls(() => get().press(name, strafe))) return

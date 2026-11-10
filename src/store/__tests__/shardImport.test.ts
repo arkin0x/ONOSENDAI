@@ -55,7 +55,9 @@ import { folderApi } from '../../lib/importFolders'
 import { publishMany, queryEach } from '../../lib/relay'
 import { useCyberspace } from '../useCyberspace'
 import { useWorkshop } from '../useWorkshop'
-import { withConstrain } from '../../lib/walkConstrain'
+import { wallMesh, withConstrain } from '../../lib/walkConstrain'
+import { bounceOf } from '../../lib/walkBounce'
+import { toPayload } from 'sno-core/shards'
 import { usePublished } from '../usePublished'
 import { NOT_SNO_OR_GLTF, looseName, routeImport, timing, useShardImport } from '../useShardImport'
 
@@ -906,5 +908,31 @@ describe('a .json picked or dropped without a zip (arkinox, 2026-11-09: "I cant 
     const zip = kitZip()
     expect(await routeImport([zip])).toEqual({ to: 'zip', file: zip })
     expect(await routeImport([zip, chicken()])).toEqual({ to: 'none', error: 'Import one zip at a time, on its own.' })
+  })
+})
+
+describe('BOUNCE through a lone .json (the owner\'s hand-made test shards, maze-kit/bounce-test)', () => {
+  const fixture = (name: string): File => new File([readFileSync(join(__dirname, '../fixtures/bounce-test', `${name}.json`), 'utf8')], `${name}.json`, { type: 'application/json' })
+
+  it('keeps `bounce` from the file to the bench, the wire and the collider', async () => {
+    for (const [name, want] of [['bounce-pad-12', 12], ['bounce-pad-reflect', 'reflect'], ['bounce-test-tower', 0]] as const) {
+      const route = await routeImport([fixture(name)])
+      expect(route.to).toBe('shards')
+      if (route.to !== 'shards') return
+      await imp().openFiles(route.files)
+      expect(imp().rows.map((r) => r.read)).toEqual(['ok'])
+      await imp().start()
+      imp().close()
+      const stored = mine().find((x) => x.id === `import/${name}`)!
+      expect(stored).toBeDefined()
+      // On the bench: carried in `extra`, beside `constrain`.
+      expect(stored.extra?.bounce).toBe(want === 0 ? undefined : want)
+      expect(stored.extra?.constrain).toBe('all')
+      expect(bounceOf(stored)).toBe(want)
+      // On the wire, as it publishes.
+      expect((toPayload(stored) as { bounce?: unknown }).bounce).toBe(want === 0 ? undefined : want)
+      // At the collider: its own faces bounce by it.
+      expect(wallMesh(stored, []).ownBounce).toBe(want)
+    }
   })
 })

@@ -408,7 +408,8 @@ let scratch = new Float64Array(0)
  *
  * With `who`, the `bounce` of the payload that owns the face it returns is
  * written there (lib/walkBounce.ts): the shard's own for its own faces, a
- * placed object's for that object's, 0 when nothing is hit.
+ * placed object's for that object's, 0 when nothing is hit. Of two faces at
+ * exactly the same distance, one with a bounce is the one returned.
  */
 export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i: 0 | 1 | 2, s: 1 | -1, maxT: number, minT: number, clip?: Box, who?: { bounce: Bounce }): number | null {
   const j = (i + 1) % 3, k = (i + 2) % 3
@@ -433,7 +434,8 @@ export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i
     const h = wa * t[a + i] + wb * t[b + i] + wc * t[c + i]
     const along = (h - pi) * s
     if (!(along > minT) || along > maxT) return
-    if (best !== null && along >= best) return
+    // Nearer wins; on an exact tie, a face with a bounce beats one without (a pad flush with a floor).
+    if (best !== null && (along > best || (along === best && (bestBounce !== 0 || owner === 0)))) return
     if (clip && own) {
       const hit = [0, 0, 0]
       hit[i] = h; hit[j] = pj; hit[k] = pk

@@ -55,9 +55,12 @@ describe('the launch', () => {
     expect(launchHeight(0, 40, false, 3)).toBe(0)
   })
 
-  it('reflect is the height fallen from, at most 24, and nothing under 1', () => {
+  it('reflect is the height fallen from, rounded down, at most 24, and nothing under 1', () => {
     expect(launchHeight('reflect', 5, false, 3)).toBe(5)
+    // A hair under 5 is float error: 5. A real 5.6 rounds down.
     expect(launchHeight('reflect', 4.9999999, false, 3)).toBe(5)
+    expect(launchHeight('reflect', 5.6, false, 3)).toBe(5)
+    expect(launchHeight('reflect', 4.99, false, 3)).toBe(4)
     expect(launchHeight('reflect', 40, false, 3)).toBe(BOUNCE_MAX)
     expect(launchHeight('reflect', 0.2, false, 3)).toBe(0)
   })
@@ -98,6 +101,11 @@ describe('whose bounce a face has: the payload that owns it', () => {
   it('the nearest face decides: a plain plate over a bouncy one shields it', () => {
     const m = wallMesh(host(), [part(plate(9)), part(plate(), [0, 1, 0])])
     expect(down(m)).toEqual({ t: 2, bounce: 0 })
+  })
+
+  it('on an exact tie, the face with a bounce wins, whichever comes first', () => {
+    expect(down(wallMesh(host(), [part(plate()), part(plate(5))]))).toEqual({ t: 3, bounce: 5 })
+    expect(down(wallMesh(host(), [part(plate(5)), part(plate())]))).toEqual({ t: 3, bounce: 5 })
   })
 
   it('a face that does not collide is not there to bounce on', () => {

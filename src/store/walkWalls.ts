@@ -801,23 +801,37 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
  * on (stepLimit with `stand`: a blocking face less than a gibson below, or
  * one in the walker's own plane with open space above), so it is always met
  * from above: a side face is parallel to the ray and a bottom face is never
- * under a walker standing, so neither ever bounces. Within that shard, the
- * face right under the walker decides, by the payload that owns it.
+ * under a walker standing, so neither ever bounces. The face right under the
+ * walker decides, by the payload that owns it, among every shard: of two at
+ * exactly the same height (a pad flush with a floor), the one that bounces.
  */
 export function floorBounce(at: Position, items: readonly WallItem[]): Bounce {
   const under = stepLimit(at, 'y', -1, 1n, items, true)
-  const w = under.by
-  if (under.reach !== 0n || !w || w.inside) return 0
-  const e = entries.get(w.key)
-  if (!e || !e.reach) return 0
-  const g = 2 ** w.shard.unit
-  const tol = tolerance(e, g, 1n)
-  const hair = tolerance(e, g, 0n)
-  const o: [number, number, number] = [Number(at.x - w.at.x) / g, Number(at.y - w.at.y) / g, -Number(at.z - w.at.z) / g]
-  const who: { bounce: Bounce } = { bounce: 0 }
-  const t = firstHit(e.mesh, o, 1, -1, (1 + tol) / g, (hair < HAIR_MAX ? -hair : ON_FACE) / g, e.clip, who)
-  return t === null ? 0 : who.bounce
+  if (under.reach !== 0n || !under.by) return 0
+  // A face in your own plane is under you only where stepLimit would stand you on it: open space above.
+  const plane = openAbove(at, items)
+  let best: number | null = null
+  let bounce: Bounce = 0
+  for (const w of items) {
+    if (w.inside || !regionReached(w, at, 'y', -1, 1n)) continue
+    const e = entries.get(w.key)
+    if (!e || e.first || !e.reach) continue
+    const g = 2 ** w.shard.unit
+    const tol = tolerance(e, g, 1n)
+    const hair = tolerance(e, g, 0n)
+    const o: [number, number, number] = [Number(at.x - w.at.x) / g, Number(at.y - w.at.y) / g, -Number(at.z - w.at.z) / g]
+    const who: { bounce: Bounce } = { bounce: 0 }
+    const t = firstHit(e.mesh, o, 1, -1, (1 + tol) / g, (plane && hair < HAIR_MAX ? -hair : ON_FACE) / g, e.clip, who)
+    if (t === null) continue
+    const gib = t * g
+    // Nearest wins; a pad flush with the floor beside or under it (an exact tie) wins over the floor.
+    if (best === null || gib < best - TIE || (Math.abs(gib - best) <= TIE && bounce === 0)) { best = gib; bounce = who.bounce }
+  }
+  return bounce
 }
+
+/** Two floors this close, in gibsons, are flush: float error only. */
+const TIE = 1e-9
 
 /**
  * A door slab's thin axis in the walls' frame (0, 1, 2 for X, Y, Z) and its

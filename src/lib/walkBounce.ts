@@ -1,8 +1,10 @@
 /**
  * walkBounce.ts - BOUNCE, EXPERIMENTAL (arkinox, 2026-11-10: "we could try
  * out a bounce feature when gravity is on?"), for the AeroCarnival kit's
- * trampolines and bounce pads. The spec shape is pending a design note on
- * anim and bounce: this is the provisional reading, not a DECK-0003 field.
+ * trampolines and bounce pads. Its shape is ruled (D5, 2026-11-10): a flat
+ * payload field beside `constrain`, a whole number 1 to 24 or "reflect",
+ * launching on landings only, and Down absorbs. It is not yet written into
+ * DECK-0003, so it stays EXPERIMENTAL until it is.
  *
  * An object-level SNO field, `bounce`, read by a walker landing on one of the
  * object's faces with GRAVITY on (store/useWalk.ts):
@@ -14,7 +16,8 @@
  * | anything else (absent, a fraction, out of range, another string) | nowhere: no bounce |
  *
  * An Up press just before the landing adds JUMP_HEIGHT to either, still at
- * most BOUNCE_MAX. Stepping up onto a fixed-height pad (the stair step-up)
+ * most BOUNCE_MAX; a Down press just before it absorbs the bounce, and the
+ * walker lands and stands. Stepping up onto a fixed-height pad (the stair step-up)
  * launches as a landing would; onto a "reflect" pad it does nothing, since it
  * fell from nowhere (ruling of 2026-11-10). sno-core does not know the field, so it rides in the
  * model's `extra` like `constrain` (lib/walkConstrain.ts), and an older
@@ -50,15 +53,19 @@ export function readBounce(raw: unknown): Bounce {
   return typeof raw === 'number' && Number.isInteger(raw) && raw >= BOUNCE_MIN && raw <= BOUNCE_MAX ? raw : 0
 }
 
+/** How far under a whole gibson a reflected fall may be and still count as it: float error only. */
+const REFLECT_EPS = 1e-6
+
 /**
  * How high a landing on a face with bounce `b` launches, in gibsons, after a
- * fall whose top was `fell` gibsons above the landing, with `boost` (an Up
+ * fall whose top was `fell` gibsons above the landing (for "reflect",
+ * rounded down, a hair's float error forgiven), with `boost` (an Up
  * press just before it) adding JUMP_HEIGHT `boostBy`: at most BOUNCE_MAX, and
  * 0 (no launch) under BOUNCE_MIN.
  */
 export function launchHeight(b: Bounce, fell: number, boost: boolean, boostBy: number): number {
   if (b === 0) return 0
-  const base = b === BOUNCE_REFLECT ? Math.round(fell) : b
+  const base = b === BOUNCE_REFLECT ? Math.floor(fell + REFLECT_EPS) : b
   const h = Math.min(BOUNCE_MAX, base + (boost ? boostBy : 0))
   return h >= BOUNCE_MIN ? h : 0
 }

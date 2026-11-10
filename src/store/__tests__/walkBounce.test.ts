@@ -8,7 +8,9 @@
  * would; onto a reflect pad it does nothing. Bouncing in place publishes
  * nothing, however long it goes on, as a jump in place does; a bounce onto
  * a higher ledge is one hop, as a jump onto one is; a fall onto a pad is one
- * hop for the landing, and nothing after it.
+ * hop for the landing, and nothing after it. Steering while bouncing is one
+ * hop a landing, straight from the landing before; Down absorbs a bounce;
+ * the walls are fetched fresh at every landing.
  */
 import { provedFor } from '../fixtures/provedHop'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -453,5 +455,269 @@ describe('reflect', () => {
     expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 6), 6)
     expect(Math.abs(peakOver(900) - 6)).toBeLessThan(1)
     nothingMade()
+  })
+})
+
+/** Every posted hop starts where the one before it ended. */
+function chainOk(): void {
+  for (let n = 1; n < posted.length; n++) expect(posted[n].from).toEqual(posted[n - 1].to)
+}
+/** Land every proof that comes, until the head is where the last one went. */
+async function landAll(maxRounds = 50): Promise<void> {
+  for (let r = 0; r < maxRounds; r++) {
+    if (posted.length === 0) return
+    const last = posted[posted.length - 1]
+    const pos = useCyberspace.getState().position
+    if (pos.x === last.to.x && pos.y === last.to.y && pos.z === last.to.z) return
+    await land()
+  }
+}
+/** Frames until the arc is coming down and due on the floor within `ms`. */
+function untilLandingIn(ms: number, maxMs = 5000): void {
+  const due = (): number => { const f = fallState()!; return f.t0 + ((f.v0 + Math.sqrt(f.v0 * f.v0 - 2 * WALK_GRAVITY * f.bottomN)) / WALK_GRAVITY) * 1000 }
+  for (let t = 0; t < maxMs && fallState() && due() - clock > ms; t += 16) frame(16)
+}
+/** How many hops `fn` queues. */
+function queuedBy(fn: () => void): number {
+  let queued = 0
+  let prev = useWalk.getState().queue.length
+  const off = useWalk.subscribe((s) => { if (s.queue.length > prev) queued += s.queue.length - prev; prev = s.queue.length })
+  fn()
+  off()
+  return queued
+}
+
+describe('Down absorbs (D5)', () => {
+  it('Down just before the landing: it lands and stands, and nothing is made', () => {
+    world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 8), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('up')
+    // The jump reaches the pad at 600 ms.
+    frame(590)
+    useWalk.getState().press('down')
+    frame(30)
+    expect(useWalk.getState().falling).toBe(false)
+    expect(fallState()).toBeNull()
+    expect(useCyberspace.getState().cursor).toEqual(start)
+    nothingMade()
+  })
+
+  it('Down long before the landing does nothing; of Down and Up, the later wins', () => {
+    world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 8), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('up')
+    frame(100)
+    useWalk.getState().press('down')
+    untilBounce()
+    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 8), 6)
+    useWalk.getState().exit()
+    clearWalls()
+    world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 8), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('up')
+    frame(450)
+    useWalk.getState().press('down')
+    frame(50)
+    useWalk.getState().press('up')
+    untilBounce()
+    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 11), 6)
+  })
+
+  it('a step up into a narrow shaft onto a pad: walls hold every steer, Down lets you out', async () => {
+    // A 1-wide nook 1 ahead: a pad of 6 whose top is 1 up, walls 30 tall either side and behind.
+    world(
+      start,
+      [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]],
+      [bouncy(boxes('Pad', 'all', [[[-0.5, 0, -1.5], [0.5, 1, -0.5]]]), 6), [0, -1, 0]],
+      [boxes('Shaft', 'all', [[[-1.5, 0, -1.5], [-0.5, 30, -0.5]], [[0.5, 0, -1.5], [1.5, 30, -0.5]], [[-1.5, 0, -2.5], [1.5, 30, -1.5]]]), [0, -1, 0]],
+    )
+    walk(true)
+    useWalk.getState().press('away')
+    const top = { ...start, y: start.y + 1n, z: start.z - 1n }
+    expect(useCyberspace.getState().cursor).toEqual(top)
+    expect(useWalk.getState().falling).toBe(true)
+    await vi.waitFor(() => expect(posted).toHaveLength(1))
+    await land()
+    // Bouncing in the nook: left, right and on are walls.
+    for (let n = 0; n < 3; n++) {
+      for (let t = 0; t < 300; t += 16) frame(16)
+      for (const k of ['left', 'right', 'away'] as const) useWalk.getState().press(k)
+    }
+    expect(at(start, fallState()!.anchor)).toEqual([0, 1, -1])
+    // Down as it comes down onto the pad: it lands, and stands.
+    untilLandingIn(100)
+    useWalk.getState().press('down')
+    fallOut()
+    expect(useWalk.getState().falling).toBe(false)
+    expect(useCyberspace.getState().cursor).toEqual(top)
+    expect(posted).toHaveLength(1)
+    // And out: back down the step, a normal walk.
+    useWalk.getState().press('toward')
+    expect(at(start)).toEqual([0, 0, 0])
+    expect(useWalk.getState().falling).toBe(false)
+  })
+})
+
+describe('the Up and Down windows count from the landing, not the frame', () => {
+  it('Up 200 ms before the landing boosts, though the frame that sees it is 100 ms late', () => {
+    world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 8), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('up')
+    frame(400)
+    useWalk.getState().press('up')
+    // One frame, 300 ms on: 100 ms past the landing at 600, the Up 200 ms before it.
+    frame(300)
+    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 11), 6)
+  })
+})
+
+describe('walls a bounce meets', () => {
+  it('a wall that loads mid-bounce holds the steers after the next landing', () => {
+    const items = world(start, [bouncy(boxes('Pad', 'all', [[[-10, -1, -40], [10, 0, 10]]]), 8), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('up')
+    untilBounce()
+    for (let t = 0; t < 2000; t += 16) frame(16)
+    // A wall arrives 2 ahead, from the pad up to 30.
+    const plane = useCyberspace.getState().plane as WorldItem['plane']
+    const wall: WorldItem = { key: 'wall', type: 'shard', at: { x: start.x, y: start.y - 1n, z: start.z }, plane, height: 84, mine: false, shard: boxes('Wall', 'all', [[[-10, 0, -3], [10, 30, -2]]]) }
+    useShards.setState({ worldItems: () => [...items, wall] })
+    // One whole bounce (just under a second at 8) for a landing to see it, then six steers into it.
+    for (let t = 0; t < 1100; t += 16) frame(16)
+    for (let k = 0; k < 6; k++) { for (let t = 0; t < 200; t += 16) frame(16); useWalk.getState().press('away') }
+    expect(at(start, fallState()!.anchor)[2]).toBeGreaterThanOrEqual(-1)
+    // Its walls stay built across bounces: nothing evicts them.
+    for (let t = 0; t < 3000; t += 16) frame(16)
+    useWalk.getState().press('away')
+    expect(at(start, fallState()!.anchor)[2]).toBeGreaterThanOrEqual(-1)
+  })
+
+  it('a fixed 24 under a ceiling 10 up never passes the ceiling, and goes on bouncing', () => {
+    world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 24), [0, -1, 0]], [boxes('Lid', 'all', [[[-10, 10, -10], [10, 11, 10]]]), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('up')
+    untilBounce()
+    const peak = peakOver(5000)
+    // The lid's underside is 9 over the walker: it rises 8, a gibson short of it, never past.
+    expect(peak).toBeLessThanOrEqual(8)
+    expect(peak).toBeGreaterThan(7.9)
+    expect(useWalk.getState().falling).toBe(true)
+    nothingMade()
+  })
+
+  it('a pad flush with a floor beside it, the floor listed first: the pad still bounces', () => {
+    // Floor and pad as two shards, their tops at exactly the same height under the walker.
+    world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]], [bouncy(boxes('Pad', 'all', [[[-1, -1, -1], [1, 0, 1]]]), 8), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('up')
+    untilBounce(2000)
+    expect(fallState()?.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 8), 6)
+  })
+})
+
+describe('steering and leaving', () => {
+  it('steering off a small pad lands on the floor below; the hops chain and land', async () => {
+    world(start, [bouncy(boxes('Pad', 'all', [[[-1, -1, -1], [1, 0, 1]]]), 8), [0, -1, 0]], [boxes('Floor', 'all', [lowFloor(6)]), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('up')
+    untilBounce()
+    for (let t = 0; t < 700; t += 16) frame(16)
+    for (let k = 0; k < 3; k++) useWalk.getState().press('away')
+    fallOut()
+    expect(useWalk.getState().falling).toBe(false)
+    const floor = { ...start, y: start.y - 6n, z: start.z - 3n }
+    expect(useCyberspace.getState().cursor).toEqual(floor)
+    await vi.waitFor(() => expect(posted.length).toBeGreaterThan(0))
+    await landAll()
+    chainOk()
+    expect(posted[0].from).toEqual(start)
+    expect(posted[posted.length - 1].to).toEqual(floor)
+    expect(useCyberspace.getState().position).toEqual(floor)
+  })
+
+  it('leaving WALK mid-bounce with a hop queued: nothing more is posted', async () => {
+    world(start, [boxes('Ledge', 'all', [LEDGE]), [0, -1, 0]], [bouncy(boxes('Pad', 'all', [lowFloor(6)]), 4), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('away')
+    await vi.waitFor(() => expect(posted).toHaveLength(1))
+    untilBounce()
+    expect(useWalk.getState().queue.length).toBeGreaterThan(0)
+    useWalk.getState().exit()
+    expect(fallState()).toBeNull()
+    const n = posted.length
+    for (let t = 0; t < 3000; t += 16) frame(16)
+    expect(posted).toHaveLength(n)
+    expect(useWalk.getState().queue).toEqual([])
+  })
+
+  it('switching identity mid-bounce stops the walk and drops the bounce', () => {
+    world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 8), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('up')
+    untilBounce()
+    useCyberspace.setState({ identity: { ...useCyberspace.getState().identity, pubkey: 'ab'.repeat(32) } })
+    expect(fallState()).toBeNull()
+    expect(useWalk.getState()).toMatchObject({ falling: false, queue: [], open: null, behind: 0 })
+    for (let t = 0; t < 2000; t += 16) frame(16)
+    expect(posted).toHaveLength(0)
+  })
+
+  it('reflect with Up held climbs by 3 a bounce to 24, and stays there, publishing nothing', () => {
+    world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 'reflect'), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('up')
+    const seen: number[] = []
+    let last = -1
+    for (let t = 0; t < 30_000; t += 16) {
+      frame(16)
+      if (t % 32 === 0) useWalk.getState().press('up')
+      const f = fallState()
+      // (An arc that meets its top exactly, a float hair under its apex, restarts there at rest: v0 0, the same motion.)
+      if (f && f.v0 !== last && f.v0 > 0) { last = f.v0; seen.push(Math.round((f.v0 * f.v0) / (2 * WALK_GRAVITY))) }
+    }
+    expect(seen).toEqual([3, 6, 9, 12, 15, 18, 21, 24])
+    // And it stays at 24, Up or not.
+    expect(Math.abs(peakOver(3000) - 24)).toBeLessThan(1)
+    nothingMade()
+  })
+})
+
+describe('the hop rate', () => {
+  it('steering along 1-high pads: one hop a bounce at most, no more than jumping along a floor', () => {
+    const LONG: [V3, V3] = [[-10, -1, -400], [10, 0, 10]]
+    const steer = (jump: boolean) => () => { for (let t = 0; t < 5000; t += 16) { frame(16); if (t % 96 === 0) { if (jump) useWalk.getState().press('up'); useWalk.getState().press('away') } } }
+    world(start, [bouncy(boxes('Pad', 'all', [LONG]), 1), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('up')
+    const bounce = queuedBy(steer(false))
+    useWalk.getState().exit()
+    clearWalls()
+    world(start, [boxes('Floor', 'all', [LONG]), [0, -1, 0]])
+    walk(true)
+    const jump = queuedBy(steer(true))
+    // A bounce at 1 is 0.35 s: 14 landings in 5 s, each a hop to the next spot
+    // along (26 before steer points were folded into the landing's hop).
+    expect(bounce).toBe(14)
+    expect(bounce).toBeLessThanOrEqual(jump)
+  })
+
+  it('steering across a long pad while proofs land: the chain stays whole and the walk never stops', async () => {
+    world(start, [bouncy(boxes('Pad', 'all', [[[-10, -1, -400], [10, 0, 10]]]), 4), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('up')
+    for (let round = 0; round < 12; round++) {
+      for (let t = 0; t < 300; t += 16) { frame(16); if (t % 96 === 0) useWalk.getState().press(round % 3 === 2 ? 'right' : 'away') }
+      await landAll()
+    }
+    expect(posted.length).toBeGreaterThan(3)
+    chainOk()
+    expect(posted[0].from).toEqual(start)
+    // The first arc is the jump, a plain fall: its steer point is a hop of its own (B), then its landing.
+    expect(at(start, posted[0].to as Position)[1]).toBeGreaterThan(0)
+    expect(at(start, posted[1].to as Position)[1]).toBe(0)
+    // Every bounce after it is one hop, landing to landing, at the pad's standing height.
+    for (const h of posted.slice(1)) expect(h.to.y).toBe(start.y)
+    expect(useWalk.getState().falling).toBe(true)
+    expect(useCyberspace.getState().proof.status).not.toBe('infeasible')
   })
 })

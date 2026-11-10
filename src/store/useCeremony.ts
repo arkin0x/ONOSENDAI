@@ -62,6 +62,13 @@ interface CeremonyState {
   /** Item key -> performance.now() when this client first opened it. */
   births: Record<string, number>
   chip: FoundChip | null
+  /**
+   * Finds opened in the other plane than the one the view is in: one bag
+   * holds a region and its twin (spec §7.6 Planes), so a scan opens both
+   * planes' entries. Each waits here for its own plane, and gets its
+   * ceremony when the view goes there (watchPlane).
+   */
+  pending: Hidden[]
   /** Items just opened by a scan; starts their decode and raises the chip. */
   mark: (items: Hidden[]) => void
   /** These finds left with a room closed (CLOSE): out of the chip's count, kept to come back. */
@@ -90,6 +97,32 @@ function watchReturns(): void {
     const away = chip.away.filter((id) => !s.discovered[id])
     if (away.length !== chip.away.length) useCeremony.setState({ chip: { ...chip, away } })
   })
+}
+
+/**
+ * A find waiting in `pending` gets its ceremony when the view enters its
+ * plane, if it is still among the finds (a delete or a retraction since
+ * leaves it out). Watched from the first find set aside.
+ */
+let watchingPlane = false
+function watchPlane(): void {
+  if (watchingPlane) return
+  watchingPlane = true
+  useCyberspace.subscribe((s, prev) => {
+    if (s.anchorPlane === prev.anchorPlane) return
+    const pending = useCeremony.getState().pending
+    if (pending.length === 0) return
+    const discovered = useShards.getState().discovered
+    const ready = pending.filter((h) => h.plane === s.anchorPlane)
+    useCeremony.setState({ pending: pending.filter((h) => h.plane !== s.anchorPlane) })
+    const still = ready.filter((h) => discovered[h.eventId])
+    if (still.length > 0) useCeremony.getState().mark(still)
+  })
+}
+
+/** Finds split by plane: those in the plane the view is in, and the rest (spec §7.6 Planes). */
+export function byViewPlane(found: readonly Hidden[], plane: Plane): { here: Hidden[]; elsewhere: Hidden[] } {
+  return { here: found.filter((h) => h.plane === plane), elsewhere: found.filter((h) => h.plane !== plane) }
 }
 
 const PREVIEW_AUTHOR = 'ab'.repeat(32)
@@ -122,8 +155,18 @@ function previewShard(unit: number): ShardModel {
 export const useCeremony = create<CeremonyState>((set, get) => ({
   births: {},
   chip: null,
+  pending: [],
 
-  mark: (found) => {
+  mark: (opened) => {
+    // A find in the other plane is not here: no decode, no chip, until the
+    // view is in its plane (watchPlane). An entry with no C took the plane
+    // it was read from, so it is here.
+    const { here: found, elsewhere } = byViewPlane(opened, useCyberspace.getState().anchorPlane)
+    if (elsewhere.length > 0) {
+      const waiting = new Set(get().pending.map((h) => h.eventId))
+      set({ pending: [...get().pending, ...elsewhere.filter((h) => !waiting.has(h.eventId))] })
+      watchPlane()
+    }
     // The tour's district shows only its curators' things (useShards
     // curated): a stranger's find there raises no chip, whose line is the
     // find's own text, and gets no decode (review of #364).

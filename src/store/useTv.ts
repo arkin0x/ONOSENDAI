@@ -505,7 +505,7 @@ function scanTick(s: TvState): void {
   looked = { avatars: s.avatars, tapeTime: s.tapeTime, version: sc.version, plane, scanner: sc }
   const opened: OpenedBag[] = []
   for (const [, a] of shownAvatars(s, plane)) opened.push(...sc.at(a.position, s.tapeTime))
-  reveal(s, opened)
+  reveal(s, opened, plane)
 }
 
 /**
@@ -523,19 +523,10 @@ function scanTick(s: TvState): void {
  * coins in the same region (a lookup id names a region, not a bag). What TV
  * found is kept by the found cache instead, as watched.
  */
-function reveal(s: TvState, opened: OpenedBag[]): void {
+function reveal(s: TvState, opened: OpenedBag[], plane: number): void {
   const now = performance.now()
-  const fresh: Array<{ h: Hidden; bagAt: number }> = []
-  const seen = new Set<string>()
-  // A find by someone blocked, or muted by its id, is not shown (store/useMutes).
-  const muted = useMutes.getState().muted
-  const me = useCyberspace.getState().identity.pubkey
+  const fresh = tvFresh(s, opened, plane, useMutes.getState().muted, useCyberspace.getState().identity.pubkey)
   for (const o of opened) {
-    for (const h of o.items) {
-      if (s.found[h.eventId] || seen.has(h.eventId) || findHidden(h, muted, me)) continue
-      seen.add(h.eventId)
-      fresh.push({ h, bagAt: o.bag.created_at })
-    }
     // Kept across a reload only when TV shows the whole bag: a kept bag
     // opens again whole (useFound), and a message in it would become a find.
     if (o.whole && !keptBags.has(o.bag.id)) {
@@ -557,6 +548,26 @@ function reveal(s: TvState, opened: OpenedBag[]): void {
     // keys open nothing by themselves (useShards addDiscovered).
     useShards.getState().addDiscovered(fresh.map(({ h }) => h), { watched: true })
   }
+}
+
+/**
+ * What a TV scan shows for the first time: in the plane the view is in only.
+ * One bag holds a region and its twin (spec §7.6 Planes), so a scan opens the
+ * other plane's entries too; those are neither a FOUND line nor a find here,
+ * and stay unfound until TV shows them in their own plane. A find by someone
+ * blocked, or muted by its id, is not shown (store/useMutes).
+ */
+export function tvFresh(s: Pick<TvState, 'found'>, opened: ReadonlyArray<Pick<OpenedBag, 'items' | 'bag'>>, plane: number, muted: Parameters<typeof findHidden>[1], me: string): Array<{ h: Hidden; bagAt: number }> {
+  const fresh: Array<{ h: Hidden; bagAt: number }> = []
+  const seen = new Set<string>()
+  for (const o of opened) {
+    for (const h of o.items) {
+      if (h.plane !== plane || s.found[h.eventId] || seen.has(h.eventId) || findHidden(h, muted, me)) continue
+      seen.add(h.eventId)
+      fresh.push({ h, bagAt: o.bag.created_at })
+    }
+  }
+  return fresh
 }
 
 async function readMore(id: number, t: number): Promise<void> {

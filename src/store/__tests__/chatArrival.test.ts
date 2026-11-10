@@ -46,7 +46,7 @@ describe('a line arriving while the controls are out', () => {
     useChat.setState({ lines: [], open: false, unread: 0, muted: false })
     useSecrets.setState({ current: { [region]: { keyHex: bytesToHex(regionKey), height: 12 } } })
     // The lines below are said in dataspace; a line is heard only in the plane its C names (DECK-0005 §3.2).
-    useCyberspace.setState({ anchorPlane: 0 })
+    useCyberspace.setState({ anchorPlane: 0, headPlane: 0 })
     usePad.setState({ open: true })
     unlink = linkChatAndPad(() => phone)
   })

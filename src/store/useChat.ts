@@ -131,6 +131,16 @@ export function sendKey(): { lookupId: string; keyHex: string; height: number } 
 }
 
 /** Newest last, no repeats: one line per inner event id. */
+/**
+ * The plane chat listens in (DECK-0005 §3.2, The plane): at the head, the
+ * plane you stand in, which a toggle lined up for the next hop does not
+ * change until it is committed; spectating, in free view or in your history,
+ * the plane the view is in, as the room keys follow the view.
+ */
+export function listeningPlane(s: Pick<ReturnType<typeof useCyberspace.getState>, 'atHead' | 'headPlane' | 'anchorPlane'>): 0 | 1 {
+  return s.atHead() ? s.headPlane : s.anchorPlane
+}
+
 export function mergeLines(have: ChatLine[], add: ChatLine[]): ChatLine[] {
   const seen = new Set(have.map((l) => l.id))
   const fresh = add.filter((l) => !seen.has(l.id))
@@ -242,7 +252,7 @@ export const useChat = create<ChatState>((set, get) => ({
     // line said at these X, Y and Z in the other plane opens here too. Only
     // lines whose C is in the plane you listen from are heard; a line with no
     // C names no plane and is heard in both (DECK-0005 §3.2, The plane).
-    const plane = useCyberspace.getState().anchorPlane
+    const plane = listeningPlane(useCyberspace.getState())
     const inners = (await chatInners(outer, hexToBytes(key.keyHex))).filter((e) => {
       const said = placeOf(e)
       return said === null || said.plane === plane

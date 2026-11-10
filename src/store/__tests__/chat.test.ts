@@ -52,7 +52,7 @@ describe('receiving', () => {
   beforeEach(() => {
     useChat.setState({ lines: [], open: false, unread: 0, muted: true })
     useSecrets.setState({ current: { [region]: { keyHex: bytesToHex(regionKey), height: 12 } } })
-    useCyberspace.setState({ anchorPlane: 0 })
+    useCyberspace.setState({ anchorPlane: 0, headPlane: 0 })
   })
 
   it('opens an envelope from someone else, unfolds the dock and keeps the line', async () => {
@@ -119,7 +119,7 @@ describe('receiving', () => {
     await useChat.getState().receive(finalizeEvent(await bagTemplate([here], regionKey, region, 12, 7, CHAT_BAG_KIND), sk))
     expect(useChat.getState().lines.map((l) => l.text)).toEqual(['from this plane'])
     // Listening from ideaspace, the same twin line is heard.
-    useCyberspace.setState({ anchorPlane: 1 })
+    useCyberspace.setState({ anchorPlane: 1, headPlane: 1 })
     await useChat.getState().receive(finalizeEvent(await bagTemplate([twin], regionKey, region, 12, 6, CHAT_BAG_KIND), sk))
     expect(useChat.getState().lines.map((l) => l.text)).toContain('from the twin plane')
   })
@@ -129,7 +129,7 @@ describe('receiving', () => {
     const bare = finalizeEvent({ kind: 23333, created_at: 8, content: 'no place said', tags: [['d', region]] }, sk)
     for (const plane of [0, 1] as const) {
       useChat.setState({ lines: [] })
-      useCyberspace.setState({ anchorPlane: plane })
+      useCyberspace.setState({ anchorPlane: plane, headPlane: plane })
       await useChat.getState().receive(finalizeEvent(await bagTemplate([bare], regionKey, region, 12, 8, CHAT_BAG_KIND), sk))
       expect(useChat.getState().lines.map((l) => l.text)).toEqual(['no place said'])
     }

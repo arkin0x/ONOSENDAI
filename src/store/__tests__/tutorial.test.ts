@@ -369,4 +369,18 @@ describe('the engine', () => {
     runTutorialEffect('test-action')
     expect(runs).toBe(1)
   })
+  it('a step that needs WALK goes back to the WALK step when not walking, and SKIP on that step passes over it', () => {
+    useCyberspace.setState({ walking: false })
+    useTutorial.setState({ script: { steps: [
+      { id: 'walk', title: 'W', caption: 'w', wait: 'walk' },
+      { id: 'run', title: 'R', caption: 'r', needsWalk: 'walk' },
+      { id: 'after', title: 'A', caption: 'a' },
+    ] } })
+    // Resumed on RUN without WALK (a reload never keeps it): back to WALK.
+    useTutorial.getState().start({ at: 'run' })
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('walk')
+    // SKIP on WALK: past RUN, which needs it.
+    useTutorial.getState().next()
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('after')
+  })
 })

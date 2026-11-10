@@ -9,7 +9,7 @@
  * | a modal is up (hooks/useEscape.ts modalUp) | a press is meant for the modal |
  * | the workshop is open | the bench has its own keys (its Z is undo) |
  * | Cyberspace TV is on (added by hooks/useKeyboard.ts) | watching only |
- * | a text field has focus | typing, not walking |
+ * | a text field has focus (keyboard holds only) | typing, not walking. Never for the pad: its press cancels the default, so focus stays in the chat line after you type, and a pad press is never typing (re-review of #651) |
  *
  * The hold loop (store/walkHold.ts) asks it every beat and lets go of
  * everything held once it closes, so a key or a pad key held as a modal or
@@ -48,7 +48,10 @@ function typing(): boolean {
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true
 }
 
-/** Whether WALK's controls take input now. */
-export function walkInputOpen(): boolean {
-  return useCyberspace.getState().walking && !menuCovering && !modalUp() && !useWorkshop.getState().open && !typing() && !closers.some((closed) => closed())
+/**
+ * Whether WALK's controls take input now. `keys`: asked for the keyboard,
+ * which a focused text field also closes; the pad is never typing.
+ */
+export function walkInputOpen(keys = false): boolean {
+  return useCyberspace.getState().walking && !menuCovering && !modalUp() && !useWorkshop.getState().open && !(keys && typing()) && !closers.some((closed) => closed())
 }

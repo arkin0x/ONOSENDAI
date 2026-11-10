@@ -400,6 +400,39 @@ describe('every hold is let go when no release can come (review of #651)', () =>
     expect(moved(start)).toEqual([0, 0, -1])
   })
 
+  it('a text field focused (the chat line after typing) closes the keyboard only: the pad walks on (re-review of #651)', () => {
+    walk()
+    face(0)
+    vi.stubGlobal('document', { activeElement: { tagName: 'INPUT', isContentEditable: false } })
+    try {
+      walkKeyDown(key('KeyW'))
+      expect(holding()).toBe(false)
+      expect(moved(start)).toEqual([0, 0, 0])
+      // The pad's press is never typing: it walks, and keeps walking.
+      const fwd = padHold(pad('forward'))
+      fwd.onPointerDown(pointer())
+      expect(moved(start)).toEqual([0, 0, -1])
+      vi.advanceTimersByTime(WALK_HOLD_MS * 2)
+      expect(moved(start)).toEqual([0, 0, -3])
+      fwd.onPointerUp()
+      // A key held as focus goes into a field is let go at the next beat; a pad key held with it walks on.
+      vi.stubGlobal('document', { activeElement: null })
+      walkKeyDown(key('KeyD'))
+      fwd.onPointerDown(pointer())
+      vi.stubGlobal('document', { activeElement: { tagName: 'TEXTAREA', isContentEditable: false } })
+      const before = moved(start)
+      vi.advanceTimersByTime(WALK_HOLD_MS)
+      const after = moved(start)
+      // That beat was FORWARD alone: straight on, with D let go.
+      expect([after[0] - before[0], after[2] - before[2]]).toEqual([0, -1])
+      expect(holding()).toBe(true)
+      fwd.onPointerUp()
+      expect(holding()).toBe(false)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('a modal or the workshop: the same', () => {
     walk()
     face(0)
@@ -687,6 +720,22 @@ describe('GRAVITY with holds (review of #651)', () => {
     fallFrames(800)
     expect(fallState()).toBeNull()
     expect(useCyberspace.getState().cursor).toEqual(start)
+  })
+
+  it('a held Down let go: the next landing bounces again', () => {
+    begin(8)
+    useWalk.getState().press('up')
+    fallFrames(100)
+    const down = padHold(gpad('down'))
+    down.onPointerDown(pointer())
+    fallFrames(700)
+    expect(fallState()).toBeNull()
+    down.onPointerUp()
+    expect(holding()).toBe(false)
+    useWalk.getState().press('up')
+    for (let t = 0; t < 2000 && fallState() && fallState()!.v0 <= JUMP_SPEED + 1e-9; t += 16) fallFrames(16)
+    expect(fallState()).not.toBeNull()
+    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 8), 6)
   })
 
   it('Up held adds its jump to a bounce, read from the hold itself', () => {

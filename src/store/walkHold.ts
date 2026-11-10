@@ -18,7 +18,8 @@
  * | let go | the source goes; with none left, the loop stops, and nothing more is pressed |
  * | the keyboard's own repeats | ignored (hooks/useKeyboard.ts): the loop is the repeat |
  * | WALK ends or begins, a STOP, the window loses focus or the page is hidden, Meta (Cmd) goes down or up | everything held is let go: macOS sends no keyup for a key let go while Cmd is down, so it would walk on forever |
- * | WALK's input closes (store/walkInput.ts: the menu, a modal, the workshop, TV, a text field) | nothing new is held, and the next beat lets go of everything |
+ * | WALK's input closes (store/walkInput.ts: the menu, a modal, the workshop, TV) | nothing new is held, and the next beat lets go of everything |
+ * | a text field takes focus | the keyboard's holds only: nothing new held from a key, and the next beat lets go of the keys held. The pad walks on |
  *
  * What is held combines, so two directions held are one diagonal press, as
  * W with D held always was on the keyboard (lib/walkKeys.ts) and now is on
@@ -98,6 +99,11 @@ function verticalPress(vert: -1 | 0 | 1): void {
 /** One beat of the loop: what is held, pressed once. */
 function beat(): void {
   if (held.size === 0 || !walkInputOpen()) { holdReleaseAll(); return }
+  // Typing into a field: the keys held are let go, and the pad walks on.
+  if (!walkInputOpen(true) && [...held.keys()].some((source) => source.startsWith('key:'))) {
+    holdEndAll('key:')
+    if (held.size === 0) return
+  }
   const d = heldNow()
   if (useWalk.getState().gravity) { verticalPress(d.vert); levelPress(d) }
   else if (!levelPress(d)) verticalPress(d.vert)
@@ -117,11 +123,12 @@ function stopLoop(): void {
  * `source` goes down holding `dir`: one press at once, then one every
  * WALK_HOLD_MS while anything is held. Down again without a let go (a lost
  * keyup) is a fresh press, as a tap is. Pressed with the input closed
- * (store/walkInput.ts), nothing. The press is what everything held makes
+ * (store/walkInput.ts; for a key, a focused text field closes it too),
+ * nothing. The press is what everything held makes
  * together: JUMP pressed while DOWN is held cancels, as the two held do.
  */
 export function holdStart(source: string, dir: HeldDir): void {
-  if (!walkInputOpen()) return
+  if (!walkInputOpen(source.startsWith('key:'))) return
   held.set(source, dir)
   const now = heldNow()
   if (dir.vert !== 0) verticalPress(now.vert)

@@ -33,10 +33,10 @@ import { useWalk } from '../store/useWalk'
 import { walkHeldDir, walkMove } from '../lib/walkKeys'
 import { holdEnd, holdReleaseAll, holdStart } from '../store/walkHold'
 import { addWalkInputCloser, setWalkMenuCovering, walkMenuCovering } from '../store/walkInput'
+import { canFly, useViewFly } from '../lib/viewFly'
 
 // Cyberspace TV is watching only: WALK's input is closed while it is on (store/walkInput.ts).
 addWalkInputCloser(() => useTv.getState().on)
-import { canFly, useViewFly } from '../lib/viewFly'
 
 const MOVE_KEYS: Record<string, MoveName> = {
   KeyW: 'up',

@@ -10,7 +10,9 @@
  *   veering as the thumb slides);
  * - the sides go along the facing's right, and a press in the air goes the
  *   way you face, a diagonal included (it went along the screen's axis);
- * - a hold publishes what the same taps publish: the same hops, as many.
+ * - a hold publishes what the same taps publish: the same hops, as many;
+ * - under GRAVITY the pad's DOWN is on, and held through a bounce's fall it
+ *   absorbs the landing, where one early tap does not (review of #649).
  */
 import { provedFor } from '../fixtures/provedHop'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -46,7 +48,7 @@ vi.mock('../../lib/relay', async (orig) => {
 })
 
 import { useCyberspace } from '../useCyberspace'
-import { WALK_SETTLE_MS, fallState, useWalk } from '../useWalk'
+import { WALK_SETTLE_MS, fallState, tickFall, useWalk } from '../useWalk'
 import { WALK_HOLD_MS, holding } from '../walkHold'
 import { useShards } from '../useShards'
 import { clearWalls } from '../walkWalls'
@@ -55,6 +57,9 @@ import { walkFacing } from '../../lib/walkEye'
 import { walkKeyDown, walkKeyUp, walkKeysReleased } from '../../hooks/useKeyboard'
 import { padHold, padLean, walkPad, type PadKey } from '../../hud/TouchControls'
 import type { Position, ViewAxes } from '../../lib/space'
+import { newShard, type ShardModel } from 'sno-core/shards'
+import { withConstrain } from '../../lib/walkConstrain'
+import type { WorldItem } from '../useShards'
 
 /** Right +X, up +Y, toward the camera +Z: level, as WALK's keys are. */
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } }
@@ -384,5 +389,72 @@ describe('a hold publishes what the same taps publish', () => {
     })
     expect(tapped.ends).toEqual([[4, 0, -4]])
     expect(held).toEqual(tapped)
+  })
+})
+
+describe('the pad\'s DOWN under GRAVITY absorbs a bounce (review of #649)', () => {
+  /** A floor whose top is 1 under the walker, its payload bouncing to 8 (as walkBounce.test.ts builds it). */
+  function bouncePad(): void {
+    const vertices: ShardModel['vertices'] = []
+    const faces: Array<[number, number, number]> = []
+    for (const x of [-10, 10]) for (const y of [-1, 0]) for (const z of [-10, 10]) vertices.push({ p: [x, y, z], c: [1, 1, 1] })
+    for (const [a, b, c, d] of [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]]) faces.push([a, b, c], [a, c, d])
+    const model = withConstrain({ ...newShard('Pad'), mode: 'solid', vertices, faces }, 'all')
+    const shard = { ...model, extra: { ...model.extra, bounce: 8 } }
+    const plane = useCyberspace.getState().plane as WorldItem['plane']
+    const items: WorldItem[] = [{ key: 'pad', type: 'shard', at: { ...start, y: start.y - 1n }, plane, height: 84, mine: false, shard }]
+    useShards.setState({ worldItems: () => items })
+  }
+
+  let clock = 1_000_000
+  /** `ms` of 16 ms frames: the clock, the hold's timers and the fall, together. */
+  function frames(ms: number): void {
+    for (let t = 0; t < ms; t += 16) { clock += 16; vi.advanceTimersByTime(16); tickFall() }
+  }
+
+  const down = (): PadKey => {
+    const k = walkPad(true, () => () => {}).find((b) => b.cell === 'down')
+    if (!k) throw new Error('no down')
+    return k
+  }
+
+  beforeEach(() => {
+    vi.spyOn(performance, 'now').mockImplementation(() => clock)
+    bouncePad()
+    useWalk.getState().setGravity(true)
+    walk()
+  })
+  afterEach(() => {
+    vi.mocked(performance.now).mockRestore()
+  })
+
+  it('DOWN is on under gravity', () => {
+    expect(down().disabled).toBeFalsy()
+  })
+
+  it('DOWN held from early in the jump registers at the landing: it lands and stands, and nothing is made', () => {
+    useWalk.getState().press('up')
+    // The jump reaches the pad at about 600 ms; DOWN goes down at 100, far before the window.
+    frames(100)
+    const h = padHold(down())
+    h.onPointerDown(pointer())
+    frames(600)
+    expect(fallState()).toBeNull()
+    expect(useWalk.getState().falling).toBe(false)
+    expect(useCyberspace.getState().cursor).toEqual(start)
+    expect(useWalk.getState()).toMatchObject({ queue: [], open: null, behind: 0 })
+    h.onPointerUp()
+    expect(posted).toHaveLength(0)
+  })
+
+  it('one early tap of DOWN does not: the landing bounces', () => {
+    useWalk.getState().press('up')
+    frames(100)
+    const h = padHold(down())
+    h.onPointerDown(pointer())
+    h.onPointerUp()
+    frames(600)
+    expect(fallState()).not.toBeNull()
+    expect(fallState()!.v0).toBeGreaterThan(0)
   })
 })

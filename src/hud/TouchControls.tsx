@@ -112,8 +112,10 @@ export interface PadKey {
  * | JUMP | Space or R | + and the 2^ readout |
  * | DOWN | C or F | - |
  *
- * Under GRAVITY JUMP is a jump and DOWN does nothing (store/useWalk.ts), so
- * DOWN is off. With gravity off, JUMP and DOWN are one cell up and down.
+ * Under GRAVITY JUMP is a jump, and DOWN moves nothing but absorbs a bounce
+ * pressed or held just before the landing (store/useWalk.ts (E), ruled D5),
+ * so it stays on: on a phone it is the only way to absorb one (review of
+ * #649). With gravity off, JUMP and DOWN are one cell up and down.
  * The forward and reverse arrows are the pair VIEW's fly keys wear too
  * (hud/ui/FlyArrows.tsx).
  *
@@ -128,7 +130,7 @@ export function walkPad(gravity: boolean, move: (name: MoveName) => () => void):
     { cell: 'backward', glyph: <ReverseArrow3D size={20} />, sub: 'BACK', title: 'Backward (S)', ...key('toward') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', ...key('right') },
     { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R)' : 'Jump: up one cell (Space or R)', ...key('up') },
-    { cell: 'down', glyph: '▼', title: gravity ? 'Down: off under gravity (C or F)' : 'Down one cell (C or F)', ...key('down'), disabled: gravity },
+    { cell: 'down', glyph: '▼', title: gravity ? 'Down: absorbs a bounce (C or F)' : 'Down one cell (C or F)', ...key('down') },
   ]
 }
 
@@ -229,7 +231,7 @@ export function TouchControls(): JSX.Element {
   // Steps pressed in WALK and not yet proven, queued or still being walked:
   // STOP has something to stop.
   const behind = useWalk((s) => s.behind + (s.open ? 1 : 0) + (s.falling ? 1 : 0))
-  // GRAVITY in WALK (store/useWalk.ts): JUMP jumps, DOWN does nothing.
+  // GRAVITY in WALK (store/useWalk.ts): JUMP jumps, DOWN absorbs a bounce.
   const gravity = useWalk((s) => s.gravity)
   const building = useBuilder((s) => s.active)
   // VIEW: FAR and NEAR fly the view while held, as the fly buttons do

@@ -196,13 +196,15 @@ describe('the WALK pad', () => {
     expect(delta(() => keyDown('KeyS'))).toEqual([-1n, 0n, 1n])
   })
 
-  it('under GRAVITY DOWN is off and JUMP says jump', () => {
+  it('under GRAVITY DOWN stays on and says it absorbs a bounce (review of #649), and JUMP says jump', () => {
     useWalk.getState().enter()
     useWalk.getState().setGravity(true)
-    expect(find('touchpad__key--down').props.disabled).toBe(true)
+    expect(find('touchpad__key--down').props.disabled).toBeFalsy()
+    expect(find('touchpad__key--down').props.title).toBe('Down: absorbs a bounce (C or F)')
     expect(find('touchpad__key--jump').props.title).toBe('Jump (Space or R)')
     useWalk.getState().setGravity(false)
-    expect(find('touchpad__key--down').props.disabled).toBe(false)
+    expect(find('touchpad__key--down').props.disabled).toBeFalsy()
+    expect(find('touchpad__key--down').props.title).toBe('Down one cell (C or F)')
   })
 })
 

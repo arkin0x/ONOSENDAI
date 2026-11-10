@@ -9789,7 +9789,8 @@ a.feed__act { text-decoration: none; }
   letter-spacing: 0.18em;
   font-weight: 700;
 }
-/* DOWN under GRAVITY: no flying, so it reads as off rather than as broken. */
+/* A WALK key that is off reads as off rather than as broken. (DOWN under
+ * GRAVITY is on: it absorbs a bounce.) */
 .touchpad--mode-walk .touchpad__key:disabled { opacity: 0.35; cursor: default; }
 .touchpad__key--gravity {
   grid-area: gravity;

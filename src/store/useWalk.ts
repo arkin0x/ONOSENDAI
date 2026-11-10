@@ -67,6 +67,7 @@
  * | Up (Space, R, the pad's up) standing | a jump of 3: back where it left, nothing; anywhere else, as a fall |
  * | Down, or Up off a floor | nothing: no flying |
  * | (E) a landing on a face with `bounce` (EXPERIMENTAL, lib/walkBounce.ts) | the landing's hop, as (A), only when it is somewhere new; the launch is the next arc of the same fall, so bouncing in place makes nothing |
+ * | (E) a step up onto a fixed-height bounce pad | the step's segment closes there, a normal hop, and the launch is a jump from it: bouncing back onto the pad makes nothing more. A "reflect" pad does nothing on a step up: it fell from nowhere |
  *
  * The hops a fall makes are queued only when it resolves (A, C or D) or
  * bounces somewhere new (E), so none is proved or published while you are
@@ -348,6 +349,8 @@ export const useWalk = create<WalkState>((set, get) => ({
     settleTimer = setTimeout(() => { settleTimer = null; get().settle() }, WALK_SETTLE_MS)
     // Off a floor under gravity: this segment ends here, and the fall begins.
     if (gravity) fallIfAirborne()
+    // Stepped up onto a fixed bounce pad: launched as if it had landed there (E).
+    if (gravity && !fall && next.y > from.y) stepLaunch(next)
   },
 
   settle: () => {
@@ -515,6 +518,27 @@ function jump(from: Position): void {
   const limit = fallLimit(from, items, afford)
   if (waitedForWalls(() => jump(from))) return
   beginFall(from, JUMP_SPEED, rise, -limit.drop, limit.lands, items, cs.plane)
+}
+
+/**
+ * (E) A press that stepped up onto `at` (the stair step-up, store/walkStep.ts)
+ * and stands on a bounce pad there: launched as if it had landed on it
+ * (ruling of 2026-11-10). A fixed height launches; "reflect" reflects a fall
+ * of 0, which is no launch. The launch is a jump of that height from `at`, so
+ * the segment that brought you here closes as a normal hop (beginFall) and
+ * every bounce after it, back onto the same pad, makes nothing.
+ */
+function stepLaunch(at: Position): void {
+  const cs = useCyberspace.getState()
+  const items = wallItemsAt(cs.plane, at)
+  takeWallWait()
+  const h = launchHeight(floorBounce(at, items), 0, false, JUMP_HEIGHT)
+  if (takeWallWait() || h === 0) return
+  const afford = affordIn(cs.plane)
+  const { rise } = jumpRise(at, items, afford, h)
+  const limit = fallLimit(at, items, afford)
+  if (takeWallWait() || rise === 0n) return
+  beginFall(at, launchSpeed(h), rise, -limit.drop, limit.lands, items, cs.plane)
 }
 
 /**

@@ -4,10 +4,11 @@
  * top of an object whose payload has `bounce` launches the walker: to that
  * many gibsons, or with "reflect" back to the height it fell from, at most
  * 24, and a jump just before landing adds 3. Side faces, gravity off and a
- * bad field never launch. Bouncing in place publishes nothing, however long
- * it goes on, as a jump in place does; a bounce onto a higher ledge is one
- * hop, as a jump onto one is; a fall onto a pad is one hop for the landing,
- * and nothing after it.
+ * bad field never launch. A step up onto a fixed pad launches as a landing
+ * would; onto a reflect pad it does nothing. Bouncing in place publishes
+ * nothing, however long it goes on, as a jump in place does; a bounce onto
+ * a higher ledge is one hop, as a jump onto one is; a fall onto a pad is one
+ * hop for the landing, and nothing after it.
  */
 import { provedFor } from '../fixtures/provedHop'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -280,6 +281,49 @@ describe('a fixed bounce', () => {
     useWalk.getState().press('up')
     untilBounce()
     expect(Math.abs(peakOver(1500) - 8)).toBeLessThan(1)
+  })
+})
+
+describe('a step up onto a pad (ruling of 2026-11-10)', () => {
+  /** A plain floor, and a pad from 1 ahead whose top is 1 up: a riser the step-up climbs. */
+  const PAD_TOP: [V3, V3] = [[-10, 0, -10], [10, 1, -0.5]]
+
+  it('onto a fixed pad of 6: the step is one hop, the launch goes to about 6, and bouncing on makes nothing', async () => {
+    world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]], [bouncy(boxes('Pad', 'all', [PAD_TOP]), 6), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('away')
+    const top = { ...start, y: start.y + 1n, z: start.z - 1n }
+    expect(useCyberspace.getState().cursor).toEqual(top)
+    expect(useWalk.getState().falling).toBe(true)
+    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 6), 6)
+    // The step's segment closed where the launch began: a normal hop, proved now.
+    expect(useWalk.getState().queue).toEqual([top])
+    await vi.waitFor(() => expect(posted).toHaveLength(1))
+    expect(posted[0]).toMatchObject({ from: start, to: top })
+    await land()
+    for (let n = 0; n < 3; n++) expect(Math.abs(peakOver(900) - 6)).toBeLessThan(1)
+    for (let t = 0; t < 10_000; t += 16) frame(16)
+    expect(useWalk.getState().falling).toBe(true)
+    expect(useCyberspace.getState().cursor).toEqual(top)
+    expect(posted).toHaveLength(1)
+    expect(useWalk.getState()).toMatchObject({ queue: [], open: null, behind: 0 })
+  })
+
+  it('onto a reflect pad: nothing, it fell from nowhere; you stand on it as on any step', () => {
+    world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]], [bouncy(boxes('Pad', 'all', [PAD_TOP]), 'reflect'), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('away')
+    expect(at(start)).toEqual([0, 1, -1])
+    expect(useWalk.getState().falling).toBe(false)
+    expect(fallState()).toBeNull()
+  })
+
+  it('walking level along a plain floor next to nothing launches nothing', () => {
+    world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('away')
+    expect(at(start)).toEqual([0, 0, -1])
+    expect(useWalk.getState().falling).toBe(false)
   })
 })
 

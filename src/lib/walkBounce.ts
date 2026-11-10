@@ -14,7 +14,9 @@
  * | anything else (absent, a fraction, out of range, another string) | nowhere: no bounce |
  *
  * An Up press just before the landing adds JUMP_HEIGHT to either, still at
- * most BOUNCE_MAX. sno-core does not know the field, so it rides in the
+ * most BOUNCE_MAX. Stepping up onto a fixed-height pad (the stair step-up)
+ * launches as a landing would; onto a "reflect" pad it does nothing, since it
+ * fell from nowhere (ruling of 2026-11-10). sno-core does not know the field, so it rides in the
  * model's `extra` like `constrain` (lib/walkConstrain.ts), and an older
  * reader passes it through untouched.
  *

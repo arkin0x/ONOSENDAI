@@ -26,7 +26,7 @@ describe('checking a DNA', () => {
     const bad = dnaOf('dna x\naxiom F(')
     expect(checkDna(bad, bad.id)).toMatchObject({ state: 'invalid', error: expect.any(String) })
     const caps = dnaOf(crystal.content, [['caps', '08000', '6000', '40']])
-    expect(checkDna(caps, caps.id)).toMatchObject({ state: 'invalid', error: 'Its caps tag is malformed.' })
+    expect(checkDna(caps, caps.id)).toMatchObject({ state: 'invalid', error: 'Its size limit is malformed.' })
     const shard = { ...copy(crystal), kind: 3330 }
     expect(checkDna(shard as NostrEvent, crystal.id).state).toBe('invalid')
   })

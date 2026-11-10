@@ -3,7 +3,7 @@
  * relays, IndexedDB, the header blobs and the seeds worker.
  *
  * Header times and block hashes for heights the blobs cover (up to the
- * manifest's last block, 971,999 today) are read out of the blob in the
+ * manifest's last block, 975,226 since nth#10) are read out of the blob in the
  * worker, its chain checked; every other height comes from NTH's anchors by
  * `authors` and `#B`, each header hashed to its `H` and signed by NTH
  * (headerBook.ts). The stop index is never asked: any key can publish a
@@ -66,9 +66,10 @@ function readBlob(m: HeadersManifest, url: string, start: number): Promise<void>
 
 /**
  * The first height whose NTH anchor carries a `header` tag (DECK-0001 §2.5,
- * published from 2026-11-09). Between the blobs' end and this, nobody has a
- * header to give, so those heights are not asked for: a seed that needs one
- * waits for blocks.
+ * published from 2026-11-09). Between the blobs' end and this (975,227 to
+ * 975,255 today), nobody has a header to give, so those heights are not asked
+ * for. A seed settled below them is judged there (seedClock settlePlanted);
+ * one that needs them waits for blocks.
  */
 export const HEADER_TAG_FROM = 975_256
 

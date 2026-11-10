@@ -97,7 +97,10 @@ export async function openRoom(door: Hidden, secretHex: string): Promise<OpenedR
   const events = (await query({ kinds: [HIDDEN_KIND], authors: [signer], '#d': [lookupId] })).filter((e) => e.pubkey === signer)
   const newest = events.sort((a, b) => b.created_at - a.created_at)[0]
   if (!newest) return { items: [], found: false, lookupId, keyHex }
-  const items = await unbag(newest, key, resolveReference, { at: regionBase(door.at, h), plane: door.plane }, h, undefined, { doorId: door.eventId })
+  // A room is in its door's plane, and holds no other (DECK-0004 §3.7.2, One
+  // plane): an entry whose C is in the other plane lies outside it and is
+  // dropped. One with no C took the door's plane from the origin, and stays.
+  const items = (await unbag(newest, key, resolveReference, { at: regionBase(door.at, h), plane: door.plane }, h, undefined, { doorId: door.eventId })).filter((it) => it.plane === door.plane)
   return { items, found: true, lookupId, keyHex }
 }
 

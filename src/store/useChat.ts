@@ -28,6 +28,7 @@ import { mentionNotification } from '../lib/notifications'
 import { useNotifications } from './useNotifications'
 import { useMutes } from './useMutes'
 import { hidesThing } from '../lib/muteList'
+import { placeOf } from '../lib/chests'
 
 export interface ChatLine {
   /** The inner event's id: the line's identity, what stops a repeat. */
@@ -46,6 +47,13 @@ export interface ChatLine {
    * 2026-10-11). Absent on lines kept before mentions existed.
    */
   mentions?: string[]
+  /** The plane its C names (DECK-0005 §3.2, The plane). Absent: it names none, or was kept before this field existed; shown in both. */
+  plane?: 0 | 1
+}
+
+/** The lines of the plane chat listens in (listeningPlane): one said in the other plane, kept before a change of plane, is not this room's talk here. */
+export function linesInPlane(lines: readonly ChatLine[], plane: 0 | 1): ChatLine[] {
+  return lines.filter((l) => l.plane === undefined || l.plane === plane)
 }
 
 const STORAGE_KEY = 'onosendai:chat'
@@ -130,6 +138,22 @@ export function sendKey(): { lookupId: string; keyHex: string; height: number } 
 }
 
 /** Newest last, no repeats: one line per inner event id. */
+/**
+ * The plane chat listens in (DECK-0005 §3.2, The plane): at the head, the
+ * plane you stand in, which a toggle lined up for the next hop does not
+ * change until it is committed; spectating, in free view or in your history,
+ * the plane the view is in, as the room keys follow the view.
+ */
+/** A heard line's plane from its C, as a field to spread: none when it names none. */
+function linePlane(e: Parameters<typeof placeOf>[0]): { plane?: 0 | 1 } {
+  const p = placeOf(e)?.plane
+  return p === undefined ? {} : { plane: p }
+}
+
+export function listeningPlane(s: Pick<ReturnType<typeof useCyberspace.getState>, 'atHead' | 'headPlane' | 'anchorPlane'>): 0 | 1 {
+  return s.atHead() ? s.headPlane : s.anchorPlane
+}
+
 export function mergeLines(have: ChatLine[], add: ChatLine[]): ChatLine[] {
   const seen = new Set(have.map((l) => l.id))
   const fresh = add.filter((l) => !seen.has(l.id))
@@ -207,7 +231,11 @@ export const useChat = create<ChatState>((set, get) => ({
     try {
       set({ sendStatus: 'signing', sendError: null })
       // The line is a rumor, never signed: only the envelope is (chatRumor).
-      const inner = chatRumor(chatInnerTemplate(wire.text, cyber.position, cyber.plane, now, key.lookupId, wire.pubkeys), cyber.identity.pubkey)
+      // Its C is where you stand: the head's position in the head's plane,
+      // never the plane lined up for the next hop. The room is shared by both
+      // planes, and the C is what tells listeners which one you spoke in
+      // (DECK-0005 §3.2, The plane).
+      const inner = chatRumor(chatInnerTemplate(wire.text, cyber.position, cyber.headPlane, now, key.lookupId, wire.pubkeys), cyber.identity.pubkey)
       set({ sendStatus: 'sending' })
       const outer = await cyber.signEvent(await bagTemplate([inner], hexToBytes(key.keyHex), key.lookupId, key.height, now, CHAT_BAG_KIND))
       const result = await publishMany(relaySet(), outer)
@@ -217,7 +245,7 @@ export const useChat = create<ChatState>((set, get) => ({
       }
       // Your own line goes straight in: an ephemeral event is not echoed back
       // by every relay, and a line you said should not depend on that.
-      const line: ChatLine = { id: inner.id, from: inner.pubkey, text: inner.content, at: inner.created_at, region: key.lookupId, height: key.height, mine: true, mentions: pTagged(inner.tags) }
+      const line: ChatLine = { id: inner.id, from: inner.pubkey, text: inner.content, at: inner.created_at, region: key.lookupId, height: key.height, mine: true, mentions: pTagged(inner.tags), plane: cyber.headPlane }
       const lines = mergeLines(get().lines, [line])
       saveLines(lines)
       set({ lines, draft: '', picked: [], sendStatus: 'idle', sendError: null })
@@ -233,14 +261,22 @@ export const useChat = create<ChatState>((set, get) => ({
     const secrets = useSecrets.getState()
     const key = secrets.current[region] ?? secrets.neighbors[region]
     if (!key) return
-    const inners = await chatInners(outer, hexToBytes(key.keyHex))
+    // A room's key and d are shared by both planes (spec §7.6 Planes), so a
+    // line said at these X, Y and Z in the other plane opens here too. Only
+    // lines whose C is in the plane you listen from are heard; a line with no
+    // C names no plane and is heard in both (DECK-0005 §3.2, The plane).
+    const plane = listeningPlane(useCyberspace.getState())
+    const inners = (await chatInners(outer, hexToBytes(key.keyHex))).filter((e) => {
+      const said = placeOf(e)
+      return said === null || said.plane === plane
+    })
     if (inners.length === 0) return
     const me = useCyberspace.getState().identity.pubkey
     // A line by someone blocked, or one muted by its id, never lands: no
     // unfold, no unread, no chime, no mention (store/useMutes). Ephemeral, so
     // an UNBLOCK shows only what is said after it.
     const muted = useMutes.getState().muted
-    const add = inners.filter((e) => !hidesThing(muted, { authors: [e.pubkey], ids: [e.id] }, me)).map((e) => ({ id: e.id, from: e.pubkey, text: e.content.slice(0, MAX_CHAT_LENGTH), at: e.created_at, region, height: key.height, mine: e.pubkey === me, mentions: pTagged(e.tags) }))
+    const add = inners.filter((e) => !hidesThing(muted, { authors: [e.pubkey], ids: [e.id] }, me)).map((e) => ({ id: e.id, from: e.pubkey, text: e.content.slice(0, MAX_CHAT_LENGTH), at: e.created_at, region, height: key.height, mine: e.pubkey === me, mentions: pTagged(e.tags), ...linePlane(e) }))
     if (add.length === 0) return
     const before = get().lines
     const lines = mergeLines(before, add)

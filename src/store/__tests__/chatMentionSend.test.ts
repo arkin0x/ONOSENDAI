@@ -29,6 +29,7 @@ import { chatInners, CHAT_BAG_KIND } from '../../lib/hidden'
 import { hexToBytes, type NostrEvent } from '../../lib/events'
 import { useChat } from '../useChat'
 import { useSecrets } from '../useSecrets'
+import { useCyberspace } from '../useCyberspace'
 
 const region = 'dd'.repeat(32)
 const keyHex = '11'.repeat(32)
@@ -58,6 +59,16 @@ describe('a line that mentions someone', () => {
     expect(s.lines.at(-1)?.mentions).toEqual([xor])
     expect(s.draft).toBe('')
     expect(s.picked).toEqual([])
+  })
+
+  it('says where you stand: the head\'s plane, not the plane lined up for the next hop (DECK-0005 §3.2)', async () => {
+    useCyberspace.setState({ position: { x: 1n, y: 2n, z: 3n }, headPlane: 0, plane: 1 })
+    useChat.getState().setDraft('standing in dataspace')
+    await useChat.getState().send()
+    const outer = vi.mocked(publishMany).mock.calls[0][1] as NostrEvent
+    const [inner] = await chatInners(outer, hexToBytes(keyHex))
+    const c = inner.tags.find((t) => t[0] === 'C')![1]
+    expect(parseInt(c[63], 16) & 1).toBe(0)
   })
 
   it('an emptied draft forgets its picks', () => {

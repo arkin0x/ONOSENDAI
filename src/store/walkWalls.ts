@@ -64,6 +64,7 @@ import { regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
 import type { AxisName, Position, ViewAxes } from '../lib/space'
 import { constrainOf, enclosed, firstHit, wallMesh, type WallMesh } from '../lib/walkConstrain'
+import type { Bounce } from '../lib/walkBounce'
 import { useShards, type WorldItem } from './useShards'
 import { useCyberspace } from './useCyberspace'
 import { openedByHand } from './useOpenedChests'
@@ -379,9 +380,24 @@ function nodesOf(placed: readonly Placed[]): number {
   return n
 }
 
+/**
+ * Whether any wall built since the last clearWalls has a bounce on its own
+ * faces or on an object it places (lib/walkBounce.ts): until one has, no
+ * floor can bounce, so WALK asks floorPad nothing (store/useWalk.ts
+ * padLaunch). Set as walls are built and kept until clearWalls, so a pad
+ * walked away from still counts: that costs only a query, never a launch.
+ */
+let bounceBuilt = false
+
+/** Whether any wall built since the last clearWalls bounces: off, a press asks no floor query. */
+export function anyBounce(): boolean {
+  return bounceBuilt
+}
+
 function build(w: WallItem, placed: readonly Placed[], starved = false, first = false): Entry {
   const pose = placedPose(WALL_AXES, w.shard.up && w.plane === 0 ? { at: w.at, spin: w.shard.spin } : undefined)
   const mesh = wallMesh(w.shard, placed, pose)
+  if (!bounceBuilt && (!!mesh.ownBounce || mesh.placements.some((p) => !!p.bounce))) bounceBuilt = true
   const missingAt = placed.some(function gone(p): boolean { return p.missing === 'unreachable' || p.children.some(gone) }) ? Date.now() : null
   return { item: w, starved, first, walk: walkNo, shard: w.shard, missingAt, where: whereOf(w), mesh, clip: w.uncut ? NO_CUT : regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
 }
@@ -655,6 +671,7 @@ function later(fn: (idle?: IdleDeadline) => void): void {
 /** Forget every shard's walls: for tests, and an identity switch has no need of them either. */
 export function clearWalls(): void {
   entries.clear()
+  bounceBuilt = false
   waited = false
   landed()
   walkNo++
@@ -793,6 +810,59 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   }
   return middle && middle.reach < stop.reach ? middle : stop
 }
+
+/** How many times floorPad has been asked: for the test that a world with no bounce asks it nothing. */
+let padQueryCount = 0
+export function padQueries(): number {
+  return padQueryCount
+}
+
+/** The floor under a walker, as a bounce reads it (floorPad). */
+export interface Pad {
+  bounce: Bounce
+  springboard: boolean
+}
+
+/**
+ * BOUNCE, EXPERIMENTAL (lib/walkBounce.ts): the `bounce` of the floor a
+ * walker at `at` stands on (a launch height, `"reflect"`, or 0 for none) and
+ * its `springboard`. The floor is the one GRAVITY stands on (stepLimit with `stand`: a blocking face less than a gibson below, or
+ * one in the walker's own plane with open space above), so it is always met
+ * from above: a side face is parallel to the ray and a bottom face is never
+ * under a walker standing, so neither ever bounces. The face right under the
+ * walker decides, by the payload that owns it, among every shard: of two at
+ * exactly the same height (a pad flush with a floor), the one that bounces.
+ */
+export function floorPad(at: Position, items: readonly WallItem[]): Pad {
+  padQueryCount++
+  const none: Pad = { bounce: 0, springboard: false }
+  const under = stepLimit(at, 'y', -1, 1n, items, true)
+  if (under.reach !== 0n || !under.by) return none
+  // A face in your own plane is under you only where stepLimit would stand you on it: open space above.
+  const plane = openAbove(at, items)
+  let best: number | null = null
+  let pad = none
+  for (const w of items) {
+    if (w.inside || !regionReached(w, at, 'y', -1, 1n)) continue
+    const e = entries.get(w.key)
+    if (!e || e.first || !e.reach) continue
+    const g = 2 ** w.shard.unit
+    const tol = tolerance(e, g, 1n)
+    const hair = tolerance(e, g, 0n)
+    const o: [number, number, number] = [Number(at.x - w.at.x) / g, Number(at.y - w.at.y) / g, -Number(at.z - w.at.z) / g]
+    const who: { bounce: Bounce; springboard?: boolean } = { bounce: 0 }
+    const t = firstHit(e.mesh, o, 1, -1, (1 + tol) / g, (plane && hair < HAIR_MAX ? -hair : ON_FACE) / g, e.clip, who)
+    if (t === null) continue
+    const gib = t * g
+    // Nearest wins; only a pad flush with a floor beside or under it (a tie within float rounding) wins over the floor.
+    const split = (who.bounce !== 0) !== (pad.bounce !== 0) && best !== null && Math.abs(gib - best) <= TIE
+    if (best === null || (split ? who.bounce !== 0 : gib < best)) { best = gib; pad = { bounce: who.bounce, springboard: !!who.springboard } }
+  }
+  return pad
+}
+
+/** Two floors this close, in gibsons, are flush: float error only. */
+const TIE = 1e-9
 
 /**
  * A door slab's thin axis in the walls' frame (0, 1, 2 for X, Y, Z) and its

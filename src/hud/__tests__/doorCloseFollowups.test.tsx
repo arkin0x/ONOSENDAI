@@ -130,6 +130,8 @@ async function openBoth(): Promise<{ lock: ReturnType<typeof forgeKey>; outer: H
 
 beforeEach(() => {
   relay.asked = 0
+  // The finds below are said in plane 1; the store's own planes come from a random identity's spawn. Pinned, so the plane filters (spec §7.6 Planes) do not make this test a coin flip.
+  useCyberspace.setState({ anchorPlane: 1, headPlane: 1, plane: 1 })
   relay.events = []
   for (const k of ['onosendai:door-secrets', 'onosendai:door-secrets-only-said', 'onosendai:chests-opened', 'onosendai:doors-closed']) localStorage.removeItem(k)
   resetDoorSecrets()

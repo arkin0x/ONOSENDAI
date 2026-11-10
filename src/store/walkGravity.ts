@@ -52,6 +52,11 @@ export const WALK_GRAVITY = (8 * JUMP_HEIGHT) / (JUMP_HANG_S * JUMP_HANG_S)
 /** A jump's speed off the floor, in gibsons/s (4h / T): 20. */
 export const JUMP_SPEED = (4 * JUMP_HEIGHT) / JUMP_HANG_S
 
+/** The speed off the floor, in gibsons/s, that rises `h` gibsons (sqrt(2 g h)): JUMP_SPEED for JUMP_HEIGHT. */
+export function launchSpeed(h: number): number {
+  return h > 0 ? Math.sqrt(2 * WALK_GRAVITY * h) : 0
+}
+
 /** Standard gravity, m/s^2. */
 export const STANDARD_GRAVITY = 9.80665
 
@@ -141,17 +146,19 @@ export function fallLimit(from: Position, items: readonly WallItem[], affordable
 }
 
 /**
- * How far a jump from `from` may rise among `items`: JUMP_HEIGHT, under a
- * ceiling, and no further than a hop can afford. Right under a solid's
+ * How far a jump from `from` may rise among `items`: JUMP_HEIGHT (or
+ * `height`, a bounce's launch), under a ceiling, and no further than a hop
+ * can afford. Right under a solid's
  * underside (a face in your plane with the solid just above you,
  * underSolid) it does not rise at all.
  */
-export function jumpRise(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean): { rise: bigint; by: WallItem | null } {
+export function jumpRise(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean, height: number = JUMP_HEIGHT): { rise: bigint; by: WallItem | null } {
   const lid = underSolid(from, items)
   if (lid) return { rise: 0n, by: lid }
-  const up = stepLimit(from, 'y', 1, BigInt(JUMP_HEIGHT), items)
+  const want = BigInt(height)
+  const up = stepLimit(from, 'y', 1, want, items)
   const afford = affordableAlongY(from, 1, up.reach, affordable)
-  return { rise: afford, by: up.reach < BigInt(JUMP_HEIGHT) ? up.by : null }
+  return { rise: afford, by: up.reach < want ? up.by : null }
 }
 
 // ---------------------------------------------------------------------------

@@ -140,7 +140,7 @@ export function walkPad(gravity: boolean, move: (name: MoveName) => () => void):
     { cell: 'left', glyph: '◀', title: 'Left (A)', ...key('left') },
     { cell: 'backward', glyph: <ReverseArrow3D size={20} />, sub: 'BACK', title: 'Backward (S)', ...key('toward') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', ...key('right') },
-    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space). Press again in the air to double jump.' : 'Jump: up one cell (Space or R)', ...key('up'), left: true },
+    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R). Press again in the air to double jump.' : 'Jump: up one cell (Space or R)', ...key('up'), left: true },
     { cell: 'down', glyph: '▼', title: gravity ? 'Down: hold to absorb a bounce (C or F)' : 'Down one cell (C or F)', ...key('down'), left: true },
   ]
 }

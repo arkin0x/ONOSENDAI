@@ -4,6 +4,8 @@
  * store/walkGravity.ts, store/walkHold.ts):
  *
  * - a jump rises JUMP_HEIGHT, 5 (it was 3), at the same gravity;
+ * - a double jump never lowers the arc (review of #654): a quick double tap
+ *   is never worse than one tap;
  * - JUMP pressed fresh in the air (Space, R or the pad's JUMP) rises
  *   DOUBLE_JUMP_HEIGHT, 3, above where it was pressed, once per time in the
  *   air: a landing gives it back, a bounce's landing included;
@@ -242,6 +244,46 @@ describe('the double jump', () => {
     expect(posted).toHaveLength(0)
   })
 
+  it('never lowers the arc: a double tap just off the floor keeps the jump\'s speed and goes as high as one tap (review of #654)', () => {
+    world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]])
+    walk()
+    tap('Space')
+    const single = fallState()!
+    const { v0: v1, t0: t1 } = single
+    // 16 ms in, still rising at about 24.8, faster than a double jump's 20.
+    frame(16)
+    const speedNow = v1 - WALK_GRAVITY * ((clock - t1) / 1000)
+    expect(speedNow).toBeGreaterThan(DOUBLE_JUMP_SPEED)
+    const pressedAt = eye(start)
+    tap('Space')
+    const f = fallState()!
+    expect(f.doubled).toBe(true)
+    // The speed now is the jump's own, not 20: nothing lost.
+    expect(f.v0 - WALK_GRAVITY * ((clock - f.t0) / 1000)).toBeCloseTo(speedNow, 6)
+    expect(eye(start)).toBeCloseTo(pressedAt, 9)
+    const peak = Math.max(eye(start), peakOver(start, 2000))
+    // As high as the single jump (5), where a speed set to 20 would have stopped at about 3.4.
+    expect(peak).toBeGreaterThan(4.99)
+    expect(peak).toBeLessThanOrEqual(5 + 1e-9)
+    expect(useCyberspace.getState().cursor).toEqual(start)
+    expect(posted).toHaveLength(0)
+  })
+
+  it('a double tap a little later, rising slower than 20: the double jump takes over and goes higher', () => {
+    world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]])
+    walk()
+    tap('Space')
+    // 160 ms in: about 2.9 up, rising at about 15.
+    frame(160)
+    const pressedAt = eye(start)
+    tap('Space')
+    const f = fallState()!
+    expect(f.v0 - WALK_GRAVITY * ((clock - f.t0) / 1000)).toBeCloseTo(DOUBLE_JUMP_SPEED, 6)
+    const peak = Math.max(eye(start), peakOver(start, 2000))
+    expect(peak - pressedAt).toBeGreaterThan(2.9)
+    expect(peak).toBeGreaterThan(5)
+  })
+
   it('a landing gives it back: the next jump has its own', () => {
     world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]])
     walk()
@@ -330,7 +372,7 @@ describe('the double jump', () => {
     expect(fallState()!.doubled).toBe(true)
     fallOut()
     const jump = walkPad(true, () => () => {}).find((b) => b.cell === 'jump')!
-    expect(jump.title).toBe('Jump (Space). Press again in the air to double jump.')
+    expect(jump.title).toBe('Jump (Space or R). Press again in the air to double jump.')
     const pointer = { preventDefault: () => {}, stopPropagation: () => {}, clientX: 0 } as unknown as React.PointerEvent
     const h = padHold(jump)
     h.onPointerDown(pointer)

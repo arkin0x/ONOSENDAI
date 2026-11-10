@@ -72,7 +72,7 @@
  * | (C) it reaches the last gibson a hop can afford | one hop there, and you hover |
  * | (D) gravity goes off mid-fall | one hop to where you are, and you float |
  * | Up (Space, R, the pad's JUMP) standing | a jump of 5 (JUMP_HEIGHT): back where it left, nothing; anywhere else, as a fall |
- * | (F) a fresh JUMP press in the air: falling, after a jump, or in a bounce's arc | a double jump of 3 (DOUBLE_JUMP_HEIGHT) from where you are, once until the next landing (a bounce's included): nothing of its own, the arc just goes on; where it comes down is published as any fall's landing |
+ * | (F) a fresh JUMP press in the air: falling, after a jump, or in a bounce's arc | a double jump of 3 (DOUBLE_JUMP_HEIGHT) from where you are, never lowering the arc, once until the next landing (a bounce's included): nothing of its own, the arc just goes on; where it comes down is published as any fall's landing |
  * | Down, or a held Up off a floor | nothing: no flying |
  * | (E) a landing on a face with `bounce` (EXPERIMENTAL, lib/walkBounce.ts) | the landing's hop, only when it is somewhere new: one hop straight from the landing before it, however you steered in the air, while that hop is affordable (else the steer points, as (B)); the launch is the next arc of the same fall, so bouncing in place makes nothing. Down just before the landing absorbs it: it lands as (A) |
  * | (E) a step up onto a fixed-height bounce pad, or any arrival onto a springboard (a level walk onto a flush pad included) | the walk segment closes there, a normal hop, and the launch is a jump from it: bouncing back onto the pad makes nothing more. A "reflect" pad does nothing on arrival, springboard or not: it fell from nowhere. Down just before absorbs it |
@@ -376,7 +376,9 @@ export const useWalk = create<WalkState>((set, get) => ({
 
   doubleJump: () => {
     const cs = useCyberspace.getState()
-    if (!fall || !cs.walking || !get().gravity) return false
+    // As a press is (press above): only walking at your own head, and not
+    // while a move waits for walls on their way.
+    if (!fall || !cs.walking || !cs.atHead() || againWhenBuilt || !get().gravity) return false
     return airJump(fall, nowMs())
   },
 }))
@@ -824,8 +826,11 @@ function airPress(f: Fall, heading: WalkHeading): void {
  * the air, falling, after a jump or in a bounce's arc, sets the arc's upward
  * speed to DOUBLE_JUMP_SPEED, not adding to it, so it rises
  * DOUBLE_JUMP_HEIGHT above where it was pressed, under any ceiling and no
- * higher than a hop can afford. Once per time in the air: a landing gives it
- * back, a bounce's landing included, so every bounce arc has its own.
+ * higher than a hop can afford. It never lowers the arc (ruled in review of
+ * #654): still rising faster than that, early in a jump, the speed is kept,
+ * so a quick double tap is never worse than one tap. Once per time in the
+ * air: a landing gives it back, a bounce's landing included, so every bounce
+ * arc has its own.
  *
  * It is only the arc going on, so it makes nothing of its own: no hop, no
  * waypoint, and the anchor stays. A double jump in place comes down where
@@ -836,7 +841,7 @@ function airPress(f: Fall, heading: WalkHeading): void {
  * The arc restarts from the whole gibson under the eye, already moving, so
  * the eye goes on from where it is without a jump of its own: launched
  * earlier, from that gibson, at the speed that reaches the press height
- * moving at DOUBLE_JUMP_SPEED. Within BOUNCE_BOOST_MS of landing on a
+ * moving at that speed. Within BOUNCE_BOOST_MS of landing on a
  * bounce, a press is that bounce's Up (E), as it always was, and not a
  * double jump. False when it did not jump: spent, that bounce, a ceiling
  * right over you, or walls still on their way.
@@ -845,12 +850,14 @@ function airJump(f: Fall, now: number): boolean {
   if (f.doubled) return false
   meetCeiling(f, now)
   if (bounceDue(f, now)) return false
-  const { r } = arcAt(f, now)
+  const { r, rising } = arcAt(f, now)
+  // Never lower than the arc already goes: the faster of the two upward.
+  const speed = Math.max(rising ? arcSpeed(f.v0, (now - f.t0) / 1000) : 0, DOUBLE_JUMP_SPEED)
   // The whole gibson under the eye, as a height above y0, and how far over it the eye is.
   const base = Math.max(f.bottomN, Math.floor(r + 1e-6))
   const over = Math.max(0, r - base)
-  const v0 = Math.sqrt(DOUBLE_JUMP_SPEED * DOUBLE_JUMP_SPEED + 2 * WALK_GRAVITY * over)
-  const t0 = now - ((v0 - DOUBLE_JUMP_SPEED) / WALK_GRAVITY) * 1000
+  const v0 = Math.sqrt(speed * speed + 2 * WALK_GRAVITY * over)
+  const t0 = now - ((v0 - speed) / WALK_GRAVITY) * 1000
   const y0 = f.y0 + BigInt(base)
   const from: Position = { ...f.anchor, y: y0 }
   takeWallWait()

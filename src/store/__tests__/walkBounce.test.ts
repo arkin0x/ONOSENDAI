@@ -689,7 +689,7 @@ describe('steering and leaving', () => {
 })
 
 describe('the hop rate', () => {
-  it('steering along 1-high pads: one hop a bounce at most; jumping along a floor, two a jump at most', () => {
+  it('steering along 1-high pads: one hop a bounce at most; a 5-high jump along a floor lands less often', () => {
     const LONG: [V3, V3] = [[-10, -1, -400], [10, 0, 10]]
     const steer = (jump: boolean) => () => { for (let t = 0; t < 5000; t += 16) { frame(16); if (t % 96 === 0) { if (jump) useWalk.getState().press('up'); useWalk.getState().press('away') } } }
     world(start, [bouncy(boxes('Pad', 'all', [LONG]), 1), [0, -1, 0]])
@@ -704,9 +704,12 @@ describe('the hop rate', () => {
     // A bounce at 1 is 0.35 s: 14 landings in 5 s, each a hop to the next spot
     // along (26 before steer points were folded into the landing's hop).
     expect(bounce).toBe(14)
-    // A jump is about 0.775 s now (5 high; at 3 it was 0.6 s and out-hopped the
-    // bounce): its steer point and its landing, at most, for each jump in 5 s.
-    expect(jump).toBeGreaterThan(0)
+    // Jumping along the floor makes 10 in the same 5 s: a steer point and a
+    // landing for each of 5 jumps. A jump of 5 is about 0.775 s in the air and
+    // lands less often, so the bounce now out-hops it, 14 to 10 (at 3 high,
+    // 0.6 s, the jump made more). The rate of either is unchanged: one hop a
+    // landing for the bounce, two a jump at most.
+    expect(jump).toBe(10)
     expect(jump).toBeLessThanOrEqual(2 * Math.ceil(5 / JUMP_HANG_S))
   }, LONG_TEST_MS)
 

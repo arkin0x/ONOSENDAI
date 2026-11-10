@@ -206,7 +206,7 @@ describe('the WALK pad', () => {
     useWalk.getState().setGravity(true)
     expect(find('touchpad__key--down').props.disabled).toBeFalsy()
     expect(find('touchpad__key--down').props.title).toBe('Down: hold to absorb a bounce (C or F)')
-    expect(find('touchpad__key--jump').props.title).toBe('Jump (Space). Press again in the air to double jump.')
+    expect(find('touchpad__key--jump').props.title).toBe('Jump (Space or R). Press again in the air to double jump.')
     useWalk.getState().setGravity(false)
     expect(find('touchpad__key--down').props.disabled).toBeFalsy()
     expect(find('touchpad__key--down').props.title).toBe('Down one cell (C or F)')
@@ -246,7 +246,7 @@ describe('JUMP and DOWN on the left (arkinox, 2026-11-10)', () => {
     expect(drawn().some((b) => b.props.className === 'walkside')).toBe(false)
   })
 
-  it('the stylesheet stands the cluster over the menu button at the pad\'s height, the LOOK ball above it, and the pad without a JUMP row', () => {
+  it('the stylesheet stands the cluster over the menu button at the pad\'s height (lifted with it), the LOOK ball above it while it is drawn, and the pad without a JUMP row', () => {
     const css = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')
     const rule = (sel: string): string => {
       const at = css.indexOf(`\n${sel} {`)
@@ -258,7 +258,14 @@ describe('JUMP and DOWN on the left (arkinox, 2026-11-10)', () => {
     expect(css).toContain('--walkside-bottom: 92px;')
     // The pad's own bottom, which JUMP and DOWN sat on.
     expect(rule('.touchpad')).toContain('bottom: 92px;')
-    expect(rule('.orbsquare.walklook')).toContain('bottom: calc(var(--walkside-bottom) + var(--walkside-key) + var(--routeov-gap));')
+    // The LOOK ball is raised only while the row is drawn; otherwise it stays over the menu button.
+    expect(rule('.orbsquare.walklook')).toContain('bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));')
+    expect(rule('.app:has(.walkside) .orbsquare.walklook')).toContain('bottom: calc(var(--walkside-bottom) + var(--walkside-key) + var(--routeov-gap));')
+    // With the HOSAKA mark too: the higher of the two, so it never touches JUMP.
+    expect(rule('.app:has(.hosaka-pulse):has(.walkside) .walklook')).toContain('bottom: max(')
+    // The pad lifted for the chain status strip: the row, and the ball on it, go up with it.
+    expect(rule('.app:has(.touchpad.is-lifted)')).toContain('--walkside-bottom: 116px;')
+    expect(css).toContain('.touchpad.is-lifted {\n  bottom: 116px;')
     expect(rule('.touchpad--mode-walk')).not.toContain('jump')
     expect(css).not.toContain('.touchpad__zone')
   })

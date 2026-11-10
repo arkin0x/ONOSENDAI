@@ -6,8 +6,9 @@
  *   WALK_HOLD_MS, with no pause first; the keyboard's own repeats add
  *   nothing; letting go stops it;
  * - two directions held are one diagonal, on the keyboard and on the pad
- *   (FORWARD and a side arrow held, or FORWARD pressed in an outer third,
- *   veering as the thumb slides);
+ *   (FORWARD and a side arrow held); FORWARD alone is plain forward wherever
+ *   the thumb is on it (its diagonal end zones went after the next play
+ *   test, the same day);
  * - the sides go along the facing's right, and a press in the air goes the
  *   way you face, a diagonal included (it went along the screen's axis);
  * - a hold publishes what the same taps publish: the same hops, as many;
@@ -15,8 +16,7 @@
  *   absorbs the landing, where one early tap does not (review of #649);
  *
  * Review of #651: a lost keyup (Cmd on macOS), a hidden page, a STOP, the
- * menu, a modal or the workshop let go of every hold; a thumb resting on a
- * zone line of FORWARD makes one hop, not one a beat; JUMP with FORWARD held
+ * menu, a modal or the workshop let go of every hold; JUMP with FORWARD held
  * is a running jump that walks on; a bounce reads Up and Down as held.
  */
 import { provedFor } from '../fixtures/provedHop'
@@ -62,7 +62,7 @@ import { walkFacing } from '../../lib/walkEye'
 import { setMenuCovering, walkKeyDown, walkKeyUp, walkKeysReleased, walkMetaRelease } from '../../hooks/useKeyboard'
 import { registerEscape } from '../../hooks/useEscape'
 import { useWorkshop } from '../useWorkshop'
-import { LEAN_SLOP_PX, LEAN_ZONE, padHold, padLean, walkPad, type PadKey } from '../../hud/TouchControls'
+import { padHold, walkPad, type PadKey } from '../../hud/TouchControls'
 import type { Position, ViewAxes } from '../../lib/space'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { withConstrain } from '../../lib/walkConstrain'
@@ -239,36 +239,18 @@ describe('two directions held go diagonally', () => {
 })
 
 describe('the touch pad', () => {
-  it('FORWARD pressed in its right end goes forward and right, in its left end forward and left', () => {
+  it('FORWARD has no zones: pressed at either end or the middle it goes straight forward, and nothing follows a sliding thumb', () => {
     walk()
     face(0)
     const fwd = padHold(pad('forward'))
-    fwd.onPointerDown(pointer(0.9))
-    expect(moved(start)).toEqual([1, 0, -1])
-    fwd.onPointerUp()
-    fwd.onPointerDown(pointer(0.1))
-    expect(moved(start)).toEqual([0, 0, -2])
-    fwd.onPointerUp()
-    fwd.onPointerDown(pointer(0.5))
-    expect(moved(start)).toEqual([0, 0, -3])
-    fwd.onPointerUp()
-  })
-
-  it('sliding the thumb along FORWARD veers the walk with it', () => {
-    walk()
-    face(0)
-    const fwd = padHold(pad('forward'))
-    fwd.onPointerDown(pointer(0.5))
-    expect(moved(start)).toEqual([0, 0, -1])
-    fwd.onPointerMove?.(pointer(0.95))
-    // The slide itself presses nothing: the next beat goes the new way.
-    expect(moved(start)).toEqual([0, 0, -1])
-    vi.advanceTimersByTime(WALK_HOLD_MS * 2)
-    expect(moved(start)).toEqual([2, 0, -3])
-    fwd.onPointerMove?.(pointer(0.5))
-    vi.advanceTimersByTime(WALK_HOLD_MS)
-    expect(moved(start)).toEqual([2, 0, -4])
-    fwd.onPointerUp()
+    expect(Object.keys(fwd)).not.toContain('onPointerMove')
+    for (const [across, n] of [[0.98, 1], [0.02, 2], [0.5, 3]] as const) {
+      fwd.onPointerDown(pointer(across))
+      expect(moved(start)).toEqual([0, 0, -n])
+      fwd.onPointerUp()
+    }
+    expect(pad('forward').label).toBeUndefined()
+    expect(pad('forward').title).toBe('Forward (W)')
   })
 
   it('FORWARD held with a side arrow is the diagonal too; BACK with a side the same backward', () => {
@@ -309,29 +291,6 @@ describe('the touch pad', () => {
       vi.advanceTimersByTime(WALK_HOLD_MS * 5)
       expect(moved(start)[2]).toBe(before - 3)
     }
-  })
-
-  it('reads the thumb in zones of 22%, 56% and 22%, and with nothing to measure, the middle', () => {
-    const rect = { getBoundingClientRect: () => ({ left: 0, width: 100 }) }
-    expect(LEAN_ZONE).toBeCloseTo(0.22, 6)
-    expect(padLean({ clientX: 21, currentTarget: rect })).toBe(-1)
-    expect(padLean({ clientX: 23, currentTarget: rect })).toBe(0)
-    expect(padLean({ clientX: 77, currentTarget: rect })).toBe(0)
-    expect(padLean({ clientX: 79, currentTarget: rect })).toBe(1)
-    expect(padLean({ clientX: 500, currentTarget: rect })).toBe(1)
-    expect(padLean({ clientX: 10 })).toBe(0)
-  })
-
-  it('a sliding thumb changes the lean only LEAN_SLOP_PX past a line', () => {
-    const rect = { getBoundingClientRect: () => ({ left: 0, width: 100 }) }
-    const at = (x: number, was: -1 | 0 | 1) => padLean({ clientX: x, currentTarget: rect }, was)
-    expect(at(22 + LEAN_SLOP_PX - 1, -1)).toBe(-1)
-    expect(at(22 + LEAN_SLOP_PX, -1)).toBe(0)
-    expect(at(22 - LEAN_SLOP_PX + 1, 0)).toBe(0)
-    expect(at(22 - LEAN_SLOP_PX, 0)).toBe(-1)
-    expect(at(78 + LEAN_SLOP_PX - 1, 0)).toBe(0)
-    expect(at(78 + LEAN_SLOP_PX, 0)).toBe(1)
-    expect(at(78 - LEAN_SLOP_PX + 1, 1)).toBe(1)
   })
 })
 
@@ -525,30 +484,21 @@ describe('a hold publishes what the same taps publish', () => {
     expect(held).toEqual(tapped)
   })
 
-  it('a thumb jittering 3 px either side of a zone line for 10 beats: one hop, not one a beat', async () => {
-    const tapped = await run(() => { for (let k = 0; k < 10; k++) useWalk.getState().press('away', -1) })
-    const jittered = await run(() => {
-      const fwd = padHold(pad('forward'))
-      fwd.onPointerDown(pointer(LEAN_ZONE, -3))
-      for (let k = 0; k < 9; k++) {
-        fwd.onPointerMove?.(pointer(LEAN_ZONE, k % 2 ? -3 : 3))
-        vi.advanceTimersByTime(WALK_HOLD_MS)
-      }
-      fwd.onPointerUp()
+  it('FORWARD held, then RIGHT held with it on the pad for three beats: the same hops as a forward tap and four diagonal taps', async () => {
+    const tapped = await run(() => {
+      useWalk.getState().press('away')
+      for (let k = 0; k < 4; k++) useWalk.getState().press('away', 1)
     })
-    expect(tapped.ends).toEqual([[-10, 0, -10]])
-    expect(jittered).toEqual(tapped)
-  })
-
-  it('four beats of FORWARD with RIGHT held on the pad, four diagonal taps: one hop to the same place', async () => {
-    const tapped = await run(() => { for (let k = 0; k < 4; k++) useWalk.getState().press('away', 1) })
     const held = await run(() => {
       const fwd = padHold(pad('forward'))
-      fwd.onPointerDown(pointer(0.9))
+      const right = padHold(pad('right'))
+      fwd.onPointerDown(pointer())
+      right.onPointerDown(pointer())
       vi.advanceTimersByTime(WALK_HOLD_MS * 3)
+      right.onPointerUp()
       fwd.onPointerUp()
     })
-    expect(tapped.ends).toEqual([[4, 0, -4]])
+    expect(tapped.ends).toEqual([[0, 0, -1], [4, 0, -5]])
     expect(held).toEqual(tapped)
   })
 })
@@ -595,11 +545,11 @@ describe('the pad\'s DOWN under GRAVITY absorbs a bounce (review of #649)', () =
 
   it('DOWN held from early in the jump registers at the landing: it lands and stands, and nothing is made', () => {
     useWalk.getState().press('up')
-    // The jump reaches the pad at about 600 ms; DOWN goes down at 100, far before the window.
+    // The jump reaches the pad at about 775 ms; DOWN goes down at 100, far before the window.
     frames(100)
     const h = padHold(down())
     h.onPointerDown(pointer())
-    frames(600)
+    frames(800)
     expect(fallState()).toBeNull()
     expect(useWalk.getState().falling).toBe(false)
     expect(useCyberspace.getState().cursor).toEqual(start)
@@ -614,7 +564,7 @@ describe('the pad\'s DOWN under GRAVITY absorbs a bounce (review of #649)', () =
     const h = padHold(down())
     h.onPointerDown(pointer())
     h.onPointerUp()
-    frames(600)
+    frames(800)
     expect(fallState()).not.toBeNull()
     expect(fallState()!.v0).toBeGreaterThan(0)
   })
@@ -743,9 +693,10 @@ describe('GRAVITY with holds (review of #651)', () => {
     useWalk.getState().press('up')
     fallFrames(100)
     padHold(gpad('jump')).onPointerDown(pointer())
-    // Its own press was far too early to count; held, it counts at the landing: 8 plus the jump's 3.
-    for (let t = 0; t < 2000 && fallState() && fallState()!.v0 <= JUMP_SPEED + 1e-9; t += 16) fallFrames(16)
-    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 11), 6)
+    // Its own press, fresh in the air, is the double jump; held, it counts at the landing: 8 plus the jump's 5.
+    expect(fallState()!.doubled).toBe(true)
+    for (let t = 0; t < 3000 && fallState() && fallState()!.v0 <= JUMP_SPEED + 1e-9; t += 16) fallFrames(16)
+    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 13), 6)
   })
 
   it('JUMP pressed while DOWN is held: the two cancel, and nothing jumps', () => {

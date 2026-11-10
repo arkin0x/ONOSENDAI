@@ -14,7 +14,6 @@
  * |---|---|
  * | a direction goes down | one press at once, and the loop restarts from now |
  * | held | one press every WALK_HOLD_MS, the pad's old repeat, as fast as a quick tap-tap-tap: no pause first |
- * | a thumb slides on FORWARD | its side changes for the next press, with no press of its own |
  * | let go | the source goes; with none left, the loop stops, and nothing more is pressed |
  * | the keyboard's own repeats | ignored (hooks/useKeyboard.ts): the loop is the repeat |
  * | WALK ends or begins, a STOP, the window loses focus or the page is hidden, Meta (Cmd) goes down or up | everything held is let go: macOS sends no keyup for a key let go while Cmd is down, so it would walk on forever |
@@ -33,6 +32,13 @@
  *
  * Up and down held are read as held by a bounce (store/useWalk.ts (E)):
  * Up held adds its jump to every landing, Down held absorbs every landing.
+ *
+ * JUMP going down in the air under GRAVITY (falling, after a jump, in a
+ * bounce's arc) is the double jump (store/useWalk.ts (F); play test of
+ * 2026-11-10), once per time in the air, whatever else is held: Down held
+ * does not cancel it. Only the press does it, never a beat, so JUMP held
+ * from the floor jumps and never double jumps by itself: that takes a new
+ * press in the air.
  *
  * A press is exactly the press a tap makes (store/useWalk.ts press), so a
  * hold of N presses builds the same open segment, closes it at the same
@@ -71,11 +77,6 @@ export function heldNow(): HeldDir {
   let vert = 0
   for (const d of held.values()) { fwd += d.fwd; strafe += d.strafe; vert += d.vert }
   return { fwd: sign(fwd), strafe: sign(strafe), vert: sign(vert) }
-}
-
-/** What `source` holds, if it is held. */
-export function heldBy(source: string): HeldDir | undefined {
-  return held.get(source)
 }
 
 /** Whether anything is held. */
@@ -131,14 +132,11 @@ export function holdStart(source: string, dir: HeldDir): void {
   if (!walkInputOpen(source.startsWith('key:'))) return
   held.set(source, dir)
   const now = heldNow()
-  if (dir.vert !== 0) verticalPress(now.vert)
+  // JUMP freshly pressed in the air: the double jump, Down held or not.
+  const doubled = dir.vert > 0 && useWalk.getState().falling && useWalk.getState().doubleJump()
+  if (dir.vert !== 0 && !doubled) verticalPress(now.vert)
   if (dir.fwd !== 0 || dir.strafe !== 0) levelPress(now)
   restart()
-}
-
-/** A held source's direction changes (a thumb sliding on FORWARD): the next press goes the new way. */
-export function holdMove(source: string, dir: HeldDir): void {
-  if (held.has(source)) held.set(source, dir)
 }
 
 /** `source` let go. With nothing left held, the loop stops. */

@@ -53,7 +53,10 @@ import { useShards, type WorldItem } from '../useShards'
 import { useToast } from '../useToast'
 import { useWorkshop } from '../useWorkshop'
 import { anyBounce, clearWalls, padQueries } from '../walkWalls'
-import { JUMP_SPEED, WALK_GRAVITY } from '../walkGravity'
+import { JUMP_HANG_S, JUMP_SPEED, WALK_GRAVITY } from '../walkGravity'
+
+/** When a jump in place comes back down, in ms: about 775 (a jump of 5; it was 600 at 3). */
+const LANDS_MS = JUMP_HANG_S * 1000
 import { walkFall } from '../../lib/walkEye'
 import { useCalibration } from '../../lib/calibration'
 import { withConstrain, type Constrain } from '../../lib/walkConstrain'
@@ -207,8 +210,8 @@ describe('a fixed bounce', () => {
     world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 8), [0, -1, 0]])
     walk(true)
     useWalk.getState().press('up')
-    // The jump lands at 600 ms; the frame comes 100 ms late.
-    frame(700)
+    // The jump lands at LANDS_MS; the frame comes 100 ms late.
+    frame(LANDS_MS + 100)
     const f = fallState()!
     expect(f.v0).toBeGreaterThan(JUMP_SPEED)
     expect(f.t0).toBeCloseTo(clock - 100, 6)
@@ -263,15 +266,15 @@ describe('a fixed bounce', () => {
     expect(useCyberspace.getState().events).toHaveLength(2)
   })
 
-  it('a jump just before landing adds 3', () => {
+  it('a jump just before landing adds JUMP_HEIGHT, 5', () => {
     world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 8), [0, -1, 0]])
     walk(true)
     useWalk.getState().press('up')
-    // The jump lands at 600 ms: Up within BOUNCE_BOOST_MS of it.
-    frame(600 - BOUNCE_BOOST_MS + 50)
+    // The jump lands at LANDS_MS: Up within BOUNCE_BOOST_MS of it.
+    frame(LANDS_MS - BOUNCE_BOOST_MS + 50)
     useWalk.getState().press('up')
     untilBounce()
-    expect(Math.abs(peakOver(1500) - 11)).toBeLessThan(1)
+    expect(Math.abs(peakOver(1500) - 13)).toBeLessThan(1)
     nothingMade()
   })
 
@@ -421,12 +424,12 @@ describe('reflect', () => {
     expect(useWalk.getState()).toMatchObject({ queue: [], behind: 0 })
   })
 
-  it('a jump in place on a reflect pad bounces at 3 forever and publishes nothing', () => {
+  it('a jump in place on a reflect pad bounces at 5 forever and publishes nothing', () => {
     world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 'reflect'), [0, -1, 0]])
     walk(true)
     useWalk.getState().press('up')
-    frame(300)
-    for (let n = 0; n < 5; n++) expect(Math.abs(peakOver(600) - 3)).toBeLessThan(1)
+    frame(400)
+    for (let n = 0; n < 5; n++) expect(Math.abs(peakOver(Math.ceil(LANDS_MS)) - 5)).toBeLessThan(1)
     for (let t = 0; t < 10_000; t += 16) frame(16)
     expect(useWalk.getState().falling).toBe(true)
     expect(useCyberspace.getState().cursor).toEqual(start)
@@ -445,15 +448,15 @@ describe('reflect', () => {
     expect(Math.abs(peakOver(2000) - 24)).toBeLessThan(1)
   })
 
-  it('reflect plus a jump on landing adds 3', () => {
+  it('reflect plus a jump on landing adds JUMP_HEIGHT, 5', () => {
     world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 'reflect'), [0, -1, 0]])
     walk(true)
     useWalk.getState().press('up')
-    frame(600 - BOUNCE_BOOST_MS + 50)
+    frame(LANDS_MS - BOUNCE_BOOST_MS + 50)
     useWalk.getState().press('up')
     frame(BOUNCE_BOOST_MS)
-    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 6), 6)
-    expect(Math.abs(peakOver(900) - 6)).toBeLessThan(1)
+    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 10), 6)
+    expect(Math.abs(peakOver(1200) - 10)).toBeLessThan(1)
     nothingMade()
   })
 })
@@ -495,8 +498,8 @@ describe('Down absorbs (D5)', () => {
     world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 8), [0, -1, 0]])
     walk(true)
     useWalk.getState().press('up')
-    // The jump reaches the pad at 600 ms.
-    frame(590)
+    // The jump reaches the pad at LANDS_MS.
+    frame(LANDS_MS - 10)
     useWalk.getState().press('down')
     frame(30)
     expect(useWalk.getState().falling).toBe(false)
@@ -518,12 +521,12 @@ describe('Down absorbs (D5)', () => {
     world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 8), [0, -1, 0]])
     walk(true)
     useWalk.getState().press('up')
-    frame(450)
+    frame(LANDS_MS - 150)
     useWalk.getState().press('down')
     frame(50)
     useWalk.getState().press('up')
     untilBounce()
-    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 11), 6)
+    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 13), 6)
   })
 
   it('a step up into a narrow shaft onto a pad: walls hold every steer, Down lets you out', async () => {
@@ -566,11 +569,11 @@ describe('the Up and Down windows count from the landing, not the frame', () => 
     world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 8), [0, -1, 0]])
     walk(true)
     useWalk.getState().press('up')
-    frame(400)
+    frame(LANDS_MS - 200)
     useWalk.getState().press('up')
-    // One frame, 300 ms on: 100 ms past the landing at 600, the Up 200 ms before it.
+    // One frame, 300 ms on: 100 ms past the landing at LANDS_MS, the Up 200 ms before it.
     frame(300)
-    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 11), 6)
+    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 13), 6)
   })
 })
 
@@ -665,7 +668,7 @@ describe('steering and leaving', () => {
     expect(posted).toHaveLength(0)
   })
 
-  it('reflect with Up held climbs by 3 a bounce to 24, and stays there, publishing nothing', () => {
+  it('reflect with Up held climbs by 5 (JUMP_HEIGHT) a bounce to 24, and stays there, publishing nothing', () => {
     world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 'reflect'), [0, -1, 0]])
     walk(true)
     useWalk.getState().press('up')
@@ -678,7 +681,7 @@ describe('steering and leaving', () => {
       // (An arc that meets its top exactly, a float hair under its apex, restarts there at rest: v0 0, the same motion.)
       if (f && f.v0 !== last && f.v0 > 0) { last = f.v0; seen.push(Math.round((f.v0 * f.v0) / (2 * WALK_GRAVITY))) }
     }
-    expect(seen).toEqual([3, 6, 9, 12, 15, 18, 21, 24])
+    expect(seen).toEqual([5, 10, 15, 20, 24])
     // And it stays at 24, Up or not.
     expect(Math.abs(peakOver(3000) - 24)).toBeLessThan(1)
     nothingMade()
@@ -686,7 +689,7 @@ describe('steering and leaving', () => {
 })
 
 describe('the hop rate', () => {
-  it('steering along 1-high pads: one hop a bounce at most, no more than jumping along a floor', () => {
+  it('steering along 1-high pads: one hop a bounce at most; jumping along a floor, two a jump at most', () => {
     const LONG: [V3, V3] = [[-10, -1, -400], [10, 0, 10]]
     const steer = (jump: boolean) => () => { for (let t = 0; t < 5000; t += 16) { frame(16); if (t % 96 === 0) { if (jump) useWalk.getState().press('up'); useWalk.getState().press('away') } } }
     world(start, [bouncy(boxes('Pad', 'all', [LONG]), 1), [0, -1, 0]])
@@ -701,7 +704,10 @@ describe('the hop rate', () => {
     // A bounce at 1 is 0.35 s: 14 landings in 5 s, each a hop to the next spot
     // along (26 before steer points were folded into the landing's hop).
     expect(bounce).toBe(14)
-    expect(bounce).toBeLessThanOrEqual(jump)
+    // A jump is about 0.775 s now (5 high; at 3 it was 0.6 s and out-hopped the
+    // bounce): its steer point and its landing, at most, for each jump in 5 s.
+    expect(jump).toBeGreaterThan(0)
+    expect(jump).toBeLessThanOrEqual(2 * Math.ceil(5 / JUMP_HANG_S))
   }, LONG_TEST_MS)
 
   it('steering across a long pad while proofs land: the chain stays whole and the walk never stops', async () => {
@@ -709,7 +715,8 @@ describe('the hop rate', () => {
     walk(true)
     useWalk.getState().press('up')
     for (let round = 0; round < 12; round++) {
-      for (let t = 0; t < 300; t += 16) { frame(16); if (t % 96 === 0) useWalk.getState().press(round % 3 === 2 ? 'right' : 'away') }
+      // On for the whole first arc (the jump, about 0.775 s), then a turn every third round.
+      for (let t = 0; t < 300; t += 16) { frame(16); if (t % 96 === 0) useWalk.getState().press(round > 2 && round % 3 === 2 ? 'right' : 'away') }
       await landAll()
     }
     expect(posted.length).toBeGreaterThan(3)

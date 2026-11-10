@@ -126,7 +126,9 @@ function stopLoop(): void {
  * keyup) is a fresh press, as a tap is. Pressed with the input closed
  * (store/walkInput.ts; for a key, a focused text field closes it too),
  * nothing. The press is what everything held makes
- * together: JUMP pressed while DOWN is held cancels, as the two held do.
+ * together: on the floor, JUMP pressed while DOWN is held cancels, as the
+ * two held do. In the air under GRAVITY JUMP's press is the double jump
+ * instead (store/useWalk.ts (F)), whatever else is held, Down included.
  */
 export function holdStart(source: string, dir: HeldDir): void {
   if (!walkInputOpen(source.startsWith('key:'))) return

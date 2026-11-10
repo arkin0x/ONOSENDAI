@@ -47,6 +47,7 @@ import { MAX_UNIT, posed, readOpacity, ticksOf, toRender, type ShardModel } from
 import { partMatrix, type Placed } from 'sno-core/parts'
 import type { Box } from './clip'
 import { renderPose, type Pose } from './pose'
+import { bounceOf, type Bounce } from './walkBounce'
 
 /** What a shard asks of a walker. */
 export type Constrain = 'off' | 'all' | 'opaque'
@@ -277,6 +278,8 @@ export interface WallPlacement {
   f: Float64Array
   min: [number, number, number]
   max: [number, number, number]
+  /** The placed object's own `bounce` (lib/walkBounce.ts), 0 for none: its faces bounce by it. */
+  bounce?: Bounce
 }
 
 /**
@@ -298,6 +301,8 @@ export interface WallMesh {
   own: number
   /** The shard's own walls in its model frame, whose triangles `tris` holds posed, in order; null when it blocks nothing. */
   ownWalls: ModelWalls | null
+  /** The shard's own `bounce` (lib/walkBounce.ts), 0 for none: its own faces bounce by it. */
+  ownBounce?: Bounce
   /** The objects it places, and theirs, each where it stands. */
   placements: WallPlacement[]
   /** The bounds of every corner of every triangle, own and placed, or null for no triangles. */
@@ -341,7 +346,7 @@ export function wallMesh(shard: ShardModel, placed: readonly Placed[], pose?: Po
       if (blocks(m)) {
         const walls = wallsOf(m)
         if (walls.tris.length) {
-          const at = { walls, f: Float64Array.from(f), min: [Infinity, Infinity, Infinity] as [number, number, number], max: [-Infinity, -Infinity, -Infinity] as [number, number, number] }
+          const at = { walls, f: Float64Array.from(f), min: [Infinity, Infinity, Infinity] as [number, number, number], max: [-Infinity, -Infinity, -Infinity] as [number, number, number], bounce: bounceOf(m) }
           const c = walls.corners
           for (let u = 0; u < walls.used.length; u++) {
             const q = walls.used[u] * 3
@@ -366,7 +371,7 @@ export function wallMesh(shard: ShardModel, placed: readonly Placed[], pose?: Po
   }
   place(shard, placed, root)
   const any = tris.length > 0 || placements.length > 0
-  return { tris, own: tris.length / 9, ownWalls, placements, min: any ? min : null, max: any ? max : null }
+  return { tris, own: tris.length / 9, ownWalls, ownBounce: bounceOf(shard), placements, min: any ? min : null, max: any ? max : null }
 }
 
 /** Barycentric slack: a ray through an edge or a corner hits, so two triangles that share an edge leave no seam. */
@@ -400,11 +405,18 @@ let scratch = new Float64Array(0)
  * that once made its triangles ahead of time, so every hit is the same
  * number to the last bit (walkConstrain.test.ts holds the old way beside the
  * new one).
+ *
+ * With `who`, the `bounce` of the payload that owns the face it returns is
+ * written there (lib/walkBounce.ts): the shard's own for its own faces, a
+ * placed object's for that object's, 0 when nothing is hit.
  */
-export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i: 0 | 1 | 2, s: 1 | -1, maxT: number, minT: number, clip?: Box): number | null {
+export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i: 0 | 1 | 2, s: 1 | -1, maxT: number, minT: number, clip?: Box, who?: { bounce: Bounce }): number | null {
   const j = (i + 1) % 3, k = (i + 2) % 3
   const pj = o[j], pk = o[k], pi = o[i]
   let best: number | null = null
+  let bestBounce: Bounce = 0
+  /** The owner of the triangles being tested now: what a hit among them bounces by. */
+  let owner: Bounce = mesh.ownBounce ?? 0
   // One triangle: the cheap rejects, then the exact test.
   const test = (t: Float64Array, a: number, b: number, c: number, own: boolean): void => {
     const aj = t[a + j], ak = t[a + k], bj = t[b + j], bk = t[b + k], cj = t[c + j], ck = t[c + k]
@@ -430,6 +442,7 @@ export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i
       if (!inside) return
     }
     best = along
+    bestBounce = owner
   }
   const t = mesh.tris
   for (let n = 0; n < t.length; n += 9) test(t, n, n + 3, n + 6, true)
@@ -453,8 +466,10 @@ export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i
       scratch[q + 1] = f[1] * r0 + f[5] * r1 + f[9] * r2 + f[13]
       scratch[q + 2] = f[2] * r0 + f[6] * r1 + f[10] * r2 + f[14]
     }
+    owner = p.bounce ?? 0
     for (let n = 0; n < tris.length; n += 3) test(scratch, tris[n] * 3, tris[n + 1] * 3, tris[n + 2] * 3, false)
   }
+  if (who) who.bounce = best === null ? 0 : bestBounce
   return best
 }
 

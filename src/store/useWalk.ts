@@ -66,11 +66,12 @@
  * | (D) gravity goes off mid-fall | one hop to where you are, and you float |
  * | Up (Space, R, the pad's up) standing | a jump of 3: back where it left, nothing; anywhere else, as a fall |
  * | Down, or Up off a floor | nothing: no flying |
+ * | (E) a landing on a face with `bounce` (EXPERIMENTAL, lib/walkBounce.ts) | the landing's hop, as (A), only when it is somewhere new; the launch is the next arc of the same fall, so bouncing in place makes nothing |
  *
- * The hops a fall makes are queued only when it resolves (A, C or D), so
- * none is proved or published while you are still falling, and a reload or
- * a STOP mid-fall leaves you where the chain is, the step-off point once
- * its hop has landed. Gravity off, a press is exactly what it was.
+ * The hops a fall makes are queued only when it resolves (A, C or D) or
+ * bounces somewhere new (E), so none is proved or published while you are
+ * still falling, and a reload or a STOP mid-fall leaves you where the chain
+ * is, the step-off point once its hop has landed. Gravity off, a press is exactly what it was.
  *
  * Under gravity a floor in your own plane holds you: a HOP, a VIEW, a BUILD
  * or a floor deployed at your height can leave you exactly on one, and a fall
@@ -98,8 +99,9 @@ import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { standing, walkStep, type WalkStep } from './walkStep'
 import { planWalkMove, walkHeading } from '../lib/walkSlide'
-import { stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
-import { JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, loadGravity, reachedHeight, saveGravity } from './walkGravity'
+import { floorBounce, stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
+import { JUMP_HEIGHT, JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, launchSpeed, loadGravity, reachedHeight, saveGravity } from './walkGravity'
+import { launchHeight } from '../lib/walkBounce'
 import { walkFacing, walkFall } from '../lib/walkEye'
 
 /** What the LOSING SYNC warning waits for: this many moves not yet proven. */
@@ -287,8 +289,13 @@ export const useWalk = create<WalkState>((set, get) => ({
     const axes = cs.screenAxes ?? cs.axes()
     const dir = moveDirection(axes, name)
     const gravity = get().gravity
-    // In the air: a level press is a move in mid-air (B); up and down do nothing.
-    if (fall) { if (dir.axis !== 'y') airPress(fall, dir.axis, dir.dir > 0 ? 1 : -1); return }
+    // In the air: a level press is a move in mid-air (B); up and down do
+    // nothing, except that Up just before landing on a bounce adds a jump (E).
+    if (fall) {
+      if (dir.axis !== 'y') airPress(fall, dir.axis, dir.dir > 0 ? 1 : -1)
+      else if (dir.dir > 0) upInAirAt = nowMs()
+      return
+    }
     const { queue, open } = get()
     const from = open?.end ?? queue[queue.length - 1] ?? cs.position
     // Under gravity Up is a jump, and Down does nothing: no flying.
@@ -438,6 +445,17 @@ let fall: Fall | null = null
 
 const nowMs = (): number => performance.now()
 
+/** When Up was last pressed in the air (ms), or null: within BOUNCE_BOOST_MS of a bounce's landing it adds JUMP_HEIGHT. */
+let upInAirAt: number | null = null
+
+/**
+ * How long before a bounce's landing an Up press in the air still counts as
+ * jumping off it, in ms. The pad has no held state for Up (only WASD keyups
+ * are tracked), so "holding jump as you land" is read as a press just before
+ * it; a held key's repeats keep it fresh.
+ */
+export const BOUNCE_BOOST_MS = 250
+
 /** The walk's segment budget in `plane`, as the fall asks it. */
 function affordIn(plane: number): (from: Position, to: Position) => boolean {
   return (from, to) => segmentAffordable(from, to, plane)
@@ -553,11 +571,74 @@ export function tickFall(now: number = nowMs()): boolean {
   const t = Math.max(0, (now - f.t0) / 1000)
   const r = Math.min(arcHeight(f.v0, t), f.topN)
   if (t > 0 && arcSpeed(f.v0, t) <= 0 && r <= f.bottomN) {
+    // (E) on a floor that bounces: the fall goes on, launched.
+    if (f.lands && bounceOff(f, now)) return true
     // (A) on the floor, or (C) at the last gibson a hop can afford.
     endFall({ ...f.anchor, y: f.y0 + f.bottom }, !f.lands)
     return true
   }
   walkFall.offset = r - f.base
+  return true
+}
+
+/**
+ * (E) BOUNCE, EXPERIMENTAL (lib/walkBounce.ts): the fall has come down on a
+ * floor whose face has `bounce`. The landing is published exactly as (A)
+ * would publish it, the hops of the fall so far, each only when it goes
+ * somewhere, and then, instead of ending, the fall starts its next arc from
+ * the landing, upward at launchSpeed of the launch height, under any ceiling
+ * and no higher than a hop can afford, with the walls it already knew. A
+ * bounce in place therefore lands where its arc left and makes nothing, like
+ * a jump in place, however many times it bounces; leaving the pad in the air
+ * (B) or switching gravity off (D) makes the hops, as for any fall.
+ *
+ * The arc restarts at the moment it reached the floor, worked out from the
+ * arc and not the frame, so a frame's lateness never shortens the bounce.
+ * False, and the fall lands as (A), when the face has no bounce, the launch
+ * is under BOUNCE_MIN, a ceiling leaves no room, or a wall is still on its way.
+ */
+function bounceOff(f: Fall, now: number): boolean {
+  const final: Position = { ...f.anchor, y: f.y0 + f.bottom }
+  takeWallWait()
+  const b = floorBounce(final, f.items)
+  // How far the fall came down: its arc's top, under any ceiling, above the landing.
+  const fell = Math.min(arcApex(f.v0), f.topN) - f.bottomN
+  const boost = upInAirAt !== null && now - upInAirAt <= BOUNCE_BOOST_MS
+  const h = launchHeight(b, fell, boost, JUMP_HEIGHT)
+  if (h === 0) { takeWallWait(); return false }
+  const afford = affordIn(f.plane)
+  const { rise } = jumpRise(final, f.items, afford, h)
+  const limit = fallLimit(final, f.items, afford)
+  if (takeWallWait() || rise === 0n) return false
+  upInAirAt = null
+  // The hops so far, as (A) makes them: none when it came back to where its arc left.
+  const hops = f.waypoints.slice()
+  if (!samePosition(final, f.anchor)) hops.push({ ...final })
+  // When the arc reached the floor: the descending root of v0 t - g t^2 / 2 = bottom.
+  const v0 = launchSpeed(h)
+  let t0 = f.t0 + ((f.v0 + Math.sqrt(f.v0 * f.v0 - 2 * WALK_GRAVITY * f.bottomN)) / WALK_GRAVITY) * 1000
+  // A gap longer than the whole bounce (a hidden tab): it leaves now instead.
+  if (!(now - t0 <= (2 * v0 / WALK_GRAVITY) * 1000)) t0 = now
+  f.anchor = final
+  f.waypoints = []
+  f.y0 = final.y
+  f.t0 = t0
+  f.v0 = v0
+  f.top = rise
+  f.bottom = -limit.drop
+  f.lands = limit.lands
+  f.peak = arcPeak(v0, Number(rise))
+  f.topSince = 0
+  f.air = null
+  syncFall(f)
+  walkFall.offset = Math.min(arcHeight(v0, Math.max(0, (now - t0) / 1000)), f.topN) - f.base
+  // In place the cursor is already here: a bounce in place touches no store.
+  if (!samePosition(useCyberspace.getState().cursor, final)) useCyberspace.setState({ cursor: { ...final } })
+  if (hops.length > 0) {
+    const next = [...useWalk.getState().queue, ...hops]
+    useWalk.setState({ queue: next, behind: next.length })
+    pump()
+  }
   return true
 }
 
@@ -630,6 +711,7 @@ function endFall(final: Position, hovering = false): void {
   const f = fall
   if (!f) return
   fall = null
+  upInAirAt = null
   walkFall.active = false
   walkFall.offset = 0
   const hops = f.waypoints.slice()
@@ -644,6 +726,7 @@ function endFall(final: Position, hovering = false): void {
 /** Forget a fall not yet resolved: it has made nothing. */
 function dropFall(): void {
   fall = null
+  upInAirAt = null
   walkFall.active = false
   walkFall.offset = 0
   if (useWalk.getState().falling) useWalk.setState({ falling: false })

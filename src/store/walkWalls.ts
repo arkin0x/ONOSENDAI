@@ -64,6 +64,7 @@ import { regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
 import type { AxisName, Position, ViewAxes } from '../lib/space'
 import { constrainOf, enclosed, firstHit, wallMesh, type WallMesh } from '../lib/walkConstrain'
+import type { Bounce } from '../lib/walkBounce'
 import { useShards, type WorldItem } from './useShards'
 import { useCyberspace } from './useCyberspace'
 import { openedByHand } from './useOpenedChests'
@@ -792,6 +793,30 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     stop = { reach: BigInt(k) < length ? BigInt(k) : length, by }
   }
   return middle && middle.reach < stop.reach ? middle : stop
+}
+
+/**
+ * BOUNCE, EXPERIMENTAL (lib/walkBounce.ts): the `bounce` of the floor a
+ * walker at `at` stands on: a launch height, `"reflect"`, or 0 for none. The floor is the one GRAVITY stands
+ * on (stepLimit with `stand`: a blocking face less than a gibson below, or
+ * one in the walker's own plane with open space above), so it is always met
+ * from above: a side face is parallel to the ray and a bottom face is never
+ * under a walker standing, so neither ever bounces. Within that shard, the
+ * face right under the walker decides, by the payload that owns it.
+ */
+export function floorBounce(at: Position, items: readonly WallItem[]): Bounce {
+  const under = stepLimit(at, 'y', -1, 1n, items, true)
+  const w = under.by
+  if (under.reach !== 0n || !w || w.inside) return 0
+  const e = entries.get(w.key)
+  if (!e || !e.reach) return 0
+  const g = 2 ** w.shard.unit
+  const tol = tolerance(e, g, 1n)
+  const hair = tolerance(e, g, 0n)
+  const o: [number, number, number] = [Number(at.x - w.at.x) / g, Number(at.y - w.at.y) / g, -Number(at.z - w.at.z) / g]
+  const who: { bounce: Bounce } = { bounce: 0 }
+  const t = firstHit(e.mesh, o, 1, -1, (1 + tol) / g, (hair < HAIR_MAX ? -hair : ON_FACE) / g, e.clip, who)
+  return t === null ? 0 : who.bounce
 }
 
 /**

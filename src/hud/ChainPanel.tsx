@@ -34,7 +34,8 @@ import { actionKind, actionLabel, firstBreak, openBracket } from '../lib/events'
 import { BrokenChainNotice } from './BrokenChain'
 import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
 import { useCyberspace } from '../store/useCyberspace'
-import { useGame } from '../store/useGame'
+import { enterTutorialDungeon, gamesEnabled, useGame } from '../store/useGame'
+import { TUTORIAL_GAME } from '../lib/games/tutorialGame'
 import { gameFor } from '../lib/games/registry'
 import { useBuilder, walkChain } from '../store/useBuilder'
 import { CYBERSPACE_RELAY } from '../lib/relay'
@@ -49,6 +50,8 @@ export function ChainPanel(): JSX.Element {
   const prevEventId = useCyberspace((s) => s.prevEventId)
   const genesisId = useCyberspace((s) => s.genesisId)
   const events = useCyberspace((s) => s.events)
+  // Why the last ENTER GAME was refused, while no game is on screen to say it.
+  const gameNote = useGame((s) => (s.session ? null : s.message))
   const published = useCyberspace((s) => s.published)
   const publishError = useCyberspace((s) => s.publishError)
   const live = useCyberspace((s) => s.live)
@@ -242,6 +245,15 @@ export function ChainPanel(): JSX.Element {
           <button className="tag tag--tap" onClick={() => useChainUi.getState().setExplaining(true)}>WHY</button>
         </p>
       ) : null}
+
+      {/* With games on (lib/games/flag.ts), a way into the tutorial dungeon
+          until the first-arrival tutorial offers it (DECK-0002 §2). */}
+      {gamesEnabled() && !game && events.length > 0 && (
+        <p className="notice notice--game">
+          {TUTORIAL_GAME.name}{gameNote ? `: ${gameNote}` : ''}
+          <button className="tag tag--tap" onClick={() => { void enterTutorialDungeon() }}>ENTER GAME</button>
+        </p>
+      )}
 
       {/* Apart from the states above: a broken row is a fact about the chain
           itself, and it can stand alongside any of them. You stand frozen at

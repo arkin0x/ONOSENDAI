@@ -59,7 +59,9 @@ export function FrameDriver(): null {
   // the world under it is pure cost, and on a phone it was most of the frame:
   // the bench measured 3 fps with the world running behind it.
   // A game on screen (game/GameView.tsx) covers it the same way, with a canvas of its own.
-  const covered = useWorkshop((s) => s.open) || useGame((s) => s.session !== null)
+  const benchOpen = useWorkshop((s) => s.open)
+  const playing = useGame((s) => s.session !== null)
+  const covered = benchOpen || playing
   // Across a pause: the time the scene has seen.
   const elapsed = useRef(0)
   useEffect(() => {

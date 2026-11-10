@@ -171,12 +171,11 @@ describe('in-game mode (useGame)', () => {
     await enterTutorialDungeon()
     await worldLoaded()
     const start = TUTORIAL_GAME.start
-    // The hall's far end is sealed 2.5 gibsons behind the start: one step, then a wall.
-    G().step('z', 1)
-    expect(G().session!.at.z).toBe(start.z + 1n)
-    G().step('z', 1)
-    expect(G().session!.at.z).toBe(start.z + 1n)
-    G().step('z', -1)
+    // The hall's far end is sealed behind the start, its plug at 32.5 from the base: the last gibson short of it is 31.
+    for (let i = 0; i < 10; i++) G().step('z', 1)
+    expect(G().session!.at.z).toBe(TUTORIAL_GAME.region.base.z + 31n)
+    for (let i = 0; i < 5; i++) G().step('z', -1)
+    expect(G().session!.at.z).toBe(start.z)
     // The hall's wall two and a half gibsons to the side.
     for (let i = 0; i < 4; i++) G().step('x', 1)
     expect(G().session!.at.x).toBe(start.x + 2n)
@@ -184,7 +183,9 @@ describe('in-game mode (useGame)', () => {
     G().step('x', -1)
     const count = S().events.length
     // Down the hall into the dead end, onto the pad by its shrine.
-    for (let i = 0; i < 21 && !G().busy; i++) G().step('z', -1)
+    let steps = 0
+    for (; steps < 30 && !G().busy; steps++) G().step('z', -1)
+    expect(steps).toBe(17)
     expect(G().busy).toBe('teleporting')
     for (let i = 0; i < 200 && G().busy; i++) await new Promise((r) => setTimeout(r, 5))
     expect(G().session!.at).toEqual(TUTORIAL_GAME.pads[0].to)

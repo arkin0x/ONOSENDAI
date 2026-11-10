@@ -46,13 +46,13 @@ export const TUTORIAL_GAME: GameDef = {
   relayHint: '',
   name: 'TUTORIAL DUNGEON',
   region: { base: BASE, height: 6, plane: 1 },
-  // Chamber A, near the sealed far end of its hall.
-  start: at(8, 18, 30),
+  // Chamber A, in its hall, far enough from the sealed end for the camera to stand inside.
+  start: at(8, 18, 26),
   pads: [
     // Chamber A's pad, by the shrine: to chamber B, which nothing joins to A.
     { at: at(8, 17, 8), to: at(40, 18, 26) },
     // Chamber B's pad: back to the start.
-    { at: at(40, 17, 21), to: at(8, 18, 30) },
+    { at: at(40, 17, 21), to: at(8, 18, 26) },
   ],
   world: { kind: 'fixture', load: async () => (await import('./tutorialDungeon.fixture.json')).default.events },
 }

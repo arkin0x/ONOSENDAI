@@ -18,12 +18,19 @@
  * device as before (store/useLayers.ts for the dots, boxes and headlamp, useCyberspace
  * showTrail and showSecrets for the other two). It is a view preference
  * only: nothing here changes a proof, a move, the cursor or the chain.
+ *
+ * One row is not a view preference: Tutorial (TutorialRow, below), the
+ * first-arrival tutorial's switch, shown only where it has been offered.
  */
 
 import type { ReactNode } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
 import { useWalk } from '../store/useWalk'
+import { useTutorial } from '../store/useTutorial'
+import { useDemo } from '../store/useDemo'
+import { useTv } from '../store/useTv'
+import { setTutorialSwitch, useTutorialSwitch } from '../tutorial/gate'
 import { Field, Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
 
@@ -141,6 +148,7 @@ export function ViewPanel(): JSX.Element {
           <Switch id={r.id} checked={r.on} onCheckedChange={r.set} />
         </Field>
       ))}
+      <TutorialRow />
       <Explanation>
         Each switch turns one thing in the scene on or off. It changes only what
         this device draws, and the choice is kept on this device: nothing here
@@ -163,5 +171,40 @@ export function ViewPanel(): JSX.Element {
         it fades to silence at its region's walls.
       </Explanation>
     </section>
+  )
+}
+
+/**
+ * The first-arrival tutorial's switch and RESTART TUTORIAL (store/useTutorial.ts,
+ * tutorial/gate.ts). Off in production: the row shows only on a device where
+ * ?tutorial=1 or ?tutorial=0 was opened, until the owner turns the tutorial on
+ * for new identities.
+ */
+function TutorialRow(): JSX.Element | null {
+  const on = useTutorialSwitch((st) => st.value)
+  const running = useTutorial((st) => st.active)
+  // RESTART cannot start over the tour or TV, which would put it away again at once.
+  const touring = useDemo((st) => st.active)
+  const tvOn = useTv((st) => st.on)
+  const blocked = touring || tvOn
+  if (on === null) return null
+  const set = (v: boolean): void => {
+    setTutorialSwitch(v)
+    if (!v) useTutorial.getState().pause()
+  }
+  return (
+    <>
+      <Field id="view-tutorial" label="Tutorial" hint="Guide a new identity on arrival.">
+        <Switch id="view-tutorial" checked={on} onCheckedChange={set} />
+      </Field>
+      {on && (
+        <button className="avatars__go tutorial-restart" onClick={() => useTutorial.getState().start({ restart: true })} disabled={running || blocked}>RESTART TUTORIAL</button>
+      )}
+      <Explanation>
+        Tutorial walks a brand-new identity through its first few minutes on
+        arrival. RESTART TUTORIAL starts it again from the welcome, for the
+        identity you are now.
+      </Explanation>
+    </>
   )
 }

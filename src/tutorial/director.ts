@@ -37,7 +37,12 @@ import { useBuilder } from '../store/useBuilder'
 import { seedItemOf } from '../lib/seeds/seedItem'
 import { dnaResolver } from '../lib/seeds/seedSources'
 import { TUTORIAL_DNA, tutorialDnaId, tutorialSeedDraft } from './dna'
-import { SEED_HIDE_MAX, dnaMatches } from '../lib/seeds/plant'
+import { PREVIEW_DAYS, SEED_HIDE_MAX, bloomReachGibsons, dnaMatches, previewRequest, seedHideFor } from '../lib/seeds/plant'
+import { growInWorker } from '../lib/seeds/growClient'
+import { headerBook, trustedTip } from '../lib/seeds/seedSources'
+import { getStopByHeight, useHyperspace } from '../store/useHyperspace'
+import { positionHex } from '../lib/events'
+import type { Caps } from 'sno-core/seeds'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { markViewedStop, ownHyperspaceView } from '../store/useHyperspace'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
@@ -304,7 +309,23 @@ registerTutorialWatcher('plant', (onDone) => {
  * as SEED does; until then the player's SEED signs a copy of the DNA. HIDE
  * is still the player's: nothing is mined or hidden here.
  */
-export async function lineUpTutorialSeed(id: string | null = tutorialDnaId()): Promise<string | null> {
+/**
+ * How far a DNA's bloom reaches at a landing point, as SEED measures it for
+ * its hide height (hud/SeedCompose useSeedFit): grown at day 31 of the past
+ * month in the seeds worker (inline under tests), its farthest vertex with
+ * the margin (plant.ts bloomReachGibsons). Built from the same Seeds pieces
+ * SEED builds it from; the height itself is SEED's own seedHideFor.
+ */
+export function bloomReachAt(text: string, caps: Caps, plane: Plane, scale: number): (p: Position) => Promise<number | undefined> {
+  const tip = trustedTip() ?? useHyperspace.getState().tipHeight ?? 975_300
+  return async (p) => {
+    const req = previewRequest({ text, caps, coord: positionHex(p, plane), scale, tip, day: PREVIEW_DAYS, hashOf: (h) => headerBook.hash(h) ?? getStopByHeight(h)?.blockHash })
+    const answer = await growInWorker({ ...req, key: 'preview-reach' })
+    return answer.type === 'bloom' ? bloomReachGibsons(answer.buffers.positions, scale) : undefined
+  }
+}
+
+export async function lineUpTutorialSeed(id: string | null = tutorialDnaId(), reachAt?: (p: Position) => Promise<number | undefined>): Promise<string | null> {
   // What is lined up already: the tree itself (a second tap while it waits or
   // mines does nothing), a copy AGAIN left lined up (stood down), or
   // anything else, which is the player's to finish or cancel first.
@@ -352,6 +373,19 @@ export async function lineUpTutorialSeed(id: string | null = tutorialDnaId()): P
     if (useBuilder.getState().active) useBuilder.getState().exit()
     return 'Stand on the dirt first.'
   }
+  // Its hide height, as SEED finds it (owner ruling 2026-11-10): the smallest
+  // from 3 to 12 whose cube holds this DNA's day-31 bloom where it lands, 12
+  // when none does; carried as the draft's fit, which the deploy uses for
+  // this very cursor and step (plant.ts seedDraftHeight).
+  const cursor = { ...s.cursor }
+  const step = buildStepOf(s)
+  const found = await seedHideFor(cursor, layout.plane, step, MAX_COMPUTE_HEIGHT, reachAt ?? bloomReachAt(draft.text, draft.caps, layout.plane, draft.scale))
+  // Asked again after the measure: something may have been lined up, or the cursor moved, meanwhile.
+  const late = lined()
+  if (late !== null) return late || null
+  const now = useCyberspace.getState()
+  if (!useBuilder.getState().active || positionHex(now.cursor, layout.plane) !== positionHex(cursor, layout.plane) || buildStepOf(now) !== step) return 'The cursor moved. Tap PLANT THE SEED again.'
+  if (found.reach !== undefined) draft = { ...draft, fit: { height: found.height, reach: found.reach, cursor: positionHex(cursor, layout.plane), step } }
   useShards.getState().startDeploySeed(draft)
   return null
 }
@@ -360,7 +394,8 @@ registerTutorialEffect('plant-tutorial-seed', () => {
   // The answer is the plant step's own note, and only while that step is still up.
   const t = useTutorial.getState()
   const index = t.index
-  t.noteStep(index, null)
+  // Measuring the bloom takes a moment.
+  t.noteStep(index, 'One moment.')
   void lineUpTutorialSeed().then((why) => useTutorial.getState().noteStep(index, why), (err: unknown) => {
     console.warn('[tutorial] could not line the seed up:', err)
     useTutorial.getState().noteStep(index, 'The seed could not be lined up. Try PLANT THE SEED again.')

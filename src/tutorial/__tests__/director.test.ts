@@ -321,6 +321,30 @@ describe('the director', () => {
     expect(buildPlane(useCyberspace.getState())).toBe(layout!.plane)
     expect(useShards.getState().pending).toMatchObject({ type: 'seed', seed: { text: TUTORIAL_DNA.text, caps: TUTORIAL_DNA.caps, scale: 0 } })
     expect((useShards.getState().pending as { seed: { dnaId?: string } }).seed.dnaId).toBeUndefined()
+    // Its hide height is the one SEED picks for this tree at this spot: SEED's seedHideFor, with the bloom
+    // measured exactly as SEED measures it (hud/SeedCompose useSeedFit), at day 31 where it lands.
+    const { seedHideFor, previewRequest, bloomReachGibsons, PREVIEW_DAYS } = await import('../../lib/seeds/plant')
+    const { growInWorker } = await import('../../lib/seeds/growClient')
+    const { headerBook, trustedTip } = await import('../../lib/seeds/seedSources')
+    const { getStopByHeight, useHyperspace } = await import('../../store/useHyperspace')
+    const { positionHex } = await import('../../lib/events')
+    const { MAX_COMPUTE_HEIGHT } = await import('../../store/useCyberspace')
+    const now = trustedTip() ?? useHyperspace.getState().tipHeight ?? 975_300
+    const seedReach = async (p: { x: bigint; y: bigint; z: bigint }): Promise<number | undefined> => {
+      const req = previewRequest({ text: TUTORIAL_DNA.text, caps: TUTORIAL_DNA.caps, coord: positionHex(p, layout!.plane), scale: 0, tip: now, day: PREVIEW_DAYS, hashOf: (h) => headerBook.hash(h) ?? getStopByHeight(h)?.blockHash })
+      const answer = await growInWorker({ ...req, key: 'preview-reach' })
+      return answer.type === 'bloom' ? bloomReachGibsons(answer.buffers.positions, 0) : undefined
+    }
+    const cursor = useCyberspace.getState().cursor
+    const seedPicks = await seedHideFor(cursor, layout!.plane, 0, MAX_COMPUTE_HEIGHT, seedReach)
+    const fit = (useShards.getState().pending as { seed: { fit?: { height: number; reach: number; cursor: string; step: number } } }).seed.fit
+    expect(fit).toEqual({ height: seedPicks.height, reach: seedPicks.reach, cursor: positionHex(cursor, layout!.plane), step: 0 })
+    // Low, as the owner ruled it should be where the bloom fits: never the fallback 12 for this small tree.
+    expect(fit!.height).toBeGreaterThanOrEqual(3)
+    expect(fit!.height).toBeLessThan(12)
+    // ... and the deploy hides it there (DeployBar's own rule, seedDraftHeight).
+    const { seedDraftHeight } = await import('../../lib/seeds/plant')
+    expect(seedDraftHeight(fit, cursor, layout!.plane, 0, MAX_COMPUTE_HEIGHT)).toBe(seedPicks.height)
     // A second tap while it mines changes nothing.
     const lined = useShards.getState().pending
     useShards.setState({ deployStatus: 'working' } as never)
@@ -349,7 +373,7 @@ describe('the director', () => {
     expect(useShards.getState().pending).toMatchObject({ type: 'seed', seed: { dnaId: owner.id, text: TUTORIAL_DNA.text } })
     useShards.setState({ pending: null })
     useBuilder.setState({ active: false } as never)
-  })
+  }, 120_000)
 
   it('the plant step\'s note is its own: shown while it is up, gone on the next step', async () => {
     const { runTutorialEffect } = await import('../../store/useTutorial')

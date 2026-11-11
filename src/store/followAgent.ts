@@ -10,11 +10,15 @@
  * kind 3 stay as they are, and one `p` tag is added at the end. A kind 3 is
  * replaceable, so one built from less than the whole list would wipe the
  * person's follows everywhere. So the edit is refused, and nothing is signed,
- * when too few relays answered the fetch (lib/muteList.ts fetchRefusal, the
- * rule the mute list edits by): with a list found, two of the general
- * relays, or most of the person's own write relays (NIP-65), must have
- * answered; with no list found, every one of them must have answered "none"
- * before a new list is made. A failed or timed-out fetch is never "none".
+ * unless EVERY relay asked answered: the general relays, the canonical and
+ * configured ones, and the person's own write relays (NIP-65). Only then is
+ * the newest list known, and only then is "none" an answer and not silence,
+ * so a new list is made only on that. A failed, timed-out or refused read
+ * is never "none". (Stricter than the mute list's majority rule,
+ * lib/muteList.ts fetchRefusal: review of #674 round 2 showed one answering
+ * write relay, or the general relays alone, could say "none" for a list
+ * held elsewhere.) The list this device last published is laid beside what
+ * the relays return, so a relay still catching up never hides it.
  * One ACTIVATE runs at a time. Nothing here runs untapped.
  */
 
@@ -23,9 +27,8 @@ import type { RelayAnswer } from '../lib/relayOutcome'
 import { parsePubkey } from '../lib/chains'
 import { GENERAL_RELAYS, parseContacts } from '../lib/contacts'
 import { RELAY_LIST_KIND } from '../lib/inbox'
-import { fetchRefusal, writeRelaysOf } from '../lib/muteList'
+import { writeRelaysOf } from '../lib/muteList'
 import { publishMany, queryEachAt, relaySet, type PublishResult } from '../lib/relay'
-import { DEFAULT_RELAY } from './useRelays'
 import { useCyberspace } from './useCyberspace'
 
 export const CONTACTS_KIND = 3
@@ -40,7 +43,8 @@ export const ACTIVATE_WORDS = {
   invalid: 'That is not an npub.',
   self: "That is your own npub. Paste your agent's.",
   already: 'You already follow that agent.',
-  unread: 'Could not read your follow list from enough relays. Nothing changed. Try again.',
+  unread: 'Not every relay answered, so your follow list was left as it is. Try again.',
+  unsaved: 'No relay took it. Nothing changed. Try again.',
   switched: 'Your account changed. Nothing changed.',
   busy: 'One moment.',
 } as const
@@ -113,15 +117,23 @@ const liveDeps: FollowDeps = {
 }
 
 let deps: FollowDeps = liveDeps
+/** The kind 3 this device last published, by pubkey: laid beside the relays' answers. */
+const lastPublished = new Map<string, NostrEvent>()
 
 /** Tests only: swap the relays and the signer. Returns the previous deps. */
 export function setFollowDeps(next: Partial<FollowDeps> | null): FollowDeps {
   const prev = deps
   deps = next ? { ...liveDeps, ...next } : liveDeps
+  lastPublished.clear()
   return prev
 }
 
 let running = false
+
+/** Whether every relay asked answered: only then is the newest list known, or "none" an answer. */
+export function everyRelayAnswered(answers: readonly RelayAnswer[]): boolean {
+  return answers.length > 0 && answers.every((a) => a.outcome === 'answered')
+}
 
 /**
  * ACTIVATE: follow the agent whose npub was pasted. Fetches the newest kind
@@ -137,20 +149,23 @@ export async function activateAgent(input: string): Promise<{ ok: true; pubkey: 
   try {
     let fetched: Awaited<ReturnType<FollowDeps['fetch']>>
     try { fetched = await deps.fetch(me) } catch { return { ok: false, error: ACTIVATE_WORDS.unread } }
-    // Every event heard, whichever relay sent it, so the newest list is the one edited.
-    const prev = newestContacts(fetched.answers.flatMap((a) => a.events), me)
-    const refusal = fetchRefusal(fetched.answers, { writeRelays: fetched.writeRelays, general: GENERAL_RELAYS, canonical: DEFAULT_RELAY, found: prev !== null })
-    if (refusal) return { ok: false, error: ACTIVATE_WORDS.unread }
+    if (!everyRelayAnswered(fetched.answers)) return { ok: false, error: ACTIVATE_WORDS.unread }
+    // Every event heard, and the list this device last published, so the newest list is the one edited.
+    const kept = lastPublished.get(me)
+    const prev = newestContacts([...fetched.answers.flatMap((a) => a.events), ...(kept ? [kept] : [])], me)
     if (deps.self() !== me) return { ok: false, error: ACTIVATE_WORDS.switched }
     const checked = checkAgentKey(input, me, prev ? parseContacts(prev).map((c) => c.pubkey) : [])
     if ('error' in checked) return { ok: false, error: checked.error }
     const signed = await deps.sign(followTemplate(prev, checked.pubkey, deps.now()))
     if (signed.pubkey !== me || deps.self() !== me) return { ok: false, error: ACTIVATE_WORDS.switched }
     const result = await deps.publish(signed, fetched.writeRelays)
-    if (!result.ok) return { ok: false, error: `Not saved: ${result.reason}` }
+    if (!result.ok) { console.warn('[activate] not published:', result.reason); return { ok: false, error: ACTIVATE_WORDS.unsaved } }
+    lastPublished.set(me, signed)
     return { ok: true, pubkey: checked.pubkey }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    // A signer's own words (declined, timed out) say what happened; anything else is said plainly.
+    console.warn('[activate] failed:', err)
+    return { ok: false, error: err instanceof Error && err.message.length <= 80 ? err.message : 'That did not work. Nothing changed. Try again.' }
   } finally {
     running = false
   }

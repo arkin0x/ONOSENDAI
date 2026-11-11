@@ -42,7 +42,7 @@ interface Fake {
 function fakeRelays(): Fake {
   const fake: Fake = { published: [], subs: [], inboxes: new Map(), transport: null as unknown as DmTransport }
   fake.transport = {
-    inboxOf: async (pk) => fake.inboxes.get(pk) ?? { relays: [], answered: true },
+    inboxOf: async (pk) => fake.inboxes.get(pk) ?? { relays: [], answered: true, complete: true },
     subscribe: (relay, filter, onEvent, onClose) => {
       const sub = { relay, filter, deliver: onEvent, close: onClose, closed: false }
       fake.subs.push(sub)
@@ -294,6 +294,15 @@ describe('DM INBOX on the generated key (arkinox, 2026-11-11)', () => {
     checkMyInbox(me.pubkey)
     await settle()
     expect(useAgentDms.getState().myInbox.status).toBe('unknown')
+    expect(await autoDmInbox()).toBe(false)
+    expect(fake.published).toEqual([])
+  })
+
+  it('never on a "none" from some relays while others did not answer (review of #674 round 2)', async () => {
+    fake.transport.inboxOf = async () => ({ relays: [], answered: true, complete: false })
+    checkMyInbox(me.pubkey)
+    await settle()
+    expect(useAgentDms.getState().myInbox.status).toBe('none')
     expect(await autoDmInbox()).toBe(false)
     expect(fake.published).toEqual([])
   })

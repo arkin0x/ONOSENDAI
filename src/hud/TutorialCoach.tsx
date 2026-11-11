@@ -90,7 +90,8 @@ export function TutorialCoach(): JSX.Element | null {
   const t = useTutorial.getState()
   const last = index === script.steps.length - 1
   const waiting = !!step.wait && !done
-  const held = step.gate === true && waiting
+  // A gate never holds when staging failed: NEXT is the way on (the box step has no SKIP otherwise).
+  const held = step.gate === true && waiting && !stageError
   const caption = done && step.captionDone ? step.captionDone : step.caption
   // BACK shows once there is a step behind this one (not on the welcome). It
   // is the way back out of a branch too (feedback item 8).

@@ -46,7 +46,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { ACTIVATED, AgentsPanel, BETA_TIP } from '../AgentsPanel'
 import { DM_INBOX_CONFIRM, DM_INBOX_RELAYS_NOTE, DmInboxConfirmBody, DmInboxSetup } from '../DmInboxSetup'
 import { DM_INBOX_TIP } from '../AgentTalk'
-import { useCyberspace } from '../../store/useCyberspace'
+import { MINTED_KEY, useCyberspace } from '../../store/useCyberspace'
 import { useAgentDms } from '../../store/useAgentDms'
 import { useMyAgentsAnswer } from '../../hooks/useMyAgents'
 import { DEFAULT_DM_RELAYS } from '../../lib/inbox'
@@ -60,11 +60,18 @@ function logIn(): void { localStorage.setItem(PREF, JSON.stringify({ kind: 'nip0
 /** The store as the relays would leave it: no agents, and my inbox as given. */
 function answered(inbox: 'none' | 'ready' | 'loading', agents: string[] = []): void {
   useMyAgentsAnswer.setState({ me: me(), agents, status: 'ready' })
-  useAgentDms.setState({ me: me(), myInbox: { status: inbox, relays: inbox === 'ready' ? ['wss://inbox.example'] : [] } })
+  useAgentDms.setState({ me: me(), myInbox: { status: inbox, relays: inbox === 'ready' ? ['wss://inbox.example'] : [], ...(inbox === 'none' ? { complete: true } : {}) } })
+}
+
+/** The key on screen is the one this app generated on this device. */
+function generatedKey(): void {
+  useCyberspace.setState({ signerKind: 'local' })
+  localStorage.setItem(MINTED_KEY, me())
 }
 
 afterEach(() => {
   localStorage.removeItem(PREF)
+  localStorage.removeItem(MINTED_KEY)
   useCyberspace.setState({ signerKind: 'local' })
   useMyAgentsAnswer.setState({ me: '', agents: [], status: 'loading' })
   useAgentDms.setState({ me: '', myInbox: { status: 'loading', relays: [] }, inboxSetup: { status: 'idle', error: null } })
@@ -79,7 +86,7 @@ describe('the AGENTS panel, public as a BETA', () => {
   })
 
   it('on the generated local key: INVITE AN AGENT, COPY and the ACTIVATE field, never a login prompt', () => {
-    useCyberspace.setState({ signerKind: 'local' })
+    generatedKey()
     answered('none')
     const html = renderToStaticMarkup(<AgentsPanel />)
     expect(html).toContain('Invite an agent')
@@ -111,11 +118,27 @@ describe('the AGENTS panel, public as a BETA', () => {
   })
 
   it('on the generated key with an agent and no inbox: it is being set up by itself, no button', () => {
-    useCyberspace.setState({ signerKind: 'local' })
+    generatedKey()
     answered('none', ['a'.repeat(64)])
     const html = renderToStaticMarkup(<AgentsPanel />)
     expect(html).toContain('SETTING UP DM INBOX')
     expect(html).not.toContain('>SET UP DM INBOX')
+  })
+
+  it('on the generated key, a "none" not every relay gave is asked again, never published', () => {
+    generatedKey()
+    answered('none', ['a'.repeat(64)])
+    useAgentDms.setState({ myInbox: { status: 'none', relays: [] } })
+    const html = renderToStaticMarkup(<AgentsPanel />)
+    expect(html).toContain('ASK AGAIN')
+    expect(html).not.toContain('SETTING UP DM INBOX')
+  })
+
+  it('a pasted nsec (a local signer, not a key made here) keeps the button and its confirmation', () => {
+    useCyberspace.setState({ signerKind: 'local' })
+    localStorage.setItem(MINTED_KEY, 'f'.repeat(64))
+    answered('none')
+    expect(renderToStaticMarkup(<AgentsPanel />)).toContain('SET UP DM INBOX')
   })
 
   it('logged in with an extension and no agent: COPY, MY AGENTS empty, and SET UP DM INBOX when you have none', () => {

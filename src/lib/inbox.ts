@@ -81,7 +81,12 @@ export function dmRelaysOf(ev: Pick<NostrEvent, 'tags'> | null | undefined): str
  * is false when no relay answered at all, so "no DM inbox" is said only
  * when a relay said so, never because every relay was down.
  */
-export interface DmInbox { relays: string[]; answered: boolean }
+export interface DmInbox {
+  relays: string[]
+  answered: boolean
+  /** Every relay asked answered: only then is "none" an answer from all of them (the generated key's automatic 10050). */
+  complete?: boolean
+}
 
 /** How long a 10050 lookup waits; profiles and lists answer in this on the general relays. */
 const DM_INBOX_WAIT_MS = 5000
@@ -100,7 +105,7 @@ export async function dmInboxOf(pubkey: string, extra: readonly string[] = []): 
   const newest = heard
     .filter((ev) => ev.kind === DM_RELAYS_KIND && ev.pubkey === pubkey)
     .sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : 1))[0]
-  return { relays: dmRelaysOf(newest), answered: answers.some((a) => a.outcome === 'answered') }
+  return { relays: dmRelaysOf(newest), answered: answers.some((a) => a.outcome === 'answered'), complete: answers.length > 0 && answers.every((a) => a.outcome === 'answered') }
 }
 
 /**

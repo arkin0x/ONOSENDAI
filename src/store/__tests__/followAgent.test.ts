@@ -32,9 +32,9 @@ function answers(events: NostrEvent[], silent: string[] = []): RelayAnswer[] {
     : { url, outcome: 'answered', events })
 }
 
-function relaysSay(list: RelayAnswer[] | Error): void {
+function relaysSay(list: RelayAnswer[] | Error, writeRelays: string[] = []): void {
   setFollowDeps({
-    fetch: async () => { if (list instanceof Error) throw list; return { answers: list, writeRelays: [] } },
+    fetch: async () => { if (list instanceof Error) throw list; return { answers: list, writeRelays } },
     publish: async (ev) => { published.push(ev); return { ok: true, accepted: ['wss://fake'] } },
     sign: (t) => me.signEvent(t),
     self: () => me.pubkey,
@@ -110,6 +110,31 @@ describe('ACTIVATE', () => {
     expect(published).toEqual([])
   })
 
+  it('never creates a list on one write relay\'s "none" while the general relays were silent (review of #674 round 2)', async () => {
+    const mine = 'wss://my.relay'
+    relaysSay([...answers([], [...GENERAL_RELAYS]), { url: mine, outcome: 'answered', events: [] }], [mine])
+    expect(await activateAgent(agentNpub)).toEqual({ ok: false, error: ACTIVATE_WORDS.unread })
+    expect(published).toEqual([])
+  })
+
+  it('never edits a list found while any relay was silent: a newer one may be there', async () => {
+    relaysSay(answers([await existingList()], [GENERAL_RELAYS[2]]))
+    expect(await activateAgent(agentNpub)).toEqual({ ok: false, error: ACTIVATE_WORDS.unread })
+    // A relay that refused the read (auth) is not an answer either.
+    relaysSay(answers([await existingList()]).map((a, i) => (i === 0 ? { url: a.url, outcome: 'refused' as const, reason: 'auth-required: no', events: [] } : a)))
+    expect(await activateAgent(agentNpub)).toEqual({ ok: false, error: ACTIVATE_WORDS.unread })
+    expect(published).toEqual([])
+  })
+
+  it('a second agent is added to the list this device just published, even if the relays have not caught up', async () => {
+    relaysSay(answers([]))
+    expect((await activateAgent(agentNpub)).ok).toBe(true)
+    const second = localSigner(generateSecretKey()).pubkey
+    expect((await activateAgent(second)).ok).toBe(true)
+    expect(published[1].tags.filter((t) => t[0] === 'p').map((t) => t[1])).toEqual([agent.pubkey, second])
+    expect(published[1].created_at).toBeGreaterThan(published[0].created_at)
+  })
+
   it('refuses an agent the newest list already follows, and publishes nothing', async () => {
     const prev = await me.signEvent({ kind: 3, created_at: 1_900_000_000, tags: [['p', agent.pubkey]], content: '' })
     relaysSay(answers([prev]))
@@ -119,6 +144,6 @@ describe('ACTIVATE', () => {
 
   it('a refused publish says why', async () => {
     setFollowDeps({ fetch: async () => ({ answers: answers([]), writeRelays: [] }), sign: (t) => me.signEvent(t), self: () => me.pubkey, now: () => 2_000_000_000, publish: vi.fn(async () => ({ ok: false as const, reason: 'blocked: no' })) })
-    expect(await activateAgent(agentNpub)).toEqual({ ok: false, error: 'Not saved: blocked: no' })
+    expect(await activateAgent(agentNpub)).toEqual({ ok: false, error: ACTIVATE_WORDS.unsaved })
   })
 })

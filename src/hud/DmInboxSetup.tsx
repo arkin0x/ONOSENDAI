@@ -22,8 +22,8 @@
 import { useEffect, useState } from 'react'
 import { Inbox } from 'lucide-react'
 import { DEFAULT_DM_RELAYS } from '../lib/inbox'
-import { autoDmInbox, checkMyInbox, setUpDmInbox, useAgentDms, type InboxState } from '../store/useAgentDms'
-import { useCyberspace } from '../store/useCyberspace'
+import { autoDmInbox, checkMyInbox, recheckMyInbox, setUpDmInbox, useAgentDms, type InboxState } from '../store/useAgentDms'
+import { appMinted, useCyberspace } from '../store/useCyberspace'
 import { ConfirmModal } from './ConfirmModal'
 
 /** What the confirmation says, apart from the relay list; exported for the tests. */
@@ -64,9 +64,11 @@ export function DmInboxSetup(): JSX.Element {
   const [asking, setAsking] = useState(false)
   const setup = useAgentDms((s) => s.inboxSetup)
   const busy = setup.status === 'publishing'
-  const local = useCyberspace((s) => s.signerKind === 'local')
+  const complete = useAgentDms((s) => s.myInbox.complete === true)
+  // The key this app generated, not a pasted nsec (also a local signer), whose owner may have an inbox elsewhere.
+  const local = useCyberspace((s) => s.signerKind === 'local' && appMinted(s.identity.pubkey) === true)
   // The generated key publishes it by itself, once, as it is drawn.
-  useEffect(() => { if (local) void autoDmInbox() }, [local])
+  useEffect(() => { if (local && complete) void autoDmInbox() }, [local, complete])
   const publish = (): void => {
     void setUpDmInbox().then((ok) => { if (ok) setAsking(false) })
   }
@@ -76,7 +78,13 @@ export function DmInboxSetup(): JSX.Element {
         <span className="notice" role="status">{setup.error}</span>
         <button className="avatars__go dminbox__setup" onClick={() => void autoDmInbox()}>RETRY</button>
       </>
-    ) : <span className="tag">SETTING UP DM INBOX</span>
+    ) : complete ? <span className="tag">SETTING UP DM INBOX</span> : (
+      // Not every relay answered the lookup: asked again, never published on a guess.
+      <>
+        <span className="notice" role="status">Some relays did not answer.</span>
+        <button className="avatars__go dminbox__setup" onClick={() => recheckMyInbox(useCyberspace.getState().identity.pubkey)}>ASK AGAIN</button>
+      </>
+    )
   }
   return (
     <>

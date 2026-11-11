@@ -113,7 +113,7 @@ const NO_DECRYPT = 'Your signer offers no NIP-44 decrypt, so messages sent to yo
 
 /** Where someone's DM inbox stands: being looked up, found, found to be absent, or not known (no relay answered). */
 export type InboxStatus = 'loading' | 'ready' | 'none' | 'unknown'
-export interface InboxState { status: InboxStatus; relays: string[] }
+export interface InboxState { status: InboxStatus; relays: string[]; complete?: boolean }
 
 /** What the reading of your inbox is doing. */
 export type ReadingStatus = 'idle' | 'live' | 'failed'
@@ -392,7 +392,7 @@ const nowS = (): number => Math.floor(Date.now() / 1000)
 
 function inboxState(found: DmInbox): InboxState {
   if (found.relays.length) return { status: 'ready', relays: found.relays }
-  return { status: found.answered ? 'none' : 'unknown', relays: [] }
+  return { status: found.answered ? 'none' : 'unknown', relays: [], ...(found.complete ? { complete: true } : {}) }
 }
 
 /** Start over for a new identity: nothing of the old one survives. */
@@ -714,6 +714,13 @@ export function checkMyInbox(me: string): void {
   mineLookup = lookup
 }
 
+/** Ask the relays for my DM inbox again, from scratch (ASK AGAIN, when not every relay answered). */
+export function recheckMyInbox(me: string): void {
+  if (!me || mineLookup) return
+  if (useAgentDms.getState().me === me) useAgentDms.setState({ myInbox: LOADING })
+  checkMyInbox(me)
+}
+
 /**
  * SET UP DM INBOX, after the confirmation (arkinox, 2026-10-13): sign a kind
  * 10050 naming `relays` with your own signer and publish it where it is
@@ -756,13 +763,16 @@ export async function setUpDmInbox(relays: readonly string[] = DEFAULT_DM_RELAYS
 
 /**
  * The DM inbox on the key this app generated (arkinox, 2026-11-11): published
- * by itself, no confirmation, by setUpDmInbox and under its rule (only when
- * the relays answered that you have none, never over one you have, never on
- * a lookup that failed). Any other signer keeps SET UP DM INBOX and its
- * confirmation. Resolves true once published.
+ * by itself, no confirmation, by setUpDmInbox and under its rule (never over
+ * one you have, never on a lookup that failed), and stricter: only when EVERY
+ * relay asked answered "none" (`complete`), since nobody confirms it (review
+ * of #674 round 2: one relay's "none" while the rest timed out replaced a
+ * real inbox). Any other signer keeps SET UP DM INBOX and its confirmation.
+ * Resolves true once published.
  */
 export function autoDmInbox(): Promise<boolean> {
-  return dmDeps.keys.promptFree() ? setUpDmInbox() : Promise.resolve(false)
+  const mine = useAgentDms.getState().myInbox
+  return dmDeps.keys.promptFree() && mine.status === 'none' && mine.complete === true ? setUpDmInbox() : Promise.resolve(false)
 }
 
 /** The words for "this cannot be sent", or null when it can. */

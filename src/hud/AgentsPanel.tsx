@@ -49,7 +49,7 @@ import { invitationText } from '../lib/agentInvite'
 import { safeNpub } from '../lib/npub'
 import { spectate } from '../lib/spectator'
 import { shortHex } from '../lib/time'
-import { useCyberspace } from '../store/useCyberspace'
+import { appMinted, useCyberspace } from '../store/useCyberspace'
 import { setTalking } from '../store/useAgentDms'
 import { activateAgent } from '../store/followAgent'
 import { DmInboxSetup, useMyDmInbox } from './DmInboxSetup'
@@ -79,8 +79,13 @@ export function AgentsPanel(): JSX.Element {
   // ACTIVATE: the pasted npub, whether it is running, what it said, and whether one went this visit.
   const [paste, setPaste] = useState('')
   const [activating, setActivating] = useState(false)
-  const [note, setNote] = useState<string | null>(null)
-  const [activated, setActivated] = useState(false)
+  // Kept per identity, so a switch to another key starts clean (and never publishes its inbox unasked).
+  const [noteFor, setNote] = useState<{ pubkey: string; text: string } | null>(null)
+  const [activatedFor, setActivatedFor] = useState<string | null>(null)
+  const note = noteFor?.pubkey === identity.pubkey ? noteFor.text : null
+  const activated = activatedFor === identity.pubkey
+  // The key this app generated (not a pasted nsec, also a local signer): its inbox publishes by itself.
+  const generated = signerKind === 'local' && appMinted(identity.pubkey) === true
   const unread = useAgentUnread()
 
   const copy = (key: string, text: string): void => {
@@ -92,14 +97,15 @@ export function AgentsPanel(): JSX.Element {
 
   const activate = (): void => {
     if (activating) return
+    const me = identity.pubkey
     setActivating(true)
     setNote(null)
     void activateAgent(paste).then((r) => {
       setActivating(false)
-      if (!r.ok) { setNote(r.error); return }
+      if (!r.ok) { setNote({ pubkey: me, text: r.error }); return }
       setPaste('')
-      setNote(ACTIVATED)
-      setActivated(true)
+      setNote({ pubkey: me, text: ACTIVATED })
+      setActivatedFor(me)
       refresh()
     })
   }
@@ -151,7 +157,7 @@ export function AgentsPanel(): JSX.Element {
       {note && <p className="notice" role="status">{note}</p>}
 
       {/* The generated key publishes its inbox by itself, so only once there is an agent to talk to. */}
-      {myInbox.status === 'none' && (signerKind !== 'local' || agents.length > 0 || activated) && (
+      {myInbox.status === 'none' && (!generated || agents.length > 0 || activated) && (
         <div className="agents__inbox">
           <span className="legend__label" title="You publish no kind 10050, so your agent cannot write to you">No DM inbox</span>
           <DmInboxSetup />

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { buildChain, firstBreak, positionHex, spawnTemplate } from '../../events'
 import { enterVirtualTemplate, exitVirtualTemplate, gameActionTemplate, regionTag, teleportTemplate } from '../bracket'
-import { TUTORIAL_GAME } from '../tutorialGame'
+import { TUTORIAL_ENTRY, TUTORIAL_GAME } from '../tutorialGame'
 
 const sk = generateSecretKey()
 const pk = getPublicKey(sk)
@@ -18,7 +18,7 @@ describe('a bracket from the templates', () => {
     const spawn = finalizeEvent(spawnTemplate(pk, 100), sk)
     const links = (prev: string, t: number) => ({ createdAt: t, genesisId: spawn.id, previousId: prev })
     const enter = finalizeEvent(enterVirtualTemplate({ ...links(spawn.id, 101), coordHex: pk, game: TUTORIAL_GAME }), sk)
-    const to = positionHex(TUTORIAL_GAME.start, 1)
+    const to = positionHex(TUTORIAL_ENTRY, 1)
     const tp = finalizeEvent(teleportTemplate({ ...links(enter.id, 102), toHex: to }), sk)
     const exit = finalizeEvent(exitVirtualTemplate({ ...links(tp.id, 103), entryId: enter.id, coordHex: pk, gameHex: to }), sk)
     const chain = buildChain([spawn, enter, tp, exit])

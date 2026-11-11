@@ -35,7 +35,7 @@ export function dungeonRefusal(why: string): string {
 
 /**
  * Enter the dungeon for the tutorial: null once the game is on screen (not
- * after its arrival is signed, so the card does not sit over the game), or
+ * after the world is read, so the card does not sit over the game), or
  * the words for the card.
  */
 export function enterDungeonFromTutorial(): Promise<string | null> {

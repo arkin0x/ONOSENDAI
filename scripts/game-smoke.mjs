@@ -1,7 +1,12 @@
 /**
- * game-smoke.mjs - the tutorial dungeon, LOCAL, in a real browser: enter the
- * game from cyberspace, walk its hall, take the pad, and exit back to exactly
- * the view you left (DECK-0002; first-arrival tutorial Track C).
+ * game-smoke.mjs - the tutorial dungeon, LOCAL, in a real browser, start to
+ * finish: enter the game from cyberspace, appear at its entry point, walk the
+ * arrival hall to the pad, climb the rotunda in jumps with gravity on, TAKE
+ * the key, OPEN the gate, reach the finish for the clear time, and exit back
+ * to exactly the view you left (DECK-0002; first-arrival tutorial Track C).
+ * Walking uses the game's keys; each jump is pressed inside the page on its
+ * own clock (JUMP, then the direction at set times), so a slow software
+ * renderer cannot change where it lands.
  *
  *   node scripts/game-smoke.mjs http://localhost:5231 <screenshot dir> [desktop|phone]
  *
@@ -92,25 +97,114 @@ await shot('1-cyberspace-before')
 // ENTER GAME (Track A's entry point).
 const refused = await page.evaluate(() => window.__enterTutorialDungeon())
 if (refused) await fail(`entry refused: ${refused}`)
-if (!await waitFor(() => game('g.session && g.session.world !== null && g.busy === null'), 30_000)) await fail('the world never loaded')
+if (!await waitFor(() => game('g.session && g.session.world !== null && g.session.at !== null && g.busy === null'), 30_000)) await fail('the world never loaded')
+// Entering is the arrival (DECK-0002 §2.2): one event on the chain, and the player at the world's entry point.
+const afterEntry = await store('s.actions().slice(-1)[0].name')
+if (afterEntry !== 'enter-virtual') await fail(`entering signed more than the entry: the head is ${afterEntry}`)
+const where = () => game('g.session && g.session.at && [g.session.at.x - g.session.game.region.base.x, g.session.at.y - g.session.game.region.base.y, g.session.at.z - g.session.game.region.base.z].join(",")')
+const expectAt = async (want, what) => { const got = await where(); console.log(`${what}: ${got}`); if (got !== want) await fail(`${what}: at ${got}, not ${want}`) }
 await sleep(2500)
-await shot('2-in-game-start')
+await expectAt('8,17,45', 'the entry point')
+await shot('2-arrival')
 
-// Down the hall: forward faces cyberspace -Z at first.
-for (let i = 0; i < 12; i++) { await page.keyboard.press('w'); await sleep(120) }
-await sleep(1200)
-await shot('3-in-game-hall')
-// Until the pad takes you: chamber B has a pad of its own, back to the start.
-for (let i = 0; i < 12 && !(await game('g.busy || g.session.at.x !== g.session.game.start.x')); i++) { await page.keyboard.press('w'); await sleep(120) }
-if (!await waitFor(() => game('g.busy === null && g.session && g.session.at.x !== g.session.game.start.x'), 15_000)) await fail(`the pad did not teleport: ${await game('g.message')} at ${await game('g.session && [g.session.at.x - g.session.game.region.base.x, g.session.at.y - g.session.game.region.base.y, g.session.at.z - g.session.game.region.base.z].join(",")')} busy=${await game('g.busy')}`)
+// Down the arrival hall with the game's keys (forward is cyberspace -Z at first) until the pad takes you.
+for (let i = 0; i < 30 && !(await game('g.busy || (g.session.at.x - g.session.game.region.base.x) !== 8n')); i++) {
+  await page.keyboard.press('w'); await sleep(130)
+  if (i === 10) await shot('3-arrival-shrine')
+}
+if (!await waitFor(() => game('g.busy === null && g.session && (g.session.at.x - g.session.game.region.base.x) === 40n'), 15_000)) await fail(`the pad did not teleport: ${await game('g.message')} at ${await where()}`)
 await sleep(2000)
-await shot('4-in-game-chamber-b')
+await expectAt('40,17,45', 'after the pad')
+await shot('4-climb')
 
-// EXIT GAME.
-await page.locator('.gameview__exit').click()
+/** Presses inside the page: `steps` is [[axis, dir, times]]; each press is a tick and a step, 120 ms apart. */
+const walk = (steps) => page.evaluate(async (steps) => {
+  const g = window.__game
+  for (const [axis, dir, times] of steps) for (let i = 0; i < times; i++) { g.getState().tick(); g.getState().step(axis, dir); await new Promise((r) => setTimeout(r, 120)) }
+  await new Promise((r) => setTimeout(r, 300))
+}, steps)
+/** A jump inside the page: JUMP, then `dir` along `axis` at each of `at` ms, then frames until it lands. */
+const leap = (axis, dir, at) => page.evaluate(async ([axis, dir, at]) => {
+  const g = window.__game
+  const t0 = performance.now()
+  g.getState().jump(t0)
+  for (const t of at) {
+    while (performance.now() - t0 < t) await new Promise((r) => setTimeout(r, 2))
+    const now = performance.now()
+    g.getState().tick(now)
+    g.getState().step(axis, dir, now)
+  }
+  for (let i = 0; i < 300 && g.getState().session.arc; i++) { g.getState().tick(); await new Promise((r) => setTimeout(r, 16)) }
+}, [axis, dir, at])
+
+/** Drag to look, as a player does (GameView: yaw -= dx * 0.008): `dx` pixels across the canvas. */
+const turn = async (dx) => {
+  const box = await page.locator('.gameview__canvas').boundingBox()
+  const y = box.y + box.height * 0.35, x0 = box.x + box.width / 2 - dx / 2
+  await page.mouse.move(x0, y); await page.mouse.down()
+  for (let i = 1; i <= 10; i++) await page.mouse.move(x0 + (dx * i) / 10, y)
+  await page.mouse.up(); await sleep(900)
+}
+/** Half a turn: 180 degrees. */
+const HALF = Math.round(Math.PI / 0.008)
+
+// The climb: the first platform, 3 up.
+await walk([['z', -1, 3], ['x', 1, 1]])
+await expectAt('41,17,42', 'at the foot of the climb')
+await leap('x', 1, [300, 410])
+await expectAt('43,21,42', 'platform 1')
+await walk([['z', -1, 2]])
+await leap('z', -1, [200, 310])
+await expectAt('43,24,38', 'platform 2')
+await sleep(800)
+await shot('5-platform-2')
+await walk([['z', -1, 2], ['x', -1, 1]])
+await leap('x', -1, [120, 230, 340])
+await expectAt('39,24,36', 'platform 3')
+await walk([['x', -1, 2], ['z', 1, 2]])
+await leap('z', 1, [250, 360])
+await expectAt('37,27,40', 'platform 4')
+await walk([['z', 1, 1]])
+// Turn round to face the key (the camera follows from behind).
+await turn(-HALF)
+await sleep(600)
+// TAKE is offered by the key, and only taken by the tap.
+if (await game('g.session.progress.keyHeld')) await fail('the key was taken without a tap')
+if (!(await page.locator('.gameview__actbtn', { hasText: 'TAKE' }).count())) await fail('no TAKE by the key')
+await shot('6-key')
+await page.locator('.gameview__actbtn', { hasText: 'TAKE' }).click()
+if (!(await game('g.session.progress.keyHeld'))) await fail('TAKE did not take the key')
+await sleep(1000)
+await shot('7-key-taken')
+await turn(HALF)
+
+// Off the platform, to the gate: LOCKED is gone, OPEN is the tap.
+await walk([['x', -1, 3]])
+await sleep(1500)
+await expectAt('34,17,41', 'down on the floor')
+await walk([['x', 1, 6], ['z', -1, 8]])
+await expectAt('40,17,33', 'at the gate')
+await sleep(800)
+await shot('8-gate')
+if (await game('g.session.progress.doorOpen')) await fail('the gate opened without a tap')
+await page.locator('.gameview__actbtn', { hasText: 'OPEN' }).click()
+if (!(await game('g.session.progress.doorOpen'))) await fail('OPEN did not open the gate')
+await sleep(1000)
+await shot('9-gate-open')
+
+// Down the hall to the finish tile: the clock stops and the exit card shows the clear time.
+await walk([['z', -1, 23]])
+if (!await waitFor(() => game('g.session.progress.clearedMs !== null'), 5_000)) await fail(`no clear at ${await where()}`)
+const clear = await page.locator('.gameview__cardtime').textContent()
+console.log(`clear time on the exit card: ${clear}`)
+await sleep(1000)
+await shot('10-clear')
+
+// EXIT GAME, from the exit card.
+await page.locator('.gameview__card .gameview__exit').click()
 if (!await waitFor(() => game('g.session === null && g.busy === null'), 30_000)) await fail(`exit did not land: ${await game('g.message')}`)
 await sleep(2500)
-await shot('5-cyberspace-after')
+await shot('11-cyberspace-after')
 const after = await viewOf()
 
 const roles = await page.evaluate(async () => {
@@ -123,6 +217,7 @@ console.log(`view restored exactly: ${before === after}`)
 if (before !== after) console.log(`before ${before}\nafter  ${after}`)
 console.log(JSON.stringify({ stats, errors: errors.slice(0, 5) }))
 await browser.close()
-const ok = before === after && !roles.broken && stats.eventsSent === 0 && roles.roles.slice(-4).join(',') === 'enter:enter-virtual,virtual:teleport,virtual:teleport,exit:exit-virtual'
+// On the chain: the entry, the pad's teleport, the exit. The key, the gate, the jumps and the clock are the game's, on the device.
+const ok = before === after && !roles.broken && stats.eventsSent === 0 && roles.roles.slice(-3).join(',') === 'enter:enter-virtual,virtual:teleport,exit:exit-virtual' && !!clear
 console.log(ok ? 'PASS' : 'FAIL')
 process.exit(ok ? 0 : 1)

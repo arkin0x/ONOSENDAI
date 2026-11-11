@@ -5,7 +5,10 @@
  * event to read, so everything else here is the game's rules, which a client
  * that implements the game carries in its own code. The world is the one part
  * that is read from the relays: the bags the game key seals to the region
- * (DECK-0002 §5).
+ * (DECK-0002 §5), and with it the game's entry point, where a player appears
+ * by virtue of entering (DECK-0002 §2.2): the `C` of the world item carrying
+ * an `entry` tag. It is not in this definition, because it is the game's to
+ * set in its world, not this client's.
  */
 
 import type { NostrEvent } from '../events'
@@ -18,6 +21,30 @@ export interface GamePad {
   at: Position
   /** Where it sends the player: a game position inside the region. */
   to: Position
+}
+
+/** A box of game positions, both corners included (game logic). */
+export interface GameZone {
+  lo: Position
+  hi: Position
+}
+
+/**
+ * The key (game logic): the world shard standing at `at` is its look. It is
+ * taken by a tap within reach, never by walking into it, and it lives only in
+ * the game: no key item of cyberspace is made, taken or published for it.
+ */
+export interface GameKey {
+  at: Position
+}
+
+/**
+ * The key door (game logic): the world shards standing at `at` are its looks.
+ * One that holds a walker (DECK-0003 §1.12) is the closed look, one that does
+ * not is the open look. The key opens it, by a tap within reach.
+ */
+export interface GameDoor {
+  at: Position
 }
 
 /** Where the world's bags come from (DECK-0002 §5.1). */
@@ -37,9 +64,15 @@ export interface GameDef {
   name: string
   /** The aligned cube the game is played in (spec §8.11.1): its base, height and plane. */
   region: { base: Position; height: number; plane: Plane }
-  /** Where the arrival puts you (DECK-0002 §2.2), a game position inside the region. */
-  start: Position
   /** The teleport pads, the mechanic cyberspace does not have. */
   pads: readonly GamePad[]
   world: GameWorldSource
+  /** Gravity and jumps (lib/games/gravity.ts). Absent: the game is flown through, UP and DOWN. */
+  gravity?: boolean
+  /** The key that opens the door, if the game has one. */
+  key?: GameKey
+  /** The door the key opens. */
+  door?: GameDoor
+  /** Reaching it clears the game: the clear time stops and the exit card shows. */
+  exit?: GameZone
 }

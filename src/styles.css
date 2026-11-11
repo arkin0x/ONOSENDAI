@@ -8068,6 +8068,28 @@ kbd {
   -webkit-tap-highlight-color: transparent;
 }
 .palettes__sw.is-on { outline: 2px solid var(--fg); outline-offset: 1px; border-color: var(--fg); }
+.palettes__sw.is-light { color: #eef6ff; }
+
+/* Each swatch's number, which is what a DNA calls the color ('(171)). Small and
+   a little faded so the sheet still reads as color first; the ink flips per
+   swatch (lightInk) so it reads on the darks and the near whites alike. */
+.palettes__n {
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  opacity: 0.85; /* PaletteModal INK_ALPHA picks the ink at this fade */
+  pointer-events: none;
+  user-select: none;
+}
+.palettes__sw.is-on .palettes__n { opacity: 1; font-weight: 700; }
+
+/* The color in hand, by number and hex, for a phone that never hovers. */
+.palettes__now { display: flex; align-items: center; gap: 7px; margin: 7px 0 0; font-size: 11px; color: var(--fg); }
+.palettes__now-sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(255, 255, 255, 0.25); flex-shrink: 0; }
+.palettes__now-n { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); }
+.palettes__now-hex { color: var(--dim); }
 
 .palettes__foot {
   display: flex;

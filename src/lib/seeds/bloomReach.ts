@@ -7,7 +7,7 @@
  * plant.ts previewRequest) at the landing point's terroir, and its reach is
  * its farthest vertex with the margin (plant.ts bloomReachGibsons). Its own
  * module rather than plant.ts: it reads the Bitcoin line's tip (useHyperspace),
- * and plant.ts is read by useShards, which that store must never import back.
+ * and plant.ts stays free of stores because a store (useShards) reads it.
  */
 
 import type { Plane } from 'cyberspace-core'

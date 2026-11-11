@@ -324,6 +324,10 @@ describe('STEP lowered before SEED (found by the tutorial\'s review, 2026-11-11)
     stepTo(10)
     D().startDeploySeed(seedDraft(seedFitFor({ height: 5, reach: 6 }, S().cursor, buildPlane(S()), 9)))
     expect(S().buildStep).toBeNull()
+    lineUp(15, 20)
+    stepTo(10)
+    D().startDeploySeed(seedDraft(seedFitFor({ height: 5, reach: 6 }, { ...S().cursor, x: S().cursor.x + 1n }, buildPlane(S()), buildStepOf(S()))))
+    expect(S().buildStep).toBeNull()
   })
 
   it('a bloom the worker could not measure still keeps the STEP it was composed at, and hides at 12 there', () => {

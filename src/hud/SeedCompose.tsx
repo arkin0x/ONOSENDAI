@@ -98,7 +98,7 @@ function useSeedFit(text: string, ok: boolean, caps: Caps, cursor: Position, pla
         if (stale) return
         // Recorded either way: a bloom the worker could not grow hides at 12, at the STEP and cursor it was composed at.
         setResult({ fit: seedFitFor(r, cursor, plane, step), point: r.point, state: r.reach !== undefined ? 'done' : 'failed' })
-      }, () => { if (!stale) setResult({ fit: undefined, point: fallback, state: 'failed' }) })
+      }, () => { if (!stale) setResult({ fit: seedFitFor({ height: Math.min(SEED_HIDE_MAX, MAX_COMPUTE_HEIGHT), reach: undefined }, cursor, plane, step), point: fallback, state: 'failed' }) })
     }, 120)
     return () => { stale = true; clearTimeout(timer) }
   }, [text, ok, caps, cursor, plane, step, scale, tip, fallback])

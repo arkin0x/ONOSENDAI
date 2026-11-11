@@ -234,23 +234,30 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
     fold()
   }
 
+  /**
+   * The palette drawn below, and so the one every pick indexes into: the
+   * built-in while building a palette (which starts from the built-in's
+   * colors), the object's own otherwise. Picking and making read it rather
+   * than `active`, so a pick always means the swatch the author saw.
+   */
+  const sheet = making ? BUILT_IN : active
+
   const take = (index: number): void => {
     if (making) {
       setPicked((p) => (p.includes(index) ? p.filter((i) => i !== index) : p.length < 256 ? [...p, index] : p))
       return
     }
-    useColor(hexAt(active, index))
+    useColor(hexAt(sheet, index))
   }
 
   const create = (): void => {
     if (picked.length < 2) return
-    const colors = picked.map((i) => active[i]) as Palette
+    const colors = picked.map((i) => sheet[i]) as Palette
     const id = w().savePalette(newName, colors)
     setMaking(false); setNewName(''); setPicked([])
     setSwitching({ id, name: newName.trim() || 'untitled' })
   }
 
-  const sheet = making ? BUILT_IN : active
   // Escape folds it as the close button does, back into the chip (arkinox,
   // 2026-10-01). Its own confirmations open later, so they close first.
   useEscape('modal', true, fold)

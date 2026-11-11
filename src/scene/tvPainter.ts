@@ -39,6 +39,7 @@ import { watchingWords } from '../lib/tv/watching'
 import type { Census, ChainHistory } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
 import { trackDrawing, type DirtyRect, type DrawTracker } from './drawTracker'
+import { announceSceneAt, charsShown, type AnnouncePlan } from '../lib/tv/upgradeAnnounce'
 import { CARD_CLEAR_PX, CARD_LINE_EM, CARD_RISE, MAP_REACH, clearOfPanel, placeCard, type Box, type CardFrame, type CardPlace, type PanelInk } from './tvCard'
 
 /** The face every word on the tube is set in. */
@@ -85,6 +86,26 @@ const AD_SPLASH: SplashLook = { fill: '#ffd23f', edge: '#ff2d7a', words: ['NOW',
 const MONEY_SPLASH: SplashLook = { fill: '#ffc21a', edge: '#ff7a00', words: ['CASHU', 'INSIDE!'] }
 /** An NFT inside, hyped as money is, in the NFT card's violet (arkinox, 2026-10-22). */
 const NFT_SPLASH: SplashLook = { fill: '#c9a6ff', edge: '#7a2dff', words: ['NFT', 'INSIDE!'] }
+/** NEW! on the UPGRADE ANNOUNCEMENT's words, the spot's gold on its own blue (lib/tv/upgradeAnnounce). */
+const NEW_SPLASH: SplashLook = { fill: '#ffd23f', edge: '#2f6bff', words: ['NEW!', ''] }
+/**
+ * Classic colour bars, drawn as a test card has them: seven at 75%, a thin
+ * row of their reverse under them, and the dark row at the foot (the two
+ * calibration blues, white, black, and three steps of near black). Each
+ * row's share of the height, and its colours left to right with their share
+ * of the width.
+ */
+const BARS: Array<{ h: number; cells: Array<[string, number]> }> = [
+  { h: 0.67, cells: [['#c0c0c0', 1], ['#c0c000', 1], ['#00c0c0', 1], ['#00c000', 1], ['#c000c0', 1], ['#c00000', 1], ['#0000c0', 1]] },
+  { h: 0.08, cells: [['#0000c0', 1], ['#131313', 1], ['#c000c0', 1], ['#131313', 1], ['#00c0c0', 1], ['#131313', 1], ['#c0c0c0', 1]] },
+  { h: 0.25, cells: [['#00214c', 1.25], ['#ffffff', 1.25], ['#32006a', 1.25], ['#131313', 1.25], ['#090909', 1 / 3], ['#131313', 1 / 3], ['#1d1d1d', 1 / 3], ['#131313', 1]] },
+]
+/** The announcement's arrows screen: the ground, top and foot, and the arrows rising over it. */
+const ARROW_SKY = '#0a2272'
+const ARROW_DEEP = '#020a2e'
+const ARROW_INK = 'rgba(64, 128, 255, 0.5)'
+/** How fast the arrows rise, cells a second: slowly. */
+const ARROW_RISE = 0.3
 /** The #1 on a CYBERSPACE STATS board: gold on hot pink (design 4.2). */
 const STATS_SPLASH: SplashLook = { fill: '#ffd23f', edge: '#ff2d95', words: ['#1', ''] }
 /** The minimap's turn, radians a second: about once round in forty seconds. */
@@ -239,6 +260,10 @@ export interface TvAssets {
   hosakaMark?: CanvasImageSource | null
   /** An explainer on screen (lib/tv/explainer), the live picture in its corner; none when none is. */
   explainer?: TvExplainer | null
+  /** An UPGRADE ANNOUNCEMENT on screen (store/useTvAnnounce): its plan and since when (performance.now()); none when none is. */
+  announce?: { at: number; plan: AnnouncePlan } | null
+  /** What the marquee says of ONOSENDAI itself, its version and the updates this week (lib/tv/upgradeAnnounce releaseTicker). */
+  release?: string[]
 }
 
 /** What the painter shows of an explainer on screen. */
@@ -287,7 +312,7 @@ export interface FlatRect { x: number; y: number; w: number; h: number }
 type Region = FlatRect
 
 /** The words on the marquee as of the moment on tape. */
-export function tickerItems(p: TvPicture, name: (pk: string) => string): string[] {
+export function tickerItems(p: TvPicture, name: (pk: string) => string, release: string[] = []): string[] {
   const t = p.tapeTime
   if (t === null) return []
   const out: string[] = []
@@ -313,6 +338,8 @@ export function tickerItems(p: TvPicture, name: (pk: string) => string): string[
   for (const r of [...p.reactions].reverse()) out.push(`${r.content} FROM ${name(r.pubkey)} ON A ${r.on === 'shard' ? 'SHARD' : 'MOVE'}`)
   // What the scan opened where the avatars stood (store/useTv reveal): a line, not a chip over the tube.
   for (const f of [...findLines(p.finds, t, p.shot)].reverse()) out.push(`FOUND: ${f.label}`)
+  // ONOSENDAI's own version, and the updates this week once something says how many (lib/tv/upgradeAnnounce releaseTicker).
+  out.push(...release)
   return out
 }
 
@@ -630,6 +657,12 @@ export class TvPainter {
     const MY = Math.round(H * MARGIN_Y)
     const narrow = cssW < 600
 
+    // An UPGRADE ANNOUNCEMENT owns it over everything, a spot and an
+    // explainer included: all of it stands still under it (store/useTvAnnounce).
+    if (a.announce) {
+      this.announcement(a.announce, W, H, MX, MY, s, narrow, now, reduced)
+      return
+    }
     // A commercial owns the picture: nothing of the tape under it.
     if (p.ad) {
       this.commercial(p.ad, p, a, W, H, MX, MY, s, narrow, now, reduced, dt, scale)
@@ -984,7 +1017,7 @@ export class TvPainter {
     for (let guard = 0; this.runX + total < area * 1.5 && guard < 40; guard++) {
       if (this.feedAt >= this.feed.length) {
         // A fresh reading of the numbers, each time round.
-        this.feed = tickerItems(p, a.name)
+        this.feed = tickerItems(p, a.name, a.release)
         this.feedAt = 0
         if (this.feed.length === 0) break
       }
@@ -1239,6 +1272,222 @@ export class TvPainter {
 
     // The channel round it.
     this.breakFurniture('ADVERTISEMENT', p, a, W, MX, MY, tickY, tickH, s, dt, scale)
+  }
+
+  /**
+   * An UPGRADE ANNOUNCEMENT (lib/tv/upgradeAnnounce), the whole picture:
+   * colour bars with UPGRADE ANNOUNCEMENT, then the words printing in a box
+   * over blue arrows rising, NEW! floating on a starburst in the top right,
+   * then the bars again with WELCOME TO ONOSENDAI VERSION <x> and ENJOY!.
+   * No furniture round it: not the clock, the marquee, nor NOW PLAYING.
+   * The big words are in the PLAY button's letters (bold Monaspace Argon in
+   * the tube's white); the printed words as a comment's quote prints.
+   */
+  private announcement(an: { at: number; plan: AnnouncePlan }, W: number, H: number, MX: number, MY: number, s: number, narrow: boolean, now: number, reduced: boolean): void {
+    const ctx = this.ctx
+    const t = Math.max(0, (now - an.at) / 1000 - CUT_MS / 1000)
+    const scene = announceSceneAt(an.plan, t)
+    this.npRect = null
+    this.track.part('announce')
+    ctx.save()
+    // In over the cut's own length, as a spot comes in.
+    ctx.globalAlpha = clamp01((now - an.at) / CUT_MS)
+    const tall = this.portrait || narrow || W < H
+    if (scene.kind === 'page') {
+      const st = t - scene.screenFrom
+      this.arrows(W, H, s, reduced ? 0 : st)
+      // NEW!, top right, floating slowly: landed and still with reduced motion asked for.
+      const r = Math.min(W, H) * (tall ? 0.13 : 0.1)
+      const bob = reduced ? 0 : Math.sin(st * 0.9) * r * 0.08
+      const drift = reduced ? 0 : Math.sin(st * 0.55) * r * 0.05
+      const burst = { cx: W - MX - r * 0.7 + drift, cy: MY + r * 0.7 + bob }
+      const top = tall ? MY + r * 1.6 : MY + 10 * s
+      this.announceBox(an.plan.pages[scene.page] ?? '', charsShown(scene, t), scene.page, scene.pages, { x0: MX, y0: top, x1: W - MX, y1: H - MY }, tall, s, narrow, now)
+      this.splash(burst.cx, burst.cy, r, reduced ? 1 : st, s, NEW_SPLASH)
+    } else {
+      this.colourBars(W, H)
+      // As large as the frame's height allows and no larger, the stream's larger text
+      // included: the bars are the picture, the words a plate across them.
+      const cap = (px: number, share: number): number => Math.min(px * s, H * share)
+      const lines = scene.kind === 'title' ? [{ text: 'UPGRADE ANNOUNCEMENT', px: cap(narrow ? 44 : 96, 0.11), colour: FG }] : [{ text: `WELCOME TO ONOSENDAI VERSION ${an.plan.version}`, px: cap(narrow ? 30 : 64, 0.07), colour: FG }, { text: 'ENJOY!', px: cap(narrow ? 40 : 84, 0.1), colour: '#ffd23f' }]
+      this.slate(lines, W, H * (scene.kind === 'title' ? 0.36 : 0.4), W - 2 * MX, H * 0.56, s)
+    }
+    ctx.restore()
+  }
+
+  /** The bars, the whole frame (BARS). */
+  private colourBars(W: number, H: number): void {
+    const ctx = this.ctx
+    let y = 0
+    BARS.forEach((row, i) => {
+      const y1 = i === BARS.length - 1 ? H : Math.round(y + row.h * H)
+      const total = row.cells.reduce((n, [, w]) => n + w, 0)
+      let x = 0
+      let used = 0
+      for (const [colour, w] of row.cells) {
+        used += w
+        const x1 = Math.round((used / total) * W)
+        ctx.fillStyle = colour
+        ctx.fillRect(x, y, x1 - x, y1 - y)
+        x = x1
+      }
+      y = y1
+    })
+  }
+
+  /**
+   * Words on a dark plate over the bars, centred on `cy`: each block as large
+   * as `maxW` and its own size allow, on as many lines (up to three, broken
+   * at words) as makes it largest, all of them within `maxH`.
+   */
+  private slate(blocks: Array<{ text: string; px: number; colour: string }>, W: number, cy: number, maxW: number, maxH: number, s: number): void {
+    const ctx = this.ctx
+    const pad = 18 * s
+    const room = maxW - 2 * pad
+    const laid = blocks.map((b) => this.biggest(b.text, room, b.px))
+    // Shrunk together where all of them would stand taller than the room.
+    const height = (k: number): number => laid.reduce((n, l) => n + l.lines.length * l.px * k * 1.15, 0) + (laid.length - 1) * 14 * s
+    const k = Math.min(1, (maxH - 2 * pad) / Math.max(1, height(1)))
+    const widest = Math.max(...laid.map((l) => { ctx.font = `700 ${l.px * k}px ${TV_FONT}`; return Math.max(...l.lines.map((line) => ctx.measureText(line).width)) }))
+    const h = height(k)
+    const pw = widest + 2 * pad
+    const ph = h + 2 * pad
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)'
+    ctx.fillRect(W / 2 - pw / 2, cy - ph / 2, pw, ph)
+    ctx.textAlign = 'center'
+    let y = cy - h / 2
+    laid.forEach((l, i) => {
+      const px = l.px * k
+      ctx.font = `700 ${px}px ${TV_FONT}`
+      ctx.fillStyle = blocks[i].colour
+      for (const line of l.lines) {
+        y += px * 1.15
+        ctx.fillText(line, W / 2, y - px * 0.22)
+      }
+      y += 14 * s
+    })
+  }
+
+  /** `text` in bold at the largest size up to `px` that fits `maxW`, on the one to three lines (broken at words) that give it the most. */
+  private biggest(text: string, maxW: number, px: number): { lines: string[]; px: number } {
+    const ctx = this.ctx
+    ctx.font = `700 ${px}px ${TV_FONT}`
+    const words = text.split(' ')
+    const width = (ws: string[]): number => ctx.measureText(ws.join(' ')).width
+    let best = { lines: [text], px: Math.min(px, (px * maxW) / Math.max(1, width(words))) }
+    for (let n = 2; n <= Math.min(3, words.length); n++) {
+      // Every way of breaking it into n lines at words; the one whose widest line is narrowest.
+      let bestCut: string[] | null = null
+      let bestW = Infinity
+      const cuts = (from: number, left: number, acc: string[]): void => {
+        if (left === 1) {
+          const lines = [...acc, words.slice(from).join(' ')]
+          const w = Math.max(...lines.map((l) => ctx.measureText(l).width))
+          if (w < bestW) { bestW = w; bestCut = lines }
+          return
+        }
+        for (let i = from + 1; i <= words.length - left + 1; i++) cuts(i, left - 1, [...acc, words.slice(from, i).join(' ')])
+      }
+      cuts(0, n, [])
+      // Two lines are worth a little less than one at the same size: the taller block reads slower.
+      const size = Math.min(px, (px * maxW) / Math.max(1, bestW))
+      if (bestCut && size > best.px * 1.15) best = { lines: bestCut, px: size }
+    }
+    return best
+  }
+
+  /** Blue arrows on dark blue, rising slowly, `t` seconds in: one path, one fill. */
+  private arrows(W: number, H: number, s: number, t: number): void {
+    const ctx = this.ctx
+    const ground = ctx.createLinearGradient(0, 0, 0, H)
+    ground.addColorStop(0, ARROW_SKY)
+    ground.addColorStop(1, ARROW_DEEP)
+    ctx.fillStyle = ground
+    ctx.fillRect(0, 0, W, H)
+    const cell = Math.max(44 * s, Math.min(W, H) / 6)
+    const a = cell * 0.5
+    const rise = (t * ARROW_RISE * cell) % (cell * 2)
+    ctx.fillStyle = ARROW_INK
+    ctx.beginPath()
+    for (let row = -1, y = -cell + cell / 2 - rise + cell * 2; y < H + cell; row++, y += cell) {
+      // Every other row a half cell over, so the rows interleave as they rise.
+      const shift = (((row % 2) + 2) % 2) * (cell / 2)
+      for (let x = -cell + shift + cell / 2; x < W + cell; x += cell) {
+        ctx.moveTo(x, y - a * 0.5)
+        ctx.lineTo(x + a * 0.45, y - a * 0.05)
+        ctx.lineTo(x + a * 0.16, y - a * 0.05)
+        ctx.lineTo(x + a * 0.16, y + a * 0.5)
+        ctx.lineTo(x - a * 0.16, y + a * 0.5)
+        ctx.lineTo(x - a * 0.16, y - a * 0.05)
+        ctx.lineTo(x - a * 0.45, y - a * 0.05)
+        ctx.closePath()
+      }
+    }
+    ctx.fill()
+  }
+
+  /**
+   * The box over the arrows, the page's words printing in it as a comment's
+   * quote prints (the caret where the printing is), laid out for the whole
+   * page first so no line moves as it prints. As large as the page lets it
+   * be within `area`, centred in it; which page of how many under the words
+   * where there is more than one.
+   */
+  private announceBox(page: string, shown: number, index: number, pages: number, area: Box, tall: boolean, s: number, narrow: boolean, now: number): void {
+    const ctx = this.ctx
+    const areaW = area.x1 - area.x0
+    const areaH = area.y1 - area.y0
+    const bw = tall ? areaW : Math.min(areaW, Math.max(areaW * 0.7, 520 * s))
+    const pad = (narrow ? 16 : 26) * s
+    const innerW = bw - 2 * pad
+    const foot = pages > 1 ? 22 * s : 0
+    let px = (this.portrait ? 26 : narrow ? 15 : 22) * s
+    ctx.font = `${px}px ${TV_FONT}`
+    let lines = wrap(ctx, page, innerW)
+    // Smaller until the page fits the room, a few tries at most.
+    for (let i = 0; i < 8 && lines.length * px * 1.45 > areaH - 2 * pad - foot; i++) {
+      px *= Math.max(0.6, Math.sqrt((areaH - 2 * pad - foot) / (lines.length * px * 1.45)))
+      ctx.font = `${px}px ${TV_FONT}`
+      lines = wrap(ctx, page, innerW)
+    }
+    const bh = Math.min(areaH, lines.length * px * 1.45 + 2 * pad + foot)
+    const bx = area.x0 + (areaW - bw) / 2
+    const by = area.y0 + (areaH - bh) / 2
+    ctx.fillStyle = 'rgba(2, 8, 34, 0.9)'
+    ctx.fillRect(bx, by, bw, bh)
+    ctx.strokeStyle = '#4f8cff'
+    ctx.lineWidth = 2 * s
+    ctx.strokeRect(bx + s, by + s, bw - 2 * s, bh - 2 * s)
+    ctx.save()
+    ctx.globalAlpha *= 0.5
+    ctx.lineWidth = Math.max(1, s)
+    ctx.strokeRect(bx + 6 * s, by + 6 * s, bw - 12 * s, bh - 12 * s)
+    ctx.restore()
+    this.track.part('caption')
+    ctx.font = `${px}px ${TV_FONT}`
+    ctx.textAlign = 'left'
+    ctx.fillStyle = FG
+    let left = shown
+    let ly = by + pad + px
+    for (const line of lines) {
+      const chars = Array.from(line)
+      const take = Math.max(0, Math.min(chars.length, left))
+      if (take > 0) ctx.fillText(chars.slice(0, take).join(''), bx + pad, ly)
+      if (take < chars.length) {
+        // The caret, where the printing is.
+        if (Math.floor(now / 400) % 2 === 0) ctx.fillText('▌', bx + pad + ctx.measureText(chars.slice(0, take).join('')).width, ly)
+        break
+      }
+      // The space wrap took out between lines is a character printed too.
+      left -= chars.length + 1
+      ly += px * 1.45
+    }
+    if (pages > 1) {
+      ctx.font = `700 ${10 * s}px ${TV_FONT}`
+      ctx.textAlign = 'right'
+      ctx.fillStyle = 'rgba(242, 251, 255, 0.6)'
+      ctx.fillText(`${index + 1} / ${pages}`, bx + bw - pad, by + bh - pad * 0.6)
+    }
   }
 
   /**

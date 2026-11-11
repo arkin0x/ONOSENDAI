@@ -33,7 +33,8 @@ vi.mock('../../lib/relay', async (orig) => {
 })
 
 import { useCyberspace } from '../../store/useCyberspace'
-import { useTutorial } from '../../store/useTutorial'
+import { runTutorialEffect, useTutorial } from '../../store/useTutorial'
+import { usePanelLayout } from '../../store/usePanelLayout'
 import { useShards } from '../../store/useShards'
 import { useOpenedChests, openedKey } from '../../store/useOpenedChests'
 import { useInventory } from '../../store/useInventory'
@@ -499,5 +500,20 @@ describe('the director', () => {
     await vi.waitFor(() => { expect(useTutorial.getState().stepNote).toMatch(/Stand on the dirt/) })
     expect(director.tutorialSeedMeasuring()).toBe(false)
     useCyberspace.setState({ events: [] })
+  })
+})
+
+describe('the inventory step puts ITEMS at the top of the menu, whatever the order (feedback item 2)', () => {
+  it('under the default order, and under one with other panels first (#677\'s), ITEMS comes first', () => {
+    const was = usePanelLayout.getState().order
+    for (const left of [
+      ['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'],
+      ['identity', 'agents', 'avatars', 'items', 'create', 'hidden', 'discovered', 'targets', 'links'],
+    ] as const) {
+      usePanelLayout.setState({ order: { left: [...left], right: [...was.right] } })
+      runTutorialEffect('teach-inventory')
+      expect(usePanelLayout.getState().order.left[0]).toBe('items')
+    }
+    usePanelLayout.setState({ order: was })
   })
 })

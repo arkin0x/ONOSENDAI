@@ -26,7 +26,7 @@ import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { BlendFunction, Effect, type BloomEffect, type EffectComposer as PostComposer } from 'postprocessing'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Quaternion, Vector3, type Fog, type PerspectiveCamera } from 'three'
+import { Quaternion, Spherical, Vector3, type Fog, type PerspectiveCamera } from 'three'
 import { applyLensShift, lensShift, stepShift, uncoveredBand, type Cover } from '../lib/coverBand'
 import { readCovers, setCoverWatch } from '../hooks/useCover'
 import { useBuilder } from '../store/useBuilder'
@@ -76,6 +76,7 @@ import { RidePath } from './RidePath'
 import { PathTrail } from './PathTrail'
 import { GameRegionBox } from './GameRegionBox'
 import { PrefixRegionBox } from './PrefixRegionBox'
+import { RegionSelectBox } from './RegionSelectBox'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
@@ -106,6 +107,7 @@ import { canvasPixels, composerSamples } from './composerBudget'
 import './radialFog'
 import { fogFarStep, FOG_FAR, FOG_NEAR, FOG_START_SHARE, VIEW_FOG_SCALE } from './fog'
 import { flyGesture, panGesture, sceneMouse, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
+import { takeSteer } from '../lib/viewFly'
 import { StartLock } from '../lib/viewCamera'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
@@ -229,6 +231,7 @@ function World(): JSX.Element {
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <GameRegionBox axes={axes} />
       <PrefixRegionBox axes={axes} />
+      <RegionSelectBox axes={axes} />
       <SpawnMarker pubkey={pubkey} axes={axes} />
       <TargetAvatars axes={axes} />
       <PresenceAvatars axes={axes} />
@@ -850,10 +853,31 @@ function Rig(): JSX.Element {
   const pressed = (): number => panGesture.fingers + (sceneMouse.down ? 1 : 0)
   // The frame's target, with the offset added (viewRig.apply).
   const aimAt = useMemo(() => new Vector3(), [])
+  // Scratch for drag-to-steer's orbit (lib/viewFly.ts steerBy): nothing allocated per frame.
+  const steerVec = useMemo(() => new Vector3(), [])
+  const steerSph = useMemo(() => new Spherical(), [])
 
   useFrame((state, dt) => {
     const c = controls.current
     if (!c) return
+    // Drag-to-steer: a drag on a held Forward or Back fly button orbits the
+    // camera about its target by the drag (lib/viewFly.ts), the way a drag on
+    // open scene would. Applied before anything reads the orbit, so the frame
+    // keeps the new angle; OrbitControls.update at the end derives its spherical
+    // from the camera's position, so moving it here sticks. Breaks the lock,
+    // as any orbit does: once you have steered you are looking, not following.
+    const steer = takeSteer()
+    if (steer.dx !== 0 || steer.dy !== 0) {
+      steerVec.copy(c.object.position).sub(c.target)
+      steerSph.setFromVector3(steerVec)
+      const k = (2 * Math.PI) / Math.max(1, state.size.height)
+      steerSph.theta -= steer.dx * k
+      steerSph.phi = Math.max(0.02, Math.min(Math.PI - 0.02, steerSph.phi - steer.dy * k))
+      steerSph.makeSafe()
+      steerVec.setFromSpherical(steerSph)
+      c.object.position.copy(c.target).add(steerVec)
+      locked.current = false
+    }
     // GRAVITY's fall (store/useWalk.ts) takes its frame first: it can land,
     // which moves the cursor read below.
     tickFall()

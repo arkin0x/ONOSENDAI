@@ -62,6 +62,7 @@ import { ProfileView } from './hud/ProfileView'
 import { ProfileModal } from './hud/ProfileModal'
 import { useProfileView } from './store/useProfileView'
 import { TouchControls } from './hud/TouchControls'
+import { RegionChip } from './hud/RegionChip'
 import { WalkLookSphere } from './hud/WalkLookSphere'
 import { ViewFlyButtons } from './hud/ViewFlyButtons'
 import { SyncWarning } from './hud/SyncWarning'
@@ -384,6 +385,8 @@ export default function App(): JSX.Element {
       {!crowded && !offerUp && !deploying && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       <div hidden={modalUp}>
         {showPad && !offerUp && <TouchControls />}
+        {/* Region mode's readout, top left (hud/RegionChip.tsx): null unless region mode is on. */}
+        {showPad && !offerUp && <RegionChip />}
         {/* Not while placing: the deploy bar docks in this same corner
             (arkinox, 2026-10-12), and placing moves no avatar, so there is
             no route to show. */}

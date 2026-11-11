@@ -43,13 +43,21 @@ import { useBuilder } from '../../store/useBuilder'
 
 type Handlers = Record<string, (e?: unknown) => void>
 
-/** The buttons as rendered now, with their props. */
+/** The fly buttons as rendered now: each sits in a row beside its key label (SPACE / SHIFT). */
 function buttons(): Array<ReactElement<Handlers & { className: string; 'aria-label': string; children: ReactNode }>> {
   let tree: ReactNode = null
   renderToString(createElement(() => { tree = ViewFlyButtons(); return null }))
   if (!isValidElement(tree)) return []
-  const kids = (tree as ReactElement<{ children: ReactNode[] }>).props.children
-  return (Array.isArray(kids) ? kids : [kids]).filter(isValidElement) as never
+  const rows = (tree as ReactElement<{ children: ReactNode[] }>).props.children
+  const out: ReactElement[] = []
+  for (const row of Array.isArray(rows) ? rows : [rows]) {
+    if (!isValidElement(row)) continue
+    const kids = (row as ReactElement<{ children: ReactNode }>).props.children
+    for (const kid of Array.isArray(kids) ? kids : [kids]) {
+      if (isValidElement(kid) && kid.type === 'button') out.push(kid)
+    }
+  }
+  return out as never
 }
 
 const press = { pointerType: 'touch', button: 0, pointerId: 7, preventDefault: () => {}, stopPropagation: () => {}, currentTarget: { setPointerCapture: () => {} } }

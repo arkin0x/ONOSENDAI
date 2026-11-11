@@ -3839,6 +3839,18 @@ kbd {
   background: radial-gradient(circle at 36% 32%, rgba(255, 176, 32, 0.5), rgba(6, 14, 22, 0.66) 62%, rgba(6, 14, 22, 0.86));
   border-color: rgba(255, 176, 32, 0.8);
 }
+/* The key that flies the same way, to the right of each orb, in VIEW's yellow
+   (arkinox, 2026-11-11): Space forward, Shift back. */
+.flyorb__row { display: flex; align-items: center; gap: 6px; }
+.flyorb__key {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  color: rgb(255, 196, 92);
+  opacity: 0.85;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
 /* Over the HOSAKA mark while a job computes, as the LOOK ball stands. */
 .app:has(.hosaka-pulse) .flyorbs {
   bottom: calc(var(--menu-bottom) + var(--menu-size) * (1 + 334 / 308) + 2 * var(--routeov-gap));
@@ -4793,6 +4805,11 @@ kbd {
   touch-action: none;
   padding: 0;
 }
+/* Pinned to their columns so the mode button keeps its size and place when
+   RECALL hides in HOP on your avatar (arkinox, 2026-11-11): without this the
+   commit button auto-flows into RECALL's narrower column. */
+.touchops__cancel { grid-column: 1; grid-row: 1; }
+.touchops__commit { grid-column: 2; grid-row: 1; }
 
 /* COMMIT is HOP's: the mode's blue, not VIEW's yellow (arkinox, 2026-10-13:
    "Commit should be the Hop color"). */
@@ -9796,6 +9813,83 @@ a.feed__act { text-decoration: none; }
   background-image: linear-gradient(rgba(255, 176, 32, 0.16), rgba(255, 176, 32, 0.16));
   border-color: rgba(255, 176, 32, 0.35);
 }
+/* The 2^0 readout wears VIEW's yellow like the keys around it (arkinox,
+   2026-11-11), where in every other mode it keeps its own tint. */
+.touchpad--mode-view .touchpad__hub {
+  color: var(--warn, #ffb020);
+  background-image: linear-gradient(rgba(255, 176, 32, 0.16), rgba(255, 176, 32, 0.16));
+  border-color: rgba(255, 176, 32, 0.35);
+}
+
+/* A key's keyboard letter, tiny at its bottom centre (arkinox, 2026-11-11),
+   per mode since the keys differ by mode (TouchControls PadKey.keyHint). */
+.touchpad__key { position: relative; }
+.touchpad__keyhint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 2px;
+  text-align: center;
+  font-size: 6px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* The Region button, in the pin cell left of the globe, VIEW only
+   (TouchControls; store/useRegion.ts). Lit in the bright /C/ yellow while
+   region mode is on. */
+.touchpad__key--region { grid-area: pin; color: var(--warn, #ffb020); }
+.touchpad__key--region.is-on {
+  color: #ffe14d;
+  background-image: linear-gradient(rgba(255, 225, 77, 0.22), rgba(255, 225, 77, 0.22));
+  border-color: rgba(255, 225, 77, 0.6);
+}
+
+/* REGION chip, top left (hud/RegionChip.tsx): the selected region's prefix,
+   tap to copy, and a link to reserve it as a private speakeasy. */
+.regionchip {
+  position: fixed;
+  top: calc(var(--menu-bottom, 16px));
+  left: var(--menu-left, 16px);
+  z-index: 104;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: min(72vw, 320px);
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 225, 77, 0.5);
+  background: rgba(6, 14, 22, 0.82);
+  backdrop-filter: blur(6px);
+  color: var(--fg, #c8f5ff);
+}
+.regionchip__head { display: flex; align-items: center; gap: 6px; color: #ffe14d; }
+.regionchip__title { font-size: 10px; letter-spacing: 0.16em; font-weight: 700; }
+.regionchip__coord {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  color: #ffe14d;
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  word-break: break-all;
+}
+.regionchip__coord:hover { color: #fff3b0; }
+.regionchip__hex { word-break: break-all; }
+.regionchip__note { font-size: 9px; letter-spacing: 0.08em; opacity: 0.7; }
+.regionchip__reserve {
+  font-size: 11px;
+  color: var(--accent, #00e5ff);
+  text-decoration: none;
+}
+.regionchip__reserve:hover { text-decoration: underline; }
 /* WALK's keys are held (store/walkHold.ts): a press never becomes a pan or a zoom. */
 .touchpad--mode-walk .touchpad__key { touch-action: none; }
 .touchpad--mode-walk .touchpad__key:not(:active),

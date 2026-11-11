@@ -51,7 +51,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react'
-import { Box, Globe, MapPinOff } from 'lucide-react'
+import { Box, Globe, MapPinOff, Scan } from 'lucide-react'
 import { ConfirmModal } from './ConfirmModal'
 import { busyLabel, useCyberspace } from '../store/useCyberspace'
 import { DEFAULT_RELAY } from '../store/useRelays'
@@ -69,8 +69,7 @@ import { useBuilder } from '../store/useBuilder'
 import { buildHeld, buildToHop, cycleMode, padMode } from '../store/padMode'
 import { useCover } from '../hooks/useCover'
 import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
-import { canFly, useViewFly } from '../lib/viewFly'
-import { flyHold } from './ViewFlyButtons'
+import { regionAtOriginalSize, useRegion } from '../store/useRegion'
 import { holdEnd, holdEndAll, holdStart } from '../store/walkHold'
 import { walkHeldDir, type HeldDir } from '../lib/walkKeys'
 
@@ -99,8 +98,8 @@ export interface PadKey {
   disabled?: boolean
   hint?: boolean
   scale?: boolean
-  /** In VIEW a held press flies the view this way instead (FAR forward, NEAR back; lib/viewFly.ts). */
-  fly?: 1 | -1
+  /** The keyboard key for this button, drawn tiny at its bottom centre (per mode, since the keys differ). */
+  keyHint?: string
   /** WALK: the direction this key holds while pressed (store/walkHold.ts). */
   hold?: HeldDir
   /** WALK's JUMP and DOWN: drawn on the left of the screen, over the menu button, not in the pad. */
@@ -136,12 +135,12 @@ export interface PadKey {
 export function walkPad(gravity: boolean, move: (name: MoveName) => () => void): PadKey[] {
   const key = (name: MoveName): Pick<PadKey, 'act' | 'hold'> => ({ act: move(name), hold: walkHeldDir(name) })
   return [
-    { cell: 'forward', glyph: <ForwardArrow3D size={26} />, sub: 'FORWARD', title: 'Forward (W)', ...key('away') },
-    { cell: 'left', glyph: '◀', title: 'Left (A)', ...key('left') },
-    { cell: 'backward', glyph: <ReverseArrow3D size={20} />, sub: 'BACK', title: 'Backward (S)', ...key('toward') },
-    { cell: 'right', glyph: '▶', title: 'Right (D)', ...key('right') },
-    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R). Press again in the air to double jump.' : 'Jump: up one cell (Space or R)', ...key('up'), left: true },
-    { cell: 'down', glyph: '▼', title: gravity ? 'Down: hold to absorb a bounce (C or F)' : 'Down one cell (C or F)', ...key('down'), left: true },
+    { cell: 'forward', glyph: <ForwardArrow3D size={26} />, sub: 'FORWARD', title: 'Forward (W)', keyHint: 'W', ...key('away') },
+    { cell: 'left', glyph: '◀', title: 'Left (A)', keyHint: 'A', ...key('left') },
+    { cell: 'backward', glyph: <ReverseArrow3D size={20} />, sub: 'BACK', title: 'Backward (S)', keyHint: 'S', ...key('toward') },
+    { cell: 'right', glyph: '▶', title: 'Right (D)', keyHint: 'D', ...key('right') },
+    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R). Press again in the air to double jump.' : 'Jump: up one cell (Space or R)', keyHint: 'SPACE', ...key('up'), left: true },
+    { cell: 'down', glyph: '▼', title: gravity ? 'Down: hold to absorb a bounce (C or F)' : 'Down one cell (C or F)', keyHint: 'C', ...key('down'), left: true },
   ]
 }
 
@@ -223,11 +222,11 @@ export function TouchControls(): JSX.Element {
   // GRAVITY in WALK (store/useWalk.ts): JUMP jumps, DOWN absorbs a bounce.
   const gravity = useWalk((s) => s.gravity)
   const building = useBuilder((s) => s.active)
-  // VIEW: FAR and NEAR fly the view while held, as the fly buttons do
-  // (arkinox, 2026-11-09: "smooth and not tied to the nearest cursor block").
-  const flies = useCyberspace((s) => canFly(s, building))
-  useEffect(() => { if (!flies) useViewFly.getState().setPad(0) }, [flies])
-  useEffect(() => () => useViewFly.getState().setPad(0), [])
+  // Region mode, a tool inside VIEW (store/useRegion.ts): the Region button
+  // turns it on, RECALL becomes RESET once the region has grown, and the pad
+  // grows the region instead of lining up a move.
+  const regionActive = useRegion((s) => s.active)
+  const regionGrown = useRegion((s) => !regionAtOriginalSize(s))
   // A deploy lined up that leaving BUILD would cancel: BUILD and RECALL wait
   // for PLACE or CANCEL (store/padMode.ts buildHeld).
   const held = useShards((s) => buildHeld(s))
@@ -268,11 +267,14 @@ export function TouchControls(): JSX.Element {
     // symbol and it is not enough on its own, because the two differ only by a
     // small mark inside the circle and that mark is the first thing to go at
     // this size. The word carries the meaning; the glyph carries the convention.
-    { cell: 'away', glyph: '⊗', sub: 'FAR', title: 'Away from camera (R)', act: move('away'), fly: 1 },
-    { cell: 'up', glyph: '▲', title: 'Up (W)', act: move('up') },
-    { cell: 'toward', glyph: '⊙', sub: 'NEAR', title: 'Toward camera (F)', act: move('toward'), fly: -1 },
-    { cell: 'left', glyph: '◀', title: 'Left (A)', act: move('left') },
-    { cell: 'right', glyph: '▶', title: 'Right (D)', act: move('right') },
+    // FAR and NEAR wear the same forward and reverse arrows VIEW's fly buttons
+    // and WALK's forward wear (hud/ui/FlyArrows.tsx; arkinox, 2026-11-11), the
+    // word under them carrying which axis they move along.
+    { cell: 'away', glyph: <ForwardArrow3D size={20} />, sub: 'FAR', title: 'Away from camera (R)', keyHint: 'R', act: move('away') },
+    { cell: 'up', glyph: '▲', title: 'Up (W)', keyHint: 'W', act: move('up') },
+    { cell: 'toward', glyph: <ReverseArrow3D size={20} />, sub: 'NEAR', title: 'Toward camera (F)', keyHint: 'F', act: move('toward') },
+    { cell: 'left', glyph: '◀', title: 'Left (A)', keyHint: 'A', act: move('left') },
+    { cell: 'right', glyph: '▶', title: 'Right (D)', keyHint: 'D', act: move('right') },
     // Left is Q and right is E, matching where those keys sit on a keyboard.
     // Q raises the exponent and E lowers it, so the left button is the plus.
     // Putting the minus on the left made the pad and the keys disagree about
@@ -284,10 +286,10 @@ export function TouchControls(): JSX.Element {
     // Glows while the covering box is clipped, because coarser scale is the
     // fix the scene is asking for. Not while disabled: a glowing dead key
     // would promise a remedy it cannot deliver.
-    { cell: 'zoomout', glyph: '+', title: 'Coarser scale (Q)', act: scale(1), disabled: scaleExp >= MAX_SCALE_EXP,
+    { cell: 'zoomout', glyph: '+', title: 'Coarser scale (Q)', keyHint: 'Q', act: scale(1), disabled: scaleExp >= MAX_SCALE_EXP,
       hint: coveringClipped && scaleExp < MAX_SCALE_EXP, scale: true },
-    { cell: 'down', glyph: '▼', title: 'Down (S)', act: move('down') },
-    { cell: 'zoomin', glyph: '−', title: 'Finer scale (E)', act: scale(-1), disabled: scaleExp <= 0, scale: true },
+    { cell: 'down', glyph: '▼', title: 'Down (S)', keyHint: 'S', act: move('down') },
+    { cell: 'zoomin', glyph: '−', title: 'Finer scale (E)', keyHint: 'E', act: scale(-1), disabled: scaleExp <= 0, scale: true },
   ]
 
   const padKey = (b: PadKey): JSX.Element => (
@@ -303,10 +305,11 @@ export function TouchControls(): JSX.Element {
       title={b.title}
       aria-label={b.label ?? b.title}
       disabled={b.disabled}
-      {...(walking && b.hold ? padHold(b) : flies && b.fly ? flyHold('pad', b.fly) : bind(b.act))}
+      {...(walking && b.hold ? padHold(b) : bind(b.act))}
     >
       {b.glyph}
       {b.sub && <span className="touchpad__sub">{b.sub}</span>}
+      {b.keyHint && <span className="touchpad__keyhint" aria-hidden>{b.keyHint}</span>}
     </button>
   )
   // WALK's JUMP and DOWN, on the left over the menu button (walkPad `left`).
@@ -346,6 +349,22 @@ export function TouchControls(): JSX.Element {
         {/* WALK has no one-press zoom: the owner removed both (2026-11-01). */}
         {!walking && (
           <>
+            {/* Region (lucide scan): picks a speakeasy region, VIEW only, left
+                of the globe. On turns region mode on and opens the REGION chip
+                (store/useRegion.ts, hud/RegionChip.tsx). It stands in the pin
+                cell, so it waits while a pin is down (rare in a region hunt). */}
+            {viewing && !pin && (
+              <button
+                className={`touchpad__key touchpad__key--region${regionActive ? ' is-on' : ''}`}
+                title="Region: pick a region for a private speakeasy"
+                aria-label="Region selector"
+                aria-pressed={regionActive}
+                {...noCallout}
+                onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); const r = useRegion.getState(); if (r.active) r.exit(); else r.enter() }}
+              >
+                <Scan size={16} strokeWidth={2.25} aria-hidden />
+              </button>
+            )}
             <button className="touchpad__key touchpad__key--earth" title="Zoom to Earth's scale (2^52)" aria-label="Zoom to 2^52" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); const s = useCyberspace.getState(); s.adjustScale(EARTH_SCALE_EXP - s.scaleExp) }}>
               <Globe size={16} strokeWidth={2.25} aria-hidden />
             </button>
@@ -389,12 +408,19 @@ export function TouchControls(): JSX.Element {
       )}
 
       {opsUp && <div ref={opsRef} className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
+        {/* RECALL is RESET while a grown region is up (store/useRegion.ts): it
+            returns the region to the size it had when region mode started. It
+            is hidden in HOP with the cursor on your avatar, where recalling
+            does nothing; the mode button keeps its place and size. */}
+        {!(mode === 'hop' && !armed && !deploying && !computing) && (
         <button
           className="touchops__cancel"
           title={walking
             ? (computing || behind > 0 ? 'Stop the walk where the chain is now (X)' : 'End WALK and go back to HOP (X)')
             : computing ? 'Cancel proof (X)'
             : building ? (held ? 'Place or cancel what is lined up first' : 'End BUILD and go back to HOP')
+            : regionActive && regionGrown ? 'Reset the region to its size when region mode started (RECALL)'
+            : regionActive ? 'Recall the cursor, end region mode and VIEW (X)'
             : viewing ? 'Recall the cursor and end VIEW (X)' : 'Recall cursor (X)'}
           disabled={building && !computing && held}
           {...noCallout}
@@ -405,14 +431,17 @@ export function TouchControls(): JSX.Element {
               else useWalk.getState().exit()
               return
             }
+            // A grown region: RESET puts it back to its entry size, VIEW stays.
+            if (regionActive && regionGrown) { useRegion.getState().resetSize(); return }
             // BUILD's RECALL goes back to HOP, as the mode button does; a
             // proof from before building is still STOP's (X).
             if (building && !computing) { buildToHop(); return }
             useCyberspace.getState().cancel()
           }}
         >
-          {computing || (walking && behind > 0) ? 'STOP' : 'RECALL'}
+          {computing || (walking && behind > 0) ? 'STOP' : regionActive && regionGrown ? 'RESET' : 'RECALL'}
         </button>
+        )}
         {/* The mode switch, in the commit slot while there is nothing to
             commit: HOP to VIEW to WALK to BUILD and back to HOP
             (store/padMode.ts). VIEW (arkinox, 2026-10-10) is a free view

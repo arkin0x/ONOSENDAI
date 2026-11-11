@@ -18,28 +18,42 @@
 import { useEffect, type PointerEvent as ReactPointerEvent } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
-import { canFly, useViewFly, type FlyDir } from '../lib/viewFly'
+import { canFly, steerBy, useViewFly, type FlyDir } from '../lib/viewFly'
 import { noCallout } from '../hooks/useRepeatable'
 import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
 
-/** Which of the fly's holds a press is: the fly buttons, or the pad's FAR and NEAR in VIEW. */
-type FlyHold = 'button' | 'pad'
+/** Which of the fly's holds a press is: so far only the fly buttons. */
+type FlyHold = 'button'
+
+/** The pointer a fly button holds, and where it last was, so a drag steers from it. */
+let dragging: { id: number; x: number; y: number } | null = null
 
 /**
- * Press-and-hold props that fly the view while held: forward or back, from
- * the fly buttons or the pad (lib/viewFly.ts useViewFly). Held even when the
- * finger slides off the key, until it lifts.
+ * Press-and-hold props that fly the view while held: forward or back, from the
+ * fly buttons (lib/viewFly.ts useViewFly). Held even when the finger slides off
+ * the button, until it lifts. A drag while held steers: it orbits the camera by
+ * the drag, the way a drag on open scene would (lib/viewFly.ts steerBy).
  */
 export function flyHold(source: FlyHold, dir: Exclude<FlyDir, 0>) {
-  const set = (d: FlyDir): void => { const f = useViewFly.getState(); if (source === 'button') f.setButton(d); else f.setPad(d) }
-  const release = (): void => { if (useViewFly.getState()[source] === dir) set(0) }
+  const set = (d: FlyDir): void => { useViewFly.getState().setButton(d) }
+  const release = (e?: ReactPointerEvent<HTMLButtonElement>): void => {
+    if (useViewFly.getState()[source] === dir) set(0)
+    if (!e || (dragging && dragging.id === e.pointerId)) dragging = null
+  }
   return {
     onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return
       e.preventDefault()
       e.stopPropagation()
       try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* the press still counts */ }
+      dragging = { id: e.pointerId, x: e.clientX, y: e.clientY }
       set(dir)
+    },
+    onPointerMove: (e: ReactPointerEvent<HTMLButtonElement>) => {
+      if (!dragging || dragging.id !== e.pointerId) return
+      steerBy(e.clientX - dragging.x, e.clientY - dragging.y)
+      dragging.x = e.clientX
+      dragging.y = e.clientY
     },
     onPointerUp: release,
     onPointerCancel: release,
@@ -58,12 +72,19 @@ export function ViewFlyButtons(): JSX.Element | null {
 
   return (
     <div className="flyorbs" role="group" aria-label="Fly the view">
-      <button className="flyorb flyorb--fwd" title="Hold to fly forward, the way the camera faces" aria-label="Fly forward" {...flyHold('button', 1)}>
-        <ForwardArrow3D size={24} />
-      </button>
-      <button className="flyorb flyorb--back" title="Hold to fly back" aria-label="Fly back" {...flyHold('button', -1)}>
-        <ReverseArrow3D size={24} />
-      </button>
+      <div className="flyorb__row">
+        <button className="flyorb flyorb--fwd" title="Hold to fly forward, the way the camera faces (Space)" aria-label="Fly forward" {...flyHold('button', 1)}>
+          <ForwardArrow3D size={24} />
+        </button>
+        {/* The key that does the same, in VIEW's yellow (arkinox, 2026-11-11). */}
+        <span className="flyorb__key" aria-hidden>SPACE</span>
+      </div>
+      <div className="flyorb__row">
+        <button className="flyorb flyorb--back" title="Hold to fly back (Shift)" aria-label="Fly back" {...flyHold('button', -1)}>
+          <ReverseArrow3D size={24} />
+        </button>
+        <span className="flyorb__key" aria-hidden>SHIFT</span>
+      </div>
     </div>
   )
 }

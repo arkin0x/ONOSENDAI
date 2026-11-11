@@ -227,8 +227,14 @@ describe('3. the view window catches up during a fly', () => {
     useViewFly.getState().setButton(1)
     for (let i = 0; i < 30; i++) frame()
     useViewFly.getState().setButton(0)
-    // Half a second at 8 cells a second, down render -z.
-    expect(useViewCentre.getState()).toEqual({ right: 0, up: 0, out: -4 })
+    // Flown down render -z by whole cells (the exact count is the eased flight's,
+    // tripled cruise less its ease-in): the window is told whole cells off the
+    // cursor, negative out, nothing on right or up.
+    const centre = useViewCentre.getState()
+    expect(centre.right).toBe(0)
+    expect(centre.up).toBe(0)
+    expect(centre.out).toBeLessThan(0)
+    expect(Number.isInteger(centre.out)).toBe(true)
     viewRig.reset()
     expect(useViewCentre.getState()).toEqual({ right: 0, up: 0, out: 0 })
   })

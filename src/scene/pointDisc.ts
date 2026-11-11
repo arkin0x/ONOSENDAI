@@ -101,6 +101,10 @@ ${HEADLAMP_DISTANCE_GLSL}
     if (uHeadlamp > 0.5) color *= headlampDistance(vHeadlampDistance);
 
     gl_FragColor = vec4(color, alpha);
+    // Colors arrive linear (shardColors.ts). On a canvas of its own this
+    // encodes to sRGB like every built-in material; into the world's composer
+    // it does nothing, and the composer encodes at the end.
+    #include <colorspace_fragment>
   }
 `
 

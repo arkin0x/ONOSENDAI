@@ -70,9 +70,14 @@ export function unreadableTitle(bagId: string): string {
   return `Opened: ${r.entries === 0 ? 'nothing inside' : `none of its ${r.entries} entries can be read by this client`}${beyondRead(r)}`
 }
 
-/** An opened bag with items: how many, and what the reading says beyond them (beyondRead). */
-export function openedTitle(bagId: string, count: number): string {
-  return `Opened: ${count} items${beyondRead(bagReading(bagId))}`
+/**
+ * An opened bag with items: how many, how many in each plane when it holds
+ * both (one bag holds a region and its twin, spec §7.6 Planes), and what the
+ * reading says beyond them (beyondRead).
+ */
+export function openedTitle(bagId: string, count: number, planes?: { data: number; idea: number }): string {
+  const split = planes && planes.data > 0 && planes.idea > 0 ? ` (${planes.data} in dataspace, ${planes.idea} in ideaspace)` : ''
+  return `Opened: ${count} items${split}${beyondRead(bagReading(bagId))}`
 }
 
 type Mode = 'hidden' | 'discovered'
@@ -109,16 +114,16 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
   // What each opened bag holds: how many items, and one icon per kind in it
   // (ItemIcon), the oldest item's kind first, a coin apart from a message.
   const kinds = useMemo(() => {
-    const by = new Map<string, (ItemKind & { at: number })[]>()
+    const by = new Map<string, (ItemKind & { at: number; plane: 0 | 1 })[]>()
     for (const h of Object.values(discovered)) {
       // A muted thing is not counted; a bag with nothing else left still reads opened (below).
       if (findHidden(h, muted, me)) continue
       const list = by.get(h.bagId) ?? []
-      list.push({ at: h.createdAt, type: h.type, coin: h.type === 'message' && findCashuToken(h.text) !== null })
+      list.push({ at: h.createdAt, type: h.type, coin: h.type === 'message' && findCashuToken(h.text) !== null, plane: h.plane })
       by.set(h.bagId, list)
     }
-    const out = new Map<string, { count: number; kinds: ItemKind[] }>()
-    for (const [bag, list] of by) out.set(bag, { count: list.length, kinds: distinctKinds(list.sort((a, b) => a.at - b.at)) })
+    const out = new Map<string, { count: number; kinds: ItemKind[]; planes: { data: number; idea: number } }>()
+    for (const [bag, list] of by) out.set(bag, { count: list.length, kinds: distinctKinds(list.sort((a, b) => a.at - b.at)), planes: { data: list.filter((x) => x.plane === 0).length, idea: list.filter((x) => x.plane === 1).length } })
     return out
   }, [discovered, muted, me])
   // A bag is opened when a key of ours decrypted it, whether or not anything in
@@ -159,7 +164,7 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
           <ProfileBadge pubkey={it.author} />
           {it.author === me && <span className="avatars__you">YOURS</span>}
           {kinds.has(it.bagId)
-            ? <span className="tag tag--live loot__kinds" title={openedTitle(it.bagId, kinds.get(it.bagId)?.count ?? 0)}>{kinds.get(it.bagId)?.kinds.map((k) => <ItemIcon key={`${k.type}:${k.coin}`} type={k.type} coin={k.coin} size={10} />)}</span>
+            ? <span className="tag tag--live loot__kinds" title={openedTitle(it.bagId, kinds.get(it.bagId)?.count ?? 0, kinds.get(it.bagId)?.planes)}>{kinds.get(it.bagId)?.kinds.map((k) => <ItemIcon key={`${k.type}:${k.coin}`} type={k.type} coin={k.coin} size={10} />)}</span>
             : opened.has(it.bagId) && <span className="tag loot__kinds" title={unreadableTitle(it.bagId)}>∅</span>}
           <span className="avatars__when" title={formatStamp(it.createdAt)}>{formatAgo(it.createdAt, now)}</span>
         </div>

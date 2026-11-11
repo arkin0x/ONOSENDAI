@@ -19,6 +19,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createElement, isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToString } from 'react-dom/server'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 vi.hoisted(() => {
   const mem = new Map<string, string>()
@@ -133,6 +135,9 @@ describe('the WALK pad', () => {
     expect(cells()).toEqual(['gravity', 'forward', 'left', 'backward', 'right', 'jump', 'down'])
     expect(drawn().some((b) => b.props.className === 'touchpad__hub')).toBe(false)
     expect(find('touchpad__key--forward').props.title).toBe('Forward (W)')
+    // Plain forward again: no end zones, and the label says only what it is.
+    expect((find('touchpad__key--forward').props as { 'aria-label'?: string })['aria-label']).toBe('Forward (W)')
+    expect(drawn().some((b) => /touchpad__zone/.test(b.props.className ?? ''))).toBe(false)
     expect(find('touchpad__key--backward').props.title).toBe('Backward (S)')
     expect(find('touchpad__key--jump').props.children).toContain('JUMP')
   })
@@ -196,13 +201,73 @@ describe('the WALK pad', () => {
     expect(delta(() => keyDown('KeyS'))).toEqual([-1n, 0n, 1n])
   })
 
-  it('under GRAVITY DOWN is off and JUMP says jump', () => {
+  it('under GRAVITY DOWN stays on and says it absorbs a bounce (review of #649), and JUMP says jump', () => {
     useWalk.getState().enter()
     useWalk.getState().setGravity(true)
-    expect(find('touchpad__key--down').props.disabled).toBe(true)
-    expect(find('touchpad__key--jump').props.title).toBe('Jump (Space or R)')
+    expect(find('touchpad__key--down').props.disabled).toBeFalsy()
+    expect(find('touchpad__key--down').props.title).toBe('Down: hold to absorb a bounce (C or F)')
+    expect(find('touchpad__key--jump').props.title).toBe('Jump (Space or R). Press again in the air to double jump.')
     useWalk.getState().setGravity(false)
-    expect(find('touchpad__key--down').props.disabled).toBe(false)
+    expect(find('touchpad__key--down').props.disabled).toBeFalsy()
+    expect(find('touchpad__key--down').props.title).toBe('Down one cell (C or F)')
+  })
+})
+
+describe('JUMP and DOWN on the left (arkinox, 2026-11-10)', () => {
+  /** The keys drawn inside the element with class `cls`. */
+  const inside = (cls: string): string[] => {
+    const box = find(cls)
+    const out: string[] = []
+    const walk = (n: ReactNode): void => {
+      if (Array.isArray(n)) { n.forEach(walk); return }
+      if (!isValidElement(n)) return
+      const m = /touchpad__key--(\S+)/.exec((n as Btn).props.className ?? '')
+      if (m) out.push(m[1])
+      walk((n as Btn).props.children)
+    }
+    walk(box.props.children)
+    return out
+  }
+
+  it('JUMP and DOWN are in the left cluster, and the pad keeps GRAVITY, FORWARD, the sides and BACK', () => {
+    useWalk.getState().enter()
+    expect(inside('walkside')).toEqual(['jump', 'down'])
+    expect(inside('touchpad')).toEqual(['gravity', 'forward', 'left', 'backward', 'right'])
+  })
+
+  it('under GRAVITY too, and nothing on the left outside WALK or while placing', () => {
+    useWalk.getState().enter()
+    useWalk.getState().setGravity(true)
+    expect(inside('walkside')).toEqual(['jump', 'down'])
+    useShards.setState({ pending: { type: 'message', text: 'hi' } })
+    expect(drawn().some((b) => b.props.className === 'walkside')).toBe(false)
+    useShards.getState().cancelDeploy()
+    useWalk.getState().exit()
+    expect(drawn().some((b) => b.props.className === 'walkside')).toBe(false)
+  })
+
+  it('the stylesheet stands the cluster over the menu button at the pad\'s height (lifted with it), the LOOK ball above it while it is drawn, and the pad without a JUMP row', () => {
+    const css = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')
+    const rule = (sel: string): string => {
+      const at = css.indexOf(`\n${sel} {`)
+      expect(at).toBeGreaterThan(-1)
+      return css.slice(at, css.indexOf('}', at))
+    }
+    expect(rule('.walkside')).toContain('left: var(--menu-left);')
+    expect(rule('.walkside')).toContain('bottom: var(--walkside-bottom);')
+    expect(css).toContain('--walkside-bottom: 92px;')
+    // The pad's own bottom, which JUMP and DOWN sat on.
+    expect(rule('.touchpad')).toContain('bottom: 92px;')
+    // The LOOK ball is raised only while the row is drawn; otherwise it stays over the menu button.
+    expect(rule('.orbsquare.walklook')).toContain('bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));')
+    expect(rule('.app:has(.walkside) .orbsquare.walklook')).toContain('bottom: calc(var(--walkside-bottom) + var(--walkside-key) + var(--routeov-gap));')
+    // With the HOSAKA mark too: the higher of the two, so it never touches JUMP.
+    expect(rule('.app:has(.hosaka-pulse):has(.walkside) .walklook')).toContain('bottom: max(')
+    // The pad lifted for the chain status strip: the row, and the ball on it, go up with it.
+    expect(rule('.app:has(.touchpad.is-lifted)')).toContain('--walkside-bottom: 116px;')
+    expect(css).toContain('.touchpad.is-lifted {\n  bottom: 116px;')
+    expect(rule('.touchpad--mode-walk')).not.toContain('jump')
+    expect(css).not.toContain('.touchpad__zone')
   })
 })
 

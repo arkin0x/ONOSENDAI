@@ -17,9 +17,16 @@ describe('normalizeServer', () => {
     expect(normalizeServer('https://nostr.download/')).toBe('https://nostr.download')
     expect(normalizeServer(' https://cdn.example.org/blossom/ ')).toBe('https://cdn.example.org/blossom')
   })
-  it('refuses plain http except for a local server, and anything that is not a host', () => {
-    expect(normalizeServer('http://blossom.band')).toBeNull()
+  it('reads plain http as https except for a local server (owner 2026-11-10 typed http://blossom.oslim.dev)', () => {
+    expect(normalizeServer('http://blossom.oslim.dev')).toBe('https://blossom.oslim.dev')
+    expect(normalizeServer('HTTP://blossom.band/')).toBe('https://blossom.band')
+    expect(normalizeServer('http://cdn.example.org:8080/b/')).toBe('https://cdn.example.org:8080/b')
+    expect(normalizeServer('http://cdn.example.org:80')).toBe('https://cdn.example.org')
     expect(normalizeServer('http://localhost:3000')).toBe('http://localhost:3000')
+    expect(normalizeServer('http://127.0.0.1:3000')).toBe('http://127.0.0.1:3000')
+    expect(normalizeServer('http://intranet')).toBeNull()
+  })
+  it('refuses anything that is not a host', () => {
     expect(normalizeServer('not a url')).toBeNull()
     expect(normalizeServer('')).toBeNull()
   })

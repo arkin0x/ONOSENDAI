@@ -3290,6 +3290,22 @@ kbd {
   padding: 3px 6px;
 }
 
+/* BOUNCE's one-line explain in the SHARD panel, as quiet as the counts line. */
+.ws__explain {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+/* A bouncy shard's chip (Workshop.tsx BounceChip), small enough for a list row and the SHARD counts line. */
+.ws__bounce-chip {
+  display: inline-block;
+  padding: 1px 5px;
+  line-height: 1.4;
+  margin-left: 4px;
+  vertical-align: 1px;
+}
+
 .workshop__list-row {
   display: flex;
   gap: 4px;
@@ -3742,9 +3758,23 @@ kbd {
   width: 112px;
   height: 112px;
 }
+/* With WALK's JUMP and DOWN drawn (.walkside, with the pad), a gap above
+   them; with the pad folded they are gone, and the ball stays over the menu
+   button (review of #654). */
+.app:has(.walkside) .orbsquare.walklook {
+  bottom: calc(var(--walkside-bottom) + var(--walkside-key) + var(--routeov-gap));
+}
 .orbsquare.walklook .benchorb--inside { padding-bottom: 10px; }
 .app:has(.hosaka-pulse) .walklook {
   bottom: calc(var(--menu-bottom) + var(--menu-size) * (1 + 334 / 308) + 2 * var(--routeov-gap));
+}
+/* Both: above the HOSAKA mark and above the JUMP row, whichever is higher
+   (on a desktop the mark's top is level with the row's: review of #654). */
+.app:has(.hosaka-pulse):has(.walkside) .walklook {
+  bottom: max(
+    calc(var(--menu-bottom) + var(--menu-size) * (1 + 334 / 308) + 2 * var(--routeov-gap)),
+    calc(var(--walkside-bottom) + var(--walkside-key) + var(--routeov-gap))
+  );
 }
 @media (max-height: 520px) {
   .orbsquare.walklook { width: 88px; height: 88px; }
@@ -3752,6 +3782,11 @@ kbd {
   .app:has(.hosaka-pulse) .walklook {
     left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));
     bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));
+  }
+  /* The JUMP row steps right of the mark too: the ball stands above it. */
+  .app:has(.hosaka-pulse):has(.walkside) .walklook {
+    left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));
+    bottom: calc(var(--walkside-bottom) + var(--walkside-key) + var(--routeov-gap));
   }
 }
 
@@ -8096,6 +8131,28 @@ kbd {
   -webkit-tap-highlight-color: transparent;
 }
 .palettes__sw.is-on { outline: 2px solid var(--fg); outline-offset: 1px; border-color: var(--fg); }
+.palettes__sw.is-light { color: #eef6ff; }
+
+/* Each swatch's number, which is what a DNA calls the color ('(171)). Small and
+   a little faded so the sheet still reads as color first; the ink flips per
+   swatch (lightInk) so it reads on the darks and the near whites alike. */
+.palettes__n {
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  opacity: 0.85; /* PaletteModal INK_ALPHA picks the ink at this fade */
+  pointer-events: none;
+  user-select: none;
+}
+.palettes__sw.is-on .palettes__n { opacity: 1; font-weight: 700; }
+
+/* The color in hand, by number and hex, for a phone that never hovers. */
+.palettes__now { display: flex; align-items: center; gap: 7px; margin: 7px 0 0; font-size: 11px; color: var(--fg); }
+.palettes__now-sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(255, 255, 255, 0.25); flex-shrink: 0; }
+.palettes__now-n { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); }
+.palettes__now-hex { color: var(--dim); }
 
 .palettes__foot {
   display: flex;
@@ -8728,6 +8785,8 @@ kbd {
  * The safe-area terms are 0 today (index.html has no viewport-fit=cover);
  * they keep the bar clear of a notch if that is ever turned on. */
 .hyperbar.buildbar {
+  /* Its own width, which the header's layout reads (.buildbar__head). */
+  container: buildbar / inline-size;
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
@@ -8737,13 +8796,41 @@ kbd {
   border-color: rgba(242, 247, 255, 0.55);
   box-shadow: 0 0 14px rgba(242, 247, 255, 0.14);
 }
+/* The wrench, BUILD with its line, then EXIT at the right edge, always in
+ * the first row. RETURN TO AVATAR (only while it has something to do) goes
+ * in the row under EXIT, on the right, when the bar is narrow, and just left
+ * of EXIT when there is room (arkinox, 2026-11-09: "move Avatar up to the
+ * same row as the exit button"). The narrow bar keeps that row, its 30px
+ * and the gap above it, while the button is gone, so neither EXIT nor any
+ * row below the header moves when it comes and goes, and the cover the bar
+ * reports (hooks/useCover) holds still: nothing after a button moves
+ * (#643). BUILD's line keeps its room on a phone. */
 .buildbar__head {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto 30px;
   align-items: center;
-  gap: 10px;
+  column-gap: 10px;
+  row-gap: 6px;
 }
-.buildbar__head .hyperbar__text {
-  flex: 1;
+.buildbar__head > .buildbar__glyph { grid-column: 1; grid-row: 1; }
+.buildbar__head > .hyperbar__text { grid-column: 2; grid-row: 1; }
+.buildbar__head > .buildbar__exit { grid-column: 3; grid-row: 1; }
+.buildbar__head > .buildbar__home {
+  grid-column: 2 / 4;
+  grid-row: 2;
+  justify-self: end;
+  height: 30px;
+  padding: 0 10px;
+}
+/* Room for the button, EXIT and a BUILD line of about 150px: one row. */
+@container buildbar (min-width: 380px) {
+  .buildbar__head {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-rows: auto;
+  }
+  .buildbar__head > .buildbar__home { grid-column: 3; grid-row: 1; }
+  .buildbar__head > .buildbar__exit { grid-column: 4; }
 }
 /* Three full axis values and a plane do not fit one line beside EXIT. */
 .buildbar .hyperbar__meta {
@@ -9480,6 +9567,13 @@ a.feed__act { text-decoration: none; }
 /* A found keypair item: its line, then TAKE at the row's end. */
 .keyline { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
 .chest__status { font-size: 9px; line-height: 1.4; color: var(--warn); }
+/* Under OPEN: which key you carry fits (DECK-0004 §3.8). */
+.chest__fits { font-size: 9px; line-height: 1.4; color: var(--ok); }
+/* The LOCK block: one for chests and doors. */
+.lock { display: flex; flex-direction: column; gap: 4px; }
+.lock .legend__label { margin: 0; }
+.lock__note { font-size: 9px; line-height: 1.4; opacity: 0.7; }
+.lock__region { display: flex; flex-direction: column; gap: 4px; }
 /* Why REMOVE FROM CHEST could not, under the item modal's actions. */
 .secret__status { margin: 6px 0 0; font-size: 10px; line-height: 1.4; color: var(--warn); }
 .chest__contents {
@@ -9765,6 +9859,8 @@ a.feed__act { text-decoration: none; }
   background-image: linear-gradient(rgba(255, 176, 32, 0.16), rgba(255, 176, 32, 0.16));
   border-color: rgba(255, 176, 32, 0.35);
 }
+/* WALK's keys are held (store/walkHold.ts): a press never becomes a pan or a zoom. */
+.touchpad--mode-walk .touchpad__key { touch-action: none; }
 .touchpad--mode-walk .touchpad__key:not(:active),
 .touchops--mode-walk .touchops__cancel:not(:active) {
   background-image: linear-gradient(rgba(255, 59, 107, 0.18), rgba(255, 59, 107, 0.18));
@@ -9776,25 +9872,25 @@ a.feed__act { text-decoration: none; }
  *
  * WALK's own keys (TouchControls walkPad; arkinox, 2026-11-02): no scale.
  * FORWARD is one large key across the row FAR, up and NEAR held, taller than
- * the rest; BACKWARD stands where down was, under it; JUMP takes + and the
- * readout's cells, and DOWN takes -'s. */
+ * the rest; BACKWARD stands where down was, under it, between the sides.
+ * JUMP and DOWN have gone to the left of the screen (.walkside; arkinox,
+ * 2026-11-10), so the pad is those three rows and nothing more: anchored at
+ * the bottom, the sides and BACK now stand where JUMP and DOWN stood. */
 .touchpad--mode-walk {
-  grid-template-rows: 22px 54px 38px 38px;
+  grid-template-rows: 22px 54px 38px;
   grid-template-areas:
     "gravity gravity  gravity"
     "forward forward  forward"
-    "left    backward right"
-    "jump    jump     down";
+    "left    backward right";
 }
 /* A pin to remove gets its row back. The pad is anchored at the bottom, so no key moves. */
 .touchpad--mode-walk:has(> .touchpad__key--pin) {
-  grid-template-rows: 22px 38px 54px 38px 38px;
+  grid-template-rows: 22px 38px 54px 38px;
   grid-template-areas:
     "gravity gravity  gravity"
     "pin     .        ."
     "forward forward  forward"
-    "left    backward right"
-    "jump    jump     down";
+    "left    backward right";
 }
 .touchpad__key--forward,
 .touchpad__key--backward {
@@ -9811,8 +9907,65 @@ a.feed__act { text-decoration: none; }
   letter-spacing: 0.18em;
   font-weight: 700;
 }
-/* DOWN under GRAVITY: no flying, so it reads as off rather than as broken. */
-.touchpad--mode-walk .touchpad__key:disabled { opacity: 0.35; cursor: default; }
+/* A WALK key that is off reads as off rather than as broken. (DOWN under
+ * GRAVITY is on: it absorbs a bounce.) */
+.touchpad--mode-walk .touchpad__key:disabled,
+.walkside .touchpad__key:disabled { opacity: 0.35; cursor: default; }
+
+/* JUMP and DOWN on the left (TouchControls walkPad `left`; arkinox,
+ * 2026-11-10: "move jump/down to the left side above the menu button and
+ * below the LOOK sphere ... at the same screen height they are currently
+ * at"). The same two cells and the same width they had as the pad's bottom
+ * row, at the same height (the pad's 92px), on the menu button's left edge;
+ * the LOOK ball stands a gap above them (.orbsquare.walklook). While a
+ * HOSAKA job runs its mark breathes in that spot above the menu button, so
+ * the row steps right of it, at the same height. */
+:root {
+  --walkside-bottom: 92px;
+  --walkside-key: 38px;
+  /* Three 38px cells and two 4px gaps, the pad's own width. */
+  --walkside-width: 122px;
+}
+/* The pad lifted a row for the chain status strip (.touchpad.is-lifted,
+   116px): the row keeps level with the pad's bottom row, and the LOOK ball,
+   which stands on the same number, goes up with it (review of #654). */
+.app:has(.touchpad.is-lifted) {
+  --walkside-bottom: 116px;
+}
+.walkside {
+  position: fixed;
+  left: var(--menu-left);
+  bottom: var(--walkside-bottom);
+  z-index: 103;
+  display: grid;
+  grid-template-columns: repeat(3, var(--walkside-key));
+  grid-template-rows: var(--walkside-key);
+  gap: 4px;
+  grid-template-areas: "jump jump down";
+  transition: bottom 160ms ease;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.app:has(.hosaka-pulse) .walkside {
+  left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));
+}
+.walkside .touchpad__key { touch-action: none; }
+.walkside .touchpad__key:not(:active) {
+  background-image: linear-gradient(rgba(255, 59, 107, 0.18), rgba(255, 59, 107, 0.18));
+  border-color: rgba(255, 59, 107, 0.4);
+}
+/* From 641px wide the open chat stands at the bottom beside the menu button
+   and the controls stay up beside it (store/usePad.ts CHAT_COVERS_PAD): it
+   starts past the row instead of over it, and past the LOOK ball above it. */
+@media (min-width: 641px) {
+  .app:has(.walkside) .chatdock {
+    left: calc(var(--menu-left) + var(--walkside-width) + var(--routeov-gap));
+  }
+  .app:has(.hosaka-pulse):has(.walkside) .chatdock {
+    left: calc(var(--menu-left) + var(--menu-size) + var(--walkside-width) + 2 * var(--routeov-gap));
+  }
+}
 .touchpad__key--gravity {
   grid-area: gravity;
   font-size: 9px;
@@ -10349,3 +10502,224 @@ html.tv-broadcast body { overflow: hidden; }
   border: 0;
   cursor: pointer;
 }
+
+/* The first-arrival tutorial (hud/TutorialCoach.tsx): the /demo coach's look,
+   a centered card for the welcome, and RESTART TUTORIAL in Settings. */
+.modal__card.tutorial-card { max-width: 380px; border-color: rgba(0, 229, 255, 0.55); display: flex; flex-direction: column; gap: 10px; font-family: var(--mono); }
+.tutorial-card .modal__title { margin: 0; }
+.tutorial-card__go { flex: 0 0 auto; align-self: stretch; justify-content: center; min-height: 40px; }
+.tutorial__explain { color: var(--dim); font-size: 12px; }
+.tutorial-restart { margin: 4px 0 8px; }
+.tutorial-choice { flex: 0 0 auto; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; min-height: 0; height: auto; text-align: left; }
+.tutorial-choice__label { color: var(--accent); font-weight: 600; letter-spacing: 0.08em; }
+.tutorial-choice__about { color: var(--dim); font-size: 11px; letter-spacing: 0; text-transform: none; }
+.tutorial-card__go--done { background: none; color: var(--dim); border-color: var(--border); }
+.tutorial__note { margin: 0; color: var(--warn); font-size: 12px; }
+.tutorial__note:empty { position: absolute; }
+.tutorial-choice[aria-disabled="true"] { opacity: 0.35; cursor: default; }
+
+/* In-game mode (game/GameView.tsx, DECK-0002 §2.3): the game's world full
+   screen over cyberspace, its bar on top, its pad at the bottom. Pink, the
+   colour of play everywhere it is drawn (palette GAME). Over the workshop's
+   layer: a game is entered from cyberspace, never from the bench. */
+.gameview {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  touch-action: none;
+}
+
+.gameview__canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.gameview__bar {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.gameview__name {
+  padding: 6px 10px;
+  border: 1px solid var(--game);
+  border-radius: 8px;
+  color: var(--game);
+  background: rgba(6, 14, 22, 0.82);
+  letter-spacing: 0.08em;
+  font-size: 12px;
+}
+
+.gameview__status {
+  color: var(--game);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  opacity: 0.8;
+}
+
+.gameview__exit {
+  margin-left: auto;
+  pointer-events: auto;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--game);
+  background: rgba(6, 14, 22, 0.9);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.gameview__exit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.gameview__note {
+  position: absolute;
+  top: calc(max(12px, env(safe-area-inset-top)) + 46px);
+  left: 16px;
+  right: 16px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(6, 14, 22, 0.88);
+  border: 1px solid rgba(255, 122, 217, 0.5);
+  font-size: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.gamepad {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  pointer-events: none;
+}
+
+.gamepad__dirs {
+  display: grid;
+  grid-template-columns: repeat(3, 52px);
+  grid-template-rows: repeat(3, 52px);
+  gap: 4px;
+}
+
+.gamepad__lift {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gamepad__btn {
+  pointer-events: auto;
+  min-width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 122, 217, 0.55);
+  background: rgba(6, 14, 22, 0.75);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  -webkit-touch-callout: none;
+  user-select: none;
+  touch-action: none;
+}
+
+.gamepad__btn:active { background: rgba(255, 122, 217, 0.25); }
+.gamepad__btn--forward { grid-column: 2; grid-row: 1; }
+.gamepad__btn--left { grid-column: 1; grid-row: 2; }
+.gamepad__btn--right { grid-column: 3; grid-row: 2; }
+.gamepad__btn--back { grid-column: 2; grid-row: 3; }
+.gamepad__lift .gamepad__btn { min-width: 72px; }
+.gamepad__btn--jump { min-width: 88px; height: 72px; letter-spacing: 0.08em; }
+.gamepad[hidden] { display: none; }
+
+/* The key door and the clock (lib/games/progress.ts): the clock and the key
+   on the bar, TAKE or OPEN above the pad by the key and the door, and the
+   exit card at the exit zone. */
+.gameview__clock {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(6, 14, 22, 0.82);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+
+.gameview__key {
+  display: inline-flex;
+  padding: 5px 7px;
+  border-radius: 8px;
+  border: 1px solid #ffd23f;
+  color: #ffd23f;
+  background: rgba(6, 14, 22, 0.82);
+}
+
+.gameview__act {
+  position: absolute;
+  left: 50%;
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 180px);
+  transform: translateX(-50%);
+}
+
+.gameview__actbtn {
+  padding: 12px 22px;
+  border-radius: 10px;
+  border: 1px solid #ffd23f;
+  background: rgba(6, 14, 22, 0.9);
+  color: #ffd23f;
+  font: inherit;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.gameview__actbtn:disabled { opacity: 0.5; cursor: default; }
+
+.gameview__locked {
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(6, 14, 22, 0.88);
+  color: var(--dim);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+}
+
+.gameview__card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 220px;
+  padding: 20px 24px;
+  border-radius: 12px;
+  border: 1px solid var(--game);
+  background: rgba(6, 14, 22, 0.94);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.gameview__cardtitle { color: var(--game); letter-spacing: 0.14em; font-size: 13px; }
+.gameview__cardtime { font-size: 34px; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+.gameview__exit--card { margin-left: 0; }
+
+.hyperbar--game { font-family: inherit; text-align: left; cursor: pointer; border-color: rgba(255, 122, 217, 0.6); }
+.hyperbar--game .hyperbar__label { color: var(--game); }

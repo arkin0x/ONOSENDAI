@@ -13,6 +13,7 @@ import { CloudUpload, Footprints, OctagonAlert } from 'lucide-react'
 import { Explanation } from './Explanation'
 import { ItemIcon } from './ItemIcon'
 import { SecretsModal } from './SecretsModal'
+import { useRoomKeys } from '../store/useKeyring'
 import { useSecrets } from '../store/useSecrets'
 import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
@@ -71,7 +72,8 @@ export function ProofPanel(): JSX.Element {
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
   const moveMode = useCyberspace((s) => s.moveMode)
-  const heldCount = useSecrets((s) => Object.keys(s.keys).length)
+  // Every key on the KEYRING: regions held and rooms opened.
+  const heldCount = useSecrets((s) => Object.keys(s.keys).length) + useRoomKeys().length
   // In the store, so RETURN from a region can bring the list back.
   const secrets = useSecrets((s) => s.open)
   // This machine's hop ceiling as the commit attempts it: the protocol cap,
@@ -278,7 +280,7 @@ export function ProofPanel(): JSX.Element {
       {/* Every region you hold the key to, and what it cost to get there. */}
       <div className="proof__secrets">
         <button className="avatars__go" onClick={() => useSecrets.getState().setOpen(true)}>
-          <ItemIcon type="key" size={12} /> REGION KEYS{heldCount > 0 ? ` (${heldCount})` : ''}
+          <ItemIcon type="key" size={12} /> KEYRING{heldCount > 0 ? ` (${heldCount})` : ''}
         </button>
       </div>
       {secrets && <SecretsModal onClose={() => useSecrets.getState().setOpen(false)} />}

@@ -1,5 +1,6 @@
 /**
- * SecretsModal.tsx — REGION KEYS: every region you can open.
+ * SecretsModal.tsx: KEYRING, every key you carry (arkinox, 2026-11-10: REGION
+ * KEYS renamed KEYRING). The regions you can open, and the rooms you opened.
  *
  * A key is a number you computed, not a password you were given: the Cantor
  * root of one aligned region, hashed for the key and again for the lookup id
@@ -39,6 +40,7 @@ import { SECRETS_MAX, useSecrets, heldList, type HeldKey, type Place, type Secre
 import { sizeLabel } from '../scene/SecretRegions'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { ConfirmModal } from './ConfirmModal'
+import { useRoomKeys } from '../store/useKeyring'
 import { Explanation } from './Explanation'
 import { useEscape } from '../hooks/useEscape'
 import { regionKeyQuote } from '../lib/deployPlan'
@@ -55,6 +57,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   const placesVersion = useSecrets((s) => s.placesVersion)
   const rescan = useSecrets((s) => s.rescan)
   const discovered = useShards((s) => s.discovered)
+  const roomCount = useRoomKeys().length
   const position = useCyberspace((s) => s.position)
   const [forgetAll, setForgetAll] = useState(false)
   const [forgetPlaces, setForgetPlaces] = useState(false)
@@ -192,11 +195,11 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   useEscape('modal', true, onClose)
 
   return createPortal(
-    <div className="modal" role="dialog" aria-label="Region keys" aria-modal="true" onPointerDown={onClose}>
+    <div className="modal" role="dialog" aria-label="Keyring" aria-modal="true" onPointerDown={onClose}>
       <div className="modal__card secrets__box" onPointerDown={(e) => e.stopPropagation()}>
         <header className="panel__head secrets__head">
-          <h2><ItemIcon type="key" size={14} /> Region keys</h2>
-          <span className="tag">{list.length === 0 ? 'NO KEYS' : `${list.length} REGION${list.length === 1 ? '' : 'S'}`}</span>
+          <h2><ItemIcon type="key" size={14} /> Keyring</h2>
+          <span className="tag">{list.length + roomCount === 0 ? 'NO KEYS' : [list.length > 0 ? `${list.length} REGION${list.length === 1 ? '' : 'S'}` : '', roomCount > 0 ? `${roomCount} ROOM${roomCount === 1 ? '' : 'S'}` : ''].filter(Boolean).join(' · ')}</span>
           <button className="targets__remove secrets__close" onClick={onClose} aria-label="Close" title="Close">✕</button>
         </header>
 
@@ -361,6 +364,8 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
             </ul>
             <ShowMore shown={keysShown} total={list.length} what="keys" onMore={() => setKeysShown((n) => n + PAGE)} />
           </section>
+
+          <RoomKeys />
 
           <section className="secrets__section" aria-label="Scanned places">
             <div className="secrets__section-head">
@@ -569,4 +574,31 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
+ * ROOMS on the KEYRING: the room keys you carry, from doors you opened and
+ * rooms you hid in (store/useKeyring roomKeysNow). A chest or door can be
+ * locked to one (DECK-0004 §3.8). Nothing to forget here: a room key comes
+ * back whenever its door opens.
+ */
+function RoomKeys(): JSX.Element | null {
+  const rooms = useRoomKeys()
+  if (rooms.length === 0) return null
+  return (
+    <section className="secrets__section" aria-label="Rooms">
+      <div className="secrets__section-head">
+        <span className="login__label">Rooms</span>
+        <span className="tag">{rooms.length}</span>
+      </div>
+      <ul className="secrets__list">
+        {rooms.map((r) => (
+          <li key={r.lookupId} className="secrets__row">
+            <span className="secrets__where">{r.kind === 'room' && r.name ? r.name : 'a room'}</span>
+            <span className="secrets__id">{r.lookupId.slice(0, 16)}…</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
 }

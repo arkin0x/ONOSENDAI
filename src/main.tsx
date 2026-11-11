@@ -12,9 +12,14 @@ import { chainReadyToDraw } from './store/useCyberspace'
 import { hydrateHidden } from './store/hiddenStorage'
 import { wireLocalObjects } from './store/localObjects'
 import { diagWanted } from './lib/diagGate'
+import { applyTutorialFlag, noteLanding } from './tutorial/gate'
 
 // A tap on a modal's backdrop only closes it (lib/tapGuard.ts).
 installTapGuard(window)
+// The first-arrival tutorial (tutorial/gate.ts): where the page landed, and
+// ?tutorial=1 or =0 setting this device's switch, before anything draws.
+noteLanding(location.pathname)
+applyTutorialFlag()
 // /tv?broadcast=1, the 24/7 stream: no pointer on the page (lib/tv/broadcast.ts).
 markBroadcastPage()
 // Your own objects placed by reference are drawn from your workshop first (store/localObjects.ts).

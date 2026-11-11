@@ -16,11 +16,14 @@
  * | A / D | left / right | the side arrows |
  * | Space or R | up one cell | JUMP |
  * | C or F | down one cell | DOWN |
- * | W or S with A or D held | 45 degrees to that side of the way you face | (none) |
+ * | W or S with A or D held | 45 degrees to that side of the way you face | FORWARD or BACK held with a side arrow |
  *
  * Forward and back go the way you face, snapped to 8 directions: a diagonal
- * near 45 degrees, and a slide along a wall you are angled into
- * (lib/walkSlide.ts). The pad's FORWARD and BACKWARD do the same.
+ * when the facing is 22.5 to 45 degrees off the nearest axis, one step on
+ * both axes, and a slide along a wall you are angled into
+ * (lib/walkSlide.ts); A and D go along the facing's right the same way. The
+ * pad's keys do the same. A held key walks from the press on, its own
+ * repeats ignored (store/walkHold.ts, walkHeldDir below).
  *
  * Under GRAVITY (store/useWalk.ts) up is a jump and down does nothing; Z,
  * answered by the keyboard itself, turns gravity on and off.
@@ -30,6 +33,13 @@
  */
 
 import type { MoveName } from './moves'
+
+/** A held WALK direction (store/walkHold.ts): forward +1 or back -1, right +1 or left -1, up +1 or down -1. */
+export interface HeldDir {
+  fwd: -1 | 0 | 1
+  strafe: -1 | 0 | 1
+  vert: -1 | 0 | 1
+}
 
 export const WALK_KEYS: Readonly<Record<string, MoveName>> = {
   KeyW: 'away',
@@ -58,23 +68,18 @@ export function walkMove(e: WalkKeyEvent): MoveName | null {
   return WALK_KEYS[e.code] ?? null
 }
 
-/** A WALK press with the side key held with it: `strafe` +1 right, -1 left, 0 none (store/useWalk.ts press). */
-export interface WalkPress { name: MoveName; strafe: -1 | 0 | 1 }
-
 /**
- * The press a WALK key makes given the letters held with it (arkinox,
- * 2026-11-03): W or S with A or D held is a step 45 degrees to that side of
- * where you face, forward or back (lib/walkSlide.ts), whichever of the two
- * the keyboard repeats. A or D alone, or with both W and S held, is the side
- * step it always was. `held` is the WALK letters down now, this one included.
+ * The direction a WALK key holds (store/walkHold.ts), which combines with
+ * the others held: W with D held is forward and right, whichever of the
+ * two went down last; W with S, or A with D, cancel.
  */
-export function walkPress(move: MoveName, code: string, held: ReadonlySet<string>): WalkPress {
-  const strafe = ((held.has('KeyD') ? 1 : 0) - (held.has('KeyA') ? 1 : 0)) as -1 | 0 | 1
-  if (code === 'KeyW' || code === 'KeyS') return { name: move, strafe }
-  if (code === 'KeyA' || code === 'KeyD') {
-    const w = held.has('KeyW')
-    const s = held.has('KeyS')
-    if (w !== s && strafe !== 0) return { name: w ? 'away' : 'toward', strafe }
+export function walkHeldDir(move: MoveName): HeldDir {
+  switch (move) {
+    case 'away': return { fwd: 1, strafe: 0, vert: 0 }
+    case 'toward': return { fwd: -1, strafe: 0, vert: 0 }
+    case 'right': return { fwd: 0, strafe: 1, vert: 0 }
+    case 'left': return { fwd: 0, strafe: -1, vert: 0 }
+    case 'up': return { fwd: 0, strafe: 0, vert: 1 }
+    case 'down': return { fwd: 0, strafe: 0, vert: -1 }
   }
-  return { name: move, strafe: 0 }
 }

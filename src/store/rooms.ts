@@ -49,6 +49,7 @@ import { useCeremony } from './useCeremony'
 import { openedByHand, rememberOpened, shutInSession } from './useOpenedChests'
 import { belowPending, closeArriving, closedByMe, recordsOfRoom, refreshClosedDoors, roomShut, writeClosed, type ClosedRecord } from './closedDoors'
 import { doorSecret, doorSecretOnlySaid, keepDoorSecret } from './doorSecrets'
+import { lookupLock, noteRoomKey } from './useKeyring'
 
 export { doorSecret, doorSecretOnlySaid, keepDoorSecret, resetDoorSecrets } from './doorSecrets'
 
@@ -96,7 +97,10 @@ export async function openRoom(door: Hidden, secretHex: string): Promise<OpenedR
   const events = (await query({ kinds: [HIDDEN_KIND], authors: [signer], '#d': [lookupId] })).filter((e) => e.pubkey === signer)
   const newest = events.sort((a, b) => b.created_at - a.created_at)[0]
   if (!newest) return { items: [], found: false, lookupId, keyHex }
-  const items = await unbag(newest, key, resolveReference, { at: regionBase(door.at, h), plane: door.plane }, h, undefined, { doorId: door.eventId })
+  // A room is in its door's plane, and holds no other (DECK-0004 §3.7.2, One
+  // plane): an entry whose C is in the other plane lies outside it and is
+  // dropped. One with no C took the door's plane from the origin, and stays.
+  const items = (await unbag(newest, key, resolveReference, { at: regionBase(door.at, h), plane: door.plane }, h, undefined, { doorId: door.eventId })).filter((it) => it.plane === door.plane)
   return { items, found: true, lookupId, keyHex }
 }
 
@@ -162,7 +166,7 @@ export function openDoorNow(door: Hidden, secretHex: string, how?: { quiet: true
     if (d.eventId === door.eventId || !d.chest) continue
     // A reload's reopening never opens a door you closed (CLOSE): only OPEN does.
     if (how?.quiet && closedByMe(me, d.eventId, d.chest.lockPubkey)) continue
-    const own = ownSecret(d.chest, openerFor(d.chest, keys, me))
+    const own = ownSecret(d.chest, openerFor(d.chest, keys, me, lookupLock))
     if (own !== null && own !== secretHex) continue
     if (own === null && doorSecret(me, d.eventId) && !doorSecretOnlySaid(me, d.eventId)) continue
     keepDoorSecret(me, d.eventId, secretHex, own === null ? { onlySaid: true } : undefined)
@@ -191,6 +195,8 @@ export async function fillRoom(door: Hidden, secretHex: string, mark?: (items: H
   const me = useCyberspace.getState().identity.pubkey
   const opened = await openRoom(door, secretHex)
   if (useCyberspace.getState().identity.pubkey !== me) return null
+  // Its key is on your keyring now, a room key a chest or door can be locked to (DECK-0004 §3.8).
+  noteRoomKey(me, { lookupId: opened.lookupId, keyHex: opened.keyHex, doorId: door.eventId, name: door.chest?.name ?? '' })
   // Closed while its room was on the way (CLOSE), this door or any of its room: the room stays dissolved.
   if (roomShutFor(me, door)) return null
   // The room had been closed: every door that comes in with it starts closed, until its own OPEN.

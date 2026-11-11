@@ -248,7 +248,8 @@ describe('the Settings panel', () => {
 describe('the switches have one home: their old controls are gone', () => {
   it('the Movement proof panel has no layer chips and no switch', () => {
     const html = renderToString(createElement(ProofPanel))
-    expect(html).toContain('REGION KEYS')
+    expect(html).toContain('KEYRING')
+    expect(html).not.toContain('REGION KEYS')
     expect(html).not.toContain('proof__layers')
     expect(html).not.toContain('hX BOXES')
     expect(html).not.toContain('role="switch"')
@@ -262,12 +263,37 @@ describe('the switches have one home: their old controls are gone', () => {
     expect(html).not.toContain('role="switch"')
   })
 
-  it('the Region keys list has no draw-in-the-scene checkbox', () => {
+  it('the KEYRING list (once Region keys) has no draw-in-the-scene checkbox', () => {
     if (typeof document === 'undefined') (globalThis as { document?: unknown }).document = { body: {} }
     const html = renderToString(createElement(SecretsModal, { onClose: () => {} }))
-    expect(html).toContain('Region keys')
+    expect(html).toContain('Keyring')
     expect(html).not.toContain('secrets-draw')
     expect(html).not.toContain('Draw them in the scene')
     expect(html).not.toContain('ui-checkbox')
+  })
+})
+
+describe('the Tutorial row (first-arrival tutorial, off in production)', () => {
+  it('is not there until ?tutorial=1 or =0 was opened on this device', async () => {
+    const { useTutorialSwitch } = await import('../../tutorial/gate')
+    useTutorialSwitch.setState({ value: null })
+    expect(view()).not.toContain('view-tutorial')
+    expect(view()).not.toContain('RESTART TUTORIAL')
+    expect(view()).not.toContain('Tutorial walks')
+  })
+
+  it('shows its switch either way once offered, and RESTART only while on, off while the tutorial runs', async () => {
+    const { useTutorialSwitch } = await import('../../tutorial/gate')
+    const { useTutorial } = await import('../../store/useTutorial')
+    useTutorialSwitch.setState({ value: false })
+    expect(switchTag(view(), 'view-tutorial')).toContain('aria-checked="false"')
+    expect(view()).not.toContain('RESTART TUTORIAL')
+    useTutorialSwitch.setState({ value: true })
+    expect(switchTag(view(), 'view-tutorial')).toContain('aria-checked="true"')
+    expect(view()).toMatch(/<button class="avatars__go tutorial-restart">RESTART TUTORIAL<\/button>/)
+    useTutorial.setState({ active: true })
+    expect(view()).toMatch(/<button class="avatars__go tutorial-restart" disabled="">RESTART TUTORIAL<\/button>/)
+    useTutorial.setState({ active: false })
+    useTutorialSwitch.setState({ value: null })
   })
 })

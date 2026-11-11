@@ -8,7 +8,9 @@
  *
  * WALK has its own keys, first-person style (lib/walkKeys.ts): W forward,
  * S back, A and D sideways, Space or R up, C or F down, every press a step;
- * W or S with A or D held steps diagonally, 45 degrees to that side. They are answered before anything else, so in WALK Space never
+ * W or S with A or D held steps diagonally, 45 degrees to that side. A held
+ * key walks from the press on (store/walkHold.ts): the keyboard's own
+ * repeats, which came after a pause, are ignored. They are answered before anything else, so in WALK Space never
  * commits, scrolls or presses a focused button. Z switches WALK's GRAVITY
  * (store/useWalk.ts); the workshop bench's own Z (undo) is never reached
  * from here, since nothing of WALK's is answered with the workshop open.
@@ -20,6 +22,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { closeScrubber, useHyperspace } from '../store/useHyperspace'
 import { useTv } from '../store/useTv'
 import { useWorkshop } from '../store/useWorkshop'
+import { useGame } from '../store/useGame'
 import { useShards } from '../store/useShards'
 import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
 import { useChat } from '../store/useChat'
@@ -28,8 +31,13 @@ import { moveDirection, type MoveName } from '../lib/moves'
 import type { RotateDirection } from '../lib/space'
 import { stepBuild } from '../store/buildStep'
 import { useWalk } from '../store/useWalk'
-import { walkMove, walkPress } from '../lib/walkKeys'
+import { walkHeldDir, walkMove } from '../lib/walkKeys'
+import { holdEnd, holdReleaseAll, holdStart } from '../store/walkHold'
+import { addWalkInputCloser, setWalkMenuCovering, walkMenuCovering } from '../store/walkInput'
 import { canFly, useViewFly } from '../lib/viewFly'
+
+// Cyberspace TV is watching only: WALK's input is closed while it is on (store/walkInput.ts).
+addWalkInputCloser(() => useTv.getState().on)
 
 const MOVE_KEYS: Record<string, MoveName> = {
   KeyW: 'up',
@@ -53,9 +61,8 @@ const ROTATE_KEYS: Record<string, RotateDirection> = {
  * (arkinox, 2026-10-01: "turn off the cyberspace controls while the menu is
  * open"). Set by App, which knows; Escape still works.
  */
-let menuCovering = false
 export function setMenuCovering(covering: boolean): void {
-  menuCovering = covering
+  setWalkMenuCovering(covering)
 }
 
 /**
@@ -80,13 +87,14 @@ export function escapeKey(event: Pick<KeyboardEvent, 'code' | 'defaultPrevented'
  * covered and the workshop shut, so the bench keeps its own Z (undo).
  */
 export function walkKeyDown(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey' | 'preventDefault'> & { repeat?: boolean }): boolean {
-  if (!useCyberspace.getState().walking || menuCovering || useWorkshop.getState().open) return false
+  if (!useCyberspace.getState().walking || walkMenuCovering() || useWorkshop.getState().open || useGame.getState().session) return false
   const step = walkMove(event)
   if (step) {
     event.preventDefault()
-    if (WALK_LETTERS.has(event.code)) walkHeld.add(event.code)
-    const press = walkPress(step, event.code, walkHeld)
-    useWalk.getState().press(press.name, press.strafe)
+    // Held, the key walks from the press on (store/walkHold.ts), so the
+    // keyboard's repeats, which begin after a pause, add nothing. With the
+    // input closed (a modal up) the key is still WALK's, and holds nothing.
+    if (!event.repeat) holdStart(`key:${event.code}`, walkHeldDir(step))
     return true
   }
   // Space is WALK's up even when it is not a step (a modifier held):
@@ -104,18 +112,33 @@ export function walkKeyDown(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shi
   return false
 }
 
-/** The letters that combine into a diagonal (lib/walkKeys.ts walkPress), and those of them held down now. */
-const WALK_LETTERS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD'])
-const walkHeld = new Set<string>()
-
-/** A key let go: no longer held for a diagonal. */
+/** A key let go: it stops walking, and is no longer held into a diagonal (store/walkHold.ts). */
 export function walkKeyUp(code: string): void {
-  walkHeld.delete(code)
+  holdEnd(`key:${code}`)
 }
 
-/** Every key let go: the window lost focus, so no keyup will come for what was held. */
+/**
+ * Everything held let go, keys and pad alike: the window lost focus or the
+ * page was hidden, so no keyup or pointerup will come for what was held.
+ */
 export function walkKeysReleased(): void {
-  walkHeld.clear()
+  holdReleaseAll()
+}
+
+/**
+ * Meta (Cmd) down or up, or any key with it held: everything held is let go
+ * (review of #651). macOS sends no keyup for a key let go while Cmd is down,
+ * so W held through Cmd+Tab would otherwise walk on forever. True when it let go.
+ */
+export function walkMetaRelease(event: Pick<KeyboardEvent, 'code' | 'metaKey'> & { key?: string }): boolean {
+  if (!(event.metaKey || event.code === 'MetaLeft' || event.code === 'MetaRight' || event.key === 'Meta')) return false
+  holdReleaseAll()
+  return true
+}
+
+/** The page hidden: no keyup or pointerup will come for what was held. */
+function pageHidden(): void {
+  if (typeof document !== 'undefined' && document.hidden) holdReleaseAll()
 }
 
 /** X in WALK: stop the steps still to prove (a fall still in the air is some), or with none, back to HOP. */
@@ -139,11 +162,15 @@ function flyKeysReleased(): void {
 export function useKeyboard(): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // Cmd swallows keyups on macOS: let go of every held walk first.
+      walkMetaRelease(event)
       // Escape closes the top layer even from a field: a modal that focuses
       // its own input (ITEM FEED's search, a chest's name, the login box)
       // otherwise could not be closed from the keyboard at all (pre-class
       // smoke test, 2026-10-16). A field that uses Escape itself (the chat
       // line's mention list) says so with preventDefault, and keeps it.
+      // In a game nothing of cyberspace's is on screen, so Escape closes none of it out of sight.
+      if (useGame.getState().session) return
       if (escapeKey(event)) return
       // Cyberspace TV is watching only: no key moves, zooms or commits.
       if (useTv.getState().on) return
@@ -155,7 +182,7 @@ export function useKeyboard(): void {
       if (walkKeyDown(event)) return
       // Let the browser keep its own shortcuts.
       if (event.metaKey || event.ctrlKey || event.altKey) return
-      if (menuCovering) return
+      if (walkMenuCovering()) return
       // Space and Enter on a focused control press that control. Space is
       // COMMIT here, a proof and possibly a paid one, so a Space meant for a
       // focused switch, checkbox or button used to try to move instead
@@ -163,6 +190,8 @@ export function useKeyboard(): void {
       // their shortcuts with a control focused.
       if ((event.code === 'Space' || event.key === 'Enter') && (event.target as HTMLElement | null)?.closest?.('button, a[href], select, summary, [role="switch"], [role="checkbox"], [role="button"], [role="menuitem"], [role="tab"]')) return
       if (useWorkshop.getState().open) return
+      // In a game its own keys answer (game/GameView.tsx): nothing here moves you in cyberspace meanwhile.
+      if (useGame.getState().session) return
 
       const store = useCyberspace.getState()
       // What is on screen, which under free orbit is not the snapped frame.
@@ -321,6 +350,7 @@ export function useKeyboard(): void {
 
     const onKeyUp = (event: KeyboardEvent) => {
       walkKeyUp(event.code)
+      walkMetaRelease(event)
       // R or F let go: VIEW's fly from that key stops.
       if (event.code === 'KeyR' || event.code === 'KeyF') flyKeyUp(event.code)
       // A button with focus activates on Space's keyup: in WALK that Space
@@ -331,7 +361,11 @@ export function useKeyboard(): void {
     window.addEventListener('keyup', onKeyUp)
     window.addEventListener('blur', walkKeysReleased)
     window.addEventListener('blur', flyKeysReleased)
+    // A page hidden (a tab switch, a phone's home button) sends no keyup.
+    const doc = typeof document === 'undefined' ? null : document
+    doc?.addEventListener('visibilitychange', pageHidden)
     return () => {
+      doc?.removeEventListener('visibilitychange', pageHidden)
       window.removeEventListener('blur', flyKeysReleased)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)

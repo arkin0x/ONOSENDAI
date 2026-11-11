@@ -96,6 +96,18 @@ function labelOf(x: { type: HiddenType; text?: string; shard?: ShardModel; key?:
   return { label: token ? `${cashuLabel(token)} hidden here` : raw ? 'cashu token hidden here' : messagePreview(x.text ?? '', 48), coin: raw !== null }
 }
 
+/**
+ * Where a bag's opened items are, by plane: one bag holds a region and its
+ * twin in the other plane (spec §7.6 Planes), so its items can stand in
+ * either, and each row says its own when they differ (`mixed`).
+ */
+export function wherePlanes(opened: ReadonlyArray<{ plane: 0 | 1 }>): { label: string; mixed: boolean } {
+  if (opened.length === 0) return { label: 'hidden', mixed: false }
+  const planes = new Set(opened.map((o) => o.plane))
+  if (planes.size > 1) return { label: 'known · dataspace and ideaspace', mixed: true }
+  return { label: planes.has(0) ? 'known · dataspace' : 'known · ideaspace', mixed: false }
+}
+
 /** The bag's items this client can see: found by its scan, or its own. */
 function openedItems(item: LootItem, discovered: ReturnType<typeof useShards.getState>['discovered'], mine: ReturnType<typeof useShards.getState>['mine'], muted: Muted, me: string): OpenedItem[] {
   const out = new Map<string, OpenedItem>()
@@ -165,6 +177,7 @@ export function LootDetail(): JSX.Element | null {
   // A thing that came out of a chest open in this bag is listed under that
   // chest, with its TAKE, and not again on its own (review of #519).
   const opened = listedOnce(openedItems(item, discovered, mine, muted, me), (o) => o.eventId, chestOpen)
+  const where = wherePlanes(opened)
   const close = (): void => useLootView.getState().select(null)
 
   const view = (o: OpenedItem): void => {
@@ -219,7 +232,7 @@ export function LootDetail(): JSX.Element | null {
           <div><dt>Region</dt><dd>{regionLabel(item.height)}{item.height !== null && <span className="lootd__dim"> (height {item.height})</span>}</dd></div>
           {item.sector && <div><dt>Sector</dt><dd title="The hider's sector hint (spec §7.7): the bag is somewhere in this cube of 2^30 gibsons on a side">{item.sector}</dd></div>}
           <div><dt>Payload</dt><dd>{formatBytes(item.bytes)}</dd></div>
-          <div><dt>Where</dt><dd>{opened.length > 0 ? (opened[0].plane === 0 ? 'known · dataspace' : 'known · ideaspace') : 'hidden'}</dd></div>
+          <div><dt>Where</dt><dd>{where.label}</dd></div>
         </dl>
 
         {/* What the key opened but this client could not read, said rather than
@@ -246,6 +259,7 @@ export function LootDetail(): JSX.Element | null {
                   : o.type === 'chest' && o.chest
                     ? <ChestBlock id={o.eventId} chest={o.chest} author={item.author} verified place={o.place} />
                     : <span className="lootd__item-label" title={o.label}>{o.label}</span>}
+                {where.mixed && <span className={`plane plane--${o.plane} viewat__plane`} title={o.plane === 0 ? 'In dataspace' : 'In ideaspace'}>{o.plane === 0 ? 'D' : 'I'}</span>}
                 <span className="lootd__acts">
                   <button className="secret__act lootd__view" onClick={() => view(o)}><Rotate3d size={12} strokeWidth={2.25} aria-hidden />VIEW</button>
                   {o.type === 'audio' && <button className="secret__act lootd__view" onClick={() => details(o)} title="Its card: PLAY and DOWNLOAD">DETAILS</button>}

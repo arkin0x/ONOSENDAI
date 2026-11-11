@@ -104,6 +104,7 @@ import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as 
 import { openedByHand, restoreOpened } from './useOpenedChests'
 import { closeArriving, closedByMe, closedDoorIds } from './closedDoors'
 import { hiderKeys, madeKeys, openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
+import { lookupLock, startKeyring } from './useKeyring'
 import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
@@ -412,6 +413,19 @@ export interface ChestLock {
   pubkey: string
   /** For the bar and the ghost: the key's name, or "a person". */
   label: string
+  /** A region's or a room's lock (DECK-0004 §3.8), not an item's or a person's; absent for those. */
+  kind?: 'region' | 'room'
+  /** How REGION picked it, so the composer comes back to the same choice. */
+  region?: RegionChoice
+  /** Which room key ROOM picked: its room bag's `d`. */
+  room?: { lookupId: string }
+}
+
+/** A region lock as the LOCK block picked it: around the chest, around you, or a key from your keyring, and its height. */
+export interface RegionChoice {
+  from: 'chest' | 'me' | 'keyring'
+  height: number
+  lookupId?: string
 }
 
 /**
@@ -2072,6 +2086,31 @@ function mergeEntries(a: BagEntry[], b: BagEntry[]): BagEntry[] {
  */
 const sealedByItem = new Map<string, { lookupId: string; ref: Reference; event: NostrEvent }>()
 
+/**
+ * The plane of every room bag this session derived the lookup id of, by that
+ * lookup id. A room is in its door's plane and holds no other (DECK-0004
+ * §3.7.2, One plane), while an ordinary bag holds a region and its twin
+ * (spec §7.6 Planes): gatherInners reads this to drop, from a room bag's
+ * rewrite, an entry whose C is in the other plane, as invalid.
+ */
+const roomPlanes = new Map<string, Plane>()
+
+/** A room's lookup id (DECK-0004 §3.7.2), recorded with its door's plane (roomPlanes). */
+function roomLookupIn(key: Uint8Array, plane: Plane): string {
+  const lookupId = roomLookupId(key)
+  roomPlanes.set(lookupId, plane)
+  return lookupId
+}
+
+/** The plane a bag entry names: an item's C, a reference's coordinate; null when it names none. */
+function planeOfEntry(e: BagEntry): Plane | null {
+  if (isReference(e)) {
+    const c = e[3]
+    return typeof c === 'string' && /^[0-9a-f]{64}$/.test(c) ? (parseInt(c[63], 16) & 1) as Plane : null
+  }
+  return eventPlace(e)?.plane ?? null
+}
+
 /** A bag's entries as a rewrite starts from them (gatherInners): the relays' and this device's, its settings, and the relays' newest version alone. */
 interface Gathered {
   entries: BagEntry[]
@@ -2588,7 +2627,9 @@ export const useShards = create<ShardsState>((set, get) => {
       }
       // What a rotation that did not finish replaced stays out, whichever write comes first.
       const replaced = new Set(items.flatMap((d) => d.rotating ?? []).map((o) => o.doorId))
-      relay = (newest ? await bagEntries(newest, key) : []).filter((e) => isReference(e) || !replaced.has(e.id))
+      // A room bag holds its door's plane only (roomPlanes): an entry in the other plane is dropped, as invalid.
+      const roomPlane = roomPlanes.get(lookupId)
+      relay = (newest ? await bagEntries(newest, key) : []).filter((e) => (isReference(e) || !replaced.has(e.id)) && (roomPlane === undefined || [null, roomPlane].includes(planeOfEntry(e))))
       still()
       // The bag's own sealed entries, opened: what each holds is what the
       // rewrite counts (§7.7) and what a row of yours is matched against when
@@ -3018,11 +3059,11 @@ export const useShards = create<ShardsState>((set, get) => {
     if (doors.some((d) => d.rotating)) return null
     const ids = new Set(doors.map((d) => d.eventId))
     const behind = get().mine.find((m) => !!m.room && ids.has(m.room.doorId) && inItsBag(m) && !m.putBack)
-    if (behind) return { key: hexToBytes(behind.keyHex), lookupId: behind.lookupId }
+    if (behind) { roomPlanes.set(behind.lookupId, door.plane); return { key: hexToBytes(behind.keyHex), lookupId: behind.lookupId } }
     const plain = doors.find((d) => !d.room && d.height === h)
     if (!plain) return null
     const key = roomKey(hexToBytes(plain.keyHex), hexToBytes(secretHex))
-    return { key, lookupId: roomLookupId(key) }
+    return { key, lookupId: roomLookupIn(key, door.plane) }
   }
 
   /** A room's bag: held here (heldRoomBag), or made from its region's key (doorLocation). */
@@ -3033,7 +3074,7 @@ export const useShards = create<ShardsState>((set, get) => {
     if (held) return { ...held, height }
     const place = await doorLocation(door)
     const key = roomKey(place.key, hexToBytes(secretHex))
-    return { key, lookupId: roomLookupId(key), height: place.height }
+    return { key, lookupId: roomLookupIn(key, door.plane), height: place.height }
   }
 
   /** Your door rows of one room, this one included (§3.7.5), among `rows` (the signed-in identity's unless named). */
@@ -3059,7 +3100,7 @@ export const useShards = create<ShardsState>((set, get) => {
     if (cyber().identity.pubkey !== owner) return SWITCHED
     const place = await doorLocation(d)
     const key = roomKey(place.key, hexToBytes(secretHex))
-    const lookupId = roomLookupId(key)
+    const lookupId = roomLookupIn(key, d.plane)
     // Whichever door a row names: one replaced from another device leaves them naming it (pruneGoneRows).
     // In the room's own bag is what makes them this room's.
     const rows = (): MyDeployment[] => {
@@ -3103,6 +3144,11 @@ export const useShards = create<ShardsState>((set, get) => {
       throw err
     }
     if (cyber().identity.pubkey !== owner) return SWITCHED
+    // A room is in its door's plane (DECK-0004 §3.7.2, One plane): an entry in
+    // the other plane is no find, and a rewrite drops it as invalid, so it is
+    // counted as read below, never as one that blocks the rewrite.
+    const otherPlane = read.filter((h) => h.plane !== d.plane)
+    read = read.filter((h) => h.plane === d.plane)
     get().addDiscovered(read)
     // Filed under this door: what the relay names by any door of the room is one room.
     // A row's item may stand in a sealed entry: its id answers for it (entryKeys, read just now by unbag).
@@ -3110,6 +3156,7 @@ export const useShards = create<ShardsState>((set, get) => {
     // Deleted here and still on a relay, because none took the rewrite: read, and gone.
     const { deleted } = get()
     for (const h of read) if (deleted[h.eventId] && (h.ref ?? h.inner)) { held.add(entryKey((h.ref ?? h.inner)!)); if (h.sealedRef) held.add(entryKey(h.sealedRef)) }
+    for (const h of otherPlane) if (h.ref ?? h.inner) { held.add(entryKey((h.ref ?? h.inner)!)); if (h.sealedRef) held.add(entryKey(h.sealedRef)) }
     const standing = await bagEntries(newest, key)
     // The room bag as the relays hold it, for a caller that retracts what it named (resealDoor).
     if (seen) seen.entries = standing
@@ -3821,7 +3868,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!d?.chest) return 'Only the chest’s hider can change what is inside it, from the device that hid it.'
       if (d.sealed) return d.sealed
       const cs = cyber()
-      const opener = openerFor(d.chest, hiderKeys(useInventory.getState().items, get().mine, cs.identity.pubkey), cs.identity.pubkey)
+      const opener = openerFor(d.chest, hiderKeys(useInventory.getState().items, get().mine, cs.identity.pubkey), cs.identity.pubkey, lookupLock)
       if (!opener) return 'Opening the chest needs the key it is sealed to, which this device does not hold.'
       try {
         return opener.by === 'key' ? openWithSecret(d.chest, opener.key.secretHex) : await openWithSigner(d.chest, cs.decryptSealed)
@@ -3912,10 +3959,10 @@ export const useShards = create<ShardsState>((set, get) => {
         if (typeof synced === 'string') return synced
         const place = await doorLocation(d)
         const oldKey = roomKey(place.key, hexToBytes(secret))
-        const oldLookup = roomLookupId(oldKey)
+        const oldLookup = roomLookupIn(oldKey, d.plane)
         const nextSecret = newDoorSecret()
         const nextKey = roomKey(place.key, hexToBytes(nextSecret))
-        const nextLookup = roomLookupId(nextKey)
+        const nextLookup = roomLookupIn(nextKey, d.plane)
         const signed = new Map<string, { row: MyDeployment; next: ChestItem; inner: NostrEvent; createdAt: number }>()
         for (const door of doorRows) {
           const lockPubkey = door.eventId === eventId ? draft.lock.pubkey : door.chest!.lockPubkey
@@ -4060,7 +4107,7 @@ export const useShards = create<ShardsState>((set, get) => {
       let list: unknown[]
       if (d.sealed) list = d.sealed
       else {
-        const opener = openerFor(d.chest, hiderKeys(useInventory.getState().items, get().mine, me), me)
+        const opener = openerFor(d.chest, hiderKeys(useInventory.getState().items, get().mine, me), me, lookupLock)
         if (!opener) return 'Opening the chest needs the key it is sealed to, which this device does not hold.'
         try {
           const parsed = JSON.parse(opener.by === 'key' ? plaintextWithSecret(d.chest, opener.key.secretHex) : await cs.decryptSealed(d.chest.senderPubkey, d.chest.payload)) as unknown
@@ -4081,7 +4128,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (standing.some((o) => !o.secret) || (await unseenDoorHere(here, d.plane, d.height))) return 'A door of yours already stands in this room. Open it first, and this one joins it.'
       const secret = standing[0]?.secret ?? newDoorSecret()
       const key = roomKey(hexToBytes(d.keyHex), hexToBytes(secret))
-      const lookupId = roomLookupId(key)
+      const lookupId = roomLookupIn(key, d.plane)
       let inside = movable.map((e): BagEntry => { const { sig, ...rumor } = e.event; return sig ? e.event : rumor })
       const live = get().mine.some((m) => m.lookupId === d.lookupId && m.published)
       let bagId = ''
@@ -4593,7 +4640,7 @@ export const useShards = create<ShardsState>((set, get) => {
         // shards by reference sealed with the room key included.
         if (into?.secret && !heldRoom) {
           const key = roomKey(rk.key, hexToBytes(into.secret))
-          rk = { key, lookupId: roomLookupId(key) }
+          rk = { key, lookupId: roomLookupIn(key, plane) }
         }
         set({ deployNote: 'Sealing and publishing' })
         // A move of something already on the relays goes to the relays, LOCAL
@@ -5155,7 +5202,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!chest?.chest) return 'Only the chest’s hider can change what is inside it, from the device that hid it.'
       const cs = cyber()
       const me = cs.identity.pubkey
-      const opener = openerFor(chest.chest, hiderKeys(useInventory.getState().items, get().mine, me), me)
+      const opener = openerFor(chest.chest, hiderKeys(useInventory.getState().items, get().mine, me), me, lookupLock)
       if (!opener) return 'Opening the chest needs the key it is sealed to, which this device does not hold.'
       let raw: BagEntry[]
       try {
@@ -5238,6 +5285,7 @@ export const useShards = create<ShardsState>((set, get) => {
       // readAgain). Nothing TV showed is restored, and a key TV showed opens
       // nothing (review of #390).
       const keys: OpeningKey[] = openingKeys(useInventory.getState().items, true)
+      startKeyring()
       // A door of a room this identity closed (§3.7.5, one room, one state) comes in closed,
       // before anything here asks whether it was opened by hand (store/closedDoors).
       if (!watched) void closeArriving(me, items)
@@ -5252,7 +5300,8 @@ export const useShards = create<ShardsState>((set, get) => {
       const revealed: Hidden[] = []
       while (queue.length > 0) {
         const door = queue.shift()!
-        const opener = openerFor(door.chest!, keys, '')
+        // A key you carry opens it too (DECK-0004 §3.8), once its lock is derived: a later scan catches up.
+        const opener = openerFor(door.chest!, keys, '', lookupLock)
         if (!opener || opener.by !== 'key') continue
         let contents: ChestEntry[]
         try { contents = readContents(openWithSecret(door.chest!, opener.key.secretHex), sealerOf(door)) } catch { continue }

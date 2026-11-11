@@ -5,7 +5,11 @@
  * rulings supersede where they differ). The fall itself, and what it
  * publishes, is the walk's (store/useWalk.ts).
  *
- * Down is cyberspace -Y everywhere. A fall is an animation on this device,
+ * Down is the axis nearest the screen's down (lib/walkDown.ts; arkinox,
+ * 2026-11-10, superseding "down is cyberspace -Y everywhere" of 2026-10-24):
+ * cyberspace -Y in the default view and in any view turned only left or
+ * right, and along X or Z once the compass's view controls tip the view.
+ * Everything here takes it as `down`, -Y when absent. A fall is an animation on this device,
  * at a real gravitational acceleration, and makes no proof while it falls.
  * It resolves into ordinary walk hops, each from where the hop before it
  * left off: on landing, on a move made in mid-air, at the last gibson a hop
@@ -15,12 +19,21 @@
  *
  * A gibson has no size of its own at walking scale, so one is chosen here:
  * the walker's gibson is GIBSON_METRES, about 0.147 m. It is the scale at
- * which the ruled jump (JUMP_HEIGHT 3 gibsons, about JUMP_HANG_S 0.6 s in the
- * air) is exactly Earth's standard gravity, 9.80665 m/s^2: 3 gibsons is a
- * 0.44 m standing jump, which a person does in 0.6 s. At that scale a Maze
- * Kit riser of 1 gibson is a 15 cm stair step and a 16-gibson tile is 2.35 m,
- * so the kit's own proportions agree with it. WALK_GRAVITY is then about
- * 66.7 gibsons/s^2: a drop of one tile takes 0.69 s, a 48-gibson shaft 1.2 s.
+ * which the first ruled jump (3 gibsons, about 0.6 s in the air; ruling D5 of
+ * 2026-10-24) is exactly Earth's standard gravity, 9.80665 m/s^2: 3 gibsons
+ * is a 0.44 m standing jump, which a person does in 0.6 s. At that scale a
+ * Maze Kit riser of 1 gibson is a 15 cm stair step and a 16-gibson tile is
+ * 2.35 m, so the kit's own proportions agree with it. WALK_GRAVITY is then
+ * about 66.7 gibsons/s^2: a drop of one tile takes 0.69 s, a 48-gibson shaft
+ * 1.2 s.
+ *
+ * Gravity stays exactly that; only the jump changed (arkinox's play test of
+ * 2026-11-10: "maybe jump should do 5 Gibsons instead of 3. let's try
+ * that"). JUMP_HEIGHT is 5 gibsons (0.74 m), off the floor at JUMP_SPEED,
+ * about 25.8 gibsons/s, and about JUMP_HANG_S 0.775 s in the air. Pressed
+ * again in the air, JUMP is a double jump (the same play test): one more of
+ * DOUBLE_JUMP_HEIGHT, 3 gibsons, from wherever you are, once per time in the
+ * air (store/useWalk.ts).
  *
  * No terminal velocity. A person's (about 55 m/s, 374 gibsons/s here) is
  * reached only after hundreds of metres; a maze-scale drop of 48 gibsons
@@ -37,20 +50,36 @@
  * hover above it. The same holds for a jump's rise.
  */
 
-import { clampAxis, type Position } from '../lib/space'
+import { clampAxis, type AxisDirection, type Position } from '../lib/space'
+import { WORLD_DOWN, upOf } from '../lib/walkDown'
 import { stepLimit, underSolid, type WallItem } from './walkWalls'
 
-/** How high a jump rises, in gibsons. */
-export const JUMP_HEIGHT = 3
+/**
+ * Down, in gibsons/s^2: the first ruled jump (3 gibsons, 0.6 s in the air:
+ * 8h / T^2) at Earth's gravity, about 66.7. Fixed: a higher jump is a faster
+ * launch, never a different gravity.
+ */
+export const WALK_GRAVITY = (8 * 3) / (0.6 * 0.6)
 
-/** How long a jump that lands where it left is in the air, in seconds. */
-export const JUMP_HANG_S = 0.6
+/** The speed off the floor, in gibsons/s, that rises `h` gibsons (sqrt(2 g h)): JUMP_SPEED for JUMP_HEIGHT. */
+export function launchSpeed(h: number): number {
+  return h > 0 ? Math.sqrt(2 * WALK_GRAVITY * h) : 0
+}
 
-/** Down, in gibsons/s^2: the ruled jump at Earth's gravity (8h / T^2), about 66.7. */
-export const WALK_GRAVITY = (8 * JUMP_HEIGHT) / (JUMP_HANG_S * JUMP_HANG_S)
+/** How high a jump rises, in gibsons (play test of 2026-11-10; it was 3). */
+export const JUMP_HEIGHT = 5
 
-/** A jump's speed off the floor, in gibsons/s (4h / T): 20. */
-export const JUMP_SPEED = (4 * JUMP_HEIGHT) / JUMP_HANG_S
+/** A jump's speed off the floor, in gibsons/s (sqrt(2 g h)): about 25.8. */
+export const JUMP_SPEED = launchSpeed(JUMP_HEIGHT)
+
+/** How long a jump that lands where it left is in the air, in seconds (2 v / g): about 0.775. */
+export const JUMP_HANG_S = (2 * JUMP_SPEED) / WALK_GRAVITY
+
+/** How high a double jump rises above where it was pressed, in gibsons. */
+export const DOUBLE_JUMP_HEIGHT = 3
+
+/** A double jump's upward speed, in gibsons/s: set to this, not added (sqrt(2 g h)), 20. */
+export const DOUBLE_JUMP_SPEED = launchSpeed(DOUBLE_JUMP_HEIGHT)
 
 /** Standard gravity, m/s^2. */
 export const STANDARD_GRAVITY = 9.80665
@@ -92,22 +121,28 @@ export function arcPeak(v0: number, top: number): number {
 }
 
 /**
- * The furthest, in whole gibsons, a hop from `from` straight along Y may go
- * (`dir` -1 down, 1 up) and still be affordable by `affordable` (the walk's
- * segment budget), at most `max`. Cost only grows with the distance (the
- * highest binary boundary crossed), so it is a binary search.
+ * The furthest, in whole gibsons, a hop from `from` straight along `along`
+ * may go and still be affordable by `affordable` (the walk's segment
+ * budget), at most `max`. Cost only grows with the distance (the highest
+ * binary boundary crossed), so it is a binary search.
  */
-export function affordableAlongY(from: Position, dir: 1 | -1, max: bigint, affordable: (from: Position, to: Position) => boolean): bigint {
+export function affordableAlong(from: Position, along: AxisDirection, max: bigint, affordable: (from: Position, to: Position) => boolean): bigint {
+  const a = along.axis
   // The axis ends: never past them.
-  const room = dir < 0 ? from.y - clampAxis(from.y - max) : clampAxis(from.y + max) - from.y
+  const room = along.dir < 0 ? from[a] - clampAxis(from[a] - max) : clampAxis(from[a] + max) - from[a]
   let lo = 0n
   let hi = room
   while (lo < hi) {
     const mid = (lo + hi + 1n) / 2n
-    if (affordable(from, { ...from, y: from.y + BigInt(dir) * mid })) lo = mid
+    if (affordable(from, { ...from, [a]: from[a] + BigInt(along.dir) * mid })) lo = mid
     else hi = mid - 1n
   }
   return lo
+}
+
+/** affordableAlong straight along Y (`dir` -1 down, 1 up). */
+export function affordableAlongY(from: Position, dir: 1 | -1, max: bigint, affordable: (from: Position, to: Position) => boolean): bigint {
+  return affordableAlong(from, { axis: 'y', dir }, max, affordable)
 }
 
 /** The whole axis, from any point: the most a fall could ever go. */
@@ -130,28 +165,31 @@ export interface FallLimit {
  * from `from` can afford, in which case the last gibson it can. A floor no
  * item has is not there, so it is fallen through. A floor in the plane of
  * `from` with open space above it holds you (store/walkWalls.ts stepLimit,
- * `stand`): drop 0.
+ * `stand`): drop 0. Below is along `down`.
  */
-export function fallLimit(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean): FallLimit {
-  const reach = affordableAlongY(from, -1, AXIS_SPAN, affordable)
+export function fallLimit(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean, down: AxisDirection = WORLD_DOWN): FallLimit {
+  const reach = affordableAlong(from, down, AXIS_SPAN, affordable)
   // With nothing affordable below, still asked one gibson down: standing there is landed.
-  const down = stepLimit(from, 'y', -1, reach > 0n ? reach : 1n, items, true)
-  if (down.by !== null && down.reach <= reach) return { drop: down.reach, lands: true, by: down.by }
+  const floor = stepLimit(from, down.axis, down.dir, reach > 0n ? reach : 1n, items, down)
+  if (floor.by !== null && floor.reach <= reach) return { drop: floor.reach, lands: true, by: floor.by }
   return { drop: reach, lands: false, by: null }
 }
 
 /**
- * How far a jump from `from` may rise among `items`: JUMP_HEIGHT, under a
- * ceiling, and no further than a hop can afford. Right under a solid's
+ * How far a jump from `from` may rise among `items`: JUMP_HEIGHT (or
+ * `height`, a bounce's launch), under a ceiling, and no further than a hop
+ * can afford. Right under a solid's
  * underside (a face in your plane with the solid just above you,
- * underSolid) it does not rise at all.
+ * underSolid) it does not rise at all. Up is against `down`.
  */
-export function jumpRise(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean): { rise: bigint; by: WallItem | null } {
-  const lid = underSolid(from, items)
+export function jumpRise(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean, height: number = JUMP_HEIGHT, down: AxisDirection = WORLD_DOWN): { rise: bigint; by: WallItem | null } {
+  const lid = underSolid(from, items, down)
   if (lid) return { rise: 0n, by: lid }
-  const up = stepLimit(from, 'y', 1, BigInt(JUMP_HEIGHT), items)
-  const afford = affordableAlongY(from, 1, up.reach, affordable)
-  return { rise: afford, by: up.reach < BigInt(JUMP_HEIGHT) ? up.by : null }
+  const want = BigInt(height)
+  const rise = upOf(down)
+  const up = stepLimit(from, rise.axis, rise.dir, want, items)
+  const afford = affordableAlong(from, rise, up.reach, affordable)
+  return { rise: afford, by: up.reach < want ? up.by : null }
 }
 
 // ---------------------------------------------------------------------------

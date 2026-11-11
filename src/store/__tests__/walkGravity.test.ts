@@ -60,12 +60,11 @@ import { useToast } from '../useToast'
 import { useWorkshop } from '../useWorkshop'
 import { clearWalls, entryFor, wallItems } from '../walkWalls'
 import { standing, walkStep } from '../walkStep'
-import { GIBSON_METRES, GRAVITY_KEY, JUMP_HANG_S, JUMP_HEIGHT, JUMP_SPEED, STANDARD_GRAVITY, WALK_GRAVITY, affordableAlongY, arcHeight, loadGravity } from '../walkGravity'
+import { DOUBLE_JUMP_HEIGHT, DOUBLE_JUMP_SPEED, GIBSON_METRES, GRAVITY_KEY, JUMP_HANG_S, JUMP_HEIGHT, JUMP_SPEED, STANDARD_GRAVITY, WALK_GRAVITY, affordableAlongY, arcHeight, loadGravity } from '../walkGravity'
 import { walkFall } from '../../lib/walkEye'
 import { useCalibration } from '../../lib/calibration'
 import { withConstrain, type Constrain } from '../../lib/walkConstrain'
-import { canonicalQuaternion, levelQuaternion, levelScreenAxes, rotateView, viewAxes, type Position, type ViewAxes } from '../../lib/space'
-import { carryLook } from '../../lib/walkLook'
+import { canonicalQuaternion, levelScreenAxes, rotateView, viewAxes, type Position, type ViewAxes } from '../../lib/space'
 import { walkCancel, walkKeyDown } from '../../hooks/useKeyboard'
 import { Vector3 } from 'three'
 import hallStairs from '../fixtures/maze-kit-basilica-hall-stairs.json'
@@ -175,16 +174,20 @@ function walk(gravity: boolean): void {
 }
 
 describe('the numbers', () => {
-  it('the ruled jump is exactly standard gravity at a gibson of about 0.147 m', () => {
-    expect(JUMP_HEIGHT).toBe(3)
-    expect(JUMP_HANG_S).toBe(0.6)
+  it('gravity is still exactly standard at a gibson of about 0.147 m; only the jump is higher: 5, in about 0.775 s', () => {
+    expect(JUMP_HEIGHT).toBe(5)
+    expect(JUMP_HANG_S).toBeCloseTo(0.7746, 4)
     expect(WALK_GRAVITY).toBeCloseTo(66.667, 3)
-    expect(JUMP_SPEED).toBeCloseTo(20, 12)
+    expect(JUMP_SPEED).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 5), 12)
+    expect(JUMP_SPEED).toBeCloseTo(25.82, 2)
     expect(GIBSON_METRES).toBeCloseTo(0.1471, 4)
     expect(WALK_GRAVITY * GIBSON_METRES).toBeCloseTo(STANDARD_GRAVITY, 12)
-    // Up 3 at the top, and back where it left after 0.6 s.
-    expect(arcHeight(JUMP_SPEED, JUMP_HANG_S / 2)).toBeCloseTo(3, 9)
+    // Up 5 at the top, and back where it left after the hang.
+    expect(arcHeight(JUMP_SPEED, JUMP_HANG_S / 2)).toBeCloseTo(5, 9)
     expect(arcHeight(JUMP_SPEED, JUMP_HANG_S)).toBeCloseTo(0, 9)
+    // The double jump: 3 at the same gravity, 20 gibsons/s up.
+    expect(DOUBLE_JUMP_HEIGHT).toBe(3)
+    expect(DOUBLE_JUMP_SPEED).toBeCloseTo(20, 9)
     // A fall accelerates: d = g t^2 / 2, no terminal velocity.
     expect(arcHeight(0, 1)).toBeCloseTo(-WALK_GRAVITY / 2, 9)
     expect(arcHeight(0, 10)).toBeCloseTo(-100 * WALK_GRAVITY / 2, 6)
@@ -760,10 +763,10 @@ describe('a jump', () => {
     walk(true)
     useWalk.getState().press('up')
     expect(useWalk.getState().falling).toBe(true)
-    frame(300)
-    // Up 3 at the top.
-    expect(walkFall.offset).toBeCloseTo(3, 6)
-    // Up again in the air: no flying.
+    frame(387)
+    // Up 5 at the top (JUMP_HEIGHT; it was 3).
+    expect(walkFall.offset).toBeCloseTo(5, 4)
+    // Up again in the air, as a held Up's beat presses it: no flying (only a fresh press is a double jump, walkDoubleJump.test.ts).
     useWalk.getState().press('up')
     fallOut()
     expect(useWalk.getState().falling).toBe(false)
@@ -772,7 +775,7 @@ describe('a jump', () => {
     expect(posted).toHaveLength(0)
   })
 
-  it('takes about 0.6 s in the air', () => {
+  it('takes about JUMP_HANG_S, 0.775 s, in the air', () => {
     world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]])
     walk(true)
     useWalk.getState().press('up')
@@ -781,24 +784,24 @@ describe('a jump', () => {
     expect((clock - t0) / 1000).toBeCloseTo(JUMP_HANG_S, 1)
   })
 
-  it('onto a ledge 3 up (too high for a step-up): one hop, onto the ledge', async () => {
-    // A ledge whose top is 3 above the floor, from 1 ahead.
-    world(start, [boxes('Ledge', 'all', [FLOOR, [[-10, 0, -10], [10, 3, -0.5]]]), [0, -1, 0]])
+  it('onto a ledge 5 up (too high for a step-up): one hop, onto the ledge', async () => {
+    // A ledge whose top is 5 above the floor, from 1 ahead.
+    world(start, [boxes('Ledge', 'all', [FLOOR, [[-10, 0, -10], [10, 5, -0.5]]]), [0, -1, 0]])
     walk(true)
-    // Walking into it is a WALL: a riser of 3 does not climb.
+    // Walking into it is a WALL: a riser of 5 does not climb.
     useWalk.getState().press('away')
     expect(at(start)).toEqual([0, 0, 0])
     useToast.setState({ toast: null })
     useWalk.getState().press('up')
-    // Rising, 2 up: the ledge's edge is in the way.
+    // Rising, 3 up: the ledge's edge is in the way.
     frame(150)
     useWalk.getState().press('away')
     expect(at(start)).toEqual([0, 0, 0])
     expect(fallState()!.waypoints).toHaveLength(0)
-    // Past the top, coming down through 2.5: it has been at 3, over the ledge's top.
-    frame(250)
+    // Past the top, coming down through 4.87: it has been at 5, over the ledge's top.
+    frame(300)
     useWalk.getState().press('away')
-    const top = { ...start, y: start.y + 3n, z: start.z - 1n }
+    const top = { ...start, y: start.y + 5n, z: start.z - 1n }
     expect(useCyberspace.getState().cursor).toEqual(top)
     fallOut()
     expect(useCyberspace.getState().cursor).toEqual(top)
@@ -826,10 +829,12 @@ describe('a jump', () => {
     world(start, [boxes('Low room', 'all', [FLOOR, [[-10, 3, -10], [10, 4, 10]]]), [0, -1, 0]])
     walk(true)
     useWalk.getState().press('up')
-    // One frame 200 ms in: the arc met the ceiling at 53 ms and has fallen since.
+    // One frame 200 ms in: the arc met the ceiling at 41 ms and has fallen since.
     frame(200)
+    const met = (JUMP_SPEED - Math.sqrt(JUMP_SPEED ** 2 - 2 * WALK_GRAVITY)) / WALK_GRAVITY
+    expect(met * 1000).toBeCloseTo(40.9, 1)
     expect(walkFall.offset).toBeLessThanOrEqual(1)
-    expect(walkFall.offset).toBeCloseTo(1 - WALK_GRAVITY * ((200 - 52.8) / 1000) ** 2 / 2, 1)
+    expect(walkFall.offset).toBeCloseTo(1 - WALK_GRAVITY * (0.2 - met) ** 2 / 2, 1)
   })
 
   it('over a gap: a press past the top keeps the arc as it was, and lands when gravity says', () => {
@@ -837,17 +842,17 @@ describe('a jump', () => {
     walk(true)
     useWalk.getState().press('up')
     const t0 = clock
-    frame(500)
+    frame(650)
     const before = walkFall.offset
-    expect(before).toBeCloseTo(arcHeight(JUMP_SPEED, 0.5), 6)
+    expect(before).toBeCloseTo(arcHeight(JUMP_SPEED, 0.65), 6)
     useWalk.getState().press('away')
-    // At 1.67 coming down it has been at 2: the hop goes there, the eye stays put.
-    expect(at(start)).toEqual([0, 2, -1])
-    expect(walkFall.offset + 2).toBeCloseTo(before, 6)
+    // At 2.7 coming down it has been at 3: the hop goes there, the eye stays put.
+    expect(at(start)).toEqual([0, 3, -1])
+    expect(walkFall.offset + 3).toBeCloseTo(before, 6)
     frame(16)
-    expect(walkFall.offset + 2).toBeCloseTo(arcHeight(JUMP_SPEED, 0.516), 6)
+    expect(walkFall.offset + 3).toBeCloseTo(arcHeight(JUMP_SPEED, 0.666), 6)
     fallOut()
-    // Down to 30 below where it left: 20 t - g t^2 / 2 = -30.
+    // Down to 30 below where it left: JUMP_SPEED t - g t^2 / 2 = -30.
     const t = (clock - t0) / 1000
     const due = (JUMP_SPEED + Math.sqrt(JUMP_SPEED ** 2 + 2 * WALK_GRAVITY * 30)) / WALK_GRAVITY
     expect(t).toBeGreaterThanOrEqual(due)
@@ -859,9 +864,10 @@ describe('a jump', () => {
     world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]])
     walk(true)
     useWalk.getState().press('up')
-    frame(300)
+    // Just past the top, 5 up.
+    frame(400)
     useWalk.getState().setGravity(false)
-    const top = { ...start, y: start.y + 3n }
+    const top = { ...start, y: start.y + 5n }
     expect(useCyberspace.getState().cursor).toEqual(top)
     expect(useWalk.getState().queue).toEqual([top])
   })
@@ -930,49 +936,20 @@ describe('a Maze Kit room', () => {
   })
 })
 
-describe('the level view', () => {
-  it('turns a view that is not level to the nearest level one, and leaves a level one alone', () => {
-    const level = canonicalQuaternion()
-    expect(levelQuaternion(level)).toBeNull()
-    expect(levelQuaternion(rotateView(level, 'left'))).toBeNull()
-    const tilted = rotateView(level, 'up')
-    const back = levelQuaternion(tilted)!
-    expect(viewAxes(back).up).toEqual({ axis: 'y', dir: 1 })
-    // The nearest: the one it was tilted from.
-    expect(viewAxes(back)).toEqual(viewAxes(level))
-  })
-
-  it('in WALK with gravity on, a view turned off level comes back level', () => {
+describe('the view (arkinox, 2026-11-10: gravity follows the view; it no longer levels it)', () => {
+  it('in WALK with gravity on, a view turned off level stays as turned', () => {
     walk(true)
     useCyberspace.getState().rotate('up')
-    expect(viewAxes(useCyberspace.getState().view).up).toEqual({ axis: 'y', dir: 1 })
-    // Turning about Y is level, and stays as turned.
+    expect(viewAxes(useCyberspace.getState().view)).toEqual(viewAxes(rotateView(canonicalQuaternion(), 'up')))
     useCyberspace.getState().rotate('left')
-    expect(viewAxes(useCyberspace.getState().view)).toEqual(viewAxes(rotateView(canonicalQuaternion(), 'left')))
+    expect(viewAxes(useCyberspace.getState().view)).toEqual(viewAxes(rotateView(rotateView(canonicalQuaternion(), 'up'), 'left')))
   })
 
-  it('switching gravity on in WALK levels a view that was not, and gravity off leaves views alone', () => {
+  it('switching gravity on in WALK leaves the view as it is', () => {
     useCyberspace.setState({ view: rotateView(canonicalQuaternion(), 'up') })
     walk(false)
-    expect(viewAxes(useCyberspace.getState().view).up.axis).not.toBe('y')
     useWalk.getState().setGravity(true)
-    expect(viewAxes(useCyberspace.getState().view).up).toEqual({ axis: 'y', dir: 1 })
-  })
-
-  it('keeps the way you look, in cyberspace, through the levelling', () => {
-    const from = viewAxes(rotateView(canonicalQuaternion(), 'up'))
-    const to = viewAxes(canonicalQuaternion())
-    for (const v of [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0.3, -0.5, 0.8]]) {
-      const look = { x: v[0], y: v[1], z: v[2] }
-      carryLook(look, from, to)
-      // The same cyberspace direction in both frames.
-      const cs = (a: ViewAxes, w: { x: number; y: number; z: number }) => {
-        const out: Record<string, number> = { x: 0, y: 0, z: 0 }
-        ;[a.right, a.up, a.out].forEach((b, i) => { out[b.axis] += b.dir * [w.x, w.y, w.z][i] })
-        return out
-      }
-      expect(cs(to, look)).toEqual(cs(from, { x: v[0], y: v[1], z: v[2] }))
-    }
+    expect(viewAxes(useCyberspace.getState().view)).toEqual(viewAxes(rotateView(canonicalQuaternion(), 'up')))
   })
 
   it('the keys stay level however far you look down: W is forward on the floor, never down', () => {

@@ -62,8 +62,10 @@ import { chargeByTrust, onFollows, readFollows, resetFollows, setFollows, truste
 import { fetchSettled, resolvePartsShared } from '../lib/parts'
 import { regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
-import type { AxisName, Position, ViewAxes } from '../lib/space'
+import type { AxisDirection, AxisName, Position, ViewAxes } from '../lib/space'
+import { WORLD_DOWN, upOf } from '../lib/walkDown'
 import { constrainOf, enclosed, firstHit, wallMesh, type WallMesh } from '../lib/walkConstrain'
+import type { Bounce } from '../lib/walkBounce'
 import { useShards, type WorldItem } from './useShards'
 import { useCyberspace } from './useCyberspace'
 import { openedByHand } from './useOpenedChests'
@@ -379,9 +381,24 @@ function nodesOf(placed: readonly Placed[]): number {
   return n
 }
 
+/**
+ * Whether any wall built since the last clearWalls has a bounce on its own
+ * faces or on an object it places (lib/walkBounce.ts): until one has, no
+ * floor can bounce, so WALK asks floorPad nothing (store/useWalk.ts
+ * padLaunch). Set as walls are built and kept until clearWalls, so a pad
+ * walked away from still counts: that costs only a query, never a launch.
+ */
+let bounceBuilt = false
+
+/** Whether any wall built since the last clearWalls bounces: off, a press asks no floor query. */
+export function anyBounce(): boolean {
+  return bounceBuilt
+}
+
 function build(w: WallItem, placed: readonly Placed[], starved = false, first = false): Entry {
   const pose = placedPose(WALL_AXES, w.shard.up && w.plane === 0 ? { at: w.at, spin: w.shard.spin } : undefined)
   const mesh = wallMesh(w.shard, placed, pose)
+  if (!bounceBuilt && (!!mesh.ownBounce || mesh.placements.some((p) => !!p.bounce))) bounceBuilt = true
   const missingAt = placed.some(function gone(p): boolean { return p.missing === 'unreachable' || p.children.some(gone) }) ? Date.now() : null
   return { item: w, starved, first, walk: walkNo, shard: w.shard, missingAt, where: whereOf(w), mesh, clip: w.uncut ? NO_CUT : regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
 }
@@ -655,6 +672,7 @@ function later(fn: (idle?: IdleDeadline) => void): void {
 /** Forget every shard's walls: for tests, and an identity switch has no need of them either. */
 export function clearWalls(): void {
   entries.clear()
+  bounceBuilt = false
   waited = false
   landed()
   walkNo++
@@ -709,8 +727,12 @@ function tolerance(e: Entry, g: number, length: bigint): number {
  * published, and every face further from your height is met exactly as
  * without it. Only where the measure can tell (a tolerance under HAIR_MAX):
  * on a monument the face you stand on lets you go, as below.
+ *
+ * `stand` is true for gravity down cyberspace -Y, or the walker's own down
+ * (lib/walkDown.ts): it is asked only of a step that goes that way, and
+ * "above" is the opposite way. Any other step is measured as without it.
  */
-export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[], stand = false): WallStop {
+export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[], stand: boolean | AxisDirection = false): WallStop {
   const keep = new Set<string>()
   let best: number | null = null
   let bestTol = ON_FACE
@@ -721,6 +743,9 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   /** The faces in the walker's own plane, held back until the space above it is known to be open. */
   const planes: Array<{ w: WallItem; tol: number }> = []
   const i = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
+  const gravity = stand === true ? WORLD_DOWN : stand || null
+  // GRAVITY's question: this step goes down.
+  const down = gravity !== null && axis === gravity.axis && dir === gravity.dir
   for (const w of items) {
     keep.add(w.key)
     // A shard whose region this step cannot enter cannot hold it: not built,
@@ -758,7 +783,6 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     // walker HOPped to within the measure's error of a face on a monument (a
     // shard past about 2^53 gibsons) may still cross it, which is accepted:
     // holding it there would hold it stepping away from the face too.
-    const down = stand && axis === 'y' && dir < 0
     const hair = down ? tolerance(e, g, 0n) : HAIR_MAX
     let t: number | null
     if (down && hair < HAIR_MAX) {
@@ -778,7 +802,7 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     if (best === null || gib < best) { best = gib; bestTol = tol; by = w }
   }
   // A face in your own plane holds you when the space a hair above you is open.
-  if (planes.length > 0 && openAbove(from, items)) { best = 0; bestTol = planes[0].tol; by = planes[0].w }
+  if (planes.length > 0 && openAbove(from, items, { axis, dir: dir < 0 ? 1 : -1 })) { best = 0; bestTol = planes[0].tol; by = planes[0].w }
   // Shards no longer in the world: what their builds held of this WALK's pools comes back.
   const back = new Set<Pool>()
   for (const [k, gone] of entries) if (!keep.has(k)) { entries.delete(k); for (const p of release(gone.spend)) back.add(p) }
@@ -792,6 +816,70 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     stop = { reach: BigInt(k) < length ? BigInt(k) : length, by }
   }
   return middle && middle.reach < stop.reach ? middle : stop
+}
+
+/** How many times floorPad has been asked: for the test that a world with no bounce asks it nothing. */
+let padQueryCount = 0
+export function padQueries(): number {
+  return padQueryCount
+}
+
+/** The floor under a walker, as a bounce reads it (floorPad). */
+export interface Pad {
+  bounce: Bounce
+  springboard: boolean
+}
+
+/**
+ * BOUNCE, EXPERIMENTAL (lib/walkBounce.ts): the `bounce` of the floor a
+ * walker at `at` stands on (a launch height, `"reflect"`, or 0 for none) and
+ * its `springboard`. The floor is the one GRAVITY stands on (stepLimit with `stand`: a blocking face less than a gibson below, or
+ * one in the walker's own plane with open space above), so it is always met
+ * from above: a side face is parallel to the ray and a bottom face is never
+ * under a walker standing, so neither ever bounces. The face right under the
+ * walker decides, by the payload that owns it, among every shard: of two at
+ * exactly the same height (a pad flush with a floor), the one that bounces.
+ * Under the walker is along its gravity, `down` (lib/walkDown.ts).
+ */
+export function floorPad(at: Position, items: readonly WallItem[], down: AxisDirection = WORLD_DOWN): Pad {
+  padQueryCount++
+  const none: Pad = { bounce: 0, springboard: false }
+  const under = stepLimit(at, down.axis, down.dir, 1n, items, down)
+  if (under.reach !== 0n || !under.by) return none
+  // A face in your own plane is under you only where stepLimit would stand you on it: open space above.
+  const plane = openAbove(at, items, upOf(down))
+  const i = AXIS_INDEX[down.axis]
+  const s = renderSign(down)
+  let best: number | null = null
+  let pad = none
+  for (const w of items) {
+    if (w.inside || !regionReached(w, at, down.axis, down.dir, 1n)) continue
+    const e = entries.get(w.key)
+    if (!e || e.first || !e.reach) continue
+    const g = 2 ** w.shard.unit
+    const tol = tolerance(e, g, 1n)
+    const hair = tolerance(e, g, 0n)
+    const o: [number, number, number] = [Number(at.x - w.at.x) / g, Number(at.y - w.at.y) / g, -Number(at.z - w.at.z) / g]
+    const who: { bounce: Bounce; springboard?: boolean } = { bounce: 0 }
+    const t = firstHit(e.mesh, o, i, s, (1 + tol) / g, (plane && hair < HAIR_MAX ? -hair : ON_FACE) / g, e.clip, who)
+    if (t === null) continue
+    const gib = t * g
+    // Nearest wins; only a pad flush with a floor beside or under it (a tie within float rounding) wins over the floor.
+    const split = (who.bounce !== 0) !== (pad.bounce !== 0) && best !== null && Math.abs(gib - best) <= TIE
+    if (best === null || (split ? who.bounce !== 0 : gib < best)) { best = gib; pad = { bounce: who.bounce, springboard: !!who.springboard } }
+  }
+  return pad
+}
+
+/** Two floors this close, in gibsons, are flush: float error only. */
+const TIE = 1e-9
+
+/** A cyberspace axis's index in the walls' frame. */
+const AXIS_INDEX: Record<AxisName, 0 | 1 | 2> = { x: 0, y: 1, z: 2 }
+
+/** A cyberspace direction's sign in the walls' frame: render Z is cyberspace -Z. */
+function renderSign(d: AxisDirection): 1 | -1 {
+  return (d.axis === 'z' ? -d.dir : d.dir) as 1 | -1
 }
 
 /**
@@ -845,9 +933,13 @@ const HAIR_MAX = 0.5
  * step does (stepLimit), so this is asked beside it. Only a closed solid
  * refuses: an open shell, such as a Maze Kit room's lintel or ceiling (its
  * doorway rims are open edges), encloses nothing, so it refuses no jump and
- * no lift (arkinox, 2026-10-26: accepted).
+ * no lift (arkinox, 2026-10-26: accepted). Above is against the walker's
+ * gravity, `down` (lib/walkDown.ts).
  */
-export function underSolid(from: Position, items: readonly WallItem[]): WallItem | null {
+export function underSolid(from: Position, items: readonly WallItem[], down: AxisDirection = WORLD_DOWN): WallItem | null {
+  const up = upOf(down)
+  const i = AXIS_INDEX[up.axis]
+  const s = renderSign(up)
   let face: WallItem | null = null
   for (const w of items) {
     // As stepLimit: only a shard whose region you are in, and one whose first
@@ -864,18 +956,20 @@ export function underSolid(from: Position, items: readonly WallItem[]): WallItem
     const lo = e.reach.lo, hi = e.reach.hi
     if ((['x', 'y', 'z'] as const).some((a) => off[a] < lo[a] || off[a] > hi[a])) continue
     const o: [number, number, number] = [Number(off.x) / g, Number(off.y) / g, -Number(off.z) / g]
-    if (firstHit(e.mesh, o, 1, 1, hair / g, -hair / g, e.clip) !== null) { face = w; break }
+    if (firstHit(e.mesh, o, i, s, hair / g, -hair / g, e.clip) !== null) { face = w; break }
   }
-  return face && !openAbove(from, items) ? face : null
+  return face && !openAbove(from, items, up) ? face : null
 }
 
 /**
  * Whether the space a hair above `from` is open: inside no closed solid of
  * any of `items` (lib/walkConstrain.ts enclosed), each shard measured with
  * its own tolerance as the hair. A shard whose measure cannot tell a hair
- * (HAIR_MAX) encloses nothing here.
+ * (HAIR_MAX) encloses nothing here. Above is along `up`.
  */
-function openAbove(from: Position, items: readonly WallItem[]): boolean {
+function openAbove(from: Position, items: readonly WallItem[], up: AxisDirection = UP_Y): boolean {
+  const i = AXIS_INDEX[up.axis]
+  const s = renderSign(up)
   for (const w of items) {
     // A door slab holding the walker: its faces let them go (WallItem `inside`).
     if (w.inside || !regionReached(w, from)) continue
@@ -888,10 +982,15 @@ function openAbove(from: Position, items: readonly WallItem[]): boolean {
     const off = { x: from.x - w.at.x, y: from.y - w.at.y, z: from.z - w.at.z }
     const lo = e.reach.lo, hi = e.reach.hi
     if ((['x', 'y', 'z'] as const).some((a) => off[a] < lo[a] || off[a] > hi[a])) continue
-    if (enclosed(e.mesh, [Number(off.x) / g, (Number(off.y) + hair) / g, -Number(off.z) / g], e.clip)) return false
+    // A hair along `up`, in the walls' frame, before the unit: for -Y gravity exactly as it always was.
+    const n = [Number(off.x), Number(off.y), -Number(off.z)]
+    n[i] += s * hair
+    if (enclosed(e.mesh, [n[0] / g, n[1] / g, n[2] / g], e.clip)) return false
   }
   return true
 }
+
+const UP_Y: AxisDirection = { axis: 'y', dir: 1 }
 
 /** A chest's or a door's look as a wall: its own key, so it is never confused with a shard's entry. */
 export const doorWallKey = (doorId: string): string => `door:${doorId}`

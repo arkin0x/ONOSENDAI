@@ -35,7 +35,12 @@ export const DEFAULT_BLOSSOM_SERVERS = [
 /** How long an upload token stays valid. The upload is one request; minutes are plenty. */
 export const AUTH_TTL_S = 5 * 60
 
-/** `https://host[:port][/path]`, no trailing slash, or null. http only for a local server. */
+/**
+ * `https://host[:port][/path]`, no trailing slash, or null. http only for a
+ * local server; `http://` on any other host is read as `https://` (owner
+ * 2026-11-10 typed http://blossom.oslim.dev, which answers on https), since a
+ * page on https cannot upload over http anyway.
+ */
 export function normalizeServer(input: string): string | null {
   const s = input.trim()
   if (!s || /\s/.test(s)) return null
@@ -43,6 +48,7 @@ export function normalizeServer(input: string): string | null {
   try {
     const u = new URL(withScheme)
     const local = u.hostname === 'localhost' || /^127\.\d+\.\d+\.\d+$/.test(u.hostname)
+    if (u.protocol === 'http:' && !local) u.protocol = 'https:'
     if (u.protocol !== 'https:' && !(u.protocol === 'http:' && local)) return null
     if (!u.hostname.includes('.') && !local) return null
     return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}`
@@ -208,6 +214,17 @@ export async function uploadBlob(server: string, file: Blob, sign: Sign, fetchIm
   if (!desc) throw new BlossomRefusal(res.status, 'the server answered without a blob descriptor')
   if (desc.sha256 !== hash) throw new BlossomRefusal(res.status, 'the server stored different bytes than were sent')
   return desc
+}
+
+/**
+ * A Blossom server answered the upload with a refusal (such as 402 for one
+ * that wants a subscription), so it is a real server the person meant: the
+ * picker keeps it (owner 2026-11-10). Not when it could not be reached or
+ * never answered, and not for "no upload here" (404, 405, 501): that is a
+ * wrong address, such as one pasted with /upload on the end.
+ */
+export function serverAnswered(err: unknown): boolean {
+  return err instanceof BlossomRefusal && err.status !== 404 && err.status !== 405 && err.status !== 501
 }
 
 /** What to tell a person when an upload fails. */

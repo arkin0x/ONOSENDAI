@@ -23,6 +23,7 @@ import { regionBox, type Box } from '../lib/clip'
 import { placedPose, type Pose } from '../lib/pose'
 import type { ShardModel } from 'sno-core/shards'
 import { TapTarget, farCullDoublings } from './TapTarget'
+import { passesTaps } from '../tutorial/guideBags'
 import { useMutes } from '../store/useMutes'
 import { useBuildDimmed } from './BuildOccluders'
 
@@ -274,7 +275,7 @@ export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRe
       </group>
       {/* Not tappable while it moves: the ghost is the one being aimed. */}
       {/* Dimmed in build mode, a tap passes through it (BuildOccluders tapsPassThrough). */}
-      {!moving && tappable && <TapTarget measure={drawn} occluder={occludes ? w.key : undefined} onTap={() => useShards.getState().selectSecret(w.key)} />}
+      {!moving && tappable && !passesTaps(w.key) && <TapTarget measure={drawn} occluder={occludes ? w.key : undefined} onTap={() => useShards.getState().selectSecret(w.key)} />}
     </group>
   )
 }

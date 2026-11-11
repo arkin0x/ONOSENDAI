@@ -33,6 +33,7 @@ import { doorRefusal, inRoom } from './doors'
 import { CHEST_KIND, entryKey, innerAuthentic, isReference, readItem, sealedAsRumor, type BagEntry, type ChestItem, type Hidden, type ItemBody, type KeyItem } from './hidden'
 import { reachGibsons, type FitPoint } from './deployFit'
 import type { Position } from './space'
+import type { CarriedKey } from './keyringLocks'
 
 /** A new key item: a fresh keypair under a name (B1 §3.1). The secret is shown to nobody; the public key is what chests are sealed to. */
 export function forgeKey(name: string, about = ''): KeyItem {
@@ -268,7 +269,12 @@ export interface OpeningKey {
   id: string
   itemPubkey: string
   secretHex: string
+  /** A lock from your keyring (DECK-0004 §3.8): the region or room key it comes from, never an ITEMS row. */
+  carried?: CarriedKey
 }
+
+/** Your keyring's key for a lock, if you carry one (store/useKeyring lookupLock): one map lookup, no relay. */
+export type KeyringLookup = (lockPubkey: string) => OpeningKey | undefined
 
 /** What opens a chest for this reader: a held key, the reader's own identity, or nothing. */
 export type Opener = { by: 'key'; key: OpeningKey } | { by: 'self' } | null
@@ -276,10 +282,12 @@ export type Opener = { by: 'key'; key: OpeningKey } | { by: 'self' } | null
 /**
  * Which of the reader's keys opens this chest, or that the lock is the
  * reader's own pubkey, or null. A held key wins over the identity, because
- * opening with a key needs no signer.
+ * opening with a key needs no signer. Then a key you carry whose lock it is
+ * (`keyring`: a region or room key, DECK-0004 §3.8), opened the same way as
+ * with an item.
  */
-export function openerFor(chest: Pick<ChestItem, 'lockPubkey'>, keys: OpeningKey[], me: string): Opener {
-  const key = keys.find((k) => k.itemPubkey === chest.lockPubkey)
+export function openerFor(chest: Pick<ChestItem, 'lockPubkey'>, keys: OpeningKey[], me: string, keyring?: KeyringLookup): Opener {
+  const key = keys.find((k) => k.itemPubkey === chest.lockPubkey) ?? keyring?.(chest.lockPubkey)
   if (key) return { by: 'key', key }
   return chest.lockPubkey === me ? { by: 'self' } : null
 }

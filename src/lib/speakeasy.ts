@@ -5,7 +5,7 @@
  * A speakeasy is a paid, location-gated relay on the canonical relay's host:
  * wss://relay.onosendai.tech/C/<region> (the owner, 2026-11-09: the same
  * /C/ path as www.onosendai.tech/C/<region>); a bought name also answers at
- * /<name>, but the relay never lists that. Only an AUTHed pubkey whose
+ * /<name>, but discovery never lists that as the url. Only an AUTHed pubkey whose
  * valid chain head is inside the region may read or write there. The region
  * is exactly the /C/ prefix form (coordRoute.ts, ruling D7): every coordinate
  * whose 64 hex start with it, in both planes.

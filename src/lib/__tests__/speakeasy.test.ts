@@ -83,7 +83,7 @@ describe('reading the answer', () => {
         entry(REGION),
         { ...entry('0fe6'), region: '0FE6' }, // not normalized
         entry('ff'), // does not hold the coordinate
-        { ...entry('0f'), url: 'wss://evil.example/0f' }, // another host
+        { ...entry('0f'), url: 'wss://evil.example/C/0f' }, // another host
         { ...entry('0f'), url: 'https://relay.onosendai.tech/C/0f' }, // not a relay address
         { ...entry('0f'), name: 7 },
         { ...entry('0f'), created_at: 'yesterday' },
@@ -106,6 +106,7 @@ describe('reading the answer', () => {
         { ...entry('0f'), url: 'wss://relay.onosendai.tech/C/0fe6' }, // another region's path
         { ...entry('0f'), url: 'ws://relay.onosendai.tech/C/0f' }, // not wss
         { ...entry('0f'), url: 'wss://relay.onosendai.tech/C/0f/x' },
+        { ...entry('0fe6'), url: 'wss://relay.onosendai.tech/C/0FE6' }, // the region hex is lowercase, as the relay serves it
       ],
     }, A, BASE)
     expect(got).toEqual([])

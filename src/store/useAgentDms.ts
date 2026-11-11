@@ -754,6 +754,17 @@ export async function setUpDmInbox(relays: readonly string[] = DEFAULT_DM_RELAYS
   }
 }
 
+/**
+ * The DM inbox on the key this app generated (arkinox, 2026-11-11): published
+ * by itself, no confirmation, by setUpDmInbox and under its rule (only when
+ * the relays answered that you have none, never over one you have, never on
+ * a lookup that failed). Any other signer keeps SET UP DM INBOX and its
+ * confirmation. Resolves true once published.
+ */
+export function autoDmInbox(): Promise<boolean> {
+  return dmDeps.keys.promptFree() ? setUpDmInbox() : Promise.resolve(false)
+}
+
 /** The words for "this cannot be sent", or null when it can. */
 export function cannotSend(s: Pick<AgentDmsState, 'myInbox' | 'inboxes'>, agent: string): string | null {
   const theirs = s.inboxes[agent] ?? LOADING

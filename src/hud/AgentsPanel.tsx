@@ -15,11 +15,20 @@
  * Public, as a BETA (arkinox, 2026-10-13: "ship it so that we can make the
  * agent panel public"): drawn for everyone, no longer only for someone who
  * already has an agent, with a BETA tag whose tooltip says what beta means
- * here. With no account of your own (the key this app generated for you,
- * which no other client knows) it says to log in first, since your agent
- * names your account and you follow it from there. When the relays answer
- * that you have no DM inbox, it offers SET UP DM INBOX (DmInboxSetup.tsx),
- * which publishes your kind 10050 only after a confirmation.
+ * here. Every signer gets the whole panel, the key this app generated for
+ * you included, and never a login prompt (arkinox, 2026-11-11): that key is
+ * an npub like any other.
+ *
+ * ACTIVATE (arkinox, 2026-11-11, D5): your agent replies with its npub; you
+ * paste it into the field and tap ACTIVATE, which adds it to your kind 3
+ * follow list (store/followAgent.ts, never from a fetch that fell short).
+ * The field stays, for as many agents as you like. Once its kind 0 names
+ * you, the agent shows under MY AGENTS.
+ *
+ * When the relays answer that you have no DM inbox, an extension or a bunker
+ * gets SET UP DM INBOX (DmInboxSetup.tsx), which publishes your kind 10050
+ * only after a confirmation; the generated key publishes it by itself once
+ * you have an agent or have just activated one.
  *
  * TALK opens the private conversation with that agent (AgentTalk.tsx;
  * arkinox, 2026-10-10, operator and agent DMs): NIP-17 DMs only, the
@@ -30,7 +39,6 @@
  * opening the conversation puts it out (arkinox, 2026-10-11). The watch that
  * notices is useAgentDmWatch.ts; the TALK modal itself is mounted from App
  * (AgentTalkHost), so the notifications toast can open it with the menu shut.
- * Hooks stay above the logged-out return (hookOrder.test.ts).
  */
 
 import { useState } from 'react'
@@ -39,14 +47,13 @@ import { useMyAgents } from '../hooks/useMyAgents'
 import { useAgentUnread } from '../hooks/useAgentDmWatch'
 import { invitationText } from '../lib/agentInvite'
 import { safeNpub } from '../lib/npub'
-import { loadSignerPref } from '../lib/signers'
 import { spectate } from '../lib/spectator'
 import { shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { setTalking } from '../store/useAgentDms'
+import { activateAgent } from '../store/followAgent'
 import { DmInboxSetup, useMyDmInbox } from './DmInboxSetup'
 import { Explanation } from './Explanation'
-import { LoginModal } from './LoginModal'
 import { ProfileBadge } from './ProfileBadge'
 
 /** How long a tapped button says COPIED before its label returns. */
@@ -56,30 +63,24 @@ const COPIED_MS = 1200
 export const BETA_TIP =
   'Beta: agents are new. The setup and the invitation may still change, and an agent can stall or make mistakes. It spends compute, never your funds. Keep its budget small and watch it in TALK.'
 
-/**
- * Whether `pubkey` is an account you chose: one you logged in with (an
- * extension, a bunker or a key you pasted), which LoginModal saves as the
- * signer preference. The key this app generates on a first visit saves
- * none, and no other client knows it, so you could not follow an agent from
- * it.
- */
-export function isChosenIdentity(pubkey: string): boolean {
-  return /^[0-9a-f]{64}$/.test(pubkey) && loadSignerPref()?.pubkey === pubkey
-}
+/** What ACTIVATE says once it went. */
+export const ACTIVATED = 'Activated. Your agent shows under MY AGENTS once its profile names you.'
 
 export function AgentsPanel(): JSX.Element {
   const identity = useCyberspace((s) => s.identity)
   const signerKind = useCyberspace((s) => s.signerKind)
-  // A key you logged in with, or the local key this app made for you: both are
-  // a real identity you can follow an agent from, so neither needs a bunker
-  // first (feedback 2026-11-11, item 7). A local signer already decrypts agent
-  // DMs without a prompt (useAgentDms promptFree).
-  const loggedIn = isChosenIdentity(identity.pubkey) || signerKind === 'local'
+  // Any signer, the generated key included, is an identity you can invite an
+  // agent from: no login first (arkinox, 2026-11-11).
+  const ready = /^[0-9a-f]{64}$/.test(identity.pubkey)
   const { agents, status, refresh } = useMyAgents(identity.pubkey)
-  const myInbox = useMyDmInbox(identity.pubkey, loggedIn)
+  const myInbox = useMyDmInbox(identity.pubkey, ready)
   // 'invite', or the pubkey whose npub was copied last.
   const [copied, setCopied] = useState<string | null>(null)
-  const [loginOpen, setLoginOpen] = useState(false)
+  // ACTIVATE: the pasted npub, whether it is running, what it said, and whether one went this visit.
+  const [paste, setPaste] = useState('')
+  const [activating, setActivating] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+  const [activated, setActivated] = useState(false)
   const unread = useAgentUnread()
 
   const copy = (key: string, text: string): void => {
@@ -89,6 +90,20 @@ export function AgentsPanel(): JSX.Element {
     )
   }
 
+  const activate = (): void => {
+    if (activating) return
+    setActivating(true)
+    setNote(null)
+    void activateAgent(paste).then((r) => {
+      setActivating(false)
+      if (!r.ok) { setNote(r.error); return }
+      setPaste('')
+      setNote(ACTIVATED)
+      setActivated(true)
+      refresh()
+    })
+  }
+
   const head = (
     <header className="panel__head">
       <h2 title={unread.total > 0 ? `${unread.total} new from your agents` : undefined}>
@@ -96,7 +111,7 @@ export function AgentsPanel(): JSX.Element {
         {unread.total > 0 && <span className="notif__dot agents__dot" aria-hidden="true" />}
         <span className="tag tag--beta" title={BETA_TIP} aria-label={`BETA. ${BETA_TIP}`}>BETA</span>
       </h2>
-      {loggedIn && (status === 'loading' ? (
+      {ready && (status === 'loading' ? (
         <span className="tag">LOADING</span>
       ) : (
         <button className="tag tag--tap" onClick={refresh} title="Ask the relays again">{agents.length} MINE</button>
@@ -110,26 +125,12 @@ export function AgentsPanel(): JSX.Element {
       beside you, marked as a bot that names you as its operator. It never
       holds your key. COPY puts its setup on the clipboard for your AI: init,
       then serve, a local server whose waker starts your AI when there is
-      something to do. Follow the agent&apos;s npub from your Nostr account and
-      it appears under MY AGENTS. TALK is how you give it orders, privately;
+      something to do. Paste the npub your agent sends back and tap ACTIVATE,
+      and it appears under MY AGENTS. TALK is how you give it orders, privately;
       👀 under a message means it has seen it. STRATEGY is standing orders,
       and KEEP GOING renews a spent budget.
     </Explanation>
   )
-
-  if (!loggedIn) {
-    return (
-      <section className="panel panel--agents">
-        {head}
-        <div className="agents__login">
-          <p className="notice">Log in with your Nostr account first.</p>
-          <button className="identity__change" onClick={() => setLoginOpen(true)}>LOG IN</button>
-        </div>
-        {explain}
-        {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
-      </section>
-    )
-  }
 
   return (
     <section className="panel panel--agents">
@@ -142,7 +143,15 @@ export function AgentsPanel(): JSX.Element {
         </button>
       </div>
 
-      {myInbox.status === 'none' && (
+      <form className="avatars__find agents__activate" onSubmit={(e) => { e.preventDefault(); activate() }}>
+        <input className="avatars__input" value={paste} onChange={(e) => setPaste(e.target.value)}
+          placeholder="Paste your agent's npub" spellCheck={false} autoComplete="off" aria-label="Your agent's npub" />
+        <button className="avatars__go" type="submit" disabled={activating || !paste.trim()}>{activating ? 'ACTIVATING' : 'ACTIVATE'}</button>
+      </form>
+      {note && <p className="notice" role="status">{note}</p>}
+
+      {/* The generated key publishes its inbox by itself, so only once there is an agent to talk to. */}
+      {myInbox.status === 'none' && (signerKind !== 'local' || agents.length > 0 || activated) && (
         <div className="agents__inbox">
           <span className="legend__label" title="You publish no kind 10050, so your agent cannot write to you">No DM inbox</span>
           <DmInboxSetup />

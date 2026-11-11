@@ -44,7 +44,7 @@ import { ProfileBadge } from './ProfileBadge'
 
 /** What a DM inbox is, for the tooltip on NO DM INBOX. */
 export const DM_INBOX_TIP =
-  'A DM inbox is a kind 10050 list naming the relays where someone reads private messages (NIP-17). Messages go only to those relays. Without yours, SET UP DM INBOX publishes one, only when you tap it and confirm. Your agent copies yours by itself.'
+  'A DM inbox is a kind 10050 list naming the relays where someone reads private messages (NIP-17). Messages go only to those relays. Without yours, SET UP DM INBOX publishes one, only when you tap it and confirm; on a key made here, it is published for you. Your agent copies yours by itself.'
 
 /** The quick orders: plain messages, written into the composer. */
 export function quickOrders(coordHex: string): { label: string; title: string; text: string; keepGoing?: boolean }[] {

@@ -9778,8 +9778,6 @@ a.feed__act { text-decoration: none; }
 .agents__inbox { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 8px; }
 /* BETA beside the AGENTS title: an amber tag, so it reads as a status, not a control. */
 .tag--beta { margin-left: 6px; color: #ffbf3c; border-color: rgba(255, 191, 60, 0.6); cursor: help; font-size: 9px; vertical-align: middle; }
-.agents__login { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.agents__login .notice { margin: 0; }
 
 /* ---------- Pad mode tint ----------
  *

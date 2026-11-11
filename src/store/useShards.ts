@@ -5602,11 +5602,16 @@ export function closedRoomTest(state: Pick<ShardsState, 'mine' | 'discovered'>, 
 // The build STEP belongs to one deploy: when it ends, hidden or canceled, or
 // another is lined up in its place, the step goes back to the zoom. A
 // placement lined up again (`placedLast`) keeps it, as it keeps every other
-// setting.
+// setting. So does a seed SEED measured at this very STEP and cursor: its
+// hide height was found for them (plant.ts seedDraftHeight), and taking the
+// step back to the zoom, and the cursor with it, would hide it at 12 at
+// another spot (found by the tutorial's review, 2026-11-11).
 useShards.subscribe((s, prev) => {
   const cs = useCyberspace.getState()
   const again = s.pending !== null && s.pending === s.placedLast?.pending
-  if (s.pending !== prev.pending && !again && (cs.buildStep !== null || cs.buildSettle !== null)) cs.setBuildStep(null)
+  const fit = s.pending?.type === 'seed' ? s.pending.seed.fit : undefined
+  const measured = fit !== undefined && fit.step === buildStepOf(cs) && fit.cursor === positionHex(cs.cursor, buildPlane(cs))
+  if (s.pending !== prev.pending && !again && !measured && (cs.buildStep !== null || cs.buildSettle !== null)) cs.setBuildStep(null)
 })
 
 /**

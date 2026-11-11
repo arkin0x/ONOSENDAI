@@ -17,6 +17,7 @@ import { seedItemOf } from '../seeds/seedItem'
 import { GrowCache, handleGrow } from '../seeds/growJob'
 import { bloomShard } from '../seeds/bloomShard'
 import { checkDna } from '../seeds/dnaStore'
+import { bloomReachAt } from '../seeds/bloomReach'
 import { fitHeightAll } from '../deployFit'
 import { deployPoint } from '../space'
 import { miningNote } from '../../store/plantSeed'
@@ -185,6 +186,15 @@ describe('the hide height (owner ruling 2026-11-10)', () => {
     // Nothing fits: 12, at its own point.
     const none = await seedHideFor(nearEdge, 1, 0, 20, async () => 100_000)
     expect(none.height).toBe(SEED_HIDE_MAX)
+  })
+
+  it('bloomReachAt, the measure SEED and the tutorial hand seedHideFor, is the day-31 bloom grown at the point', async () => {
+    const at = { x: (1n << 40n) + 123_457n, y: (1n << 41n) + 987_651n, z: (1n << 42n) + 55_555n }
+    const reach = await bloomReachAt(ORIGINAL_DNAS[2].text, ORIGINAL_CAPS, 1, 0)(at)
+    const req = previewRequest({ text: ORIGINAL_DNAS[2].text, caps: ORIGINAL_CAPS, coord: positionHex(at, 1), scale: 0, tip: 975_300, day: PREVIEW_DAYS, hashOf: () => undefined })
+    const { answer } = handleGrow({ type: 'grow', id: 1, ...req }, new GrowCache())
+    if (answer.type !== 'bloom') throw new Error(answer.type)
+    expect(reach).toBe(bloomReachGibsons(answer.buffers.positions, 0))
   })
 
   it('the deploy uses the height SEED found only for that cursor and step; anywhere else 12', () => {

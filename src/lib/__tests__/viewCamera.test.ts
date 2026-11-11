@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { EASE_BACK_MS, LAND_IDLE_MS, LAND_LERP_MS, PAN_SLOP_PX, PanGesture, StartLock, ViewOffset, ease, type OffsetEvent } from '../viewCamera'
+import { EASE_BACK_MS, FLY_RAMP_S, LAND_IDLE_MS, LAND_LERP_MS, PAN_SLOP_PX, PanGesture, StartLock, ViewOffset, ease, type OffsetEvent } from '../viewCamera'
 import { FLY_CELLS_PER_SECOND, FLY_MAX_DT } from '../viewFly'
 
 const off = (v: ViewOffset): [number, number, number] => { const o = v.offset({ x: 0, y: 0, z: 0 }); return [o.x, o.y, o.z] }
@@ -23,45 +23,51 @@ function run(v: ViewOffset, ms: number, frameMs: number, sign: 1 | -1 | 0): Offs
   return events
 }
 
-describe('the fly: linear, and the same at any frame rate', () => {
-  it('one second forward is FLY_CELLS_PER_SECOND cells down the line of sight, at 30, 60 and 144 fps alike', () => {
-    for (const fps of [30, 60, 144]) {
-      const v = new ViewOffset()
-      run(v, 1000, 1000 / fps, 1)
-      const [x, y, z] = off(v)
-      expect(x).toBe(0)
-      expect(y).toBe(0)
-      expect(z).toBeCloseTo(-FLY_CELLS_PER_SECOND, 9)
-    }
-  })
-
-  it('is linear: every equal frame moves the same distance, with no ease in or out', () => {
+describe('the fly: quadratic ease-in to cruise, exponential ease-out (arkinox, 2026-11-11)', () => {
+  it('eases in: the first frames move less than a cruise frame, then it reaches FLY_CELLS_PER_SECOND', () => {
     const v = new ViewOffset()
     const steps: number[] = []
     let last = 0
-    for (let i = 0; i < 20; i++) {
+    // Past FLY_RAMP_S the speed is at cruise; 40 frames at 60fps is well past it.
+    for (let i = 0; i < 40; i++) {
       v.fly(0, 0, -1, 1, 1 / 60)
       v.step(1000 / 60)
       const z = off(v)[2]
       steps.push(last - z)
       last = z
     }
-    for (const s of steps) expect(s).toBeCloseTo(FLY_CELLS_PER_SECOND / 60, 12)
+    const cruise = FLY_CELLS_PER_SECOND / 60
+    expect(steps[0]).toBeLessThan(cruise)
+    expect(steps[5]).toBeGreaterThan(steps[0])
+    // At cruise every frame is the same, FLY_CELLS_PER_SECOND of the zoom a second.
+    expect(steps[39]).toBeCloseTo(cruise, 6)
   })
 
-  it('back goes the other way, along a slanted line too', () => {
+  it('is frame-rate independent over a fixed time, ramp and all', () => {
+    const totals = [30, 60, 144].map((fps) => {
+      const v = new ViewOffset()
+      run(v, 2000, 1000 / fps, 1)
+      return -off(v)[2]
+    })
+    for (const t of totals) expect(Math.abs(t - totals[1])).toBeLessThan(0.6)
+  })
+
+  it('eases out: let go, it coasts a little further and then stops', () => {
     const v = new ViewOffset()
-    const k = Math.SQRT1_2
-    v.fly(k, 0, -k, -1, 0.05)
-    const [x, , z] = off(v)
-    expect(x).toBeCloseTo(-k * FLY_CELLS_PER_SECOND * 0.05, 12)
-    expect(z).toBeCloseTo(k * FLY_CELLS_PER_SECOND * 0.05, 12)
+    for (let i = 0; i < 40; i++) { v.fly(0, 0, -1, 1, 1 / 60); v.step(1000 / 60) }
+    const atRelease = off(v)[2]
+    for (let i = 0; i < 60; i++) { v.rest(); v.step(1000 / 60) }
+    const afterCoast = off(v)[2]
+    expect(afterCoast).toBeLessThan(atRelease)
+    for (let i = 0; i < 60; i++) { v.rest(); v.step(1000 / 60) }
+    expect(off(v)[2]).toBeCloseTo(afterCoast, 9)
   })
 
-  it('a long frame (a tab coming back) flies no further than FLY_MAX_DT', () => {
+  it('a long frame (a tab coming back) is clamped to FLY_MAX_DT', () => {
     const v = new ViewOffset()
     v.fly(0, 0, -1, 1, 5)
-    expect(off(v)[2]).toBeCloseTo(-FLY_CELLS_PER_SECOND * FLY_MAX_DT, 12)
+    const rampT = Math.min(1, FLY_MAX_DT / FLY_RAMP_S)
+    expect(-off(v)[2]).toBeCloseTo(FLY_CELLS_PER_SECOND * rampT * rampT * FLY_MAX_DT, 9)
   })
 })
 

@@ -1,9 +1,8 @@
 /**
- * viewFlyHolds.test.ts - FAR and NEAR in VIEW (arkinox, 2026-11-09: "when
- * using the move forward and backward functions in VIEW mode, I want the
- * movement to be smooth and not tied to the nearest cursor block"): the
- * pad's FAR and NEAR, and R and F, held in VIEW, fly the view as the fly
- * buttons do; anywhere else they step the cursor a cell as before.
+ * viewFlyHolds.test.ts - VIEW's fly, after the 2026-11-11 rework: Space flies
+ * forward and Shift back (keys), the two fly buttons do the same held, and a
+ * drag on a held button steers (orbits). R and F are FAR and NEAR again, a
+ * cell at a time, not a fly. The pad no longer flies.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -28,63 +27,76 @@ vi.mock('../../lib/relay', async (importOriginal) => ({
 
 import { flyHold } from '../ViewFlyButtons'
 import { flyKeyUp } from '../../hooks/useKeyboard'
-import { flyDir, useViewFly } from '../../lib/viewFly'
+import { flyDir, takeSteer, useViewFly } from '../../lib/viewFly'
 
-const press = { pointerType: 'touch', button: 0, pointerId: 7, preventDefault: () => {}, stopPropagation: () => {}, currentTarget: { setPointerCapture: () => {} } }
+const press = (pointerId = 7, x = 100, y = 100) => ({ pointerType: 'touch', button: 0, pointerId, clientX: x, clientY: y, preventDefault: () => {}, stopPropagation: () => {}, currentTarget: { setPointerCapture: () => {} } })
 
-afterEach(() => { useViewFly.setState({ button: 0, pad: 0, key: 0, touch: 0 }) })
+afterEach(() => { useViewFly.setState({ button: 0, pad: 0, key: 0, touch: 0 }); takeSteer() })
 
-describe('the pad\'s FAR and NEAR fly while held in VIEW', () => {
-  it('FAR flies forward and NEAR back while held, and stop when let go', () => {
-    const far = flyHold('pad', 1)
-    far.onPointerDown(press as never)
-    expect(useViewFly.getState().pad).toBe(1)
+describe('the fly buttons fly while held', () => {
+  it('Forward flies forward and Back flies back while held, and stop when let go', () => {
+    const fwd = flyHold('button', 1)
+    fwd.onPointerDown(press() as never)
+    expect(useViewFly.getState().button).toBe(1)
     expect(flyDir()).toBe(1)
-    far.onPointerUp()
+    fwd.onPointerUp(press() as never)
     expect(flyDir()).toBe(0)
-    const near = flyHold('pad', -1)
-    near.onPointerDown(press as never)
+    const back = flyHold('button', -1)
+    back.onPointerDown(press() as never)
     expect(flyDir()).toBe(-1)
-    near.onLostPointerCapture()
+    back.onLostPointerCapture(press() as never)
     expect(flyDir()).toBe(0)
   })
 
-  it('a lift of one does not stop the other\'s fly, and the pad never touches the buttons\' hold', () => {
-    flyHold('pad', 1).onPointerDown(press as never)
-    flyHold('pad', -1).onPointerUp()
-    expect(useViewFly.getState().pad).toBe(1)
-    expect(useViewFly.getState().button).toBe(0)
-  })
-
-  it('TouchControls hands FAR and NEAR to the hold only while the view flies (canFly); otherwise they step as before', () => {
-    const src = readFileSync('src/hud/TouchControls.tsx', 'utf8')
-    expect(src).toMatch(/sub: 'FAR', title: 'Away from camera \(R\)', act: move\('away'\), fly: 1/)
-    expect(src).toMatch(/sub: 'NEAR', title: 'Toward camera \(F\)', act: move\('toward'\), fly: -1/)
-    // WALK's keys hold their walk first (store/walkHold.ts); FAR and NEAR are not WALK's.
-    expect(src).toMatch(/\{\.\.\.\(walking && b\.hold \? padHold\(b\) : flies && b\.fly \? flyHold\('pad', b\.fly\) : bind\(b\.act\)\)\}/)
-    expect(src).toMatch(/const flies = useCyberspace\(\(s\) => canFly\(s, building\)\)/)
+  it('a drag on a held fly button gathers steer, in CSS pixels, for the scene to orbit by', () => {
+    const fwd = flyHold('button', 1)
+    fwd.onPointerDown(press(7, 100, 100) as never)
+    fwd.onPointerMove(press(7, 130, 112) as never)
+    const s = takeSteer()
+    expect(s.dx).toBe(30)
+    expect(s.dy).toBe(12)
+    // Drained: nothing left for the next frame.
+    expect(takeSteer()).toEqual({ dx: 0, dy: 0 })
+    fwd.onPointerUp(press(7, 130, 112) as never)
   })
 })
 
-describe('R and F fly while held in VIEW', () => {
-  it('R\'s keyup ends R\'s fly, and leaves F\'s alone', () => {
+describe('Space and Shift fly the view in VIEW', () => {
+  it('Space\'s keyup ends the forward fly, Shift\'s the back one', () => {
     useViewFly.getState().setKey(1)
-    flyKeyUp('KeyF')
+    flyKeyUp(-1)
     expect(useViewFly.getState().key).toBe(1)
-    flyKeyUp('KeyR')
+    flyKeyUp(1)
     expect(useViewFly.getState().key).toBe(0)
     useViewFly.getState().setKey(-1)
-    flyKeyUp('KeyF')
+    flyKeyUp(-1)
     expect(flyDir()).toBe(0)
   })
 
-  it('useKeyboard sends R and F to the fly in VIEW, before its cell step, and lets go on keyup and blur', () => {
+  it('useKeyboard flies forward on Space and back on Shift in VIEW, moves the cursor on R and F, and lets go on keyup and blur', () => {
     const src = readFileSync('src/hooks/useKeyboard.ts', 'utf8')
-    const at = src.indexOf("if (event.code === 'KeyR' || event.code === 'KeyF') {")
-    const block = src.slice(at, src.indexOf('return\n      }', at))
-    expect(block.indexOf('canFly(store, building)')).toBeGreaterThan(0)
-    expect(block.indexOf('setKey(')).toBeLessThan(block.indexOf('store.moveCursor('))
-    expect(src).toMatch(/if \(event\.code === 'KeyR' \|\| event\.code === 'KeyF'\) flyKeyUp\(event\.code\)/)
+    // Space in a free view flies forward, never commits there.
+    expect(src).toMatch(/if \(canFly\(store, building\)\) \{ useViewFly\.getState\(\)\.setKey\(1\); return \}/)
+    // Shift flies back in a free view, but not while a rotate key is held.
+    expect(src).toMatch(/ShiftLeft' \|\| event\.code === 'ShiftRight'\) && canFly\(store, building\) && rotateHeld\.size === 0\) \{\s*event\.preventDefault\(\)\s*useViewFly\.getState\(\)\.setKey\(-1\)/)
+    // A rotate ends any backward fly, so steering by rotation does not drift.
+    expect(src).toMatch(/if \(event\.shiftKey\) \{[\s\S]*?useViewFly\.getState\(\)\.setKey\(0\)\s*store\.rotate\(rotation\)/)
+    // R and F just move the cursor, no fly branch.
+    expect(src).toMatch(/if \(event\.code === 'KeyR' \|\| event\.code === 'KeyF'\) \{[\s\S]*?store\.moveCursor\(moveDirection\(axes, MOVE_KEYS\[event\.code\]\)\)/)
+    expect(src).not.toMatch(/canFly\(store, building\)\) \{\s*useViewFly\.getState\(\)\.setKey\(event\.code === 'KeyR'/)
+    // Keyup and blur release the key fly.
+    expect(src).toMatch(/if \(event\.code === 'Space'\) flyKeyUp\(1\)/)
     expect(src).toMatch(/window\.addEventListener\('blur', flyKeysReleased\)/)
+  })
+
+  it('the pad no longer flies: FAR and NEAR bind their cursor step, arrow only, the word kept in the title', () => {
+    const src = readFileSync('src/hud/TouchControls.tsx', 'utf8')
+    expect(src).toMatch(/glyph: <ForwardArrow3D size=\{24\} \/>, title: 'FAR: away from camera \(R\)', keyHint: 'R', act: move\('away'\)/)
+    expect(src).toMatch(/glyph: <ReverseArrow3D size=\{24\} \/>, title: 'NEAR: toward camera \(F\)', keyHint: 'F', act: move\('toward'\)/)
+    // No FAR/NEAR text on the face any more.
+    expect(src).not.toMatch(/sub: 'FAR'/)
+    expect(src).not.toMatch(/sub: 'NEAR'/)
+    expect(src).not.toMatch(/flyHold\('pad'/)
+    expect(src).toMatch(/\{\.\.\.\(walking && b\.hold \? padHold\(b\) : bind\(b\.act\)\)\}/)
   })
 })

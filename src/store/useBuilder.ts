@@ -112,6 +112,7 @@ import { depName, useStash } from '../hud/stash'
 import { registerEscape } from '../hooks/useEscape'
 import { buildPlane, placedCursor } from '../lib/buildCursor'
 import { landFly } from '../lib/viewFly'
+import { useRegion } from './useRegion'
 
 /** How a session of BUILD mode began: the BUILD control (or B), or a DEPLOY. */
 export type BuildEntry = 'build' | 'deploy'
@@ -252,6 +253,8 @@ export const useBuilder = create<BuilderState>((set, get) => ({
 
   enter: (via = 'build') => {
     if (get().active) return
+    // Region mode is a VIEW tool: BUILD ends it (arkinox, 2026-11-11).
+    useRegion.getState().exit()
     // The camera back from a hyperspace view first, as spectating does
     // (useHyperspace.ts): its ownership hides the gibson field and stands a
     // second bar up whose RETURN would end the mode.

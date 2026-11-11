@@ -110,3 +110,62 @@ export function coordLink(origin: string, hex: string): string {
 export function frameScale(maxHeight: number, maxScale: number): number {
   return Math.max(0, Math.min(maxScale, maxHeight - 3))
 }
+
+/**
+ * The cell of zoom `scaleExp` that holds `p`: its low and high gibson corners
+ * (both inclusive). A region selected at a zoom must hold whole cells, not
+ * the cursor's one gibson, so the covering prefix is grown from both corners.
+ */
+export function cellCorners(p: Position, scaleExp: number): [Position, Position] {
+  const s = BigInt(Math.max(0, scaleExp))
+  const lo = (v: bigint): bigint => (v >> s) << s
+  const span = (1n << s) - 1n
+  const l: Position = { x: lo(p.x), y: lo(p.y), z: lo(p.z) }
+  return [l, { x: l.x + span, y: l.y + span, z: l.z + span }]
+}
+
+/** How many leading characters two strings share. */
+function commonPrefixLen(a: string, b: string): number {
+  const n = Math.min(a.length, b.length)
+  let i = 0
+  while (i < n && a[i] === b[i]) i++
+  return i
+}
+
+/**
+ * The smallest /C/ prefix whose region holds every one of `points`, with the
+ * box it fixes, or null when none does (the points span the whole space, so
+ * the only box holding them is all of cyberspace, which is not a region).
+ *
+ * The prefix is the points' longest shared run of the interleaved coordinate
+ * hex, clamped to 63 characters: a region of 1 to 63 hex never reaches the
+ * plane bit (the coordinate's lowest), so `plane` only has to be the same for
+ * every point, never right. The box comes back from prefixRegion, so a
+ * selection matches the relay's shared region vectors exactly
+ * (regionPrefixVectors.test.ts).
+ */
+export function coveringPrefix(points: readonly Position[], plane: Plane): { prefix: string; region: PrefixRegion } | null {
+  if (points.length === 0) return null
+  const hexes = points.map((p) => placeHex(p, plane))
+  let n = hexes[0].length
+  for (let i = 1; i < hexes.length; i++) n = Math.min(n, commonPrefixLen(hexes[0], hexes[i]))
+  // A prefix of 64 fixes the plane and is a place, not a region: the finest
+  // region is 63 hex, a 2x2x2 box of gibsons.
+  n = Math.min(n, 63)
+  if (n < 1) return null
+  const prefix = hexes[0].slice(0, n)
+  return { prefix, region: prefixRegion(prefix) }
+}
+
+/**
+ * The region that covers the cells of `positions` at zoom `scaleExp`: the
+ * smallest valid /C/ prefix, or null when there is none. Each position
+ * contributes its whole cell (both corners), so the region grows to hold the
+ * cells, not just the points. Used by region mode to grow the selection to
+ * the entry cell and the cursor cell, and to collapse it to one cell.
+ */
+export function coveringRegion(positions: readonly Position[], scaleExp: number, plane: Plane): { prefix: string; region: PrefixRegion } | null {
+  const corners: Position[] = []
+  for (const p of positions) corners.push(...cellCorners(p, scaleExp))
+  return coveringPrefix(corners, plane)
+}

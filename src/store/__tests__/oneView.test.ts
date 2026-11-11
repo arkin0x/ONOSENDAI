@@ -159,6 +159,18 @@ describe('D3: viewing a block only views it', () => {
   })
 })
 
+describe('VIEW to WALK', () => {
+  it('ends the view without bringing back the list the view came from', async () => {
+    const { cycleMode } = await import('../padMode')
+    const { useShards } = await import('../useShards')
+    useShards.getState().setNearbyReturn({ scrollTop: 0 } as never)
+    cs().viewAt({ x: 5n, y: 6n, z: 7n }, 0, 'SHARD', 0, { item: true })
+    cycleMode()
+    expect(useShards.getState().nearbyReturn).toBeNull()
+    expect(useShards.getState().nearbyOpen).toBe(false)
+  })
+})
+
 describe('region mode at the big zooms', () => {
   it('turns on from EARTH at 2^52 and from CYBERSPACE at 2^82 with a prefix that holds the cursor cell', () => {
     viewEarth()

@@ -58,7 +58,7 @@ function stopPlace(stop: Stop): { position: Position; plane: Plane } {
  * Open the route in the current address, if there is one. Returns what
  * undoes the watching it set up (tests, and a remount in development).
  */
-export function startCoordRoute(loc: Pick<Location, 'pathname' | 'search' | 'hash'> = window.location, history: Pick<History, 'replaceState'> = window.history): () => void {
+export function startCoordRoute(loc: Pick<Location, 'pathname' | 'search' | 'hash'> = window.location, history: Pick<History, 'replaceState'> = window.history, keepZoom = false): () => void {
   const route = parseCoordRoute(loc.pathname)
   if (!route) return () => {}
   const home = (): void => { try { history.replaceState(null, '', `/${loc.search}${loc.hash}`) } catch { /* no history here */ } }
@@ -90,7 +90,7 @@ export function startCoordRoute(loc: Pick<Location, 'pathname' | 'search' | 'has
     const label = `C/${route.hex.slice(0, 8)}…${route.hex.slice(-4)}`
     useCoordRoute.setState({ region: null, label })
     cs.viewAt(position, plane, label)
-    stops.push(watchForBlock(route.hex))
+    stops.push(watchForBlock(route.hex, keepZoom))
   }
 
   // The link's view ended: anything that replaced its focus, or cleared it.
@@ -105,7 +105,7 @@ export function startCoordRoute(loc: Pick<Location, 'pathname' | 'search' | 'has
  * Look for a block whose merkle root or hash is `hex` among the anchors, now
  * and as more load, until one matches or the link's view ends.
  */
-function watchForBlock(hex: string): () => void {
+function watchForBlock(hex: string, keepZoom: boolean): () => void {
   const bytes = hexToBytes(hex)
   let timer: ReturnType<typeof setTimeout> | null = null
   let last = 0
@@ -122,7 +122,7 @@ function watchForBlock(hex: string): () => void {
     if (row === -1) return
     done = true
     unsub()
-    landOnStop(stopAt(index, row))
+    landOnStop(stopAt(index, row), keepZoom)
   }
   const schedule = (): void => {
     if (done || timer !== null) return
@@ -133,8 +133,8 @@ function watchForBlock(hex: string): () => void {
   return () => { done = true; unsub(); if (timer !== null) clearTimeout(timer) }
 }
 
-/** The link named a block: show its stop, under the block's name. */
-function landOnStop(stop: Stop): void {
+/** The link named a block: show its stop, under the block's name, framed at stopScale unless `keepZoom` (a /demo step's own zoom). */
+function landOnStop(stop: Stop, keepZoom: boolean): void {
   const cs = useCyberspace.getState()
   const linkLabel = useCoordRoute.getState().label
   if (linkLabel === null || cs.focus?.label !== linkLabel) return
@@ -144,7 +144,7 @@ function landOnStop(stop: Stop): void {
   // (HyperspacePanel selectStopInScene); RETURN goes home, not back to the
   // raw coordinate the link held.
   useCoordRoute.setState({ label })
-  viewHyperspace(at.position, at.plane, label, stopScale(stop), stop.height)
+  viewHyperspace(at.position, at.plane, label, keepZoom ? undefined : stopScale(stop), stop.height)
   // arkinox's words (2026-10-14). The title names the kind of stop, which
   // also says where the view is, whether or not it had to move there.
   useToast.getState().show(blockToast(stop))

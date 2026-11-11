@@ -286,6 +286,10 @@ describe('HOP and VIEW keep their pad', () => {
     expect(cells()).not.toContain('pin')
     expect(keys().some((b) => (b.props.className ?? '').includes('is-standdown'))).toBe(false)
     expect(find('is-view').props.children).toBe('VIEW')
+    // BUILD from the view keeps it, but region mode is VIEW's: no Region key there.
+    useBuilder.getState().enter('build')
+    expect(cells()).not.toContain('region')
+    useBuilder.getState().exit()
     S().clearFocus()
   })
 })

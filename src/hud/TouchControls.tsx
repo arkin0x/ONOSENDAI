@@ -343,7 +343,7 @@ export function TouchControls(): JSX.Element {
                 of the globe. On turns region mode on and opens the REGION chip
                 (store/useRegion.ts, hud/RegionChip.tsx). The pin cell is its
                 own: REMOVE PIN is gone with the cross marker (arkinox, 2026-11-11). */}
-            {viewing && (
+            {viewing && !building && (
               <button
                 className={`touchpad__key touchpad__key--region${regionActive ? ' is-on' : ''}`}
                 title="Region: pick a region for a private speakeasy"

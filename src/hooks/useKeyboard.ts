@@ -314,7 +314,7 @@ export function useKeyboard(): void {
       if (event.code === 'KeyH') {
         event.preventDefault()
         const hs = useHyperspace.getState()
-        if (hs.scrubHeight === null) hs.setScrubHeight(hs.tipHeight ?? 0)
+        if (hs.scrubHeight === null) hs.setScrubHeight(hs.viewedStop ?? hs.tipHeight ?? 0)
         else closeScrubber()
         return
       }

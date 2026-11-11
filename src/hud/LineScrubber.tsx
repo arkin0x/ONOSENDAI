@@ -135,7 +135,7 @@ export function LineScrubber(): JSX.Element {
 
   const toggle = (): void => {
     const hs = useHyperspace.getState()
-    if (hs.scrubHeight === null) hs.setScrubHeight(hs.destination ?? hs.tipHeight ?? 0)
+    if (hs.scrubHeight === null) hs.setScrubHeight(hs.viewedStop ?? hs.destination ?? hs.tipHeight ?? 0)
     else closeScrubber()
   }
 

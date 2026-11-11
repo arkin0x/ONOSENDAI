@@ -487,7 +487,7 @@ export function HyperspacePanel(): JSX.Element {
           <button
             className="tag tag--tap"
             title="Open the Hyperspace overlay (H)"
-            onClick={() => { const hs = useHyperspace.getState(); if (hs.scrubHeight === null) hs.setScrubHeight(hs.tipHeight ?? 0); else closeScrubber() }}
+            onClick={() => { const hs = useHyperspace.getState(); if (hs.scrubHeight === null) hs.setScrubHeight(hs.viewedStop ?? hs.tipHeight ?? 0); else closeScrubber() }}
           >{tag}</button>
         ) : (
           <span className={`tag ${sync.status === 'error' ? 'tag--danger' : ''}`}>{tag}</span>

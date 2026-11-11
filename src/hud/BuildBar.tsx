@@ -80,7 +80,8 @@ export function BuildBar(): JSX.Element | null {
   const stop = (): void => {
     const s = useCyberspace.getState()
     if (s.plan) s.cancelPlan()
-    else s.cancel()
+    // Finished since the render: X here would end BUILD's view, not a move.
+    else if (moveUnderWay(s)) s.cancel()
   }
 
   return (

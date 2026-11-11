@@ -25,6 +25,14 @@ import { watchNearbyReturn } from './lib/nearbyReturn'
 import { watchDoorReturn } from './lib/doorReturn'
 import { startCoordRoute } from './store/useCoordRoute'
 import { DemoCoach } from './hud/DemoCoach'
+import { TutorialCoach } from './hud/TutorialCoach'
+import { watchFirstArrival } from './store/useTutorial'
+// The tutorial's staged things and the waits on them (registered on load; stages only while it runs).
+import './tutorial/director'
+// The final card's DUNGEON, when games are on for this device.
+import './tutorial/dungeon'
+import { GameView } from './game/GameView'
+import { GameChip } from './hud/GameChip'
 import { TvScreen } from './hud/TvScreen'
 import { isTvPath, useTv } from './store/useTv'
 import { isBroadcast, reloadBroadcast } from './lib/tv/broadcast'
@@ -127,6 +135,11 @@ export default function App(): JSX.Element {
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
+  // The first-arrival tutorial (store/useTutorial.ts): with this device's
+  // switch on (tutorial/gate.ts, off in production until the owner turns it
+  // on), a brand-new identity gets the tutorial and a player who left one
+  // unfinished resumes it.
+  useEffect(() => watchFirstArrival(), [])
   // onosendai.tech/tv: Cyberspace TV (store/useTv.ts). Back off /tv turns
   // it off, Forward onto /tv turns it on, as loading that address would.
   useEffect(() => {
@@ -330,6 +343,8 @@ export default function App(): JSX.Element {
               {/* A broken chain first: nothing else moves you until you respawn.
                   It stays in BUILD mode too; building is not moving. */}
               <BrokenChainChip />
+              {/* Your head is inside a game ONOSENDAI plays, off screen: tap to go back in (DECK-0002 §7). */}
+              <GameChip />
               {/* The trip GOAL planned, until it is cleared (useGoal.ts). */}
               <GoalChip />
               {/* BUILD mode keeps the stack to what building needs (arkinox,
@@ -394,10 +409,14 @@ export default function App(): JSX.Element {
       )}
       {/* The /demo tour's caption panel, only while the tour runs. */}
       <DemoCoach />
+      {/* The first-arrival tutorial's caption panel, only while it runs. */}
+      <TutorialCoach />
       {/* WALK's lag, centered over everything and touching nothing. */}
       <SyncWarning />
       {crowded && <div className="mobile-overlay" />}
       <Workshop />
+      {/* In-game mode: the game's world over everything, while you play one (DECK-0002 §2.3). */}
+      <GameView />
       {/* The one hidden canvas that draws every list's shard pictures, there only while it has some to draw. */}
       <ThumbHost />
       {/* Docked in the lower left, a gap short of the pad while the pad is on

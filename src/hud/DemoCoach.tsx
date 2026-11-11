@@ -223,6 +223,44 @@ function Panel({ panel, waiting }: { panel: DemoPanel; waiting: boolean }): JSX.
   }
 }
 
+/**
+ * Push the instrument stack and the compass down below a caption panel at the
+ * top while it shares their columns (styles.css .instruments, --demo-coach-h
+ * and --demo-coach-c): the /demo coach's, and the first-arrival tutorial's
+ * (hud/TutorialCoach.tsx).
+ */
+export function useCoachOffsets(ref: { current: HTMLDivElement | null }, active: boolean, minimized: boolean): void {
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    // Idle, nothing to do: the active run's cleanup took the offsets away, and
+    // removing them here would clear the other coach's while it is up.
+    if (!active) return
+    const el = ref.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    // Only when the two share columns: on a desktop the coach sits top centre
+    // and the stack beside the panel column, and pushing the stack down there
+    // only made it jump on every step (rehearsal, 2026-10-15).
+    const put = (): void => {
+      const coach = el.getBoundingClientRect()
+      const below = (sel: string, prop: string): void => {
+        const r = document.querySelector(sel)?.getBoundingClientRect()
+        const shares = !r || r.width === 0 || (coach.left < r.right && r.left < coach.right)
+        if (shares) root.style.setProperty(prop, `${Math.ceil(coach.height)}px`)
+        else root.style.removeProperty(prop)
+      }
+      below('.instruments', '--demo-coach-h')
+      // The compass too: on a phone the coach spans the screen and covered
+      // the view controls for the whole tour (rehearsal, 2026-10-15).
+      below('.compass-3d', '--demo-coach-c')
+    }
+    put()
+    const ro = new ResizeObserver(put)
+    ro.observe(el)
+    window.addEventListener('resize', put)
+    return () => { ro.disconnect(); window.removeEventListener('resize', put); root.style.removeProperty('--demo-coach-h'); root.style.removeProperty('--demo-coach-c') }
+  }, [ref, active, minimized])
+}
+
 export function DemoCoach(): JSX.Element | null {
   const active = useDemo((s) => s.active)
   const index = useDemo((s) => s.index)
@@ -294,33 +332,7 @@ export function DemoCoach(): JSX.Element | null {
   }, [active])
 
   // The instrument stack starts below the panel (styles.css .instruments).
-  useLayoutEffect(() => {
-    const root = document.documentElement
-    if (!active) { root.style.removeProperty('--demo-coach-h'); root.style.removeProperty('--demo-coach-c'); return }
-    const el = ref.current
-    if (!el || typeof ResizeObserver === 'undefined') return
-    // Only when the two share columns: on a desktop the coach sits top centre
-    // and the stack beside the panel column, and pushing the stack down there
-    // only made it jump on every step (rehearsal, 2026-10-15).
-    const put = (): void => {
-      const coach = el.getBoundingClientRect()
-      const below = (sel: string, prop: string): void => {
-        const r = document.querySelector(sel)?.getBoundingClientRect()
-        const shares = !r || r.width === 0 || (coach.left < r.right && r.left < coach.right)
-        if (shares) root.style.setProperty(prop, `${Math.ceil(coach.height)}px`)
-        else root.style.removeProperty(prop)
-      }
-      below('.instruments', '--demo-coach-h')
-      // The compass too: on a phone the coach spans the screen and covered
-      // the view controls for the whole tour (rehearsal, 2026-10-15).
-      below('.compass-3d', '--demo-coach-c')
-    }
-    put()
-    const ro = new ResizeObserver(put)
-    ro.observe(el)
-    window.addEventListener('resize', put)
-    return () => { ro.disconnect(); window.removeEventListener('resize', put); root.style.removeProperty('--demo-coach-h'); root.style.removeProperty('--demo-coach-c') }
-  }, [active, minimized])
+  useCoachOffsets(ref, active, minimized)
 
   if (!active || !step) return null
   const caption = captionFor(step, hasChain, done, ownAvatar)

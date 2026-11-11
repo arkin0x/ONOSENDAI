@@ -599,38 +599,19 @@ function claimed(v: Vector3, i: number, local: ViewAxes): AxisDirection {
 }
 
 /**
- * The level view nearest `q`, or null when `q` is level already: cyberspace
- * +Y up on screen, which WALK keeps while GRAVITY is on (store/useWalk.ts).
- * The four level views are the canonical one turned about +Y; the nearest is
- * the one the smallest turn reaches.
- */
-export function levelQuaternion(q: Quaternion): Quaternion | null {
-  const up = viewAxes(q).up
-  if (up.axis === 'y' && up.dir === 1) return null
-  let best: Quaternion | null = null
-  let bestDot = -1
-  let level = canonicalQuaternion()
-  for (let k = 0; k < 4; k++) {
-    const d = Math.abs(level.dot(q))
-    if (d > bestDot + 1e-9) { best = level; bestDot = d }
-    level = rotateView(level, 'left')
-  }
-  return best
-}
-
-/**
- * claimScreenAxes for a level walker (WALK under GRAVITY): up is cyberspace
- * +Y whatever the camera does, and right and out are the two level axes
+ * claimScreenAxes for a level walker (WALK under GRAVITY): up is against
+ * gravity `down` (lib/walkDown.ts: cyberspace -Y unless the view is turned)
+ * whatever the camera does, and right and out are the two level axes
  * nearest the camera's own, so A and D, W and S stay on the floor however
  * far you look up or down. `right`, `up` and `out` are the camera's basis
  * in the scene's local frame, as for claimScreenAxes, and are overwritten.
  */
-export function levelScreenAxes(right: Vector3, up: Vector3, out: Vector3, local: ViewAxes): ViewAxes {
-  // Cyberspace +Y in the local frame: the slot that holds y, signed.
+export function levelScreenAxes(right: Vector3, up: Vector3, out: Vector3, local: ViewAxes, down: AxisDirection = { axis: 'y', dir: -1 }): ViewAxes {
+  // Up, against gravity, in the local frame: the slot that holds its axis, signed.
   const slots = [local.right, local.up, local.out]
   let j = 0
-  while (j < 2 && slots[j].axis !== 'y') j++
-  LEVEL_UP.set(0, 0, 0).setComponent(j, slots[j].dir)
+  while (j < 2 && slots[j].axis !== down.axis) j++
+  LEVEL_UP.set(0, 0, 0).setComponent(j, -slots[j].dir * down.dir)
   // The camera's basis laid flat on it.
   right.addScaledVector(LEVEL_UP, -right.dot(LEVEL_UP))
   out.addScaledVector(LEVEL_UP, -out.dot(LEVEL_UP))

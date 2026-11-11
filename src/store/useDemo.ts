@@ -290,12 +290,12 @@ export const tourHeads = {
  * gets the pin's +. Whatever destination and pin were there before come
  * back when the step ends, unless something else replaced them meanwhile.
  */
-function selectBlock(sel: NonNullable<DemoScene['select']>, scaleExp: number | undefined): void {
+function selectBlock(sel: NonNullable<DemoScene['select']>, scaleExp: number | undefined, push: (c: () => void) => void): void {
   const prevDest = useHyperspace.getState().destination
   const prevPin = useCyberspace.getState().pin
   useHyperspace.getState().setDestination(sel.height)
   useCyberspace.getState().dropPin(landfallPlace(sel.blockHash), sel.label, scaleExp)
-  stepCleanups.push(() => {
+  push(() => {
     if (useHyperspace.getState().destination === sel.height) useHyperspace.getState().setDestination(prevDest)
     const pin = useCyberspace.getState().pin
     if (pin && pin.label === sel.label) {
@@ -305,8 +305,12 @@ function selectBlock(sel: NonNullable<DemoScene['select']>, scaleExp: number | u
   })
 }
 
-/** Put the scene where a step says. Returns nothing; watchers go in stepCleanups. */
-export function applyScene(scene: DemoScene, walkStep = false): void {
+/**
+ * Put the scene where a step says. Returns nothing; what undoes its watchers
+ * goes to `push`: the tour's own step cleanups, or the caller's (the
+ * first-arrival tutorial, store/useTutorial.ts, keeps its own).
+ */
+export function applyScene(scene: DemoScene, walkStep = false, push: (c: () => void) => void = (c) => { stepCleanups.push(c) }): void {
   const cs = useCyberspace.getState()
   const target = scene.target
   // WALK is the walk step's alone: any later step that sets a scene ends it,
@@ -334,15 +338,15 @@ export function applyScene(scene: DemoScene, walkStep = false): void {
     } else if (typeof target === 'object' && 'block' in target) {
       // The /C/ route's own machinery: a merkle root or block hash lands on
       // its hyperspace stop, with the block's toast (useCoordRoute.ts).
-      stepCleanups.push(startCoordRoute({ pathname: `/C/${target.block}`, search: '', hash: '' }, tourHistory))
+      push(startCoordRoute({ pathname: `/C/${target.block}`, search: '', hash: '' }, tourHistory))
       // The block's toast waits for a tap; the tour takes its own toast with it.
-      stepCleanups.push(dismissBlockToast)
+      push(dismissBlockToast)
     } else if (typeof target === 'object' && 'head' in target) {
       // Someone's present position: looked at once their chain arrives,
       // and only while the step is still up. Nothing arriving leaves the
       // view where it was.
       let up = true
-      stepCleanups.push(() => { up = false })
+      push(() => { up = false })
       void tourHeads.read(target.head).then((at) => {
         if (up && at) useCyberspace.getState().focusOn(at.position, at.plane, target.label)
       }, () => {})
@@ -357,7 +361,7 @@ export function applyScene(scene: DemoScene, walkStep = false): void {
   if (scene.layers) for (const [layer, on] of Object.entries(scene.layers)) if (on !== undefined) useLayers.getState().setLayer(layer as SceneLayer, on)
   if (scene.chat) useChat.getState().setOpen(true)
   if (scene.pad) usePad.getState().setOpen(true)
-  if (scene.select) selectBlock(scene.select, scene.scale)
+  if (scene.select) selectBlock(scene.select, scene.scale, push)
 }
 
 /**

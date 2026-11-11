@@ -5,7 +5,11 @@
  * rulings supersede where they differ). The fall itself, and what it
  * publishes, is the walk's (store/useWalk.ts).
  *
- * Down is cyberspace -Y everywhere. A fall is an animation on this device,
+ * Down is the axis nearest the screen's down (lib/walkDown.ts; arkinox,
+ * 2026-11-10, superseding "down is cyberspace -Y everywhere" of 2026-10-24):
+ * cyberspace -Y in the default view and in any view turned only left or
+ * right, and along X or Z once the compass's view controls tip the view.
+ * Everything here takes it as `down`, -Y when absent. A fall is an animation on this device,
  * at a real gravitational acceleration, and makes no proof while it falls.
  * It resolves into ordinary walk hops, each from where the hop before it
  * left off: on landing, on a move made in mid-air, at the last gibson a hop
@@ -46,7 +50,8 @@
  * hover above it. The same holds for a jump's rise.
  */
 
-import { clampAxis, type Position } from '../lib/space'
+import { clampAxis, type AxisDirection, type Position } from '../lib/space'
+import { WORLD_DOWN, upOf } from '../lib/walkDown'
 import { stepLimit, underSolid, type WallItem } from './walkWalls'
 
 /**
@@ -116,22 +121,28 @@ export function arcPeak(v0: number, top: number): number {
 }
 
 /**
- * The furthest, in whole gibsons, a hop from `from` straight along Y may go
- * (`dir` -1 down, 1 up) and still be affordable by `affordable` (the walk's
- * segment budget), at most `max`. Cost only grows with the distance (the
- * highest binary boundary crossed), so it is a binary search.
+ * The furthest, in whole gibsons, a hop from `from` straight along `along`
+ * may go and still be affordable by `affordable` (the walk's segment
+ * budget), at most `max`. Cost only grows with the distance (the highest
+ * binary boundary crossed), so it is a binary search.
  */
-export function affordableAlongY(from: Position, dir: 1 | -1, max: bigint, affordable: (from: Position, to: Position) => boolean): bigint {
+export function affordableAlong(from: Position, along: AxisDirection, max: bigint, affordable: (from: Position, to: Position) => boolean): bigint {
+  const a = along.axis
   // The axis ends: never past them.
-  const room = dir < 0 ? from.y - clampAxis(from.y - max) : clampAxis(from.y + max) - from.y
+  const room = along.dir < 0 ? from[a] - clampAxis(from[a] - max) : clampAxis(from[a] + max) - from[a]
   let lo = 0n
   let hi = room
   while (lo < hi) {
     const mid = (lo + hi + 1n) / 2n
-    if (affordable(from, { ...from, y: from.y + BigInt(dir) * mid })) lo = mid
+    if (affordable(from, { ...from, [a]: from[a] + BigInt(along.dir) * mid })) lo = mid
     else hi = mid - 1n
   }
   return lo
+}
+
+/** affordableAlong straight along Y (`dir` -1 down, 1 up). */
+export function affordableAlongY(from: Position, dir: 1 | -1, max: bigint, affordable: (from: Position, to: Position) => boolean): bigint {
+  return affordableAlong(from, { axis: 'y', dir }, max, affordable)
 }
 
 /** The whole axis, from any point: the most a fall could ever go. */
@@ -154,13 +165,13 @@ export interface FallLimit {
  * from `from` can afford, in which case the last gibson it can. A floor no
  * item has is not there, so it is fallen through. A floor in the plane of
  * `from` with open space above it holds you (store/walkWalls.ts stepLimit,
- * `stand`): drop 0.
+ * `stand`): drop 0. Below is along `down`.
  */
-export function fallLimit(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean): FallLimit {
-  const reach = affordableAlongY(from, -1, AXIS_SPAN, affordable)
+export function fallLimit(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean, down: AxisDirection = WORLD_DOWN): FallLimit {
+  const reach = affordableAlong(from, down, AXIS_SPAN, affordable)
   // With nothing affordable below, still asked one gibson down: standing there is landed.
-  const down = stepLimit(from, 'y', -1, reach > 0n ? reach : 1n, items, true)
-  if (down.by !== null && down.reach <= reach) return { drop: down.reach, lands: true, by: down.by }
+  const floor = stepLimit(from, down.axis, down.dir, reach > 0n ? reach : 1n, items, down)
+  if (floor.by !== null && floor.reach <= reach) return { drop: floor.reach, lands: true, by: floor.by }
   return { drop: reach, lands: false, by: null }
 }
 
@@ -169,14 +180,15 @@ export function fallLimit(from: Position, items: readonly WallItem[], affordable
  * `height`, a bounce's launch), under a ceiling, and no further than a hop
  * can afford. Right under a solid's
  * underside (a face in your plane with the solid just above you,
- * underSolid) it does not rise at all.
+ * underSolid) it does not rise at all. Up is against `down`.
  */
-export function jumpRise(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean, height: number = JUMP_HEIGHT): { rise: bigint; by: WallItem | null } {
-  const lid = underSolid(from, items)
+export function jumpRise(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean, height: number = JUMP_HEIGHT, down: AxisDirection = WORLD_DOWN): { rise: bigint; by: WallItem | null } {
+  const lid = underSolid(from, items, down)
   if (lid) return { rise: 0n, by: lid }
   const want = BigInt(height)
-  const up = stepLimit(from, 'y', 1, want, items)
-  const afford = affordableAlongY(from, 1, up.reach, affordable)
+  const rise = upOf(down)
+  const up = stepLimit(from, rise.axis, rise.dir, want, items)
+  const afford = affordableAlong(from, rise, up.reach, affordable)
   return { rise: afford, by: up.reach < want ? up.by : null }
 }
 

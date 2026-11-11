@@ -35,6 +35,10 @@
  * not know the field, so it rides in the model's `extra` like `constrain`
  * (lib/walkConstrain.ts), and an older reader passes it through untouched.
  *
+ * Up, above and the top are against the walker's gravity (lib/walkDown.ts):
+ * cyberspace +Y in the default view, along X or Z once the view is turned
+ * (arkinox, 2026-11-10), so a pad throws you the way JUMP does.
+ *
  * Whose `bounce` a face has: the payload that owns the face, as each object
  * is judged by its own `constrain` (§1.10). A shard's own faces bounce by the
  * shard's field; the faces of an object it places bounce by that object's,

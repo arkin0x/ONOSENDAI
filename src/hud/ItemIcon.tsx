@@ -25,7 +25,7 @@
  * at 2.5) passes that instead.
  */
 
-import { Bitcoin, KeyRound, Music, Pyramid, ScrollText, Vault, type LucideIcon } from 'lucide-react'
+import { Bitcoin, KeyRound, Music, Pyramid, ScrollText, Sprout, Vault, type LucideIcon } from 'lucide-react'
 import type { HiddenType } from '../lib/hidden'
 import { isPictureUri } from '../lib/itemPicture'
 
@@ -42,6 +42,8 @@ export function itemIconOf(type: HiddenType, coin = false): LucideIcon {
   if (type === 'chest') return Vault
   // Hidden audio is a music note (arkinox, 2026-10-23), in the world inside the note's blue box.
   if (type === 'audio') return Music
+  // A seed (DECK-0008) is a sprout: what grows from it is its bloom.
+  if (type === 'seed') return Sprout
   return Pyramid
 }
 

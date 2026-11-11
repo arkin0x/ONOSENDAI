@@ -85,6 +85,7 @@ import { SpawnMarker } from './SpawnMarker'
 import { TargetAvatars } from './TargetAvatars'
 import { PresenceAvatars } from './PresenceAvatars'
 import { WorldShards } from './WorldShards'
+import { WorldSeeds } from './WorldSeeds'
 import { WorldMessages } from './WorldMessages'
 import { ChestLooks } from './ChestLooks'
 import { BuildOccluders } from './BuildOccluders'
@@ -236,6 +237,8 @@ function World(): JSX.Element {
       <TargetAvatars axes={axes} />
       <PresenceAvatars axes={axes} />
       <WorldShards axes={axes} />
+      {/* Each seed's bloom, grown here from its DNA and the blocks since it was planted (DECK-0008). */}
+      <WorldSeeds axes={axes} />
       <WorldMessages axes={axes} />
       {/* Each hidden sound's full-volume sphere, behind the Settings switch (AudioSpheres). */}
       <AudioSpheres axes={axes} />

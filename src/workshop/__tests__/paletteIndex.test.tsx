@@ -105,6 +105,27 @@ describe('the palette sheet names colors by number', () => {
     await m.unmount()
   })
 
+  it('builds a new palette from the built-in colors picked, even on an object with its own', async () => {
+    // The sheet while building is the built-in, so a pick is a built-in
+    // index. Taking it from the object's own palette instead gave the wrong
+    // colors, and undefined past the end of a short one.
+    const own: Array<[number, number, number]> = [[10, 10, 10], [250, 250, 250], [0, 175, 202], [200, 40, 40]]
+    const m = await sheet('#00afca', [], own)
+    await m.press('NEW PALETTE')
+    const sw = swatches(m.all())
+    expect(sw).toHaveLength(256)
+    // Picked out of order, one inside the own palette's length and one past it.
+    for (const i of [200, 2]) {
+      ;(swatches(m.all())[i].props.onClick as () => void)()
+      await settled()
+    }
+    await m.press(/^MAKE IT/)
+    const made = useWorkshop.getState().palettes
+    expect(made).toHaveLength(1)
+    expect(made[0].colors).toEqual([BUILT_IN[200], BUILT_IN[2]])
+    await m.unmount()
+  })
+
   it('numbers a palette of the object\'s own by its own places', async () => {
     const own: Array<[number, number, number]> = [[10, 10, 10], [250, 250, 250], [0, 175, 202], [200, 40, 40]]
     const off = hexAt(BUILT_IN, 100)

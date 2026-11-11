@@ -53,6 +53,8 @@ import { ChestBlock, KeyLine } from './ItemRows'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemFace } from './ItemIcon'
 import { CardSpin } from '../scene/CardSpin'
+import { BloomCard } from './BloomCard'
+import { seedItemOf } from '../lib/seeds/seedItem'
 import { drawnLook, lookOf } from '../lib/looks'
 import { openedByHand, useOpenedChests } from '../store/useOpenedChests'
 import { EventData } from './EventData'
@@ -163,8 +165,8 @@ export function SecretModal(): JSX.Element | null {
 
   const goTo = (): void => {
     close()
-    const label = item.type === 'message' ? name : item.type === 'key' ? item.keyItem?.name ?? 'key' : item.type === 'chest' ? item.chest?.name ?? 'chest' : item.type === 'audio' ? item.audio?.title ?? 'audio' : item.shard?.name ?? 'shard'
-    useCyberspace.getState().viewAt(item.at, item.plane, label, item.type === 'shard' ? item.shard?.unit ?? 0 : 0, { item: true })
+    const label = item.type === 'message' ? name : item.type === 'key' ? item.keyItem?.name ?? 'key' : item.type === 'chest' ? item.chest?.name ?? 'chest' : item.type === 'audio' ? item.audio?.title ?? 'audio' : item.type === 'seed' ? 'seed' : item.shard?.name ?? 'shard'
+    useCyberspace.getState().viewAt(item.at, item.plane, label, item.type === 'shard' ? item.shard?.unit ?? 0 : item.type === 'seed' && item.event ? seedItemOf(item.event)?.scale ?? 0 : 0, { item: true })
   }
   // Where it was found, for what is taken out of a chest here.
   const place = { lookupId: item.lookupId ?? '', bagId: item.bagId ?? '', at: { x: item.at.x.toString(), y: item.at.y.toString(), z: item.at.z.toString() }, plane: item.plane, height: item.height }
@@ -234,6 +236,9 @@ export function SecretModal(): JSX.Element | null {
             who={muteSubject(item)}
             moderation={audioModeration(item, author, mine, close)}
           />
+        ) : item.type === 'seed' ? (
+          // A seed's bloom, grown here, and what keeps it from growing (DECK-0008).
+          <BloomCard event={item.event} />
         ) : (
           <div className="secret__shard">
             <span className="secret__shard-name">{item.shard?.name}</span>

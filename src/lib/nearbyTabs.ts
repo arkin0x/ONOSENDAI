@@ -32,6 +32,8 @@ export function tabOf(item: { type: string; event?: { tags?: readonly unknown[] 
   switch (item.type) {
     case 'key': return 'items'
     case 'shard': return 'shards'
+    // A seed's bloom is a SNO object, so it lists with the shards.
+    case 'seed': return 'shards'
     case 'audio': return 'sounds'
     case 'chest': return isDoor(item.event?.tags) ? 'doors' : 'chests'
     default: return 'messages'

@@ -4,10 +4,11 @@
  *
  * The script (src/tutorial/script.ts) is data; this walks it, with the /demo
  * tour's own pieces (store/useDemo.ts applyScene, watchAction, aimCursor).
- * What it does not take from /demo: the tour's LOCAL. The tutorial never
- * touches the publishing switch, so a newcomer's moves are as real as any
- * (a new identity is LIVE): the first move signs the spawn, and what they
- * plant stays. It is gated by a device switch that is off in production
+ * A first arrival starts LOCAL (feedback 2026-11-11, item 15): the first move
+ * still signs the spawn and what they plant stays, but nothing is published
+ * until they flip the publishing switch themselves, so a newcomer sandboxes
+ * safely. A resume or a RESTART leaves the switch where they left it. It is gated by a
+ * device switch that is off in production
  * (tutorial/gate.ts), shown only to a brand-new identity on arrival
  * (isNewArrival), kept per player pubkey so a reload resumes, and started
  * again by RESTART TUTORIAL in Settings.
@@ -22,10 +23,11 @@ import { create } from 'zustand'
 import { TUTORIAL_SCRIPT } from '../tutorial/script'
 import type { TutorialScript, TutorialStep, TutorialWait } from '../tutorial/types'
 import type { DemoAction } from '../demo/types'
-import { landedPath, readProgress, tutorialOn, writeProgress } from '../tutorial/gate'
+import { landedPath, readProgress, tutorialOn, writeProgress, type TutorialProgress } from '../tutorial/gate'
 import { aimCursor, applyScene, useDemo, watchAction } from './useDemo'
 import { appMinted, keyMintedOnLoad, savedChainLoaded, useCyberspace } from './useCyberspace'
 import { useTv } from './useTv'
+import { setMenuOpen } from '../hooks/useMenuOpen'
 
 /** How long a done step stays on screen, its ✓ showing, before the next comes up. */
 export const ADVANCE_MS = 900
@@ -109,7 +111,13 @@ function watchWait(wait: TutorialWait, onDone: () => void): () => void {
  */
 export interface TutorialLifecycle {
   start?: (pubkey: string, restart: boolean) => void
-  stop?: () => void
+  /**
+   * The run went away. `how` is why: 'finished' keeps what it staged on
+   * screen, local only (feedback item 9); 'skipped' and 'pause' take it away.
+   */
+  stop?: (how: 'finished' | 'skipped' | 'pause') => void
+  /** A load for a player who FINISHed: what the run kept is put back on screen, local only (feedback item 9). */
+  restore?: (pubkey: string) => void
 }
 const lifecycles: TutorialLifecycle[] = []
 export function onTutorialLifecycle(l: TutorialLifecycle): () => void {
@@ -169,6 +177,8 @@ interface TutorialState {
   explaining: boolean
   /** Bumped whenever a choice is registered, so the coach shows it. */
   choicesVersion: number
+  /** The route choices done this run, checked off on the choices card (feedback item 10). */
+  doneChoices: string[]
   /** The choice whose run is under way (its card waits), or null. */
   choosing: string | null
   /** Why the last choice did not go, in plain words, on the card until the next choice or step. */
@@ -182,6 +192,8 @@ interface TutorialState {
   start: (opts?: { at?: string; restart?: boolean }) => void
   /** NEXT (or SKIP on a step still waiting); on the last step, FINISH. */
   next: () => void
+  /** BACK: the step before, skipping the branch steps (feedback item 8). */
+  back: () => void
   /** A choice on a modal step (TutorialChoice): its registered run first, if any, then its branch step or the end. */
   choose: (choiceId: string) => void
   /** End the run for this player, kept as finished or skipped. */
@@ -203,7 +215,9 @@ function cleanupStep(): void {
 }
 
 export const useTutorial = create<TutorialState>((set, get) => {
-  const enter = (index: number, from?: number): void => {
+  // `viaBack`: come to by BACK. A step already done then shows its ✓ and waits
+  // for NEXT, rather than moving on by itself again (feedback item 8).
+  const enter = (index: number, from?: number, viaBack = false): void => {
     cleanupStep()
     const steps = get().script.steps
     const step: TutorialStep | undefined = steps[index]
@@ -222,7 +236,7 @@ export const useTutorial = create<TutorialState>((set, get) => {
       return
     }
     set({ index, done: !step.wait, explaining: false, choosing: null, choiceNote: null, stepNote: null })
-    writeProgress(pubkey, { step: step.id })
+    writeProgress(pubkey, progress(step.id))
     if (step.scene) applyScene(step.scene, step.wait === 'walk', (c) => { stepCleanups.push(c) })
     // Leaving WALK while such a step is up goes back to the step that asks for it.
     if (step.needsWalk) {
@@ -238,6 +252,7 @@ export const useTutorial = create<TutorialState>((set, get) => {
         // Once: a watcher that calls twice must not start a second timer.
         if (get().index !== index || !get().active || get().done) return
         set({ done: true })
+        if (viaBack) return
         // On by itself, a moment after the ✓: the next thing to do comes up.
         advanceTimer = setTimeout(() => { advanceTimer = null; if (get().active && get().index === index) get().next() }, ADVANCE_MS)
       }))
@@ -249,9 +264,15 @@ export const useTutorial = create<TutorialState>((set, get) => {
     }
   }
 
-  const stop = (): void => {
+  /** What is kept for a step: its id, and the routes checked off so far (feedback item 10). */
+  const progress = (step: string, ended?: 'finished' | 'skipped'): TutorialProgress => {
+    const choices = get().doneChoices
+    return { step, ...(ended ? { ended } : {}), ...(choices.length ? { choices } : {}) }
+  }
+
+  const stop = (how: 'finished' | 'skipped' | 'pause'): void => {
     cleanupStep()
-    for (const l of lifecycles) { try { l.stop?.() } catch (err) { console.warn('[tutorial] stop failed:', err) } }
+    for (const l of lifecycles) { try { l.stop?.(how) } catch (err) { console.warn('[tutorial] stop failed:', err) } }
   }
 
   return {
@@ -262,6 +283,7 @@ export const useTutorial = create<TutorialState>((set, get) => {
     minimized: false,
     explaining: false,
     choicesVersion: 0,
+    doneChoices: [],
     choosing: null,
     choiceNote: null,
     stepNote: null,
@@ -272,12 +294,23 @@ export const useTutorial = create<TutorialState>((set, get) => {
       // Never over the tour or TV, which would put it away again at once.
       if (blocked()) return
       // Started again while running (RESTART): what the run had going stops first.
-      if (get().active) stop()
+      if (get().active) stop('skipped')
       const pubkey = useCyberspace.getState().identity.pubkey
       if (opts.restart) writeProgress(pubkey, null)
       const steps = get().script.steps
       const at = opts.at ? steps.findIndex((s) => s.id === opts.at) : 0
-      set({ active: true, pubkey, minimized: false })
+      // A first arrival starts clutter-free and local: the menu shut (feedback
+      // item 16), publishing off (feedback item 15). A RESTART shuts the menu
+      // too (it is started from the menu) but leaves the publishing switch as
+      // the player set it; a resume leaves both. The inventory step opens the
+      // menu itself.
+      if (!opts.at || opts.restart) setMenuOpen(false)
+      if (!opts.at && !opts.restart) {
+        try { useCyberspace.getState().setLive(false) } catch { /* no switch here */ }
+      }
+      // A resume keeps the routes already checked off (feedback item 10).
+      const doneChoices = opts.at && !opts.restart ? readProgress(pubkey)?.choices ?? [] : []
+      set({ active: true, pubkey, minimized: false, doneChoices })
       for (const l of lifecycles) { try { l.start?.(pubkey, opts.restart === true) } catch (err) { console.warn('[tutorial] start failed:', err) } }
       enter(at >= 0 ? at : 0)
     },
@@ -287,12 +320,36 @@ export const useTutorial = create<TutorialState>((set, get) => {
       if (!s.active) return
       const step = s.script.steps[s.index]
       if (step?.gate && !s.done) return
-      // A branch's NEXT is FINISH; on the way through, branches are passed over.
-      let i = step?.branch ? s.script.steps.length : s.index + 1
+      // A branch's NEXT returns to the choices with this one checked off, so
+      // the player can try the rest (feedback item 10).
+      if (step?.branch) {
+        const ci = s.script.steps.findIndex((st) => st.choices)
+        const choice = ci >= 0 ? s.script.steps[ci].choices?.find((c) => c.step === step.id) : undefined
+        if (choice && !s.doneChoices.includes(choice.id)) set({ doneChoices: [...s.doneChoices, choice.id] })
+        if (ci >= 0) { enter(ci, s.index); return }
+        get().end('finished')
+        return
+      }
+      let i = s.index + 1
       while (i < s.script.steps.length && s.script.steps[i].branch) i++
       if (i < s.script.steps.length) enter(i, s.index)
       // Past the last step with its wait still to do is a skip, not a finish.
       else get().end(step?.wait && !s.done ? 'skipped' : 'finished')
+    },
+
+    back: () => {
+      const s = get()
+      if (!s.active) return
+      // On a branch, BACK is the way back to the choices, but it checks
+      // nothing off: only NEXT (FINISH) there says the route was done.
+      if (s.script.steps[s.index]?.branch) {
+        const ci = s.script.steps.findIndex((st) => st.choices)
+        if (ci >= 0) enter(ci, s.index, true)
+        return
+      }
+      let i = s.index - 1
+      while (i > 0 && s.script.steps[i].branch) i--
+      if (i >= 0 && i !== s.index) enter(i, s.index, true)
     },
 
     choose: (choiceId) => {
@@ -325,14 +382,14 @@ export const useTutorial = create<TutorialState>((set, get) => {
       const s = get()
       if (!s.active) return
       const step = s.script.steps[s.index]
-      if (s.pubkey) writeProgress(s.pubkey, { step: step?.id ?? s.script.steps[0].id, ended: how })
-      stop()
+      if (s.pubkey) writeProgress(s.pubkey, progress(step?.id ?? s.script.steps[0].id, how))
+      stop(how)
       set({ active: false, minimized: false, explaining: false })
     },
 
     pause: () => {
       if (!get().active) return
-      stop()
+      stop('pause')
       set({ active: false, minimized: false, explaining: false })
     },
 
@@ -359,7 +416,10 @@ export function watchFirstArrival(): () => void {
     if (!settled()) { decidedFor = null; return }
     if (!tutorialOn() || useTutorial.getState().active || blocked() || !plainAddress()) return
     const p = readProgress(pubkey)
-    if (p?.ended) return
+    if (p?.ended) {
+      if (p.ended === 'finished') for (const l of lifecycles) { try { l.restore?.(pubkey) } catch (err) { console.warn('[tutorial] restore failed:', err) } }
+      return
+    }
     if (p) useTutorial.getState().start({ at: p.step })
     else if (isNewArrival()) useTutorial.getState().start()
   }

@@ -48,6 +48,13 @@ export interface TutorialStep {
   modal?: boolean
   /** The modal card's button. */
   go?: string
+  /**
+   * Top-left chips this step still needs, by name (tutorial feedback
+   * 2026-11-11, item 3): the tutorial hides them all while it runs, and a step
+   * names the few it teaches with. 'found' is the FOUND HERE chip (opening a
+   * chest); 'chain' is the chain chip (spectating a friend's history).
+   */
+  keepChips?: Array<'found' | 'chain'>
   /** A picture under the caption (T2: one or two lines plus a picture), by its path under public/. */
   image?: { src: string; alt: string }
   /** A longer explanation behind an EXPLAIN pill (T2); never shown unasked. */

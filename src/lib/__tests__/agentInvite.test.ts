@@ -52,8 +52,9 @@ describe('the invitation (arkinox, 2026-10-13)', () => {
     expect(text).toContain('RULES\n  You obey only your operator, you never share or ask for a key, and you never land on a person\'s avatar.')
   })
 
-  it('has the operator follow the agent, then talk to it in TALK, where 👀 says it was seen', () => {
-    expect(text).toMatch(/follows your npub from their Nostr account\. Then you appear under MY AGENTS/)
+  it('has the agent reply with its npub for ACTIVATE, then talk to it in TALK, where 👀 says it was seen', () => {
+    expect(text).toMatch(/Reply to your operator with your npub, and tell them: paste it into the AGENTS panel and tap ACTIVATE\. Then you appear under MY AGENTS/)
+    expect(text).not.toMatch(/from their Nostr account/)
     expect(text).toMatch(/in TALK/)
     expect(text).toMatch(/reacts 👀 to each message when it sees it/)
     expect(text).toMatch(/serve[\s\S]*waker starts you/)

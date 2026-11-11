@@ -39,6 +39,19 @@ export function saveMenuOpen(open: boolean): void {
   }
 }
 
+/**
+ * A setter the mounted menu lends out, so something outside React (the
+ * first-arrival tutorial) can open or close it: the tutorial starts with it
+ * shut to cut clutter, then opens it to teach the inventory (tutorial feedback
+ * 2026-11-11, items 2 and 16). Null when no menu is mounted.
+ */
+let external: Dispatch<SetStateAction<boolean>> | null = null
+
+/** Open or close the menu from outside React; nothing happens with no menu mounted. */
+export function setMenuOpen(open: boolean): void {
+  external?.(open)
+}
+
 /** useState for the menu's open state, starting where it was last left and saving every change. */
 export function useMenuOpen(defaultOpen: boolean): [boolean, Dispatch<SetStateAction<boolean>>] {
   const [open, setOpen] = useState(() => loadMenuOpen(defaultOpen))
@@ -48,5 +61,7 @@ export function useMenuOpen(defaultOpen: boolean): [boolean, Dispatch<SetStateAc
     saved.current = open
     saveMenuOpen(open)
   }, [open])
+  // Lend the setter while this menu is mounted, so the tutorial can drive it.
+  useEffect(() => { external = setOpen; return () => { if (external === setOpen) external = null } }, [])
   return [open, setOpen]
 }

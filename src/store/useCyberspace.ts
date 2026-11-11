@@ -778,10 +778,10 @@ export interface CyberspaceState {
    * lined up, and the cell the placement snaps to, as an exponent finer than
    * the zoom (arkinox, 2026-10-08). Null is the zoom itself, which is where
    * every deploy starts, so nothing changes until STEP is touched. Read it
-   * through buildStepOf (lib/buildCursor.ts), which keeps it at or under the
-   * zoom; zooming in to it or below puts it back on the zoom, by any path
-   * (the subscription at the bottom). Cleared when the deploy ends (useShards)
-   * and when BUILD mode does (store/buildStep.ts).
+   * through buildStepOf (lib/buildCursor.ts). A zoom never moves a lined-up
+   * placement, so while one is lined up a zoom holds it where it was, above
+   * the zoom after a zoom in (store/buildStep.ts). Cleared when the deploy
+   * ends (useShards) and when BUILD mode does (store/buildStep.ts).
    */
   buildStep: number | null
   /**
@@ -7117,13 +7117,6 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 // The saved chain loaded at boot is drawn already; its signatures are
 // checked now, off the main thread.
 startSignatureCheck(pubkeyHex, saved?.unchecked ?? [])
-
-// The build STEP never exceeds the zoom. Zooming in to it or past it, by any
-// path (the pad and the keys, a focus, a hyperspace view), puts it back on
-// the zoom, so it cannot come back when the zoom is restored.
-useCyberspace.subscribe((s, prev) => {
-  if (s.scaleExp < prev.scaleExp && s.buildStep !== null && s.buildStep >= s.scaleExp) s.setBuildStep(null)
-})
 
 // DEV is also true under vitest, which runs in node, and importing this module
 // for alignedOrigin must not blow up on a missing window. Same reason the

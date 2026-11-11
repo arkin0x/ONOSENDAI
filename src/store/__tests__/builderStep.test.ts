@@ -135,22 +135,26 @@ describe('STEP', () => {
     expect(placed().z).toBe(center.z + 1n)
   })
 
-  it('never exceeds the zoom: + stops at the zoom, and zooming in below it brings it down', () => {
+  it('+ stops at the zoom, and zooming in below it holds it there, so the placement stays put (arkinox, 2026-11-11)', () => {
     lineUp(15, 20)
     stepBuild(1)
     expect(buildStepOf(S())).toBe(15)
     expect(S().buildStep).toBeNull()
 
     stepTo(10)
+    const p = placed()
     S().adjustScale(-7)
     expect(S().scaleExp).toBe(8)
-    expect(buildStepOf(S())).toBe(8)
-    expect(S().buildStep).toBeNull()
+    expect(buildStepOf(S())).toBe(10)
+    expect(placed()).toEqual(p)
+    // Above the zoom + has nowhere to go, and - comes down one at a time.
+    stepBuild(1)
+    expect(buildStepOf(S())).toBe(10)
+    stepBuild(-1)
+    expect(buildStepOf(S())).toBe(9)
     const x = S().cursor.x
     S().moveCursor({ axis: 'x', dir: 1 })
-    expect(S().cursor.x - x).toBe(1n << 8n)
-    // Even a stored step past the zoom reads as the zoom.
-    expect(buildStepOf({ scaleExp: 4, buildStep: 9 })).toBe(4)
+    expect(S().cursor.x - x).toBe(1n << 9n)
   })
 
   it('leaves the hide height and its region alone', () => {
@@ -261,6 +265,8 @@ describe('STEP', () => {
     stepTo(14)
     stepTo(15)
     S().adjustScale(3)
+    // The zoom held STEP at 2^15; back up to the zoom, then down.
+    stepTo(18)
     stepTo(17)
     // Re-centered on the 2^18 cube's center, not left where 2^15 put it.
     expect(S().cursor).toEqual(deployPoint(SPOT, 18, 20))
@@ -274,13 +280,15 @@ describe('STEP', () => {
     expect(S().cursor).toEqual(deployPoint(SPOT, 12, 20))
   })
 
-  it('a zoom changed without the pad or keys (a focus, a hyperspace view) still brings STEP down for good', () => {
+  it('a zoom changed without the pad or keys (a focus, a hyperspace view) holds STEP the same way', () => {
     lineUp(15, 20)
     stepTo(10)
+    const p = placed()
     useCyberspace.setState({ scaleExp: 8 })
-    expect(S().buildStep).toBeNull()
+    expect(buildStepOf(S())).toBe(10)
     useCyberspace.setState({ scaleExp: 15 })
-    expect(buildStepOf(S())).toBe(15)
+    expect(buildStepOf(S())).toBe(10)
+    expect(placed()).toEqual(p)
   })
 
   it('snaps a message the same way', () => {

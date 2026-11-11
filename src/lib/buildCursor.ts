@@ -46,11 +46,12 @@ export function buildCursorOf(s: BuildCursorSource): { position: Position; plane
  * The build STEP in force: how far one move steps the build cursor and the
  * cell a placement snaps to (space.ts deployPoint). It is the zoom unless a
  * finer STEP is set while a deploy is lined up (arkinox, 2026-10-08: at 2^15
- * an object could only sit at the center of a 2^15 cube), and it never
- * exceeds the zoom, whatever is stored.
+ * an object could only sit at the center of a 2^15 cube), or a zoom has held
+ * it where it was (store/buildStep.ts: a zoom never moves a lined-up
+ * placement, arkinox 2026-11-11), which a zoom in can leave above the zoom.
  */
 export function buildStepOf(s: { scaleExp: number; buildStep: number | null }): number {
-  return s.buildStep === null ? s.scaleExp : Math.max(0, Math.min(s.buildStep, s.scaleExp))
+  return s.buildStep === null ? s.scaleExp : Math.max(0, s.buildStep)
 }
 
 /**

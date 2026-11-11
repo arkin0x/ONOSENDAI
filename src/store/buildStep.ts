@@ -45,20 +45,40 @@ export function stepOpen(): boolean {
   return sh.pending !== null && sh.deployStatus !== 'working' && useBuilder.getState().active && cs.canDrive() && !cs.atHead()
 }
 
-/** STEP down (-1) or up (+1), between 2^0 and the zoom. Only while stepOpen. */
+/**
+ * STEP down (-1) or up (+1), between 2^0 and the zoom, or where a zoom in
+ * left it above the zoom (below), from where it only comes down. Only while
+ * stepOpen.
+ */
 export function stepBuild(delta: 1 | -1): void {
   if (!stepOpen()) return
   const cs = useCyberspace.getState()
   const from = buildStepOf(cs)
-  const to = Math.max(0, Math.min(cs.scaleExp, from + delta))
+  const to = Math.max(0, Math.min(Math.max(cs.scaleExp, from), from + delta))
   if (to === from) return
   const settle = cs.buildSettle
   if (to < from && !(settle && samePosition(settle.at, cs.cursor))) {
     const at = deployPoint(cs.cursor, from, useShards.getState().deployHeight)
     useCyberspace.setState({ cursor: at, buildSettle: { at, from: { ...cs.cursor } } })
   }
-  useCyberspace.getState().setBuildStep(to)
+  // Coming down is kept as it is, even at or above the zoom: back to
+  // following the zoom only from below, where setBuildStep undoes a settle.
+  if (to < from) useCyberspace.setState({ buildStep: to })
+  else useCyberspace.getState().setBuildStep(to)
 }
+
+// arkinox, 2026-11-11: "if I position a shard for placement in build, and
+// then I zoom out, when I zoom back in sometimes the shard has changed
+// position." The placement is the cursor's cell at the STEP (deployPoint),
+// and a STEP left following the zoom moved with every zoom: out, it snapped
+// to the coarse cell's center, and a center at one size is never a center at
+// another. So a zoom changes the view only: while anything is lined up in
+// BUILD mode, a STEP following the zoom stays at the zoom it was lined up at,
+// in either direction, and a STEP already set is left alone.
+useCyberspace.subscribe((s, prev) => {
+  if (s.scaleExp === prev.scaleExp || s.buildStep !== null) return
+  if (useShards.getState().pending !== null && useBuilder.getState().active) useCyberspace.setState({ buildStep: prev.scaleExp })
+})
 
 // BUILD mode ending takes STEP with it, whatever is still lined up: a hide
 // running when the view moved away keeps its bar, and its STEP must not step

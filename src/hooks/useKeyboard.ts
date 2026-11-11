@@ -155,9 +155,18 @@ export function flyKeyUp(dir: 1 | -1): void {
   if (f.key === dir) f.setKey(0)
 }
 
-/** The window lost focus: no keyup will come for a held Space or Shift. */
+/**
+ * The rotate keys (W A S D) held now. Shift flies the view back in VIEW, but
+ * Shift with W A S D rotates it; while a rotate key is down Shift does not
+ * fly, so steering the view by rotation never also drifts it backward
+ * (review, 2026-11-11).
+ */
+const rotateHeld = new Set<string>()
+
+/** The window lost focus: no keyup will come for a held Space or Shift, or a held rotate key. */
 function flyKeysReleased(): void {
   useViewFly.getState().setKey(0)
+  rotateHeld.clear()
 }
 
 export function useKeyboard(): void {
@@ -337,10 +346,13 @@ export function useKeyboard(): void {
         return
       }
 
+      // Which rotate keys are held, so Shift can fly only when none is.
+      if (ROTATE_KEYS[event.code]) rotateHeld.add(event.code)
+
       // In VIEW, Shift flies the view backward while held (arkinox, 2026-11-11),
-      // as the Back button does. Shift with W A S D still rotates (below), so a
-      // rotate in VIEW also eases the view back a touch; Shift alone just flies.
-      if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight') && canFly(store, building)) {
+      // as the Back button does. Not while a rotate key is down: Shift with
+      // W A S D rotates (below), and a rotate must not also drift the view back.
+      if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight') && canFly(store, building) && rotateHeld.size === 0) {
         event.preventDefault()
         useViewFly.getState().setKey(-1)
         return
@@ -350,6 +362,9 @@ export function useKeyboard(): void {
         const rotation = ROTATE_KEYS[event.code]
         if (!rotation) return
         event.preventDefault()
+        // Starting a rotate ends any backward fly Shift had begun, so you steer
+        // by rotation without the view sliding back under you.
+        useViewFly.getState().setKey(0)
         store.rotate(rotation)
         return
       }
@@ -365,6 +380,7 @@ export function useKeyboard(): void {
     const onKeyUp = (event: KeyboardEvent) => {
       walkKeyUp(event.code)
       walkMetaRelease(event)
+      if (ROTATE_KEYS[event.code]) rotateHeld.delete(event.code)
       // Space or Shift let go: VIEW's fly from that key stops.
       if (event.code === 'Space') flyKeyUp(1)
       if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') flyKeyUp(-1)

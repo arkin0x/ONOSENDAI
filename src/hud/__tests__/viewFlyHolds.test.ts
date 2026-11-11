@@ -77,8 +77,10 @@ describe('Space and Shift fly the view in VIEW', () => {
     const src = readFileSync('src/hooks/useKeyboard.ts', 'utf8')
     // Space in a free view flies forward, never commits there.
     expect(src).toMatch(/if \(canFly\(store, building\)\) \{ useViewFly\.getState\(\)\.setKey\(1\); return \}/)
-    // Shift flies back in a free view.
-    expect(src).toMatch(/ShiftLeft' \|\| event\.code === 'ShiftRight'\) && canFly\(store, building\)\) \{\s*event\.preventDefault\(\)\s*useViewFly\.getState\(\)\.setKey\(-1\)/)
+    // Shift flies back in a free view, but not while a rotate key is held.
+    expect(src).toMatch(/ShiftLeft' \|\| event\.code === 'ShiftRight'\) && canFly\(store, building\) && rotateHeld\.size === 0\) \{\s*event\.preventDefault\(\)\s*useViewFly\.getState\(\)\.setKey\(-1\)/)
+    // A rotate ends any backward fly, so steering by rotation does not drift.
+    expect(src).toMatch(/if \(event\.shiftKey\) \{[\s\S]*?useViewFly\.getState\(\)\.setKey\(0\)\s*store\.rotate\(rotation\)/)
     // R and F just move the cursor, no fly branch.
     expect(src).toMatch(/if \(event\.code === 'KeyR' \|\| event\.code === 'KeyF'\) \{[\s\S]*?store\.moveCursor\(moveDirection\(axes, MOVE_KEYS\[event\.code\]\)\)/)
     expect(src).not.toMatch(/canFly\(store, building\)\) \{\s*useViewFly\.getState\(\)\.setKey\(event\.code === 'KeyR'/)

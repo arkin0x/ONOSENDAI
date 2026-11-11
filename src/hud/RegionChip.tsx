@@ -10,7 +10,10 @@ import { useState } from 'react'
 import { Copy, Scan } from 'lucide-react'
 import { useRegion } from '../store/useRegion'
 
-const RELAY = 'https://relay.onosendai.tech/C/'
+// The relay's region path is the bare hex, not the app's /C/ form: the
+// speakeasy vectors give the owner's own example as relay.onosendai.tech/<hex>
+// naming the same region as www.onosendai.tech/C/<hex> (regionPrefixVectors).
+const RELAY = 'https://relay.onosendai.tech/'
 
 export function RegionChip(): JSX.Element | null {
   const active = useRegion((s) => s.active)

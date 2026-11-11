@@ -15,7 +15,8 @@
  * you are now at; RESET puts it back to the size it had on entry.
  *
  * The prefix math is coordRoute's, shared with the relay's region vectors, so
- * a region picked here is exactly the one relay.onosendai.tech/C/<hex> serves.
+ * a region picked here is exactly the one relay.onosendai.tech/<hex> serves
+ * (the relay path is the bare hex; /C/<hex> is the app's own form).
  */
 
 import { create } from 'zustand'

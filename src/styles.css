@@ -10606,6 +10606,43 @@ html.tv-broadcast body { overflow: hidden; }
 .bloom__who { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .bloom__who .secret__label { flex: 0 0 64px; }
 
+/* The SEED composer (SeedCompose, DECK-0008): the DNAs as chips, the bloom turning, then day, scale and price. */
+.seedc__picks { display: flex; flex-wrap: wrap; gap: 4px; }
+.seedc__pick {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 3px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  cursor: pointer;
+}
+.seedc__pick.is-on { color: #6fe08a; border-color: #6fe08a; background: rgba(111, 224, 138, 0.12); }
+.seedc__text { min-height: 120px; }
+.seedc__row { display: flex; align-items: center; gap: 8px; }
+.seedc__row .secret__label { flex: 0 0 44px; }
+.seedc__import { flex: none; min-width: 0; padding: 0 10px; height: 28px; }
+.seedc__preview { display: flex; justify-content: center; align-items: center; min-height: 200px; }
+.seedc__empty { font-size: 10px; letter-spacing: 0.08em; color: var(--dim); }
+.seedc__slider input[type='range'] { flex: 1 1 auto; min-width: 0; accent-color: #6fe08a; }
+.seedc__value { min-width: 36px; font-size: 11px; color: var(--fg); text-align: center; }
+.seedc__step {
+  font-family: inherit;
+  width: 28px;
+  height: 26px;
+  border-radius: 3px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  cursor: pointer;
+}
+.seedc__step:disabled { opacity: 0.35; cursor: default; }
+.seedc__price { margin: 2px 0 4px; font-size: 9px; letter-spacing: 0.1em; color: var(--dim); }
+.seedc__row .seedc__label--wide { flex: 0 0 auto; margin-right: 4px; }
+
 /* The first-arrival tutorial (hud/TutorialCoach.tsx): the /demo coach's look,
    a centered card for the welcome, and RESTART TUTORIAL in Settings. */
 .modal__card.tutorial-card { max-width: 380px; border-color: rgba(0, 229, 255, 0.55); display: flex; flex-direction: column; gap: 10px; font-family: var(--mono); }

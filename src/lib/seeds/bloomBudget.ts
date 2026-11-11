@@ -7,13 +7,13 @@
  * reach 4,194,304 steps (16,384 symbols for 256 generations). Measured on
  * Node 22, 2026-11-10, growing the vectors' six DNAs with sno-core v0.1.27:
  *
- *   - starter caps (6,000 symbols, 40 generations, worst case 240,000 steps):
+ *   - original DNAs' caps (6,000 symbols, 40 generations, worst case 240,000 steps):
  *     a full grow takes 1 to 9 ms, a draw 1 to 5 ms;
  *   - the largest caps at day 256: up to 3,043,297 steps, 68 ms to grow and
  *     17 ms to draw (the oak, 18,100 vertices).
  *
  * A phone is five to ten times slower, and a DNA can make each step dearer
- * than the starters do (§3.8 bounds a step, not its cost). So a phone grows a
+ * than the original DNAs do (§3.8 bounds a step, not its cost). So a phone grows a
  * bloom whose caps allow at most PHONE_BUDGET steps, a larger screen at most
  * DESKTOP_BUDGET (every bloom the caps allow), and anything dearer waits for
  * GROW ANYWAY. Either way growth runs in a worker, SLICE_STEPS at a time, so
@@ -22,7 +22,7 @@
 
 import { worstCaseSteps, type Caps } from 'sno-core/seeds'
 
-/** 2^20: four times the starter caps' worst case; about a quarter second on a slow phone. */
+/** 2^20: four times the worst case at the original DNAs' caps; about a quarter second on a slow phone. */
 export const PHONE_BUDGET = 1 << 20
 /** 2^22: the largest caps DECK-0008 allows, so every bloom grows here. */
 export const DESKTOP_BUDGET = 1 << 22

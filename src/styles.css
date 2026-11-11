@@ -8068,6 +8068,28 @@ kbd {
   -webkit-tap-highlight-color: transparent;
 }
 .palettes__sw.is-on { outline: 2px solid var(--fg); outline-offset: 1px; border-color: var(--fg); }
+.palettes__sw.is-light { color: #eef6ff; }
+
+/* Each swatch's number, which is what a DNA calls the color ('(171)). Small and
+   a little faded so the sheet still reads as color first; the ink flips per
+   swatch (lightInk) so it reads on the darks and the near whites alike. */
+.palettes__n {
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  opacity: 0.85; /* PaletteModal INK_ALPHA picks the ink at this fade */
+  pointer-events: none;
+  user-select: none;
+}
+.palettes__sw.is-on .palettes__n { opacity: 1; font-weight: 700; }
+
+/* The color in hand, by number and hex, for a phone that never hovers. */
+.palettes__now { display: flex; align-items: center; gap: 7px; margin: 7px 0 0; font-size: 11px; color: var(--fg); }
+.palettes__now-sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(255, 255, 255, 0.25); flex-shrink: 0; }
+.palettes__now-n { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); }
+.palettes__now-hex { color: var(--dim); }
 
 .palettes__foot {
   display: flex;
@@ -10419,16 +10441,6 @@ html.tv-broadcast body { overflow: hidden; }
   cursor: pointer;
 }
 
-/* The first-arrival tutorial (hud/TutorialCoach.tsx): the /demo coach's look,
-   a centered card for the welcome, and RESTART TUTORIAL in Settings. */
-.modal__card.tutorial-card { max-width: 380px; border-color: rgba(0, 229, 255, 0.55); display: flex; flex-direction: column; gap: 10px; font-family: var(--mono); }
-.tutorial-card .modal__title { margin: 0; }
-.tutorial-card__go { flex: 0 0 auto; align-self: stretch; justify-content: center; min-height: 40px; }
-.tutorial__explain { color: var(--dim); font-size: 12px; }
-.tutorial-restart { margin: 4px 0 8px; }
-.tutorial-choice { flex: 0 0 auto; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; min-height: 0; height: auto; text-align: left; }
-.tutorial-choice__label { color: var(--accent); font-weight: 600; letter-spacing: 0.08em; }
-.tutorial-choice__about { color: var(--dim); font-size: 11px; letter-spacing: 0; text-transform: none; }
 /* A seed's card (BloomCard, DECK-0008): the bloom turning, one line for its state, then its facts. */
 .bloom { display: flex; flex-direction: column; margin-bottom: 12px; }
 .bloom__state { margin: 0 0 10px; font-size: 12px; color: var(--fg); text-align: center; }
@@ -10475,6 +10487,17 @@ html.tv-broadcast body { overflow: hidden; }
 .seedc__step:disabled { opacity: 0.35; cursor: default; }
 .seedc__price { margin: 2px 0 4px; font-size: 9px; letter-spacing: 0.1em; color: var(--dim); }
 .seedc__row .seedc__label--wide { flex: 0 0 auto; margin-right: 4px; }
+
+/* The first-arrival tutorial (hud/TutorialCoach.tsx): the /demo coach's look,
+   a centered card for the welcome, and RESTART TUTORIAL in Settings. */
+.modal__card.tutorial-card { max-width: 380px; border-color: rgba(0, 229, 255, 0.55); display: flex; flex-direction: column; gap: 10px; font-family: var(--mono); }
+.tutorial-card .modal__title { margin: 0; }
+.tutorial-card__go { flex: 0 0 auto; align-self: stretch; justify-content: center; min-height: 40px; }
+.tutorial__explain { color: var(--dim); font-size: 12px; }
+.tutorial-restart { margin: 4px 0 8px; }
+.tutorial-choice { flex: 0 0 auto; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; min-height: 0; height: auto; text-align: left; }
+.tutorial-choice__label { color: var(--accent); font-weight: 600; letter-spacing: 0.08em; }
+.tutorial-choice__about { color: var(--dim); font-size: 11px; letter-spacing: 0; text-transform: none; }
 /* A transparent picture: no band behind it, a square at most 160 across, centered. */
 .tutorial__image { display: block; width: 160px; height: 160px; max-width: 100%; margin: 4px auto 0; object-fit: contain; }
 .tutorial-card__go--done { background: none; color: var(--dim); border-color: var(--border); }

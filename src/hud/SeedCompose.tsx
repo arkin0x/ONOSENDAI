@@ -37,11 +37,12 @@ import { useCalibration } from '../lib/calibration'
 import { minerCount } from '../lib/avatarWorker'
 import { describeDuration } from '../lib/avatarMine'
 import { ORIGINAL_CAPS, ORIGINAL_DNAS, originalDnaId } from '../lib/seeds/originalDnas'
-import { bloomReachGibsons, dnaTextRefusal, miningSeconds, PREVIEW_DAYS, previewRequest, readDnaText, seedHideFor, SEED_HIDE_MAX, type SeedFit } from '../lib/seeds/plant'
+import { dnaTextRefusal, miningSeconds, PREVIEW_DAYS, previewRequest, readDnaText, seedFitFor, seedHideFor, SEED_HIDE_MAX, type SeedFit } from '../lib/seeds/plant'
 import type { Position } from '../lib/space'
 import type { Plane } from 'cyberspace-core'
 import { MAX_COMPUTE_HEIGHT } from '../store/useCyberspace'
 import { growInWorker } from '../lib/seeds/growClient'
+import { bloomReachAt } from '../lib/seeds/bloomReach'
 import { bloomShard } from '../lib/seeds/bloomShard'
 import { dnaResolver, headerBook, trustedTip } from '../lib/seeds/seedSources'
 
@@ -93,17 +94,11 @@ function useSeedFit(text: string, ok: boolean, caps: Caps, cursor: Position, pla
     if (!ok) return
     let stale = false
     const timer = setTimeout(() => {
-      const now = trustedTip() ?? tip ?? 975_300
-      const reachAt = async (p: Position): Promise<number | undefined> => {
-        const req = previewRequest({ text, caps, coord: positionHex(p, plane), scale, tip: now, day: PREVIEW_DAYS, hashOf: (h) => headerBook.hash(h) ?? getStopByHeight(h)?.blockHash })
-        const answer = await growInWorker({ ...req, key: 'preview-reach' })
-        return answer.type === 'bloom' ? bloomReachGibsons(answer.buffers.positions, scale) : undefined
-      }
-      seedHideFor(cursor, plane, step, MAX_COMPUTE_HEIGHT, reachAt).then((r) => {
+      seedHideFor(cursor, plane, step, MAX_COMPUTE_HEIGHT, bloomReachAt(text, caps, plane, scale)).then((r) => {
         if (stale) return
-        const fit = r.reach !== undefined ? { height: r.height, reach: r.reach, cursor: positionHex(cursor, plane), step } : undefined
-        setResult({ fit, point: r.point, state: fit ? 'done' : 'failed' })
-      }, () => { if (!stale) setResult({ fit: undefined, point: fallback, state: 'failed' }) })
+        // Recorded either way: a bloom the worker could not grow hides at 12, at the STEP and cursor it was composed at.
+        setResult({ fit: seedFitFor(r, cursor, plane, step), point: r.point, state: r.reach !== undefined ? 'done' : 'failed' })
+      }, () => { if (!stale) setResult({ fit: seedFitFor({ height: Math.min(SEED_HIDE_MAX, MAX_COMPUTE_HEIGHT), reach: undefined }, cursor, plane, step), point: fallback, state: 'failed' }) })
     }, 120)
     return () => { stale = true; clearTimeout(timer) }
   }, [text, ok, caps, cursor, plane, step, scale, tip, fallback])

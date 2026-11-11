@@ -10,7 +10,8 @@
  *   region's lock, and its contents read as the guide's, verified;
  * - every item lies inside its bag's region (spec §7.6), and every bag is
  *   under the size cap;
- * - signed by the guide, never the player.
+ * - signed by the guide, never the player, through lib/signers.ts, so
+ *   carrying ONOSENDAI's client tag as a player's own bags do.
  */
 import { describe, expect, it } from 'vitest'
 import { generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure'
@@ -22,6 +23,7 @@ import { DNA_KIND } from '../../lib/seeds/seedItem'
 import { lockOf } from '../../lib/locks'
 import { NIP44_MAX_PLAINTEXT, openWithSecret, plaintextBytes, readContents } from '../../lib/chests'
 import { BAG_SAFE_BYTES } from '../../lib/bagSize'
+import { CLIENT_TAG } from '../../lib/client'
 import { BOX_HEIGHT, COVER_MAX, FOOTPRINT, inRegion, regionBase, toWorld, tutorialLayout } from '../layout'
 import { STAGE_TEXT, buildStage, readStage, stageKey, writeStage, type KeyAt } from '../stage'
 import { guideBagsFor, isGuideAuthor, isGuideBag, onGuideBags, passesTaps, setGuideBags } from '../guideBags'
@@ -108,6 +110,8 @@ describe('the stage', () => {
       expect(b.pubkey).toBe(stage.guide)
       expect(b.pubkey).not.toBe(player)
       expect(JSON.stringify(b).length).toBeLessThan(BAG_SAFE_BYTES)
+      // Signed through lib/signers.ts like every raw key (clientTagGuard.test.ts), so attributed as a player's bag is.
+      expect(b.tags).toContainEqual(CLIENT_TAG)
     }
 
     const [coverBag, boxBag, finishBag] = stage.bags
@@ -155,6 +159,10 @@ describe('the stage', () => {
       expect(c.verified).toBe(true)
       expect(c.event.pubkey).toBe(stage.guide)
     }
+    // The signed items inside are attributed too; the message is a rumor, never signed, so never tagged.
+    expect(contents[0].event.tags).toContainEqual(CLIENT_TAG)
+    expect(contents[2].event.tags).toContainEqual(CLIENT_TAG)
+    expect(contents[1].event.tags).not.toContainEqual(CLIENT_TAG)
     expect(contents[1].body.text).toBe(STAGE_TEXT.message)
     expect(contents[2].body.key?.name).toBe(STAGE_TEXT.welcomeName)
 

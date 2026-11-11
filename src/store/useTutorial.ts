@@ -68,15 +68,23 @@ export function runTutorialEffect(name: string): void {
  * offered; registering it later shows it at once (the coach redraws).
  *
  * The seam for Track C: `registerTutorialChoice('dungeon', { run })` from
- * any module, at any time. `run` is the player's own choice and may return a
- * promise (publishing enter-virtual is async): a choice with a `step` runs
- * `run` and goes to that step, so a coach step can follow the player into
- * the game; one without ends the tutorial as finished first, then runs. A
- * `run` that throws or rejects is logged and the tutorial stays where it is
- * (for a choice with a step) so the player can choose again.
+ * any module, at any time (tutorial/dungeon.ts does). `run` is the player's
+ * own choice and may return a promise (publishing enter-virtual is async).
+ * It runs while the card is still up, and a second tap meanwhile does
+ * nothing. Words it returns are a refusal: they are shown on the card
+ * (`choiceNote`) and the card stays, so the player can choose again or take
+ * DONE. Nothing returned means it went: a choice with a `step` goes to that
+ * step, so a coach step can follow the player into the game, and one without
+ * ends the tutorial as finished. A `run` that throws or rejects is logged and
+ * said on the card in plain words (CHOICE_FAILED_MESSAGE).
  */
-export interface TutorialChoiceRun { run: () => void | Promise<void> }
+export type TutorialChoiceResult = void | string | null
+export interface TutorialChoiceRun { run: () => TutorialChoiceResult | Promise<TutorialChoiceResult> }
 const TUTORIAL_CHOICES = new Map<string, TutorialChoiceRun>()
+/** On the card when a choice's run threw: the error itself goes to the console. */
+export const CHOICE_FAILED_MESSAGE = 'That did not work. Try again.'
+/** Which run of a choice may still settle: anything that moves the tutorial on makes an older one stale. */
+let choiceToken = 0
 
 export function registerTutorialChoice(name: string, choice: TutorialChoiceRun): void {
   TUTORIAL_CHOICES.set(name, choice)
@@ -161,12 +169,16 @@ interface TutorialState {
   explaining: boolean
   /** Bumped whenever a choice is registered, so the coach shows it. */
   choicesVersion: number
+  /** The choice whose run is under way (its card waits), or null. */
+  choosing: string | null
+  /** Why the last choice did not go, in plain words, on the card until the next choice or step. */
+  choiceNote: string | null
   script: TutorialScript
   /** Start (or resume) for the identity on screen; `at` names a step, `restart` begins again from the first. */
   start: (opts?: { at?: string; restart?: boolean }) => void
   /** NEXT (or SKIP on a step still waiting); on the last step, FINISH. */
   next: () => void
-  /** A choice on a modal step (TutorialChoice): its branch step, or its registered run after the tutorial ends. */
+  /** A choice on a modal step (TutorialChoice): its registered run first, if any, then its branch step or the end. */
   choose: (choiceId: string) => void
   /** End the run for this player, kept as finished or skipped. */
   end: (how: 'finished' | 'skipped') => void
@@ -181,6 +193,7 @@ let stepCleanups: Array<() => void> = []
 let advanceTimer: ReturnType<typeof setTimeout> | null = null
 
 function cleanupStep(): void {
+  choiceToken++
   if (advanceTimer !== null) { clearTimeout(advanceTimer); advanceTimer = null }
   for (const c of stepCleanups.splice(0)) { try { c() } catch { /* already gone */ } }
 }
@@ -204,7 +217,7 @@ export const useTutorial = create<TutorialState>((set, get) => {
       get().end('skipped')
       return
     }
-    set({ index, done: !step.wait, explaining: false })
+    set({ index, done: !step.wait, explaining: false, choosing: null, choiceNote: null })
     writeProgress(pubkey, { step: step.id })
     if (step.scene) applyScene(step.scene, step.wait === 'walk', (c) => { stepCleanups.push(c) })
     // Leaving WALK while such a step is up goes back to the step that asks for it.
@@ -245,6 +258,8 @@ export const useTutorial = create<TutorialState>((set, get) => {
     minimized: false,
     explaining: false,
     choicesVersion: 0,
+    choosing: null,
+    choiceNote: null,
     script: TUTORIAL_SCRIPT,
 
     start: (opts = {}) => {
@@ -276,23 +291,28 @@ export const useTutorial = create<TutorialState>((set, get) => {
 
     choose: (choiceId) => {
       const s = get()
-      if (!s.active) return
+      if (!s.active || s.choosing) return
       const here = s.script.steps[s.index]
       if (here?.gate && !s.done) return
       const choice = here?.choices?.find((c) => c.id === choiceId)
       if (!choice || !choiceOffered(choice)) return
       const run = choice.when ? TUTORIAL_CHOICES.get(choice.when) : undefined
-      const runIt = (): Promise<void> => Promise.resolve().then(() => run?.run())
-      if (choice.step) {
-        const at = s.script.steps.findIndex((st) => st.id === choice.step)
-        if (at < 0) { console.warn(`[tutorial] choice ${choice.id} names no step ${choice.step}`); return }
-        const index = s.index
-        if (!run) { enter(at); return }
-        void runIt().then(() => { if (get().active && get().index === index) enter(at) }, (err: unknown) => console.warn('[tutorial] choice failed:', err))
-        return
+      const at = choice.step ? s.script.steps.findIndex((st) => st.id === choice.step) : -1
+      if (choice.step && at < 0) { console.warn(`[tutorial] choice ${choice.id} names no step ${choice.step}`); return }
+      const went = (): void => { if (choice.step) enter(at); else get().end('finished') }
+      if (!run) { went(); return }
+      const token = ++choiceToken
+      set({ choosing: choice.id, choiceNote: null })
+      // Only the run still current settles: a step, an end or a restart since makes it stale.
+      const settle = (note: string | null): void => {
+        if (token !== choiceToken || !get().active) return
+        set({ choosing: null, choiceNote: note })
+        if (!note) went()
       }
-      get().end('finished')
-      void runIt().catch((err: unknown) => console.warn('[tutorial] choice failed:', err))
+      void Promise.resolve().then(() => run.run()).then(
+        (result) => settle(typeof result === 'string' && result ? result : null),
+        (err: unknown) => { console.warn('[tutorial] choice failed:', err); settle(CHOICE_FAILED_MESSAGE) },
+      )
     },
 
     end: (how) => {

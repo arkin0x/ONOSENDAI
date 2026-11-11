@@ -64,7 +64,8 @@ const RESERVED = new Set(['spawn', 'hop', 'sidestep', 'enter-hyperspace', 'hyper
 
 /**
  * DECK-0002 §4.1: the game put you at `toHex` with no path between. `fromHex`
- * is the game position you left, absent on the arrival (§2.2).
+ * is the game position you left, when the game says (optional, DECK-0002 §4.1).
+ * Entering is never a teleport: a player appears at the entry point (§2.2).
  */
 export function teleportTemplate(i: Links & { toHex: string; fromHex?: string }): EventTemplate {
   if (!HEX_64.test(i.toHex) || (i.fromHex !== undefined && !HEX_64.test(i.fromHex))) throw new Error('a game position is 64 lowercase hex')

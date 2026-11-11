@@ -79,10 +79,10 @@ export interface TutorialStep {
   branch?: boolean
   /**
    * A modal step's choices, one button each, above its own button (which
-   * ends the run). A choice goes to its `step`, or runs what was registered
-   * for it (store/useTutorial.ts registerTutorialChoice); one that names
-   * `when` is shown only once something registered it (the dungeon, until
-   * the Games DECK lands).
+   * ends the run). A choice runs what was registered for it, if anything
+   * (store/useTutorial.ts registerTutorialChoice), then goes to its `step` or
+   * ends the run; one that names `when` is shown only once something
+   * registered it (the dungeon: tutorial/dungeon.ts, with games on).
    */
   choices?: TutorialChoice[]
 }

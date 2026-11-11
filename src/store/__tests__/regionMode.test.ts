@@ -26,6 +26,7 @@ vi.mock('../../lib/relay', async (importOriginal) => ({
 
 import { useCyberspace } from '../useCyberspace'
 import { regionAtOriginalSize, useRegion } from '../useRegion'
+import { useBuilder } from '../useBuilder'
 
 const cs = () => useCyberspace.getState()
 const region = () => useRegion.getState()
@@ -87,5 +88,15 @@ describe('region mode, a tool inside VIEW', () => {
     expect(region().active).toBe(true)
     cs().clearFocus()
     expect(region().active).toBe(false)
+  })
+
+  it('ends when BUILD starts from VIEW', () => {
+    cs().viewHere()
+    region().enter()
+    expect(region().active).toBe(true)
+    useBuilder.getState().enter('build')
+    expect(useBuilder.getState().active).toBe(true)
+    expect(region().active).toBe(false)
+    useBuilder.getState().exit()
   })
 })

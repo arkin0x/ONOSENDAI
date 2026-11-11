@@ -49,6 +49,7 @@ import { useBuilder } from '../useBuilder'
 import { useShards } from '../useShards'
 import { useWalk } from '../useWalk'
 import { useToast } from '../useToast'
+import { useRegion } from '../useRegion'
 import { buildHeld, buildToHop, currentPadMode, cycleMode, padMode } from '../padMode'
 import { walkCancel } from '../../hooks/useKeyboard'
 import { escapeTop } from '../../hooks/useEscape'
@@ -94,6 +95,15 @@ describe('the mode button', () => {
     expect(S().focus).toBeNull()
     expect(S().atHead()).toBe(true)
     expect(S().cursor).toEqual(home)
+  })
+
+  it('VIEW to BUILD ends region mode, a VIEW tool', () => {
+    cycleMode()
+    useRegion.getState().enter()
+    expect(useRegion.getState().active).toBe(true)
+    cycleMode()
+    expect(currentPadMode()).toBe('build')
+    expect(useRegion.getState().active).toBe(false)
   })
 
   it('keeps the zoom all the way round', () => {

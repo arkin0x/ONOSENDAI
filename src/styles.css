@@ -4868,9 +4868,10 @@ kbd {
   touch-action: none;
   padding: 0;
 }
-/* Pinned to their columns so the mode button keeps its size and place when
-   RECALL hides in HOP on your avatar (arkinox, 2026-11-11): without this the
-   commit button auto-flows into RECALL's narrower column. */
+/* Pinned to their columns so the mode button keeps its size and place
+   whichever fills the first cell, WALK at rest in HOP or RECALL otherwise
+   (arkinox, 2026-11-11): without this the commit button auto-flows into the
+   narrower column. */
 .touchops__cancel { grid-column: 1; grid-row: 1; }
 .touchops__commit { grid-column: 2; grid-row: 1; }
 

@@ -103,7 +103,7 @@ export function TutorialCoach(): JSX.Element | null {
           <div className="demo__head">
             <span className="demo__tag">TUTORIAL</span>
             <span className="demo__chapter" />
-            <button className="demo__icon" onClick={() => t.end('skipped')} aria-label="Skip the tutorial" title="Skip the tutorial"><X size={14} /></button>
+            <button className="demo__icon" onClick={() => t.end('skipped')} aria-label="Close the tutorial" title="Close the tutorial"><X size={14} /></button>
           </div>
           <h2 className="modal__title">{step.title}</h2>
           <p className="demo__caption"><CaptionText caption={caption} /></p>
@@ -147,7 +147,7 @@ export function TutorialCoach(): JSX.Element | null {
         <span className="demo__tag">TUTORIAL</span>
         <span className="demo__chapter" />
         <button className="demo__icon" onClick={() => t.setMinimized(true)} aria-label="Fold the caption" title="Fold"><ChevronUp size={14} /></button>
-        <button className="demo__icon" onClick={() => t.end('skipped')} aria-label="Skip the tutorial" title="Skip the tutorial"><X size={14} /></button>
+        <button className="demo__icon" onClick={() => t.end('skipped')} aria-label="Close the tutorial" title="Close the tutorial"><X size={14} /></button>
       </div>
       {/* How far along, counting the way through (branches after the choice count as its end). */}
       <div className="demo__bar-track" aria-hidden><div className="demo__bar-fill" style={{ width: `${progressOf(script.steps, index) * 100}%` }} /></div>

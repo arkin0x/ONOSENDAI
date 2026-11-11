@@ -87,6 +87,9 @@ async function stageFor(player: string, restart: boolean): Promise<void> {
     const spawn = spawnPlace(player)
     const layout = tutorialLayout({ x: spawn.x, y: spawn.y, z: spawn.z }, spawn.plane as Plane)
     const guide = guideKey()
+    // A RESTART after a FINISH that kept its finds local (stop keeps them):
+    // drop the old run's before staging a new chest, so none are orphaned.
+    if (restart) dropGuideFinds(guide.pubkey)
     const current = (): boolean => mine === run && useTutorial.getState().active && useTutorial.getState().pubkey === player
     let stage = restart ? null : st.readStage(player, guide.pubkey, st.stageKey(layout))
     if (!stage) {

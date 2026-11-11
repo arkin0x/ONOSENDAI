@@ -97,8 +97,10 @@ describe('the director', () => {
     expect(Object.keys(useShards.getState().discovered)).toContain(stage.ids.chest)
     expect(guideBagsFor(lookups)).toHaveLength(3)
     expect(log.published).toEqual([])
-    // Clean up for the next test: a skip takes it all away again.
+    // A RESTART then drops the old run's kept find before staging a new chest, so none is orphaned.
     useTutorial.getState().start({ restart: true })
+    await staged()
+    expect(Object.keys(useShards.getState().discovered)).not.toContain(stage.ids.chest)
     useTutorial.getState().end('skipped')
     useShards.setState({ discovered: {} })
   })

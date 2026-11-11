@@ -62,7 +62,8 @@ export const INVENTORY: TutorialStep = {
   caption: "What you took is in ITEMS, in the menu. That's your stuff.",
   hint: 'Look in ITEMS at the top of the menu.',
   explain: 'A shard in ITEMS can be placed in the world, built with, or changed in the workshop.',
-  scene: { target: 'keep', highlight: '.panel--loot' },
+  // The ITEMS panel by its slot id: DISCOVERED shares the .panel--loot class.
+  scene: { target: 'keep', highlight: '[data-panel-id="items"]' },
   effect: 'teach-inventory',
 }
 

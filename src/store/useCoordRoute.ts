@@ -29,7 +29,7 @@ import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
 import { hexToBytes } from '../lib/events'
 import { MAX_SCALE_EXP, type Position } from '../lib/space'
 import { useCyberspace } from './useCyberspace'
-import { getStopIndex, markViewedStop, ownHyperspaceView, useHyperspace } from './useHyperspace'
+import { getStopIndex, stopScale, useHyperspace, viewHyperspace } from './useHyperspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 
 export interface RouteRegion extends PrefixRegion {
@@ -84,12 +84,12 @@ export function startCoordRoute(loc: Pick<Location, 'pathname' | 'search' | 'has
     const plane = cs.anchorPlane
     const label = `C/${route.hex}`
     useCoordRoute.setState({ region: { ...region, prefix: route.hex, plane }, label })
-    cs.focusOn(region.center, plane, label, frameScale(region.maxHeight, MAX_SCALE_EXP), true)
+    cs.viewAt(region.center, plane, label, frameScale(region.maxHeight, MAX_SCALE_EXP))
   } else {
     const { position, plane } = coordPlace(route.hex)
     const label = `C/${route.hex.slice(0, 8)}…${route.hex.slice(-4)}`
     useCoordRoute.setState({ region: null, label })
-    cs.focusOn(position, plane, label, undefined, true)
+    cs.viewAt(position, plane, label)
     stops.push(watchForBlock(route.hex))
   }
 
@@ -144,10 +144,7 @@ function landOnStop(stop: Stop): void {
   // (HyperspacePanel selectStopInScene); RETURN goes home, not back to the
   // raw coordinate the link held.
   useCoordRoute.setState({ label })
-  ownHyperspaceView()
-  useHyperspace.setState({ returnFocus: null })
-  markViewedStop(stop.height)
-  cs.focusOn(at.position, at.plane, label)
+  viewHyperspace(at.position, at.plane, label, stopScale(stop), stop.height)
   // arkinox's words (2026-10-14). The title names the kind of stop, which
   // also says where the view is, whether or not it had to move there.
   useToast.getState().show(blockToast(stop))

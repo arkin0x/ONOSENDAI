@@ -32,7 +32,7 @@ import { useOpenedChests, openedKey } from '../store/useOpenedChests'
 import { useInventory } from '../store/useInventory'
 import { useWalk } from '../store/useWalk'
 import { useWorkshop } from '../store/useWorkshop'
-import { markViewedStop, ownHyperspaceView } from '../store/useHyperspace'
+import { viewHyperspace } from '../store/useHyperspace'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { START_STAND, atStart, courseToWorld, onDeck } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
@@ -248,7 +248,5 @@ registerTutorialEffect('open-workshop', () => { useWorkshop.getState().openWorks
  * Looking costs nothing; only a ride does (T9).
  */
 registerTutorialEffect('view-earth', () => {
-  ownHyperspaceView()
-  markViewedStop(null)
-  useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', EARTH_SCALE_EXP)
+  viewHyperspace({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', EARTH_SCALE_EXP, null)
 })

@@ -51,7 +51,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react'
-import { Box, Globe, MapPinOff, Scan } from 'lucide-react'
+import { Box, Globe, Scan } from 'lucide-react'
 import { ConfirmModal } from './ConfirmModal'
 import { busyLabel, useCyberspace } from '../store/useCyberspace'
 import { DEFAULT_RELAY } from '../store/useRelays'
@@ -183,7 +183,6 @@ export function TouchControls(): JSX.Element {
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const pin = useCyberspace((s) => s.pin)
   const live = useCyberspace((s) => s.live)
   // What the chain's publishing is doing when the switch alone cannot say:
   // held, a conflict waiting for a choice, or LIVE with nothing reachable.
@@ -327,16 +326,6 @@ export function TouchControls(): JSX.Element {
             ladder. Viewing cyberspace itself is the CYBERSPACE button in the
             view menu, which is a different thing and stays where it is.
             On every pad, at your head or off it. */}
-        {/* REMOVE PIN: only while there is a pin to remove, so the cell is
-            empty the rest of the time and nothing moves when it appears.
-            The pin itself is dropped by a click on the globe or a View
-            panel VIEW, and RETURN already clears it; this is the way to put
-            a look down without leaving the place you are looking at. */}
-        {pin && (
-          <button className="touchpad__key touchpad__key--pin" title={`Remove the pin at ${pin.label}`} aria-label="Remove the pin" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().clearPin() }}>
-            <MapPinOff size={16} strokeWidth={2.25} aria-hidden />
-          </button>
-        )}
         {/* The planet at 2^52, the scale the view menu's EARTH
             button means, through the same function so the two can never
             drift: dataspace lined up, no viewed stop, the planet's centre.
@@ -352,9 +341,9 @@ export function TouchControls(): JSX.Element {
           <>
             {/* Region (lucide scan): picks a speakeasy region, VIEW only, left
                 of the globe. On turns region mode on and opens the REGION chip
-                (store/useRegion.ts, hud/RegionChip.tsx). It stands in the pin
-                cell, so it waits while a pin is down (rare in a region hunt). */}
-            {viewing && !pin && (
+                (store/useRegion.ts, hud/RegionChip.tsx). The pin cell is its
+                own: REMOVE PIN is gone with the cross marker (arkinox, 2026-11-11). */}
+            {viewing && (
               <button
                 className={`touchpad__key touchpad__key--region${regionActive ? ' is-on' : ''}`}
                 title="Region: pick a region for a private speakeasy"

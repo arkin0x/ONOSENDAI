@@ -25,9 +25,9 @@ import { Hash, X } from 'lucide-react'
 import { xyzToCoord } from 'cyberspace-core'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { useCyberspace } from '../store/useCyberspace'
-import { closeScrubber, getStopByHeight, getStopIndex, markViewedStop, ownHyperspaceView, useHyperspace } from '../store/useHyperspace'
+import { closeScrubber, getStopByHeight, getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { findStation } from '../lib/hyperspace/station'
-import { formatLatLon, stopPlane, stopPosition } from './HyperspacePanel'
+import { formatLatLon, viewStop } from './HyperspacePanel'
 import { useEscape } from '../hooks/useEscape'
 import { clearRideDestination, setRideDestination } from '../store/destination'
 
@@ -94,17 +94,7 @@ export function LineScrubber(): JSX.Element {
     return findStation(index, here, tipHeight ?? Number.MAX_SAFE_INTEGER)?.stop
   }, [position, plane, indexVersion, tipHeight])
 
-  const viewStation = (): void => {
-    if (!station) return
-    ownHyperspaceView()
-    markViewedStop(station.height)
-    useCyberspace.getState().focusOn(
-      stopPosition(station),
-      stopPlane(station),
-      `STATION · BLOCK ${station.height}`,
-      34,
-    )
-  }
+  const viewStation = (): void => { if (station) viewStop(station, `STATION · BLOCK ${station.height}`, 34) }
 
   const ready = syncStatus === 'ready' && tipHeight !== null
   const open = scrubHeight !== null
@@ -137,18 +127,10 @@ export function LineScrubber(): JSX.Element {
     if (was === null) return
     if (was !== scrubHeight) armed.current = true
     if (!armed.current) return
+    // A landfall is a place on Earth: the globe with the landfall's side
+    // toward the camera instead of standing on the surface grid (stopScale).
     const stop = getStopByHeight(scrubHeight)
-    if (!stop) return
-    ownHyperspaceView()
-    markViewedStop(stop.height)
-    useCyberspace.getState().focusOn(
-      stopPosition(stop),
-      stopPlane(stop),
-      `BLOCK ${stop.height} · ${stop.kind === 'port' ? 'PORT' : 'LANDFALL'}`,
-      // A landfall is a place on Earth: frame the globe with the landfall's
-      // side toward the camera instead of standing on the surface grid.
-      stop.kind === 'landfall' ? 52 : 34,
-    )
+    if (stop) viewStop(stop)
   }, [scrubHeight, indexVersion])
 
   const toggle = (): void => {

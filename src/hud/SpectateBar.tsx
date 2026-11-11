@@ -61,6 +61,8 @@ export function SpectateBar(): JSX.Element | null {
           <span title={spectate.status === 'partial' ? 'The relays are missing part of this chain, so it is drawn up to the gap. Their real head may be further on than what you see here.' : undefined}>{status}</span>
         </span>
       </span>
+      {/* VIEW HERE: where they are on screen becomes your VIEW (arkinox, 2026-11-11). */}
+      <button className="spectate__end spectate__end--view" title="VIEW from here: move the cursor, pick a region; RECALL goes home" onClick={() => useCyberspace.getState().viewHere()}>VIEW HERE</button>
       <button className="spectate__end" onClick={stopSpectating}>END SPECTATION</button>
     </div>
   )

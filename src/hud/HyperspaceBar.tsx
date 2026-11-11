@@ -25,7 +25,8 @@ function useHosakaRiding(): boolean {
 }
 
 /**
- * VIEWING a stop, EARTH or your station, with its RETURN: the always-visible
+ * VIEWING the ride's look, with its RETURN (a block, EARTH or a station is a
+ * VIEW now and has the focus bar): the always-visible
  * way home from a hyperspace view, since the panel column may be folded
  * away. Its own component so it stands with the other RETURN chips at the
  * top of the stack (arkinox, 2026-10-14), apart from the ride's status,
@@ -37,7 +38,10 @@ export function HyperspaceViewBar(): JSX.Element | null {
   const transit = useCyberspace((s) => s.transit)
   const progress = useRideRun((s) => s.progress)
   const riding = useHosakaRiding()
-  const viewOwned = useHyperspace((s) => s.viewOwned)
+  // A VIEW has the focus bar (FocusBar); this is for the ride's look.
+  const owned = useHyperspace((s) => s.viewOwned)
+  const aView = useCyberspace((s) => s.focus?.view === true)
+  const viewOwned = owned && !aView
   const focusLabel = useCyberspace((s) => s.focus?.label ?? null)
   // Viewing a stop, EARTH or your station: Escape is RETURN, a chip on the
   // Escape stack (arkinox, 2026-10-01). Boarding and riding are chain states,

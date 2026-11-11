@@ -43,8 +43,7 @@ function formatDuration(ms: number): string {
   return `${(h / 24).toFixed(1)} d`
 }
 import { GAME_HOLDS_MESSAGE, IN_GAME_HERE_MESSAGE, STALE_CONFIRMATION, useCyberspace, whyNoMove, type CompletedRide } from '../store/useCyberspace'
-import { setRideDestination } from '../store/destination'
-import { closeScrubber, exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
+import { closeScrubber, exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, stopScale, useHyperspace, viewHyperspace } from '../store/useHyperspace'
 import { Explanation } from './Explanation'
 import { useChainUi } from '../store/useChainUi'
 
@@ -65,6 +64,11 @@ export function stopPosition(stop: Stop): Position {
 
 export function stopPlane(stop: Stop): Plane {
   return coordToXyz(stop.coordApprox).plane
+}
+
+/** VIEW a block: the standard VIEW on it, marked as the viewed block, at stopScale. */
+export function viewStop(stop: Stop, label = `BLOCK ${stop.height} · ${stop.kind === 'port' ? 'PORT' : 'LANDFALL'}`, scaleExp = stopScale(stop)): void {
+  viewHyperspace(stopPosition(stop), stopPlane(stop), label, scaleExp, stop.height)
 }
 
 /** A landfall as a place on Earth: "31.6°N 98.8°W". */
@@ -516,14 +520,9 @@ export function HyperspacePanel(): JSX.Element {
             </dl>
             <button
               className="hyper__btn hyper__btn--view"
-              onClick={() => { ownHyperspaceView(); markViewedStop(nearest.stop.height); useCyberspace.getState().focusOn(
-                stopPosition(nearest.stop),
-                stopPlane(nearest.stop),
-                `STATION · BLOCK ${nearest.stop.height}`,
-                // 2^34: one render cell is 2 meters, the spec's h34 human
-                // scale, so the stop reads as a place you could stand at.
-                34,
-              ) }}
+              // 2^34: one render cell is 2 meters, the spec's h34 human
+              // scale, so the stop reads as a place you could stand at.
+              onClick={() => viewStop(nearest.stop, `STATION · BLOCK ${nearest.stop.height}`, 34)}
             >VIEW STATION</button>
           </>
         ) : (
@@ -743,16 +742,13 @@ export function HyperspacePanel(): JSX.Element {
 
 
 /**
- * Click-select a stop in the scene: it becomes the destination and the
- * camera flies to it. With the scrubber open the height goes through the
- * scrubber so its readout follows the click; closed, the focus is set
- * directly at the current zoom so a click never yanks the scale.
+ * Click a stop in the scene: VIEW it, nothing more (arkinox, 2026-11-11: a
+ * view only views; the destination is set on purpose, with SET DESTINATION
+ * in the Hyperspace overlay). With the scrubber open the height goes through
+ * the scrubber so its readout follows the click.
  */
 export function selectStopInScene(height: number): void {
   const hs = useHyperspace.getState()
-  // The stop becomes the destination only when none is set; with one set, a
-  // tap only flies to the stop (arkinox, 2026-10-15: clear before setting).
-  setRideDestination(height, { quiet: true })
   // With the scrubber open the height goes through it (its effect flies and
   // marks); a click on the very block it is parked on falls through to the
   // direct path, because a no-op set would fire no effect and no fly.
@@ -761,14 +757,7 @@ export function selectStopInScene(height: number): void {
     return
   }
   const stop = getStopByHeight(height)
-  if (!stop) return
-  ownHyperspaceView()
-  markViewedStop(stop.height)
-  useCyberspace.getState().focusOn(
-    stopPosition(stop),
-    stopPlane(stop),
-    `BLOCK ${stop.height} · ${stop.kind === 'port' ? 'PORT' : 'LANDFALL'}`,
-  )
+  if (stop) viewStop(stop)
 }
 
 /**
@@ -784,12 +773,10 @@ export function selectStopInScene(height: number): void {
  * that means the planet, so it means the planet unconditionally.
  */
 export function viewEarth(): void {
-  ownHyperspaceView()
-  markViewedStop(null)
   // Earth is a dataspace thing (§9.1): looking at it lines up dataspace, so
   // that RETURN, and the next commit, stay in the plane the planet is in.
   useCyberspace.getState().setPlane(0)
-  useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', EARTH_SCALE_EXP)
+  viewHyperspace({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', EARTH_SCALE_EXP, null)
 }
 
 /**
@@ -798,8 +785,5 @@ export function viewEarth(): void {
  * current plane; the lattices take that plane's colors.
  */
 export function viewCyberspace(scaleExp = 82): void {
-  ownHyperspaceView()
-  markViewedStop(null)
-  const plane = useCyberspace.getState().plane
-  useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, plane, 'CYBERSPACE', scaleExp)
+  viewHyperspace({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, useCyberspace.getState().plane, 'CYBERSPACE', scaleExp, null)
 }

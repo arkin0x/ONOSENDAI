@@ -164,7 +164,7 @@ export function SecretModal(): JSX.Element | null {
   const goTo = (): void => {
     close()
     const label = item.type === 'message' ? name : item.type === 'key' ? item.keyItem?.name ?? 'key' : item.type === 'chest' ? item.chest?.name ?? 'chest' : item.type === 'audio' ? item.audio?.title ?? 'audio' : item.shard?.name ?? 'shard'
-    useCyberspace.getState().focusItem(item.at, item.plane, label, item.type === 'shard' ? item.shard?.unit ?? 0 : 0)
+    useCyberspace.getState().viewAt(item.at, item.plane, label, item.type === 'shard' ? item.shard?.unit ?? 0 : 0, { item: true })
   }
   // Where it was found, for what is taken out of a chest here.
   const place = { lookupId: item.lookupId ?? '', bagId: item.bagId ?? '', at: { x: item.at.x.toString(), y: item.at.y.toString(), z: item.at.z.toString() }, plane: item.plane, height: item.height }

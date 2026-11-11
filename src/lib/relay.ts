@@ -1121,8 +1121,10 @@ const NO_ANSWER = 'no answer in time'
  * (HIDDEN BAGS) can take longer than the deadline on a busy socket or a busy
  * page, and its first events alone were taken for the whole answer: 29 bags
  * of 105, or none (the owner, 2026-11-04).
+ * `graceMs`: once any relay has answered, the rest have this long more, not
+ * the whole deadline: for a read any one relay's answer will do (TV's tape).
  */
-export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?: { quietMs: number; capMs: number } }
+export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?: { quietMs: number; capMs: number }; graceMs?: number }
 
 async function askOne(url: string, filter: Filter, deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
   const { answerMs, onSent, stop, onEvent, deferChecks, quietMs, capAt } = opts
@@ -1273,11 +1275,18 @@ async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_
   const asked = opts.evenHung ? urls : skipHung(urls)
   await authAll(asked)
   const deadline = Date.now() + maxWait
+  // `graceMs`: once one relay has answered, the others have this long more,
+  // then end as no answer in time with what they sent. Ended early, none hung.
+  const early = new AbortController()
   const answers = await Promise.all(urls.map((url): Promise<RelayAnswer> => asked.includes(url)
-    ? askOne(url, filter, deadline, { deferChecks: opts.deferChecks, ...(opts.stream ? { quietMs: opts.stream.quietMs, capAt: Date.now() + opts.stream.capMs } : {}) }).then((a) => { opts.onAnswer?.(a); return a })
+    ? askOne(url, filter, deadline, { deferChecks: opts.deferChecks, stop: early.signal, ...(opts.stream ? { quietMs: opts.stream.quietMs, capAt: Date.now() + opts.stream.capMs } : {}) }).then((a) => {
+      if (opts.graceMs !== undefined && a.outcome === 'answered') setTimeout(() => early.abort(), opts.graceMs)
+      opts.onAnswer?.(a)
+      return a
+    })
     : Promise.resolve({ url, outcome: 'unreachable', reason: HUNG_REASON, events: [] })))
   // Silent for a whole full-length question, with nothing sent: it hung. A short question says nothing.
-  if (maxWait >= CONNECT_MS) for (const a of answers) if (a.outcome === 'unreachable' && a.reason === NO_ANSWER && a.events.length === 0) noteTimeout(a.url)
+  if (maxWait >= CONNECT_MS && !early.signal.aborted) for (const a of answers) if (a.outcome === 'unreachable' && a.reason === NO_ANSWER && a.events.length === 0) noteTimeout(a.url)
   return answers
 }
 

@@ -104,6 +104,11 @@ import { useBuilder } from './store/useBuilder'
 import { CHAT_COVERS_PAD, linkChatAndPad, tapScene, usePad } from './store/usePad'
 
 export default function App(): JSX.Element {
+  // Landing on /tv, the first render is already TV's alone, as it will be
+  // once TV starts (in the effect below): the panels would mount for one
+  // render and ask the relays for megabytes (every bag, the avatars) ahead
+  // of TV's first question, on the same sockets.
+  const [tvLanding, setTvLanding] = useState(() => isTvPath(window.location.pathname))
   // Reactions and comments that tag you: the first page per identity, then a poll.
   useNotificationsLoop()
   // New private messages from your agents, for the dot on AGENTS and the
@@ -152,6 +157,7 @@ export default function App(): JSX.Element {
       try { window.history.replaceState(null, '', '/') } catch { /* no history here */ }
     }
     if (isTvPath(window.location.pathname)) open()
+    setTvLanding(false)
     const onPop = (): void => {
       const at = isTvPath(window.location.pathname)
       const tv = useTv.getState()
@@ -309,7 +315,7 @@ export default function App(): JSX.Element {
   const tv = useTv((s) => s.on)
   useCanvasTap(onSceneTap, !crowded && !tv)
 
-  if (tv) {
+  if (tv || tvLanding) {
     return (
       <div className="app">
         <WorldScans />

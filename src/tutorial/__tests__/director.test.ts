@@ -59,6 +59,20 @@ beforeEach(() => {
 })
 afterEach(() => { useTutorial.getState().pause() })
 
+/**
+ * The owner's published tutorial tree (dna.ts TUTORIAL_DNA_ID), signed, as the
+ * relays hold it, noted on this device as the relays would hand it over: the
+ * PLANT THE SEED button resolves it before anything else.
+ */
+async function notePublishedTree(): Promise<void> {
+  const published = (await import('./moon-blossom-v2-published.json')).default
+  const { tutorialDnaId } = await import('../dna')
+  const { dnaResolver } = await import('../../lib/seeds/seedSources')
+  expect(published.id).toBe(tutorialDnaId())
+  dnaResolver.note(published as never)
+  expect(await dnaResolver.resolve(published.id)).toMatchObject({ state: 'ok' })
+}
+
 describe('the director', () => {
   it('stages under a guide key of its own on start, hands the bags to discovery, and takes them back on stop', async () => {
     useTutorial.getState().start({ restart: true })
@@ -378,6 +392,7 @@ describe('the director', () => {
 
   it('the plant step\'s note is its own: shown while it is up, gone on the next step', async () => {
     const { runTutorialEffect } = await import('../../store/useTutorial')
+    await notePublishedTree()
     useTutorial.getState().start({ restart: true })
     await staged()
     useTutorial.getState().start({ at: 'plant' })
@@ -440,6 +455,7 @@ describe('the director', () => {
   it('a second PLANT THE SEED tap while it measures does nothing', async () => {
     const { runTutorialEffect } = await import('../../store/useTutorial')
     const director = await import('../director')
+    await notePublishedTree()
     useTutorial.getState().start({ restart: true })
     await staged()
     useTutorial.getState().start({ at: 'plant' })

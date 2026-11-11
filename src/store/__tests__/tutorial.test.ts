@@ -422,7 +422,7 @@ describe('the engine', () => {
     expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('after')
   })
 
-  it('plants the tutorial tree, MOON BLOSSOM v2: the owner\'s DNA template, the free caps, no published id yet, its plant button and its bud picture', async () => {
+  it('plants the tutorial tree, MOON BLOSSOM v2: the owner\'s DNA template, the free caps, the owner\'s published id, its plant button and its bud picture', async () => {
     const { TUTORIAL_DNA, TUTORIAL_BUD_PICTURE } = await import('../../tutorial/dna')
     const ids = TUTORIAL_SCRIPT.steps.map((st) => st.id)
     expect(ids.slice(ids.indexOf('take'), ids.indexOf('to-course') + 1)).toEqual(['take', 'to-plot', 'plant', 'bud', 'to-course'])
@@ -445,13 +445,14 @@ describe('the engine', () => {
     const { dnaTextRefusal, readDnaText } = await import('../../lib/seeds/plant')
     expect(dnaTextRefusal(TUTORIAL_DNA.text)).toBe(null)
     expect(readDnaText(TUTORIAL_DNA.text)).toEqual({ ok: true, name: 'moon blossom' })
-    // Not published yet: no id, and the seed is a copy the player's SEED signs. Set, it names the owner's event.
+    // Published: the seed names the owner's event. With no id, the seed is a copy the player's SEED signs.
     const { TUTORIAL_DNA_ID, tutorialDnaId, tutorialSeedDraft } = await import('../../tutorial/dna')
-    expect(TUTORIAL_DNA_ID).toBe('')
-    expect(tutorialDnaId()).toBe(null)
+    expect(TUTORIAL_DNA_ID).toBe('75156b56dda84154f42581a097dd14691c60550088cafa9a8639db9c305de264')
+    expect(tutorialDnaId()).toBe(TUTORIAL_DNA_ID)
+    expect(tutorialDnaId('')).toBe(null)
     expect(tutorialDnaId('nope')).toBe(null)
     expect(tutorialDnaId('A'.repeat(64))).toBe(null)
-    expect(tutorialSeedDraft()).toEqual({ text: TUTORIAL_DNA.text, caps: BASE_CAPS, scale: 0, title: '' })
+    expect(tutorialSeedDraft(null)).toEqual({ text: TUTORIAL_DNA.text, caps: BASE_CAPS, scale: 0, title: '' })
     const id = 'a'.repeat(64)
     const owned = { vertices: 2048, symbols: 2048, generations: 32 }
     expect(tutorialDnaId(id)).toBe(id)

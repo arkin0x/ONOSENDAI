@@ -100,6 +100,7 @@ import { dnaTextRefusal, draftPrice, seedWorkHolds, type SeedDraft } from '../li
 import { MineCancelled } from '../lib/avatarWorker'
 import { cancelMining, isMining, plantedTemplate, seedDraftName } from './plantSeed'
 import { dnaResolver } from '../lib/seeds/seedSources'
+import { seedSnapOffered } from '../lib/seeds/orientation'
 import { seedItemOf } from '../lib/seeds/seedItem'
 import { SEALED_KIND, freshSealedD, isSealedRef, refOf, rememberSealed, utf8Bytes, retractSealed, sealedChanges, sealedEventOf, sealedItemOf, sealedRefParts, sealedTemplate, sendBagWithSealed, type OutgoingSealed } from '../lib/sealed'
 import { retractionTemplate } from '../lib/published'
@@ -2914,8 +2915,10 @@ export const useShards = create<ShardsState>((set, get) => {
    * §7.7): the sector hint goes off above height 30 the way the snap goes off
    * below its own height.
    */
+  /** Whether the snap is offered for what is lined up: a seed in dataspace at any height (orientation.ts seedSnapOffered), anything else at 27 and up. */
+  const snapHere = (height: number): boolean => (get().pending?.type === 'seed' ? seedSnapOffered(buildPlane(cyber())) : snapOffered(buildPlane(cyber()), height))
   const heightPatch = (height: number): Partial<ShardsState> => {
-    const offered = snapOffered(buildPlane(cyber()), height)
+    const offered = snapHere(height)
     const bag = get().deployBag
     const hintGone = bag.hint !== null && !hintFits(bag.hint, height)
     return { deployHeight: height, deployAsk: null, ...(offered ? {} : { deployUp: false, deployFollow: false }), ...(hintGone ? { deployBag: { ...bag, hint: null } } : {}) }
@@ -2925,7 +2928,7 @@ export const useShards = create<ShardsState>((set, get) => {
   const leaveRoom = (snap: NonNullable<ShardsState['deployRoomSnap']>): Partial<ShardsState> => {
     const patch: Partial<ShardsState> = { deployRoomSnap: null, ...heightPatch(snap.chosen) }
     const s = get()
-    if (snap.kept.up && !s.deployUp && snapOffered(buildPlane(cyber()), snap.chosen)) Object.assign(patch, { deployUp: true, deployFollow: snap.kept.follow })
+    if (snap.kept.up && !s.deployUp && snapHere(snap.chosen)) Object.assign(patch, { deployUp: true, deployFollow: snap.kept.follow })
     const bag = patch.deployBag ?? s.deployBag
     if (snap.kept.hint && !bag.hint && hintFits(snap.kept.hint, snap.chosen)) patch.deployBag = { ...bag, hint: snap.kept.hint }
     return patch
@@ -4702,7 +4705,10 @@ export const useShards = create<ShardsState>((set, get) => {
         if (pending.type === 'seed') {
           seedPrice = draftPrice(pending.seed)
           const current = (): boolean => get().pending === pending
-          const planted = await plantedTemplate(pending, { at, plane, createdAt, owner, live: cs.live, sign: signAsOwner, current, note: (n) => { if (current()) set({ deployNote: n }) }, mining: (on) => { if (current()) set({ deployMining: on }) } })
+          // TURN, SNAP TO EARTH and FINE ROTATION, as the seed's tags write them (§5.7): turns in Cyberspace's axes, as the bar
+          // turns a shard, so as they are; standing on Earth only in dataspace.
+          const stand = { turn: [...deployTurn] as Turns, up: deployUp && seedSnapOffered(plane), spin: wrapSpin(deploySpin) }
+          const planted = await plantedTemplate(pending, { at, plane, createdAt, owner, live: cs.live, sign: signAsOwner, current, stand, note: (n) => { if (current()) set({ deployNote: n }) }, mining: (on) => { if (current()) set({ deployMining: on }) } })
           if (!current()) return
           innerTemplate = planted
           still()

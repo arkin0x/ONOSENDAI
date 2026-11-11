@@ -203,7 +203,12 @@ export class BloomEngine {
     if (!was) this.set(id, { seedId: id, status: 'reading' })
     const verdict = await this.deps.dna.resolve(seed.dnaId)
     if (verdict.state !== 'ok') {
-      this.set(id, { seedId: id, status: dnaStatus(verdict), ...(verdict.state === 'invalid' ? { error: verdict.error } : {}) })
+      const status = dnaStatus(verdict)
+      const error = verdict.state === 'invalid' ? verdict.error : undefined
+      // Asked again on a timer while its DNA is missing: a view that says the same is not written again.
+      const now = this.views.get(id)
+      if (now && now.status === status && now.error === error && !now.shard) return
+      this.set(id, { seedId: id, status, ...(error !== undefined ? { error } : {}) })
       return
     }
     const dna = { id: verdict.id, name: verdict.name, author: verdict.author, price: verdict.price }

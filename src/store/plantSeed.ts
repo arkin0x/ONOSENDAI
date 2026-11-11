@@ -27,7 +27,7 @@ import type { Position } from '../lib/space'
 import { dnaMatches, dnaTemplate, draftPrice, dnaTextRefusal, readDnaText, seedTemplate, type SeedDraft } from '../lib/seeds/plant'
 import { checkDna, idbDnaCache } from '../lib/seeds/dnaStore'
 import { dnaResolver, refreshTrustedTip, trustedTip } from '../lib/seeds/seedSources'
-import { DNA_KIND } from '../lib/seeds/seedItem'
+import { DNA_KIND, type SeedStand } from '../lib/seeds/seedItem'
 
 /** The name a seed draft goes by: its DNA's, or its title. Parsed once per text (plant.ts readDnaText). */
 export function seedDraftName(draft: SeedDraft): string {
@@ -80,6 +80,13 @@ async function publishTo(ev: NostrEvent): Promise<string | null> {
 
 /** The DNA this seed plants, on the relays when live, and the relay hint its `dna` tag names. */
 export async function dnaFor(draft: SeedDraft, owner: string, live: boolean, createdAt: number, sign: (t: EventTemplate) => Promise<NostrEvent>): Promise<{ event: NostrEvent; hint: string }> {
+  // An original DNA the owner has published: that event, by id, for every seed of it (owner ruling 2026-11-10).
+  if (draft.dnaId) {
+    const v = await dnaResolver.resolve(draft.dnaId)
+    if (v.state !== 'ok' || !dnaMatches(v.event, draft.text, draft.caps)) throw new Error('The original DNA is not on your relays yet. Try again in a moment.')
+    // No relay named that this client has not seen take it: the hint MAY be empty (§8.2).
+    return { event: v.event, hint: '' }
+  }
   const key = keyOf(owner, draft)
   let ev: NostrEvent | undefined = kept.get(key)
   // One of yours this device signed before, LOCAL or not, kept in IndexedDB: no second copy after a reload.
@@ -99,7 +106,8 @@ export async function dnaFor(draft: SeedDraft, owner: string, live: boolean, cre
   void idbDnaCache.save(ev)
   if (!live) return { event: ev, hint: '' }
   const there = await query({ ids: [ev.id] }).catch(() => [] as NostrEvent[])
-  if (there.some((e) => e.id === ev!.id)) return { event: ev, hint: relaySet()[0] ?? '' }
+  // Already out there, on some relay of yours; which one is not known, so no hint (§8.2 lets it be empty).
+  if (there.some((e) => e.id === ev!.id)) return { event: ev, hint: '' }
   const took = await publishTo(ev)
   if (!took) throw new Error('No relay took the DNA. Try again when one is reachable.')
   return { event: ev, hint: took }
@@ -115,6 +123,8 @@ export interface PlantContext {
   sign: (t: EventTemplate) => Promise<NostrEvent>
   /** Whether this planting is still the deploy lined up: once another replaces it, its mining stops. */
   current: () => boolean
+  /** How the bloom stands, from the deploy bar's TURN, SNAP TO EARTH and FINE ROTATION (§5.7), as the tags write it. */
+  stand?: SeedStand
   note: (n: string) => void
   mining: (on: boolean) => void
 }
@@ -127,7 +137,7 @@ export async function plantedTemplate(pending: { type: 'seed'; seed: SeedDraft }
   const draft = pending.seed
   const refusal = dnaTextRefusal(draft.text)
   const price = draftPrice(draft)
-  if (refusal || price === null) throw new Error(refusal ?? 'Its caps are out of range.')
+  if (refusal || price === null) throw new Error(refusal ?? 'Its size limit is out of range.')
   o.note('Getting the DNA ready')
   const dna = await dnaFor(draft, o.owner, o.live, o.createdAt, o.sign)
   // The writer's clock block (§4.2): the tip this client trusts, NTH's newest verified anchor, asked
@@ -138,7 +148,7 @@ export async function plantedTemplate(pending: { type: 'seed'; seed: SeedDraft }
   if (!o.current()) throw new MineCancelled()
   // Attributed before it is mined, as an avatar is (lib/client.ts): the signer adds no client tag to a
   // template that names one, so the work, done over every tag, still holds on what it signs.
-  const template = attributed(seedTemplate({ dnaId: dna.event.id, relayHint: dna.hint, planted: clockHeight(tip), scale: draft.scale, at: o.at, plane: o.plane, title: draft.title, createdAt: o.createdAt }))
+  const template = attributed(seedTemplate({ dnaId: dna.event.id, relayHint: dna.hint, planted: clockHeight(tip), scale: draft.scale, at: o.at, plane: o.plane, title: draft.title, createdAt: o.createdAt, ...(o.stand ? { stand: o.stand } : {}) }))
   o.note('Mining the seed')
   o.mining(true)
   const mineable: MineTemplate = { pubkey: o.owner, created_at: template.created_at, kind: template.kind, tags: template.tags, content: template.content }

@@ -97,7 +97,8 @@ import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, r
 import { useEscape } from '../hooks/useEscape'
 import { useCover } from '../hooks/useCover'
 import { fitCause, fitHeight, fitHeightAll, outsideAt, reachGibsons, type FitPoint } from '../lib/deployFit'
-import { seedHideHeight } from '../lib/seeds/plant'
+import { seedDraftHeight } from '../lib/seeds/plant'
+import { seedSnapOffered } from '../lib/seeds/orientation'
 import { CHEST_LOOKS, DOOR_LOOKS, LOOK_LABELS } from '../lib/looks'
 import { LookPicker } from './LookPicker'
 import { SHALLOW_WARN, shallowBag, shallowExplain } from '../lib/shallowBag'
@@ -368,12 +369,13 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   }, [pending, plane])
   // A seed hides where the automatic discovery finds it (owner ruling
   // 2026-11-10): the smallest height from 3 to 12 whose cube holds this DNA's
-  // own bloom at day 31 (SeedCompose measures it), 12 when none does, and the
-  // bloom draws past its cube. + still hides it higher, by hand. It used to fit
+  // own bloom at day 31 where it lands (SeedCompose measures it for this cursor
+  // and step; anywhere else, AGAIN included, it is 12), 12 when none does, and
+  // the bloom draws past its cube. + still hides it higher, by hand. It used to fit
   // the 64 units every bloom is held to, a 128-gibson span that straddles some
   // power-of-two boundary near most points, so the height climbed to wherever
   // the nearest one ended (13 at the owner's spot every time).
-  const seedFit = pending?.type === 'seed' ? seedHideHeight(pending.seed.reach, cursor, step, ceiling) : null
+  const seedFit = pending?.type === 'seed' ? seedDraftHeight(pending.seed.fit, cursor, plane, step, ceiling) : null
   // What the height is fitted to: a shard's own reach, the chest's look and
   // aimed contents, so its region holds the whole model it wears, or a seed's bloom.
   const fitting = !!shard || !!lookModel || aimed.points.length > 0 || seedFit !== null
@@ -424,6 +426,10 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   // WALK, but not the snap.
   const isMessage = pending.type !== 'shard'
   const sized = pending.type === 'shard' || pending.type === 'chest'
+  // A seed turns as a shard does, and stands on Earth wherever it is planted in
+  // dataspace (DECK-0008 §5.7; owner ruling 2026-11-10). Its scale is set in SEED.
+  const seedStands = pending.type === 'seed'
+  const snapHere = seedStands ? seedSnapOffered(plane) : !isMessage && !link && snapOffered(plane, height)
   const title = intoChest ? 'AIM' : moving ? (pending.type === 'shard' ? 'EDIT' : 'MOVE') : pending.type === 'shard' ? 'DEPLOY' : door ? 'HIDE DOOR' : `HIDE ${pending.type.toUpperCase()}`
   const name = pendingName(pending, shard)
   const empty = pendingEmpty(pending, shard)
@@ -628,7 +634,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
 
       {/* Quarter turns about the object's own origin, for this deployment only:
           exact on the lattice, and every reader draws them (lib/turn.ts). */}
-      {sized && !link && (
+      {((sized && !link) || seedStands) && (
         <DeployRow kind="turn" label="TURN">
           {(['X', 'Y', 'Z'] as const).map((name, axis) => (
             <button key={name} className={`deploybar__btn deploybar__turn ${turn[axis] ? 'is-on' : ''}`} onClick={() => useShards.getState().turnDeploy(axis as 0 | 1 | 2)} aria-label={`Turn a quarter about ${name}, now ${turn[axis] * 90} degrees`} {...noCallout}>
@@ -662,7 +668,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
 
       {/* Standing on the ground, where there is ground: dataspace, and big
           enough that an orientation could ever be seen. */}
-      {!isMessage && !link && snapOffered(plane, height) && (
+      {snapHere && (
         <DeployRow kind="snap" label="SNAP TO EARTH" hint={up ? 'bottom to Earth' : null}>
           <button
             className={`deploybar__toggle ${up ? 'is-on' : ''}`}
@@ -673,7 +679,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
         </DeployRow>
       )}
 
-      {!isMessage && !link && snapOffered(plane, height) && up && (
+      {snapHere && up && (
         <DeployRow kind="spin" label="FINE ROTATION" hint={follow ? 'orbit to aim' : null}>
           <button
             className={`deploybar__toggle ${follow ? 'is-on' : ''}`}

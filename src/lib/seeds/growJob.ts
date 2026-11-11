@@ -83,11 +83,12 @@ export type SeedsResponse =
 
 /**
  * Grown strings kept, least recently used first out: as many as the page
- * keeps seeds (useBlooms BLOOMS_KEPT), so a bloom grown a slice at a time is
+ * keeps seeds (useBlooms BLOOMS_KEPT, 128) and the SEED composer's two
+ * previews, so a bloom grown a slice at a time is
  * never pushed out between its slices. Each is at most a symbol cap of
- * symbols; the starters' run to a few thousand.
+ * symbols; the original DNAs' run to a few thousand.
  */
-export const GROWN_KEPT = 128
+export const GROWN_KEPT = 130
 /** Parsed DNAs kept by text. */
 const PARSED_KEPT = 32
 

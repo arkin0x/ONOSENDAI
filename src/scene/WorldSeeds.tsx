@@ -25,6 +25,7 @@ import { useMutes } from '../store/useMutes'
 import { useBlooms, wantSeeds } from '../store/useBlooms'
 import { seedItemOf, seedsInPlane, type SeedItem } from '../lib/seeds/seedItem'
 import { bloomShard } from '../lib/seeds/bloomShard'
+import { standBloom } from '../lib/seeds/orientation'
 import type { ShardModel } from 'sno-core/shards'
 import type { NostrEvent } from '../lib/events'
 import { PlacedShard, placeShard, useSteadied, type PlacedShardDraw } from './WorldShards'
@@ -33,6 +34,13 @@ import type { Box } from '../lib/clip'
 const REACH = GRID_RADIUS * 8
 /** A box that holds everything: a bloom is drawn whole, past its bag's cube (owner ruling 2026-11-10). */
 const UNBOUNDED: Box = { min: [-Infinity, -Infinity, -Infinity], max: [Infinity, Infinity, Infinity] }
+/**
+ * The largest scale whose bloom draws past its cube. A bloom is held to 64
+ * units of its own scale (DECK-0008 §3.8), so at 2^30 it reaches at most 2^36
+ * gibsons; a seed at 2^84 (the spec allows it) from another client would cover
+ * everything near it, and is cut at its cube instead.
+ */
+const UNCLIPPED_SCALE_MAX = 30
 
 /** The bead a seed stands as before its bloom is drawn: half a unit across, the palette's green (index 168). */
 function seedMark(unit: number): ShardModel {
@@ -87,7 +95,12 @@ export function WorldSeeds({ axes }: { axes: ViewAxes }): JSX.Element | null {
 
   const fresh = useMemo<PlacedShardDraw[]>(() => {
     const origin = alignedOrigin(anchor, scaleExp)
-    return near.map(({ w, seed }) => ({ ...placeShard({ ...w, shard: views[seed.id]?.shard ?? markFor(seed.scale) }, origin, scaleExp, axes), clip: UNBOUNDED }))
+    return near.map(({ w, seed }) => {
+      // Turned and stood as the seed's tags say (§5.7): the pose stands it on Earth when it carries `up` in dataspace.
+      const placed = placeShard({ ...w, shard: standBloom(views[seed.id]?.shard ?? markFor(seed.scale), seed.stand, w.plane) }, origin, scaleExp, axes)
+      // Past its cube only up to scale 2^30, the largest SEED offers: a seed at 2^84 from another client is cut at its cube as a shard is.
+      return seed.scale <= UNCLIPPED_SCALE_MAX ? { ...placed, clip: UNBOUNDED } : placed
+    })
   }, [near, views, anchor, scaleExp, axes])
   const placed = useSteadied(fresh)
 

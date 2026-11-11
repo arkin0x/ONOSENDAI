@@ -43,8 +43,8 @@ function saved(order: PanelOrder, collapsed: Partial<Record<PanelId, boolean>> =
 }
 
 describe('the default order', () => {
-  it('is the menu as it was, every panel once, in one column', () => {
-    expect(DEFAULT_ORDER.left).toEqual(['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'])
+  it('leads with identity, agents, avatars, items, create (arkinox, 2026-11-11), every panel once, in one column', () => {
+    expect(DEFAULT_ORDER.left).toEqual(['identity', 'agents', 'avatars', 'items', 'create', 'hidden', 'discovered', 'targets', 'links'])
     expect(DEFAULT_ORDER.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'])
     expect(new Set(PANEL_IDS).size).toBe(PANEL_IDS.length)
     expect(PANEL_IDS).toHaveLength(21)

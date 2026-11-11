@@ -5,11 +5,14 @@
  * WALK is first person, every press a step (store/useWalk.ts); BUILD places
  * things at a build cursor and never moves you (store/useBuilder.ts).
  *
- * The mode button in the commit slot goes HOP, VIEW, WALK, BUILD and back to
- * HOP (arkinox, 2026-11-02: "WALK mode button switches to BUILD mode;
- * pressing again cycles back to HOP mode"). RECALL still goes back to HOP
- * from VIEW, WALK and BUILD. B, the Stash panel's BUILD, a DEPLOY, EXIT and
- * Esc go in and out of BUILD as they always have; this only adds the ring.
+ * The mode button in the commit slot goes HOP, VIEW, BUILD and back to HOP
+ * (arkinox, 2026-11-11). WALK left the ring: at rest in HOP (the cursor on
+ * your avatar, no move planned or under way) RECALL's slot is a WALK button
+ * (TouchControls), and in WALK both RECALL and the mode button go back to
+ * HOP. BUILD starts where VIEW was looking (useBuilder `enter` keeps a
+ * driven view's cursor). RECALL still goes back to HOP from VIEW and BUILD.
+ * B, the Stash panel's BUILD, a DEPLOY, EXIT and Esc go in and out of BUILD
+ * as they always have.
  */
 
 import { useCyberspace } from './useCyberspace'
@@ -58,23 +61,14 @@ export function buildToHop(): void {
   if (cs.spectate === null && cs.focus?.drive) cs.clearFocus(true)
 }
 
-/**
- * WALK to BUILD: the walk ends as leaving WALK always has (steps not yet
- * proved are dropped, what was signed stays), and BUILD starts on your
- * avatar, at the zoom you walked at.
- */
-export function walkToBuild(): void {
-  if (!useCyberspace.getState().walking) return
-  useWalk.getState().exit()
-  useBuilder.getState().enter('build')
-}
-
 /** The mode button: one step round the ring. */
 export function cycleMode(): void {
   switch (currentPadMode()) {
     case 'hop': useCyberspace.getState().viewHere(); return
-    case 'view': useWalk.getState().enter(); return
-    case 'walk': walkToBuild(); return
+    case 'view': useBuilder.getState().enter('build'); return
+    // Out of the ring: the walk ends as leaving WALK always has (steps not
+    // yet proved are dropped, what was signed stays), back to HOP.
+    case 'walk': useWalk.getState().exit(); return
     case 'build': buildToHop(); return
   }
 }

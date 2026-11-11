@@ -1,24 +1,22 @@
 /**
- * ShardsPanel.tsx — the Stash: your shards and hidden messages, in kinds.
+ * ShardsPanel.tsx: the Stash: your shards and hidden messages, in kinds.
  *
  * A MODEL is a named shard design that lives on this device; you open it in the
  * workshop and deploy copies. A DEPLOYED instance is one such copy, or a hidden
  * message, placed at a coordinate and published. Deleting a model and deleting
  * an instance are different acts with different warnings, so they live in
  * different sections. Tapping a deployment flies the scene to it and opens its
- * record. Leaving a message is the same mechanics as a shard: type it, then aim
- * and place at a height that hides it.
+ * record. Placing anything (an object, a message, audio, an item, a chest or
+ * a door) is BUILD mode's (BuildBar), not this panel's (arkinox, 2026-11-11:
+ * the panel's own place buttons removed, BUILD has them all).
  */
 
-import { useState } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { copyLinedUp, useShards } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
 import { useBuilder } from '../store/useBuilder'
 import { Explanation } from './Explanation'
-import { MessageCompose } from './MessageCompose'
-import { DoorClosedLocked, Rss, Wrench } from 'lucide-react'
-import { ItemIcon } from './ItemIcon'
+import { Rss, Wrench } from 'lucide-react'
 import { bagsOf, useStash } from './stash'
 import { BagRow } from './StashModals'
 
@@ -26,8 +24,8 @@ import { BagRow } from './StashModals'
 const RECENT_BAGS = 3
 
 /**
- * SEAL A CHEST: a chest on the hide bar at once, to place first (R18). One
- * that BUILD mode ended under comes back with what was in it.
+ * The BUILD bar's CHEST: a chest on the hide bar at once, to place first
+ * (R18). One that BUILD mode ended under comes back with what was in it.
  */
 export function sealAChest(): void {
   useStash.getState().close()
@@ -35,7 +33,7 @@ export function sealAChest(): void {
   useShards.getState().startPlaceChest(kept?.type === 'chest' ? { name: kept.name, lock: kept.lock, requires: kept.requires, contents: kept.contents } : null)
 }
 
-/** SEAL A DOOR: a door on the hide bar at once, to place first (4.2). */
+/** The BUILD bar's DOOR: a door on the hide bar at once, to place first (4.2). */
 export function sealADoor(): void {
   useStash.getState().close()
   useShards.getState().startPlaceDoor()
@@ -44,7 +42,6 @@ export function sealADoor(): void {
 export function ShardsPanel(): JSX.Element {
   const mine = useShards((s) => s.mine)
   const scanning = useShards((s) => s.scanning)
-  const [composing, setComposing] = useState(false)
   const building = useBuilder((s) => s.active)
   // EXIT BUILD waits for a lined-up deploy to be hidden or canceled, as B
   // and the bar's EXIT do (useBuilder `exit`).
@@ -89,47 +86,9 @@ export function ShardsPanel(): JSX.Element {
         </div>
       </div>
 
-      <div className="shards__section">
-        <span className="legend__label">Place a hidden object</span>
-        <div>
-          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openModels()}><ItemIcon type="shard" className="shards__build-icon" size={13} strokeWidth={2.5} /> DEPLOY AN OBJECT</button>
-        </div>
-      </div>
-
-      <div className="shards__section">
-        <span className="legend__label">Place a hidden message</span>
-        {composing ? (
-          <MessageCompose onDone={() => setComposing(false)} />
-        ) : (
-          <button className="avatars__go shards__compose-open" onClick={() => setComposing(true)}><ItemIcon type="message" className="shards__build-icon" size={13} strokeWidth={2.5} /> WRITE A MESSAGE</button>
-        )}
-      </div>
-
-      {/* Items, chests and doors (B1 §3.1; chest and door design, arkinox
-          2026-10-26: "buttons should be forge an item / seal a chest / seal a
-          door"). An item is a keypair hidden in a bag, composed in a modal
-          first. A chest and a door are placed first, then filled (R18;
-          2026-10-31: "tap, choose location, choose contents for both doors
-          and chests"): the hide bar comes up at once, and the chest's modal
-          after PLACE CHEST or PLACE DOOR. */}
-      <div className="shards__section">
-        <span className="legend__label">Place an item, a chest or a door</span>
-        <div className="shards__modes">
-          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge a keypair as an item and hide it; whoever finds it can TAKE it, and a chest can be sealed to it"><ItemIcon type="key" className="shards__build-icon" size={13} strokeWidth={2.5} /> FORGE AN ITEM</button>
-          <button className="avatars__go shards__compose-open" onClick={sealAChest} title="Place a chest, then seal a message, a model or an item in it to an item or a person"><ItemIcon type="chest" className="shards__build-icon" size={13} strokeWidth={2.5} /> SEAL A CHEST</button>
-          <button className="avatars__go shards__compose-open" onClick={sealADoor} title="Place a door, then whatever you place in its red cube at its height is sealed to it"><DoorClosedLocked className="item-icon shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> SEAL A DOOR</button>
-        </div>
-      </div>
-
-      {/* Hidden audio (DECK-0007): an encrypted file on Blossom, its key in the bag. */}
-      <div className="shards__section">
-        <span className="legend__label">Place hidden audio</span>
-        <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openAudio()} title="Hide an audio file, encrypted; only finders can play it"><ItemIcon type="audio" className="shards__build-icon" size={13} strokeWidth={2.5} /> PLACE AUDIO</button>
-      </div>
-
       {mine.length > 0 && (
         <div className="shards__section">
-          <span className="legend__label">Deployed — hidden in cyberspace</span>
+          <span className="legend__label">Deployed: hidden in cyberspace</span>
           {/* Anything deployed while LOCAL was signed and kept but never sent.
               It stays that way until it is broadcast, which needs LIVE. */}
           {localCount > 0 && (
@@ -149,9 +108,10 @@ export function ShardsPanel(): JSX.Element {
       )}
 
       <Explanation>
-        Build 3D objects and messages, and encrypt them at a location in
-        cyberspace for others to find. Everything you hide at one place travels
-        together as one bag.
+        Make 3D objects in the workshop. BUILD places objects, messages, audio,
+        items, chests and doors, encrypted at a location in cyberspace for
+        others to find. Everything you hide at one place travels together as
+        one bag.
       </Explanation>
     </section>
   )

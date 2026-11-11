@@ -36,9 +36,13 @@ export const COLUMNS: readonly Column[] = ['left', 'right']
  * until the same day, and a saved order already holds it there. A saved
  * order from before has no `viewat`, so mergeOrder puts it right under
  * Position, its default place.
+ *
+ * The left column leads with IDENTITY, AGENTS, AVATARS, ITEMS, CREATE, the
+ * rest after them in their old order (arkinox, 2026-11-11). Only a first
+ * visit gets it: a saved order is kept as it was.
  */
 export const DEFAULT_ORDER = {
-  left: ['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'],
+  left: ['identity', 'agents', 'avatars', 'items', 'create', 'hidden', 'discovered', 'targets', 'links'],
   right: ['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'],
 } as const satisfies Record<Column, readonly string[]>
 

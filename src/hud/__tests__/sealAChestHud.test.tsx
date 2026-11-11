@@ -69,14 +69,12 @@ const actions = (html: string): string[] => {
   return [...row.slice(0, row.indexOf('</div>')).matchAll(/<button[^>]*>(?:<svg.*?<\/svg>)?([^<]*)<\/button>/g)].map((m) => m[1])
 }
 
-describe('FORGE AN ITEM / SEAL A CHEST / SEAL A DOOR', () => {
-  it('are three distinct buttons, each live', () => {
+// The Create panel places nothing itself; BUILD has every one (arkinox, 2026-11-11).
+describe('the Create panel', () => {
+  it('has no place buttons of its own, and keeps BUILD', () => {
     const html = render(<ShardsPanel />)
-    const i = html.indexOf('FORGE AN ITEM'), c = html.indexOf('SEAL A CHEST'), d = html.indexOf('SEAL A DOOR')
-    expect(i).toBeGreaterThan(-1)
-    expect(c).toBeGreaterThan(i)
-    expect(d).toBeGreaterThan(c)
-    expect(html).not.toContain('title="Soon"')
+    for (const t of ['DEPLOY AN OBJECT', 'WRITE A MESSAGE', 'FORGE AN ITEM', 'SEAL A CHEST', 'SEAL A DOOR', 'PLACE AUDIO', 'shards__textarea']) expect(html).not.toContain(t)
+    expect(html).toContain('BUILD')
   })
 })
 

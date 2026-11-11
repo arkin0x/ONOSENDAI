@@ -1,9 +1,8 @@
 /**
- * padModeCycle.test.ts - the mode button's ring, HOP, VIEW, WALK, BUILD and
- * back to HOP (arkinox, 2026-11-02: "WALK mode button switches to BUILD
- * mode; pressing again cycles back to HOP mode. RECALL still goes back to
- * HOP as usual"), and every other way in and out of BUILD still working
- * beside it: B, Esc, EXIT, RECALL, a deploy lined up, and spectating.
+ * padModeCycle.test.ts - the mode button's ring, HOP, VIEW, BUILD and back
+ * to HOP, with WALK out of it and going back to HOP (arkinox, 2026-11-11;
+ * BUILD joined on 2026-11-02), and every other way in and out of BUILD still
+ * working beside it: B, Esc, EXIT, RECALL, a deploy lined up, and spectating.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -50,7 +49,7 @@ import { useBuilder } from '../useBuilder'
 import { useShards } from '../useShards'
 import { useWalk } from '../useWalk'
 import { useToast } from '../useToast'
-import { buildHeld, buildToHop, currentPadMode, cycleMode, padMode, walkToBuild } from '../padMode'
+import { buildHeld, buildToHop, currentPadMode, cycleMode, padMode } from '../padMode'
 import { walkCancel } from '../../hooks/useKeyboard'
 import { escapeTop } from '../../hooks/useEscape'
 import { spectate, stopSpectating } from '../../lib/spectator'
@@ -73,24 +72,21 @@ beforeEach(async () => {
 })
 
 describe('the mode button', () => {
-  it('goes HOP, VIEW, WALK, BUILD and back to HOP, one press each', () => {
+  it('goes HOP, VIEW, BUILD and back to HOP, one press each', () => {
     const home = { ...S().position }
     cycleMode()
     expect(currentPadMode()).toBe('view')
     expect(S().viewing()).toBe(true)
+    // Looked away in VIEW: BUILD starts where the view's cursor is.
+    S().moveCursor({ axis: 'x', dir: 1 })
+    const looked = { ...S().cursor }
+    expect(looked).not.toEqual(home)
 
-    cycleMode()
-    expect(currentPadMode()).toBe('walk')
-    expect(S().walking).toBe(true)
-
-    // WALK used to go back to HOP here.
     cycleMode()
     expect(currentPadMode()).toBe('build')
-    expect(S().walking).toBe(false)
     expect(B().active).toBe(true)
     expect(B().via).toBe('build')
-    // BUILD starts on your avatar.
-    expect(S().cursor).toEqual(home)
+    expect(S().cursor).toEqual(looked)
 
     cycleMode()
     expect(currentPadMode()).toBe('hop')
@@ -102,7 +98,7 @@ describe('the mode button', () => {
 
   it('keeps the zoom all the way round', () => {
     useCyberspace.setState({ scaleExp: 5 })
-    for (const mode of ['view', 'walk', 'build', 'hop'] as const) {
+    for (const mode of ['view', 'build', 'hop'] as const) {
       cycleMode()
       expect(currentPadMode()).toBe(mode)
       expect(S().scaleExp).toBe(5)
@@ -185,12 +181,12 @@ describe('the other ways in and out still work', () => {
     expect(B().active).toBe(false)
   })
 
-  it('WALK to BUILD only from WALK', () => {
-    walkToBuild()
-    expect(B().active).toBe(false)
+  it('WALK is out of the ring: the mode button in WALK goes back to HOP', () => {
     useWalk.getState().enter()
-    walkToBuild()
-    expect(B().active).toBe(true)
+    cycleMode()
+    expect(S().walking).toBe(false)
+    expect(B().active).toBe(false)
+    expect(currentPadMode()).toBe('hop')
   })
 
   it('names the mode with WALK first, then BUILD, then VIEW', () => {

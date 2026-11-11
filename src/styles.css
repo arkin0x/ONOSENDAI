@@ -4837,7 +4837,7 @@ kbd {
 /* HOP, the resting mode: blue words on the dark button, and nothing to do
    but turn VIEW on. */
 .touchops__commit.is-hop { color: var(--accent, #00e5ff); border-color: rgba(0, 229, 255, 0.45); }
-/* Under HOP: pressing it switches modes (HOP, VIEW, WALK, BUILD). */
+/* Under HOP: pressing it switches modes (HOP, VIEW, BUILD). */
 .touchops__sub { display: block; margin-top: 2px; font-size: 7px; letter-spacing: 0.08em; opacity: 0.7; }
 /* WALK: first person, every press a step. Red, lit, while it is on. */
 .touchops__commit.is-walk.is-on {
@@ -4846,6 +4846,15 @@ kbd {
   border-color: var(--danger, #ff3b6b);
   font-weight: 700;
 }
+/* WALK in RECALL's slot at rest in HOP (arkinox, 2026-11-11): WALK's red
+   outline on a dark red ground, in place of HOP's blue tint. */
+.touchops.touchops--mode-hop .touchops__cancel.touchops__walk {
+  color: var(--danger, #ff3b6b);
+  border-color: var(--danger, #ff3b6b);
+  background: rgba(60, 8, 22, 0.85);
+  font-weight: 700;
+}
+.touchops__walk svg { vertical-align: -2px; }
 .touchops__commit.is-view { color: var(--warn, #ffb020); border-color: rgba(255, 176, 32, 0.45); }
 .touchops__commit.is-view.is-on {
   color: #05070d;
@@ -8835,7 +8844,8 @@ kbd {
 /* Every button in a cell of one size, always in the same order, wrapping to
  * another row when the bar is narrow (arkinox, 2026-11-09: "sit nicely in
  * the same spot every time"). The cell is the longest label, MESSAGE, with
- * its icon. */
+ * its icon. AGAIN, last, is left out while it has nothing to do (2026-11-11);
+ * auto-fill keeps the columns, so the others never move. */
 .buildbar__acts {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
@@ -8864,12 +8874,8 @@ kbd {
 .buildbar__icon {
   flex: none;
 }
-.buildbar__act:hover:not(:disabled) {
+.buildbar__act:hover {
   background: rgba(242, 247, 255, 0.1);
-}
-.buildbar__act:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 .buildbar .explain {
   letter-spacing: 0.04em;
@@ -8905,7 +8911,7 @@ kbd {
 }
 
 /* The wrench inside the Stash panel's BUILD control, on the text's line. */
-/* The icon before a stash button's label: one size for all six, large enough
+/* The icon before a stash button's label: one size for all, large enough
  * to read at the label's small type. The four composer buttons used text
  * glyphs here until 2026-10-09, which drew at the label's size and were too
  * small to read (arkinox). */

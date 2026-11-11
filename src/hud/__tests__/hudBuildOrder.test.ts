@@ -219,14 +219,14 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
   it('lays the columns out in the saved order, with the brand, the license and the build where they were', () => {
     usePanelLayout.setState({ order: moveBefore(moveBefore(defaultOrder(), 'relays', 'identity', 'left'), 'hidden', null, 'right') })
     const { left, right } = columns()
-    expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'AgentsPanel', 'DiscoveredPanel', 'InventoryPanel', 'ShardsPanel', 'AvatarsPanel', 'TargetsPanel', 'LinksPanel'])
+    expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'AgentsPanel', 'AvatarsPanel', 'InventoryPanel', 'ShardsPanel', 'DiscoveredPanel', 'TargetsPanel', 'LinksPanel'])
     expect(right).toEqual(['ScalePanel', 'PositionPanel', 'ViewAtPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'Controls', 'DerezzPanel', 'HiddenPanel'])
   })
 
   it('AGENTS is drawn for everyone, with no agent, in its saved place (arkinox, 2026-10-13)', () => {
     useMyAgentsAnswer.setState({ me: useCyberspace.getState().identity.pubkey, agents: [], status: 'ready' })
     try {
-      expect(columns().left.slice(0, 4)).toEqual(['Brand', 'IdentityPanel', 'AgentsPanel', 'HiddenPanel'])
+      expect(columns().left.slice(0, 4)).toEqual(['Brand', 'IdentityPanel', 'AgentsPanel', 'AvatarsPanel'])
       usePanelLayout.setState({ order: moveBefore(defaultOrder(), 'agents', null, 'right') })
       expect(columns().left).not.toContain('AgentsPanel')
       expect(columns().right.at(-1)).toBe('AgentsPanel')

@@ -8,7 +8,9 @@
  *   pad and the keys cannot disagree: pressed from the same place, they land
  *   on the same place.
  * - The commit slot reads WALK in WALK, BUILD (lit white) in BUILD, and
- *   pressing them goes on round the ring; RECALL is there in BUILD too.
+ *   pressing them goes on round the ring, WALK back to HOP; RECALL is there
+ *   in BUILD too. At rest in HOP RECALL's slot is WALK (2026-11-11), and in
+ *   WALK it is STOP while steps wait on their proofs.
  * - HOP and VIEW keep the pad they had.
  * - With the chain status strip up the commit block is a row taller, and the
  *   pad is lifted by that row wherever the block is drawn, BUILD included
@@ -280,10 +282,9 @@ describe('HOP and VIEW keep their pad', () => {
 })
 
 describe('the commit slot on screen', () => {
-  it('WALK goes to BUILD, BUILD is lit white and goes to HOP, and BUILD has RECALL', () => {
-    useWalk.getState().enter()
-    expect(find('touchops').props.className).toContain('touchops--mode-walk')
-    press(find('is-walk'))
+  it('VIEW goes to BUILD, BUILD is lit white and goes to HOP, and BUILD has RECALL', () => {
+    S().viewHere()
+    press(find('is-view'))
     expect(currentPadMode()).toBe('build')
 
     expect(find('touchpad').props.className).toContain('touchpad--mode-build')
@@ -313,19 +314,77 @@ describe('the commit slot on screen', () => {
   })
 })
 
+/** WALK out of the ring, in RECALL's slot at rest in HOP (arkinox, 2026-11-11). */
+describe('WALK in RECALL\'s slot', () => {
+  it('is there at rest in HOP, red, and enters WALK', () => {
+    const walk = find('touchops__walk')
+    expect(walk.props.className).toContain('touchops__cancel')
+    expect(walk.props.title).toBe('Walk: first person, every press a step')
+    press(walk)
+    expect(currentPadMode()).toBe('walk')
+  })
+
+  it('is RECALL, as before, with the cursor off your avatar, a move planned, or outside HOP', () => {
+    S().moveCursor({ axis: 'x', dir: 1 })
+    expect(drawn().some((b) => b.props.className?.includes('touchops__walk'))).toBe(false)
+    expect(find('touchops__cancel').props.children).toBe('RECALL')
+    S().cancel()
+    expect(find('touchops__walk')).toBeTruthy()
+    useCyberspace.setState({ plan: { status: 'paused' } as never })
+    expect(drawn().some((b) => b.props.className?.includes('touchops__walk'))).toBe(false)
+    useCyberspace.setState({ plan: null })
+    S().viewHere()
+    expect(drawn().some((b) => b.props.className?.includes('touchops__walk'))).toBe(false)
+  })
+
+  it('in WALK, RECALL and the mode button both go back to HOP', () => {
+    useWalk.getState().enter()
+    expect(find('is-walk').props.children).toBe('WALK')
+    expect(find('touchops__cancel').props.children).toBe('RECALL')
+    press(find('touchops__cancel'))
+    expect(currentPadMode()).toBe('hop')
+    useWalk.getState().enter()
+    press(find('is-walk'))
+    expect(currentPadMode()).toBe('hop')
+  })
+
+  // Must not regress (owner, 2026-11-11): steps ahead of their proofs make the slot STOP, which drops them back to the last proved step, still walking.
+  it('in WALK with steps not yet proved, the slot is STOP and drops them back to the last proved step', () => {
+    const start = { ...S().position }
+    useWalk.getState().enter()
+    useWalk.getState().press('up')
+    useWalk.getState().press('right')
+    expect(find('touchops__cancel').props.children).toBe('STOP')
+    press(find('touchops__cancel'))
+    expect(S().walking).toBe(true)
+    expect(useWalk.getState().queue).toEqual([])
+    expect(useWalk.getState().open).toBeNull()
+    expect(S().proof.status).not.toBe('computing')
+    expect(S().position).toEqual(start)
+    expect(S().cursor).toEqual(start)
+    expect(find('touchops__cancel').props.children).toBe('RECALL')
+  })
+})
+
 describe('the pad and the commit block with the chain status strip up', () => {
   const lifted = (): boolean => (find('touchpad').props.className ?? '').split(' ').includes('is-lifted')
   const opsDrawn = (): boolean => drawn().some((b) => b.props.className?.split(' ').includes('touchops'))
 
   it('lifts the pad in HOP, VIEW, WALK and BUILD alike, and not without the strip', () => {
     useCyberspace.setState({ held: true })
-    for (const mode of ['hop', 'view', 'walk', 'build', 'hop'] as const) {
+    for (const mode of ['hop', 'view', 'build', 'hop'] as const) {
       expect(currentPadMode()).toBe(mode)
       expect(opsDrawn()).toBe(true)
       expect(find('touchops').props.className).toContain('touchops--status')
       expect(lifted()).toBe(true)
       press(find('touchops__commit'))
     }
+    // The last press went on to VIEW; RECALL ends it, and HOP at rest has WALK.
+    press(find('touchops__cancel'))
+    press(find('touchops__walk'))
+    expect(currentPadMode()).toBe('walk')
+    expect(lifted()).toBe(true)
+    useWalk.getState().exit()
     // Nothing to report: no hold, no conflict, LOCAL.
     useCyberspace.setState({ held: false, chainConflict: null, canonicalLate: 0, live: false })
     useBuilder.getState().enter('build')

@@ -1,7 +1,7 @@
 /**
  * doorOwnerHud.test.tsx: a door on the HUD for the one who sealed it (chest
- * and door design 4.2, 4.3, 4.7, 4.8, 4.11, R12). SEAL A DOOR is live and
- * PLACE DOOR its first step; its modal asks a name and a lock and has no ADD;
+ * and door design 4.2, 4.3, 4.7, 4.8, 4.11, R12). DOOR on the BUILD bar
+ * lines it up and PLACE DOOR is its first step; its modal asks a name and a lock and has no ADD;
  * the card has BEHIND IT, HERE with SEAL and SEAL ALL, and EDIT · MOVE · ADD ·
  * DELETE; on another device before OPEN only DELETE; a stranger none; DELETE's
  * card has its one switch (R12); a chest of yours offers CONVERT TO DOOR.
@@ -46,7 +46,6 @@ import { useWorkshop } from '../../store/useWorkshop'
 import { ChestCompose } from '../ChestCompose'
 import { deleteDoorWords, DoorOwnerBlock } from '../DoorOwner'
 import { SecretModal } from '../SecretModal'
-import { ShardsPanel } from '../ShardsPanel'
 
 const at = { x: 0x31n, y: 0x22n, z: 0x13n }
 const stored = { x: '49', y: '34', z: '19' }
@@ -86,13 +85,6 @@ beforeEach(() => {
 })
 
 describe('SEAL A DOOR', () => {
-  it('is live now, beside FORGE AN ITEM and SEAL A CHEST', () => {
-    const html = render(<ShardsPanel />)
-    const door = html.slice(html.lastIndexOf('<button', html.indexOf('SEAL A DOOR')), html.indexOf('SEAL A DOOR'))
-    expect(door).not.toContain('disabled')
-    expect(door).not.toContain('Soon')
-  })
-
   it('its modal asks a name, a lock and what opens it, shows it in 3D, and has no contents', () => {
     useShards.getState().startPlaceDoor()
     useShards.getState().setDeployHeight(4)

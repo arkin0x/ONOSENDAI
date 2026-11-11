@@ -242,10 +242,10 @@ export const DEMO_SCRIPT: DemoScript = {
     },
     {
       id: 'walk', chapter: 'work', title: 'Walk',
-      caption: 'Press the mode button under the pad until it reads WALK. You move first person, and the grid on the walls shows how hard each boundary is to cross.',
+      caption: 'Press WALK under the pad. You move first person, and the grid on the walls shows how hard each boundary is to cross.',
       scene: { target: 'self', scale: 0, layers: { boxes: true } },
       wait: 'walk',
-      hint: 'Tap the mode button until it reads WALK.',
+      hint: 'Tap WALK under the pad.',
     },
 
     // 5. Hidden in place

@@ -9883,11 +9883,15 @@ a.feed__act { text-decoration: none; }
   cursor: pointer;
   text-align: left;
   min-width: 0;
+  /* Only as wide as its text, so a tap on the chip's empty width copies nothing. */
+  align-self: flex-start;
 }
 .regionchip__coord:hover { color: #fff3b0; }
 .regionchip__hex { min-width: 0; overflow-wrap: anywhere; }
 .regionchip__note { font-size: 9px; letter-spacing: 0.08em; opacity: 0.7; }
 .regionchip__reserve {
+  /* Only as wide as its words, so the chip's empty width opens nothing. */
+  align-self: flex-start;
   font-size: 11px;
   color: var(--accent, #00e5ff);
   text-decoration: none;

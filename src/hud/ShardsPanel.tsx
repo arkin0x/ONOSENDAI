@@ -1,5 +1,5 @@
 /**
- * ShardsPanel.tsx: the Stash: your shards and hidden messages, in kinds.
+ * ShardsPanel.tsx: the Create panel, your shards and hidden messages, in kinds.
  *
  * A MODEL is a named shard design that lives on this device; you open it in the
  * workshop and deploy copies. A DEPLOYED instance is one such copy, or a hidden

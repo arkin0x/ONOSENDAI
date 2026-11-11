@@ -74,7 +74,7 @@ describe('the Create panel', () => {
   it('has no place buttons of its own, and keeps BUILD', () => {
     const html = render(<ShardsPanel />)
     for (const t of ['DEPLOY AN OBJECT', 'WRITE A MESSAGE', 'FORGE AN ITEM', 'SEAL A CHEST', 'SEAL A DOOR', 'PLACE AUDIO', 'shards__textarea']) expect(html).not.toContain(t)
-    expect(html).toContain('BUILD')
+    expect(html).toMatch(/class="[^"]*shards__build[^"]*" aria-pressed="false"/)
   })
 })
 

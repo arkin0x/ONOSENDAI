@@ -21,14 +21,15 @@
  * already signed out with it (see lib/release.ts). Cancelling leaves the
  * switch exactly where it was, on LOCAL.
  *
- * The commit slot is also the pad's mode switch, four states in a ring
- * (arkinox, 2026-10-13 and 2026-11-02; store/padMode.ts): HOP, the resting
- * state, where the pad lines up a move and COMMIT sends it; VIEW, a free
- * look from your head; WALK, first person, where every press is a step
- * (store/useWalk.ts); BUILD, placing things at a build cursor
- * (store/useBuilder.ts). HOP turns VIEW on, VIEW turns WALK on, WALK turns
- * BUILD on, BUILD goes back to HOP, and RECALL goes back to HOP from any of
- * them. Each mode tints the pad's keys its own color, blue, yellow, red,
+ * The commit slot is also the pad's mode switch (arkinox, 2026-10-13,
+ * 2026-11-02 and 2026-11-11; store/padMode.ts): HOP, the resting state,
+ * where the pad lines up a move and COMMIT sends it; VIEW, a free look from
+ * your head; BUILD, placing things at a build cursor (store/useBuilder.ts).
+ * HOP turns VIEW on, VIEW turns BUILD on where it was looking, BUILD goes
+ * back to HOP. WALK, first person, where every press is a step
+ * (store/useWalk.ts), is RECALL's slot at rest in HOP; in WALK both RECALL
+ * and the mode button go back to HOP, and RECALL goes back to HOP from VIEW
+ * and BUILD too. Each mode tints the pad's keys its own color, blue, yellow, red,
  * white, so the hand knows what a press will do before it presses.
  *
  * WALK's pad is its own (arkinox, 2026-11-02): no scale keys, one large
@@ -214,8 +215,8 @@ export function TouchControls(): JSX.Element {
   const home = useCyberspace((s) => s.atHead())
   const viewing = useCyberspace((s) => s.viewing())
   const walking = useCyberspace((s) => s.walking)
-  // No move planned or under way: with the cursor home in HOP, RECALL's slot is WALK.
-  const resting = useCyberspace((s) => s.plan === null && !moveUnderWay(s))
+  // No move planned or under way, and no cloud job: with the cursor home in HOP, RECALL's slot is WALK.
+  const resting = useCyberspace((s) => s.plan === null && !moveUnderWay(s) && s.cloud.status === 'idle')
   // A WALK key held as the pad goes away (the menu covers it, an offer comes
   // up) or WALK ends gets no pointerup: let go of it here.
   useEffect(() => { if (!walking) holdEndAll('pad:') }, [walking])
@@ -395,7 +396,7 @@ export function TouchControls(): JSX.Element {
 
       {opsUp && <div ref={opsRef} className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
         {walkSlot ? (
-          <button className="touchops__cancel touchops__walk" aria-label="Walk" title="Walk: first person, every press a step" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().enter() }}>
+          <button className="touchops__cancel touchops__walk" aria-label="Walk: first person, every press a step" title="Walk: first person, every press a step" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().enter() }}>
             <Footprints size={12} strokeWidth={2.25} aria-hidden /> WALK
           </button>
         ) : <button

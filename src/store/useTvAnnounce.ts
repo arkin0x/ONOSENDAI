@@ -66,6 +66,8 @@ let testTimer: ReturnType<typeof setTimeout> | null = null
 const listeners = new Set<(a: UpgradeAnnouncement) => void>()
 /** What each plan on screen or waiting was made from, for afterUpgradeAnnouncement. */
 const asked = new WeakMap<AnnouncePlan, UpgradeAnnouncement>()
+/** Those played through in this run of them, told of together once TV is back. */
+let played: UpgradeAnnouncement[] = []
 
 /**
  * Play an UPGRADE ANNOUNCEMENT now, over whatever TV is showing, or straight
@@ -73,7 +75,7 @@ const asked = new WeakMap<AnnouncePlan, UpgradeAnnouncement>()
  * nothing to interrupt, and nobody watching), or it has no version.
  */
 export function playUpgradeAnnouncement(a: UpgradeAnnouncement, now: number = performance.now()): boolean {
-  if (!tvIsOn()) return false
+  if (!tvIsOn() || !a || typeof a !== 'object') return false
   const plan = announcePlan(a)
   if (!plan) return false
   asked.set(plan, a)
@@ -93,7 +95,7 @@ export function setUpdatesThisWeek(n: number | null): void {
 
 /**
  * Called with each announcement once it has played through and TV has
- * picked up again. The 24/7 stream will reload here, later, to run the new
+ * picked up again: for a run of them, each once the last is over. The 24/7 stream will reload here, later, to run the new
  * version. Returns how to stop listening.
  */
 export function afterUpgradeAnnouncement(fn: (a: UpgradeAnnouncement) => void): () => void {
@@ -143,10 +145,10 @@ export function announceTick(now: number, resumeTv: (heldMs: number, now: number
   if (!s) return false
   if (now - s.at < announceMs(s.plan)) return true
   const done = asked.get(s.plan)
+  if (done) played.push(done)
   const next = waiting.shift()
   if (next) {
     useTvAnnounce.setState({ showing: { at: now, plan: next } })
-    if (done) tell(done)
     return true
   }
   const held = heldAt === null ? 0 : Math.max(0, now - heldAt)
@@ -156,7 +158,9 @@ export function announceTick(now: number, resumeTv: (heldMs: number, now: number
   resumeTv(held, now)
   releaseExplainer(now)
   putMusicBack()
-  if (done) tell(done)
+  const heard = played
+  played = []
+  for (const a of heard) tell(a)
   return false
 }
 
@@ -190,6 +194,7 @@ export function stopAnnouncements(): void {
   if (testTimer !== null) clearTimeout(testTimer)
   testTimer = null
   waiting = []
+  played = []
   heldAt = null
   if (ducked) { ducked = false; duckMusicForExplainer(false) }
   if (useTvAnnounce.getState().showing) useTvAnnounce.setState({ showing: null })

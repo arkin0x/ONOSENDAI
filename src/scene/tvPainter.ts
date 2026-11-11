@@ -314,7 +314,8 @@ type Region = FlatRect
 /** The words on the marquee as of the moment on tape. */
 export function tickerItems(p: TvPicture, name: (pk: string) => string, release: string[] = []): string[] {
   const t = p.tapeTime
-  if (t === null) return []
+  // Before the tape has a moment (tuning), ONOSENDAI's own words only.
+  if (t === null) return [...release]
   const out: string[] = []
   const shot = p.shot
   // No sector: a sector id is a long number that tells a viewer nothing (2026-10-19: "the sector printed in the marquee is not helpful. remove that.").
@@ -453,6 +454,8 @@ export class TvPainter {
   private track: DrawTracker
   /** What the last paint changed, canvas px; null for all of it. */
   private changed: DirtyRect[] | null = null
+  /** An announcement page as last laid out, and what it was laid out for: the same page, box and size lay out the same. */
+  private pageLayout: { key: string; px: number; lines: string[]; bh: number } | null = null
 
   /** `canvas` for tests; a new one otherwise. */
   constructor(canvas?: HTMLCanvasElement) {
@@ -1289,8 +1292,9 @@ export class TvPainter {
     const scene = announceSceneAt(an.plan, t)
     this.npRect = null
     this.track.part('announce')
-    ctx.save()
-    // In over the cut's own length, as a spot comes in.
+    // In over the cut's own length, as a spot comes in. Set, not saved: a
+    // save left open across the parts below would have the tube take the
+    // whole canvas every paint (drawTracker), the still bars too.
     ctx.globalAlpha = clamp01((now - an.at) / CUT_MS)
     const tall = this.portrait || narrow || W < H
     if (scene.kind === 'page') {
@@ -1301,8 +1305,9 @@ export class TvPainter {
       const bob = reduced ? 0 : Math.sin(st * 0.9) * r * 0.08
       const drift = reduced ? 0 : Math.sin(st * 0.55) * r * 0.05
       const burst = { cx: W - MX - r * 0.7 + drift, cy: MY + r * 0.7 + bob }
-      const top = tall ? MY + r * 1.6 : MY + 10 * s
-      this.announceBox(an.plan.pages[scene.page] ?? '', charsShown(scene, t), scene.page, scene.pages, { x0: MX, y0: top, x1: W - MX, y1: H - MY }, tall, s, narrow, now)
+      // The box keeps clear of where the burst can reach: under it where it would reach across.
+      const reach = { x0: W - MX - r * 1.9, y0: 0, x1: W, y1: MY + r * 1.9 }
+      this.announceBox(an.plan.pages[scene.page] ?? '', charsShown(scene, t), scene.page, scene.pages, { x0: MX, y0: MY + 10 * s, x1: W - MX, y1: H - MY }, reach, tall, s, narrow, now)
       this.splash(burst.cx, burst.cy, r, reduced ? 1 : st, s, NEW_SPLASH)
     } else {
       this.colourBars(W, H)
@@ -1312,7 +1317,7 @@ export class TvPainter {
       const lines = scene.kind === 'title' ? [{ text: 'UPGRADE ANNOUNCEMENT', px: cap(narrow ? 44 : 96, 0.11), colour: FG }] : [{ text: `WELCOME TO ONOSENDAI VERSION ${an.plan.version}`, px: cap(narrow ? 30 : 64, 0.07), colour: FG }, { text: 'ENJOY!', px: cap(narrow ? 40 : 84, 0.1), colour: '#ffd23f' }]
       this.slate(lines, W, H * (scene.kind === 'title' ? 0.36 : 0.4), W - 2 * MX, H * 0.56, s)
     }
-    ctx.restore()
+    ctx.globalAlpha = 1
   }
 
   /** The bars, the whole frame (BARS). */
@@ -1433,25 +1438,31 @@ export class TvPainter {
    * be within `area`, centred in it; which page of how many under the words
    * where there is more than one.
    */
-  private announceBox(page: string, shown: number, index: number, pages: number, area: Box, tall: boolean, s: number, narrow: boolean, now: number): void {
+  private announceBox(page: string, shown: number, index: number, pages: number, room: Box, avoid: Box, tall: boolean, s: number, narrow: boolean, now: number): void {
     const ctx = this.ctx
+    const area = { ...room }
     const areaW = area.x1 - area.x0
-    const areaH = area.y1 - area.y0
     const bw = tall ? areaW : Math.min(areaW, Math.max(areaW * 0.7, 520 * s))
+    const bx = area.x0 + (areaW - bw) / 2
+    if (bx + bw > avoid.x0) area.y0 = Math.max(area.y0, avoid.y1)
+    const areaH = area.y1 - area.y0
     const pad = (narrow ? 16 : 26) * s
     const innerW = bw - 2 * pad
-    const foot = pages > 1 ? 22 * s : 0
-    let px = (this.portrait ? 26 : narrow ? 15 : 22) * s
-    ctx.font = `${px}px ${TV_FONT}`
-    let lines = wrap(ctx, page, innerW)
-    // Smaller until the page fits the room, a few tries at most.
-    for (let i = 0; i < 8 && lines.length * px * 1.45 > areaH - 2 * pad - foot; i++) {
-      px *= Math.max(0.6, Math.sqrt((areaH - 2 * pad - foot) / (lines.length * px * 1.45)))
+    const foot = pages > 1 ? 24 * s : 0
+    const key = `${page}|${innerW}|${areaH}|${s}|${foot}`
+    if (this.pageLayout?.key !== key) {
+      let px = (this.portrait ? 26 : narrow ? 17 : 22) * s
       ctx.font = `${px}px ${TV_FONT}`
-      lines = wrap(ctx, page, innerW)
+      let lines = wrap(ctx, page, innerW)
+      // Smaller until the page fits the room, a few tries at most.
+      for (let i = 0; i < 8 && lines.length * px * 1.45 > areaH - 2 * pad - foot; i++) {
+        px *= Math.max(0.6, Math.sqrt((areaH - 2 * pad - foot) / (lines.length * px * 1.45)))
+        ctx.font = `${px}px ${TV_FONT}`
+        lines = wrap(ctx, page, innerW)
+      }
+      this.pageLayout = { key, px, lines, bh: Math.min(areaH, lines.length * px * 1.45 + 2 * pad + foot) }
     }
-    const bh = Math.min(areaH, lines.length * px * 1.45 + 2 * pad + foot)
-    const bx = area.x0 + (areaW - bw) / 2
+    const { px, lines, bh } = this.pageLayout
     const by = area.y0 + (areaH - bh) / 2
     ctx.fillStyle = 'rgba(2, 8, 34, 0.9)'
     ctx.fillRect(bx, by, bw, bh)
@@ -1467,23 +1478,26 @@ export class TvPainter {
     ctx.font = `${px}px ${TV_FONT}`
     ctx.textAlign = 'left'
     ctx.fillStyle = FG
-    let left = shown
+    // Where each line starts in the page, characters in: the space wrap took
+    // out between two lines was printed too, a word cut across two was not.
+    const all = Array.from(page)
+    let at = 0
     let ly = by + pad + px
     for (const line of lines) {
       const chars = Array.from(line)
-      const take = Math.max(0, Math.min(chars.length, left))
+      const take = Math.max(0, Math.min(chars.length, shown - at))
       if (take > 0) ctx.fillText(chars.slice(0, take).join(''), bx + pad, ly)
       if (take < chars.length) {
         // The caret, where the printing is.
         if (Math.floor(now / 400) % 2 === 0) ctx.fillText('▌', bx + pad + ctx.measureText(chars.slice(0, take).join('')).width, ly)
         break
       }
-      // The space wrap took out between lines is a character printed too.
-      left -= chars.length + 1
+      at += chars.length
+      if (all[at] === ' ') at++
       ly += px * 1.45
     }
     if (pages > 1) {
-      ctx.font = `700 ${10 * s}px ${TV_FONT}`
+      ctx.font = `700 ${(narrow ? 11 : 12) * s}px ${TV_FONT}`
       ctx.textAlign = 'right'
       ctx.fillStyle = 'rgba(242, 251, 255, 0.6)'
       ctx.fillText(`${index + 1} / ${pages}`, bx + bw - pad, by + bh - pad * 0.6)

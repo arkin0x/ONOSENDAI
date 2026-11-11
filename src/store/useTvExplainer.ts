@@ -220,7 +220,8 @@ function show(ex: Explainer, now: number): void {
   useTvExplainer.setState({ showing: { id: ex.id, title: ex.title, phase: 'in', at: now, outMs: EXPLAINER_OUT_MS } })
   const mine = gen
   v.play().catch((e: unknown) => {
-    if (mine !== gen || video !== v) return
+    // Paused by an announcement before it began (an AbortError): releaseExplainer plays it.
+    if (mine !== gen || video !== v || heldAt !== null) return
     // The browser holds the sound back (no tap yet): the picture plays
     // without it, and the next tap brings it in.
     if ((e as { name?: string })?.name === 'NotAllowedError' && !v.muted) {
@@ -247,6 +248,8 @@ function soundOnTap(v: HTMLVideoElement): void {
   if (typeof window === 'undefined' || unlock) return
   const go = (): void => {
     if (video !== v || !useTvExplainer.getState().showing) { unlock?.(); return }
+    // Not under an UPGRADE ANNOUNCEMENT, which holds it paused: the next tap after it.
+    if (heldAt !== null) return
     policyMuted = false
     setSound(v)
     void v.play().then(() => unlock?.(), () => { policyMuted = true; v.muted = true; void v.play().catch(() => {}) })
@@ -262,6 +265,8 @@ function soundOnTap(v: HTMLVideoElement): void {
 /** The video stopped working on screen: the picture straight back. */
 function fail(): void {
   failedOut = true
+  // Under an announcement nothing goes out, nor does the music come up: the first look after it does (onScreen).
+  if (heldAt !== null) return
   const s = useTvExplainer.getState().showing
   if (s && s.phase !== 'out') goOut(performance.now(), EXPLAINER_FAIL_OUT_MS)
 }

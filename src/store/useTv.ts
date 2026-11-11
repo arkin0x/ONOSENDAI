@@ -19,7 +19,7 @@ import { queryEach } from '../lib/relay'
 import { AD_IN_MS, adById, adEveryMs, adLength, nextAd } from '../lib/tv/hosakaAd'
 import { EXPLAINER_AD_GAP_MS } from '../lib/tv/explainer'
 import { explainerBusy, explainerDue, explainerEndedAt, explainerTick, startExplainers, stopExplainers } from './useTvExplainer'
-import { announceTick, startAnnouncements, stopAnnouncements } from './useTvAnnounce'
+import { announceBusy, announceTick, startAnnouncements, stopAnnouncements } from './useTvAnnounce'
 import {
   BEATS, STATS_FORCED_MS, STATS_GAP_MS, STATS_LOAD_DELAY_MS, STATS_RETRY_MS, asOfHour, breakMayStart, countStats, forcedBoard, isAgentProfile, keysToKnow,
   nextBoard, profilesSettled, readActions, statsEveryMs, statsFirstMs, statsLength, statsOn, type ActionStore, type BoardId, type StatsBoard, type StatsFilter, type StatsSnapshot,
@@ -607,11 +607,11 @@ async function readMore(id: number, t: number): Promise<void> {
 
 // Back from the background: the shot picks up where it was, not as far on
 // as the time away, and the reader may ask again at once.
-let hidden: { shot: Shot | null; elapsed: number; holds: number } | null = null
+let hidden: { shot: Shot | null; elapsed: number; holds: number; announcing: boolean } | null = null
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      hidden = { shot: useTv.getState().shot, elapsed: performance.now() - shotBegan, holds }
+      hidden = { shot: useTv.getState().shot, elapsed: performance.now() - shotBegan, holds, announcing: announceBusy() }
       return
     }
     const was = hidden
@@ -619,8 +619,11 @@ if (typeof document !== 'undefined') {
     if (!was || !useTv.getState().on) return
     // Only the shot that was on screen: one the throttled timer began while
     // away keeps its own start.
-    // Not across an UPGRADE ANNOUNCEMENT's end, which put the shot back itself (resumeTv).
-    if (was.shot !== null && useTv.getState().shot === was.shot && was.holds === holds) shotBegan = performance.now() - was.elapsed
+    // Not across an UPGRADE ANNOUNCEMENT, on either side or over the whole
+    // time away: the shot stood still under it, and resumeTv puts it back
+    // for all of the hold; this would count the time away a second time.
+    const held = was.announcing || announceBusy() || was.holds !== holds
+    if (was.shot !== null && useTv.getState().shot === was.shot && !held) shotBegan = performance.now() - was.elapsed
     retryAt = 0
     // A play the browser held while away is asked for again.
     resumeMusic()
@@ -952,10 +955,14 @@ let holds = 0
  * was, and none of it counts toward a break being due, the gaps between
  * them, or anyone's screen time (lib/tv/dwell).
  */
-function resumeTv(heldMs: number): void {
+function resumeTv(heldMs: number, now: number): void {
   if (!(heldMs > 0)) return
   holds++
-  shotBegan += heldMs
+  // Only what began before the hold: a retune under it (END OF TAPE's,
+  // the stream's NO SIGNAL) began its own clocks then, which held nothing.
+  const from = now - heldMs
+  const on = (t: number): number => (t < from ? t + heldMs : t)
+  shotBegan = on(shotBegan)
   adDue += heldMs
   adEndedAt += heldMs
   statsDue += heldMs
@@ -963,9 +970,9 @@ function resumeTv(heldMs: number): void {
   dwell.hold(heldMs)
   const s = useTv.getState()
   useTv.setState({
-    cutAt: s.cutAt + heldMs,
-    ad: s.ad ? { ...s.ad, at: s.ad.at + heldMs } : null,
-    stats: s.stats ? { ...s.stats, at: s.stats.at + heldMs } : null,
+    cutAt: on(s.cutAt),
+    ad: s.ad ? { ...s.ad, at: on(s.ad.at) } : null,
+    stats: s.stats ? { ...s.stats, at: on(s.stats.at) } : null,
   })
 }
 

@@ -174,8 +174,23 @@ describe('UPGRADE ANNOUNCEMENT', () => {
     off()
     expect(announceBusy()).toBe(false)
     expect(heard.map((h) => h.version)).toEqual(['2.1', '2.2'])
-    expect(heard[1]).toMatchObject({ busy: false, waiting: 0 })
+    // Each told of only once TV is back: none while the second still plays (review: a reload there would cut it off).
+    for (const h of heard) expect(h).toMatchObject({ busy: false, waiting: 0 })
     expect(ducks).toEqual([true, false])
+  })
+
+  it('a retune under it keeps its own clocks: the cut it began is not pushed past the end (review)', async () => {
+    useTv.getState().start()
+    await run(2500)
+    playUpgradeAnnouncement(NOTE)
+    await run(2000)
+    // END OF TAPE's retune, or the stream's NO SIGNAL one, while it plays.
+    useTv.getState().retune()
+    const retunedCut = useTv.getState().cutAt
+    await run(noteMs)
+    expect(announceBusy()).toBe(false)
+    expect(useTv.getState().cutAt).toBeLessThanOrEqual(performance.now())
+    if (useTv.getState().cutAt !== retunedCut) expect(useTv.getState().cutAt).toBeGreaterThan(retunedCut)
   })
 
   it('cuts in, from screen to screen, and back to TV', async () => {

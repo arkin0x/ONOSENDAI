@@ -99,7 +99,7 @@ export function announcePages(text: string, pageChars: number = PAGE_CHARS): str
   return pages
 }
 
-/** The last page marked cut: an ellipsis in place of its last character where it is full. */
+/** The last page marked cut: an ellipsis after it, its closing punctuation dropped. */
 function endWithEllipsis(pages: string[]): string[] {
   if (pages.length === 0) return pages
   const last = pages[pages.length - 1]

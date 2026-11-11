@@ -9,8 +9,9 @@
  * discovery scan opens them as a stranger's.
  *
  * Three bags:
- *   - the covering bag (tutorial/layout.ts cover): the blue box and the
- *     bounce course (tutorial/course.ts), seen from the spawn;
+ *   - the covering bag (tutorial/layout.ts cover): the blue box, the
+ *     bounce course (tutorial/course.ts) and the dirt plot, seen from the
+ *     spawn;
  *   - the box bag (the blue box's own height-3 region): the treasure chest,
  *     locked to that region (DECK-0004 §3.8, the region's lock), so whoever
  *     stands in the box carries the key that opens it (store/useKeyring). In
@@ -42,7 +43,7 @@ import { forgeKey, sealEntries } from '../lib/chests'
 import { lockOf } from '../lib/locks'
 import type { Position } from '../lib/space'
 import { BOX_HEIGHT, regionBase, toWorld, type TutorialLayout } from './layout'
-import { BACK_STEP, CATCH_FLOOR, COURSE, FINISH_CHEST, courseToWorld, type CoursePart } from './course'
+import { BACK_STEP, CATCH_FLOOR, COURSE, FINISH_CHEST, PLOT, PLOT_AT, courseToWorld, type CoursePart } from './course'
 import trophyPayload from './pieces/trophy.json'
 import platSquare6 from './pieces/plat-square-6.json'
 import platSquare4 from './pieces/plat-square-4.json'
@@ -76,7 +77,7 @@ const REGION_REQUIRES = 'the key of a place'
  * without it still plays the same, and a bump would hand a player a new,
  * unopened chest.
  */
-export const STAGE_VERSION = 3
+export const STAGE_VERSION = 4
 
 /** One player's stage, by pubkey. */
 export const STAGE_PREFIX = 'onosendai:tutorial:stage:'
@@ -98,6 +99,8 @@ export interface StageIds {
   finishChest: string
   finishContents: string[]
   finishLookup: string
+  /** The dirt plot shard. */
+  plot: string
 }
 
 export interface Stage {
@@ -217,9 +220,14 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
 
   const blueBox = await sign(shardInnerTemplate(blueBoxModel(), boxMiddle, plane, createdAt))
   const course = await Promise.all(COURSE.map((part, i) => sign(shardInnerTemplate(pieceModel(PIECES[part.piece], `tutorial-course-${i}`), courseToWorld(frame, part.at), plane, createdAt))))
+  // The dirt plot (A5). The tutorial tree's DNA is not staged: a seed names
+  // the owner's published event (TUTORIAL_DNA_ID), or with no id a copy the
+  // player's SEED signs (tutorial/dna.ts); never one the guide signed, since
+  // a DNA's id names its signer.
+  const plot = await sign(shardInnerTemplate(pieceModel(PLOT, 'tutorial-plot'), toWorld(frame, PLOT_AT.f, PLOT_AT.r, PLOT_AT.u), plane, createdAt))
 
   const bags = await Promise.all([
-    sealBag(sign, [blueBox, ...course], coverKey.key, coverKey.lookupId, cover.height, createdAt, cover.base, plane),
+    sealBag(sign, [blueBox, ...course, plot], coverKey.key, coverKey.lookupId, cover.height, createdAt, cover.base, plane),
     sealBag(sign, [chest], boxKey.key, boxKey.lookupId, BOX_HEIGHT, createdAt, b, plane),
     sealBag(sign, [finishChest], finishKey.key, finishKey.lookupId, BOX_HEIGHT, createdAt, finishBase, plane),
   ])
@@ -238,6 +246,7 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
       finishChest: finishChest.id,
       finishContents: finishContents.map(entryId),
       finishLookup: finishKey.lookupId,
+      plot: plot.id,
     },
   }
 }

@@ -138,6 +138,29 @@ export function slabPayload(name: string, hx: number, hz: number, color: number)
   }
 }
 
+/**
+ * The dirt plot (A5): a 5 by 5 patch, its top at the box's floor, a little
+ * way from the box and away from the course (a walker stands on box frame
+ * f 12 to 16, r 2 to 6, the slab's corners -2 and +2 about its middle
+ * counting as cells too, the same whichever way the layout faces).
+ */
+export const PLOT_AT = { f: 14, r: 4, u: 0 } as const
+/** Where a player stands on the plot, and where a seed planted there sits. */
+export const PLOT_STAND = { f: 14, r: 4, u: 1 } as const
+export const PLOT = slabPayload('Dirt', 2, 2, 121)
+
+/** Whether a world point is on the plot, standing or planted (one cell above its top, or two). */
+export function onPlot(frame: Frame, at: Position): boolean {
+  const a = toWorld(frame, PLOT_AT.f - 2, PLOT_AT.r - 2, 1)
+  const b = toWorld(frame, PLOT_AT.f + 2, PLOT_AT.r + 2, 2)
+  for (const k of ['x', 'y', 'z'] as const) {
+    const lo = a[k] < b[k] ? a[k] : b[k]
+    const hi = a[k] > b[k] ? a[k] : b[k]
+    if (at[k] < lo || at[k] > hi) return false
+  }
+  return true
+}
+
 /** The catch floor: x -7 to 7 and z -12 to 37 of the course (cells), its origin at course z 13, reaching behind the step. */
 export const CATCH_FLOOR = slabPayload('Catch floor', 7, 25, 200)
 /** The step up from the catch floor to the start square's back edge (course z -7 to -3). */

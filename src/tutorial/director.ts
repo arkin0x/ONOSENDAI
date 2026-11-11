@@ -28,22 +28,22 @@ import type { Plane } from 'cyberspace-core'
 import { onTutorialLifecycle, registerTutorialEffect, registerTutorialWatcher, useTutorial } from '../store/useTutorial'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { spawnPlace } from '../store/useDemo'
-import { useShards } from '../store/useShards'
+import { copyLinedUp, positionOf, useShards } from '../store/useShards'
 import { useOpenedChests, openedKey } from '../store/useOpenedChests'
 import { useInventory } from '../store/useInventory'
 import { useWalk } from '../store/useWalk'
 import { useWorkshop } from '../store/useWorkshop'
 import { useBuilder } from '../store/useBuilder'
-import { positionOf } from '../store/useShards'
 import { seedItemOf } from '../lib/seeds/seedItem'
 import { dnaResolver } from '../lib/seeds/seedSources'
 import { TUTORIAL_DNA, tutorialDnaId, tutorialSeedDraft } from './dna'
-import { dnaMatches } from '../lib/seeds/plant'
+import { SEED_HIDE_MAX, dnaMatches } from '../lib/seeds/plant'
+import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { markViewedStop, ownHyperspaceView } from '../store/useHyperspace'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { PLOT_STAND, START_STAND, atStart, courseToWorld, onDeck, onPlot } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
-import type { Position } from '../lib/space'
+import { deployPoint, type Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
 import { inRegion, toWorld, type TutorialLayout } from './layout'
 import type { Stage } from './stage'
@@ -273,7 +273,7 @@ registerTutorialWatcher('at-plot', (onDone) => watchArrival((at, layout) => onPl
  * bag written. A state, not "since the step came up": a reload after
  * planting finds it planted.
  */
-export function tutorialTreePlanted(onUnknown?: () => void): boolean {
+export function tutorialTreePlanted(onUnknown?: () => void, ownerId: string | null = tutorialDnaId()): boolean {
   const layout = useTutorialStage.getState().layout
   if (!layout) return false
   const live = useCyberspace.getState().live
@@ -282,7 +282,7 @@ export function tutorialTreePlanted(onUnknown?: () => void): boolean {
     if (d.plane !== layout.plane || !onPlot(layout.frame, positionOf(d))) return false
     const seed = seedItemOf(d.inner)
     if (!seed) return false
-    if (seed.dnaId === tutorialDnaId()) return true
+    if (ownerId !== null && seed.dnaId === ownerId) return true
     const v = dnaResolver.verdict(seed.dnaId)
     if (!v || v.state === 'fetching') { if (onUnknown) void dnaResolver.resolve(seed.dnaId).then(onUnknown, onUnknown); return false }
     return v.state === 'ok' && v.text === TUTORIAL_DNA.text
@@ -305,19 +305,66 @@ registerTutorialWatcher('plant', (onDone) => {
  * is still the player's: nothing is mined or hidden here.
  */
 export async function lineUpTutorialSeed(id: string | null = tutorialDnaId()): Promise<string | null> {
+  // What is lined up already: the tree itself (a second tap while it waits or
+  // mines does nothing), a copy AGAIN left lined up (stood down), or
+  // anything else, which is the player's to finish or cancel first.
+  const lined = (): string | null => {
+    const sh = useShards.getState()
+    if (sh.pending?.type === 'seed' && sh.pending.seed.text === TUTORIAL_DNA.text) return ''
+    if (sh.deployStatus !== 'working' && copyLinedUp(sh)) sh.cancelDeploy()
+    const now = useShards.getState()
+    return now.pending || now.deployStatus === 'working' ? 'Finish or cancel what is lined up first.' : null
+  }
+  const first = lined()
+  if (first !== null) return first || null
   let draft = tutorialSeedDraft(null)
   if (id) {
     const v = await dnaResolver.resolve(id)
-    if (v.state !== 'ok' || !dnaMatches(v.event, TUTORIAL_DNA.text, v.caps)) return 'The tutorial tree is not on your relays yet. Try again in a moment.'
+    if (v.state === 'ok' && !dnaMatches(v.event, TUTORIAL_DNA.text, v.caps)) return 'The tutorial tree on your relays is not this one. Tell the owner.'
+    if (v.state !== 'ok') return 'The tutorial tree is not on your relays yet. Try again soon.'
     draft = tutorialSeedDraft(id, v.caps)
+    // Asked again after the wait: something may have been lined up meanwhile.
+    const again = lined()
+    if (again !== null) return again || null
   }
-  if (!useBuilder.getState().active) useBuilder.getState().enter('build')
+  // On the dirt, at zoom 2^0, with the build cursor on your avatar: the seed
+  // then lands exactly where you stand (space.ts deployPoint at step 0),
+  // never on a cursor moved elsewhere or a view's cell.
+  const layout = useTutorialStage.getState().layout
+  const cs = useCyberspace.getState()
+  if (!layout) return 'The dirt is not placed yet.'
+  if (cs.spectate) return 'Stop watching, then PLANT THE SEED.'
+  if (cs.walking || cs.events.length === 0 || cs.headPlane !== layout.plane || !onPlot(layout.frame, cs.position)) return 'Stand on the dirt first.'
+  if (useBuilder.getState().active) useBuilder.getState().exit()
+  if (useCyberspace.getState().focus) useCyberspace.getState().clearFocus(true)
+  if (useCyberspace.getState().scaleExp !== 0) useCyberspace.getState().adjustScale(-useCyberspace.getState().scaleExp)
+  useBuilder.getState().enter('build')
+  // BUILD starts its cursor, and its plane, where you look, which is not
+  // always your avatar (a cursor moved before, a view in the other plane):
+  // both are put on you, where you stand. In BUILD's driven view setPlane
+  // sets the plane you build in.
+  const here = useCyberspace.getState()
+  useCyberspace.setState({ cursor: { ...here.position } })
+  useCyberspace.getState().setPlane(here.headPlane)
+  const s = useCyberspace.getState()
+  const point = deployPoint(s.cursor, buildStepOf(s), SEED_HIDE_MAX)
+  if (!useBuilder.getState().active || buildPlane(s) !== layout.plane || !onPlot(layout.frame, point)) {
+    if (useBuilder.getState().active) useBuilder.getState().exit()
+    return 'Stand on the dirt first.'
+  }
   useShards.getState().startDeploySeed(draft)
   return null
 }
 
 registerTutorialEffect('plant-tutorial-seed', () => {
-  void lineUpTutorialSeed().then((why) => useTutorialStage.setState({ error: why }), (err: unknown) => { console.warn('[tutorial] could not line the seed up:', err); useTutorialStage.setState({ error: 'The seed could not be lined up. Try PLANT THE SEED again.' }) })
+  // The answer is the plant step's own note, and only while that step is still up.
+  const t = useTutorial.getState()
+  const index = t.index
+  t.noteStep(index, null)
+  void lineUpTutorialSeed().then((why) => useTutorial.getState().noteStep(index, why), (err: unknown) => {
+    console.warn('[tutorial] could not line the seed up:', err)
+    useTutorial.getState().noteStep(index, 'The seed could not be lined up. Try PLANT THE SEED again.')
+  })
 })
 
 /** The bud: out of BUILD (planting leaves a copy of the seed lined up), so the next step's COMMIT is there to tap. */

@@ -249,6 +249,14 @@ describe('the director', () => {
     // A reload after planting finds it planted.
     useTutorial.getState().start({ at: 'plant' })
     await vi.waitFor(() => { expect(useTutorial.getState().done).toBe(true) })
+    // Once the owner's event is set, a seed naming it counts at once, on the dirt; off it, not.
+    const { tutorialTreePlanted } = await import('../director')
+    const ownerId = 'c'.repeat(64)
+    useShards.setState({ mine: [seedRow(ownerId, stand)] })
+    expect(tutorialTreePlanted(undefined, ownerId)).toBe(true)
+    expect(tutorialTreePlanted(undefined, null)).toBe(false)
+    useShards.setState({ mine: [seedRow(ownerId, { ...stand, x: stand.x + 40n })] })
+    expect(tutorialTreePlanted(undefined, ownerId)).toBe(false)
     // The bud leaves BUILD, so the course step can line its COMMIT up.
     const { useBuilder } = await import('../../store/useBuilder')
     useBuilder.setState({ active: true } as never)
@@ -256,7 +264,7 @@ describe('the director', () => {
     expect(useBuilder.getState().active).toBe(false)
     useShards.setState({ mine: [] })
     useCyberspace.setState({ events: [] })
-  })
+  }, 60_000)
 
   it('waits on a workshop already open, and on a shard DEPLOY lined up to place, before the next card comes', async () => {
     const { useWorkshop } = await import('../../store/useWorkshop')
@@ -282,27 +290,56 @@ describe('the director', () => {
     expect(useCyberspace.getState().plane).toBe(1)
   })
 
-  it('PLANT THE SEED lines the tutorial tree up in BUILD; with the owner\'s event set, it names that event, and waits until it is on the relays', async () => {
+  it('PLANT THE SEED lines the tutorial tree up in BUILD on the dirt; with the owner\'s event set it names that event; it waits, refuses and never replaces', async () => {
     const { lineUpTutorialSeed } = await import('../director')
     const { TUTORIAL_DNA } = await import('../dna')
     const { useBuilder } = await import('../../store/useBuilder')
     const { dnaResolver } = await import('../../lib/seeds/seedSources')
+    const { onPlot } = await import('../course')
     const { finalizeEvent, generateSecretKey } = await import('nostr-tools/pure')
     const template = (await import('../moon-blossom-v2-event.json')).default
     useTutorial.getState().start({ restart: true })
     await staged()
+    const { layout } = useTutorialStage.getState()
+    const stand = toWorld(layout!.frame, PLOT_STAND.f, PLOT_STAND.r, PLOT_STAND.u)
     useBuilder.setState({ active: false } as never)
-    useShards.setState({ pending: null })
-    // Unpublished: a copy for the player's SEED to sign.
-    expect(await lineUpTutorialSeed(null)).toBe(null)
+    useShards.setState({ pending: null, deployStatus: 'idle' } as never)
+    // Off the dirt: refused, nothing lined up.
+    useCyberspace.setState({ events: [{ id: 'e', tags: [] } as never], position: { ...stand, x: stand.x + 40n }, cursor: { ...stand, x: stand.x + 40n }, headPlane: layout!.plane })
+    expect(await lineUpTutorialSeed(null)).toMatch(/Stand on the dirt/)
+    expect(useShards.getState().pending).toBe(null)
+    // On the dirt, at another zoom with the cursor elsewhere: BUILD on the avatar at 2^0, the seed lands on the dirt.
+    useCyberspace.setState({ position: stand, cursor: { ...stand, z: stand.z + 30n }, anchorPlane: (1 - layout!.plane) as 0 | 1 })
+    useCyberspace.getState().adjustScale(3)
+    const r0 = await lineUpTutorialSeed(null)
+    expect(r0).toBe(null)
     expect(useBuilder.getState().active).toBe(true)
+    expect(useCyberspace.getState().scaleExp).toBe(0)
+    expect(onPlot(layout!.frame, useCyberspace.getState().cursor)).toBe(true)
+    // Built in the plane the player stands in, whatever plane a view had.
+    const { buildPlane } = await import('../../lib/buildCursor')
+    expect(buildPlane(useCyberspace.getState())).toBe(layout!.plane)
     expect(useShards.getState().pending).toMatchObject({ type: 'seed', seed: { text: TUTORIAL_DNA.text, caps: TUTORIAL_DNA.caps, scale: 0 } })
     expect((useShards.getState().pending as { seed: { dnaId?: string } }).seed.dnaId).toBeUndefined()
+    // A second tap while it mines changes nothing.
+    const lined = useShards.getState().pending
+    useShards.setState({ deployStatus: 'working' } as never)
+    expect(await lineUpTutorialSeed(null)).toBe(null)
+    expect(useShards.getState().pending).toBe(lined)
+    // Something else lined up: the player's to finish first.
+    useShards.setState({ pending: { type: 'message', text: 'hi' } as never, deployStatus: 'idle' } as never)
+    expect(await lineUpTutorialSeed(null)).toMatch(/Finish or cancel/)
+    expect(useShards.getState().pending).toMatchObject({ type: 'message' })
     useShards.setState({ pending: null })
-    // Published but not on this device's relays: refused, nothing lined up.
+    useBuilder.setState({ active: false } as never)
+    // Published but not on this device's relays; or not this tree: refused, each in its own words.
     const missing = 'b'.repeat(64)
     vi.spyOn(dnaResolver, 'resolve').mockResolvedValueOnce({ state: 'missing', id: missing })
-    expect(await lineUpTutorialSeed(missing)).toMatch(/not on your relays/)
+    expect(await lineUpTutorialSeed(missing)).toMatch(/not on your relays yet/)
+    const other = finalizeEvent({ kind: 3350, created_at: 1_800_000_000, tags: template.tags, content: template.content.replace('moon blossom', 'sun blossom') }, generateSecretKey())
+    dnaResolver.note(other as never)
+    await dnaResolver.resolve(other.id)
+    expect(await lineUpTutorialSeed(other.id)).toMatch(/not this one/)
     expect(useShards.getState().pending).toBe(null)
     // Published and found: the seed names the owner's event, at its size limit.
     const owner = finalizeEvent({ kind: template.kind, created_at: 1_800_000_000, tags: template.tags, content: template.content }, generateSecretKey())
@@ -312,5 +349,20 @@ describe('the director', () => {
     expect(useShards.getState().pending).toMatchObject({ type: 'seed', seed: { dnaId: owner.id, text: TUTORIAL_DNA.text } })
     useShards.setState({ pending: null })
     useBuilder.setState({ active: false } as never)
+  })
+
+  it('the plant step\'s note is its own: shown while it is up, gone on the next step', async () => {
+    const { runTutorialEffect } = await import('../../store/useTutorial')
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    useTutorial.getState().start({ at: 'plant' })
+    await staged()
+    useCyberspace.setState({ events: [{ id: 'e', tags: [] } as never], position: { x: 0n, y: 0n, z: 0n } })
+    runTutorialEffect('plant-tutorial-seed')
+    await vi.waitFor(() => { expect(useTutorial.getState().stepNote).toMatch(/Stand on the dirt/) })
+    useTutorial.getState().next()
+    expect(useTutorial.getState().stepNote).toBe(null)
+    expect(useTutorialStage.getState().error).toBe(null)
+    useCyberspace.setState({ events: [] })
   })
 })

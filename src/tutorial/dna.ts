@@ -19,26 +19,20 @@
  * with HIDE. Nothing in the Seeds client is changed.
  */
 
-import { BASE_CAPS, type Caps } from 'sno-core/seeds'
-import { originalDnaId, type OriginalDna } from '../lib/seeds/originalDnas'
-import type { SeedDraft } from '../lib/seeds/plant'
+import { BASE_CAPS, capsFromTags, type Caps } from 'sno-core/seeds'
+import type { OriginalDna } from '../lib/seeds/originalDnas'
+import { readDnaText, type SeedDraft } from '../lib/seeds/plant'
 import moonBlossom from './moon-blossom-v2-event.json'
 
-/** The caps a DNA event's `caps` tag names, or the free caps when it names none (DECK-0008 §7). */
-function capsOf(tags: readonly (readonly string[])[]): Caps {
-  const t = tags.find((x) => x[0] === 'caps')
-  if (!t) return BASE_CAPS
-  const [v, s, g] = t.slice(1, 4).map(Number)
-  return [v, s, g].every((n) => Number.isInteger(n) && n > 0) ? { vertices: v, symbols: s, generations: g } : BASE_CAPS
-}
+/** Its name, as the engine reads the `dna` line (a test holds that the engine accepts the text). */
+const read = readDnaText(moonBlossom.content)
 
-/** The name on a DNA's `dna` line. */
-function dnaName(text: string): string {
-  return /^dna[ \t]+(.+)$/m.exec(text)?.[1]?.trim() ?? 'tutorial tree'
-}
-
-/** The DNA the tutorial's seed grows. */
-export const TUTORIAL_DNA: OriginalDna = { name: dnaName(moonBlossom.content), text: moonBlossom.content, caps: capsOf(moonBlossom.tags) }
+/**
+ * The DNA the tutorial's seed grows: the template's text, and the caps its
+ * `caps` tag names as sno-core reads them (the free caps if it named none
+ * or one the engine refuses; a test holds them at 2,048 / 2,048 / 32).
+ */
+export const TUTORIAL_DNA: OriginalDna = { name: read.ok ? read.name : 'moon blossom', text: moonBlossom.content, caps: capsFromTags(moonBlossom.tags) ?? BASE_CAPS }
 
 /**
  * The owner's published event for the tutorial tree, by id, or empty while it
@@ -46,9 +40,9 @@ export const TUTORIAL_DNA: OriginalDna = { name: dnaName(moonBlossom.content), t
  */
 export const TUTORIAL_DNA_ID = ''
 
-/** The owner's event id for the tutorial tree, or null while none is set (checked as an original DNA's is). */
+/** The owner's event id for the tutorial tree, or null while none is set (64 lowercase hex, as an original DNA's is checked). */
 export function tutorialDnaId(id: string = TUTORIAL_DNA_ID): string | null {
-  return originalDnaId(TUTORIAL_DNA.name, { [TUTORIAL_DNA.name]: id })
+  return /^[0-9a-f]{64}$/.test(id) ? id : null
 }
 
 /**

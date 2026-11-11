@@ -10475,7 +10475,8 @@ html.tv-broadcast body { overflow: hidden; }
 .seedc__step:disabled { opacity: 0.35; cursor: default; }
 .seedc__price { margin: 2px 0 4px; font-size: 9px; letter-spacing: 0.1em; color: var(--dim); }
 .seedc__row .seedc__label--wide { flex: 0 0 auto; margin-right: 4px; }
-.tutorial__image { display: block; width: 100%; height: auto; aspect-ratio: 1; max-height: 160px; margin-top: 4px; object-fit: contain; border-radius: 6px; background: rgba(0, 0, 0, 0.35); }
+/* A transparent picture: no band behind it, a square at most 160 across, centered. */
+.tutorial__image { display: block; width: 160px; height: 160px; max-width: 100%; margin: 4px auto 0; object-fit: contain; }
 .tutorial-card__go--done { background: none; color: var(--dim); border-color: var(--border); }
 .tutorial__note { margin: 0; color: var(--warn); font-size: 12px; }
 .tutorial__note:empty { position: absolute; }

@@ -441,11 +441,16 @@ describe('the engine', () => {
     expect(TUTORIAL_DNA.caps).toEqual(BASE_CAPS)
     expect(capsPrice(TUTORIAL_DNA.caps)).toBe(16)
     expect(dnaMatches(template, TUTORIAL_DNA.text, TUTORIAL_DNA.caps)).toBe(true)
+    // The engine takes the text, under its own name.
+    const { dnaTextRefusal, readDnaText } = await import('../../lib/seeds/plant')
+    expect(dnaTextRefusal(TUTORIAL_DNA.text)).toBe(null)
+    expect(readDnaText(TUTORIAL_DNA.text)).toEqual({ ok: true, name: 'moon blossom' })
     // Not published yet: no id, and the seed is a copy the player's SEED signs. Set, it names the owner's event.
     const { TUTORIAL_DNA_ID, tutorialDnaId, tutorialSeedDraft } = await import('../../tutorial/dna')
     expect(TUTORIAL_DNA_ID).toBe('')
     expect(tutorialDnaId()).toBe(null)
     expect(tutorialDnaId('nope')).toBe(null)
+    expect(tutorialDnaId('A'.repeat(64))).toBe(null)
     expect(tutorialSeedDraft()).toEqual({ text: TUTORIAL_DNA.text, caps: BASE_CAPS, scale: 0, title: '' })
     const id = 'a'.repeat(64)
     const owned = { vertices: 2048, symbols: 2048, generations: 32 }

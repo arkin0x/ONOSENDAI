@@ -24,6 +24,7 @@ import { useHyperspace } from '../store/useHyperspace'
 import { useOpenCeremony } from '../store/useOpenCeremony'
 import { useShards } from '../store/useShards'
 import { useTv } from '../store/useTv'
+import { useGame } from '../store/useGame'
 import { useWorkshop } from '../store/useWorkshop'
 import { flyDir, useViewFly } from '../lib/viewFly'
 
@@ -57,7 +58,10 @@ export function FrameDriver(): null {
   // The workshop is an opaque, full-screen bench with its own canvas. Drawing
   // the world under it is pure cost, and on a phone it was most of the frame:
   // the bench measured 3 fps with the world running behind it.
-  const covered = useWorkshop((s) => s.open)
+  // A game on screen (game/GameView.tsx) covers it the same way, with a canvas of its own.
+  const benchOpen = useWorkshop((s) => s.open)
+  const playing = useGame((s) => s.session !== null)
+  const covered = benchOpen || playing
   // Across a pause: the time the scene has seen.
   const elapsed = useRef(0)
   useEffect(() => {

@@ -7,9 +7,11 @@
 
 import { useEffect } from 'react'
 import { useProfiles, type Profile } from '../store/useProfiles'
+import { isGuideAuthor } from '../tutorial/guideBags'
 
 export function useProfile(pubkey: string | null | undefined): Profile | null | undefined {
   const profile = useProfiles((s) => (pubkey ? s.profiles[pubkey] : undefined))
-  useEffect(() => { if (pubkey) useProfiles.getState().request(pubkey) }, [pubkey])
+  // The tutorial's guide key has no profile, and no relay is asked about it (tutorial/guideBags.ts).
+  useEffect(() => { if (pubkey && !isGuideAuthor(pubkey)) useProfiles.getState().request(pubkey) }, [pubkey])
   return profile
 }

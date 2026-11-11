@@ -42,7 +42,7 @@ function formatDuration(ms: number): string {
   if (h < 48) return `${h.toFixed(1)} h`
   return `${(h / 24).toFixed(1)} d`
 }
-import { GAME_HOLDS_MESSAGE, STALE_CONFIRMATION, useCyberspace, whyNoMove, type CompletedRide } from '../store/useCyberspace'
+import { GAME_HOLDS_MESSAGE, IN_GAME_HERE_MESSAGE, STALE_CONFIRMATION, useCyberspace, whyNoMove, type CompletedRide } from '../store/useCyberspace'
 import { setRideDestination } from '../store/destination'
 import { closeScrubber, exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
 import { Explanation } from './Explanation'
@@ -702,6 +702,8 @@ export function HyperspacePanel(): JSX.Element {
         ? <p className="hyper__why">NEW VERSION: RELOAD TO BOARD OR RIDE</p>
         : noMove === GAME_HOLDS_MESSAGE
         ? <p className="hyper__why">A GAME HOLDS YOUR AVATAR: LEAVE THE GAME IN THE CLIENT YOU ENTERED IT WITH, OR RESPAWN, TO BOARD OR RIDE</p>
+        : noMove === IN_GAME_HERE_MESSAGE
+        ? <p className="hyper__why">IN A GAME: EXIT GAME TO BOARD OR RIDE</p>
         : (
           <p className="hyper__why">
             YOUR CHAIN IS BROKEN: NOTHING MOVES UNTIL YOU RESPAWN

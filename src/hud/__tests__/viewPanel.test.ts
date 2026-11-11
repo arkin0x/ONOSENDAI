@@ -272,3 +272,28 @@ describe('the switches have one home: their old controls are gone', () => {
     expect(html).not.toContain('ui-checkbox')
   })
 })
+
+describe('the Tutorial row (first-arrival tutorial, off in production)', () => {
+  it('is not there until ?tutorial=1 or =0 was opened on this device', async () => {
+    const { useTutorialSwitch } = await import('../../tutorial/gate')
+    useTutorialSwitch.setState({ value: null })
+    expect(view()).not.toContain('view-tutorial')
+    expect(view()).not.toContain('RESTART TUTORIAL')
+    expect(view()).not.toContain('Tutorial walks')
+  })
+
+  it('shows its switch either way once offered, and RESTART only while on, off while the tutorial runs', async () => {
+    const { useTutorialSwitch } = await import('../../tutorial/gate')
+    const { useTutorial } = await import('../../store/useTutorial')
+    useTutorialSwitch.setState({ value: false })
+    expect(switchTag(view(), 'view-tutorial')).toContain('aria-checked="false"')
+    expect(view()).not.toContain('RESTART TUTORIAL')
+    useTutorialSwitch.setState({ value: true })
+    expect(switchTag(view(), 'view-tutorial')).toContain('aria-checked="true"')
+    expect(view()).toMatch(/<button class="avatars__go tutorial-restart">RESTART TUTORIAL<\/button>/)
+    useTutorial.setState({ active: true })
+    expect(view()).toMatch(/<button class="avatars__go tutorial-restart" disabled="">RESTART TUTORIAL<\/button>/)
+    useTutorial.setState({ active: false })
+    useTutorialSwitch.setState({ value: null })
+  })
+})

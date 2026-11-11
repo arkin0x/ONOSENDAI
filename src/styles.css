@@ -9704,6 +9704,8 @@ a.feed__act { text-decoration: none; }
 /* AGENTS: a labeled COPY, then MY AGENTS rows of face, npub, TALK, SPECTATE. */
 .agents__invite { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .agents__invite .legend__label { margin: 0; flex: 1 1 auto; }
+/* What ACTIVATE said, kept clear of MY AGENTS below it. */
+.agents__activate + .notice { margin: 0 0 10px; }
 .agents__row { grid-template-columns: 1fr auto auto auto; }
 .agents__npub { font-size: 9px; color: var(--dim); white-space: nowrap; }
 .agents__npub:hover { color: var(--accent); }
@@ -9863,8 +9865,6 @@ a.feed__act { text-decoration: none; }
 .agents__inbox { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 8px; }
 /* BETA beside the AGENTS title: an amber tag, so it reads as a status, not a control. */
 .tag--beta { margin-left: 6px; color: #ffbf3c; border-color: rgba(255, 191, 60, 0.6); cursor: help; font-size: 9px; vertical-align: middle; }
-.agents__login { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.agents__login .notice { margin: 0; }
 
 /* ---------- Pad mode tint ----------
  *
@@ -10668,6 +10668,15 @@ html.tv-broadcast body { overflow: hidden; }
 .tutorial__note { margin: 0; color: var(--warn); font-size: 12px; }
 .tutorial__note:empty { position: absolute; }
 .tutorial-choice[aria-disabled="true"] { opacity: 0.35; cursor: default; }
+/* A route already done this run, checked off (feedback item 10). */
+.tutorial-choice.is-done .tutorial-choice__label { color: var(--ok); }
+.tutorial-choice__check { color: var(--ok); margin-right: 4px; vertical-align: -2px; }
+/* BACK is sized to its text and outlined; the primary action (NEXT, or the
+   card's go button) fills the row (feedback item 8). */
+.tutorial-card__foot { display: flex; gap: 6px; }
+.tutorial-card__foot .tutorial-card__go { flex: 1 1 0; align-self: auto; }
+.tutorial__back { flex: 0 0 auto; padding: 0 12px; background: transparent; }
+.tutorial__next { flex: 1 1 0; }
 
 /* In-game mode (game/GameView.tsx, DECK-0002 §2.3): the game's world full
    screen over cyberspace, its bar on top, its pad at the bottom. Pink, the

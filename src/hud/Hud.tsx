@@ -34,6 +34,8 @@ import { DerezzPanel } from './DerezzPanel'
 import { HyperspacePanel } from './HyperspacePanel'
 import { useHyperspace } from '../store/useHyperspace'
 import { RelaysPanel } from './RelaysPanel'
+import { TutorialPanel } from './TutorialPanel'
+import { useTutorialSwitch } from '../tutorial/gate'
 import { TargetsPanel } from './TargetsPanel'
 import { ShardsPanel } from './ShardsPanel'
 import { Legend } from './Legend'
@@ -599,7 +601,7 @@ function Controls(): JSX.Element {
  * Hyperspace, View (what the scene draws, just above the Legend that decodes
  * it), Legend, Controls, Derezz and Relays.
  */
-const PANELS: Record<PanelId, () => JSX.Element> = {
+const PANELS: Record<PanelId, () => JSX.Element | null> = {
   identity: IdentityPanel,
   agents: AgentsPanel,
   hidden: HiddenPanel,
@@ -621,6 +623,7 @@ const PANELS: Record<PanelId, () => JSX.Element> = {
   controls: Controls,
   derezz: DerezzPanel,
   relays: RelaysPanel,
+  tutorial: TutorialPanel,
 }
 
 /**
@@ -696,7 +699,11 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // drawn only for someone a bot profile named as operator, while TALK and
   // the follow rule were missing; both have shipped. It sits in its saved
   // place, which the hidden days kept.
-  const hidden = (id: PanelId): boolean => leads.includes(id)
+  // The TUTORIAL panel (feedback item 17) is drawn only where the tutorial
+  // switch is on; off (everyone in production), it is filtered out so no empty
+  // slot shows for a panel that would render nothing.
+  const tutorialShown = useTutorialSwitch((s) => s.value) === true
+  const hidden = (id: PanelId): boolean => leads.includes(id) || (id === 'tutorial' && !tutorialShown)
   const left = [...leads, ...order.left.filter((id) => !hidden(id))]
   const right = order.right.filter((id) => !hidden(id))
 

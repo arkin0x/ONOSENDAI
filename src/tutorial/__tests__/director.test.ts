@@ -33,7 +33,8 @@ vi.mock('../../lib/relay', async (orig) => {
 })
 
 import { useCyberspace } from '../../store/useCyberspace'
-import { useTutorial } from '../../store/useTutorial'
+import { runTutorialEffect, useTutorial } from '../../store/useTutorial'
+import { usePanelLayout } from '../../store/usePanelLayout'
 import { useShards } from '../../store/useShards'
 import { useOpenedChests, openedKey } from '../../store/useOpenedChests'
 import { useInventory } from '../../store/useInventory'
@@ -42,7 +43,7 @@ import { guideBagsFor } from '../guideBags'
 import { GUIDE_KEY } from '../guide'
 import { TUTORIAL_SCRIPT } from '../script'
 import { PLOT_STAND, START_STAND, courseToWorld } from '../course'
-import { toWorld } from '../layout'
+import { besideToward, toWorld } from '../layout'
 import { useWalk } from '../../store/useWalk'
 
 const pubkey = (): string => useCyberspace.getState().identity.pubkey
@@ -93,6 +94,40 @@ describe('the director', () => {
     useShards.setState({ discovered: { [stage.ids.chest]: theirs, ['x'.repeat(64)]: other } })
     useTutorial.getState().pause()
     expect(Object.keys(useShards.getState().discovered)).toEqual(['x'.repeat(64)])
+  })
+
+  it('keeps what the guide sealed on screen when the tutorial finishes, local only (feedback item 9)', async () => {
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    const stage = useTutorialStage.getState().stage!
+    const theirs = { eventId: stage.ids.chest, author: stage.guide } as never
+    useShards.setState({ discovered: { [stage.ids.chest]: theirs } })
+    const lookups = stage.bags.map((b) => b.tags.find((t) => t[0] === 'd')![1])
+    // FINISH keeps the finds and the bags; nothing was ever published.
+    useTutorial.getState().end('finished')
+    expect(Object.keys(useShards.getState().discovered)).toContain(stage.ids.chest)
+    expect(guideBagsFor(lookups)).toHaveLength(3)
+    expect(log.published).toEqual([])
+    // A RESTART then drops the old run's kept find before staging a new chest, so none is orphaned.
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    expect(Object.keys(useShards.getState().discovered)).not.toContain(stage.ids.chest)
+    useTutorial.getState().end('skipped')
+    useShards.setState({ discovered: {} })
+  })
+
+  it('lines the first move up one gibson in front of the chest, facing it (feedback item 4)', async () => {
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    const layout = useTutorialStage.getState().layout!
+    useTutorial.getState().start({ at: 'box' })
+    await staged()
+    // The chest sits at the frame's (3, 3, 3); the cursor lands on its neighbor toward the player.
+    const cursor = useCyberspace.getState().cursor
+    expect(cursor).toEqual(besideToward(layout.frame, 3, 3, 3, useCyberspace.getState().position))
+    const chest = toWorld(layout.frame, 3, 3, 3)
+    const off = [cursor.x - chest.x, cursor.y - chest.y, cursor.z - chest.z].map((d) => (d < 0n ? -d : d))
+    expect(off.every((d) => d <= 1n) && off.some((d) => d === 1n)).toBe(true)
   })
 
   it('never lets a staging a RESTART overtook overwrite the kept stage', async () => {
@@ -465,5 +500,20 @@ describe('the director', () => {
     await vi.waitFor(() => { expect(useTutorial.getState().stepNote).toMatch(/Stand on the dirt/) })
     expect(director.tutorialSeedMeasuring()).toBe(false)
     useCyberspace.setState({ events: [] })
+  })
+})
+
+describe('the inventory step puts ITEMS at the top of the menu, whatever the order (feedback item 2)', () => {
+  it('under the default order, and under one with other panels first (#677\'s), ITEMS comes first', () => {
+    const was = usePanelLayout.getState().order
+    for (const left of [
+      ['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'],
+      ['identity', 'agents', 'avatars', 'items', 'create', 'hidden', 'discovered', 'targets', 'links'],
+    ] as const) {
+      usePanelLayout.setState({ order: { left: [...left], right: [...was.right] } })
+      runTutorialEffect('teach-inventory')
+      expect(usePanelLayout.getState().order.left[0]).toBe('items')
+    }
+    usePanelLayout.setState({ order: was })
   })
 })

@@ -50,6 +50,7 @@ import { clock, describeDuration, expectedTries, minedIn, serializeEvent, triesP
 import { minerCount } from '../lib/avatarWorker'
 import { useCalibration } from '../lib/calibration'
 import { useCyberspace } from '../store/useCyberspace'
+import { useTutorial } from '../store/useTutorial'
 import { ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
 import { usePublished } from '../store/usePublished'
@@ -100,7 +101,11 @@ const INTRO_KEY = 'onosendai:workshop-intro'
 
 function Intro(): JSX.Element | null {
   const [show, setShow] = useState<boolean>(() => { try { return !localStorage.getItem(INTRO_KEY) } catch { return false } })
-  if (!show) return null
+  // Held back while the tutorial runs, without burning the one-time flag, so
+  // entering the workshop from the tutorial never interrupts it (feedback
+  // 2026-11-11, item 11b). It may get its own tutorial later.
+  const tutorialActive = useTutorial((s) => s.active)
+  if (!show || tutorialActive) return null
   const done = (): void => { try { localStorage.setItem(INTRO_KEY, '1') } catch { /* private mode */ } setShow(false) }
   return (
     <div className="workshop__intro" role="note" aria-label="How to make an object">

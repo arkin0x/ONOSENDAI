@@ -48,6 +48,7 @@ import { jobInProgress } from '../lib/cloud'
 import { useMutes } from '../store/useMutes'
 import { MuteListModal } from './MuteListModal'
 import { useCover } from '../hooks/useCover'
+import { SpeakeasyLine } from './SpeakeasyLine'
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
 
@@ -215,11 +216,14 @@ export function PositionPanel(): JSX.Element {
         <PlaneTag plane={plane} />
       </header>
       <PlaceReadout position={position} sector={sector} coordHex={coordHex} linkHex={coordHex} />
+      <SpeakeasyLine />
       <Explanation>
         Where your avatar stands: its X, Y and Z, the sector they fall in, and
         the coordinate of your chain head. Tap any figure to copy it. LINK
         copies a link that opens ONOSENDAI looking at your avatar. To look
-        somewhere else without moving, use the View panel.
+        somewhere else without moving, use the View panel. While LIVE,
+        SPEAKEASY shows up when your chain head is inside one: a private relay
+        for that region. ADD RELAY adds it to your relays.
       </Explanation>
     </section>
   )

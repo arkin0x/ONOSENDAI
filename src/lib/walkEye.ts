@@ -13,19 +13,26 @@
  */
 
 import { Vector3 } from 'three'
-import type { ViewAxes } from './space'
+import type { AxisName, ViewAxes } from './space'
 
 /** The eye's target in render cells: the predicted head the walk is easing toward. */
 export const walkEye = new Vector3()
 
 /**
  * A fall in WALK (store/useWalk.ts), as the rig draws it: while `active`,
- * the eye is `offset` gibsons along cyberspace +Y from the cursor (negative
- * below it), and follows that height exactly instead of easing to it. Written
- * once a frame by the fall (tickFall), read once a frame by the rig: two
- * numbers, so a fall allocates nothing per frame.
+ * the eye is `offset` gibsons up from the cursor (negative below it), along
+ * walkFallUp, and follows that height exactly instead of easing to it.
+ * Written once a frame by the fall (tickFall), read once a frame by the rig:
+ * two numbers, so a fall allocates nothing per frame.
  */
 export const walkFall = { active: false, offset: 0 }
+
+/**
+ * Which way a fall's up is (walkFall): cyberspace `axis` in direction `dir`,
+ * against the fall's gravity (lib/walkDown.ts), +Y unless the view is
+ * turned. Written when a fall begins or the view turns its gravity.
+ */
+export const walkFallUp: { axis: AxisName; dir: 1 | -1 } = { axis: 'y', dir: 1 }
 
 /**
  * Which way the WALK camera looks, in cyberspace axes (lib/walkSlide.ts

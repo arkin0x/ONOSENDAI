@@ -36,12 +36,12 @@ import { keepPrograms } from '../lib/keepPrograms'
 import { sortWithoutBoxing } from '../lib/sortNoAlloc'
 import { FrameDriver } from './frameDriver'
 import { BG } from '../lib/palette'
-import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, renderDirection, viewAxes, type Position } from '../lib/space'
+import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, renderDirection, viewAxes, type AxisName, type Position } from '../lib/space'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
-import { setWalkFacing, walkEye, walkFacing, walkFall } from '../lib/walkEye'
-import { carryLook, clearWalkLook, lookRadPerPx, takeKeepWalkLook, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
-import { tickFall, useWalk } from '../store/useWalk'
+import { setWalkFacing, walkEye, walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
+import { clearWalkLook, lookRadPerPx, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
+import { tickFall, useWalk, walkDown } from '../store/useWalk'
 import { orbitOffset } from '../workshop/benchAxes'
 import { WalkProbe } from './WalkProbe'
 import { commitAnchor, commitScale, committedAnchor } from '../lib/renderFrame'
@@ -291,9 +291,10 @@ function ScreenAxes(): null {
     // The permutation itself is claimScreenAxes, in space.ts, so the property
     // that makes it correct (three different axes for any camera angle) can be
     // asserted without a camera. Under GRAVITY in WALK the keys are level
-    // (levelScreenAxes): looking down a stair never turns W into down.
+    // across gravity (levelScreenAxes, walkDown): looking down a stair never
+    // turns W into down.
     const screen = walking && useWalk.getState().gravity
-      ? levelScreenAxes(right.current, up.current, out.current, axes)
+      ? levelScreenAxes(right.current, up.current, out.current, axes, walkDown())
       : claimScreenAxes(right.current, up.current, out.current, axes)
     useCyberspace.getState().setScreenAxes(screen)
     if (import.meta.env.DEV) {
@@ -543,10 +544,17 @@ const ORBIT_MIN_DISTANCE = 2
 const WALK_EYE = 0.001
 /** Scratch for the eye's line of sight, so the frame loop allocates nothing. */
 const walkDir = new Vector3()
-/** Where cyberspace +Y points in the render frame of a view: worked out once per view, for a fall. */
-let upFor: { view: Quaternion | null; dir: [number, number, number] } = { view: null, dir: [0, 1, 0] }
-function renderUp(view: Quaternion): [number, number, number] {
-  if (upFor.view !== view) upFor = { view, dir: renderDirection(viewAxes(view), 'y') }
+/**
+ * Where a fall's up (lib/walkEye.ts walkFallUp: cyberspace +Y unless the view
+ * is turned) points in the render frame of a view: worked out once per view
+ * and axis, for a fall.
+ */
+let upFor: { view: Quaternion | null; axis: AxisName; sign: 1 | -1; dir: [number, number, number] } = { view: null, axis: 'y', sign: 1, dir: [0, 1, 0] }
+function renderUp(view: Quaternion, axis: AxisName, sign: 1 | -1): [number, number, number] {
+  if (upFor.view !== view || upFor.axis !== axis || upFor.sign !== sign) {
+    const d = renderDirection(viewAxes(view), axis)
+    upFor = { view, axis, sign, dir: [d[0] * sign, d[1] * sign, d[2] * sign] }
+  }
   return upFor.dir
 }
 
@@ -598,8 +606,6 @@ function Rig(): JSX.Element {
   const walkLook = useRef<Vector3 | null>(null)
   const eye = useRef<{ from: number; to: number; t0: number } | null>(null)
   const outTo = useRef(START_DISTANCE)
-  // The view the last frame was drawn in, for a look kept through a change of view (GRAVITY's level).
-  const drawnView = useRef<Quaternion | null>(null)
 
   // Locked means the camera travels with the cursor, so an axis-aligned view
   // stays framed on it as you drive. Aligning with Shift+WASD re-locks; orbiting
@@ -900,9 +906,9 @@ function Rig(): JSX.Element {
     let ty = live[1] + (lag ? lag[1] : 0)
     let tz = live[2] + (lag ? lag[2] : 0)
     // In a fall the eye is above or below the cursor (the point the fall
-    // left off from), along cyberspace Y, and follows that height exactly.
+    // left off from), along the fall's up, and follows that height exactly.
     const falling = s.walking && walkFall.active
-    const up = falling ? renderUp(s.view) : null
+    const up = falling ? renderUp(s.view, walkFallUp.axis, walkFallUp.dir) : null
     if (up) {
       const k = walkFall.offset / 2 ** s.scaleExp
       tx += up[0] * k
@@ -1018,12 +1024,6 @@ function Rig(): JSX.Element {
       c.enableRotate = !s.walking
       clearWalkLook()
       walkLook.current = null
-    }
-    // GRAVITY levelled the view: the look turns with it, so you face the
-    // same way in cyberspace (lib/walkLook.ts keepWalkLook).
-    if (drawnView.current !== s.view) {
-      if (takeKeepWalkLook() && drawnView.current && s.walking && walkLook.current) carryLook(walkLook.current, viewAxes(drawnView.current), viewAxes(s.view))
-      drawnView.current = s.view
     }
     if (eye.current) {
       const t = (performance.now() - eye.current.t0) / AVATAR_LERP_MS

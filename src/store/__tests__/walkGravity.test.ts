@@ -64,8 +64,7 @@ import { DOUBLE_JUMP_HEIGHT, DOUBLE_JUMP_SPEED, GIBSON_METRES, GRAVITY_KEY, JUMP
 import { walkFall } from '../../lib/walkEye'
 import { useCalibration } from '../../lib/calibration'
 import { withConstrain, type Constrain } from '../../lib/walkConstrain'
-import { canonicalQuaternion, levelQuaternion, levelScreenAxes, rotateView, viewAxes, type Position, type ViewAxes } from '../../lib/space'
-import { carryLook } from '../../lib/walkLook'
+import { canonicalQuaternion, levelScreenAxes, rotateView, viewAxes, type Position, type ViewAxes } from '../../lib/space'
 import { walkCancel, walkKeyDown } from '../../hooks/useKeyboard'
 import { Vector3 } from 'three'
 import hallStairs from '../fixtures/maze-kit-basilica-hall-stairs.json'
@@ -937,49 +936,20 @@ describe('a Maze Kit room', () => {
   })
 })
 
-describe('the level view', () => {
-  it('turns a view that is not level to the nearest level one, and leaves a level one alone', () => {
-    const level = canonicalQuaternion()
-    expect(levelQuaternion(level)).toBeNull()
-    expect(levelQuaternion(rotateView(level, 'left'))).toBeNull()
-    const tilted = rotateView(level, 'up')
-    const back = levelQuaternion(tilted)!
-    expect(viewAxes(back).up).toEqual({ axis: 'y', dir: 1 })
-    // The nearest: the one it was tilted from.
-    expect(viewAxes(back)).toEqual(viewAxes(level))
-  })
-
-  it('in WALK with gravity on, a view turned off level comes back level', () => {
+describe('the view (arkinox, 2026-11-10: gravity follows the view; it no longer levels it)', () => {
+  it('in WALK with gravity on, a view turned off level stays as turned', () => {
     walk(true)
     useCyberspace.getState().rotate('up')
-    expect(viewAxes(useCyberspace.getState().view).up).toEqual({ axis: 'y', dir: 1 })
-    // Turning about Y is level, and stays as turned.
+    expect(viewAxes(useCyberspace.getState().view)).toEqual(viewAxes(rotateView(canonicalQuaternion(), 'up')))
     useCyberspace.getState().rotate('left')
-    expect(viewAxes(useCyberspace.getState().view)).toEqual(viewAxes(rotateView(canonicalQuaternion(), 'left')))
+    expect(viewAxes(useCyberspace.getState().view)).toEqual(viewAxes(rotateView(rotateView(canonicalQuaternion(), 'up'), 'left')))
   })
 
-  it('switching gravity on in WALK levels a view that was not, and gravity off leaves views alone', () => {
+  it('switching gravity on in WALK leaves the view as it is', () => {
     useCyberspace.setState({ view: rotateView(canonicalQuaternion(), 'up') })
     walk(false)
-    expect(viewAxes(useCyberspace.getState().view).up.axis).not.toBe('y')
     useWalk.getState().setGravity(true)
-    expect(viewAxes(useCyberspace.getState().view).up).toEqual({ axis: 'y', dir: 1 })
-  })
-
-  it('keeps the way you look, in cyberspace, through the levelling', () => {
-    const from = viewAxes(rotateView(canonicalQuaternion(), 'up'))
-    const to = viewAxes(canonicalQuaternion())
-    for (const v of [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0.3, -0.5, 0.8]]) {
-      const look = { x: v[0], y: v[1], z: v[2] }
-      carryLook(look, from, to)
-      // The same cyberspace direction in both frames.
-      const cs = (a: ViewAxes, w: { x: number; y: number; z: number }) => {
-        const out: Record<string, number> = { x: 0, y: 0, z: 0 }
-        ;[a.right, a.up, a.out].forEach((b, i) => { out[b.axis] += b.dir * [w.x, w.y, w.z][i] })
-        return out
-      }
-      expect(cs(to, look)).toEqual(cs(from, { x: v[0], y: v[1], z: v[2] }))
-    }
+    expect(viewAxes(useCyberspace.getState().view)).toEqual(viewAxes(rotateView(canonicalQuaternion(), 'up')))
   })
 
   it('the keys stay level however far you look down: W is forward on the floor, never down', () => {

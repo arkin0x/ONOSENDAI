@@ -48,9 +48,15 @@
  * face. The chain sees none of this: the walk publishes where you went, as
  * one straight hop per segment (store/useWalk.ts), the same as any move
  * between those two places.
+ *
+ * Up, down, the floor and the lift are along the walker's gravity, `down`
+ * (lib/walkDown.ts: the axis nearest the screen's down, arkinox
+ * 2026-11-10), cyberspace -Y unless the view is turned. With gravity off it
+ * is always -Y, as it was.
  */
 
-import { clampAxis, type AxisName, type Position } from '../lib/space'
+import { clampAxis, type AxisDirection, type AxisName, type Position } from '../lib/space'
+import { WORLD_DOWN, raised, upOf } from '../lib/walkDown'
 import { stepLimit, underSolid, type WallItem } from './walkWalls'
 
 /** The highest a press lifts you over what is in its way, in gibsons: the Maze Kit's stairs need 2. */
@@ -72,11 +78,11 @@ export interface WalkStep {
 /**
  * Whether a blocking face is less than a gibson below `at`: you stand on it.
  * With `gravity`, a floor in your own plane with open space above it is under
- * you too (stepLimit `stand`).
+ * you too (stepLimit `stand`). Below is along `down`.
  */
-export function standing(at: Position, items: readonly WallItem[], gravity = false): boolean {
-  const down = stepLimit(at, 'y', -1, 1n, items, gravity)
-  return down.reach === 0n && down.by !== null
+export function standing(at: Position, items: readonly WallItem[], gravity = false, down: AxisDirection = WORLD_DOWN): boolean {
+  const under = stepLimit(at, down.axis, down.dir, 1n, items, gravity && down)
+  return under.reach === 0n && under.by !== null
 }
 
 /** `at` moved `n` gibsons along `axis` in direction `dir`. */
@@ -94,18 +100,19 @@ function moved(at: Position, axis: AxisName, dir: 1 | -1, n: bigint): Position {
  * clear at either height, or nothing to stand on. A solid over you that
  * refused it is named (`lid`), so the WALL chip names it and not the riser.
  */
-function lifted(at: Position, axis: AxisName, dir: 1 | -1, items: readonly WallItem[], gravity: boolean): { on: Position | null; lid: WallItem | null } {
+function lifted(at: Position, axis: AxisName, dir: 1 | -1, items: readonly WallItem[], gravity: boolean, down: AxisDirection): { on: Position | null; lid: WallItem | null } {
   // A solid whose underside is in your own plane: no lift at all goes into it.
-  const lid = underSolid(at, items)
+  const lid = underSolid(at, items, down)
   if (lid) return { on: null, lid }
+  const rise = upOf(down)
   for (let lift = 1n; lift <= STEP_UP_MAX; lift++) {
-    if (clampAxis(at.y + lift) !== at.y + lift) return { on: null, lid: null }
+    const up = raised(at, down, lift)
+    if (clampAxis(up[rise.axis]) !== up[rise.axis]) return { on: null, lid: null }
     // Headroom: a face over you holds this lift and every higher one.
-    if (stepLimit(at, 'y', 1, lift, items).reach !== lift) return { on: null, lid: null }
-    const up = { ...at, y: at.y + lift }
+    if (stepLimit(at, rise.axis, rise.dir, lift, items).reach !== lift) return { on: null, lid: null }
     if (stepLimit(up, axis, dir, 1n, items).reach !== 1n) continue
     const on = moved(up, axis, dir, 1n)
-    return { on: standing(on, items, gravity) ? on : null, lid: null }
+    return { on: standing(on, items, gravity, down) ? on : null, lid: null }
   }
   return { on: null, lid: null }
 }
@@ -117,10 +124,11 @@ function lifted(at: Position, axis: AxisName, dir: 1 | -1, items: readonly WallI
  * then). The settle is cleared by stepLimit and is the walls' own stop short
  * of the floor, so it ends at standing height.
  */
-function settled(at: Position, items: readonly WallItem[], gravity: boolean): { at: Position; standing: boolean } {
-  const down = stepLimit(at, 'y', -1, STEP_DOWN_MAX + 1n, items, gravity)
-  if (down.by === null || down.reach > at.y) return { at, standing: false }
-  return { at: { ...at, y: at.y - down.reach }, standing: true }
+function settled(at: Position, items: readonly WallItem[], gravity: boolean, down: AxisDirection): { at: Position; standing: boolean } {
+  const floor = stepLimit(at, down.axis, down.dir, STEP_DOWN_MAX + 1n, items, gravity && down)
+  const to = raised(at, down, -floor.reach)
+  if (floor.by === null || clampAxis(to[down.axis]) !== to[down.axis]) return { at, standing: false }
+  return { at: to, standing: true }
 }
 
 /**
@@ -128,25 +136,26 @@ function settled(at: Position, items: readonly WallItem[], gravity: boolean): { 
  * direction `dir`, goes among `items`: the walls' stop short, with the
  * step-up and step-down above while you stand on a blocking floor and step
  * level. With `gravity`, a press off an edge stops on the first gibson past it.
+ * `down` is the walker's gravity: a press along its axis is the plain step.
  */
-export function walkStep(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[], gravity = false): WalkStep {
-  if (axis === 'y' || length > STEP_SUBSTEP_MAX || !standing(from, items, gravity)) {
+export function walkStep(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[], gravity = false, down: AxisDirection = WORLD_DOWN): WalkStep {
+  if (axis === down.axis || length > STEP_SUBSTEP_MAX || !standing(from, items, gravity, down)) {
     const wall = stepLimit(from, axis, dir, length, items)
     return { to: moved(from, axis, dir, wall.reach), by: wall.by }
   }
   let at = from
   for (let n = 0n; n < length; n++) {
     const ahead = stepLimit(at, axis, dir, 1n, items)
-    const lift = ahead.reach === 1n ? null : lifted(at, axis, dir, items, gravity)
+    const lift = ahead.reach === 1n ? null : lifted(at, axis, dir, items, gravity, down)
     const next = lift ? lift.on : moved(at, axis, dir, 1n)
     // Held: the press stops on the last gibson it reached.
     if (next === null) return { to: at, by: lift?.lid ?? ahead.by }
-    const down = settled(next, items, gravity)
-    at = down.at
+    const floor = settled(next, items, gravity, down)
+    at = floor.at
     // Off an edge higher than a step-down, with no floor near: the rest of
     // the press is the plain step, at this height. Under gravity the press
     // ends here instead, and the fall starts from this gibson.
-    if (!down.standing) {
+    if (!floor.standing) {
       if (gravity) break
       const rest = length - n - 1n
       if (rest === 0n) break

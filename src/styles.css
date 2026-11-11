@@ -9619,6 +9619,8 @@ a.feed__act { text-decoration: none; }
 /* AGENTS: a labeled COPY, then MY AGENTS rows of face, npub, TALK, SPECTATE. */
 .agents__invite { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .agents__invite .legend__label { margin: 0; flex: 1 1 auto; }
+/* What ACTIVATE said, kept clear of MY AGENTS below it. */
+.agents__activate + .notice { margin: 0 0 10px; }
 .agents__row { grid-template-columns: 1fr auto auto auto; }
 .agents__npub { font-size: 9px; color: var(--dim); white-space: nowrap; }
 .agents__npub:hover { color: var(--accent); }

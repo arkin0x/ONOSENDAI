@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BUILT_IN, hexAt } from 'sno-core/snoPalette'
-import { mount, textOf, type Host } from '../../test/elementRoot'
+import { mount, settled, textOf, type Host } from '../../test/elementRoot'
 
 if (typeof localStorage === 'undefined') {
   const mem = new Map<string, string>()
@@ -25,7 +25,7 @@ if (typeof localStorage === 'undefined') {
 vi.mock('react-dom', async (importOriginal) => ({ ...(await importOriginal<typeof import('react-dom')>()), createPortal: (el: unknown) => el }))
 vi.mock('../../lib/relay', () => ({ onAuthChange: () => () => {}, signInFailed: () => false, publishMany: vi.fn(async () => ({ ok: true })), query: vi.fn(async () => []), queryAny: vi.fn(async () => []), queryEach: vi.fn(async () => []), relaySet: () => ['wss://relay.test'] }))
 
-const { PaletteModal, lightInk } = await import('../PaletteModal')
+const { PaletteModal, inkContrast, lightInk } = await import('../PaletteModal')
 const { useWorkshop } = await import('../../store/useWorkshop')
 
 const rgb = (hex: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number]
@@ -37,12 +37,13 @@ const numberOf = (h: Host): string | null => {
 }
 const readout = (all: Host[]): Host | undefined => all.find((h) => cls(h) === 'palettes__now')
 
-async function sheet(colorHex: string, recent: string[] = []) {
-  useWorkshop.setState({ shards: [], currentId: null, color: rgb(colorHex), palette: recent, palettes: [] } as never)
+async function sheet(colorHex: string, recent: string[] = [], palette?: Array<[number, number, number]>) {
+  const shards = palette ? [{ id: 'own', name: 'own', vertices: [], faces: [], mode: 'solid', unit: 0, extent: 8, updatedAt: 1, palette, paletteName: 'four' }] : []
+  useWorkshop.setState({ shards, currentId: palette ? 'own' : null, color: rgb(colorHex), palette: recent, palettes: [] } as never)
   return mount(<PaletteModal onClose={() => {}} />)
 }
 
-afterEach(() => { useWorkshop.setState({ palette: [] } as never) })
+afterEach(() => { useWorkshop.setState({ shards: [], currentId: null, palette: [] } as never) })
 
 describe('the palette sheet names colors by number', () => {
   it('reads out the color in hand by number and hex, without hover', async () => {
@@ -51,7 +52,7 @@ describe('the palette sheet names colors by number', () => {
     const now = readout(m.all())
     expect(now).toBeDefined()
     const words = textOf(now!)
-    expect(words).toContain('IN HAND')
+    expect(words).toContain('COLOR')
     expect(words).toContain('171')
     expect(words).toContain(hex)
     await m.unmount()
@@ -91,16 +92,42 @@ describe('the palette sheet names colors by number', () => {
     await m.unmount()
   })
 
-  it('swaps a picked swatch\'s number for the check while building a palette', async () => {
+  it('shows no numbers while building a palette, whose numbers are the picks\' order', async () => {
     const m = await sheet(hexAt(BUILT_IN, 0))
     await m.press('NEW PALETTE')
     expect(readout(m.all())).toBeUndefined()
-    const first = swatches(m.all())[5]
-    ;(first.props.onClick as () => void)()
-    await new Promise((r) => setTimeout(r, 5))
+    expect(swatches(m.all()).every((h) => numberOf(h) === null)).toBe(true)
+    ;(swatches(m.all())[5].props.onClick as () => void)()
+    await settled()
     const after = swatches(m.all())
-    expect(numberOf(after[5])).toBeNull()
-    expect(numberOf(after[6])).toBe('6')
+    expect(after[5].props['aria-pressed']).toBe(true)
+    expect(after.every((h) => numberOf(h) === null)).toBe(true)
+    await m.unmount()
+  })
+
+  it('numbers a palette of the object\'s own by its own places', async () => {
+    const own: Array<[number, number, number]> = [[10, 10, 10], [250, 250, 250], [0, 175, 202], [200, 40, 40]]
+    const off = hexAt(BUILT_IN, 100)
+    const m = await sheet('#00afca', [off, '#00afca'], own)
+    const sw = swatches(m.all())
+    // Two recent, then the object's four.
+    expect(sw).toHaveLength(6)
+    expect(numberOf(sw[0])).toBeNull()
+    expect(sw[0].props['aria-label']).toBe(`Recently used color ${off}`)
+    expect(numberOf(sw[1])).toBe('2')
+    expect(sw.slice(2).map(numberOf)).toEqual(['0', '1', '2', '3'])
+    expect(cls(sw[4])).toContain('is-on')
+    expect(textOf(readout(m.all())!)).toContain('2')
+    expect(textOf(readout(m.all())!)).toContain('#00afca')
+    await m.unmount()
+  })
+
+  it('writes the number in light ink on the darks and dark ink on the lights', async () => {
+    const m = await sheet(hexAt(BUILT_IN, 0))
+    const sw = swatches(m.all())
+    sw.forEach((h, i) => expect(cls(h).includes('is-light')).toBe(lightInk(hexAt(BUILT_IN, i))))
+    expect(cls(sw[192])).toContain('is-light')
+    expect(cls(sw[223])).not.toContain('is-light')
     await m.unmount()
   })
 })
@@ -113,5 +140,13 @@ describe('lightInk', () => {
     expect(lightInk('#f0f0a0')).toBe(false)
     // Saturated blue is dark to the eye though one channel is full.
     expect(lightInk('#0000ff')).toBe(true)
+    // Bright saturated mid tones take dark ink (a raw hex threshold got these wrong).
+    expect(lightInk('#00afca')).toBe(false)
+    expect(lightInk('#ff1ae7')).toBe(false)
+  })
+
+  it('keeps every built-in number at 3:1 contrast or better, faded as drawn', () => {
+    const worst = Math.min(...BUILT_IN.map((_, i) => inkContrast(hexAt(BUILT_IN, i))))
+    expect(worst).toBeGreaterThanOrEqual(3)
   })
 })

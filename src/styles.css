@@ -8079,7 +8079,7 @@ kbd {
   line-height: 1;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
-  opacity: 0.72;
+  opacity: 0.85; /* PaletteModal INK_ALPHA picks the ink at this fade */
   pointer-events: none;
   user-select: none;
 }

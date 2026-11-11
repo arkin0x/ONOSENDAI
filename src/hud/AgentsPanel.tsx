@@ -69,7 +69,12 @@ export function isChosenIdentity(pubkey: string): boolean {
 
 export function AgentsPanel(): JSX.Element {
   const identity = useCyberspace((s) => s.identity)
-  const loggedIn = isChosenIdentity(identity.pubkey)
+  const signerKind = useCyberspace((s) => s.signerKind)
+  // A key you logged in with, or the local key this app made for you: both are
+  // a real identity you can follow an agent from, so neither needs a bunker
+  // first (feedback 2026-11-11, item 7). A local signer already decrypts agent
+  // DMs without a prompt (useAgentDms promptFree).
+  const loggedIn = isChosenIdentity(identity.pubkey) || signerKind === 'local'
   const { agents, status, refresh } = useMyAgents(identity.pubkey)
   const myInbox = useMyDmInbox(identity.pubkey, loggedIn)
   // 'invite', or the pubkey whose npub was copied last.

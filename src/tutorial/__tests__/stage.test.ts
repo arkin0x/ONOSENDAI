@@ -23,7 +23,7 @@ import { NIP44_MAX_PLAINTEXT, openWithSecret, plaintextBytes, readContents } fro
 import { BAG_SAFE_BYTES } from '../../lib/bagSize'
 import { CLIENT_TAG } from '../../lib/client'
 import { BOX_HEIGHT, COVER_MAX, FOOTPRINT, inRegion, regionBase, toWorld, tutorialLayout } from '../layout'
-import { STAGE_TEXT, buildStage, readStage, stageKey, writeStage, type KeyAt } from '../stage'
+import { STAGE_TEXT, WELCOME_ITEM, buildStage, readStage, stageKey, writeStage, type KeyAt } from '../stage'
 import { guideBagsFor, isGuideAuthor, isGuideBag, onGuideBags, passesTaps, setGuideBags } from '../guideBags'
 import { COURSE, FINISH_CHEST, START_STAND, atStart, courseToWorld } from '../course'
 import type { Position } from '../../lib/space'
@@ -149,16 +149,21 @@ describe('the stage', () => {
     const contents = readContents(openWithSecret(chest.chest!, lock.secretHex), stage.guide)
     expect(contents.map((c) => c.body.type)).toEqual(['shard', 'message', 'key'])
     expect(contents.map((c) => c.id)).toEqual(stage.ids.chestContents)
-    for (const c of contents) {
-      expect(c.verified).toBe(true)
-      expect(c.event.pubkey).toBe(stage.guide)
-    }
-    // The signed items inside are attributed too; the message is a rumor, never signed, so never tagged.
+    // Every entry verifies. The trophy and the message are the guide's; the
+    // welcome item is the owner's own published event, embedded as theirs.
+    for (const c of contents) expect(c.verified).toBe(true)
+    expect(contents[0].event.pubkey).toBe(stage.guide)
+    expect(contents[1].event.pubkey).toBe(stage.guide)
+    expect(contents[2].event.id).toBe(WELCOME_ITEM.id)
+    expect(contents[2].event.pubkey).toBe(WELCOME_ITEM.pubkey)
+    // The guide's signed shard carries the client tag; the message is a rumor,
+    // never signed, so never tagged; the owner's welcome item is theirs, not
+    // re-signed here, so it carries no guide tag of ours.
     expect(contents[0].event.tags).toContainEqual(CLIENT_TAG)
-    expect(contents[2].event.tags).toContainEqual(CLIENT_TAG)
     expect(contents[1].event.tags).not.toContainEqual(CLIENT_TAG)
+    expect(contents[2].event.tags).not.toContainEqual(CLIENT_TAG)
     expect(contents[1].body.text).toBe(STAGE_TEXT.message)
-    expect(contents[2].body.key?.name).toBe(STAGE_TEXT.welcomeName)
+    expect(contents[2].body.key?.name).toBe('Black Sun')
 
     // The finish chest: in the deck's own height-3 region, locked to it, with pieces to build with.
     const finishAt = courseToWorld(l.frame, FINISH_CHEST)

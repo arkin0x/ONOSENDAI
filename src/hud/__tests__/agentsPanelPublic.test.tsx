@@ -60,6 +60,7 @@ function answered(inbox: 'none' | 'ready' | 'loading'): void {
 
 afterEach(() => {
   localStorage.removeItem(PREF)
+  useCyberspace.setState({ signerKind: 'local' })
   useMyAgentsAnswer.setState({ me: '', agents: [], status: 'loading' })
   useAgentDms.setState({ me: '', myInbox: { status: 'loading', relays: [] }, inboxSetup: { status: 'idle', error: null } })
 })
@@ -72,7 +73,10 @@ describe('the AGENTS panel, public as a BETA', () => {
     expect(BETA_TIP).toMatch(/never your funds/)
   })
 
-  it('with no account of your own, says to log in first and offers nothing else', () => {
+  it('on an unchosen non-local signer, says to log in first and offers nothing else', () => {
+    // A signer that is neither saved as your pref nor the app's own local key
+    // (an extension connected but not kept): still the logged-out path.
+    useCyberspace.setState({ signerKind: 'nip07' })
     answered('none')
     expect(isChosenIdentity(me())).toBe(false)
     const html = renderToStaticMarkup(<AgentsPanel />)
@@ -81,6 +85,18 @@ describe('the AGENTS panel, public as a BETA', () => {
     expect(html).not.toContain('COPY')
     expect(html).not.toContain('SET UP DM INBOX')
     expect(html).not.toContain('MINE')
+  })
+
+  it('on the generated local key, opens the full panel without logging in (feedback item 7)', () => {
+    // The key the app made for you (signerKind local) is already an identity
+    // you can follow an agent from: no bunker, no LOG IN.
+    useCyberspace.setState({ signerKind: 'local' })
+    answered('none')
+    expect(isChosenIdentity(me())).toBe(false)
+    const html = renderToStaticMarkup(<AgentsPanel />)
+    expect(html).not.toContain('Log in with your Nostr account first.')
+    expect(html).toContain('COPY')
+    expect(html).toContain('0 MINE')
   })
 
   it('logged in with no agent: COPY, MY AGENTS empty, and SET UP DM INBOX when you have none', () => {

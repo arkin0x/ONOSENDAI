@@ -26,7 +26,7 @@ import { watchDoorReturn } from './lib/doorReturn'
 import { startCoordRoute } from './store/useCoordRoute'
 import { DemoCoach } from './hud/DemoCoach'
 import { TutorialCoach } from './hud/TutorialCoach'
-import { watchFirstArrival } from './store/useTutorial'
+import { useTutorial, watchFirstArrival } from './store/useTutorial'
 // The tutorial's staged things and the waits on them (registered on load; stages only while it runs).
 import './tutorial/director'
 // The final card's DUNGEON, when games are on for this device.
@@ -102,6 +102,9 @@ const SYNC_PRIORITY_DELAY_MS = 1500
 import { useShards } from './store/useShards'
 import { useBuilder } from './store/useBuilder'
 import { CHAT_COVERS_PAD, linkChatAndPad, tapScene, usePad } from './store/usePad'
+
+/** A stable empty list for a step that keeps no chips, so the selector never churns. */
+const EMPTY_KEEP: ReadonlyArray<'found' | 'chain'> = []
 
 export default function App(): JSX.Element {
   // Reactions and comments that tag you: the first page per identity, then a poll.
@@ -229,6 +232,12 @@ export default function App(): JSX.Element {
   // where building happens, so on a phone the panels fold away.
   const building = useBuilder((s) => s.active)
   const touring = useDemo((s) => s.active)
+  // The first-arrival tutorial hides the top-left chips to cut clutter, save
+  // the few a step teaches with by name (feedback item 3). They all come back
+  // when it is exited or finished.
+  const tutorialActive = useTutorial((s) => s.active)
+  const tutorialKeep = useTutorial((s) => (s.active ? (s.script.steps[s.index]?.keepChips ?? EMPTY_KEEP) : EMPTY_KEEP))
+  const keepsChip = (name: 'found' | 'chain'): boolean => !tutorialActive || tutorialKeep.includes(name)
   // The question bubble lives in the menu; on a phone the menu covers the
   // scene, so starting the tour from it closes it. Only on the start:
   // opening the menu during the tour (its menu step) leaves it open.
@@ -300,6 +309,9 @@ export default function App(): JSX.Element {
     // A tap while the view menu is up dismisses that first, so one gesture never
     // has two meanings.
     if (viewMenuOpen) { setViewMenuOpen(false); return }
+    // While the tutorial runs the controls stay out, so a stray tap never
+    // folds them and COMMIT is always there to press (feedback item 5).
+    if (useTutorial.getState().active && usePad.getState().open) return
     // With the chat open over the controls, this folds the chat (usePad).
     tapScene()
   }, [viewMenuOpen])
@@ -337,7 +349,13 @@ export default function App(): JSX.Element {
               {/* BUILD mode, where the free view's bar would be: it rides that view. */}
               <BuildBar />
             </>,
-            status: <>
+            status: tutorialActive ? <>
+              {/* During the tutorial only the chips a step names are shown
+                  (feedback item 3): FOUND HERE while opening a chest, the
+                  chain chip while spectating a friend. */}
+              {keepsChip('found') && <KeyFoundChip />}
+              {keepsChip('chain') && <ChainExplorer />}
+            </> : <>
               {/* A newer deploy, first of all when it requires a RELOAD to move (lib/versionGate.ts). */}
               <VersionChip />
               {/* A broken chain first: nothing else moves you until you respawn.

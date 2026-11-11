@@ -38,7 +38,7 @@ export const COLUMNS: readonly Column[] = ['left', 'right']
  * Position, its default place.
  */
 export const DEFAULT_ORDER = {
-  left: ['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'],
+  left: ['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links', 'tutorial'],
   right: ['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'],
 } as const satisfies Record<Column, readonly string[]>
 

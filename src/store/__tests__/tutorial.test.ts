@@ -231,18 +231,30 @@ describe('the script', () => {
   it('has no em dash in any line the player reads', () => {
     for (const s of TUTORIAL_SCRIPT.steps) for (const t of [s.title, s.caption, s.captionDone, s.explain, s.hint, s.go]) if (t) expect(t, s.id).not.toMatch(/\u2014/)
   })
+
+  it('keeps only the chips a step teaches with, and no others (feedback item 3)', () => {
+    const keep = (id: string): string[] => TUTORIAL_SCRIPT.steps.find((s) => s.id === id)?.keepChips ?? []
+    // Opening and taking from a chest needs FOUND HERE; spectating a friend needs the chain chip.
+    expect(keep('open')).toEqual(['found'])
+    expect(keep('take')).toEqual(['found'])
+    expect(keep('finish')).toEqual(['found'])
+    expect(keep('friend')).toEqual(['chain'])
+    // The welcome, the box and the course teach with none.
+    expect(keep('welcome')).toEqual([])
+    expect(keep('box')).toEqual([])
+    expect(keep('to-course')).toEqual([])
+  })
 })
 
 describe('the engine', () => {
-  it('never touches the publishing switch: the player is LIVE as before, and stays so', () => {
+  it('starts a first arrival LOCAL, so a newcomer sandboxes (feedback item 15)', () => {
     useTutorial.setState({ script: { steps: [TUTORIAL_SCRIPT.steps[0]] } })
     useCyberspace.getState().setLive(true)
     useTutorial.getState().start()
-    expect(useCyberspace.getState().live).toBe(true)
+    expect(useCyberspace.getState().live).toBe(false)
     useTutorial.getState().next() // FIND IT on the welcome, here the last step
     expect(useTutorial.getState().active).toBe(false)
     expect(readProgress(pubkey())?.ended).toBe('finished')
-    expect(useCyberspace.getState().live).toBe(true)
   })
 
   it('RESTART begins again from the first step for any identity, and pause keeps the step', () => {
@@ -321,21 +333,26 @@ describe('the engine', () => {
     expect(readProgress(pubkey())).toEqual({ step: 'only', ended: 'skipped' })
   })
 
-  it('branches: a choice goes to its step, NEXT on the way through passes over branches, a branch\'s NEXT finishes', () => {
+  it('branches: a choice goes to its step, a branch\'s NEXT returns to the choices checked off, DONE passes over them (feedback items 8 and 10)', () => {
+    const id = (): string => useTutorial.getState().script.steps[useTutorial.getState().index].id
     useTutorial.setState({ script: { steps: [
-      { id: 'c', title: 'C', caption: 'c', modal: true, choices: [{ id: 'go-b', label: 'B', about: 'b', step: 'b' }] },
+      { id: 'c', title: 'C', caption: 'c', modal: true, go: 'DONE', choices: [{ id: 'go-b', label: 'B', about: 'b', step: 'b' }] },
       { id: 'b', title: 'B', caption: 'b', branch: true },
       { id: 'after', title: 'A', caption: 'a' },
     ] } })
     useTutorial.getState().start()
     useTutorial.getState().choose('go-b')
-    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('b')
+    expect(id()).toBe('b')
+    // A branch's NEXT returns to the choices with it checked off, not a finish.
     useTutorial.getState().next()
-    expect(useTutorial.getState().active).toBe(false)
-    expect(readProgress(pubkey())).toEqual({ step: 'b', ended: 'finished' })
-    useTutorial.getState().start({ restart: true })
+    expect(id()).toBe('c')
+    expect(useTutorial.getState().doneChoices).toContain('go-b')
+    // DONE passes over the branch to the step after it.
     useTutorial.getState().next()
-    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('after')
+    expect(id()).toBe('after')
+    // BACK from there steps to the choices, past the branch (feedback item 8).
+    useTutorial.getState().back()
+    expect(id()).toBe('c')
   })
 
   it('a choice that names `when` is offered only once registered; its run happens while the card is up, and the tutorial ends once it went', async () => {
@@ -394,7 +411,7 @@ describe('the engine', () => {
 
   it('the script offers HYPERSPACE and AGENTS, and the dungeon only once Track C registers it', () => {
     const choice = TUTORIAL_SCRIPT.steps.find((st) => st.id === 'choice')!
-    expect(choice.choices!.filter(choiceOffered).map((c) => c.id)).toEqual(['hyperspace', 'agents'])
+    expect(choice.choices!.filter(choiceOffered).map((c) => c.id)).toEqual(['hyperspace', 'agents', 'friend', 'build'])
     for (const c of choice.choices!) if (c.step) expect(TUTORIAL_SCRIPT.steps.find((st) => st.id === c.step)?.branch, c.id).toBe(true)
   })
 

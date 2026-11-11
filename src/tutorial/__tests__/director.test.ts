@@ -42,6 +42,7 @@ import { guideBagsFor } from '../guideBags'
 import { GUIDE_KEY } from '../guide'
 import { TUTORIAL_SCRIPT } from '../script'
 import { START_STAND, courseToWorld } from '../course'
+import { toWorld } from '../layout'
 import { useWalk } from '../../store/useWalk'
 
 const pubkey = (): string => useCyberspace.getState().identity.pubkey
@@ -82,6 +83,34 @@ describe('the director', () => {
     useShards.setState({ discovered: { [stage.ids.chest]: theirs, ['x'.repeat(64)]: other } })
     useTutorial.getState().pause()
     expect(Object.keys(useShards.getState().discovered)).toEqual(['x'.repeat(64)])
+  })
+
+  it('keeps what the guide sealed on screen when the tutorial finishes, local only (feedback item 9)', async () => {
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    const stage = useTutorialStage.getState().stage!
+    const theirs = { eventId: stage.ids.chest, author: stage.guide } as never
+    useShards.setState({ discovered: { [stage.ids.chest]: theirs } })
+    const lookups = stage.bags.map((b) => b.tags.find((t) => t[0] === 'd')![1])
+    // FINISH keeps the finds and the bags; nothing was ever published.
+    useTutorial.getState().end('finished')
+    expect(Object.keys(useShards.getState().discovered)).toContain(stage.ids.chest)
+    expect(guideBagsFor(lookups)).toHaveLength(3)
+    expect(log.published).toEqual([])
+    // Clean up for the next test: a skip takes it all away again.
+    useTutorial.getState().start({ restart: true })
+    useTutorial.getState().end('skipped')
+    useShards.setState({ discovered: {} })
+  })
+
+  it('lines the first move up one gibson in front of the chest, facing it (feedback item 4)', async () => {
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    const layout = useTutorialStage.getState().layout!
+    useTutorial.getState().start({ at: 'box' })
+    await staged()
+    // The chest sits at the frame's (3, 3, 3); the cursor lands a gibson nearer the way in.
+    expect(useCyberspace.getState().cursor).toEqual(toWorld(layout.frame, 2, 3, 3))
   })
 
   it('never lets a staging a RESTART overtook overwrite the kept stage', async () => {

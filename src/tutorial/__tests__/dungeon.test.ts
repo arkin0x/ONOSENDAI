@@ -57,13 +57,13 @@ describe('the DUNGEON choice', () => {
     // Loading the module with games off registered nothing, and asking again registers nothing.
     expect(registerDungeonChoice()).toBe(false)
     expect(choiceOffered(dungeon)).toBe(false)
-    expect(offered()).toEqual(['hyperspace', 'agents'])
+    expect(offered()).toEqual(['hyperspace', 'agents', 'friend', 'build'])
   })
 
   it('is offered with games on, and its tap enters the dungeon and ends the tutorial once the game is on screen', async () => {
     localStorage.setItem(GAMES_KEY, '1')
     expect(registerDungeonChoice()).toBe(true)
-    expect(offered()).toEqual(['hyperspace', 'dungeon', 'agents'])
+    expect(offered()).toEqual(['hyperspace', 'dungeon', 'agents', 'friend', 'build'])
     // The game comes on screen before its world is read: the card goes then, not after.
     entry.next = () => {
       useGame.setState({ session: { entryId: 'e'.repeat(64) } as unknown as GameSession })

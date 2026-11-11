@@ -38,8 +38,32 @@ import { START_STAND, atStart, courseToWorld, onDeck } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import type { Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
-import { inRegion, type TutorialLayout } from './layout'
+import { inRegion, toWorld, type TutorialLayout } from './layout'
 import type { Stage } from './stage'
+import { setTutorialSpin, setTutorialZoom } from '../store/useTutorialCam'
+import { setMenuOpen } from '../hooks/useMenuOpen'
+import { usePanelLayout } from '../store/usePanelLayout'
+
+/**
+ * A comfortable orbit distance (render cells) to ease in to once the player
+ * HOPs onto the course, so the platform is not looked at from far away
+ * (feedback item 6). START_DISTANCE is 26; this is closer.
+ */
+const COURSE_ZOOM = 12
+
+/**
+ * arkinox's pubkey (npub1arkn0x...), the owner, offered as a friend to add and
+ * spectate (feedback item 11a). The decoded hex, the same key demo/script.ts
+ * curates under.
+ */
+const OWNER_PUBKEY = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
+
+/** Lift the ITEMS panel to the top of the left menu column (feedback items 2 and 11b). */
+function itemsToTop(): void {
+  const { order, move } = usePanelLayout.getState()
+  const first = order.left.find((id) => id !== 'items') ?? null
+  move('items', first, 'left')
+}
 
 interface StageState {
   /** What is staged for the run on screen, once it is. */
@@ -172,14 +196,28 @@ registerTutorialWatcher('take', (onDone) => watchUntil(() => {
 
 onTutorialLifecycle({
   start: (player, restart) => { void stageFor(player, restart) },
-  stop: unstage,
+  // FINISH keeps what was staged on screen, local only (feedback item 9): the
+  // course, the chests and what was taken stay. A skip or a pause takes it all
+  // away. The spin and the zoom are the run's either way.
+  stop: (how) => {
+    setTutorialSpin(false)
+    setTutorialZoom(null)
+    if (how !== 'finished') unstage()
+  },
 })
 
-/** The box step lines the cursor up in the blue box, once it is staged, so one COMMIT moves you in. */
-registerTutorialEffect('aim-box', aimOnce((layout) => {
-  const b = layout.frame.boxBase
-  return { x: b.x + 4n, y: b.y + 4n, z: b.z + 4n }
-}))
+/**
+ * The box step lines the cursor up one gibson in front of the chest, facing
+ * it, so one COMMIT lands the player there rather than beside and behind it
+ * (feedback item 4). The chest sits at the frame's (3, 3, 3); this is (2, 3,
+ * 3), a gibson nearer the way in. While the step is up the camera idles a slow
+ * spin around the cursor (feedback item 14); it stops when the step moves on.
+ */
+registerTutorialEffect('aim-box', () => {
+  setTutorialSpin(true)
+  const off = aimOnce((layout) => toWorld(layout.frame, 2, 3, 3))()
+  return () => { setTutorialSpin(false); if (off) off() }
+})
 
 /**
  * Arrival (T7): `inside` is true of where the player stands, their chain's
@@ -219,8 +257,40 @@ registerTutorialWatcher('take-finish', (onDone) => watchUntil(() => {
   return ids.some((id) => { const it = items[id]; return !!it && !it.cleared })
 }, onDone, [onStage, (l) => useInventory.subscribe((s, prev) => { if (s.items !== prev.items) l() })]))
 
-/** The course step lines the cursor up on the start square, so one COMMIT moves you there. */
-registerTutorialEffect('aim-start', aimOnce((layout) => courseToWorld(layout.frame, START_STAND)))
+/**
+ * The course step lines the cursor up on the start square, so one COMMIT HOPs
+ * you there, and eases the orbit camera in close once you land, so the
+ * platform is not looked at from far away (feedback item 6).
+ */
+registerTutorialEffect('to-course', () => {
+  const offAim = aimOnce((layout) => courseToWorld(layout.frame, START_STAND))()
+  let zoomed = false
+  const check = (): void => {
+    if (zoomed) return
+    const { layout } = useTutorialStage.getState()
+    const cs = useCyberspace.getState()
+    if (layout && cs.events.length > 0 && cs.headPlane === layout.plane && atStart(layout.frame, cs.position)) {
+      zoomed = true
+      setTutorialZoom(COURSE_ZOOM)
+      offPos()
+    }
+  }
+  const offPos = useCyberspace.subscribe((s, prev) => { if (s.position !== prev.position || s.headPlane !== prev.headPlane) check() })
+  check()
+  return () => { if (offAim) offAim(); offPos(); setTutorialZoom(null) }
+})
+
+/** The inventory step opens the menu and lifts ITEMS to the top of it (feedback item 2). */
+registerTutorialEffect('teach-inventory', () => { setMenuOpen(true); itemsToTop() })
+
+/** The friend step adds the owner as a TARGET and opens the menu (feedback item 11a). */
+registerTutorialEffect('add-friend', () => {
+  setMenuOpen(true)
+  try { useCyberspace.getState().addTarget(OWNER_PUBKEY, 'arkinox') } catch (err) { console.warn('[tutorial] add friend failed:', err) }
+})
+
+/** The build step opens the menu with ITEMS at the top, to place a shard from (feedback item 11b). */
+registerTutorialEffect('teach-build', () => { setMenuOpen(true); itemsToTop() })
 
 /**
  * The workshop opened, and closed again: the player has been in it (the next

@@ -1,10 +1,9 @@
 /**
  * script.ts: the first-arrival tutorial, as data (first-arrival tutorial
- * design, 2026-11-10, §3).
+ * design, 2026-11-10, §3; owner feedback 2026-11-11).
  *
- * Captions are drafts in the owner's voice, short and plain, waiting on the
- * owner's read of the whole script (design §7, question 7). The welcome line
- * is the owner's own.
+ * Captions are in the owner's voice, short and plain. The welcome line and the
+ * course line are the owner's own (feedback 2026-11-11, items 5 and 13).
  */
 
 import type { TutorialScript, TutorialStep } from './types'
@@ -12,20 +11,22 @@ import type { TutorialScript, TutorialStep } from './types'
 export const WELCOME: TutorialStep = {
   id: 'welcome',
   title: 'Welcome!',
-  caption: "A treasure chest has appeared near your location. You should see what's in it.",
+  caption: "A treasure chest has appeared near your location. Go see what's in it! 🪎👀",
   modal: true,
   go: 'FIND IT',
 }
 
-/** Move into the blue box: being there reveals the chest (the scan does it, no button). */
+/** Move into the green box: being there reveals the chest (the scan does it, no button). */
 export const BOX: TutorialStep = {
   id: 'box',
-  title: 'The blue box',
-  caption: "The chest is in the blue box. Being somewhere is how you find what's hidden there.",
+  title: 'The green box',
+  caption: "The chest is in the green box. Being somewhere is how you find what's hidden there.",
   captionDone: "You're in.",
   hint: 'Tap COMMIT to move into the box.',
   explain: 'Every place in cyberspace has a key, and the only way to get it is to be there or to do the work of being there. Things are hidden at a place under its key, so you find them by going there. The box is one region, 8 gibsons on a side.',
-  scene: { target: 'self' },
+  // The COMMIT button glows so a newcomer knows where to press; the camera
+  // idles a slow spin around the cursor (tutorial/director.ts aim-box).
+  scene: { target: 'self', highlight: '.touchops__commit' },
   wait: 'see-chest',
   effect: 'aim-box',
 }
@@ -37,6 +38,7 @@ export const OPEN: TutorialStep = {
   caption: 'Tap the chest, then OPEN.',
   hint: 'Tap the chest (or FOUND HERE), then OPEN.',
   explain: "Nothing opens by itself. This chest is locked to the box's region, and standing in the box gave you its key.",
+  keepChips: ['found'],
   scene: { target: 'keep', highlight: '.foundchip' },
   wait: 'open-chest',
 }
@@ -47,20 +49,32 @@ export const TAKE: TutorialStep = {
   title: 'Take it',
   caption: "What's in the chest is yours once you TAKE it.",
   hint: 'Tap the chest again, then TAKE ALL.',
+  keepChips: ['found'],
   scene: { target: 'keep', highlight: '.foundchip' },
   explain: 'What you take goes in your ITEMS, in the menu. A shard you take can be placed in the world, built with, or changed in the workshop.',
   wait: 'take',
+}
+
+/** The items you hold: open the menu, ITEMS at the top of it (feedback item 2). */
+export const INVENTORY: TutorialStep = {
+  id: 'inventory',
+  title: 'Your items',
+  caption: "What you took is in ITEMS, in the menu. That's your stuff.",
+  hint: 'Look in ITEMS at the top of the menu.',
+  explain: 'A shard in ITEMS can be placed in the world, built with, or changed in the workshop.',
+  scene: { target: 'keep', highlight: '.panel--loot' },
+  effect: 'teach-inventory',
 }
 
 /** To the start of the course: one COMMIT, the cursor already on the start square. */
 export const TO_COURSE: TutorialStep = {
   id: 'to-course',
   title: 'The course',
-  caption: 'See the platforms? Go to the start.',
-  hint: 'Tap COMMIT to move there.',
-  scene: { target: 'self' },
+  caption: 'HOPs are the basic way to move through cyberspace, but running and jumping is a bit more fun! See the platform course? Let\'s HOP over it and try it. Tap COMMIT in CONTROLS to HOP there.',
+  hint: 'Tap COMMIT to HOP to the start.',
+  scene: { target: 'self', highlight: '.touchops__commit' },
   wait: 'at-start',
-  effect: 'aim-start',
+  effect: 'to-course',
 }
 
 /** WALK: the mode button goes round HOP, VIEW, WALK, BUILD. */
@@ -102,6 +116,7 @@ export const FINISH: TutorialStep = {
   title: 'You made it',
   caption: 'Another chest, with pieces to build a course of your own. OPEN it and TAKE them.',
   hint: 'Tap the chest to OPEN it, then again to TAKE ALL.',
+  keepChips: ['found'],
   scene: { target: 'keep', highlight: '.foundchip' },
   wait: 'take-finish',
 }
@@ -117,17 +132,23 @@ export const WORKSHOP: TutorialStep = {
   wait: 'workshop',
 }
 
-/** The three big doors (T9). Each choice is the player's; nothing here costs work or sats. */
+/**
+ * Where next (T9). Each choice is the player's; nothing here costs work or
+ * sats. After a route they come back here with it checked off, so they can do
+ * the rest (feedback item 10); DONE ends the run.
+ */
 export const CHOICE: TutorialStep = {
   id: 'choice',
   title: 'Where next?',
-  caption: 'That was the basics. Pick one.',
+  caption: 'That was the basics. Try as many as you like.',
   modal: true,
   go: 'DONE',
   choices: [
     { id: 'hyperspace', label: 'TRAVEL TO EARTH', about: 'Ride hyperspace to a place on Earth.', step: 'earth' },
     { id: 'dungeon', label: 'PLAY THE DUNGEON', about: 'A game inside cyberspace, with its own rules.', when: 'dungeon' },
     { id: 'agents', label: 'BRING YOUR AI', about: 'Add your AI to cyberspace and talk to it here.', step: 'agents' },
+    { id: 'friend', label: 'SEE A FRIEND', about: 'Add a friend and watch where they have been.', step: 'friend' },
+    { id: 'build', label: 'BUILD SOMETHING', about: 'Place a shard from your ITEMS in the world.', step: 'build-place' },
   ],
 }
 
@@ -143,16 +164,50 @@ export const EARTH: TutorialStep = {
   branch: true,
 }
 
-/** AGENTS: the existing panel, in the menu. */
+/** AGENTS: the existing panel, in the menu, open to the key you are on (feedback item 7). */
 export const AGENTS: TutorialStep = {
   id: 'agents',
   title: 'Your AI',
-  caption: 'Your AI can be in cyberspace with you, and you can talk to it here. It needs your Nostr account.',
-  hint: 'Open the menu, AGENTS, then LOG IN.',
+  caption: 'Your AI can be in cyberspace with you, and you can give it commands through ONOSENDAI.',
+  hint: 'Open the menu, then AGENTS.',
   scene: { target: 'keep', highlight: '.hamburger-menu' },
   branch: true,
 }
 
+/** A friend in cyberspace: add the owner as a TARGET, spectate his chain (feedback item 11a). */
+export const FRIEND: TutorialStep = {
+  id: 'friend',
+  title: 'See a friend',
+  caption: "I'm in cyberspace too. I added myself to your TARGET panel. Watch where I have been.",
+  hint: 'Open TARGET, then tap the chain chip to SPECTATE me.',
+  explain: 'A TARGET is anyone you want to keep an eye on. The chain chip walks their moves, oldest to newest. SPECTATE rides along from your own head.',
+  keepChips: ['chain'],
+  scene: { target: 'keep', highlight: '.hamburger-menu' },
+  effect: 'add-friend',
+  branch: true,
+}
+
+/** BUILD: move a shard from ITEMS into your hand, place it in the world (feedback item 11b). */
+export const BUILD_PLACE: TutorialStep = {
+  id: 'build-place',
+  title: 'Build something',
+  caption: 'Take a shard from ITEMS into your hand, then place it in BUILD.',
+  hint: 'ITEMS, pick a shard, HOLD, switch to BUILD, then COMMIT to place it.',
+  explain: 'BUILD puts what you hold into the world where the cursor is. The workshop is where you change or make a shard; it will not interrupt this.',
+  scene: { target: 'keep', highlight: '.hamburger-menu' },
+  effect: 'teach-build',
+  branch: true,
+}
+
+/** The last word: how to open the tutorial again (feedback items 10 and 17). */
+export const FAREWELL: TutorialStep = {
+  id: 'done',
+  title: "That's the tour",
+  caption: 'Want it again? Open the menu and tap TUTORIAL.',
+  modal: true,
+  go: 'FINISH',
+}
+
 export const TUTORIAL_SCRIPT: TutorialScript = {
-  steps: [WELCOME, BOX, OPEN, TAKE, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, EARTH, AGENTS],
+  steps: [WELCOME, BOX, OPEN, TAKE, INVENTORY, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, EARTH, AGENTS, FRIEND, BUILD_PLACE, FAREWELL],
 }

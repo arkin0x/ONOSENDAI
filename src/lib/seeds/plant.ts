@@ -47,10 +47,20 @@ export interface SeedDraft {
 /** A hide height measured for one spot: the build cursor (as a coordinate) and step it holds for. */
 export interface SeedFit {
   height: number
-  /** The bloom's reach at the landing point of that height, in gibsons with the margin. */
-  reach: number
+  /** The bloom's reach at the landing point of that height, in gibsons with the margin; absent when the worker could not grow it (the height is then SEED_HIDE_MAX). */
+  reach?: number
   cursor: string
   step: number
+}
+
+/**
+ * The fit SEED hands the deploy, from what seedHideFor found at this cursor,
+ * plane and step: recorded even when the bloom could not be measured (at
+ * SEED_HIDE_MAX), so lining the seed up keeps the STEP and cursor it was
+ * composed at either way (useShards, the STEP subscription).
+ */
+export function seedFitFor(found: { height: number; reach: number | undefined }, cursor: Position, plane: Plane, step: number): SeedFit {
+  return { height: found.height, ...(found.reach !== undefined ? { reach: found.reach } : {}), cursor: positionHex(cursor, plane), step }
 }
 
 /** The DNA's price in bits, or null when its caps are out of range. */

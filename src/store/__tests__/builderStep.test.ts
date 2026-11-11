@@ -36,9 +36,8 @@ import { useBuilder } from '../useBuilder'
 import { stepBuild } from '../buildStep'
 import { BASE_CAPS } from 'sno-core/seeds'
 import { ORIGINAL_DNAS } from '../../lib/seeds/originalDnas'
-import { seedDraftHeight, type SeedFit } from '../../lib/seeds/plant'
+import { seedDraftHeight, seedFitFor, type SeedFit } from '../../lib/seeds/plant'
 import { buildPlane } from '../../lib/buildCursor'
-import { positionHex } from '../../lib/events'
 import { buildCursorOf, buildStepOf } from '../../lib/buildCursor'
 import { alignTo, deployPoint, type Position } from '../../lib/space'
 
@@ -307,7 +306,7 @@ describe('STEP lowered before SEED (found by the tutorial\'s review, 2026-11-11)
     stepTo(10)
     const at = { ...S().cursor }
     // The composer measures where the seed lands at this STEP and cursor (plant.ts seedHideFor) ...
-    const fit: SeedFit = { height: 5, reach: 6, cursor: positionHex(at, buildPlane(S())), step: buildStepOf(S()) }
+    const fit = seedFitFor({ height: 5, reach: 6 }, at, buildPlane(S()), buildStepOf(S()))
     // ... and PLANT lines the seed up in place of what was lined up.
     D().startDeploySeed(seedDraft(fit))
     expect(D().pending?.type).toBe('seed')
@@ -323,7 +322,18 @@ describe('STEP lowered before SEED (found by the tutorial\'s review, 2026-11-11)
     expect(S().buildStep).toBeNull()
     lineUp(15, 20)
     stepTo(10)
-    D().startDeploySeed(seedDraft({ height: 5, reach: 6, cursor: positionHex(S().cursor, buildPlane(S())), step: 9 }))
+    D().startDeploySeed(seedDraft(seedFitFor({ height: 5, reach: 6 }, S().cursor, buildPlane(S()), 9)))
     expect(S().buildStep).toBeNull()
+  })
+
+  it('a bloom the worker could not measure still keeps the STEP it was composed at, and hides at 12 there', () => {
+    lineUp(15, 20)
+    stepTo(10)
+    const at = { ...S().cursor }
+    const fit = seedFitFor({ height: 12, reach: undefined }, at, buildPlane(S()), buildStepOf(S()))
+    D().startDeploySeed(seedDraft(fit))
+    expect(buildStepOf(S())).toBe(10)
+    expect(S().cursor).toEqual(at)
+    expect(seedDraftHeight(fit, S().cursor, buildPlane(S()), buildStepOf(S()), 20)).toBe(12)
   })
 })

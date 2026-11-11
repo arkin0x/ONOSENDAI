@@ -37,12 +37,9 @@ import { useBuilder } from '../store/useBuilder'
 import { seedItemOf } from '../lib/seeds/seedItem'
 import { dnaResolver } from '../lib/seeds/seedSources'
 import { TUTORIAL_DNA, tutorialDnaId, tutorialSeedDraft } from './dna'
-import { PREVIEW_DAYS, SEED_HIDE_MAX, bloomReachGibsons, dnaMatches, previewRequest, seedHideFor } from '../lib/seeds/plant'
-import { growInWorker } from '../lib/seeds/growClient'
-import { headerBook, trustedTip } from '../lib/seeds/seedSources'
-import { getStopByHeight, useHyperspace } from '../store/useHyperspace'
+import { SEED_HIDE_MAX, dnaMatches, seedHideFor } from '../lib/seeds/plant'
+import { bloomReachAt } from '../lib/seeds/bloomReach'
 import { positionHex } from '../lib/events'
-import type { Caps } from 'sno-core/seeds'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { markViewedStop, ownHyperspaceView } from '../store/useHyperspace'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
@@ -299,22 +296,6 @@ registerTutorialWatcher('plant', (onDone) => {
   const off = watchUntil(() => tutorialTreePlanted(() => again()), onDone, [onStage, (l) => { again = l; return useShards.subscribe((s, prev) => { if (s.mine !== prev.mine) l() }) }])
   return () => { again = () => {}; off() }
 })
-
-/**
- * How far a DNA's bloom reaches at a landing point, as SEED measures it for
- * its hide height (hud/SeedCompose useSeedFit): grown at day 31 of the past
- * month in the seeds worker (inline under tests), its farthest vertex with
- * the margin (plant.ts bloomReachGibsons). Built from the same Seeds pieces
- * SEED builds it from; the height itself is SEED's own seedHideFor.
- */
-export function bloomReachAt(text: string, caps: Caps, plane: Plane, scale: number): (p: Position) => Promise<number | undefined> {
-  const tip = trustedTip() ?? useHyperspace.getState().tipHeight ?? 975_300
-  return async (p) => {
-    const req = previewRequest({ text, caps, coord: positionHex(p, plane), scale, tip, day: PREVIEW_DAYS, hashOf: (h) => headerBook.hash(h) ?? getStopByHeight(h)?.blockHash })
-    const answer = await growInWorker({ ...req, key: 'preview-reach' })
-    return answer.type === 'bloom' ? bloomReachGibsons(answer.buffers.positions, scale) : undefined
-  }
-}
 
 /**
  * PLANT THE SEED (the plant step's button): BUILD on the player, where they

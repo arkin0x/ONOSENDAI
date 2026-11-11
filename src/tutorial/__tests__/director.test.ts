@@ -321,8 +321,9 @@ describe('the director', () => {
     expect(buildPlane(useCyberspace.getState())).toBe(layout!.plane)
     expect(useShards.getState().pending).toMatchObject({ type: 'seed', seed: { text: TUTORIAL_DNA.text, caps: TUTORIAL_DNA.caps, scale: 0 } })
     expect((useShards.getState().pending as { seed: { dnaId?: string } }).seed.dnaId).toBeUndefined()
-    // Its hide height is the one SEED picks for this tree at this spot: SEED's seedHideFor, with the bloom
-    // measured exactly as SEED measures it (hud/SeedCompose useSeedFit), at day 31 where it lands.
+    // Its hide height is the one SEED's seedHideFor picks for this tree at this spot, with the bloom measured
+    // from the same Seeds pieces SEED's useSeedFit uses (day 31, where it lands). This holds the wiring
+    // (cursor, plane, step, ceiling, the deploy's rule); if useSeedFit's measure changes, change bloomReachAt too.
     const { seedHideFor, previewRequest, bloomReachGibsons, PREVIEW_DAYS } = await import('../../lib/seeds/plant')
     const { growInWorker } = await import('../../lib/seeds/growClient')
     const { headerBook, trustedTip } = await import('../../lib/seeds/seedSources')
@@ -387,6 +388,70 @@ describe('the director', () => {
     useTutorial.getState().next()
     expect(useTutorial.getState().stepNote).toBe(null)
     expect(useTutorialStage.getState().error).toBe(null)
+    useCyberspace.setState({ events: [] })
+  })
+
+  it('PLANT THE SEED, after its measure: lines nothing up if the cursor, step or plane moved, BUILD was left, something else was lined up, or the tutorial moved on', async () => {
+    const { lineUpTutorialSeed } = await import('../director')
+    const { useBuilder } = await import('../../store/useBuilder')
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    const { layout } = useTutorialStage.getState()
+    const stand = toWorld(layout!.frame, PLOT_STAND.f, PLOT_STAND.r, PLOT_STAND.u)
+    /** A measure that waits until `go()`, while the test changes something. */
+    const held = () => { let go: () => void = () => {}; const p = new Promise<void>((r) => { go = r }); return { go: () => go(), reachAt: async () => { await p; return 4 } } }
+    const fresh = () => {
+      useBuilder.setState({ active: false } as never)
+      useShards.setState({ pending: null, deployStatus: 'idle' } as never)
+      useCyberspace.setState({ events: [{ id: 'e', tags: [] } as never], position: stand, cursor: stand, headPlane: layout!.plane })
+    }
+    const meanwhile: Array<[string, () => void, RegExp | null]> = [
+      ['the cursor moved', () => useCyberspace.setState({ cursor: { ...stand, x: stand.x + 1n } }), /cursor moved/],
+      ['the step changed', () => useCyberspace.getState().adjustScale(2), /cursor moved/],
+      ['the plane changed', () => useCyberspace.getState().setPlane((1 - layout!.plane) as 0 | 1), /cursor moved/],
+      ['BUILD was left', () => useBuilder.getState().exit(), /BUILD was left/],
+      ['something else was lined up', () => useShards.setState({ pending: { type: 'message', text: 'hi' } as never }), /Finish or cancel/],
+    ]
+    for (const [what, change, want] of meanwhile) {
+      fresh()
+      const m = held()
+      const run = lineUpTutorialSeed(null, m.reachAt)
+      await new Promise((r) => setTimeout(r, 0))
+      change()
+      m.go()
+      const why = await run
+      expect(why, what).toMatch(want!)
+      expect(useShards.getState().pending?.type === 'seed', what).toBe(false)
+    }
+    // The tutorial moved on: nothing lined up, nothing said, and BUILD closed again.
+    fresh()
+    const m = held()
+    let here = true
+    const run = lineUpTutorialSeed(null, m.reachAt, () => here)
+    await new Promise((r) => setTimeout(r, 0))
+    here = false
+    m.go()
+    expect(await run).toBe(null)
+    expect(useShards.getState().pending).toBe(null)
+    expect(useBuilder.getState().active).toBe(false)
+    useCyberspace.setState({ events: [] })
+  })
+
+  it('a second PLANT THE SEED tap while it measures does nothing', async () => {
+    const { runTutorialEffect } = await import('../../store/useTutorial')
+    const director = await import('../director')
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    useTutorial.getState().start({ at: 'plant' })
+    await staged()
+    useCyberspace.setState({ events: [{ id: 'e', tags: [] } as never], position: { x: 0n, y: 0n, z: 0n } })
+    runTutorialEffect('plant-tutorial-seed')
+    expect(director.tutorialSeedMeasuring()).toBe(true)
+    expect(useTutorial.getState().stepNote).toBe('One moment.')
+    // A second tap meanwhile is ignored: the first run's answer is the one shown, and then taps work again.
+    runTutorialEffect('plant-tutorial-seed')
+    await vi.waitFor(() => { expect(useTutorial.getState().stepNote).toMatch(/Stand on the dirt/) })
+    expect(director.tutorialSeedMeasuring()).toBe(false)
     useCyberspace.setState({ events: [] })
   })
 })

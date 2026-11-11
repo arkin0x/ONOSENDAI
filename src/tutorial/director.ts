@@ -301,15 +301,6 @@ registerTutorialWatcher('plant', (onDone) => {
 })
 
 /**
- * PLANT THE SEED (the plant step's button): BUILD on the player, where they
- * stand on the dirt, with the tutorial tree lined up to hide, as SEED's
- * PLANT lines one up (hud/SeedCompose; the composer offers the original
- * DNAs, not this tree). Once the owner's event is set, the seed names it at
- * its own size limit, and waits until the event is on this device's relays,
- * as SEED does; until then the player's SEED signs a copy of the DNA. HIDE
- * is still the player's: nothing is mined or hidden here.
- */
-/**
  * How far a DNA's bloom reaches at a landing point, as SEED measures it for
  * its hide height (hud/SeedCompose useSeedFit): grown at day 31 of the past
  * month in the seeds worker (inline under tests), its farthest vertex with
@@ -325,7 +316,18 @@ export function bloomReachAt(text: string, caps: Caps, plane: Plane, scale: numb
   }
 }
 
-export async function lineUpTutorialSeed(id: string | null = tutorialDnaId(), reachAt?: (p: Position) => Promise<number | undefined>): Promise<string | null> {
+/**
+ * PLANT THE SEED (the plant step's button): BUILD on the player, where they
+ * stand on the dirt, with the tutorial tree lined up to hide, as SEED's
+ * PLANT lines one up (hud/SeedCompose; the composer offers the original
+ * DNAs, not this tree). Once the owner's event is set, the seed names it at
+ * its own size limit, and waits until the event is on this device's relays,
+ * as SEED does; until then the player's SEED signs a copy of the DNA. HIDE
+ * is still the player's: nothing is mined or hidden here. `reachAt` measures
+ * the bloom (SEED's measure by default); `stillHere` says whether the plant
+ * step is still up, asked again after the measure's wait.
+ */
+export async function lineUpTutorialSeed(id: string | null = tutorialDnaId(), reachAt?: (p: Position) => Promise<number | undefined>, stillHere: () => boolean = () => true): Promise<string | null> {
   // What is lined up already: the tree itself (a second tap while it waits or
   // mines does nothing), a copy AGAIN left lined up (stood down), or
   // anything else, which is the player's to finish or cancel first.
@@ -380,26 +382,43 @@ export async function lineUpTutorialSeed(id: string | null = tutorialDnaId(), re
   const cursor = { ...s.cursor }
   const step = buildStepOf(s)
   const found = await seedHideFor(cursor, layout.plane, step, MAX_COMPUTE_HEIGHT, reachAt ?? bloomReachAt(draft.text, draft.caps, layout.plane, draft.scale))
-  // Asked again after the measure: something may have been lined up, or the cursor moved, meanwhile.
+  // Asked again after the measure, which waits: the tutorial moved on (then
+  // nothing is lined up, and BUILD this opened closes if it holds nothing),
+  // something was lined up, BUILD was left, or the cursor, step or plane moved.
+  if (!stillHere()) {
+    if (useBuilder.getState().active && useShards.getState().pending === null) useBuilder.getState().exit()
+    return null
+  }
   const late = lined()
   if (late !== null) return late || null
+  if (!useBuilder.getState().active) return 'BUILD was left. Tap PLANT THE SEED again.'
   const now = useCyberspace.getState()
-  if (!useBuilder.getState().active || positionHex(now.cursor, layout.plane) !== positionHex(cursor, layout.plane) || buildStepOf(now) !== step) return 'The cursor moved. Tap PLANT THE SEED again.'
+  if (positionHex(now.cursor, layout.plane) !== positionHex(cursor, layout.plane) || buildStepOf(now) !== step || buildPlane(now) !== layout.plane) return 'The cursor moved. Tap PLANT THE SEED again.'
   if (found.reach !== undefined) draft = { ...draft, fit: { height: found.height, reach: found.reach, cursor: positionHex(cursor, layout.plane), step } }
   useShards.getState().startDeploySeed(draft)
   return null
 }
 
+/** Whether a PLANT THE SEED is measuring now: a second tap meanwhile does nothing. */
+let planting = false
+export function tutorialSeedMeasuring(): boolean {
+  return planting
+}
+
 registerTutorialEffect('plant-tutorial-seed', () => {
+  if (planting) return
   // The answer is the plant step's own note, and only while that step is still up.
   const t = useTutorial.getState()
   const index = t.index
+  const pubkey = t.pubkey
+  const stillHere = (): boolean => { const n = useTutorial.getState(); return n.active && n.index === index && n.pubkey === pubkey }
+  planting = true
   // Measuring the bloom takes a moment.
   t.noteStep(index, 'One moment.')
-  void lineUpTutorialSeed().then((why) => useTutorial.getState().noteStep(index, why), (err: unknown) => {
+  void lineUpTutorialSeed(tutorialDnaId(), undefined, stillHere).then((why) => useTutorial.getState().noteStep(index, why), (err: unknown) => {
     console.warn('[tutorial] could not line the seed up:', err)
     useTutorial.getState().noteStep(index, 'The seed could not be lined up. Try PLANT THE SEED again.')
-  })
+  }).finally(() => { planting = false })
 })
 
 /** The bud: out of BUILD (planting leaves a copy of the seed lined up), so the next step's COMMIT is there to tap. */

@@ -105,12 +105,12 @@ import { create } from 'zustand'
 import { samePosition, useCyberspace } from './useCyberspace'
 import { copyLinedUp, movable, movingId, placingCopy, positionOf, useShards, type DeployPending } from './useShards'
 import { useWorkshop } from './useWorkshop'
-import { placedStep } from '../lib/space'
+import { deployPoint, placedStep } from '../lib/space'
 import { useHyperspace } from './useHyperspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { depName, useStash } from '../hud/stash'
 import { registerEscape } from '../hooks/useEscape'
-import { buildPlane, placedCursor } from '../lib/buildCursor'
+import { buildPlane, buildStepOf, placedCursor } from '../lib/buildCursor'
 import { landFly } from '../lib/viewFly'
 
 /** How a session of BUILD mode began: the BUILD control (or B), or a DEPLOY. */
@@ -571,4 +571,33 @@ export function addToRoom(eventId: string): void {
 // ADD's height lasts as long as the BUILD it started.
 useBuilder.subscribe((s, prev) => {
   if (prev.active && !s.active && useShards.getState().deployInto !== null) useShards.setState({ deployInto: null })
+})
+
+// BUILD mode ending takes STEP with it, whatever is still lined up: a hide
+// running when the view moved away keeps its bar, and its STEP must not step
+// the cursor at your head. Here, with the mode, so it holds wherever the mode
+// is loaded (it lived in store/buildStep.ts, loaded only with the deploy bar).
+useBuilder.subscribe((s, prev) => {
+  if (!prev.active || s.active) return
+  useCyberspace.setState({ buildExact: false })
+  useCyberspace.getState().setBuildStep(null)
+})
+
+// arkinox, 2026-11-11: "if I position a shard for placement in build, and
+// then I zoom out, when I zoom back in sometimes the shard has changed
+// position." The placement was the cursor's cell at a STEP that follows the
+// zoom (lib/space.ts deployPoint), so a zoom moved it: out, to the coarse
+// cell's center, and a center at one size is never a center at another.
+// The first zoom while anything is lined up puts the build cursor on the
+// placement as it stands, and from then on the placement is the cursor
+// itself (useCyberspace `buildExact`): no zoom moves it, each move steps it
+// one cell of the zoom you are at, and the camera and the cursor cube sit on
+// it. Like lowering STEP, putting the cursor there is not a move of yours
+// (`buildSettle`), so it still counts as being on your avatar.
+useCyberspace.subscribe((s, prev) => {
+  if (s.scaleExp === prev.scaleExp || s.buildExact || !useBuilder.getState().active) return
+  const sh = useShards.getState()
+  if (sh.pending === null) return
+  const at = deployPoint(s.cursor, buildStepOf({ ...s, scaleExp: prev.scaleExp }), sh.deployHeight)
+  useCyberspace.setState({ cursor: at, buildExact: true, buildSettle: { at, from: { ...placedCursor(s) } } })
 })

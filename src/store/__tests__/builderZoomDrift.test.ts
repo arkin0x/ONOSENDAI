@@ -5,8 +5,10 @@
  * then I zoom out, when I zoom back in sometimes the shard has changed
  * position. We can't have this happening. Otherwise, I might zoom out to
  * line it up with a different view, and then placing the shard ends up in
- * the wrong place." The zoom changes the view only: the build STEP the
- * placement snaps by holds while anything is lined up (store/buildStep.ts).
+ * the wrong place." The zoom changes the view only: the first zoom puts the
+ * build cursor on the placement, which is the cursor itself from then on
+ * (useCyberspace `buildExact`), and a move steps one cell of the zoom you
+ * are at (coordinator's ruling on the review of #676).
  */
 
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
@@ -30,10 +32,11 @@ vi.mock('../../lib/relay', () => ({
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from '../useCyberspace'
 import { positionOf, useShards } from '../useShards'
+import type { AudioItem } from '../../lib/audioItem'
 import { useWorkshop } from '../useWorkshop'
 import { useBuilder } from '../useBuilder'
 import { stepBuild } from '../buildStep'
-import { buildStepOf } from '../../lib/buildCursor'
+import { buildStepOf, moveStepOf } from '../../lib/buildCursor'
 import { deployPoint, type Position } from '../../lib/space'
 
 const S = () => useCyberspace.getState()
@@ -65,7 +68,7 @@ beforeEach(() => {
   useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle', deployError: null })
   useBuilder.getState().exit()
   S().clearFocus()
-  useCyberspace.setState({ live: false, position: SPOT, anchor: SPOT, cursor: SPOT, scaleExp: 0, buildStep: null, buildSettle: null, spectate: null, exploreIndex: null, transit: null })
+  useCyberspace.setState({ live: false, position: SPOT, anchor: SPOT, cursor: SPOT, scaleExp: 0, buildStep: null, buildSettle: null, buildExact: false, spectate: null, exploreIndex: null, transit: null })
 })
 
 afterEach(() => {
@@ -95,7 +98,6 @@ describe('a zoom never moves a lined-up placement', () => {
       useShards.setState({ deployHeight: 40, deployHeightAuto: false })
       S().moveCursor({ axis: 'x', dir: 1 })
       const want = placed()
-      const cursor = { ...S().cursor }
       for (const n of [1, 2, 5, 9]) {
         zoom(n)
         expect(placed()).toEqual(want)
@@ -109,8 +111,8 @@ describe('a zoom never moves a lined-up placement', () => {
           expect(placed()).toEqual(want)
         }
       }
-      // The cursor itself was never touched by a zoom.
-      expect(S().cursor).toEqual(cursor)
+      // The first zoom put the cursor on the placement, and nothing moved it since.
+      expect(S().cursor).toEqual(want)
     })
   }
 
@@ -201,5 +203,119 @@ describe('a zoom never moves a lined-up placement', () => {
     zoom(3)
     expect(S().buildStep).toBeNull()
     expect(buildStepOf(S())).toBe(12)
+  })
+
+  it('zooming in puts the cursor on the placement, which does not move', () => {
+    at(SPOT)
+    useCyberspace.setState({ scaleExp: 10 })
+    D().startDeployShard(benchShard().id)
+    useShards.setState({ deployHeight: 40, deployHeightAuto: false })
+    S().moveCursor({ axis: 'x', dir: 1 })
+    const want = placed()
+    zoom(-4)
+    expect(S().cursor).toEqual(want)
+    expect(placed()).toEqual(want)
+  })
+
+  it('zoom out, move, zoom back: a move is one cell of the zoom you are at, and it places where the cursor is', async () => {
+    at(SPOT)
+    useCyberspace.setState({ scaleExp: 2 })
+    D().startDeployShard(benchShard().id)
+    useShards.setState({ deployHeight: 8, deployHeightAuto: false })
+    S().moveCursor({ axis: 'x', dir: 1 })
+    const want = placed()
+    zoom(3)
+    expect(placed()).toEqual(want)
+    S().moveCursor({ axis: 'x', dir: 1 })
+    S().moveCursor({ axis: 'z', dir: -1 })
+    const moved = { x: want.x + (1n << 5n), y: want.y, z: want.z - (1n << 5n) }
+    expect(placed()).toEqual(moved)
+    zoom(-3)
+    expect(placed()).toEqual(moved)
+    expect(S().cursor).toEqual(moved)
+    await D().deploy()
+    expect(D().deployStatus).toBe('done')
+    expect(positionOf(D().mine[0])).toEqual(moved)
+  })
+
+  it('zoom in, move: a move is one fine cell, from the placement as it stood', () => {
+    at(SPOT)
+    useCyberspace.setState({ scaleExp: 10 })
+    D().startDeployShard(benchShard().id)
+    useShards.setState({ deployHeight: 40, deployHeightAuto: false })
+    const want = placed()
+    zoom(-6)
+    S().moveCursor({ axis: 'y', dir: -1 })
+    expect(placed()).toEqual({ ...want, y: want.y - (1n << 4n) })
+    zoom(6)
+    expect(placed()).toEqual({ ...want, y: want.y - (1n << 4n) })
+  })
+
+  it('a STEP lowered before a zoom out still sets how far a move goes, and STEP no longer moves the placement', () => {
+    at(SPOT)
+    useCyberspace.setState({ scaleExp: 10 })
+    D().startDeployShard(benchShard().id)
+    useShards.setState({ deployHeight: 40, deployHeightAuto: false })
+    while (moveStepOf(S()) > 4) stepBuild(-1)
+    const want = placed()
+    zoom(3)
+    expect(moveStepOf(S())).toBe(4)
+    S().moveCursor({ axis: 'x', dir: 1 })
+    const moved = { ...want, x: want.x + (1n << 4n) }
+    expect(placed()).toEqual(moved)
+    stepBuild(-1)
+    stepBuild(1)
+    stepBuild(1)
+    expect(placed()).toEqual(moved)
+  })
+
+  it('a zoom on your avatar is not leaving it: CANCEL still ends BUILD mode, on your avatar', () => {
+    useCyberspace.setState({ scaleExp: 15 })
+    D().startDeployShard(benchShard().id)
+    useShards.setState({ deployHeight: 20, deployHeightAuto: false })
+    expect(useBuilder.getState().via).toBe('deploy')
+    zoom(-3)
+    expect(S().cursor).not.toEqual(S().position)
+    expect(useBuilder.getState().leftAvatar).toBe(false)
+    D().cancelDeploy()
+    expect(useBuilder.getState().active).toBe(false)
+    expect(S().cursor).toEqual(S().position)
+    expect(S().buildExact).toBe(false)
+  })
+
+  it('editing the same deploy in place (a fade, a look, a chest placed and taken back) keeps it after a zoom', () => {
+    const audio: AudioItem = {
+      title: 'Trickling water', about: '', url: 'https://blossom.test/' + 'ab'.repeat(32), mime: 'audio/mpeg', hash: 'ab'.repeat(32),
+      originalHash: 'cd'.repeat(32), size: 2048, keyHex: 'ef'.repeat(32), nonceHex: '01'.repeat(12), autoplay: true, loop: true, retrigger: 'once', walkOnly: false,
+    }
+    at(SPOT)
+    useCyberspace.setState({ scaleExp: 9 })
+    D().startDeployAudio(audio)
+    useShards.setState({ deployHeight: 30 })
+    S().moveCursor({ axis: 'x', dir: 1 })
+    let want = placed()
+    zoom(4)
+    D().setDeployFade(1_000_000)
+    expect(placed()).toEqual(want)
+    zoom(-4)
+    expect(placed()).toEqual(want)
+    D().cancelDeploy()
+
+    useCyberspace.setState({ scaleExp: 9 })
+    D().startPlaceChest()
+    useShards.setState({ deployHeight: 30, deployHeightAuto: false })
+    S().moveCursor({ axis: 'y', dir: 1 })
+    want = placed()
+    zoom(4)
+    D().setDeployLook({ from: 'builtin', name: 'crawl' })
+    useShards.setState({ deployHeight: 30 })
+    expect(placed()).toEqual(want)
+    D().placeChest()
+    const p = D().pending
+    expect(p?.type === 'chest' ? p.spot?.at : null).toEqual(want)
+    D().unplaceChest()
+    expect(placed()).toEqual(want)
+    zoom(-4)
+    expect(placed()).toEqual(want)
   })
 })

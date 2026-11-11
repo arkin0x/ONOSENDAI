@@ -188,7 +188,7 @@ import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary }
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { addRecentView } from '../lib/viewAt'
 import { endOfChainLabel } from '../lib/chainBreak'
-import { buildStepOf } from '../lib/buildCursor'
+import { moveStepOf } from '../lib/buildCursor'
 import { targetColor, type CyberTarget } from '../lib/targets'
 import { useSecrets } from './useSecrets'
 import { useToast } from './useToast'
@@ -778,10 +778,10 @@ export interface CyberspaceState {
    * lined up, and the cell the placement snaps to, as an exponent finer than
    * the zoom (arkinox, 2026-10-08). Null is the zoom itself, which is where
    * every deploy starts, so nothing changes until STEP is touched. Read it
-   * through buildStepOf (lib/buildCursor.ts). A zoom never moves a lined-up
-   * placement, so while one is lined up a zoom holds it where it was, above
-   * the zoom after a zoom in (store/buildStep.ts). Cleared when the deploy
-   * ends (useShards) and when BUILD mode does (store/buildStep.ts).
+   * through moveStepOf (lib/buildCursor.ts), which keeps it at or under the
+   * zoom, so zoomed in past it a move steps the zoom, and zoomed back out the
+   * STEP again (no zoom moves the placement: `buildExact`). Cleared when the
+   * deploy ends (useShards) and when BUILD mode does (useBuilder).
    */
   buildStep: number | null
   /**
@@ -792,6 +792,15 @@ export interface CyberspaceState {
    * STEP returns to following the zoom. Null while STEP has not re-centered.
    */
   buildSettle: { at: Position; from: Position } | null
+  /**
+   * A zoom never moves a lined-up placement (arkinox, 2026-11-11). The first
+   * zoom while one is lined up in BUILD mode puts the build cursor on the
+   * placement itself (useBuilder), and from then on the placement is the
+   * cursor's own gibson (lib/buildCursor.ts buildStepOf), so each move steps
+   * it exactly one cell of the zoom, or one STEP, and no zoom changes it.
+   * Cleared with the deploy and with BUILD mode, as the STEP is.
+   */
+  buildExact: boolean
   /** Current view quaternion (camera snaps instantly to this). */
   view: Quaternion
   viewHistory: Quaternion[]
@@ -5061,6 +5070,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   scaleExp: 0,
   buildStep: null,
   buildSettle: null,
+  buildExact: false,
   // Facing the black sun, the section 11.3 canonical orientation, the same
   // one the SUN button restores. The spec's left/right/above/below language
   // is defined against it, so it is what a first look should agree with; the
@@ -5094,7 +5104,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (get().walking) return
     // One cell of the zoom, or one build STEP while a deploy is lined up in
     // BUILD mode. Never a STEP at your head, where the cursor is a move's.
-    const step = stepFor(get().atHead() ? scaleExp : buildStepOf(get())) * BigInt(dir.dir)
+    const step = stepFor(get().atHead() ? scaleExp : moveStepOf(get())) * BigInt(dir.dir)
 
     const next: Position = { ...cursor }
     next[dir.axis] = clampAxis(cursor[dir.axis] + step)
@@ -5110,6 +5120,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (next !== null) { if (next !== get().buildStep) set({ buildStep: next }); return }
     const { buildStep, buildSettle, cursor } = get()
     if (buildStep === null && buildSettle === null) return
+    // The placement is the cursor itself (`buildExact`): nothing to undo.
+    if (get().buildExact) { if (buildStep !== null) set({ buildStep: null }); return }
     // Back on the zoom, the snap is the cube's center wherever the cursor is
     // in it, so STEP's re-centering is undone if nothing has moved it since.
     const back = buildSettle && samePosition(cursor, buildSettle.at) ? { cursor: { ...buildSettle.from } } : {}

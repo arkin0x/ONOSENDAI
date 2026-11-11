@@ -454,7 +454,8 @@ describe('the engine', () => {
     const { TUTORIAL_DNA_EVENT } = await import('../../tutorial/dna')
     const { verifyEvent } = await import('nostr-tools/pure')
     expect(TUTORIAL_DNA_EVENT.id).toBe(TUTORIAL_DNA_ID)
-    expect(verifyEvent({ ...TUTORIAL_DNA_EVENT } as never)).toBe(true)
+    // A JSON copy: a spread would carry nostr-tools' cached verified mark and skip the check.
+    expect(verifyEvent(JSON.parse(JSON.stringify(TUTORIAL_DNA_EVENT)))).toBe(true)
     expect({ kind: TUTORIAL_DNA_EVENT.kind, content: TUTORIAL_DNA_EVENT.content, tags: TUTORIAL_DNA_EVENT.tags }).toEqual({ kind: template.kind, content: template.content, tags: template.tags })
     expect(tutorialDnaId('nope')).toBe(null)
     expect(tutorialDnaId('A'.repeat(64))).toBe(null)

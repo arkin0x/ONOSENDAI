@@ -221,9 +221,9 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
   const blueBox = await sign(shardInnerTemplate(blueBoxModel(), boxMiddle, plane, createdAt))
   const course = await Promise.all(COURSE.map((part, i) => sign(shardInnerTemplate(pieceModel(PIECES[part.piece], `tutorial-course-${i}`), courseToWorld(frame, part.at), plane, createdAt))))
   // The dirt plot (A5). The tutorial tree's DNA is not staged: a seed names
-  // the owner's published event once TUTORIAL_DNA_ID is set, and until then
-  // a copy the player's SEED signs (tutorial/dna.ts); never one the guide
-  // signed, since a DNA's id names its signer.
+  // the owner's published event (TUTORIAL_DNA_ID), or with no id a copy the
+  // player's SEED signs (tutorial/dna.ts); never one the guide signed, since
+  // a DNA's id names its signer.
   const plot = await sign(shardInnerTemplate(pieceModel(PLOT, 'tutorial-plot'), toWorld(frame, PLOT_AT.f, PLOT_AT.r, PLOT_AT.u), plane, createdAt))
 
   const bags = await Promise.all([

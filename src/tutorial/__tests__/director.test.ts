@@ -60,17 +60,13 @@ beforeEach(() => {
 afterEach(() => { useTutorial.getState().pause() })
 
 /**
- * The owner's published tutorial tree (dna.ts TUTORIAL_DNA_ID), signed, as the
- * relays hold it, noted on this device as the relays would hand it over: the
- * PLANT THE SEED button resolves it before anything else.
+ * PLANT THE SEED presses the owner's id, and this file's relays hold nothing
+ * (query is mocked to answer []): the press gets past the DNA only because the
+ * director notes the event the app ships (dna.ts TUTORIAL_DNA_EVENT) first.
  */
-async function notePublishedTree(): Promise<void> {
-  const published = (await import('./moon-blossom-v2-published.json')).default
-  const { tutorialDnaId } = await import('../dna')
-  const { dnaResolver } = await import('../../lib/seeds/seedSources')
-  expect(published.id).toBe(tutorialDnaId())
-  dnaResolver.note(published as never)
-  expect(await dnaResolver.resolve(published.id)).toMatchObject({ state: 'ok' })
+async function expectShippedTree(): Promise<void> {
+  const { tutorialDnaId, TUTORIAL_DNA_EVENT } = await import('../dna')
+  expect(TUTORIAL_DNA_EVENT.id).toBe(tutorialDnaId())
 }
 
 describe('the director', () => {
@@ -263,7 +259,7 @@ describe('the director', () => {
     // A reload after planting finds it planted.
     useTutorial.getState().start({ at: 'plant' })
     await vi.waitFor(() => { expect(useTutorial.getState().done).toBe(true) })
-    // Once the owner's event is set, a seed naming it counts at once, on the dirt; off it, not.
+    // A seed naming the owner's event counts at once, on the dirt; off it, not.
     const { tutorialTreePlanted } = await import('../director')
     const ownerId = 'c'.repeat(64)
     useShards.setState({ mine: [seedRow(ownerId, stand)] })
@@ -337,7 +333,7 @@ describe('the director', () => {
     expect((useShards.getState().pending as { seed: { dnaId?: string } }).seed.dnaId).toBeUndefined()
     // Its hide height is the one SEED's seedHideFor picks for this tree at this spot, with the bloom measured
     // from the same Seeds pieces SEED's useSeedFit uses (day 31, where it lands). This holds the wiring
-    // (cursor, plane, step, ceiling, the deploy's rule); if useSeedFit's measure changes, change bloomReachAt too.
+    // (cursor, plane, step, ceiling, the deploy's rule); if lib/seeds/bloomReach bloomReachAt changes, change seedReach here.
     const { seedHideFor, previewRequest, bloomReachGibsons, PREVIEW_DAYS } = await import('../../lib/seeds/plant')
     const { growInWorker } = await import('../../lib/seeds/growClient')
     const { headerBook, trustedTip } = await import('../../lib/seeds/seedSources')
@@ -392,7 +388,7 @@ describe('the director', () => {
 
   it('the plant step\'s note is its own: shown while it is up, gone on the next step', async () => {
     const { runTutorialEffect } = await import('../../store/useTutorial')
-    await notePublishedTree()
+    await expectShippedTree()
     useTutorial.getState().start({ restart: true })
     await staged()
     useTutorial.getState().start({ at: 'plant' })
@@ -455,7 +451,7 @@ describe('the director', () => {
   it('a second PLANT THE SEED tap while it measures does nothing', async () => {
     const { runTutorialEffect } = await import('../../store/useTutorial')
     const director = await import('../director')
-    await notePublishedTree()
+    await expectShippedTree()
     useTutorial.getState().start({ restart: true })
     await staged()
     useTutorial.getState().start({ at: 'plant' })

@@ -22,7 +22,9 @@
 import { BASE_CAPS, capsFromTags, type Caps } from 'sno-core/seeds'
 import type { OriginalDna } from '../lib/seeds/originalDnas'
 import { readDnaText, type SeedDraft } from '../lib/seeds/plant'
+import type { NostrEvent } from '../lib/events'
 import moonBlossom from './moon-blossom-v2-event.json'
+import moonBlossomPublished from './moon-blossom-v2-published.json'
 
 /** Its name, as the engine reads the `dna` line (a test holds that the engine accepts the text). */
 const read = readDnaText(moonBlossom.content)
@@ -40,6 +42,15 @@ export const TUTORIAL_DNA: OriginalDna = { name: read.ok ? read.name : 'moon blo
  * Empty would mean unpublished.
  */
 export const TUTORIAL_DNA_ID = '75156b56dda84154f42581a097dd14691c60550088cafa9a8639db9c305de264'
+
+/**
+ * The owner's published event itself, signed, as the relays hold it
+ * (moon-blossom-v2-published.json; its id is TUTORIAL_DNA_ID). It ships with
+ * the app so the plant step needs no relay for it: the director notes it on
+ * this device (lib/seeds/seedSources dnaResolver, which checks its signature)
+ * before resolving the id.
+ */
+export const TUTORIAL_DNA_EVENT: NostrEvent = moonBlossomPublished
 
 /** The owner's event id for the tutorial tree, or null while none is set (64 lowercase hex, as an original DNA's is checked). */
 export function tutorialDnaId(id: string = TUTORIAL_DNA_ID): string | null {

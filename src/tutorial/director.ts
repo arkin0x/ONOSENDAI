@@ -36,7 +36,7 @@ import { useWorkshop } from '../store/useWorkshop'
 import { useBuilder } from '../store/useBuilder'
 import { seedItemOf } from '../lib/seeds/seedItem'
 import { dnaResolver } from '../lib/seeds/seedSources'
-import { TUTORIAL_DNA, tutorialDnaId, tutorialSeedDraft } from './dna'
+import { TUTORIAL_DNA, TUTORIAL_DNA_EVENT, tutorialDnaId, tutorialSeedDraft } from './dna'
 import { SEED_HIDE_MAX, dnaMatches, seedHideFor } from '../lib/seeds/plant'
 import { bloomReachAt } from '../lib/seeds/bloomReach'
 import { positionHex } from '../lib/events'
@@ -267,8 +267,8 @@ registerTutorialWatcher('at-plot', (onDone) => watchArrival((at, layout) => onPl
 
 /**
  * The tutorial tree planted (A5): a seed of the player's own on the dirt,
- * growing the tutorial DNA (the owner's event once TUTORIAL_DNA_ID is set,
- * or a copy of its text the player's SEED signed), and out (published)
+ * growing the tutorial DNA (the owner's published event, TUTORIAL_DNA_ID, or
+ * a copy of its text the player's SEED signed), and out (published)
  * unless they are LOCAL. Planting is theirs: PLANT THE SEED lines it up in
  * BUILD, and HIDE runs the deploy that mines its work (the Seeds client,
  * store/useShards), whose row appears only once the seed is mined and its
@@ -301,9 +301,11 @@ registerTutorialWatcher('plant', (onDone) => {
  * PLANT THE SEED (the plant step's button): BUILD on the player, where they
  * stand on the dirt, with the tutorial tree lined up to hide, as SEED's
  * PLANT lines one up (hud/SeedCompose; the composer offers the original
- * DNAs, not this tree). Once the owner's event is set, the seed names it at
- * its own size limit, and waits until the event is on this device's relays,
- * as SEED does; until then the player's SEED signs a copy of the DNA. HIDE
+ * DNAs, not this tree). The seed names the owner's published event at its
+ * own size limit; that event ships with the app (dna.ts TUTORIAL_DNA_EVENT)
+ * and is noted on this device first, so no relay is needed for it. Another
+ * id waits until its event is on this device's relays, as SEED does; with
+ * no id the player's SEED signs a copy of the DNA. HIDE
  * is still the player's: nothing is mined or hidden here. `reachAt` measures
  * the bloom (SEED's measure by default); `stillHere` says whether the plant
  * step is still up, asked again after the measure's wait.
@@ -323,6 +325,7 @@ export async function lineUpTutorialSeed(id: string | null = tutorialDnaId(), re
   if (first !== null) return first || null
   let draft = tutorialSeedDraft(null)
   if (id) {
+    if (id === TUTORIAL_DNA_EVENT.id) dnaResolver.note(TUTORIAL_DNA_EVENT)
     const v = await dnaResolver.resolve(id)
     if (v.state === 'ok' && !dnaMatches(v.event, TUTORIAL_DNA.text, v.caps)) return 'The tutorial tree on your relays is not this one. Tell the owner.'
     if (v.state !== 'ok') return 'The tutorial tree is not on your relays yet. Try again soon.'

@@ -450,6 +450,12 @@ describe('the engine', () => {
     expect(TUTORIAL_DNA_ID).toBe('75156b56dda84154f42581a097dd14691c60550088cafa9a8639db9c305de264')
     expect(tutorialDnaId()).toBe(TUTORIAL_DNA_ID)
     expect(tutorialDnaId('')).toBe(null)
+    // The app ships that event, signed (the plant step needs no relay for it): the template byte for byte.
+    const { TUTORIAL_DNA_EVENT } = await import('../../tutorial/dna')
+    const { verifyEvent } = await import('nostr-tools/pure')
+    expect(TUTORIAL_DNA_EVENT.id).toBe(TUTORIAL_DNA_ID)
+    expect(verifyEvent({ ...TUTORIAL_DNA_EVENT } as never)).toBe(true)
+    expect({ kind: TUTORIAL_DNA_EVENT.kind, content: TUTORIAL_DNA_EVENT.content, tags: TUTORIAL_DNA_EVENT.tags }).toEqual({ kind: template.kind, content: template.content, tags: template.tags })
     expect(tutorialDnaId('nope')).toBe(null)
     expect(tutorialDnaId('A'.repeat(64))).toBe(null)
     expect(tutorialSeedDraft(null)).toEqual({ text: TUTORIAL_DNA.text, caps: BASE_CAPS, scale: 0, title: '' })

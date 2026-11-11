@@ -51,6 +51,7 @@ import { ChainStatusModal } from './hud/ChainStatus'
 import { ChainStoreTrial } from './hud/ChainStoreTrial'
 import { BrokenChainChip, BrokenChainModal } from './hud/BrokenChain'
 import { VersionChip } from './hud/VersionChip'
+import { useVersionGate } from './lib/versionGate'
 import { startVersionGate } from './lib/versionGate'
 import { HosakaPulse } from './hud/HosakaPulse'
 import { useOfferView } from './store/useOffer'
@@ -238,6 +239,7 @@ export default function App(): JSX.Element {
   const tutorialActive = useTutorial((s) => s.active)
   const tutorialKeep = useTutorial((s) => (s.active ? (s.script.steps[s.index]?.keepChips ?? EMPTY_KEEP) : EMPTY_KEEP))
   const keepsChip = (name: 'found' | 'chain'): boolean => !tutorialActive || tutorialKeep.includes(name)
+  const versionBlocked = useVersionGate((s) => s.verdict === 'blocked')
   // The question bubble lives in the menu; on a phone the menu covers the
   // scene, so starting the tour from it closes it. Only on the start:
   // opening the menu during the tour (its menu step) leaves it open.
@@ -350,9 +352,13 @@ export default function App(): JSX.Element {
               <BuildBar />
             </>,
             status: tutorialActive ? <>
-              {/* During the tutorial only the chips a step names are shown
-                  (feedback item 3): FOUND HERE while opening a chest, the
-                  chain chip while spectating a friend. */}
+              {/* During the tutorial only what is needed shows (feedback item
+                  3): RELOAD TO MOVE, a broken chain and a game you are in,
+                  which each stop you; then the chips a step names, FOUND HERE
+                  while opening a chest, the chain chip while spectating a friend. */}
+              {versionBlocked && <VersionChip />}
+              <BrokenChainChip />
+              <GameChip />
               {keepsChip('found') && <KeyFoundChip />}
               {keepsChip('chain') && <ChainExplorer />}
             </> : <>

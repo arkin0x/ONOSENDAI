@@ -10459,7 +10459,7 @@ html.tv-broadcast body { overflow: hidden; }
    card's go button) fills the row (feedback item 8). */
 .tutorial-card__foot { display: flex; gap: 6px; }
 .tutorial-card__foot .tutorial-card__go { flex: 1 1 0; align-self: auto; }
-.tutorial__back { flex: 0 0 auto; padding: 0 12px; }
+.tutorial__back { flex: 0 0 auto; padding: 0 12px; background: transparent; }
 .tutorial__next { flex: 1 1 0; }
 
 /* In-game mode (game/GameView.tsx, DECK-0002 §2.3): the game's world full

@@ -38,7 +38,7 @@ import { START_STAND, atStart, courseToWorld, onDeck } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import type { Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
-import { inRegion, toWorld, type TutorialLayout } from './layout'
+import { besideToward, inRegion, type TutorialLayout } from './layout'
 import type { Stage } from './stage'
 import { setTutorialSpin, setTutorialZoom } from '../store/useTutorialCam'
 import { setMenuOpen } from '../hooks/useMenuOpen'
@@ -78,15 +78,19 @@ export const useTutorialStage = create<StageState>(() => ({ stage: null, layout:
 /** Which staging is current: a newer start (or a stop) makes an older one's answer moot. */
 let run = 0
 
+/** The stager, the layout from `player`'s spawn and the guide key, loaded only when the tutorial needs them. */
+async function setupFor(player: string): Promise<{ st: typeof import('./stage'); layout: TutorialLayout; guide: { pubkey: string; secret: Uint8Array } }> {
+  const [{ tutorialLayout }, st, { guideKey }] = await Promise.all([import('./layout'), import('./stage'), import('./guide')])
+  const spawn = spawnPlace(player)
+  return { st, layout: tutorialLayout({ x: spawn.x, y: spawn.y, z: spawn.z }, spawn.plane as Plane), guide: guideKey() }
+}
+
 /** Stage the tutorial for `player` and hand its bags to discovery; a restart stages anew. */
 async function stageFor(player: string, restart: boolean): Promise<void> {
   const mine = ++run
   useTutorialStage.setState({ stage: null, layout: null, error: null })
   try {
-    const [{ tutorialLayout }, st, { guideKey }] = await Promise.all([import('./layout'), import('./stage'), import('./guide')])
-    const spawn = spawnPlace(player)
-    const layout = tutorialLayout({ x: spawn.x, y: spawn.y, z: spawn.z }, spawn.plane as Plane)
-    const guide = guideKey()
+    const { st, layout, guide } = await setupFor(player)
     // A RESTART after a FINISH that kept its finds local (stop keeps them):
     // drop the old run's before staging a new chest, so none are orphaned.
     if (restart) dropGuideFinds(guide.pubkey)
@@ -106,6 +110,24 @@ async function stageFor(player: string, restart: boolean): Promise<void> {
     if (mine !== run) return
     console.warn('[tutorial] staging failed:', err)
     useTutorialStage.setState({ error: 'The chest could not be placed. Try RESTART TUTORIAL in Settings.' })
+  }
+}
+
+/**
+ * A load for a player who FINISHed (feedback item 9): the stage the run kept
+ * on this device goes back to discovery, so what FINISH left on screen is
+ * still there after a reload. Local only, as it always was; nothing is staged
+ * anew, and a run starting meanwhile wins.
+ */
+async function restoreKept(player: string): Promise<void> {
+  const mine = ++run
+  try {
+    const { st, layout, guide } = await setupFor(player)
+    const stage = st.readStage(player, guide.pubkey, st.stageKey(layout))
+    if (!stage || mine !== run || useTutorial.getState().active || useCyberspace.getState().identity.pubkey !== player) return
+    setGuideBags(stage.bags, { passTaps: [stage.ids.blueBox] })
+  } catch (err) {
+    console.warn('[tutorial] could not put the kept stage back:', err)
   }
 }
 
@@ -207,18 +229,21 @@ onTutorialLifecycle({
     setTutorialZoom(null)
     if (how !== 'finished') unstage()
   },
+  restore: (player) => { void restoreKept(player) },
 })
 
 /**
  * The box step lines the cursor up one gibson in front of the chest, facing
  * it, so one COMMIT lands the player there rather than beside and behind it
- * (feedback item 4). The chest sits at the frame's (3, 3, 3); this is (2, 3,
- * 3), a gibson nearer the way in. While the step is up the camera idles a slow
- * spin around the cursor (feedback item 14); it stops when the step moves on.
+ * (feedback item 4). The chest sits at the frame's (3, 3, 3); the cursor goes
+ * to its neighbor on the player's side (besideToward), so the avatar, which
+ * turns to face the way it moved (lib/facing.ts), ends looking at the chest.
+ * While the step is up the camera idles a slow spin around the cursor
+ * (feedback item 14); it stops when the step moves on.
  */
 registerTutorialEffect('aim-box', () => {
   setTutorialSpin(true)
-  const off = aimOnce((layout) => toWorld(layout.frame, 2, 3, 3))()
+  const off = aimOnce((layout) => besideToward(layout.frame, 3, 3, 3, useCyberspace.getState().position))()
   return () => { setTutorialSpin(false); if (off) off() }
 })
 
@@ -280,7 +305,9 @@ registerTutorialEffect('to-course', () => {
   }
   const offPos = useCyberspace.subscribe((s, prev) => { if (s.position !== prev.position || s.headPlane !== prev.headPlane) check() })
   check()
-  return () => { if (offAim) offAim(); offPos(); setTutorialZoom(null) }
+  // The zoom outlives the step, which moves on before the ease ends; WALK or
+  // a grab of the camera ends it (scene/Scene.tsx), as does the run's end.
+  return () => { if (offAim) offAim(); offPos() }
 })
 
 /** The inventory step opens the menu and lifts ITEMS to the top of it (feedback item 2). */

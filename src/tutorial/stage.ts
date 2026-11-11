@@ -78,7 +78,7 @@ const REGION_REQUIRES = 'the key of a place'
  * without it still plays the same, and a bump would hand a player a new,
  * unopened chest.
  */
-export const STAGE_VERSION = 4
+export const STAGE_VERSION = 5
 
 /** One player's stage, by pubkey. */
 export const STAGE_PREFIX = 'onosendai:tutorial:stage:'
@@ -134,14 +134,17 @@ export const WELCOME_ITEM = welcomeItemSigned as unknown as NostrEvent
  * The box: a lime-green outline cube filling the box region, nothing a walker
  * bumps into. An outline, not a filled cube, and green rather than blue, which
  * read too close to the HOP region colour (tutorial feedback 2026-11-11, item
- * 1). In LINES mode the renderer draws each face edge once (scene/ShardMesh.tsx
- * outlineGeometry), so the faces below become the twelve edges of the cube.
+ * 1). No faces: in LINES mode a faced cube draws every triangle edge, the six
+ * face diagonals too (scene/ShardMesh.tsx outlineGeometry). Without faces it
+ * is one line through its points, so the points trace the twelve edges once
+ * each, retracing three to get round (16 points).
  */
 export function boxModel(): ShardModel {
   // Drawn from its origin at a gibson's centre (the box's middle gibson,
   // base + 4), so corners at -4.5 and +3.5 meet the region's faces exactly:
   // the whole numbers -5 and 3, with 60 of 120 ticks.
-  const c = [[-5, -5, -5], [3, -5, -5], [3, -5, 3], [-5, -5, 3], [-5, 3, -5], [3, 3, -5], [3, 3, 3], [-5, 3, 3]] as Array<[number, number, number]>
+  const corner = [[-5, -5, -5], [3, -5, -5], [3, -5, 3], [-5, -5, 3], [-5, 3, -5], [3, 3, -5], [3, 3, 3], [-5, 3, 3]] as Array<[number, number, number]>
+  const c = [0, 1, 2, 3, 0, 4, 5, 6, 7, 4, 5, 1, 2, 6, 7, 3].map((i) => corner[i])
   const payload: ShardPayload = {
     v: 2,
     name: 'Green box',
@@ -151,7 +154,7 @@ export function boxModel(): ShardModel {
     vertices: c,
     ticks: c.map(() => [60, 60, 60] as [number, number, number]),
     colors: c.map(() => 159),
-    faces: [[4, 7, 6], [4, 6, 5], [0, 1, 2], [0, 2, 3], [3, 2, 6], [3, 6, 7], [1, 0, 4], [1, 4, 5], [2, 1, 5], [2, 5, 6], [0, 3, 7], [0, 7, 4]],
+    faces: [],
     // The outline reads clearly from across the region, but short of solid so
     // it never hides the chest inside it (readOpacity takes 1..99).
     opacity: 85,

@@ -8,6 +8,12 @@
 
 import type { TutorialScript, TutorialStep } from './types'
 
+/**
+ * The COMMIT button alone (feedback items 5 and 14): the mode button beside it
+ * shares the class, wearing is-hop, is-view, is-walk or is-build.
+ */
+export const COMMIT = '.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build)'
+
 export const WELCOME: TutorialStep = {
   id: 'welcome',
   title: 'Welcome!',
@@ -26,8 +32,10 @@ export const BOX: TutorialStep = {
   explain: 'Every place in cyberspace has a key, and the only way to get it is to be there or to do the work of being there. Things are hidden at a place under its key, so you find them by going there. The box is one region, 8 gibsons on a side.',
   // The COMMIT button glows so a newcomer knows where to press; the camera
   // idles a slow spin around the cursor (tutorial/director.ts aim-box).
-  scene: { target: 'self', highlight: '.touchops__commit' },
+  scene: { target: 'self', highlight: COMMIT, pad: true },
   wait: 'see-chest',
+  // No SKIP here (feedback item 17): NEXT waits for the box, and the X closes the tutorial.
+  gate: true,
   effect: 'aim-box',
 }
 
@@ -73,7 +81,7 @@ export const TO_COURSE: TutorialStep = {
   title: 'The course',
   caption: 'HOPs are the basic way to move through cyberspace, but running and jumping is a bit more fun! See the platform course? Let\'s HOP over it and try it. Tap COMMIT in CONTROLS to HOP there.',
   hint: 'Tap COMMIT to HOP to the start.',
-  scene: { target: 'self', highlight: '.touchops__commit' },
+  scene: { target: 'self', highlight: COMMIT, pad: true },
   wait: 'at-start',
   effect: 'to-course',
 }
@@ -188,12 +196,12 @@ export const FRIEND: TutorialStep = {
   branch: true,
 }
 
-/** BUILD: move a shard from ITEMS into your hand, place it in the world (feedback item 11b). */
+/** BUILD: move a shard from ITEMS to the workshop, then place it with BUILD's OBJECT (feedback item 11b). */
 export const BUILD_PLACE: TutorialStep = {
   id: 'build-place',
   title: 'Build something',
-  caption: 'Take a shard from ITEMS into your hand, then place it in BUILD.',
-  hint: 'ITEMS, pick a shard, HOLD, switch to BUILD, then COMMIT to place it.',
+  caption: 'Move a shard from ITEMS to your workshop, then place it in BUILD.',
+  hint: 'ITEMS: MOVE TO WORKSHOP. Then BUILD, OBJECT, pick it, PLACE.',
   explain: 'BUILD puts what you hold into the world where the cursor is. The workshop is where you change or make a shard; it will not interrupt this.',
   scene: { target: 'keep', highlight: '.hamburger-menu' },
   effect: 'teach-build',

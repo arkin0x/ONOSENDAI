@@ -1076,13 +1076,17 @@ function Rig(): JSX.Element {
     }
     // The tutorial eases the orbit in to a close distance after a HOP onto the
     // course (feedback item 6), only when idle and only while it asks for it.
-    if (want === null && !s.walking && !eye.current) {
-      const tz = useTutorialCam.getState().zoom
-      if (tz !== null) {
+    // WALK ends the ask, and so does a finger or the mouse on the scene (the
+    // player taking the camera), not the step moving on, which comes before
+    // the ease is done.
+    const tutorialZoom = useTutorialCam.getState().zoom
+    if (tutorialZoom !== null && (s.walking || pressed() > 0)) clearTutorialZoom()
+    else if (want === null && !eye.current) {
+      if (tutorialZoom !== null) {
         const off = walkDir.copy(c.object.position).sub(c.target)
         const cur = off.length()
         if (cur < 1e-4) off.set(0, 0, 1)
-        const target = Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, tz))
+        const target = Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, tutorialZoom))
         const nd = cur < 1e-4 ? target : cur + (target - cur) * (1 - Math.exp(-dt / 0.4))
         c.object.position.copy(c.target).addScaledVector(off.normalize(), nd)
         lastOffset.current.copy(c.object.position).sub(c.target)

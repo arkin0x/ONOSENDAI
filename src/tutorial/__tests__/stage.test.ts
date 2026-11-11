@@ -22,8 +22,8 @@ import { lockOf } from '../../lib/locks'
 import { NIP44_MAX_PLAINTEXT, openWithSecret, plaintextBytes, readContents } from '../../lib/chests'
 import { BAG_SAFE_BYTES } from '../../lib/bagSize'
 import { CLIENT_TAG } from '../../lib/client'
-import { BOX_HEIGHT, COVER_MAX, FOOTPRINT, inRegion, regionBase, toWorld, tutorialLayout } from '../layout'
-import { STAGE_TEXT, WELCOME_ITEM, buildStage, readStage, stageKey, writeStage, type KeyAt } from '../stage'
+import { BOX_HEIGHT, COVER_MAX, FOOTPRINT, besideToward, inRegion, regionBase, toWorld, tutorialLayout } from '../layout'
+import { STAGE_TEXT, WELCOME_ITEM, boxModel, buildStage, readStage, stageKey, writeStage, type KeyAt } from '../stage'
 import { guideBagsFor, isGuideAuthor, isGuideBag, onGuideBags, passesTaps, setGuideBags } from '../guideBags'
 import { COURSE, FINISH_CHEST, START_STAND, atStart, courseToWorld } from '../course'
 import type { Position } from '../../lib/space'
@@ -224,5 +224,39 @@ describe('the guide\'s bags on this device', () => {
     expect(heard).toBe(3)
     expect(guideBagsFor(lookups)).toEqual([])
     off()
+  })
+})
+
+describe('the green box (feedback item 1)', () => {
+  it('is a lime outline of exactly the twelve cube edges: no faces, so no face diagonals in LINES', () => {
+    const m = boxModel()
+    expect(m.mode).toBe('lines')
+    expect(m.faces).toEqual([])
+    const v = m.vertices.map((x) => x.p.join(','))
+    const edges = new Set<string>()
+    for (let i = 1; i < v.length; i++) edges.add([v[i - 1], v[i]].sort().join('|'))
+    expect(edges.size).toBe(12)
+    // Every segment runs along one axis: an edge, never a diagonal.
+    for (let i = 1; i < m.vertices.length; i++) {
+      const a = m.vertices[i - 1].p, b = m.vertices[i].p
+      expect([0, 1, 2].filter((k) => a[k] !== b[k])).toHaveLength(1)
+    }
+  })
+})
+
+describe('the first move lands in front of the chest, facing it (feedback item 4)', () => {
+  const frames = [{ fwd: 1, side: 1 }, { fwd: -1, side: -1 }] as const
+  it('from straight behind: the neighbor nearer the way in', () => {
+    for (const f of frames) {
+      const frame = { ...f, boxBase: { x: 800n, y: 800n, z: 800n } }
+      expect(besideToward(frame, 3, 3, 3, toWorld(frame, -5, 3, 3))).toEqual(toWorld(frame, 2, 3, 3))
+    }
+  })
+  it('from off to a side and above: the neighbor on that line, so the move points at the chest', () => {
+    for (const f of frames) {
+      const frame = { ...f, boxBase: { x: 800n, y: 800n, z: 800n } }
+      // From (-1, 7, 7) the chest at (3, 3, 3) is along (1, -1, -1): land at (2, 4, 4), on that line.
+      expect(besideToward(frame, 3, 3, 3, toWorld(frame, -1, 7, 7))).toEqual(toWorld(frame, 2, 4, 4))
+    }
   })
 })

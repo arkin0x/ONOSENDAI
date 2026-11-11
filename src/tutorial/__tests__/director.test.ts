@@ -42,7 +42,7 @@ import { guideBagsFor } from '../guideBags'
 import { GUIDE_KEY } from '../guide'
 import { TUTORIAL_SCRIPT } from '../script'
 import { START_STAND, courseToWorld } from '../course'
-import { toWorld } from '../layout'
+import { besideToward, toWorld } from '../layout'
 import { useWalk } from '../../store/useWalk'
 
 const pubkey = (): string => useCyberspace.getState().identity.pubkey
@@ -111,8 +111,12 @@ describe('the director', () => {
     const layout = useTutorialStage.getState().layout!
     useTutorial.getState().start({ at: 'box' })
     await staged()
-    // The chest sits at the frame's (3, 3, 3); the cursor lands a gibson nearer the way in.
-    expect(useCyberspace.getState().cursor).toEqual(toWorld(layout.frame, 2, 3, 3))
+    // The chest sits at the frame's (3, 3, 3); the cursor lands on its neighbor toward the player.
+    const cursor = useCyberspace.getState().cursor
+    expect(cursor).toEqual(besideToward(layout.frame, 3, 3, 3, useCyberspace.getState().position))
+    const chest = toWorld(layout.frame, 3, 3, 3)
+    const off = [cursor.x - chest.x, cursor.y - chest.y, cursor.z - chest.z].map((d) => (d < 0n ? -d : d))
+    expect(off.every((d) => d <= 1n) && off.some((d) => d === 1n)).toBe(true)
   })
 
   it('never lets a staging a RESTART overtook overwrite the kept stage', async () => {

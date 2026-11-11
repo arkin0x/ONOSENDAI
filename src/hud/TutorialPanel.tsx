@@ -26,10 +26,7 @@ export function TutorialPanel(): JSX.Element | null {
   return (
     <section className="panel panel--tutorial">
       <header className="panel__head"><h2>Tutorial</h2></header>
-      <Explanation>
-        Walk through your first few minutes in cyberspace again, for the
-        identity you are now. It starts from the welcome.
-      </Explanation>
+      <Explanation>Your first few minutes again, from the welcome.</Explanation>
       <button
         className="avatars__go"
         onClick={() => useTutorial.getState().start({ restart: true })}

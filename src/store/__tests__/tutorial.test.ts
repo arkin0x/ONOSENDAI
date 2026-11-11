@@ -32,7 +32,7 @@ vi.mock('../useCyberspace', async (orig) => {
 })
 
 import { MINTED_KEY, useCyberspace } from '../useCyberspace'
-import { ADVANCE_MS, CHOICE_FAILED_MESSAGE, choiceOffered, isNewArrival, registerTutorialChoice, registerTutorialEffect, registerTutorialWatcher, runTutorialEffect, useTutorial, watchFirstArrival } from '../useTutorial'
+import { ADVANCE_MS, CHOICE_FAILED_MESSAGE, choiceOffered, isNewArrival, onTutorialLifecycle, registerTutorialChoice, registerTutorialEffect, registerTutorialWatcher, runTutorialEffect, useTutorial, watchFirstArrival } from '../useTutorial'
 import { useDemo } from '../useDemo'
 import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialFlag, noteLanding, readProgress, setTutorialSwitch, tutorialEnabled, tutorialSwitch, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
 import { useTv } from '../useTv'
@@ -228,6 +228,24 @@ describe('the script', () => {
     for (const s of TUTORIAL_SCRIPT.steps) if (s.modal) { expect(s.wait, s.id).toBeUndefined(); expect(s.gate, s.id).toBeUndefined() }
   })
 
+  it('glows COMMIT alone, never the mode button beside it, and opens CONTROLS for it (items 5 and 14)', () => {
+    for (const id of ['box', 'to-course']) {
+      const step = TUTORIAL_SCRIPT.steps.find((s) => s.id === id)!
+      expect(step.scene?.highlight).toBe('.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build)')
+      expect(step.scene?.pad).toBe(true)
+    }
+  })
+
+  it('has no SKIP on the first step: the box step is gated (item 17)', () => {
+    expect(TUTORIAL_SCRIPT.steps.find((s) => s.id === 'box')?.gate).toBe(true)
+  })
+
+  it('teaches the real build flow, with no HOLD button (item 11b)', () => {
+    const build = TUTORIAL_SCRIPT.steps.find((s) => s.id === 'build-place')!
+    expect(build.hint).not.toMatch(/HOLD/)
+    expect(build.hint).toMatch(/MOVE TO WORKSHOP[\s\S]*BUILD[\s\S]*OBJECT[\s\S]*PLACE/)
+  })
+
   it('has no em dash in any line the player reads', () => {
     for (const s of TUTORIAL_SCRIPT.steps) for (const t of [s.title, s.caption, s.captionDone, s.explain, s.hint, s.go]) if (t) expect(t, s.id).not.toMatch(/\u2014/)
   })
@@ -353,6 +371,74 @@ describe('the engine', () => {
     // BACK from there steps to the choices, past the branch (feedback item 8).
     useTutorial.getState().back()
     expect(id()).toBe('c')
+  })
+
+  it('BACK onto a step already done shows its check and waits, never bouncing forward again; BACK on a route checks nothing off (item 8)', () => {
+    vi.useFakeTimers()
+    registerTutorialWatcher('already-done' as never, (onDone) => { onDone(); return () => {} })
+    const id = (): string => useTutorial.getState().script.steps[useTutorial.getState().index].id
+    useTutorial.setState({ script: { steps: [
+      { id: 'w', title: 'W', caption: 'w', wait: 'already-done' as never },
+      { id: 'c', title: 'C', caption: 'c', modal: true, go: 'DONE', choices: [{ id: 'go-b', label: 'B', about: 'b', step: 'b' }] },
+      { id: 'b', title: 'B', caption: 'b', branch: true },
+    ] } })
+    useTutorial.getState().start({ at: 'c' })
+    useTutorial.getState().back()
+    expect(id()).toBe('w')
+    expect(useTutorial.getState().done).toBe(true)
+    vi.advanceTimersByTime(ADVANCE_MS * 3)
+    expect(id()).toBe('w')
+    useTutorial.getState().next()
+    useTutorial.getState().choose('go-b')
+    expect(id()).toBe('b')
+    useTutorial.getState().back()
+    expect(id()).toBe('c')
+    expect(useTutorial.getState().doneChoices).toEqual([])
+  })
+
+  it('keeps the checked-off routes with the progress, so a reload resumes with them (item 10)', () => {
+    useTutorial.setState({ script: { steps: [
+      { id: 'c', title: 'C', caption: 'c', modal: true, go: 'DONE', choices: [{ id: 'go-b', label: 'B', about: 'b', step: 'b' }] },
+      { id: 'b', title: 'B', caption: 'b', branch: true },
+    ] } })
+    useTutorial.getState().start()
+    useTutorial.getState().choose('go-b')
+    useTutorial.getState().next()
+    expect(readProgress(pubkey())).toEqual({ step: 'c', choices: ['go-b'] })
+    useTutorial.getState().pause()
+    useTutorial.getState().start({ at: 'c' })
+    expect(useTutorial.getState().doneChoices).toEqual(['go-b'])
+    // RESTART starts clean.
+    useTutorial.getState().start({ restart: true })
+    expect(useTutorial.getState().doneChoices).toEqual([])
+  })
+
+  it('RESTART leaves the publishing switch as the player set it: LOCAL is for a first arrival only (item 15)', () => {
+    useTutorial.setState({ script: { steps: [TUTORIAL_SCRIPT.steps[0]] } })
+    useCyberspace.getState().setLive(true)
+    useTutorial.getState().start({ restart: true })
+    expect(useCyberspace.getState().live).toBe(true)
+    useTutorial.getState().pause()
+  })
+
+  it('FINISH then a reload puts the kept stage back, through the restore hook (item 9)', async () => {
+    const restored: string[] = []
+    const off = onTutorialLifecycle({ restore: (pk) => { restored.push(pk) } })
+    writeProgress(pubkey(), { step: 'done', ended: 'finished' })
+    switchOn()
+    const stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().active).toBe(false)
+    expect(restored).toEqual([pubkey()])
+    stop()
+    // A skipped run restores nothing.
+    restored.length = 0
+    writeProgress(pubkey(), { step: 'box', ended: 'skipped' })
+    const stop2 = watchFirstArrival()
+    await flush()
+    expect(restored).toEqual([])
+    stop2()
+    off()
   })
 
   it('a choice that names `when` is offered only once registered; its run happens while the card is up, and the tutorial ends once it went', async () => {

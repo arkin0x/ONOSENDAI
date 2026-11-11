@@ -63,6 +63,7 @@ import { ProfileModal } from './hud/ProfileModal'
 import { useProfileView } from './store/useProfileView'
 import { TouchControls } from './hud/TouchControls'
 import { RegionChip } from './hud/RegionChip'
+import { useRegion } from './store/useRegion'
 import { WalkLookSphere } from './hud/WalkLookSphere'
 import { ViewFlyButtons } from './hud/ViewFlyButtons'
 import { SyncWarning } from './hud/SyncWarning'
@@ -230,6 +231,8 @@ export default function App(): JSX.Element {
   // where building happens, so on a phone the panels fold away.
   const building = useBuilder((s) => s.active)
   const touring = useDemo((s) => s.active)
+  // Region mode (store/useRegion.ts) clears the stack under its chip the same way.
+  const regionOn = useRegion((s) => s.active)
   // The question bubble lives in the menu; on a phone the menu covers the
   // scene, so starting the tour from it closes it. Only on the start:
   // opening the menu during the tour (its menu step) leaves it open.
@@ -337,6 +340,9 @@ export default function App(): JSX.Element {
               <FocusBar />
               {/* BUILD mode, where the free view's bar would be: it rides that view. */}
               <BuildBar />
+              {/* Region mode's readout, under RETURN (hud/RegionChip.tsx):
+                  null unless region mode is on (arkinox, 2026-11-11). */}
+              <RegionChip />
             </>,
             status: <>
               {/* A newer deploy, first of all when it requires a RELOAD to move (lib/versionGate.ts). */}
@@ -350,15 +356,15 @@ export default function App(): JSX.Element {
               <GoalChip />
               {/* BUILD mode keeps the stack to what building needs (arkinox,
                   2026-10-08): the line and XOR BITS step aside and come back
-                  on exit. */}
+                  on exit. Region mode does the same (arkinox, 2026-11-11). */}
               {/* Not during the /demo tour (arkinox, 2026-10-15). */}
-              {!building && !touring && <LineScrubber />}
+              {!building && !touring && !regionOn && <LineScrubber />}
               <HyperspaceBar />
               {/* Not in BUILD mode, and neither is NEARBY (arkinox,
                   2026-11-02); each chip stands down itself. [ ] Home End
                   still aim the build cursor along a chain (useBuilder walkChain). */}
               <ChainExplorer />
-              {!building && <BitReadout />}
+              {!building && !regionOn && <BitReadout />}
               {/* Under XOR BITS while anything is unread (arkinox, 2026-09-28). */}
               <NotificationsToast />
               {/* What was just found, what is open to you here, then the scan. */}
@@ -385,8 +391,6 @@ export default function App(): JSX.Element {
       {!crowded && !offerUp && !deploying && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       <div hidden={modalUp}>
         {showPad && !offerUp && <TouchControls />}
-        {/* Region mode's readout, top left (hud/RegionChip.tsx): null unless region mode is on. */}
-        {showPad && !offerUp && <RegionChip />}
         {/* Not while placing: the deploy bar docks in this same corner
             (arkinox, 2026-10-12), and placing moves no avatar, so there is
             no route to show. */}

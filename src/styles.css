@@ -8735,18 +8735,22 @@ kbd {
 :root {
   --build: #f2f7ff;
 }
-/* The whole width of the scene up to the compass (arkinox, 2026-11-09).
+/* The whole width of the scene up to the compass (arkinox, 2026-11-09),
+ * the BUILD bar and the REGION chip alike (arkinox, 2026-11-11).
  * The safe-area terms are 0 today (index.html has no viewport-fit=cover);
  * they keep the bar clear of a notch if that is ever turned on. */
+.hyperbar.buildbar,
+.regionchip {
+  margin-left: env(safe-area-inset-left, 0px);
+  width: calc(100vw - var(--instruments-left) - var(--compass-reserve) - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  max-width: none;
+}
 .hyperbar.buildbar {
   /* Its own width, which the header's layout reads (.buildbar__head). */
   container: buildbar / inline-size;
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
-  margin-left: env(safe-area-inset-left, 0px);
-  width: calc(100vw - var(--instruments-left) - var(--compass-reserve) - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
-  max-width: none;
   border-color: rgba(242, 247, 255, 0.55);
   box-shadow: 0 0 14px rgba(242, 247, 255, 0.14);
 }
@@ -9838,26 +9842,24 @@ a.feed__act { text-decoration: none; }
 }
 
 /* The Region button, in the pin cell left of the globe, VIEW only
-   (TouchControls; store/useRegion.ts). Lit in the bright /C/ yellow while
-   region mode is on. */
+   (TouchControls; store/useRegion.ts). Lit in the bright /C/ yellow for as
+   long as region mode is on, a toggle (arkinox, 2026-11-11): scoped to the
+   VIEW pad so it outranks VIEW's tint above, which used to win. */
 .touchpad__key--region { grid-area: pin; color: var(--warn, #ffb020); }
-.touchpad__key--region.is-on {
+.touchpad--mode-view .touchpad__key--region.is-on {
   color: #ffe14d;
   background-image: linear-gradient(rgba(255, 225, 77, 0.22), rgba(255, 225, 77, 0.22));
   border-color: rgba(255, 225, 77, 0.6);
 }
 
-/* REGION chip, top left (hud/RegionChip.tsx): the selected region's prefix,
-   tap to copy, and a link to reserve it as a private speakeasy. */
+/* REGION chip, in the top-left stack under RETURN (hud/RegionChip.tsx):
+   the selected region's prefix, tap to copy, and a link to reserve it as a
+   private speakeasy. Its width is the BUILD bar's, up to the compass. */
 .regionchip {
-  position: fixed;
-  top: calc(var(--menu-bottom, 16px));
-  left: var(--menu-left, 16px);
-  z-index: 104;
+  pointer-events: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: min(72vw, 320px);
   padding: 8px 10px;
   border-radius: 10px;
   border: 1px solid rgba(255, 225, 77, 0.5);
@@ -9875,14 +9877,15 @@ a.feed__act { text-decoration: none; }
   background: none;
   border: none;
   color: #ffe14d;
-  font-family: var(--mono);
+  /* The monospace the other chips on the scene read in (.bits, .explorer). */
+  font-family: 'Monaspace Krypton', var(--mono);
   font-size: 12px;
   cursor: pointer;
   text-align: left;
-  word-break: break-all;
+  min-width: 0;
 }
 .regionchip__coord:hover { color: #fff3b0; }
-.regionchip__hex { word-break: break-all; }
+.regionchip__hex { min-width: 0; overflow-wrap: anywhere; }
 .regionchip__note { font-size: 9px; letter-spacing: 0.08em; opacity: 0.7; }
 .regionchip__reserve {
   font-size: 11px;

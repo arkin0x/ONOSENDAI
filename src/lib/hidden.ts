@@ -825,7 +825,7 @@ export const DEFAULT_BAG_SETTINGS: BagSettings = { heightTag: true, hint: null, 
  * keys, chests, hidden audio, and the cashu tokens and nonfungible.cash claim links (NFTs,
  * lib/nftLink) written in its messages.
  */
-export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number; audio: number; door: number }
+export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number; audio: number; door: number; seed: number; dna: number }
 
 /**
  * What a bag holds, counted as spec §7.7 counts (Contents). An inline item by
@@ -837,7 +837,7 @@ export interface BagContents { shard: number; message: number; key: number; ches
  * sealed entry whose item was never read, counts as nothing.
  */
 export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): BagContents {
-  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0, door: 0 }
+  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0, door: 0, seed: 0, dna: 0 }
   for (const entry of inners) {
     let e: Pick<Rumor, 'kind' | 'content' | 'tags'>
     if (isReference(entry)) {
@@ -853,6 +853,9 @@ export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: Re
     // A door counts as `door`, never as `chest` (spec §7.7, #82); what its room holds is never counted.
     else if (e.kind === CHEST_KIND) { if (isDoor(e.tags)) out.door++; else out.chest++ }
     else if (e.kind === AUDIO_KIND) out.audio++
+    // Seeds and the DNAs hidden with them (DECK-0008 §8.2, Contents).
+    else if (e.kind === SEED_KIND) out.seed++
+    else if (e.kind === DNA_KIND) out.dna++
   }
   return out
 }
@@ -863,7 +866,7 @@ export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: Re
  * it keeps the order spec §7.7 gives; `door` (DECK-0004 §3.7, spec #82)
  * after it, for the same reason.
  */
-export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft', 'audio', 'door'] as const
+export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft', 'audio', 'door', 'seed', 'dna'] as const
 
 /**
  * The public tags a bag's contents settings write (arkinox, 2026-10-18:

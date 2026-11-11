@@ -17,7 +17,13 @@ const LINK2 = `https://nonfungible.cash/claim/${'0a'.repeat(16)}#${'B'.repeat(42
 describe('bagContents', () => {
   it('counts shards (in the bag or by reference), messages, keys, chests and cashu tokens', () => {
     const c = bagContents([ev(3330), ref, ev(1, `here ${TOKEN}`), ev(1, 'hi'), ev(3340), ev(3341)])
-    expect(c).toEqual({ shard: 2, message: 2, key: 1, chest: 1, cashu: 1, nft: 0, audio: 0, door: 0 })
+    expect(c).toEqual({ shard: 2, message: 2, key: 1, chest: 1, cashu: 1, nft: 0, audio: 0, door: 0, seed: 0, dna: 0 })
+  })
+
+  it('counts seeds and the DNAs hidden with them, after door (DECK-0008 §8.2)', () => {
+    expect(bagContents([ev(3351), ev(3351), ev(3350)])).toMatchObject({ seed: 2, dna: 1 })
+    expect(bagContentsTags([ev(3330), ev(3351), ev(3350)], { contents: true, money: false })).toEqual([['contents', 'shard', '1'], ['contents', 'seed', '1'], ['contents', 'dna', '1']])
+    expect(readBagContents([['contents', 'seed', '2'], ['contents', 'dna', '1']]).counts).toEqual({ seed: '2', dna: '1' })
   })
 
   it('counts the nonfungible.cash claim links in messages, each once, and never a look-alike', () => {

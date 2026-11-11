@@ -25,6 +25,7 @@ import { useMutes } from '../store/useMutes'
 import { useBlooms, wantSeeds } from '../store/useBlooms'
 import { seedItemOf, seedsInPlane, type SeedItem } from '../lib/seeds/seedItem'
 import { bloomShard } from '../lib/seeds/bloomShard'
+import { standBloom } from '../lib/seeds/orientation'
 import type { ShardModel } from 'sno-core/shards'
 import type { NostrEvent } from '../lib/events'
 import { PlacedShard, placeShard, useSteadied, type PlacedShardDraw } from './WorldShards'
@@ -95,7 +96,8 @@ export function WorldSeeds({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const fresh = useMemo<PlacedShardDraw[]>(() => {
     const origin = alignedOrigin(anchor, scaleExp)
     return near.map(({ w, seed }) => {
-      const placed = placeShard({ ...w, shard: views[seed.id]?.shard ?? markFor(seed.scale) }, origin, scaleExp, axes)
+      // Turned and stood as the seed's tags say (§5.7): the pose stands it on Earth when it carries `up` in dataspace.
+      const placed = placeShard({ ...w, shard: standBloom(views[seed.id]?.shard ?? markFor(seed.scale), seed.stand, w.plane) }, origin, scaleExp, axes)
       // Past its cube only up to scale 2^30, the largest SEED offers: a seed at 2^84 from another client is cut at its cube as a shard is.
       return seed.scale <= UNCLIPPED_SCALE_MAX ? { ...placed, clip: UNBOUNDED } : placed
     })

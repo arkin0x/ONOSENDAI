@@ -67,12 +67,17 @@ export const TO_PLOT: TutorialStep = {
   effect: 'aim-plot',
 }
 
-/** Plant it: BUILD, SEED, the tree, PLANT, then place it on the dirt. Planting is the player's, mined on their device. */
+/**
+ * Plant it: PLANT THE SEED lines the tutorial tree up in BUILD, where the
+ * player stands on the dirt, and HIDE plants it. Planting is the player's,
+ * mined on their device.
+ */
 export const PLANT: TutorialStep = {
   id: 'plant',
   title: 'Plant it',
-  caption: `Go into BUILD and plant the ${TREE} on the dirt.`,
-  hint: `BUILD, SEED, ${TREE}, SMALL, PLANT, then HIDE.`,
+  caption: `Plant the ${TREE} on the dirt.`,
+  hint: 'PLANT THE SEED, then HIDE.',
+  action: { label: 'PLANT THE SEED', effect: 'plant-tutorial-seed' },
   explain: 'A seed is yours. You sign it and do a little work for it on this device, and it stays where you plant it. Everyone who finds it grows the same tree, a little more every day.',
   wait: 'plant',
 }

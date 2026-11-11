@@ -37,7 +37,8 @@ import { useBuilder } from '../store/useBuilder'
 import { positionOf } from '../store/useShards'
 import { seedItemOf } from '../lib/seeds/seedItem'
 import { dnaResolver } from '../lib/seeds/seedSources'
-import { TUTORIAL_DNA } from './dna'
+import { TUTORIAL_DNA, tutorialDnaId, tutorialSeedDraft } from './dna'
+import { dnaMatches } from '../lib/seeds/plant'
 import { markViewedStop, ownHyperspaceView } from '../store/useHyperspace'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { PLOT_STAND, START_STAND, atStart, courseToWorld, onDeck, onPlot } from './course'
@@ -264,11 +265,13 @@ registerTutorialWatcher('at-plot', (onDone) => watchArrival((at, layout) => onPl
 
 /**
  * The tutorial tree planted (A5): a seed of the player's own on the dirt,
- * growing the tutorial DNA, and out (published) unless they are LOCAL.
- * Planting is theirs: BUILD, SEED, the tree, PLANT, and the deploy that
- * mines its work (the Seeds client, store/useShards), whose row appears only
- * once the seed is mined and its bag written. A state, not "since the step
- * came up": a reload after planting finds it planted.
+ * growing the tutorial DNA (the owner's event once TUTORIAL_DNA_ID is set,
+ * or a copy of its text the player's SEED signed), and out (published)
+ * unless they are LOCAL. Planting is theirs: PLANT THE SEED lines it up in
+ * BUILD, and HIDE runs the deploy that mines its work (the Seeds client,
+ * store/useShards), whose row appears only once the seed is mined and its
+ * bag written. A state, not "since the step came up": a reload after
+ * planting finds it planted.
  */
 export function tutorialTreePlanted(onUnknown?: () => void): boolean {
   const layout = useTutorialStage.getState().layout
@@ -279,6 +282,7 @@ export function tutorialTreePlanted(onUnknown?: () => void): boolean {
     if (d.plane !== layout.plane || !onPlot(layout.frame, positionOf(d))) return false
     const seed = seedItemOf(d.inner)
     if (!seed) return false
+    if (seed.dnaId === tutorialDnaId()) return true
     const v = dnaResolver.verdict(seed.dnaId)
     if (!v || v.state === 'fetching') { if (onUnknown) void dnaResolver.resolve(seed.dnaId).then(onUnknown, onUnknown); return false }
     return v.state === 'ok' && v.text === TUTORIAL_DNA.text
@@ -289,6 +293,31 @@ registerTutorialWatcher('plant', (onDone) => {
   let again: () => void = () => {}
   const off = watchUntil(() => tutorialTreePlanted(() => again()), onDone, [onStage, (l) => { again = l; return useShards.subscribe((s, prev) => { if (s.mine !== prev.mine) l() }) }])
   return () => { again = () => {}; off() }
+})
+
+/**
+ * PLANT THE SEED (the plant step's button): BUILD on the player, where they
+ * stand on the dirt, with the tutorial tree lined up to hide, as SEED's
+ * PLANT lines one up (hud/SeedCompose; the composer offers the original
+ * DNAs, not this tree). Once the owner's event is set, the seed names it at
+ * its own size limit, and waits until the event is on this device's relays,
+ * as SEED does; until then the player's SEED signs a copy of the DNA. HIDE
+ * is still the player's: nothing is mined or hidden here.
+ */
+export async function lineUpTutorialSeed(id: string | null = tutorialDnaId()): Promise<string | null> {
+  let draft = tutorialSeedDraft(null)
+  if (id) {
+    const v = await dnaResolver.resolve(id)
+    if (v.state !== 'ok' || !dnaMatches(v.event, TUTORIAL_DNA.text, v.caps)) return 'The tutorial tree is not on your relays yet. Try again in a moment.'
+    draft = tutorialSeedDraft(id, v.caps)
+  }
+  if (!useBuilder.getState().active) useBuilder.getState().enter('build')
+  useShards.getState().startDeploySeed(draft)
+  return null
+}
+
+registerTutorialEffect('plant-tutorial-seed', () => {
+  void lineUpTutorialSeed().then((why) => useTutorialStage.setState({ error: why }), (err: unknown) => { console.warn('[tutorial] could not line the seed up:', err); useTutorialStage.setState({ error: 'The seed could not be lined up. Try PLANT THE SEED again.' }) })
 })
 
 /** The bud: out of BUILD (planting leaves a copy of the seed lined up), so the next step's COMMIT is there to tap. */

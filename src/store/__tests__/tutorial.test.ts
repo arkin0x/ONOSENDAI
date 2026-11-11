@@ -422,17 +422,38 @@ describe('the engine', () => {
     expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('after')
   })
 
-  it('plants the tutorial tree: the plant step names the DNA the SEED composer offers, and the bud step shows its picture', async () => {
+  it('plants the tutorial tree, MOON BLOSSOM v2: the owner\'s DNA template, the free caps, no published id yet, its plant button and its bud picture', async () => {
     const { TUTORIAL_DNA, TUTORIAL_BUD_PICTURE } = await import('../../tutorial/dna')
     const ids = TUTORIAL_SCRIPT.steps.map((st) => st.id)
     expect(ids.slice(ids.indexOf('take'), ids.indexOf('to-course') + 1)).toEqual(['take', 'to-plot', 'plant', 'bud', 'to-course'])
     const plant = TUTORIAL_SCRIPT.steps.find((st) => st.id === 'plant')!
-    expect(plant.hint).toContain(TUTORIAL_DNA.name.toUpperCase())
+    expect(plant.caption).toContain('MOON BLOSSOM')
+    expect(plant.action?.effect).toBe('plant-tutorial-seed')
     expect(TUTORIAL_SCRIPT.steps.find((st) => st.id === 'bud')!.image?.src).toBe(TUTORIAL_BUD_PICTURE)
-    // The tree is a starter, so the composer offers it by name; the picture is on disk.
-    const { STARTER_DNAS } = await import('../../lib/seeds/starterDnas')
-    expect(STARTER_DNAS).toContain(TUTORIAL_DNA)
-    expect(TUTORIAL_DNA.name).toBe('oak')
+    // The DNA is the owner's event template, byte for byte; its caps are the free caps (16 bits a seed).
+    const template = (await import('../../tutorial/moon-blossom-v2-event.json')).default as { kind: number; content: string; tags: string[][] }
+    const { BASE_CAPS, capsPrice } = await import('sno-core/seeds')
+    const { dnaMatches } = await import('../../lib/seeds/plant')
+    expect(template.kind).toBe(3350)
+    expect(TUTORIAL_DNA.text).toBe(template.content)
+    expect(TUTORIAL_DNA.text.startsWith('seedo   1\n')).toBe(true)
+    expect(TUTORIAL_DNA.name).toBe('moon blossom')
+    expect(TUTORIAL_DNA.caps).toEqual(BASE_CAPS)
+    expect(capsPrice(TUTORIAL_DNA.caps)).toBe(16)
+    expect(dnaMatches(template, TUTORIAL_DNA.text, TUTORIAL_DNA.caps)).toBe(true)
+    // Not published yet: no id, and the seed is a copy the player's SEED signs. Set, it names the owner's event.
+    const { TUTORIAL_DNA_ID, tutorialDnaId, tutorialSeedDraft } = await import('../../tutorial/dna')
+    expect(TUTORIAL_DNA_ID).toBe('')
+    expect(tutorialDnaId()).toBe(null)
+    expect(tutorialDnaId('nope')).toBe(null)
+    expect(tutorialSeedDraft()).toEqual({ text: TUTORIAL_DNA.text, caps: BASE_CAPS, scale: 0, title: '' })
+    const id = 'a'.repeat(64)
+    const owned = { vertices: 2048, symbols: 2048, generations: 32 }
+    expect(tutorialDnaId(id)).toBe(id)
+    expect(tutorialSeedDraft(id, owned)).toEqual({ text: TUTORIAL_DNA.text, caps: owned, scale: 0, title: '', dnaId: id })
+    // The tree is not one of the original DNAs (the composer offers those); the plant button lines it up instead.
+    const { ORIGINAL_DNAS } = await import('../../lib/seeds/originalDnas')
+    expect(ORIGINAL_DNAS.some((d) => d.text === TUTORIAL_DNA.text)).toBe(false)
     const { existsSync } = await import('node:fs')
     const { join } = await import('node:path')
     expect(existsSync(join(__dirname, '../../../public', TUTORIAL_BUD_PICTURE))).toBe(true)

@@ -219,13 +219,13 @@ describe('the director', () => {
     const { dnaResolver } = await import('../../lib/seeds/seedSources')
     const { TUTORIAL_DNA } = await import('../dna')
     const { seedTemplate, dnaTemplate } = await import('../../lib/seeds/plant')
-    const { STARTER_DNAS } = await import('../../lib/seeds/starterDnas')
+    const { ORIGINAL_DNAS } = await import('../../lib/seeds/originalDnas')
     const { finalizeEvent, generateSecretKey, getPublicKey } = await import('nostr-tools/pure')
     const { minePow } = await import('nostr-tools/nip13')
     const me = generateSecretKey()
     const dnaOf = (text: string, caps = TUTORIAL_DNA.caps) => { const ev = finalizeEvent(dnaTemplate(text, caps, 1_800_000_000), me); dnaResolver.note(ev as never); return ev }
-    const oak = dnaOf(TUTORIAL_DNA.text)
-    const fern = dnaOf(STARTER_DNAS.find((d) => d.name !== TUTORIAL_DNA.name)!.text)
+    const tree = dnaOf(TUTORIAL_DNA.text)
+    const fern = dnaOf(ORIGINAL_DNAS[0].text, ORIGINAL_DNAS[0].caps)
     const seedRow = (dnaId: string, at: { x: bigint; y: bigint; z: bigint }, published = true) => {
       // With the work a seed owes at the base price (DECK-0008 §8.2), or no reader reads it.
       const t = seedTemplate({ dnaId, relayHint: '', planted: 900_000, scale: 0, at, plane: layout!.plane, title: '', createdAt: 1_800_000_000 })
@@ -239,11 +239,11 @@ describe('the director', () => {
     useShards.setState({ mine: [seedRow(fern.id, stand)] })
     await new Promise((r) => setTimeout(r, 20))
     expect(useTutorial.getState().done).toBe(false)
-    useShards.setState({ mine: [seedRow(oak.id, { ...stand, x: stand.x + 40n })] })
+    useShards.setState({ mine: [seedRow(tree.id, { ...stand, x: stand.x + 40n })] })
     expect(useTutorial.getState().done).toBe(false)
-    useShards.setState({ mine: [seedRow(oak.id, stand, false)] })
+    useShards.setState({ mine: [seedRow(tree.id, stand, false)] })
     expect(useTutorial.getState().done).toBe(false)
-    useShards.setState({ mine: [seedRow(oak.id, stand)] })
+    useShards.setState({ mine: [seedRow(tree.id, stand)] })
     // Its DNA is resolved (asynchronously), then it counts.
     await vi.waitFor(() => { expect(useTutorial.getState().done).toBe(true) })
     // A reload after planting finds it planted.
@@ -280,5 +280,37 @@ describe('the director', () => {
     expect(useCyberspace.getState().headPlane).toBe(1)
     useCyberspace.getState().clearFocus(true)
     expect(useCyberspace.getState().plane).toBe(1)
+  })
+
+  it('PLANT THE SEED lines the tutorial tree up in BUILD; with the owner\'s event set, it names that event, and waits until it is on the relays', async () => {
+    const { lineUpTutorialSeed } = await import('../director')
+    const { TUTORIAL_DNA } = await import('../dna')
+    const { useBuilder } = await import('../../store/useBuilder')
+    const { dnaResolver } = await import('../../lib/seeds/seedSources')
+    const { finalizeEvent, generateSecretKey } = await import('nostr-tools/pure')
+    const template = (await import('../moon-blossom-v2-event.json')).default
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    useBuilder.setState({ active: false } as never)
+    useShards.setState({ pending: null })
+    // Unpublished: a copy for the player's SEED to sign.
+    expect(await lineUpTutorialSeed(null)).toBe(null)
+    expect(useBuilder.getState().active).toBe(true)
+    expect(useShards.getState().pending).toMatchObject({ type: 'seed', seed: { text: TUTORIAL_DNA.text, caps: TUTORIAL_DNA.caps, scale: 0 } })
+    expect((useShards.getState().pending as { seed: { dnaId?: string } }).seed.dnaId).toBeUndefined()
+    useShards.setState({ pending: null })
+    // Published but not on this device's relays: refused, nothing lined up.
+    const missing = 'b'.repeat(64)
+    vi.spyOn(dnaResolver, 'resolve').mockResolvedValueOnce({ state: 'missing', id: missing })
+    expect(await lineUpTutorialSeed(missing)).toMatch(/not on your relays/)
+    expect(useShards.getState().pending).toBe(null)
+    // Published and found: the seed names the owner's event, at its size limit.
+    const owner = finalizeEvent({ kind: template.kind, created_at: 1_800_000_000, tags: template.tags, content: template.content }, generateSecretKey())
+    dnaResolver.note(owner as never)
+    await dnaResolver.resolve(owner.id)
+    expect(await lineUpTutorialSeed(owner.id)).toBe(null)
+    expect(useShards.getState().pending).toMatchObject({ type: 'seed', seed: { dnaId: owner.id, text: TUTORIAL_DNA.text } })
+    useShards.setState({ pending: null })
+    useBuilder.setState({ active: false } as never)
   })
 })

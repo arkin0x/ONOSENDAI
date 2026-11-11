@@ -18,6 +18,8 @@ import { generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from 'nostr-tools'
 import { regionKeyAt } from '../../lib/shardCrypto'
 import { unbag, type Hidden } from '../../lib/hidden'
+import { decryptForRegion } from '../../lib/shardCrypto'
+import { DNA_KIND } from '../../lib/seeds/seedItem'
 import { lockOf } from '../../lib/locks'
 import { NIP44_MAX_PLAINTEXT, openWithSecret, plaintextBytes, readContents } from '../../lib/chests'
 import { BAG_SAFE_BYTES } from '../../lib/bagSize'
@@ -116,7 +118,11 @@ describe('the stage', () => {
     const coverItems = await open(coverBag, MID, l.cover.height)
     expect(coverItems[0].eventId).toBe(stage.ids.blueBox)
     // The blue box and the whole course, every piece where the course puts it, all in the cover (§7.6).
-    expect(coverItems).toHaveLength(1 + COURSE.length)
+    // ... and the dirt plot (A5). No DNA: the player's composer signs the tree's own (stage.ts).
+    expect(coverItems).toHaveLength(1 + COURSE.length + 1)
+    expect(coverItems[coverItems.length - 1].eventId).toBe(stage.ids.plot)
+    const json = await decryptForRegion(regionKeyAt(l.cover.base, l.cover.height, MAX_COMPUTE).key, coverBag.tags.find((t) => t[0] === 'encrypted')![2])
+    expect((JSON.parse(json ?? '[]') as NostrEvent[]).some((e) => e.kind === DNA_KIND)).toBe(false)
     COURSE.forEach((part, i) => {
       const item = coverItems[1 + i]
       expect(item.type).toBe('shard')

@@ -37,6 +37,7 @@ export function TutorialCoach(): JSX.Element | null {
   const script = useTutorial((s) => s.script)
   // The guide's things could not be staged: said where the instruction goes.
   const stageError = useTutorialStage((s) => s.error)
+  const stepNote = useTutorial((s) => s.stepNote)
   // Never over the /demo tour (useTutorial pauses for it; this is the frame between),
   // nor over the workshop, which has the screen while it is open.
   const touring = useDemo((s) => s.active)
@@ -145,11 +146,12 @@ export function TutorialCoach(): JSX.Element | null {
           <h2 className="demo__title">{step.title}</h2>
         </div>
         <p className="demo__caption"><CaptionText caption={caption} /></p>
+        {step.image && <img className="tutorial__image" src={step.image.src} alt={step.image.alt} width={160} height={160} onError={(e) => { e.currentTarget.style.display = 'none' }} />}
         {step.explain && explaining && <p className="demo__caption tutorial__explain">{step.explain}</p>}
       </div>
       {step.wait ? (
         <div className={`demo__wait ${done ? 'is-done' : ''}`} aria-live="polite">
-          <span>{done ? '✓ Done' : stageError ?? step.hint ?? 'Your turn.'}</span>
+          <span>{done ? '✓ Done' : stageError ?? stepNote ?? step.hint ?? 'Your turn.'}</span>
         </div>
       ) : step.hint && (
         // A step that waits on nothing still says where to go next (the menu, for a ride or an agent).

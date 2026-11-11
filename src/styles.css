@@ -3839,6 +3839,18 @@ kbd {
   background: radial-gradient(circle at 36% 32%, rgba(255, 176, 32, 0.5), rgba(6, 14, 22, 0.66) 62%, rgba(6, 14, 22, 0.86));
   border-color: rgba(255, 176, 32, 0.8);
 }
+/* The key that flies the same way, to the right of each orb, in VIEW's yellow
+   (arkinox, 2026-11-11): Space forward, Shift back. */
+.flyorb__row { display: flex; align-items: center; gap: 6px; }
+.flyorb__key {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  color: rgb(255, 196, 92);
+  opacity: 0.85;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
 /* Over the HOSAKA mark while a job computes, as the LOOK ball stands. */
 .app:has(.hosaka-pulse) .flyorbs {
   bottom: calc(var(--menu-bottom) + var(--menu-size) * (1 + 334 / 308) + 2 * var(--routeov-gap));
@@ -4179,6 +4191,69 @@ kbd {
   font-size: 8px;
   letter-spacing: 0.14em;
   color: var(--dim);
+}
+
+/* ---------- Speakeasy (Position panel) ----------
+ * The speakeasy your chain head stands in: one quiet line under the
+ * coordinate, its name linking to the region's page, then ADD RELAY or JOINED.
+ */
+.speakeasy {
+  margin-top: 10px;
+}
+
+.speakeasy__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.speakeasy__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 10px;
+}
+
+.speakeasy__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.speakeasy__name:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.speakeasy__add {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  padding: 0 8px;
+  height: 22px;
+  border-radius: 3px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.28);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.speakeasy__add:hover {
+  background: rgba(0, 229, 255, 0.16);
+}
+
+.speakeasy__joined {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--ok);
+  flex-shrink: 0;
 }
 
 /* ---------- Derezz ----------
@@ -4793,6 +4868,11 @@ kbd {
   touch-action: none;
   padding: 0;
 }
+/* Pinned to their columns so the mode button keeps its size and place when
+   RECALL hides in HOP on your avatar (arkinox, 2026-11-11): without this the
+   commit button auto-flows into RECALL's narrower column. */
+.touchops__cancel { grid-column: 1; grid-row: 1; }
+.touchops__commit { grid-column: 2; grid-row: 1; }
 
 /* COMMIT is HOP's: the mode's blue, not VIEW's yellow (arkinox, 2026-10-13:
    "Commit should be the Hop color"). */
@@ -8718,18 +8798,22 @@ kbd {
 :root {
   --build: #f2f7ff;
 }
-/* The whole width of the scene up to the compass (arkinox, 2026-11-09).
+/* The whole width of the scene up to the compass (arkinox, 2026-11-09),
+ * the BUILD bar and the REGION chip alike (arkinox, 2026-11-11).
  * The safe-area terms are 0 today (index.html has no viewport-fit=cover);
  * they keep the bar clear of a notch if that is ever turned on. */
+.hyperbar.buildbar,
+.regionchip {
+  margin-left: env(safe-area-inset-left, 0px);
+  width: calc(100vw - var(--instruments-left) - var(--compass-reserve) - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  max-width: none;
+}
 .hyperbar.buildbar {
   /* Its own width, which the header's layout reads (.buildbar__head). */
   container: buildbar / inline-size;
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
-  margin-left: env(safe-area-inset-left, 0px);
-  width: calc(100vw - var(--instruments-left) - var(--compass-reserve) - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
-  max-width: none;
   border-color: rgba(242, 247, 255, 0.55);
   box-shadow: 0 0 14px rgba(242, 247, 255, 0.14);
 }
@@ -9529,6 +9613,7 @@ a.feed__act { text-decoration: none; }
 .chest__glyph--cashu { color: #f7931a; }
 .secret__badge--key { color: #e8c547; }
 .secret__badge--audio { color: #9fd0ff; }
+.secret__badge--seed { color: #6fe08a; }
 .chest__glyph--audio, .shards__type--audio { color: #9fd0ff; }
 
 /* Hidden audio's card in the item modal (AudioCard, DECK-0007): the note's
@@ -9796,6 +9881,86 @@ a.feed__act { text-decoration: none; }
   background-image: linear-gradient(rgba(255, 176, 32, 0.16), rgba(255, 176, 32, 0.16));
   border-color: rgba(255, 176, 32, 0.35);
 }
+/* The 2^0 readout wears VIEW's yellow like the keys around it (arkinox,
+   2026-11-11), where in every other mode it keeps its own tint. */
+.touchpad--mode-view .touchpad__hub {
+  color: var(--warn, #ffb020);
+  background-image: linear-gradient(rgba(255, 176, 32, 0.16), rgba(255, 176, 32, 0.16));
+  border-color: rgba(255, 176, 32, 0.35);
+}
+
+/* A key's keyboard letter, tiny at its bottom centre (arkinox, 2026-11-11),
+   per mode since the keys differ by mode (TouchControls PadKey.keyHint). */
+.touchpad__key { position: relative; }
+.touchpad__keyhint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 2px;
+  text-align: center;
+  font-size: 6px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* The Region button, in the pin cell left of the globe, VIEW only
+   (TouchControls; store/useRegion.ts). Lit in the bright /C/ yellow for as
+   long as region mode is on, a toggle (arkinox, 2026-11-11): scoped to the
+   VIEW pad so it outranks VIEW's tint above, which used to win. */
+.touchpad__key--region { grid-area: pin; color: var(--warn, #ffb020); }
+.touchpad--mode-view .touchpad__key--region.is-on {
+  color: #ffe14d;
+  background-image: linear-gradient(rgba(255, 225, 77, 0.22), rgba(255, 225, 77, 0.22));
+  border-color: rgba(255, 225, 77, 0.6);
+}
+
+/* REGION chip, in the top-left stack under RETURN (hud/RegionChip.tsx):
+   the selected region's prefix, tap to copy, and a link to reserve it as a
+   private speakeasy. Its width is the BUILD bar's, up to the compass. */
+.regionchip {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 225, 77, 0.5);
+  background: rgba(6, 14, 22, 0.82);
+  backdrop-filter: blur(6px);
+  color: var(--fg, #c8f5ff);
+}
+.regionchip__head { display: flex; align-items: center; gap: 6px; color: #ffe14d; }
+.regionchip__title { font-size: 10px; letter-spacing: 0.16em; font-weight: 700; }
+.regionchip__coord {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  color: #ffe14d;
+  /* The monospace the other chips on the scene read in (.bits, .explorer). */
+  font-family: 'Monaspace Krypton', var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+  /* Only as wide as its text, so a tap on the chip's empty width copies nothing. */
+  align-self: flex-start;
+}
+.regionchip__coord:hover { color: #fff3b0; }
+.regionchip__hex { min-width: 0; overflow-wrap: anywhere; }
+.regionchip__note { font-size: 9px; letter-spacing: 0.08em; opacity: 0.7; }
+.regionchip__reserve {
+  /* Only as wide as its words, so the chip's empty width opens nothing. */
+  align-self: flex-start;
+  font-size: 11px;
+  color: var(--accent, #00e5ff);
+  text-decoration: none;
+}
+.regionchip__reserve:hover { text-decoration: underline; }
 /* WALK's keys are held (store/walkHold.ts): a press never becomes a pan or a zoom. */
 .touchpad--mode-walk .touchpad__key { touch-action: none; }
 .touchpad--mode-walk .touchpad__key:not(:active),
@@ -10440,6 +10605,53 @@ html.tv-broadcast body { overflow: hidden; }
   cursor: pointer;
 }
 
+/* A seed's card (BloomCard, DECK-0008): the bloom turning, one line for its state, then its facts. */
+.bloom { display: flex; flex-direction: column; margin-bottom: 12px; }
+.bloom__state { margin: 0 0 10px; font-size: 12px; color: var(--fg); text-align: center; }
+.bloom__anyway { flex: none; width: 100%; margin-bottom: 12px; }
+.bloom__facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 12px; font-size: 12px; }
+.bloom__facts dt { font-size: 8px; letter-spacing: 0.16em; color: var(--dim); align-self: center; }
+.bloom__facts dd { margin: 0; color: var(--fg); overflow-wrap: anywhere; }
+.bloom__who { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.bloom__who .secret__label { flex: 0 0 64px; }
+
+/* The SEED composer (SeedCompose, DECK-0008): the DNAs as chips, the bloom turning, then day, scale and price. */
+.seedc__picks { display: flex; flex-wrap: wrap; gap: 4px; }
+.seedc__pick {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 3px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  cursor: pointer;
+}
+.seedc__pick.is-on { color: #6fe08a; border-color: #6fe08a; background: rgba(111, 224, 138, 0.12); }
+.seedc__text { min-height: 120px; }
+.seedc__row { display: flex; align-items: center; gap: 8px; }
+.seedc__row .secret__label { flex: 0 0 44px; }
+.seedc__import { flex: none; min-width: 0; padding: 0 10px; height: 28px; }
+.seedc__preview { display: flex; justify-content: center; align-items: center; min-height: 200px; }
+.seedc__empty { font-size: 10px; letter-spacing: 0.08em; color: var(--dim); }
+.seedc__slider input[type='range'] { flex: 1 1 auto; min-width: 0; accent-color: #6fe08a; }
+.seedc__value { min-width: 36px; font-size: 11px; color: var(--fg); text-align: center; }
+.seedc__step {
+  font-family: inherit;
+  width: 28px;
+  height: 26px;
+  border-radius: 3px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  cursor: pointer;
+}
+.seedc__step:disabled { opacity: 0.35; cursor: default; }
+.seedc__price { margin: 2px 0 4px; font-size: 9px; letter-spacing: 0.1em; color: var(--dim); }
+.seedc__row .seedc__label--wide { flex: 0 0 auto; margin-right: 4px; }
+
 /* The first-arrival tutorial (hud/TutorialCoach.tsx): the /demo coach's look,
    a centered card for the welcome, and RESTART TUTORIAL in Settings. */
 .modal__card.tutorial-card { max-width: 380px; border-color: rgba(0, 229, 255, 0.55); display: flex; flex-direction: column; gap: 10px; font-family: var(--mono); }
@@ -10450,6 +10662,8 @@ html.tv-broadcast body { overflow: hidden; }
 .tutorial-choice { flex: 0 0 auto; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; min-height: 0; height: auto; text-align: left; }
 .tutorial-choice__label { color: var(--accent); font-weight: 600; letter-spacing: 0.08em; }
 .tutorial-choice__about { color: var(--dim); font-size: 11px; letter-spacing: 0; text-transform: none; }
+/* A transparent picture: no band behind it, a square at most 160 across, centered. */
+.tutorial__image { display: block; width: 160px; height: 160px; max-width: 100%; margin: 4px auto 0; object-fit: contain; }
 .tutorial-card__go--done { background: none; color: var(--dim); border-color: var(--border); }
 .tutorial__note { margin: 0; color: var(--warn); font-size: 12px; }
 .tutorial__note:empty { position: absolute; }

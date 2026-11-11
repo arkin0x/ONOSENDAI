@@ -7,6 +7,10 @@
  */
 
 import type { TutorialScript, TutorialStep } from './types'
+import { TUTORIAL_BUD_PICTURE, TUTORIAL_DNA } from './dna'
+
+/** The tutorial tree's name as the SEED composer shows it. */
+const TREE = TUTORIAL_DNA.name.toUpperCase()
 
 /**
  * The COMMIT button alone (feedback items 5 and 14): the mode button beside it
@@ -61,6 +65,41 @@ export const TAKE: TutorialStep = {
   scene: { target: 'keep', highlight: '.foundchip' },
   explain: 'What you take goes in your ITEMS, in the menu. A shard you take can be placed in the world, built with, or changed in the workshop.',
   wait: 'take',
+}
+
+/** To the dirt plot (A5): one COMMIT, the cursor already on it. */
+export const TO_PLOT: TutorialStep = {
+  id: 'to-plot',
+  title: 'The dirt',
+  caption: 'The dirt is for a seed. Go stand on it.',
+  hint: 'Tap COMMIT to move there.',
+  scene: { target: 'self' },
+  wait: 'at-plot',
+  effect: 'aim-plot',
+}
+
+/**
+ * Plant it: PLANT THE SEED lines the tutorial tree up in BUILD, where the
+ * player stands on the dirt, and HIDE plants it. Planting is the player's,
+ * mined on their device.
+ */
+export const PLANT: TutorialStep = {
+  id: 'plant',
+  title: 'Plant it',
+  caption: `Plant the ${TREE} on the dirt.`,
+  hint: 'PLANT THE SEED, then HIDE.',
+  action: { label: 'PLANT THE SEED', effect: 'plant-tutorial-seed' },
+  explain: 'A seed is yours. You sign it and do a little work for it on this device, and it stays where you plant it. Everyone who finds it grows the same tree, a little more every day.',
+  wait: 'plant',
+}
+
+/** The bud preview: a reason to come back. */
+export const BUD: TutorialStep = {
+  id: 'bud',
+  title: 'It grows',
+  caption: 'It will grow over time. Check back later.',
+  effect: 'leave-build',
+  image: { src: TUTORIAL_BUD_PICTURE, alt: `The ${TUTORIAL_DNA.name} as it starts to bud` },
 }
 
 /** The items you hold: open the menu, ITEMS at the top of it (feedback item 2). */
@@ -218,5 +257,5 @@ export const FAREWELL: TutorialStep = {
 }
 
 export const TUTORIAL_SCRIPT: TutorialScript = {
-  steps: [WELCOME, BOX, OPEN, TAKE, INVENTORY, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, EARTH, AGENTS, FRIEND, BUILD_PLACE, FAREWELL],
+  steps: [WELCOME, BOX, OPEN, TAKE, TO_PLOT, PLANT, BUD, INVENTORY, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, EARTH, AGENTS, FRIEND, BUILD_PLACE, FAREWELL],
 }

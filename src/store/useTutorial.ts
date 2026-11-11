@@ -183,6 +183,10 @@ interface TutorialState {
   choosing: string | null
   /** Why the last choice did not go, in plain words, on the card until the next choice or step. */
   choiceNote: string | null
+  /** A sentence about the step on screen (why its button did nothing), shown in place of its hint; cleared on every step change. */
+  stepNote: string | null
+  /** Set the step note, only while the step at `index` is still the one on screen. */
+  noteStep: (index: number, note: string | null) => void
   script: TutorialScript
   /** Start (or resume) for the identity on screen; `at` names a step, `restart` begins again from the first. */
   start: (opts?: { at?: string; restart?: boolean }) => void
@@ -231,7 +235,7 @@ export const useTutorial = create<TutorialState>((set, get) => {
       get().end('skipped')
       return
     }
-    set({ index, done: !step.wait, explaining: false, choosing: null, choiceNote: null })
+    set({ index, done: !step.wait, explaining: false, choosing: null, choiceNote: null, stepNote: null })
     writeProgress(pubkey, progress(step.id))
     if (step.scene) applyScene(step.scene, step.wait === 'walk', (c) => { stepCleanups.push(c) })
     // Leaving WALK while such a step is up goes back to the step that asks for it.
@@ -282,6 +286,8 @@ export const useTutorial = create<TutorialState>((set, get) => {
     doneChoices: [],
     choosing: null,
     choiceNote: null,
+    stepNote: null,
+    noteStep: (index, note) => { if (get().active && get().index === index) set({ stepNote: note }) },
     script: TUTORIAL_SCRIPT,
 
     start: (opts = {}) => {

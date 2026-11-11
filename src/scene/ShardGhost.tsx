@@ -40,6 +40,9 @@ import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { bearingOf, csDirection, frameOf, placedPose, snapOffered, type V3 } from '../lib/pose'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { lookModelOf, sealingDoor, useShards } from '../store/useShards'
+import { seedDraftName } from '../store/plantSeed'
+import { seedSnapOffered, standArrows } from '../lib/seeds/orientation'
+import { SeedArrows } from './SeedArrows'
 import { messagePreview } from '../lib/hidden'
 import { ShardMesh } from './ShardMesh'
 import { regionBox } from '../lib/clip'
@@ -86,7 +89,16 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   const plane = useCyberspace(buildPlane)
   const up = useShards((s) => s.deployUp)
   const spin = useShards((s) => s.deploySpin)
-  const standing = up && snapOffered(plane, deployHeight)
+  // A seed stands on Earth wherever it is planted in dataspace (orientation.ts seedSnapOffered).
+  const standing = up && (pending?.type === 'seed' ? seedSnapOffered(plane) : snapOffered(plane, deployHeight))
+  // A seed's arrows: which way its bloom will stand, after TURN, SNAP TO EARTH and FINE ROTATION (DECK-0008 §5.7).
+  const seedScale = pending?.type === 'seed' ? pending.seed.scale : null
+  const seedArrows = useMemo(
+    () => (seedScale === null ? null : standArrows(deployTurn, placedPose(axes, standing ? { at, spin } : undefined))),
+    [seedScale, deployTurn, standing, at, spin, axes],
+  )
+  // About the size of a bloom (some sixteen units of its scale), never smaller than a cell or past a few.
+  const arrowLength = seedScale === null ? 1 : Math.min(6, Math.max(1.2, 16 * 2 ** (seedScale - scaleExp)))
   // In the view frame either way, exactly as WorldShards draws what lands
   // (pose.ts placedPose): after a compass turn the ghost turns with its place.
   const pose = useMemo(
@@ -111,9 +123,10 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // Ride the live cursor, like the cursor cube does, rather than a React commit.
   useFrame((state) => {
     const g = group.current
-    if (!g) return
+    // A seed has no mesh group (its ghost is its label and arrows), but its FINE ROTATION follows the camera all the same.
+    if (!g && pending?.type !== 'seed') return
     const b = landingAt()
-    g.position.set(b[0], b[1], b[2])
+    g?.position.set(b[0], b[1], b[2])
 
     // FINE ROTATION: the camera owns the spin. The direction from the camera
     // to the ghost is the way you are looking; read into cyberspace axes and
@@ -136,14 +149,15 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // A message ghosts as a dim note that follows the cursor; a key, a chest
   // and hidden audio ghost as their mark and name, the way the world draws
   // them once hidden.
-  if (pending?.type === 'message' || pending?.type === 'key' || (pending?.type === 'chest' && !shard) || pending?.type === 'audio') {
+  if (pending?.type === 'message' || pending?.type === 'key' || (pending?.type === 'chest' && !shard) || pending?.type === 'audio' || pending?.type === 'seed') {
     return (
       <>
       {/* Hidden audio's sphere: full volume inside, a one-shot's trigger zone (AudioSphereGhost). */}
       {pending.type === 'audio' && <AudioSphereGhost landingAt={landingAt} />}
+      {seedArrows && <SeedArrows follow={landingAt} up={seedArrows.up} front={seedArrows.front} length={arrowLength} />}
       {sealed}
       <WorldLabel
-        text={pending.type === 'message' ? messagePreview(pending.text, 40) : pending.type === 'key' ? `⚷ ${pending.key.name}` : pending.type === 'audio' ? `AUDIO · ${pending.audio.title}` : `▣ ${pending.name}`}
+        text={pending.type === 'message' ? messagePreview(pending.text, 40) : pending.type === 'key' ? `⚷ ${pending.key.name}` : pending.type === 'audio' ? `AUDIO · ${pending.audio.title}` : pending.type === 'seed' ? `SEED · ${seedDraftName(pending.seed)}` : `▣ ${pending.name}`}
         color="#ffd27d"
         follow={landingAt}
         align="center"

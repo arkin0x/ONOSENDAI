@@ -17,6 +17,7 @@ import { PublishSwitch } from './PublishSwitch'
 import { useEscape } from '../hooks/useEscape'
 import { MessageCompose } from './MessageCompose'
 import { KeyCompose } from './KeyCompose'
+import { SeedCompose } from './SeedCompose'
 import { ChestCompose } from './ChestCompose'
 import { AudioCompose } from './AudioCompose'
 import { ItemIcon, distinctKinds } from './ItemIcon'
@@ -179,7 +180,7 @@ function FeedActions({ object }: { object: FeedObject }): JSX.Element {
 }
 
 export function StashModals(): JSX.Element | null {
-  const { models, bags, bag, message, key, chest, chestEdit, audio, feed } = useStash()
+  const { models, bags, bag, message, key, chest, chestEdit, audio, seed, feed } = useStash()
   const mine = useShards((s) => s.mine)
   const close = useStash.getState().close
   const all = bagsOf(mine)
@@ -259,6 +260,13 @@ export function StashModals(): JSX.Element | null {
     return (
       <Shell title="Place audio" onClose={close}>
         <AudioCompose onDone={close} />
+      </Shell>
+    )
+  }
+  if (seed) {
+    return (
+      <Shell title="Plant a seed" onClose={close}>
+        <SeedCompose onDone={close} />
       </Shell>
     )
   }

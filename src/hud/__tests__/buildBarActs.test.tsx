@@ -41,7 +41,7 @@ import { moveDirection } from '../../lib/moves'
 import { useKeyboard } from '../../hooks/useKeyboard'
 import { BuildBar } from '../BuildBar'
 
-const ORDER = ['OBJECT', 'MESSAGE', 'AUDIO', 'ITEM', 'CHEST', 'DOOR', 'AGAIN']
+const ORDER = ['OBJECT', 'MESSAGE', 'AUDIO', 'ITEM', 'CHEST', 'DOOR', 'SEED', 'AGAIN']
 
 const acts = (bar: Mounted): Host[] => bar.all().filter((h) => h.type === 'button' && h.props.className === 'buildbar__act')
 const act = (bar: Mounted, label: string): Host => acts(bar).find((h) => textOf(h) === label)!
@@ -63,7 +63,7 @@ describe('the BUILD bar: ITEM, CHEST, DOOR, and no verbs', () => {
   it('shows every button by its noun, in one fixed order', async () => {
     const bar = await mount(<BuildBar />)
     expect(acts(bar).map(textOf)).toEqual(ORDER)
-    for (const verb of ['PLACE OBJECT', 'HIDE MESSAGE', 'PLACE AUDIO', 'PLACE AGAIN', 'FORGE AN ITEM', 'SEAL A CHEST', 'SEAL A DOOR']) expect(bar.says(verb)).toBe(false)
+    for (const verb of ['PLACE OBJECT', 'HIDE MESSAGE', 'PLACE AUDIO', 'PLACE AGAIN', 'FORGE AN ITEM', 'SEAL A CHEST', 'SEAL A DOOR', 'PLANT A SEED']) expect(bar.says(verb)).toBe(false)
     await bar.unmount()
   })
 
@@ -78,7 +78,7 @@ describe('the BUILD bar: ITEM, CHEST, DOOR, and no verbs', () => {
 
   it('names each button by its full phrase, its visible word inside it (label in name)', async () => {
     const bar = await mount(<BuildBar />)
-    const names = ['Place object', 'Hide message', 'Place audio', 'Forge an item', 'Seal a chest', 'Seal a door', 'Place again']
+    const names = ['Place object', 'Hide message', 'Place audio', 'Forge an item', 'Seal a chest', 'Seal a door', 'Plant a seed', 'Place again']
     expect(acts(bar).map((h) => h.props['aria-label'])).toEqual(names)
     for (const h of acts(bar)) expect(String(h.props['aria-label']).toUpperCase()).toContain(textOf(h))
     await bar.unmount()
@@ -88,6 +88,14 @@ describe('the BUILD bar: ITEM, CHEST, DOOR, and no verbs', () => {
     const bar = await mount(<BuildBar />)
     expect(acts(bar)).toHaveLength(ORDER.length)
     expect(act(bar, 'AGAIN').props.disabled).toBe(true)
+    await bar.unmount()
+  })
+
+  it('SEED opens the seed composer (DECK-0008)', async () => {
+    const bar = await mount(<BuildBar />)
+    expect(act(bar, 'SEED').props.title).toMatch(/^Plant a seed/)
+    await bar.press(/^SEED$/)
+    expect(useStash.getState().seed).toBe(true)
     await bar.unmount()
   })
 

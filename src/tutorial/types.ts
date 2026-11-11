@@ -30,7 +30,7 @@ export type TutorialWait = Exclude<DemoAction, 'spawn'> | TutorialAction
  * course's start reached, gravity on in WALK, the finish chest found and
  * something in it taken; the workshop opened and closed again.
  */
-export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-start' | 'gravity' | 'see-finish' | 'take-finish' | 'workshop'
+export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-start' | 'gravity' | 'see-finish' | 'take-finish' | 'workshop' | 'at-plot' | 'plant'
 
 export interface TutorialStep {
   /** Unique across the script; also what a player's saved progress names. */
@@ -55,6 +55,8 @@ export interface TutorialStep {
    * chest); 'chain' is the chain chip (spectating a friend's history).
    */
   keepChips?: Array<'found' | 'chain'>
+  /** A picture under the caption (T2: one or two lines plus a picture), by its path under public/. */
+  image?: { src: string; alt: string }
   /** A longer explanation behind an EXPLAIN pill (T2); never shown unasked. */
   explain?: string
   /** What the scene should show as the step comes up; omitted leaves it as it is. */

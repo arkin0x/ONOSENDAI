@@ -123,7 +123,7 @@ afterEach(() => {
 })
 
 describe('VIEW\'s fly moves the camera, not the cursor', () => {
-  it('held, the camera and its target glide down the line of sight, linearly, FLY_CELLS_PER_SECOND cells a second; the cursor stays', () => {
+  it('held, the camera and its target glide down the line of sight, easing in to FLY_CELLS_PER_SECOND cells a second; the cursor stays', () => {
     cs().viewHere()
     h.frame()
     const cursor = cs().cursor
@@ -133,10 +133,17 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
     const zs: number[] = []
     for (let i = 0; i < 60; i++) { h.frame(); zs.push(h.cam.target.z) }
     expect(cs().cursor).toBe(cursor)
-    expect(h.cam.target.z - start.z).toBeCloseTo(-FLY_CELLS_PER_SECOND, 6)
+    // Eased in: a second of holding flies toward -z, less than a full linear
+    // second (FLY_CELLS_PER_SECOND) because the first part of the hold ramps up.
+    const flew = start.z - h.cam.target.z
+    expect(flew).toBeGreaterThan(0)
+    expect(flew).toBeLessThan(FLY_CELLS_PER_SECOND)
     expect(h.cam.target.x).toBeCloseTo(start.x, 9)
-    // Linear: the same step every frame.
-    for (let i = 1; i < zs.length; i++) expect(zs[i - 1] - zs[i]).toBeCloseTo(FLY_CELLS_PER_SECOND * DT, 9)
+    // Quadratic ease-in: the per-frame step grows, then holds at cruise,
+    // FLY_CELLS_PER_SECOND of the zoom a second.
+    const steps = zs.map((z, i) => (i === 0 ? start.z - z : zs[i - 1] - z))
+    expect(steps[0]).toBeLessThan(steps[30])
+    expect(steps[59]).toBeCloseTo(FLY_CELLS_PER_SECOND * DT, 6)
     // The orbit's distance and angle are untouched.
     expect(h.orbit().distanceTo(orbit)).toBeLessThan(1e-9)
   })
@@ -158,8 +165,13 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
       const axis = a.x !== 0 ? 'x' : a.y !== 0 ? 'y' : 'z'
       return Number(alignTo(cs().cursor[axis], scaleExp) - alignTo(from[axis], scaleExp)) / 2 ** scaleExp
     }
-    expect(Math.abs(land(0))).toBe(4)
-    expect(Math.abs(land(12))).toBe(4)
+    // The same hold flies the same number of cells at either zoom; at 2^12
+    // each is 4,096 times the gibsons. The count is whatever the eased fly
+    // covers, derived here, not a fixed number.
+    const l0 = Math.abs(land(0))
+    const l12 = Math.abs(land(12))
+    expect(l0).toBe(l12)
+    expect(l0).toBeGreaterThan(0)
   })
 
   it('two seconds after it stops, the box glides LAND_LERP_MS to the cell the view centres on, and only then does the cursor move', () => {
@@ -169,8 +181,10 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
     useViewFly.getState().setButton(1)
     h.run(500)
     useViewFly.getState().setButton(0)
-    const flown = h.cam.target.clone()
+    // Where the view centres once it has eased to a stop (past the coast tail),
+    // which is where the cursor will land.
     h.run(LAND_IDLE_MS - 50)
+    const flown = h.cam.target.clone()
     expect(cs().cursor).toBe(from)
     expect(cursorGlide.share).toBe(0)
     h.run(100)
@@ -178,7 +192,8 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
     expect(cs().cursor).toBe(from)
     expect(cursorGlide.from).toBe(from)
     expect(cursorGlide.share).toBeGreaterThan(0)
-    expect(Math.hypot(cursorGlide.dx, cursorGlide.dy, cursorGlide.dz)).toBeCloseTo(4, 6)
+    // The box is pushed toward the landing, however many cells the fly covered.
+    expect(Math.hypot(cursorGlide.dx, cursorGlide.dy, cursorGlide.dz)).toBeGreaterThan(0)
     h.run(LAND_LERP_MS)
     expect(cs().cursor).not.toBe(from)
     // Where the view centred: the new cursor is drawn within half a cell of it on every axis.
@@ -206,7 +221,9 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
       worst = Math.max(worst, h.cam.target.distanceTo(last))
       last = h.cam.target.clone()
     }
-    expect(worst).toBeLessThan(0.1)
+    // Never more than a fly frame in one frame: the ease-out coast's first
+    // frame is the largest, and it is under a cruise frame's travel.
+    expect(worst).toBeLessThan(FLY_CELLS_PER_SECOND * DT)
   })
 
   it('moving again calls a running glide off: the box goes back, and the cursor stays', () => {
@@ -232,21 +249,26 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
     cs().viewHere()
     h.frame()
     const from = { ...cs().cursor }
+    const startTarget = h.cam.target.clone()
     useViewFly.getState().setButton(1)
     h.run(1000)
     useViewFly.getState().setButton(0)
     h.frame()
     const flown = h.cam.target.clone()
+    // How many cells the eased fly covered, derived from the camera's travel.
+    const flownCells = Math.round(flown.distanceTo(startTarget))
     // One cell up the screen.
     const up = cs().axes().up
     cs().moveCursor({ axis: up.axis, dir: up.dir as 1 | -1 })
     const a = ahead()
     const axis = (['x', 'y', 'z'] as const).find((k) => a[k] !== 0)!
-    expect(Math.abs(Number(cs().cursor[axis] - from[axis]))).toBe(FLY_CELLS_PER_SECOND)
+    expect(Math.abs(Number(cs().cursor[axis] - from[axis]))).toBe(flownCells)
     h.run(EASE_BACK_MS + 50)
-    // The camera went one cell up from where it had flown, not back to the start.
+    // The camera went one cell up from where it had flown, not back to the
+    // start: its depth stays at the flown depth (within the ease-out coast's
+    // short tail), nowhere near the start it would be pulled back to.
     expect(h.cam.target.y - flown.y).toBeCloseTo(1, 6)
-    expect(h.cam.target.z).toBeCloseTo(flown.z, 6)
+    expect(Math.abs(h.cam.target.z - flown.z)).toBeLessThan(FLY_CELLS_PER_SECOND * DT)
   })
 
   it('does nothing in BUILD or WALK, and BUILD lands an unlanded fly at once', () => {
@@ -272,15 +294,18 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
     cs().viewHere()
     h.frame()
     const from = { ...cs().cursor }
+    const startTarget = h.cam.target.clone()
     useViewFly.getState().setButton(1)
     h.run(500)
     useViewFly.getState().setButton(0)
     h.frame()
+    // The fly landed at the old zoom: the cursor steps by the cells it covered.
+    const flownCells = Math.round(h.cam.target.distanceTo(startTarget))
     cs().adjustScale(1)
     h.frame()
     const a = ahead()
     const axis = (['x', 'y', 'z'] as const).find((k) => a[k] !== 0)!
-    expect(Math.abs(Number(cs().cursor[axis] - from[axis]))).toBe(4)
+    expect(Math.abs(Number(cs().cursor[axis] - from[axis]))).toBe(flownCells)
     expect(viewOffset.active).toBe(false)
     expect(h.cam.target.distanceTo(h.cursorAt())).toBeLessThan(1e-9)
   })
@@ -294,8 +319,11 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
     h.run(4000)
     expect(cs().anchor).not.toBe(anchor)
     expect(cs().cursor).toBe(from)
-    // The camera kept flying straight through the re-anchor: the cursor is drawn 32 cells behind it.
-    expect(h.cam.target.distanceTo(h.cursorAt())).toBeCloseTo(4 * FLY_CELLS_PER_SECOND, 6)
+    // The camera kept flying straight through the re-anchor: the cursor is
+    // drawn far behind it, nearly four seconds of cruise (less the ease-in).
+    const behind = h.cam.target.distanceTo(h.cursorAt())
+    expect(behind).toBeGreaterThan(3 * FLY_CELLS_PER_SECOND)
+    expect(behind).toBeLessThan(4 * FLY_CELLS_PER_SECOND)
   })
 })
 

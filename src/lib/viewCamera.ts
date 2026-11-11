@@ -50,6 +50,17 @@ export const OFFSET_EPS = 1e-6
 /** How far two fingers' midpoint must travel, in CSS pixels, before their drag is a pan and not yet a pinch. */
 export const PAN_SLOP_PX = 10
 
+/**
+ * The flight's speed envelope (arkinox, 2026-11-11): from a standstill it eases
+ * in quadratically, reaching peak over FLY_RAMP_S; let go, it eases out
+ * exponentially, coasting to a stop over about FLY_DECAY_TAU, so a fly starts
+ * and ends soft rather than snapping on and off.
+ */
+export const FLY_RAMP_S = 0.45
+export const FLY_DECAY_TAU = 0.13
+/** Below this many of the zoom's cells a second, a coasting fly has stopped. */
+export const FLY_MIN_VEL = 0.06
+
 /** Smooth in and out over 0..1 (zero slope at both ends). */
 export function ease(t: number): number {
   const u = t <= 0 ? 0 : t >= 1 ? 1 : t
@@ -72,6 +83,11 @@ export class ViewOffset {
   private easeMs = EASE_BACK_MS
   /** Since anything last moved the view, in ms. */
   private idleMs = 0
+  /** The flight's speed envelope: cells a second, how far up the quadratic ramp, the unit line it flies, and its sign. */
+  private vel = 0
+  private rampT = 0
+  private ux = 0; private uy = 0; private uz = 0
+  private dirSign: 1 | -1 = 1
   /** The cursor box's glide: how far along (0..1) and which way it is heading (1 to the landing, 0 back). */
   private glideAt = 0
   private glideTo: 0 | 1 = 0
@@ -111,10 +127,16 @@ export class ViewOffset {
       // FAR and NEAR count as moving the cursor: a pan eases out as the fly begins.
       this.foldPan()
     }
-    const d = FLY_CELLS_PER_SECOND * Math.min(Math.max(dt, 0), FLY_MAX_DT) * sign
-    this.fx += ux * d
-    this.fy += uy * d
-    this.fz += uz * d
+    this.dirSign = sign
+    if (ux !== 0 || uy !== 0 || uz !== 0) { this.ux = ux; this.uy = uy; this.uz = uz }
+    const cdt = Math.min(Math.max(dt, 0), FLY_MAX_DT)
+    // Quadratic ease-in: the ramp fills over FLY_RAMP_S, speed its square.
+    this.rampT = Math.min(1, this.rampT + cdt / FLY_RAMP_S)
+    this.vel = FLY_CELLS_PER_SECOND * this.rampT * this.rampT
+    const d = this.vel * cdt * sign
+    this.fx += this.ux * d
+    this.fy += this.uy * d
+    this.fz += this.uz * d
     this.moved()
   }
 
@@ -157,6 +179,8 @@ export class ViewOffset {
     this.easeMs = 0
     this.glideAt = 0
     this.glideTo = 0
+    this.vel = 0
+    this.rampT = 0
   }
 
   /** Ease the whole offset back from where it is (WALK began, the fly's landing, a fly that may no longer land). */
@@ -174,6 +198,8 @@ export class ViewOffset {
     this.glideAt = 0
     this.glideTo = 0
     this.flying = false
+    this.vel = 0
+    this.rampT = 0
   }
 
   /** A landing the scene cannot make now (the view is no longer one that flies): the box goes back. */
@@ -190,6 +216,21 @@ export class ViewOffset {
   step(dtMs: number): OffsetEvent {
     const dt = Math.max(0, dtMs)
     this.easeMs = Math.min(EASE_BACK_MS, this.easeMs + dt)
+    // Let go with speed still on it, the fly coasts: exponential ease-out,
+    // moving on down the last line it flew for a short tail. It is still
+    // counted as rest below, so the coast softens the stop without pushing the
+    // cursor's two-second landing back.
+    if (!this.flying && this.vel > FLY_MIN_VEL) {
+      const cdt = Math.min(dt / 1000, FLY_MAX_DT)
+      this.vel *= Math.exp(-(dt / 1000) / FLY_DECAY_TAU)
+      const d = this.vel * cdt * this.dirSign
+      this.fx += this.ux * d
+      this.fy += this.uy * d
+      this.fz += this.uz * d
+    } else if (!this.flying && this.vel !== 0) {
+      this.vel = 0
+      this.rampT = 0
+    }
     // A frame that flew is not rest, however long it took.
     if (!this.flying) this.idleMs += dt
     if (this.glideTo === 1) {

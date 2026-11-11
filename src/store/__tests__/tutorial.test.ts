@@ -525,6 +525,57 @@ describe('the engine', () => {
     expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('after')
   })
 
+  it('plants the tutorial tree, MOON BLOSSOM v2: the owner\'s DNA template, the free caps, the owner\'s published id, its plant button and its bud picture', async () => {
+    const { TUTORIAL_DNA, TUTORIAL_BUD_PICTURE } = await import('../../tutorial/dna')
+    const ids = TUTORIAL_SCRIPT.steps.map((st) => st.id)
+    // ITEMS is taught right before the course (feedback 2026-11-11, item 2), after the seed.
+    expect(ids.slice(ids.indexOf('take'), ids.indexOf('to-course') + 1)).toEqual(['take', 'to-plot', 'plant', 'bud', 'inventory', 'to-course'])
+    const plant = TUTORIAL_SCRIPT.steps.find((st) => st.id === 'plant')!
+    expect(plant.caption).toContain('MOON BLOSSOM')
+    expect(plant.action?.effect).toBe('plant-tutorial-seed')
+    expect(TUTORIAL_SCRIPT.steps.find((st) => st.id === 'bud')!.image?.src).toBe(TUTORIAL_BUD_PICTURE)
+    // The DNA is the owner's event template, byte for byte; its caps are the free caps (16 bits a seed).
+    const template = (await import('../../tutorial/moon-blossom-v2-event.json')).default as { kind: number; content: string; tags: string[][] }
+    const { BASE_CAPS, capsPrice } = await import('sno-core/seeds')
+    const { dnaMatches } = await import('../../lib/seeds/plant')
+    expect(template.kind).toBe(3350)
+    expect(TUTORIAL_DNA.text).toBe(template.content)
+    expect(TUTORIAL_DNA.text.startsWith('seedo   1\n')).toBe(true)
+    expect(TUTORIAL_DNA.name).toBe('moon blossom')
+    expect(TUTORIAL_DNA.caps).toEqual(BASE_CAPS)
+    expect(capsPrice(TUTORIAL_DNA.caps)).toBe(16)
+    expect(dnaMatches(template, TUTORIAL_DNA.text, TUTORIAL_DNA.caps)).toBe(true)
+    // The engine takes the text, under its own name.
+    const { dnaTextRefusal, readDnaText } = await import('../../lib/seeds/plant')
+    expect(dnaTextRefusal(TUTORIAL_DNA.text)).toBe(null)
+    expect(readDnaText(TUTORIAL_DNA.text)).toEqual({ ok: true, name: 'moon blossom' })
+    // Published: the seed names the owner's event. With no id, the seed is a copy the player's SEED signs.
+    const { TUTORIAL_DNA_ID, tutorialDnaId, tutorialSeedDraft } = await import('../../tutorial/dna')
+    expect(TUTORIAL_DNA_ID).toBe('75156b56dda84154f42581a097dd14691c60550088cafa9a8639db9c305de264')
+    expect(tutorialDnaId()).toBe(TUTORIAL_DNA_ID)
+    expect(tutorialDnaId('')).toBe(null)
+    // The app ships that event, signed (the plant step needs no relay for it): the template byte for byte.
+    const { TUTORIAL_DNA_EVENT } = await import('../../tutorial/dna')
+    const { verifyEvent } = await import('nostr-tools/pure')
+    expect(TUTORIAL_DNA_EVENT.id).toBe(TUTORIAL_DNA_ID)
+    // A JSON copy: a spread would carry nostr-tools' cached verified mark and skip the check.
+    expect(verifyEvent(JSON.parse(JSON.stringify(TUTORIAL_DNA_EVENT)))).toBe(true)
+    expect({ kind: TUTORIAL_DNA_EVENT.kind, content: TUTORIAL_DNA_EVENT.content, tags: TUTORIAL_DNA_EVENT.tags }).toEqual({ kind: template.kind, content: template.content, tags: template.tags })
+    expect(tutorialDnaId('nope')).toBe(null)
+    expect(tutorialDnaId('A'.repeat(64))).toBe(null)
+    expect(tutorialSeedDraft(null)).toEqual({ text: TUTORIAL_DNA.text, caps: BASE_CAPS, scale: 0, title: '' })
+    const id = 'a'.repeat(64)
+    const owned = { vertices: 2048, symbols: 2048, generations: 32 }
+    expect(tutorialDnaId(id)).toBe(id)
+    expect(tutorialSeedDraft(id, owned)).toEqual({ text: TUTORIAL_DNA.text, caps: owned, scale: 0, title: '', dnaId: id })
+    // The tree is not one of the original DNAs (the composer offers those); the plant button lines it up instead.
+    const { ORIGINAL_DNAS } = await import('../../lib/seeds/originalDnas')
+    expect(ORIGINAL_DNAS.some((d) => d.text === TUTORIAL_DNA.text)).toBe(false)
+    const { existsSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    expect(existsSync(join(__dirname, '../../../public', TUTORIAL_BUD_PICTURE))).toBe(true)
+  })
+
   it('choice seams: a run with a step runs first then goes there; a run that fails leaves the card; a missing step changes nothing; a gate holds; a double tap does nothing twice', async () => {
     let runs = 0
     let fail = false

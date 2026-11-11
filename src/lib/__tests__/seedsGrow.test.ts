@@ -91,11 +91,11 @@ describe('the worker\'s growth equals the engine\'s', () => {
 })
 
 describe('the budget', () => {
-  it('the starter caps grow on a phone; the largest caps wait there, and grow on a larger screen', () => {
-    const starter: Caps = { vertices: 8000, symbols: 6000, generations: 40 }
+  it('the original DNAs\' caps grow on a phone; the largest caps wait there, and grow on a larger screen', () => {
+    const original: Caps = { vertices: 8000, symbols: 6000, generations: 40 }
     const largest: Caps = { vertices: 65536, symbols: 16384, generations: 256 }
-    expect(worstCaseSteps(starter)).toBe(240_000)
-    expect(tooHeavy(starter, PHONE_BUDGET)).toBe(false)
+    expect(worstCaseSteps(original)).toBe(240_000)
+    expect(tooHeavy(original, PHONE_BUDGET)).toBe(false)
     expect(tooHeavy(largest, PHONE_BUDGET)).toBe(true)
     expect(tooHeavy(largest, DESKTOP_BUDGET)).toBe(false)
     expect(SLICE_STEPS).toBeLessThan(PHONE_BUDGET)
@@ -236,7 +236,7 @@ describe('the engine, from a seed to a drawn bloom', () => {
     none.engine.want([seed])
     await settle(none.engine, seed.id)
     expect(bloomStateLine(none.views.get(seed.id))).toBe('Waiting for blocks.')
-  })
+  }, 60_000) // two seeds mined at 16 bits
 
   it('before its planted height settles, it is drawn as its axiom, pending', async () => {
     const { engine, views } = engineFor([crystal], { tip: honest.not_settled_at_clock + 6 })

@@ -31,11 +31,11 @@ export function dnaOf(content: string, tags: string[][] = [], sk = authorSk): No
 }
 
 /** A seed mined to `bits` (NIP-13, committed target `bits`), signed. */
-export function mineSeedEvent(o: { dnaId: string; planted: number; at: Position; plane: Plane; createdAt: number; bits?: number; scale?: number; sk?: Uint8Array; target?: number }): NostrEvent {
+export function mineSeedEvent(o: { dnaId: string; planted: number; at: Position; plane: Plane; createdAt: number; bits?: number; scale?: number; sk?: Uint8Array; target?: number; extra?: string[][] }): NostrEvent {
   const sk = o.sk ?? planterSk
   const bits = o.bits ?? 16
   const pubkey = getPublicKey(sk)
-  const base: string[][] = [['dna', o.dnaId, ''], ['planted', String(o.planted)], ...(o.scale ? [['scale', String(o.scale)]] : []), ['C', positionHex(o.at, o.plane)], ['-']]
+  const base: string[][] = [['dna', o.dnaId, ''], ['planted', String(o.planted)], ...(o.scale ? [['scale', String(o.scale)]] : []), ['C', positionHex(o.at, o.plane)], ...(o.extra ?? []), ['-']]
   for (let n = 0; ; n++) {
     const tags = [...base, ['nonce', String(n), String(o.target ?? bits)]]
     const t = { kind: 3351, created_at: o.createdAt, tags, content: '', pubkey }

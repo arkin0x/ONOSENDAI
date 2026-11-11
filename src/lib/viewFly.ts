@@ -27,8 +27,12 @@
 import { create } from 'zustand'
 import { alignTo, clampAxis, CONTINUOUS_SCALE_MIN, type AxisName, type Position, type ViewAxes } from './space'
 
-/** Cells of the current zoom flown per second: a held pad key steps about nine a second (useRepeatable). */
-export const FLY_CELLS_PER_SECOND = 8
+/**
+ * Cells of the current zoom flown per second at cruise (arkinox, 2026-11-11:
+ * "triple the flight speed"). The speed eases in and out around this peak
+ * (lib/viewCamera.ts ViewOffset); it is not reached the instant a key goes down.
+ */
+export const FLY_CELLS_PER_SECOND = 24
 /** The longest frame flown at once, in seconds: a tab coming back from the background is not a leap. */
 export const FLY_MAX_DT = 0.1
 /** How long two or three fingers must rest before they fly, in ms: a pinch shows itself sooner. */
@@ -252,6 +256,22 @@ export function setFlyLanding(source: (() => Position | null) | null): void {
 }
 export function flyLanding(): Position | null {
   return landingSource ? landingSource() : null
+}
+
+/**
+ * Drag-to-steer (arkinox, 2026-11-11): a drag while the Forward or Back fly
+ * button is held orbits the camera, so you steer the view as you fly it. The
+ * fly button gathers the drag here in CSS pixels; the scene drains it each
+ * frame and turns the orbit by it (scene/Scene.tsx), the same amount a drag on
+ * open scene would. Not a store: nothing renders from it, and it is read and
+ * cleared every frame.
+ */
+const steer = { dx: 0, dy: 0 }
+export function steerBy(dx: number, dy: number): void { steer.dx += dx; steer.dy += dy }
+export function takeSteer(): { dx: number; dy: number } {
+  const out = { dx: steer.dx, dy: steer.dy }
+  steer.dx = 0; steer.dy = 0
+  return out
 }
 
 /**

@@ -35,6 +35,7 @@ import { walkHeldDir, walkMove } from '../lib/walkKeys'
 import { holdEnd, holdReleaseAll, holdStart } from '../store/walkHold'
 import { addWalkInputCloser, setWalkMenuCovering, walkMenuCovering } from '../store/walkInput'
 import { canFly, useViewFly } from '../lib/viewFly'
+import { useRegion } from '../store/useRegion'
 
 // Cyberspace TV is watching only: WALK's input is closed while it is on (store/walkInput.ts).
 addWalkInputCloser(() => useTv.getState().on)
@@ -148,15 +149,24 @@ export function walkCancel(): void {
   else walk.exit()
 }
 
-/** R or F let go: the fly that key started stops (a different key held since keeps its own). */
-export function flyKeyUp(code: 'KeyR' | 'KeyF'): void {
+/** Space (forward) or Shift (back) let go in VIEW: the fly that key drove stops, a different one held keeps its own. */
+export function flyKeyUp(dir: 1 | -1): void {
   const f = useViewFly.getState()
-  if (f.key === (code === 'KeyR' ? 1 : -1)) f.setKey(0)
+  if (f.key === dir) f.setKey(0)
 }
 
-/** The window lost focus: no keyup will come for a held R or F. */
+/**
+ * The rotate keys (W A S D) held now. Shift flies the view back in VIEW, but
+ * Shift with W A S D rotates it; while a rotate key is down Shift does not
+ * fly, so steering the view by rotation never also drifts it backward
+ * (review, 2026-11-11).
+ */
+const rotateHeld = new Set<string>()
+
+/** The window lost focus: no keyup will come for a held Space or Shift, or a held rotate key. */
 function flyKeysReleased(): void {
   useViewFly.getState().setKey(0)
+  rotateHeld.clear()
 }
 
 export function useKeyboard(): void {
@@ -252,6 +262,10 @@ export function useKeyboard(): void {
       if (event.code === 'Space') {
         event.preventDefault()
         if (useShards.getState().pending) { void useShards.getState().deploy(); return }
+        // In VIEW, Space flies the view forward while held, the way the camera
+        // faces (arkinox, 2026-11-11), as the Forward button does; it never
+        // commits there. R and F are FAR and NEAR again, a cell at a time.
+        if (canFly(store, building)) { useViewFly.getState().setKey(1); return }
         // Building never moves you: with nothing to place, Space does nothing.
         if (building) return
         // The next action, as the button names it: HOSAKA's step brings up the
@@ -271,6 +285,10 @@ export function useKeyboard(): void {
       if (event.code === 'KeyX') {
         event.preventDefault()
         if (store.walking) { walkCancel(); return }
+        // In region mode, X resets the cursor to where region mode started and
+        // collapses the region to that one cell at the zoom you are now at
+        // (store/useRegion.ts; arkinox, 2026-11-11).
+        if (useRegion.getState().active) { useRegion.getState().collapseToEntry(); return }
         if (building && store.proof.status !== 'computing' && store.cloud.status === 'idle' && store.plan === null) useBuilder.getState().toAvatar()
         else store.cancel()
         return
@@ -317,18 +335,26 @@ export function useKeyboard(): void {
       }
 
       // R and F travel along the axis perpendicular to the screen, which is
-      // otherwise unreachable without rotating the view first.
+      // otherwise unreachable without rotating the view first. FAR and NEAR,
+      // one cell at a time, in VIEW as everywhere else (arkinox, 2026-11-11:
+      // "R = FAR, F = NEAR again"); flying the view is Space and Shift now.
       if (event.code === 'KeyR' || event.code === 'KeyF') {
         event.preventDefault()
         // In WALK R and F are up and down, answered above.
         if (store.walking) return
-        // In VIEW they fly the view while held, as the fly buttons do
-        // (lib/viewFly.ts; arkinox, 2026-11-09): the key's own repeat adds nothing.
-        if (canFly(store, building)) {
-          useViewFly.getState().setKey(event.code === 'KeyR' ? 1 : -1)
-          return
-        }
         store.moveCursor(moveDirection(axes, MOVE_KEYS[event.code]))
+        return
+      }
+
+      // Which rotate keys are held, so Shift can fly only when none is.
+      if (ROTATE_KEYS[event.code]) rotateHeld.add(event.code)
+
+      // In VIEW, Shift flies the view backward while held (arkinox, 2026-11-11),
+      // as the Back button does. Not while a rotate key is down: Shift with
+      // W A S D rotates (below), and a rotate must not also drift the view back.
+      if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight') && canFly(store, building) && rotateHeld.size === 0) {
+        event.preventDefault()
+        useViewFly.getState().setKey(-1)
         return
       }
 
@@ -336,6 +362,9 @@ export function useKeyboard(): void {
         const rotation = ROTATE_KEYS[event.code]
         if (!rotation) return
         event.preventDefault()
+        // Starting a rotate ends any backward fly Shift had begun, so you steer
+        // by rotation without the view sliding back under you.
+        useViewFly.getState().setKey(0)
         store.rotate(rotation)
         return
       }
@@ -351,8 +380,10 @@ export function useKeyboard(): void {
     const onKeyUp = (event: KeyboardEvent) => {
       walkKeyUp(event.code)
       walkMetaRelease(event)
-      // R or F let go: VIEW's fly from that key stops.
-      if (event.code === 'KeyR' || event.code === 'KeyF') flyKeyUp(event.code)
+      if (ROTATE_KEYS[event.code]) rotateHeld.delete(event.code)
+      // Space or Shift let go: VIEW's fly from that key stops.
+      if (event.code === 'Space') flyKeyUp(1)
+      if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') flyKeyUp(-1)
       // A button with focus activates on Space's keyup: in WALK that Space
       // was a step up, not a press of the button.
       if (event.code === 'Space' && useCyberspace.getState().walking) event.preventDefault()

@@ -89,10 +89,13 @@ describe('Space and Shift fly the view in VIEW', () => {
     expect(src).toMatch(/window\.addEventListener\('blur', flyKeysReleased\)/)
   })
 
-  it('the pad no longer flies: FAR and NEAR bind their cursor step like every other key', () => {
+  it('the pad no longer flies: FAR and NEAR bind their cursor step, arrow only, the word kept in the title', () => {
     const src = readFileSync('src/hud/TouchControls.tsx', 'utf8')
-    expect(src).toMatch(/sub: 'FAR', title: 'Away from camera \(R\)', keyHint: 'R', act: move\('away'\)/)
-    expect(src).toMatch(/sub: 'NEAR', title: 'Toward camera \(F\)', keyHint: 'F', act: move\('toward'\)/)
+    expect(src).toMatch(/glyph: <ForwardArrow3D size=\{24\} \/>, title: 'FAR: away from camera \(R\)', keyHint: 'R', act: move\('away'\)/)
+    expect(src).toMatch(/glyph: <ReverseArrow3D size=\{24\} \/>, title: 'NEAR: toward camera \(F\)', keyHint: 'F', act: move\('toward'\)/)
+    // No FAR/NEAR text on the face any more.
+    expect(src).not.toMatch(/sub: 'FAR'/)
+    expect(src).not.toMatch(/sub: 'NEAR'/)
     expect(src).not.toMatch(/flyHold\('pad'/)
     expect(src).toMatch(/\{\.\.\.\(walking && b\.hold \? padHold\(b\) : bind\(b\.act\)\)\}/)
   })

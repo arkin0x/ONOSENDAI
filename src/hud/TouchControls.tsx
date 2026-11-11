@@ -267,12 +267,13 @@ export function TouchControls(): JSX.Element {
     // symbol and it is not enough on its own, because the two differ only by a
     // small mark inside the circle and that mark is the first thing to go at
     // this size. The word carries the meaning; the glyph carries the convention.
-    // FAR and NEAR wear the same forward and reverse arrows VIEW's fly buttons
-    // and WALK's forward wear (hud/ui/FlyArrows.tsx; arkinox, 2026-11-11), the
-    // word under them carrying which axis they move along.
-    { cell: 'away', glyph: <ForwardArrow3D size={20} />, sub: 'FAR', title: 'Away from camera (R)', keyHint: 'R', act: move('away') },
+    // FAR and NEAR wear the forward and reverse arrows VIEW's fly buttons and
+    // WALK's forward wear (hud/ui/FlyArrows.tsx; arkinox, 2026-11-11), full
+    // size and with no word on the face: the arrow says it, and FAR/NEAR stay
+    // in the title for a reader (arkinox, review, 2026-11-11).
+    { cell: 'away', glyph: <ForwardArrow3D size={24} />, title: 'FAR: away from camera (R)', keyHint: 'R', act: move('away') },
     { cell: 'up', glyph: '▲', title: 'Up (W)', keyHint: 'W', act: move('up') },
-    { cell: 'toward', glyph: <ReverseArrow3D size={20} />, sub: 'NEAR', title: 'Toward camera (F)', keyHint: 'F', act: move('toward') },
+    { cell: 'toward', glyph: <ReverseArrow3D size={24} />, title: 'NEAR: toward camera (F)', keyHint: 'F', act: move('toward') },
     { cell: 'left', glyph: '◀', title: 'Left (A)', keyHint: 'A', act: move('left') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', keyHint: 'D', act: move('right') },
     // Left is Q and right is E, matching where those keys sit on a keyboard.

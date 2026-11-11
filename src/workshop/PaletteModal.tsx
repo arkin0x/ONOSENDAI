@@ -42,6 +42,18 @@ const BANDS = [
  */
 const FOLD_MS = 190
 
+/**
+ * Whether a swatch's number is written in light ink rather than dark.
+ *
+ * The number is how a color is named in a DNA (`'(171)`), so it has to read on
+ * every swatch, from the deep grounds to the near whites. Rec. 709 luma on the
+ * hex itself is enough to pick which of the two inks stands out.
+ */
+export function lightInk(hex: string): boolean {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 140
+}
+
 export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element {
   const shard = useWorkshop((s) => s.current())
   const palettes = useWorkshop((s) => s.palettes)
@@ -225,6 +237,22 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
               ? `Tap colors to take them. ${picked.length} chosen, 2 or more makes a palette.`
               : `${activeName} · ${active.length} colors · a color on the wire is an index into this`}
           </p>
+          {/*
+            The color in hand, by number, without hovering anything.
+
+            The number is what a DNA names a color by, and the tooltips that
+            used to be the only place it was written never show on a phone
+            (arkinox, 2026-11-11). Hidden while building a palette, where the
+            sheet is the built-in and its numbers are about to change.
+          */}
+          {!making && (
+            <p className="palettes__now">
+              <span className="palettes__label">IN HAND</span>
+              <span className="palettes__now-sw" style={{ background: hex }} />
+              {current >= 0 ? <b className="palettes__now-n">{current}</b> : null}
+              <span className="palettes__now-hex">{current >= 0 ? hex : `${hex} · not in this palette`}</span>
+            </p>
+          )}
         </div>
         <button className="chip ws__icon" onClick={fold} aria-label="Close"><X size={16} strokeWidth={2.25} /></button>
       </div>
@@ -248,13 +276,13 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
                 return (
                   <button
                     key={h}
-                    className={`palettes__sw ${h === hex ? 'is-on' : ''}`}
+                    className={`palettes__sw ${h === hex ? 'is-on' : ''}${lightInk(h) ? ' is-light' : ''}`}
                     style={{ background: h }}
                     title={i >= 0 ? `${i} · ${h}` : `${h}, not in this palette`}
-                    aria-label={`Recently used color ${h}`}
+                    aria-label={i >= 0 ? `Recently used color ${i}, ${h}` : `Recently used color ${h}`}
                     aria-pressed={h === hex}
                     onClick={() => useColor(h)}
-                  />
+                  >{i >= 0 ? <span className="palettes__n" aria-hidden="true">{i}</span> : null}</button>
                 )
               })}
             </div>
@@ -270,13 +298,13 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
                 return (
                   <button
                     key={i}
-                    className={`palettes__sw ${on ? 'is-on' : ''}`}
+                    className={`palettes__sw ${on ? 'is-on' : ''}${lightInk(hexAt(sheet, i)) ? ' is-light' : ''}`}
                     style={{ background: hexAt(sheet, i) }}
                     title={`${i} · ${hexAt(sheet, i)}`}
                     aria-label={`Color ${i}, ${hexAt(sheet, i)}`}
                     aria-pressed={on}
                     onClick={() => take(i)}
-                  >{making && on ? <Check size={11} strokeWidth={3} /> : null}</button>
+                  >{making && on ? <Check size={11} strokeWidth={3} /> : <span className="palettes__n" aria-hidden="true">{i}</span>}</button>
                 )
               })}
             </div>

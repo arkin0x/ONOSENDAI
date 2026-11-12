@@ -20,6 +20,27 @@ vi.mock('../../lib/chains', async (importOriginal) => ({
   confirmChainEvents: async () => [],
 }))
 
+/**
+ * Every world read the store starts, until it settles. Each test starts from
+ * the same chain within the same second, so every entry here has the same
+ * event id, and a read one test left running would land in the next test's
+ * session as if it were its own (useGame readWorld matches by entry id).
+ * beforeEach waits them all out, and a test waits on them, not on the clock.
+ */
+const reading = vi.hoisted(() => new Set<Promise<unknown>>())
+vi.mock('../../lib/games/world', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../../lib/games/world')>()
+  return {
+    ...mod,
+    loadWorld: (game: Parameters<typeof mod.loadWorld>[0]) => {
+      const read = mod.loadWorld(game)
+      reading.add(read)
+      read.then(() => reading.delete(read), () => reading.delete(read))
+      return read
+    },
+  }
+})
+
 if (typeof localStorage === 'undefined') {
   const mem = new Map<string, string>()
   ;(globalThis as { localStorage?: unknown }).localStorage = {
@@ -53,14 +74,25 @@ async function land(dx: bigint): Promise<void> {
   })
 }
 
-/** Wait for the world to load (the fixture is a dynamic import). */
+/** Wait for every world read in flight to settle, and so to have landed in its session (the fixture is a dynamic import). */
 async function worldLoaded(): Promise<void> {
-  for (let i = 0; i < 200 && G().session && (G().session!.world === null || G().session!.at === null); i++) await new Promise((r) => setTimeout(r, 10))
+  while (reading.size > 0) await Promise.allSettled([...reading])
+}
+
+/** Wait for the game to stop being busy (a teleport being signed). */
+function idle(): Promise<void> {
+  return new Promise((resolve) => {
+    if (!G().busy) { resolve(); return }
+    const stop = useGame.subscribe((st) => { if (!st.busy) { stop(); resolve() } })
+  })
 }
 
 let fresh: Pick<ReturnType<typeof S>, 'events' | 'prevEventId' | 'genesisId' | 'published' | 'position' | 'plane' | 'headPlane' | 'positionHistory' | 'chain'> | null = null
 
 beforeEach(async () => {
+  // Nothing an earlier test began, a world read or a teleport being signed, may land in this one.
+  await worldLoaded()
+  await idle()
   localStorage.setItem('onosendai:games', '1')
   if (!fresh) {
     await placeSpawn()
@@ -191,7 +223,7 @@ describe('in-game mode (useGame)', () => {
     for (; steps < 30 && !G().busy; steps++) G().step('z', -1)
     expect(steps).toBe(20)
     expect(G().busy).toBe('teleporting')
-    for (let i = 0; i < 200 && G().busy; i++) await new Promise((r) => setTimeout(r, 5))
+    await idle()
     expect(G().session!.at).toEqual(TUTORIAL_GAME.pads[0].to)
     expect(S().events.length).toBe(count + 1)
     const tp = last()
@@ -384,7 +416,7 @@ describe('what the review of #660 found untested', () => {
     await enterTutorialDungeon()
     await worldLoaded()
     for (let i = 0; i < 30 && !G().busy; i++) G().step('z', -1)
-    for (let i = 0; i < 200 && G().busy; i++) await new Promise((r) => setTimeout(r, 5))
+    await idle()
     expect(G().session!.at).toEqual(TUTORIAL_GAME.pads[0].to)
     useGame.setState({ session: null })
     expect(G().resume()).toBe(true)
@@ -395,7 +427,7 @@ describe('what the review of #660 found untested', () => {
   it('a world that fails to load: nobody moves, LEAVING still works, and the exit is valid', async () => {
     const broken = { ...TUTORIAL_GAME, world: { kind: 'fixture' as const, load: async () => { throw new Error('relay down') } } }
     expect(await G().enter(broken)).toBeNull()
-    for (let i = 0; i < 200 && G().session!.worldError === null; i++) await new Promise((r) => setTimeout(r, 5))
+    await worldLoaded()
     expect(G().session!.worldError).toBe('relay down')
     expect(G().session!.at).toBeNull()
     G().step('z', -1)

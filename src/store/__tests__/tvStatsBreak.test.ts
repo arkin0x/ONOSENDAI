@@ -208,7 +208,9 @@ describe('the CYBERSPACE STATS break in TV\'s engine', () => {
     expect(useTv.getState().stats === null || stats[stats.length - 1].to === Infinity).toBe(true)
    }, 60_000)
 
-  it('counts from one read of the movement events and the scoped deletions, stamped on the hour; publishes nothing', async () => {
+  // Genuinely slow: TV runs a whole simulated stats break over the 4000-hop tape, a frame every 100 ms, about 2.5 s in a
+  // parallel run; past 5 s under load such a test stopped part way, TV still on, and the next test counted what it left.
+  it('counts from one read of the movement events and the scoped deletions, stamped on the hour; publishes nothing', { timeout: 20_000 }, async () => {
     let board: { asOf: number; title: string } | null = null
     const off = useTv.subscribe((s) => { if (s.stats && !board) board = s.stats.board })
     useTv.getState().start()
@@ -225,7 +227,8 @@ describe('the CYBERSPACE STATS break in TV\'s engine', () => {
     expect(statsClockForTest().due).toBeGreaterThan(0)
   })
 
-  it('a board the address names plays first, at the first cut after its counts are in (/tv?stats=<id>)', async () => {
+  // The same: two simulated minutes of TV, a frame every 100 ms.
+  it('a board the address names plays first, at the first cut after its counts are in (/tv?stats=<id>)', { timeout: 20_000 }, async () => {
     vi.stubGlobal('window', { location: { pathname: '/tv', search: '?stats=new-arrivals' }, setTimeout, clearTimeout, addEventListener: () => {}, removeEventListener: () => {} })
     const ids: string[] = []
     const off = useTv.subscribe((s, prev) => { if (s.stats && !prev.stats) ids.push(s.stats.board.id) })
@@ -273,17 +276,19 @@ describe('version 1 hops not on the list do not count on the boards', () => {
     return statsSnapshotForTest()?.chain.get(pk)
   }
 
+  // Genuinely slow: TV runs a whole simulated stats break over the 4000-hop tape, a frame every 100 ms, about 2.5 s in a
+  // parallel run; past 5 s under load such a test stopped part way, TV still on, and the next test counted what it left.
   it('a list with ids on it takes the hop off the chain', async () => {
     expect(await chainCounted(async () => new Set(['ab'.repeat(32)]))).toBe(1)
-  })
+  }, 20_000)
 
   it('an empty list, from a core older than the census, cuts nothing', async () => {
     expect(await chainCounted(async () => new Set())).toBe(2)
-  })
+  }, 20_000)
 
   it('a list that does not load cuts nothing', async () => {
     expect(await chainCounted(async () => { throw new Error('chunk failed') })).toBe(2)
-  })
+  }, 20_000)
 })
 
 describe('who is an agent: a break holds for the profiles (review of #537)', () => {

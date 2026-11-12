@@ -167,13 +167,15 @@ describe('chain verdicts', () => {
     expect(row.breakAt).toBeUndefined()
   })
 
+  // Genuinely slow: 250 signed events, moved into the database and marked, about 3 s alone in a parallel run and past 5 s
+  // under load; the test after it then failed on what it left running.
   it('a long chain is written in batches, not one long transaction', async () => {
     const chain = chainOf(250)
     await seed(chain)
     const { rows, transactions } = await writes(() => mark())
     expect(rows).toBe(250)
     expect(transactions).toBe(3)
-  })
+  }, 20_000)
 
   it('a move made during the run: its head stands, and a verdict about the old head is not written on the record', async () => {
     const chain = chainOf(4)

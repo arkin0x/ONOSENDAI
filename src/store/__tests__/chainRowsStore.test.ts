@@ -9,7 +9,7 @@
 import { provedHop } from '../fixtures/provedHop'
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const version = vi.hoisted(() => ({ v: 2 as 1 | 2 }))
 const posted = vi.hoisted(() => [] as unknown[])
@@ -151,6 +151,26 @@ async function oldRecord(): Promise<unknown> {
 }
 
 const tick = (ms = 0): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/*
+ * Every test here loads one or more fresh copies of the store (openTab: the
+ * whole module graph evaluated again after vi.resetModules), the genuinely
+ * slow part: 0.6 to 1.4 s a test alone, 5 to 7 times that under a loaded
+ * parallel suite, where tests passed 5 s at random (2026-11-12). The first
+ * test also pays the graph's cold transform, over 4 s alone. So 20 s for this
+ * file, as closedDoorsStorage.test.ts has; the tests that had 30 s keep it. A warm-up in
+ * beforeAll is not used instead: a store loaded there keeps working (its
+ * probe, its version look) into the first test.
+ */
+vi.setConfig({ testTimeout: 20_000 })
+afterAll(() => { vi.resetConfig() })
+/**
+ * A wait for what another tab or the database does: polled, and bounded by 3 s
+ * rather than waitFor's 1 s, which a loaded machine passed while the work was
+ * still on its way (2026-11-12). Under the file's 20 s, so a wait that
+ * fails says what it waited for.
+ */
+const SOON = { timeout: 3_000, interval: 20 }
 
 beforeEach(() => {
   posted.length = 0
@@ -460,7 +480,7 @@ describe('two tabs, one chain', () => {
     see()
     expect(moveB).not.toBe(moveA)
     expect(await b.rows.chainLanded(pk, moveB)).toBe(false)
-    await vi.waitFor(() => expect(b.S().prevEventId).toBe(moveA))
+    await vi.waitFor(() => expect(b.S().prevEventId).toBe(moveA), SOON)
     const rows = await rowsNow()
     expect(rows!.events.map((e) => e.id)).toEqual([...chain.map((e) => e.id), moveA])
     // B's action is not in its chain, not owed to any relay, and is kept, signed, as a branch set aside.
@@ -470,7 +490,7 @@ describe('two tabs, one chain', () => {
     await vi.waitFor(async () => {
       const parted = await b.rows.rowsSetAside(pk)
       expect(parted.flatMap((p) => p.events.map((e) => e.id))).toContain(moveB)
-    })
+    }, SOON)
     // And it moves on from the head that won.
     b.store.useCyberspace.setState({ proof: { ...b.S().proof, status: 'idle', message: null } })
     const next = await signMove(b)
@@ -497,7 +517,7 @@ describe('two tabs, one chain', () => {
     await vi.waitFor(async () => {
       const heads = tabs.map((t) => t.S().prevEventId)
       expect(new Set(heads).size).toBe(1)
-    })
+    }, SOON)
     const rows = await rowsNow()
     expect(rows!.events).toHaveLength(6)
     const previous = (e: NostrEvent): string | undefined => e.tags.find((t) => t[0] === 'e' && t[3] === 'previous')?.[1]
@@ -612,7 +632,7 @@ describe('when storage will not take it', () => {
     localStorage.setItem(`onosendai:chain-unsaved:${pk}`, JSON.stringify([stray]))
     const b = await openTab()
     expect(b.S().events).toHaveLength(6)
-    await vi.waitFor(async () => expect((await b.rows.rowsSetAside(pk)).flatMap((p) => p.events.map((e) => e.id))).toContain(stray.id))
+    await vi.waitFor(async () => expect((await b.rows.rowsSetAside(pk)).flatMap((p) => p.events.map((e) => e.id))).toContain(stray.id), SOON)
   })
 
   it('a tail holding a sibling of the head is set aside: a page closed mid-commit, whose commit then lost, shows no fork', async () => {
@@ -629,13 +649,13 @@ describe('when storage will not take it', () => {
     see()
     const lostEvent = b.S().events.find((e) => e.id === lost)!
     await b.rows.chainRowsSettled()
-    await vi.waitFor(() => expect(b.S().prevEventId).toBe(won))
+    await vi.waitFor(() => expect(b.S().prevEventId).toBe(won), SOON)
     localStorage.setItem(`onosendai:chain-unsaved:${pk}`, JSON.stringify([lostEvent]))
     const c = await openTab()
     expect(c.S().prevEventId).toBe(won)
     expect(c.S().events.map((e) => e.id)).not.toContain(lost)
     expect(c.S().forkNotice).toBeNull()
-    await vi.waitFor(async () => expect((await c.rows.rowsSetAside(pk)).flatMap((p) => p.events.map((e) => e.id))).toContain(lost))
+    await vi.waitFor(async () => expect((await c.rows.rowsSetAside(pk)).flatMap((p) => p.events.map((e) => e.id))).toContain(lost), SOON)
     expect(localStorage.getItem(`onosendai:chain-unsaved:${pk}`)).toBeNull()
   })
 
@@ -713,7 +733,7 @@ describe('when storage will not take it', () => {
     // The frozen copy, or the late answer already: never less, and never a write over the copy.
     expect(store.useCyberspace.getState().events.length).toBeGreaterThanOrEqual(10)
     expect(localStorage.getItem(LOCAL_KEY)).toBe(frozen)
-    await vi.waitFor(() => expect(store.useCyberspace.getState().prevEventId).toBe(further))
+    await vi.waitFor(() => expect(store.useCyberspace.getState().prevEventId).toBe(further), SOON)
     expect(rows.inRows(pk)).toBe(true)
   })
 
@@ -768,7 +788,7 @@ describe('reversible by version', () => {
     ;(await import('../../lib/eventDb/connection')).closeEventDb()
     version.v = 2
     const c = await openTab()
-    await vi.waitFor(() => expect(c.S().prevEventId).toBe(m2))
+    await vi.waitFor(() => expect(c.S().prevEventId).toBe(m2), SOON)
     await c.rows.chainRowsSettled()
     expect((await rowsNow())!.events.map((e) => e.id).slice(-2)).toEqual([m1, m2])
   })
@@ -911,7 +931,7 @@ describe('the kill switch, from the deploy\'s version file', () => {
     expect(a.rows.rowsWanted()).toBe(false)
     expect(localStorage.getItem(OFF)).toBeNull()
     const b = await openTab()
-    await vi.waitFor(() => expect(b.S().prevEventId).toBe(m2))
+    await vi.waitFor(() => expect(b.S().prevEventId).toBe(m2), SOON)
     await b.rows.chainRowsSettled()
     expect((await rowsNow())!.events.map((e) => e.id).slice(-2)).toEqual([m1, m2])
   })
@@ -1083,7 +1103,7 @@ describe('a switched device whose rows fail', () => {
     rows.setRowsPatience({ read: 0 })
     const store = await import('../useCyberspace')
     await store.savedChainLoaded()
-    await vi.waitFor(() => expect(rows.inRows(pk)).toBe(true))
+    await vi.waitFor(() => expect(rows.inRows(pk)).toBe(true), SOON)
     rows.setRowsPatience({ read: 3_000 })
     const tab: Tab = { store, rows, S: store.useCyberspace.getState }
     store.useCyberspace.setState({ selfCheck: { pubkey: pk, status: 'none' } })
@@ -1740,7 +1760,7 @@ describe('what an older build or the old stores saved, folded in before anything
     // Back to A, its rows not read yet when the fold ends.
     const eventsHeld = await holdDb('onosendai:events', 'events')
     void S().useNsec(nip19.nsecEncode(sk))
-    await vi.waitFor(() => expect(S().identity.pubkey).toBe(pk))
+    await vi.waitFor(() => expect(S().identity.pubkey).toBe(pk), SOON)
     await chainsHeld.letGo()
     await tick(100)
     expect(S().identity.pubkey).toBe(pk)

@@ -27,14 +27,24 @@ import { planterSk, vectorBlocks, vectors } from './seedsFixture'
 const at = { x: 1_000n, y: 2_000n, z: 3_000n }
 
 describe('the original DNAs', () => {
-  it('are the vectors\' six, word for word, and each is valid SEEDO', () => {
+  it('are the vectors\' six, word for word after the line `seedo   1`, and each is valid SEEDO of revision 1', () => {
     expect(ORIGINAL_DNAS.map((d) => d.name)).toEqual(['fiddlehead', 'sword fern', 'oak', 'willow', 'coral', 'crystal'])
     for (const d of ORIGINAL_DNAS) {
-      expect(d.text).toBe(vectors.growth.dnas[d.name])
+      expect(d.text).toBe('seedo   1\n' + vectors.growth.dnas[d.name])
       const read = tryParseDna(d.text)
       expect(read.ok, d.name).toBe(true)
       if (read.ok) expect(read.dna.name).toBe(d.name)
+      if (read.ok) expect(read.dna.revision).toBe(1)
       expect(d.caps).toEqual(ORIGINAL_CAPS)
+    }
+  })
+
+  it('the revision line changes no bloom: each grows the vectors\' payload at day 30 and 6 blocks (DECK-0008 §3.10)', () => {
+    const blocks = vectorBlocks()
+    for (const d of ORIGINAL_DNAS) {
+      const c = vectors.growth.cases.find((x: { dna: string; what: string }) => x.dna === d.name && x.what === 'day 30 and 6 blocks')
+      const b = growBloom(parseDna(d.text), { coord: c.coord, planted: c.planted, scale: c.scale, caps: c.caps }, c.clock, (h) => blocks.get(h))
+      expect(b.sha256, d.name).toBe(c.sno_sha256)
     }
   })
 })
@@ -135,6 +145,21 @@ describe('the preview', () => {
     expect(answer.growth.generation).toBe(30)
     const bloom = growBloom(parseDna(ORIGINAL_DNAS[0].text), req.seed, req.clock, (h) => blocks.get(h))
     expect(bloomShard(answer.buffers, 'fiddlehead', 0, 'x')).toEqual({ ...fromPayload(bloom.sno, 'x')!, updatedAt: 0 })
+  })
+
+  it('a glassy bloom keeps its opacity from the worker\'s buffers to the shard, as the payload carries it (DECK-0008 §5.4, §5.5)', () => {
+    const glass = vectors.opacity.dnas['glass crystal']
+    const req = previewRequest({ text: glass, caps: ORIGINAL_CAPS, coord: vectors.growth.cases[0].coord, scale: 0, tip, day: 30, hashOf: (h) => blocks.get(h) })
+    const { answer } = handleGrow({ type: 'grow', id: 1, ...req }, new GrowCache())
+    if (answer.type !== 'bloom') throw new Error(answer.type)
+    expect(answer.buffers.opacity).toBe(40)
+    const bloom = growBloom(parseDna(glass), req.seed, req.clock, (h) => blocks.get(h))
+    expect(bloom.sno.opacity).toBe(40)
+    const shard = bloomShard(answer.buffers, 'crystal', 0, 'x')
+    expect(shard.opacity).toBe(40)
+    expect(shard).toEqual({ ...fromPayload(bloom.sno, 'x')!, updatedAt: 0 })
+    // a solid bloom has no opacity at all, as its payload has none
+    expect('opacity' in bloomShard({ ...answer.buffers, opacity: undefined }, 'crystal', 0, 'x')).toBe(false)
   })
 
   it('made-up hashes where the page has none, day 0 is the axiom, and the day is held to 0..30', () => {

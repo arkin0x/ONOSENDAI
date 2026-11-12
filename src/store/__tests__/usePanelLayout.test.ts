@@ -45,9 +45,10 @@ function saved(order: PanelOrder, collapsed: Partial<Record<PanelId, boolean>> =
 describe('the default order', () => {
   it('leads with identity, agents, avatars, items, create (arkinox, 2026-11-11), every panel once, in one column', () => {
     expect(DEFAULT_ORDER.left).toEqual(['identity', 'agents', 'avatars', 'items', 'create', 'hidden', 'discovered', 'targets', 'links'])
-    expect(DEFAULT_ORDER.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'])
+    // TUTORIAL last of all: the foot of the right column, which a phone stacks under the left (item 17).
+    expect(DEFAULT_ORDER.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'])
     expect(new Set(PANEL_IDS).size).toBe(PANEL_IDS.length)
-    expect(PANEL_IDS).toHaveLength(21)
+    expect(PANEL_IDS).toHaveLength(22)
   })
 
   it('comes as a fresh copy each time', () => {
@@ -107,7 +108,7 @@ describe('moveBefore', () => {
 
 describe('mergeOrder: a saved order against the defaults', () => {
   it('keeps a complete saved order as it is', () => {
-    const o: PanelOrder = { left: ['links', 'identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'scale'], right: ['position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'] }
+    const o: PanelOrder = { left: ['links', 'identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'scale'], right: ['position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'] }
     expect(mergeOrder(o)).toEqual(o)
   })
 
@@ -124,7 +125,7 @@ describe('mergeOrder: a saved order against the defaults', () => {
     const o = defaultOrder()
     o.right = o.right.filter((id) => id !== 'view' && id !== 'hyperspace')
     o.left.push('hyperspace')
-    expect(mergeOrder(o).right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'view', 'legend', 'controls', 'derezz', 'relays'])
+    expect(mergeOrder(o).right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'])
   })
 
   it('puts a missing panel at the top of its column when nothing above it in the defaults is there', () => {
@@ -179,18 +180,18 @@ describe('a layout saved before the View panel (viewat)', () => {
   /** The defaults as they were the day before: no viewat. */
   const before = (): { left: string[]; right: string[] } => ({
     left: ['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'],
-    right: ['scale', 'position', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'],
+    right: ['scale', 'position', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'],
   })
 
   it('gets the View panel right under Position, and Settings (view) where it was', () => {
     const merged = mergeOrder(before())
-    expect(merged.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'])
+    expect(merged.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'])
     expect(merged.left).toEqual(before().left)
   })
 
   it('follows Position wherever it was dragged in the right column, and keeps every other saved place', () => {
     const o = before()
-    o.right = ['relays', 'view', 'scale', 'legend', 'proof', 'cloud', 'chain', 'hyperspace', 'controls', 'derezz', 'position']
+    o.right = ['tutorial', 'relays', 'view', 'scale', 'legend', 'proof', 'cloud', 'chain', 'hyperspace', 'controls', 'derezz', 'position']
     expect(mergeOrder(o).right).toEqual([...o.right, 'viewat'])
     const o2 = before()
     o2.right = ['view', 'position', 'relays', 'scale', 'legend', 'proof', 'cloud', 'chain', 'hyperspace', 'controls', 'derezz']
@@ -376,5 +377,14 @@ describe('the store over localStorage', () => {
     const S = await load()
     expect(S.getState().order).toEqual(defaultOrder())
     expect(() => S.getState().toggle('hidden')).not.toThrow()
+  })
+})
+
+describe('a layout saved before the TUTORIAL panel (item 17)', () => {
+  it('gets TUTORIAL at the foot of the right column, the bottom of the menu', () => {
+    const o = defaultOrder()
+    o.right = o.right.filter((id) => id !== 'tutorial')
+    expect(mergeOrder(o).right.at(-1)).toBe('tutorial')
+    expect(mergeOrder(o).left).not.toContain('tutorial')
   })
 })

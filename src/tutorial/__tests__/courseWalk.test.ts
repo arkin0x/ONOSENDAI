@@ -40,7 +40,8 @@ import { walkStep } from '../../store/walkStep'
 import { clearWalls, type WallItem } from '../../store/walkWalls'
 import { regionBase, type TutorialLayout } from '../layout'
 import { buildStage, type KeyAt } from '../stage'
-import { courseToWorld } from '../course'
+import { PLOT_AT, PLOT_STAND, courseToWorld, onPlot } from '../course'
+import { toWorld } from '../layout'
 
 const keyAt: KeyAt = async (at, h) => { const rk = regionKeyAt(at, h, 20); return { key: rk.key, lookupId: rk.lookupId } }
 const BASE = 1n << 40n
@@ -68,6 +69,12 @@ function standAt(layout: TutorialLayout, items: WallItem[], x: number, z: number
   const f = fallLimit(from, items, () => true)
   if (!f.lands) return null
   return 30 - Number(f.drop)
+}
+
+/** Where a walker dropped over box-frame (f, r) comes to stand, as a box-frame u, or null. */
+function standAt0(layout: TutorialLayout, items: WallItem[], f: number, r: number): number | null {
+  const fall = fallLimit(toWorld(layout.frame, f, r, 20), items, () => true)
+  return fall.lands ? 20 - Number(fall.drop) : null
 }
 
 /** The course z cells along x 0 where a walker stands at course height `y`. */
@@ -107,6 +114,20 @@ describe.each([[1, 1], [1, -1], [-1, 1], [-1, -1]] as const)('the course, facing
       expect(s, `floor at x 6 z ${z}`).toBe(-2)
     }
     for (const z of [7, 13, 14, 20, 21]) expect(standAt(layout, items, 0, z), `gap z ${z}`).toBe(-2)
+
+    // The dirt plot (A5): a walker stands on it at u 1, on its 4 by 4 cells, which count as on the plot.
+    for (const f of [12, 16]) for (const r of [2, 6]) {
+      const top = toWorld(layout.frame, f, r, 20)
+      const fall = fallLimit(top, items, () => true)
+      expect(fall.lands, `plot f ${f} r ${r}`).toBe(true)
+      expect(20 - Number(fall.drop)).toBe(PLOT_STAND.u)
+      expect(onPlot(layout.frame, toWorld(layout.frame, f, r, 1))).toBe(true)
+    }
+    for (const [f, r] of [[11, 4], [17, 4], [14, 1], [14, 7]]) {
+      expect(onPlot(layout.frame, toWorld(layout.frame, f, r, 1)), `off the plot f ${f} r ${r}`).toBe(false)
+      expect(standAt0(layout, items, f, r)).not.toBe(PLOT_STAND.u)
+    }
+    void PLOT_AT
 
     // Back up: from the floor behind the start, walking forward climbs the step and onto the start square.
     let at = courseToWorld(layout.frame, [0, -2, -10])

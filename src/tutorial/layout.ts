@@ -71,6 +71,25 @@ export function toWorld(frame: Frame, f: number, r: number, u: number): Position
   }
 }
 
+/**
+ * The gibson next to the frame's (f, r, u) on the side `from` lies, in the
+ * world: each axis steps one toward `from` where the direction to it leans
+ * that way (the unit vector, rounded), so a move from `from` ends facing
+ * (f, r, u) as nearly as one gibson's choice allows (feedback item 4: land in
+ * front of the chest, facing it).
+ */
+export function besideToward(frame: Frame, f: number, r: number, u: number, from: Position): Position {
+  const at = toWorld(frame, f, r, u)
+  // `from` in the frame's own terms: forward, side, up, relative to (f, r, u).
+  const df = Number(frame.fwd === 1 ? from.z - at.z : at.z - from.z)
+  const dr = Number(frame.side === 1 ? from.x - at.x : at.x - from.x)
+  const du = Number(from.y - at.y)
+  const len = Math.hypot(df, dr, du)
+  if (len === 0) return toWorld(frame, f - 1, r, u)
+  const step = (d: number): number => Math.round(d / len)
+  return toWorld(frame, f + step(df), r + step(dr), u + step(du))
+}
+
 /** The world box a frame's footprint covers, lowest and highest gibson, inclusive. */
 function footprintBounds(frame: Frame): { lo: Position; hi: Position } {
   const a = toWorld(frame, FOOTPRINT.f[0], FOOTPRINT.r[0], FOOTPRINT.u[0])

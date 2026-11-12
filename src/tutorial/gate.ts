@@ -89,10 +89,15 @@ export function applyTutorialFlag(loc: Pick<Location, 'pathname' | 'search' | 'h
   return on
 }
 
-/** What a player's progress says: the step it was on, and whether it ended (and how). */
+/**
+ * What a player's progress says: the step it was on, whether it ended (and
+ * how), and the routes after the basics already done, so a reload on the
+ * choices card keeps them checked off (tutorial feedback 2026-11-11, item 10).
+ */
 export interface TutorialProgress {
   step: string
   ended?: 'finished' | 'skipped'
+  choices?: string[]
 }
 
 export function readProgress(pubkey: string): TutorialProgress | null {
@@ -102,7 +107,8 @@ export function readProgress(pubkey: string): TutorialProgress | null {
     const v = JSON.parse(raw) as Partial<TutorialProgress>
     if (typeof v.step !== 'string') return null
     if (v.ended !== undefined && v.ended !== 'finished' && v.ended !== 'skipped') return null
-    return v.ended ? { step: v.step, ended: v.ended } : { step: v.step }
+    const choices = Array.isArray(v.choices) ? v.choices.filter((c): c is string => typeof c === 'string') : []
+    return { step: v.step, ...(v.ended ? { ended: v.ended } : {}), ...(choices.length ? { choices } : {}) }
   } catch { return null }
 }
 

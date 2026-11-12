@@ -40,10 +40,14 @@ export const COLUMNS: readonly Column[] = ['left', 'right']
  * The left column leads with IDENTITY, AGENTS, AVATARS, ITEMS, CREATE, the
  * rest after them in their old order (arkinox, 2026-11-11). Only a first
  * visit gets it: a saved order is kept as it was.
+ *
+ * `tutorial` (feedback 2026-11-11, item 17) is the last panel of all: the
+ * foot of the right column, which a phone stacks under the left one, so it
+ * is the bottom of the menu either way.
  */
 export const DEFAULT_ORDER = {
   left: ['identity', 'agents', 'avatars', 'items', 'create', 'hidden', 'discovered', 'targets', 'links'],
-  right: ['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'],
+  right: ['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'],
 } as const satisfies Record<Column, readonly string[]>
 
 export type PanelId = (typeof DEFAULT_ORDER)[Column][number]

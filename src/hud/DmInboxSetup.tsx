@@ -12,12 +12,18 @@
  * own signer (store/useAgentDms.ts setUpDmInbox). The relays are
  * lib/inbox.ts DEFAULT_DM_RELAYS, chosen for being free and refusing to
  * hand out gift wraps without NIP-42 AUTH.
+ *
+ * On the key this app generated (signerKind local), there is no button and
+ * no confirmation (arkinox, 2026-11-11): drawn, it publishes the same 10050
+ * by itself (store/useAgentDms.ts autoDmInbox), under the same rule. The
+ * button and its confirmation stay for an extension or a bunker.
  */
 
 import { useEffect, useState } from 'react'
 import { Inbox } from 'lucide-react'
 import { DEFAULT_DM_RELAYS } from '../lib/inbox'
-import { checkMyInbox, setUpDmInbox, useAgentDms, type InboxState } from '../store/useAgentDms'
+import { autoDmInbox, checkMyInbox, recheckMyInbox, setUpDmInbox, useAgentDms, type InboxState } from '../store/useAgentDms'
+import { appMinted, useCyberspace } from '../store/useCyberspace'
 import { ConfirmModal } from './ConfirmModal'
 
 /** What the confirmation says, apart from the relay list; exported for the tests. */
@@ -51,14 +57,34 @@ export function DmInboxConfirmBody({ relays = DEFAULT_DM_RELAYS, error }: { rela
 
 /**
  * The SET UP DM INBOX button and its confirmation. Rendered only where your
- * inbox is known to be missing; nothing is signed or sent before PUBLISH.
+ * inbox is known to be missing; nothing is signed or sent before PUBLISH. On
+ * the generated key, a status line instead, and it publishes by itself.
  */
 export function DmInboxSetup(): JSX.Element {
   const [asking, setAsking] = useState(false)
   const setup = useAgentDms((s) => s.inboxSetup)
   const busy = setup.status === 'publishing'
+  const complete = useAgentDms((s) => s.myInbox.complete === true)
+  // The key this app generated, not a pasted nsec (also a local signer), whose owner may have an inbox elsewhere.
+  const local = useCyberspace((s) => s.signerKind === 'local' && appMinted(s.identity.pubkey) === true)
+  // The generated key publishes it by itself, once, as it is drawn.
+  useEffect(() => { if (local && complete) void autoDmInbox() }, [local, complete])
   const publish = (): void => {
     void setUpDmInbox().then((ok) => { if (ok) setAsking(false) })
+  }
+  if (local) {
+    return setup.status === 'failed' ? (
+      <>
+        <span className="notice" role="status">{setup.error}</span>
+        <button className="avatars__go dminbox__setup" onClick={() => void autoDmInbox()}>RETRY</button>
+      </>
+    ) : complete ? <span className="tag">SETTING UP DM INBOX</span> : (
+      // Not every relay answered the lookup: asked again, never published on a guess.
+      <>
+        <span className="notice" role="status">Some relays did not answer.</span>
+        <button className="avatars__go dminbox__setup" onClick={() => recheckMyInbox(useCyberspace.getState().identity.pubkey)}>ASK AGAIN</button>
+      </>
+    )
   }
   return (
     <>

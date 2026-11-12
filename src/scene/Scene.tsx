@@ -70,6 +70,7 @@ import { StopCubes } from './StopCubes'
 import { StopBurst } from './StopBurst'
 import { TourLine } from './TourLine'
 import { useDemo } from '../store/useDemo'
+import { clearTutorialZoom, useTutorialCam } from '../store/useTutorialCam'
 import { TourCameraState } from '../demo/tourDistance'
 import { TransitAvatar } from './TransitAvatar'
 import { RidePath } from './RidePath'
@@ -647,6 +648,9 @@ function Rig(): JSX.Element {
     check(useDemo.getState())
     return useDemo.subscribe(check)
   }, [tourCam])
+  // The first-arrival tutorial's idle orbit spin around the cursor (feedback
+  // item 14); off for everyone else, so the controls are untouched.
+  const tutorialSpin = useTutorialCam((s) => s.spin)
   // The rig re-framed on its own (a cut or a straight-on reframe): the step's
   // camera comes back only when the view has just arrived at the step's own
   // place. A block landing late reframed straight on, which put the camera on
@@ -1097,6 +1101,25 @@ function Rig(): JSX.Element {
       c.object.position.copy(c.target).addScaledVector(along.normalize(), Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, want.distance)))
       lastOffset.current.copy(c.object.position).sub(c.target)
     }
+    // The tutorial eases the orbit in to a close distance after a HOP onto the
+    // course (feedback item 6), only when idle and only while it asks for it.
+    // WALK ends the ask, and so does a finger or the mouse on the scene (the
+    // player taking the camera), not the step moving on, which comes before
+    // the ease is done.
+    const tutorialZoom = useTutorialCam.getState().zoom
+    if (tutorialZoom !== null && (s.walking || pressed() > 0)) clearTutorialZoom()
+    else if (want === null && !eye.current) {
+      if (tutorialZoom !== null) {
+        const off = walkDir.copy(c.object.position).sub(c.target)
+        const cur = off.length()
+        if (cur < 1e-4) off.set(0, 0, 1)
+        const target = Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, tutorialZoom))
+        const nd = cur < 1e-4 ? target : cur + (target - cur) * (1 - Math.exp(-dt / 0.4))
+        c.object.position.copy(c.target).addScaledVector(off.normalize(), nd)
+        lastOffset.current.copy(c.object.position).sub(c.target)
+        if (Math.abs(nd - target) < 0.05) clearTutorialZoom()
+      }
+    }
     c.update()
     if (s.walking) (walkLook.current ??= new Vector3()).copy(c.object.position).sub(c.target).normalize()
   })
@@ -1109,6 +1132,8 @@ function Rig(): JSX.Element {
       minDistance={ORBIT_MIN_DISTANCE}
       maxDistance={GRID_RADIUS * 4}
       dampingFactor={0.12}
+      autoRotate={tutorialSpin}
+      autoRotateSpeed={0.6}
       onStart={() => { if (startLock.start(pressed())) locked.current = false }}
     />
   )

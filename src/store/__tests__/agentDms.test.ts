@@ -19,7 +19,7 @@ import { DEFAULT_DM_RELAYS, type DmInbox } from '../../lib/inbox'
 import { GENERAL_RELAYS } from '../../lib/contacts'
 import { unwrapMessage, type DmReader, type DmSender } from '../../lib/dm'
 import {
-  cannotSend, checkMyInbox, dmDeps, openConversation, resetAgentDms, sendToAgent, setUpDmInbox, strategyWith, useAgentDms,
+  autoDmInbox, cannotSend, checkMyInbox, dmDeps, openConversation, resetAgentDms, sendToAgent, setUpDmInbox, strategyWith, useAgentDms,
   type DmKeys, type DmTransport,
 } from '../useAgentDms'
 
@@ -42,7 +42,7 @@ interface Fake {
 function fakeRelays(): Fake {
   const fake: Fake = { published: [], subs: [], inboxes: new Map(), transport: null as unknown as DmTransport }
   fake.transport = {
-    inboxOf: async (pk) => fake.inboxes.get(pk) ?? { relays: [], answered: true },
+    inboxOf: async (pk) => fake.inboxes.get(pk) ?? { relays: [], answered: true, complete: true },
     subscribe: (relay, filter, onEvent, onClose) => {
       const sub = { relay, filter, deliver: onEvent, close: onClose, closed: false }
       fake.subs.push(sub)
@@ -270,5 +270,49 @@ describe('SET UP DM INBOX (arkinox, 2026-10-13)', () => {
     const s = useAgentDms.getState()
     expect(s.myInbox.status).toBe('none')
     expect(s.inboxSetup).toEqual({ status: 'failed', error: 'Not published: blocked: no' })
+  })
+})
+
+describe('DM INBOX on the generated key (arkinox, 2026-11-11)', () => {
+  it('publishes by itself, with no confirmation, when the relays answered that there is none', async () => {
+    checkMyInbox(me.pubkey)
+    await settle()
+    expect(useAgentDms.getState().myInbox.status).toBe('none')
+    expect(await autoDmInbox()).toBe(true)
+    expect(fake.published).toHaveLength(1)
+    expect(fake.published[0].ev.kind).toBe(10050)
+    expect(fake.published[0].ev.tags.filter((t) => t[0] === 'relay')).toEqual(DEFAULT_DM_RELAYS.map((r) => ['relay', r]))
+  })
+
+  it('never over an inbox you have, and never on a lookup that failed', async () => {
+    fake.inboxes.set(me.pubkey, { relays: [MY_RELAY], answered: true })
+    checkMyInbox(me.pubkey)
+    await settle()
+    expect(await autoDmInbox()).toBe(false)
+    resetAgentDms()
+    fake.transport.inboxOf = async () => ({ relays: [], answered: false })
+    checkMyInbox(me.pubkey)
+    await settle()
+    expect(useAgentDms.getState().myInbox.status).toBe('unknown')
+    expect(await autoDmInbox()).toBe(false)
+    expect(fake.published).toEqual([])
+  })
+
+  it('never on a "none" from some relays while others did not answer (review of #674 round 2)', async () => {
+    fake.transport.inboxOf = async () => ({ relays: [], answered: true, complete: false })
+    checkMyInbox(me.pubkey)
+    await settle()
+    expect(useAgentDms.getState().myInbox.status).toBe('none')
+    expect(await autoDmInbox()).toBe(false)
+    expect(fake.published).toEqual([])
+  })
+
+  it('an extension or a bunker never publishes it by itself', async () => {
+    dmDeps.keys = { ...dmDeps.keys, promptFree: () => false }
+    checkMyInbox(me.pubkey)
+    await settle()
+    expect(useAgentDms.getState().myInbox.status).toBe('none')
+    expect(await autoDmInbox()).toBe(false)
+    expect(fake.published).toEqual([])
   })
 })

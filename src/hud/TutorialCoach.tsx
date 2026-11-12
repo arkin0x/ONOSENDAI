@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, ChevronRight, ChevronUp, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X } from 'lucide-react'
 import { choiceOffered, runTutorialEffect, useTutorial } from '../store/useTutorial'
 import { useWorkshop } from '../store/useWorkshop'
 import { useDemo } from '../store/useDemo'
@@ -37,6 +37,7 @@ export function TutorialCoach(): JSX.Element | null {
   const script = useTutorial((s) => s.script)
   // The guide's things could not be staged: said where the instruction goes.
   const stageError = useTutorialStage((s) => s.error)
+  const stepNote = useTutorial((s) => s.stepNote)
   // Never over the /demo tour (useTutorial pauses for it; this is the frame between),
   // nor over the workshop, which has the screen while it is open.
   const touring = useDemo((s) => s.active)
@@ -61,6 +62,8 @@ export function TutorialCoach(): JSX.Element | null {
   // Waiting is aria-disabled, not disabled: the focus stays on the card, so Space never falls through to COMMIT behind it.
   const choosing = useTutorial((s) => s.choosing)
   const choiceNote = useTutorial((s) => s.choiceNote)
+  // The routes already done this run, checked off on the choices card (item 10).
+  const doneChoices = useTutorial((s) => s.doneChoices)
   useEffect(() => { if (shown && modal) (firstChoice.current ?? go.current)?.focus() }, [shown, modal, index])
 
   // The control a step points at wears the /demo tour's pulsing ring
@@ -88,8 +91,12 @@ export function TutorialCoach(): JSX.Element | null {
   const t = useTutorial.getState()
   const last = index === script.steps.length - 1
   const waiting = !!step.wait && !done
-  const held = step.gate === true && waiting
+  // A gate never holds when staging failed: NEXT is the way on (the box step has no SKIP otherwise).
+  const held = step.gate === true && waiting && !stageError
   const caption = done && step.captionDone ? step.captionDone : step.caption
+  // BACK shows once there is a step behind this one (not on the welcome). It
+  // is the way back out of a branch too (feedback item 8).
+  const canBack = index > 0
 
   if (modal) {
     return createPortal(
@@ -98,19 +105,25 @@ export function TutorialCoach(): JSX.Element | null {
           <div className="demo__head">
             <span className="demo__tag">TUTORIAL</span>
             <span className="demo__chapter" />
-            <button className="demo__icon" onClick={() => t.end('skipped')} aria-label="Skip the tutorial" title="Skip the tutorial"><X size={14} /></button>
+            <button className="demo__icon" onClick={() => t.end('skipped')} aria-label="Close the tutorial" title="Close the tutorial"><X size={14} /></button>
           </div>
           <h2 className="modal__title">{step.title}</h2>
           <p className="demo__caption"><CaptionText caption={caption} /></p>
-          {step.choices?.filter(choiceOffered).map((c, i) => (
-            <button key={c.id} ref={i === 0 ? firstChoice : undefined} className="demo__btn tutorial-choice" onClick={() => t.choose(c.id)} aria-disabled={choosing !== null}>
-              <span className="tutorial-choice__label">{c.label}</span>
-              <span className="tutorial-choice__about">{choosing === c.id ? 'One moment.' : c.about}</span>
-            </button>
-          ))}
+          {step.choices?.filter(choiceOffered).map((c, i) => {
+            const choiceDone = doneChoices.includes(c.id)
+            return (
+              <button key={c.id} ref={i === 0 ? firstChoice : undefined} className={`demo__btn tutorial-choice ${choiceDone ? 'is-done' : ''}`} onClick={() => t.choose(c.id)} aria-disabled={choosing !== null}>
+                <span className="tutorial-choice__label">{choiceDone && <Check size={13} aria-hidden className="tutorial-choice__check" />}{c.label}</span>
+                <span className="tutorial-choice__about">{choosing === c.id ? 'One moment.' : choiceDone ? 'Done. Try another.' : c.about}</span>
+              </button>
+            )
+          })}
           {/* Always there, so a screen reader hears the refusal when its words arrive. */}
           <p className="demo__caption tutorial__note" role="status">{choiceNote}</p>
-          <button ref={go} className={`demo__btn tutorial-card__go ${step.choices ? 'tutorial-card__go--done' : 'demo__btn--next'}`} onClick={t.next}>{step.go ?? (last ? 'FINISH' : 'NEXT')}</button>
+          <div className="tutorial-card__foot">
+            {canBack && <button className="demo__btn tutorial__back" onClick={t.back} aria-label="Back"><ChevronLeft size={14} aria-hidden /> BACK</button>}
+            <button ref={go} className={`demo__btn tutorial-card__go ${step.choices ? 'tutorial-card__go--done' : 'demo__btn--next'}`} onClick={t.next}>{step.go ?? (last ? 'FINISH' : 'NEXT')}</button>
+          </div>
         </div>
       </div>,
       document.body,
@@ -136,7 +149,7 @@ export function TutorialCoach(): JSX.Element | null {
         <span className="demo__tag">TUTORIAL</span>
         <span className="demo__chapter" />
         <button className="demo__icon" onClick={() => t.setMinimized(true)} aria-label="Fold the caption" title="Fold"><ChevronUp size={14} /></button>
-        <button className="demo__icon" onClick={() => t.end('skipped')} aria-label="Skip the tutorial" title="Skip the tutorial"><X size={14} /></button>
+        <button className="demo__icon" onClick={() => t.end('skipped')} aria-label="Close the tutorial" title="Close the tutorial"><X size={14} /></button>
       </div>
       {/* How far along, counting the way through (branches after the choice count as its end). */}
       <div className="demo__bar-track" aria-hidden><div className="demo__bar-fill" style={{ width: `${progressOf(script.steps, index) * 100}%` }} /></div>
@@ -145,11 +158,12 @@ export function TutorialCoach(): JSX.Element | null {
           <h2 className="demo__title">{step.title}</h2>
         </div>
         <p className="demo__caption"><CaptionText caption={caption} /></p>
+        {step.image && <img className="tutorial__image" src={step.image.src} alt={step.image.alt} width={160} height={160} onError={(e) => { e.currentTarget.style.display = 'none' }} />}
         {step.explain && explaining && <p className="demo__caption tutorial__explain">{step.explain}</p>}
       </div>
       {step.wait ? (
         <div className={`demo__wait ${done ? 'is-done' : ''}`} aria-live="polite">
-          <span>{done ? '✓ Done' : stageError ?? step.hint ?? 'Your turn.'}</span>
+          <span>{done ? '✓ Done' : stageError ?? stepNote ?? step.hint ?? 'Your turn.'}</span>
         </div>
       ) : step.hint && (
         // A step that waits on nothing still says where to go next (the menu, for a ride or an agent).
@@ -162,7 +176,9 @@ export function TutorialCoach(): JSX.Element | null {
         {step.explain && (
           <button className={`demo__btn ${explaining ? 'is-on' : ''}`} onClick={() => t.setExplaining(!explaining)} aria-pressed={explaining}>EXPLAIN</button>
         )}
-        <button className={`demo__btn demo__btn--next ${waiting && !held ? 'is-skip' : ''}`} onClick={t.next} disabled={held} title={held ? step.hint : undefined}>
+        {/* BACK is sized to its text and outlined; NEXT fills the rest and is the filled action (feedback item 8). */}
+        {canBack && <button className="demo__btn tutorial__back" onClick={t.back} aria-label="Back"><ChevronLeft size={14} aria-hidden /> BACK</button>}
+        <button className={`demo__btn demo__btn--next tutorial__next ${waiting && !held ? 'is-skip' : ''}`} onClick={t.next} disabled={held} title={held ? step.hint : undefined}>
           {(last || step.branch) && !waiting ? 'FINISH' : waiting && !held ? 'SKIP' : 'NEXT'} <ChevronRight size={14} aria-hidden />
         </button>
       </div>

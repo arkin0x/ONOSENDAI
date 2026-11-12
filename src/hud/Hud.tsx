@@ -51,6 +51,10 @@ import { useMutes } from '../store/useMutes'
 import { MuteListModal } from './MuteListModal'
 import { useCover } from '../hooks/useCover'
 import { SpeakeasyLine } from './SpeakeasyLine'
+import { appVersion } from '../lib/tv/upgradeAnnounce'
+
+/** The menu footer's version: VERSION 2.1, or the build stamp for a build with no simple version. */
+const SHOWN_VERSION = ((v) => (v ? `VERSION ${v}` : __ONOSENDAI_VERSION__))(appVersion())
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
 
@@ -753,9 +757,13 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
           <div>CODE <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="license noopener noreferrer">CC BY-SA 4.0</a></div>
           <div>LOGO © 2023-2026 ARKINOX <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/" target="_blank" rel="license noopener noreferrer">CC BY-NC-ND 4.0</a></div>
         </div>
-        {/* The build, last thing in the menu: 2, the day it was merged, how
-            many PRs had merged that day, and which PR this is. */}
-        <div className="hud__version" title="2 . day merged . PRs merged that day . this PR">{__ONOSENDAI_VERSION__}</div>
+        {/* The version, last thing in the menu: the simple one people see
+            (2.1, 2.2, ...; owner, 2026-11-12), the build this page runs. The
+            build stamp (2, the day it was merged, how many PRs had merged
+            that day, and which PR this is) is in its title, for debugging. */}
+        <div className="hud__version" title={`build ${__ONOSENDAI_VERSION__} (2 . day merged . PRs merged that day . this PR)`}>
+          {SHOWN_VERSION}
+        </div>
       </div>
       <div ref={grabRef} className="hud__grab" onPointerMove={over} onPointerUp={drop} onPointerCancel={drop} onLostPointerCapture={drop} aria-hidden="true" />
     </div>

@@ -1,9 +1,10 @@
 /// <reference types="vitest/config" />
 import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { resolveVersion, UNVERSIONED } from './src/lib/version'
+import { resolveVersion, simpleVersion, UNVERSIONED } from './src/lib/version'
 import { ROUTE_PAGES, withCard } from './src/lib/routeCard'
 import { VERSION_FILE, versionFileOf } from './src/lib/chainRulesEpoch'
 
@@ -110,6 +111,9 @@ function commitMessage(): string | null {
 
 const BUILD = process.env.VITEST ? 'test' : buildId()
 
+/** The app's simple version (src/lib/version.ts simpleVersion), from package.json: "2.1.0" is 2.1. Empty when it is not plain numbers. */
+const APP_VERSION = simpleVersion((JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: string }).version) ?? ''
+
 export default defineConfig(async () => ({
   plugins: [react(), routeCards(), composerKnowsWebGL2(), versionFile(BUILD), v1HopListGuard()],
   define: {
@@ -118,6 +122,9 @@ export default defineConfig(async () => ({
     // Tests never reach the network for a number; the build and the dev
     // server ask GitHub once (see src/lib/version.ts).
     __ONOSENDAI_VERSION__: JSON.stringify(process.env.VITEST ? UNVERSIONED : await resolveVersion(process.env, commitMessage())),
+    // The simple version people see (2.1, 2.2, ...), bumped once per UPGRADE
+    // ANNOUNCEMENT: the menu's footer, TV's marquee and its WELCOME screen.
+    __ONOSENDAI_APP_VERSION__: JSON.stringify(APP_VERSION),
   },
   // cyberspace-core is a file: dependency, so it resolves through a symlink.
   // Excluding it from pre-bundling keeps edits to the core package live in dev

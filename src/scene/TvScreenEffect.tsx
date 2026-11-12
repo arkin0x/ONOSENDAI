@@ -58,6 +58,7 @@ import { EXPLAINER_PIP_ENABLED, explainerLayout, explainerMix, lerpRect, type Re
 import { explainerCaption, explainerSoundHeld, explainerVideo, useTvExplainer } from '../store/useTvExplainer'
 import { announceCutAt, useTvAnnounce } from '../store/useTvAnnounce'
 import { appVersion, releaseTicker } from '../lib/tv/upgradeAnnounce'
+import { higherVersion } from '../lib/version'
 import type { ShardModel } from 'sno-core/shards'
 
 /** Kept for what still names the old static: a cut's transition, ms. */
@@ -560,7 +561,8 @@ export function TvScreenEffect(): JSX.Element {
     }
     wasOn.current = tv.on
     // An UPGRADE ANNOUNCEMENT over everything (store/useTvAnnounce): all of TV stands still under it.
-    const announce = useTvAnnounce.getState().showing
+    const announceState = useTvAnnounce.getState()
+    const announce = announceState.showing
     // The banner runs only while the commercial is on.
     if (hosaka) {
       // From its start once per spot, when the spot's own clock starts
@@ -685,7 +687,9 @@ export function TvScreenEffect(): JSX.Element {
       hosakaMark: tv.ad ? pictureFor('/hosaka-mark.png') : null,
       explainer,
       announce,
-      release: releaseTicker(appVersion(), useTvAnnounce.getState().updatesThisWeek),
+      // The higher of this build's version and the newest announced this week:
+      // the stream does not reload for an update, so it may run an older build.
+      release: releaseTicker(higherVersion(appVersion(), announceState.announcedVersion), announceState.updatesThisWeek),
     }
     // The turning shard's next frame, for the next paint: this one copies the
     // last (TvSegments tvSpin).

@@ -41,8 +41,8 @@ vi.mock('../../lib/relay', async (importOriginal) => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
-import { flyGesture, installFlyTouches, panGesture, viewRig, viewOffset, type RigCamera } from '../ViewFly'
-import { useViewFly } from '../../lib/viewFly'
+import { flyGesture, installFlyTouches, panGesture, sceneHeld, steerToSpend, viewRig, viewOffset, type RigCamera } from '../ViewFly'
+import { steerBy, takeSteer, useViewFly } from '../../lib/viewFly'
 import { FlightPivot, PIVOT_EASE_MS, ViewOffset, FLY_MIN_VEL } from '../../lib/viewCamera'
 import { alignedOrigin, useCyberspace } from '../../store/useCyberspace'
 import { viewToAvatar } from '../../store/padMode'
@@ -52,9 +52,15 @@ const cs = () => useCyberspace.getState()
 const DT = 1 / 60
 const HEIGHT = 800
 
-/** A page for the controls: the document, and the scene's element on it. */
+/**
+ * A page for the controls: the document, its root element, and the scene's
+ * element. Moves and lifts bubble through the root before the document (as
+ * in the browser), so the gate on the root runs ahead of OrbitControls'
+ * document listeners whenever they were added.
+ */
 function page() {
-  const doc = new EventTarget()
+  const html = new EventTarget()
+  const doc = Object.assign(new EventTarget(), { documentElement: html })
   const el = Object.assign(new EventTarget(), {
     style: {} as Record<string, string>,
     ownerDocument: doc,
@@ -66,9 +72,15 @@ function page() {
   return { doc, el }
 }
 const ev = (type: string, init: Record<string, unknown>): Event => Object.assign(new Event(type), init)
-const touchAt = (id: number, x: number, y: number, primary = false) => ({ pointerType: 'touch', pointerId: id, isPrimary: primary, button: 0, clientX: x, clientY: y, pageX: x, pageY: y })
+const touchAt = (id: number, x: number, y: number, primary = false, pointerType = 'touch') => ({ pointerType, pointerId: id, isPrimary: primary, button: 0, buttons: 1, clientX: x, clientY: y, pageX: x, pageY: y })
+/** An event on its way out of the page: the root element, then (unless stopped there) the document. */
+function bubble(type: string, init: Record<string, unknown>): void {
+  const first = ev(type, init)
+  doc.documentElement.dispatchEvent(first)
+  if (!first.cancelBubble) doc.dispatchEvent(ev(type, init))
+}
 
-let doc: EventTarget
+let doc: ReturnType<typeof page>['doc']
 let el: ReturnType<typeof page>['el']
 let camera: PerspectiveCamera
 let controls: OrbitControls
@@ -88,8 +100,8 @@ function sceneDown(id: number, x: number, y: number, primary = false): void {
 function hudDown(id: number, x: number, y: number, primary = false): void {
   doc.dispatchEvent(ev('pointerdown', touchAt(id, x, y, primary)))
 }
-const moveTo = (id: number, x: number, y: number): void => { doc.dispatchEvent(ev('pointermove', touchAt(id, x, y))) }
-const lift = (id: number, x: number, y: number): void => { doc.dispatchEvent(ev('pointerup', touchAt(id, x, y))) }
+const moveTo = (id: number, x: number, y: number, kind = 'touch'): void => { bubble('pointermove', touchAt(id, x, y, false, kind)) }
+const lift = (id: number, x: number, y: number, kind = 'touch'): void => { bubble('pointerup', { ...touchAt(id, x, y, false, kind), buttons: 0 }) }
 
 /**
  * One frame, in Scene.tsx's order; the camera is unlocked (a drag unlocks it),
@@ -147,6 +159,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   useViewFly.setState({ button: 0, pad: 0, key: 0, touch: 0 })
+  takeSteer()
   uninstall()
   controls.dispose()
   flyGesture.clear()
@@ -351,6 +364,25 @@ describe('1. in flight the camera turns in place; after it, the pivot glides out
   })
 })
 
+describe('1a. the tutorial\'s auto-rotate is not a hand turn (review of #685, 3)', () => {
+  it('a turn the pivot is told not to answer is left as an orbit, and only marked', () => {
+    useViewFly.getState().setButton(1)
+    for (let i = 0; i < 30; i++) frame()
+    expect(viewRig.pivotWeight).toBe(1)
+    const centre = controls.target.clone()
+    // The controls turn the camera about the target, as auto-rotate does.
+    const off = camera.position.clone().sub(centre).applyAxisAngle(new Vector3(0, 1, 0), 0.2)
+    camera.position.copy(centre).add(off)
+    const turnedTo = camera.position.clone()
+    viewRig.pivot(camera.position, controls.target, follow, false)
+    expect(camera.position.distanceTo(turnedTo)).toBe(0)
+    expect(controls.target.distanceTo(centre)).toBe(0)
+    // Marked: the next pivot does not answer it late.
+    viewRig.pivot(camera.position, controls.target, follow)
+    expect(camera.position.distanceTo(turnedTo)).toBe(0)
+  })
+})
+
 describe('1b. RECALL in VIEW (#683) and the pivot', () => {
   for (const when of ['mid-flight, the fly still held', 'in the handover, after the coast'] as const) {
     it(`RECALL ${when}: the fly lands, the pivot stops sliding at once, and the camera does not jump on that frame`, () => {
@@ -465,17 +497,54 @@ describe('2. a finger that landed on a HUD control never moves the camera', () =
     doc.removeEventListener('pointerup', later)
   })
 
-  it("Scene.tsx's rig: the fly button's drag is spent only with nothing on the scene, and the pivot runs after the steer and around the rig's update", () => {
+  it("the fly button's drag is spent only with nothing pressed on the scene, and drained either way", () => {
+    steerBy(12, -3)
+    expect(steerToSpend()).toEqual({ dx: 12, dy: -3 })
+    sceneDown(1, 200, 400, true)
+    expect(sceneHeld()).toBe(true)
+    steerBy(2, 1)
+    expect(steerToSpend()).toBeNull()
+    lift(1, 200, 400)
+    expect(sceneHeld()).toBe(false)
+    // What the button gathered while the scene finger was down is gone, not saved up.
+    expect(steerToSpend()).toBeNull()
+    steerBy(1, 0)
+    expect(steerToSpend()).toEqual({ dx: 1, dy: 0 })
+  })
+
+  it('a pen on the scene closes the gate too, and the steer waits for it (review of #685, 1)', () => {
+    const heard: string[] = []
+    const later = (e: Event): void => { heard.push(e.type) }
+    doc.addEventListener('pointermove', later)
+    const down = touchAt(3, 200, 400, true, 'pen')
+    doc.dispatchEvent(ev('pointerdown', down))
+    el.dispatchEvent(ev('pointerdown', down))
+    expect(sceneHeld()).toBe(true)
+    steerBy(5, 0)
+    expect(steerToSpend()).toBeNull()
+    hudDown(7, 40, 700)
+    moveTo(7, 42, 700)
+    expect(heard).toEqual([])
+    lift(3, 200, 400, 'pen')
+    expect(sceneHeld()).toBe(false)
+    moveTo(7, 44, 700)
+    expect(heard).toEqual(['pointermove'])
+    lift(7, 44, 700)
+    doc.removeEventListener('pointermove', later)
+  })
+
+  it("Scene.tsx's rig: the steer is steerToSpend's, the pivot runs after it and around the rig's update, never answering the tutorial's auto-rotate", () => {
     const src = readFileSync('src/scene/Scene.tsx', 'utf8')
     const at = src.indexOf('\nfunction Rig(')
     const body = src.slice(at, src.indexOf('\nfunction ', at + 1))
     const loop = body.slice(body.indexOf('useFrame((state, dt) =>'))
-    expect(loop).toMatch(/if \(\(steer\.dx !== 0 \|\| steer\.dy !== 0\) && pressed\(\) === 0\)/)
+    expect(loop).toMatch(/const steer = steerToSpend\(\)/)
     const top = loop.indexOf('viewRig.pivot(')
-    expect(top).toBeGreaterThan(loop.indexOf('takeSteer()'))
+    expect(top).toBeGreaterThan(loop.indexOf('steerToSpend()'))
     expect(top).toBeLessThan(loop.indexOf('viewRig.before('))
     const update = loop.indexOf('c.update()')
     expect(loop.lastIndexOf('viewRig.mark(', update)).toBeGreaterThan(loop.indexOf('viewRig.apply('))
     expect(loop.indexOf('viewRig.pivot(', update)).toBeGreaterThan(update)
+    expect(loop.match(/viewRig\.pivot\([^)]*!c\.autoRotate\)/g)?.length).toBe(2)
   })
 })

@@ -51,7 +51,7 @@ import { alignedOrigin, samePosition, useCyberspace } from '../store/useCyberspa
 import { useBuilder } from '../store/useBuilder'
 import { useTv } from '../store/useTv'
 import { aimCentres, GRID_RADIUS, type AxisName, type Position, type ViewAxes } from '../lib/space'
-import { canFly, flyDir, FlyGesture, landingOf, PINCH_SLOP_PX, setFlyLander, setFlyLanding, useViewFly } from '../lib/viewFly'
+import { canFly, flyDir, FlyGesture, landingOf, PINCH_SLOP_PX, setFlyLander, setFlyLanding, takeSteer, useViewFly } from '../lib/viewFly'
 import { cursorGlide, FlightPivot, OFFSET_EPS, PanGesture, setViewCentre, ViewOffset, type Vec3Out } from '../lib/viewCamera'
 
 /** The scene's fly gesture (two and three fingers at rest; off for now), fed by useFlyTouches. */
@@ -117,6 +117,30 @@ export function takeFlyReanchor(focus: unknown): boolean {
 
 /** The mouse on the scene, for the rig's follow (StartLock): a button down, and whether a plain left (orbit) or middle (dolly) drag has moved the camera. */
 export const sceneMouse = { down: false, dragged: false }
+
+/**
+ * A pen pressed on the scene, by its pointer id: OrbitControls drives it as
+ * a mouse. Kept apart from sceneMouse, whose press the follow's unlock
+ * counts (StartLock), so a pen's orbit unlocks as it always has.
+ */
+let scenePen: number | null = null
+
+/** Anything pressed on the scene now: a finger, the mouse or a pen. */
+export function sceneHeld(): boolean {
+  return panGesture.fingers > 0 || sceneMouse.down || scenePen !== null
+}
+
+/**
+ * Drag-to-steer's drag for this frame (lib/viewFly.ts steerBy), or null.
+ * Always drained; null while anything is pressed on the scene, which is
+ * already turning the camera (arkinox, 2026-11-12: "ignore dragging on the
+ * button if other dragging is happening"), so a resting thumb's wobble on
+ * the button is never spent.
+ */
+export function steerToSpend(): { dx: number; dy: number } | null {
+  const steer = takeSteer()
+  return (steer.dx !== 0 || steer.dy !== 0) && !sceneHeld() ? steer : null
+}
 
 /** The camera, as the frame sees it: where it is, where it looks, its field of view and the canvas height. */
 export interface RigCamera {
@@ -257,10 +281,12 @@ export class ViewRigOffset {
    * the camera, the target and the follow point together so the turn is one
    * about the camera instead (lib/viewCamera.ts FlightPivot), and record the
    * slide as flown so the cursor lands where the view now centres. Marks
-   * afresh. Never moves the camera but to answer a turn.
+   * afresh. Never moves the camera but to answer a turn. `answer` false (the
+   * tutorial's auto-rotate is on, whose turn is the camera's, not a hand's)
+   * only marks.
    */
-  pivot(camera: Vector3, target: Vector3, follow: Vector3): void {
-    if (this.turnValid && viewOffset.flown && this.pivotAt.weight > 0) {
+  pivot(camera: Vector3, target: Vector3, follow: Vector3, answer = true): void {
+    if (answer && this.turnValid && viewOffset.flown && this.pivotAt.weight > 0) {
       turned.x = camera.x - target.x; turned.y = camera.y - target.y; turned.z = camera.z - target.z
       this.pivotAt.shift(this.turnFrom, turned, slid)
       if (slid.x !== 0 || slid.y !== 0 || slid.z !== 0) {
@@ -393,18 +419,19 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
   // down): the surface's own listener, which hears it next, takes it back.
   const landed = (ev: Event): void => {
     const e = ev as PointerEvent
-    if (!touch(e)) return
+    if (e.pointerType === 'mouse') return
     // The first finger of a touch: any still listed lifted unheard.
     if (e.isPrimary) elsewhere.clear()
     elsewhere.add(e.pointerId)
   }
   // On the way out of the page, after the controls' own handlers: a finger
-  // from elsewhere goes no further while one is on the scene.
+  // (or pen) from elsewhere goes no further while anything is pressed on
+  // the scene, a finger, the mouse or a pen (review of #685, 1).
   const gate = (ev: Event): void => {
     const e = ev as PointerEvent
-    if (!touch(e) || !elsewhere.has(e.pointerId)) return
+    if (e.pointerType === 'mouse' || !elsewhere.has(e.pointerId)) return
     if (e.type !== 'pointermove') elsewhere.delete(e.pointerId)
-    if (panGesture.fingers > 0) e.stopImmediatePropagation()
+    if (sceneHeld()) e.stopImmediatePropagation()
   }
   const down = (ev: Event): void => {
     const e = ev as PointerEvent
@@ -418,6 +445,7 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
       } else if (e.button === 0 || e.button === 1) orbiting = { id: e.pointerId, x: e.clientX, y: e.clientY }
       return
     }
+    if (e.pointerType === 'pen') { elsewhere.delete(e.pointerId); scenePen = e.pointerId; return }
     if (!touch(e)) return
     elsewhere.delete(e.pointerId)
     // The first finger of a touch: no other is down, so any finger still
@@ -438,6 +466,8 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
       mouse.y = e.clientY
       return
     }
+    // A pen moving with its tip up let go where the page did not hear it.
+    if (scenePen === e.pointerId && (e.buttons & 1) === 0) scenePen = null
     if (!touch(e)) return
     flyGesture.move(e.pointerId, e.clientX, e.clientY)
     panGesture.move(e.pointerId, e.clientX, e.clientY)
@@ -446,6 +476,7 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
     const e = ev as PointerEvent
     if (e.pointerType === 'mouse') { sceneMouse.down = false; sceneMouse.dragged = false; orbiting = null }
     if (mouse && e.pointerId === mouse.id) { mouse = null; panGesture.setMouse(false); return }
+    if (scenePen === e.pointerId) { scenePen = null; return }
     if (!touch(e)) return
     flyGesture.up(e.pointerId, clock())
     panGesture.up(e.pointerId)
@@ -461,6 +492,7 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
     panGesture.clear()
     mouse = null
     orbiting = null
+    scenePen = null
     elsewhere.clear()
     sceneMouse.down = false
     sceneMouse.dragged = false

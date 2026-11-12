@@ -1,8 +1,10 @@
 /**
  * padModeCycle.test.ts - the mode button's ring, HOP, VIEW, BUILD and back
- * to HOP, with WALK out of it and going back to HOP (arkinox, 2026-11-11;
- * BUILD joined on 2026-11-02), and every other way in and out of BUILD still
- * working beside it: B, Esc, EXIT, RECALL, a deploy lined up, and spectating.
+ * to HOP (arkinox, 2026-11-11; BUILD joined on 2026-11-02), with WALK out of
+ * it: a toggle that remembers the mode it was entered from and goes back to
+ * it, and RECALL that stays in VIEW and BUILD (arkinox, 2026-11-12). Every
+ * other way in and out of BUILD still works beside it: B, Esc, EXIT, a
+ * deploy lined up, and spectating.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -50,7 +52,7 @@ import { useShards } from '../useShards'
 import { useWalk } from '../useWalk'
 import { useToast } from '../useToast'
 import { useRegion } from '../useRegion'
-import { buildHeld, buildToHop, currentPadMode, cycleMode, padMode } from '../padMode'
+import { buildHeld, buildToHop, currentPadMode, cycleMode, enterWalk, leaveWalk, padMode, recall } from '../padMode'
 import { walkCancel } from '../../hooks/useKeyboard'
 import { escapeTop } from '../../hooks/useEscape'
 import { spectate, stopSpectating } from '../../lib/spectator'
@@ -205,5 +207,120 @@ describe('the other ways in and out still work', () => {
     expect(padMode(false, true, true)).toBe('build')
     expect(padMode(false, false, true)).toBe('view')
     expect(padMode(false, false, false)).toBe('hop')
+  })
+})
+
+describe('WALK, a toggle that remembers the mode (arkinox, 2026-11-12)', () => {
+  it('from HOP, VIEW and BUILD, and back to each, VIEW and BUILD at your avatar', () => {
+    const home = { ...S().position }
+    for (const from of ['hop', 'view', 'build'] as const) {
+      if (from === 'view') S().viewHere()
+      if (from === 'build') B().enter('build')
+      expect(currentPadMode()).toBe(from)
+      enterWalk()
+      expect(currentPadMode()).toBe('walk')
+      expect(S().atHead()).toBe(true)
+      expect(useWalk.getState().from).toBe(from)
+      leaveWalk()
+      expect(currentPadMode()).toBe(from)
+      expect(S().cursor).toEqual(home)
+      if (from === 'view') S().clearFocus()
+      if (from === 'build') buildToHop()
+    }
+  })
+
+  it('X at rest in WALK goes back to the mode too, and the mode button in WALK does', () => {
+    S().viewHere()
+    enterWalk()
+    walkCancel()
+    expect(currentPadMode()).toBe('view')
+    cycleMode()
+    expect(currentPadMode()).toBe('build')
+    enterWalk()
+    cycleMode()
+    expect(currentPadMode()).toBe('build')
+  })
+
+  it('keeps the zoom in and out of WALK', () => {
+    useCyberspace.setState({ scaleExp: 4 })
+    S().viewHere()
+    enterWalk()
+    expect(S().scaleExp).toBe(4)
+    leaveWalk()
+    expect(S().scaleExp).toBe(4)
+  })
+
+  it('does not start from BUILD while a deploy is lined up: the deploy and BUILD stay', () => {
+    B().enter('build')
+    const pending = { type: 'message' as const, text: 'hi' }
+    useShards.setState({ pending })
+    enterWalk()
+    expect(S().walking).toBe(false)
+    expect(B().active).toBe(true)
+    expect(useShards.getState().pending).toEqual(pending)
+  })
+
+  it('entered any other way (B into BUILD, then out) goes back to HOP', () => {
+    S().viewHere()
+    enterWalk()
+    B().toggle()
+    expect(S().walking).toBe(false)
+    B().toggle()
+    useWalk.getState().enter()
+    expect(useWalk.getState().from).toBe('hop')
+    leaveWalk()
+    expect(currentPadMode()).toBe('hop')
+  })
+})
+
+describe('RECALL stays in the mode (arkinox, 2026-11-12)', () => {
+  it('in VIEW: the cursor and the view come home, VIEW stays, at the zoom you are at', () => {
+    const home = { ...S().position }
+    S().viewHere()
+    for (let i = 0; i < 3; i++) S().moveCursor({ axis: 'x', dir: 1 })
+    useCyberspace.setState({ scaleExp: 3 })
+    recall()
+    expect(currentPadMode()).toBe('view')
+    expect(S().cursor).toEqual(home)
+    expect(S().focus?.position).toEqual(home)
+    expect(S().anchor).toEqual(home)
+    expect(S().scaleExp).toBe(3)
+  })
+
+  it('in BUILD: the build cursor comes home, BUILD stays', () => {
+    const home = { ...S().position }
+    B().enter('build')
+    S().moveCursor({ axis: 'x', dir: 1 })
+    recall()
+    expect(currentPadMode()).toBe('build')
+    expect(S().cursor).toEqual(home)
+  })
+
+  it('in HOP: the cursor comes home, as before', () => {
+    const home = { ...S().position }
+    S().moveCursor({ axis: 'x', dir: 1 })
+    recall()
+    expect(currentPadMode()).toBe('hop')
+    expect(S().cursor).toEqual(home)
+  })
+
+  it('in region mode: RESET a grown region, then back to the entry cell as X, then home with region mode ended, VIEW staying', () => {
+    const home = { ...S().position }
+    S().viewHere()
+    S().moveCursor({ axis: 'x', dir: 1 })
+    useRegion.getState().enter()
+    const entry = { ...useRegion.getState().entry! }
+    for (let i = 0; i < 40; i++) S().moveCursor({ axis: 'y', dir: 1 })
+    expect(useRegion.getState().prefix).not.toBe(useRegion.getState().entryPrefix)
+    recall()
+    expect(useRegion.getState().prefix).toBe(useRegion.getState().entryPrefix)
+    expect(useRegion.getState().active).toBe(true)
+    recall()
+    expect(useRegion.getState().active).toBe(true)
+    expect(S().cursor).toEqual(entry)
+    recall()
+    expect(useRegion.getState().active).toBe(false)
+    expect(currentPadMode()).toBe('view')
+    expect(S().cursor).toEqual(home)
   })
 })

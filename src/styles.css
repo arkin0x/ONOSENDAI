@@ -4897,8 +4897,10 @@ kbd {
 .touchops__commit { grid-column: 2; grid-row: 1; }
 
 /* COMMIT is HOP's: the mode's blue, not VIEW's yellow (arkinox, 2026-10-13:
-   "Commit should be the Hop color"). */
-.touchops__commit.is-armed {
+   "Commit should be the Hop color"). HOP lit, the mode the pad is in, wears
+   COMMIT's look (arkinox, 2026-11-12: "like it looks when it says COMMIT"). */
+.touchops__commit.is-armed,
+.touchops__commit.is-hop.is-on {
   color: #05070d;
   background: var(--accent, #00e5ff);
   border-color: var(--accent, #00e5ff);
@@ -4936,27 +4938,46 @@ kbd {
 /* VIEW in the commit slot while there is nothing to commit (arkinox,
    2026-10-10): yellow words on the resting button, and the armed yellow fill
    while the free view is on. */
-/* HOP, the resting mode: blue words on the dark button, and nothing to do
-   but turn VIEW on. */
-.touchops__commit.is-hop { color: var(--accent, #00e5ff); border-color: rgba(0, 229, 255, 0.45); }
+/* HOP dim, in WALK entered from HOP: blue words on the dark button, the
+   look HOP had at rest before 2026-11-12. Lit, it is COMMIT's (above). */
+.touchops__commit.is-hop:not(.is-on) { color: var(--accent, #00e5ff); border-color: rgba(0, 229, 255, 0.45); }
 /* Under HOP: pressing it switches modes (HOP, VIEW, BUILD). */
 .touchops__sub { display: block; margin-top: 2px; font-size: 7px; letter-spacing: 0.08em; opacity: 0.7; }
-/* WALK: first person, every press a step. Red, lit, while it is on. */
-.touchops__commit.is-walk.is-on {
-  color: #05070d;
-  background: var(--danger, #ff3b6b);
-  border-color: var(--danger, #ff3b6b);
-  font-weight: 700;
-}
-/* WALK in RECALL's slot at rest in HOP (arkinox, 2026-11-11): WALK's red
-   outline on a dark red ground, in place of HOP's blue tint. */
-.touchops.touchops--mode-hop .touchops__cancel.touchops__walk {
+/* WALK in RECALL's slot (arkinox, 2026-11-12). Dim, with the cursor on
+   your avatar outside WALK: WALK's red words, on the border and fill RECALL
+   wears in WALK (the dark ground under WALK's red tint, below, as one
+   color so it can ease). Lit in WALK: WALK's red fill. The mode button
+   beside it eases the other way at the same time (.touchops__commit
+   is-hop, is-view, is-build). Above every mode's tint on RECALL's slot. */
+.touchops .touchops__cancel.touchops__walk.is-dim {
   color: var(--danger, #ff3b6b);
-  border-color: var(--danger, #ff3b6b);
-  background: rgba(60, 8, 22, 0.85);
+  border-color: rgba(255, 59, 107, 0.4);
+  background-color: rgba(64, 25, 42, 0.77);
+  background-image: none;
   font-weight: 700;
 }
-.touchops__walk svg { vertical-align: -2px; }
+.touchops .touchops__cancel.touchops__walk.is-on {
+  color: #05070d;
+  background-color: var(--danger, #ff3b6b);
+  background-image: none;
+  border-color: var(--danger, #ff3b6b);
+  font-weight: 700;
+}
+/* WALK and the mode button cross over in 400 ms, dim to lit and lit to dim
+   (arkinox, 2026-11-12). Each is keyed by what it names (TouchControls), so
+   RECALL, STOP, COMMIT and a turn of the ring change at once, as before. */
+.touchops__walk,
+.touchops__commit.is-hop,
+.touchops__commit.is-view,
+.touchops__commit.is-build {
+  transition: color 400ms ease, background-color 400ms ease, border-color 400ms ease, box-shadow 400ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .touchops__walk,
+  .touchops__commit.is-hop,
+  .touchops__commit.is-view,
+  .touchops__commit.is-build { transition: none; }
+}
 .touchops__commit.is-view { color: var(--warn, #ffb020); border-color: rgba(255, 176, 32, 0.45); }
 .touchops__commit.is-view.is-on {
   color: #05070d;
@@ -10114,6 +10135,8 @@ a.feed__act { text-decoration: none; }
   background-image: linear-gradient(rgba(242, 247, 255, 0.12), rgba(242, 247, 255, 0.12));
   border-color: rgba(242, 247, 255, 0.42);
 }
+/* BUILD dim, in WALK entered from BUILD: white words, white edge. */
+.touchops__commit.is-build:not(.is-on) { color: var(--build); border-color: rgba(242, 247, 255, 0.42); }
 .touchops__commit.is-build.is-on {
   color: #05070d;
   background: var(--build);

@@ -7,10 +7,12 @@
  * - Each key takes the step its keyboard key takes (lib/walkKeys.ts), so the
  *   pad and the keys cannot disagree: pressed from the same place, they land
  *   on the same place.
- * - The commit slot reads WALK in WALK, BUILD (lit white) in BUILD, and
- *   pressing them goes on round the ring, WALK back to HOP; RECALL is there
- *   in BUILD too. At rest in HOP RECALL's slot is WALK (2026-11-11), and in
- *   WALK it is STOP while steps wait on their proofs.
+ * - The commit slot reads HOP (lit as COMMIT), VIEW or BUILD (lit white),
+ *   and pressing it goes on round the ring. WALK is a toggle in RECALL's
+ *   slot (arkinox, 2026-11-12): dim with the cursor on your avatar in HOP,
+ *   VIEW or BUILD, lit in WALK beside the dim mode it came from, either of
+ *   them going back to that mode; STOP while steps wait on their proofs;
+ *   RECALL with the cursor off your avatar, staying in the mode.
  * - HOP and VIEW keep the pad they had.
  * - With the chain status strip up the commit block is a row taller, and the
  *   pad is lifted by that row wherever the block is drawn, BUILD included
@@ -297,7 +299,7 @@ describe('HOP and VIEW keep their pad', () => {
 })
 
 describe('the commit slot on screen', () => {
-  it('VIEW goes to BUILD, BUILD is lit white and goes to HOP, and BUILD has RECALL', () => {
+  it('VIEW goes to BUILD, BUILD is lit white and goes to HOP, and BUILD has RECALL off your avatar', () => {
     S().viewHere()
     press(find('is-view'))
     expect(currentPadMode()).toBe('build')
@@ -307,47 +309,105 @@ describe('the commit slot on screen', () => {
     const build = find('is-build')
     expect(build.props.className).toContain('is-on')
     expect(build.props.children).toBe('BUILD')
+    S().moveCursor({ axis: 'x', dir: 1 })
     expect(find('touchops__cancel').props.children).toBe('RECALL')
     press(build)
     expect(currentPadMode()).toBe('hop')
   })
 
-  it('RECALL in BUILD goes back to HOP; both wait while a deploy is lined up', () => {
+  it('HOP is lit at rest, COMMIT takes its place with a move lined up, and HOP comes back lit', () => {
+    const hop = find('is-hop')
+    expect(hop.props.className).toContain('is-on')
+    expect((hop.props as { 'aria-pressed'?: boolean })['aria-pressed']).toBe(true)
+    S().moveCursor({ axis: 'x', dir: 1 })
+    expect(drawn().some((b) => b.props.className?.split(' ').includes('is-hop'))).toBe(false)
+    // The next action's own name: COMMIT, or a step of the way.
+    expect(find('touchops__commit').props.disabled).toBe(false)
+    S().cancel()
+    expect(find('is-hop').props.className).toContain('is-on')
+  })
+
+  it('RECALL in BUILD brings the build cursor home and stays in BUILD; BUILD and WALK wait while a deploy is lined up, RECALL does not', () => {
+    const home = { ...S().position }
     useBuilder.getState().enter('build')
+    S().moveCursor({ axis: 'x', dir: 1 })
     useShards.setState({ pending: { type: 'message', text: 'hi' } })
     expect(find('is-build').props.disabled).toBe(true)
-    expect(find('touchops__cancel').props.disabled).toBe(true)
     press(find('is-build'))
     expect(useBuilder.getState().active).toBe(true)
+    // RECALL never leaves BUILD now, so a lined-up deploy does not hold it.
+    expect(find('touchops__cancel').props.disabled).toBeFalsy()
+    press(find('touchops__cancel'))
+    expect(useBuilder.getState().active).toBe(true)
+    expect(S().cursor).toEqual(home)
+    expect(useShards.getState().pending).not.toBeNull()
+    // On your avatar the slot is WALK, held by the deploy: no walk, the deploy kept.
+    const walk = find('touchops__walk')
+    expect(walk.props.disabled).toBe(true)
+    expect(walk.props.title).toBe('Place or cancel what is lined up first')
+    press(walk)
+    expect(S().walking).toBe(false)
+    expect(currentPadMode()).toBe('build')
+    expect(useShards.getState().pending).not.toBeNull()
     useShards.getState().cancelDeploy()
     useBuilder.getState().enter('build')
-
-    expect(find('touchops__cancel').props.disabled).toBe(false)
-    press(find('touchops__cancel'))
-    expect(useBuilder.getState().active).toBe(false)
-    expect(currentPadMode()).toBe('hop')
+    expect(find('touchops__walk').props.disabled).toBe(false)
   })
 })
 
-/** WALK out of the ring, in RECALL's slot at rest in HOP (arkinox, 2026-11-11). */
-describe('WALK in RECALL\'s slot', () => {
-  it('is there at rest in HOP, red, and enters WALK', () => {
+/** WALK, a toggle in RECALL's slot (arkinox, 2026-11-12; store/padMode.ts). */
+describe('the WALK toggle', () => {
+  const cls = (b: Btn): string[] => (b.props.className ?? '').split(' ')
+  const has = (c: string): boolean => drawn().some((b) => cls(b).includes(c))
+  const pressed = (b: Btn): boolean | undefined => (b.props as { 'aria-pressed'?: boolean })['aria-pressed']
+
+  it('is there in HOP at rest, dim and with no icon, beside HOP lit, and enters WALK', () => {
     const walk = find('touchops__walk')
-    expect(walk.props.className).toContain('touchops__cancel')
+    expect(cls(walk)).toEqual(expect.arrayContaining(['touchops__cancel', 'is-dim']))
+    expect(cls(walk)).not.toContain('is-on')
+    expect(walk.props.children).toBe('WALK')
+    expect(pressed(walk)).toBe(false)
     expect(walk.props.title).toBe('Walk: first person, every press a step')
     expect((walk.props as { 'aria-label'?: string })['aria-label']).toBe('Walk: first person, every press a step')
+    expect(cls(find('is-hop'))).toContain('is-on')
     press(walk)
     expect(currentPadMode()).toBe('walk')
   })
 
-  it('is RECALL, as before, with the cursor off your avatar, a move planned, or outside HOP', () => {
+  it('in WALK is lit beside HOP dim, keyed the same so both ease; either goes back to HOP lit', () => {
+    const before = { walk: find('touchops__walk').key, hop: find('is-hop').key }
+    press(find('touchops__walk'))
+    const walk = find('touchops__walk')
+    expect(cls(walk)).toContain('is-on')
+    expect(cls(walk)).not.toContain('is-dim')
+    expect(pressed(walk)).toBe(true)
+    const hop = find('is-hop')
+    expect(cls(hop)).not.toContain('is-on')
+    expect(pressed(hop)).toBe(false)
+    expect(hop.props.title).toBe('Leave WALK and go back to HOP')
+    // The same elements, dim to lit and lit to dim: the 400 ms ease runs on them.
+    expect(walk.key).toBe(before.walk)
+    expect(hop.key).toBe(before.hop)
+    expect(has('is-walk')).toBe(false)
+
+    press(hop)
+    expect(currentPadMode()).toBe('hop')
+    expect(cls(find('is-hop'))).toContain('is-on')
+    expect(cls(find('touchops__walk'))).toContain('is-dim')
+
+    press(find('touchops__walk'))
+    press(find('touchops__walk'))
+    expect(currentPadMode()).toBe('hop')
+  })
+
+  it('is RECALL in HOP with the cursor off your avatar, a move planned, or a job running', () => {
     S().moveCursor({ axis: 'x', dir: 1 })
-    expect(drawn().some((b) => b.props.className?.includes('touchops__walk'))).toBe(false)
+    expect(has('touchops__walk')).toBe(false)
     expect(find('touchops__cancel').props.children).toBe('RECALL')
     S().cancel()
     expect(find('touchops__walk')).toBeTruthy()
     useCyberspace.setState({ plan: { status: 'paused' } as never })
-    expect(drawn().some((b) => b.props.className?.includes('touchops__walk'))).toBe(false)
+    expect(has('touchops__walk')).toBe(false)
     useCyberspace.setState({ plan: null })
     // A proof computing or a cloud job: STOP or RECALL, never WALK.
     useCyberspace.setState({ proof: { ...S().proof, status: 'computing' } })
@@ -355,19 +415,62 @@ describe('WALK in RECALL\'s slot', () => {
     useCyberspace.setState({ proof: { ...S().proof, status: 'idle' }, cloud: { ...S().cloud, status: 'error' } })
     expect(find('touchops__cancel').props.children).toBe('RECALL')
     useCyberspace.setState({ cloud: { ...S().cloud, status: 'idle' } })
-    S().viewHere()
-    expect(drawn().some((b) => b.props.className?.includes('touchops__walk'))).toBe(false)
+    expect(find('touchops__walk')).toBeTruthy()
   })
 
-  it('in WALK, RECALL and the mode button both go back to HOP', () => {
-    useWalk.getState().enter()
-    expect(find('is-walk').props.children).toBe('WALK')
-    expect(find('touchops__cancel').props.children).toBe('RECALL')
-    press(find('touchops__cancel'))
-    expect(currentPadMode()).toBe('hop')
-    useWalk.getState().enter()
-    press(find('is-walk'))
-    expect(currentPadMode()).toBe('hop')
+  it('in VIEW is WALK on your avatar and RECALL off it; RECALL comes home and stays in VIEW', () => {
+    const home = { ...S().position }
+    S().viewHere()
+    expect(cls(find('is-view'))).toContain('is-on')
+    expect(cls(find('touchops__walk'))).toContain('is-dim')
+    S().moveCursor({ axis: 'x', dir: 1 })
+    S().moveCursor({ axis: 'y', dir: 1 })
+    expect(has('touchops__walk')).toBe(false)
+    const recall = find('touchops__cancel')
+    expect(recall.props.children).toBe('RECALL')
+    expect(recall.props.title).toBe('Recall the cursor and the view to your avatar, still in VIEW (X)')
+    press(recall)
+    expect(currentPadMode()).toBe('view')
+    expect(S().viewing()).toBe(true)
+    expect(S().cursor).toEqual(home)
+    expect(S().focus?.position).toEqual(home)
+    expect(cls(find('touchops__walk'))).toContain('is-dim')
+  })
+
+  it('entered from VIEW keeps VIEW, dim, and goes back to VIEW at your avatar', () => {
+    const home = { ...S().position }
+    S().viewHere()
+    press(find('touchops__walk'))
+    expect(currentPadMode()).toBe('walk')
+    expect(S().atHead()).toBe(true)
+    const view = find('is-view')
+    expect(cls(view)).not.toContain('is-on')
+    expect(view.props.title).toBe('Leave WALK and go back to VIEW')
+    expect(has('is-hop')).toBe(false)
+    press(view)
+    expect(currentPadMode()).toBe('view')
+    expect(S().cursor).toEqual(home)
+    // And by the lit WALK.
+    press(find('touchops__walk'))
+    press(find('touchops__walk'))
+    expect(currentPadMode()).toBe('view')
+  })
+
+  it('entered from BUILD keeps BUILD, dim, and goes back to BUILD at your avatar', () => {
+    const home = { ...S().position }
+    useBuilder.getState().enter('build')
+    expect(cls(find('touchops__walk'))).toContain('is-dim')
+    press(find('touchops__walk'))
+    expect(currentPadMode()).toBe('walk')
+    expect(useBuilder.getState().active).toBe(false)
+    const build = find('is-build')
+    expect(cls(build)).not.toContain('is-on')
+    expect(build.props.children).toBe('BUILD')
+    expect(build.props.title).toBe('Leave WALK and go back to BUILD')
+    press(find('touchops__walk'))
+    expect(currentPadMode()).toBe('build')
+    expect(S().cursor).toEqual(home)
+    expect(cls(find('is-build'))).toContain('is-on')
   })
 
   // Must not regress (owner, 2026-11-11): steps ahead of their proofs make the slot STOP, which drops them back to the last proved step, still walking.
@@ -377,6 +480,7 @@ describe('WALK in RECALL\'s slot', () => {
     useWalk.getState().press('up')
     useWalk.getState().press('right')
     expect(find('touchops__cancel').props.children).toBe('STOP')
+    expect(has('touchops__walk')).toBe(false)
     press(find('touchops__cancel'))
     expect(S().walking).toBe(true)
     expect(useWalk.getState().queue).toEqual([])
@@ -384,7 +488,22 @@ describe('WALK in RECALL\'s slot', () => {
     expect(S().proof.status).not.toBe('computing')
     expect(S().position).toEqual(start)
     expect(S().cursor).toEqual(start)
-    expect(find('touchops__cancel').props.children).toBe('RECALL')
+    // All proved: the lit WALK is back in STOP's place.
+    expect(cls(find('touchops__walk'))).toContain('is-on')
+  })
+
+  it('the stylesheet eases WALK and the mode button over 400 ms (not under reduced motion), and dims WALK in RECALL-in-WALK colors', () => {
+    const css = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')
+    const rule = /\.touchops__walk,\s*\.touchops__commit\.is-hop,\s*\.touchops__commit\.is-view,\s*\.touchops__commit\.is-build\s*\{\s*transition:([^}]*)\}/.exec(css)
+    expect(rule).not.toBeNull()
+    for (const prop of ['color', 'background-color', 'border-color']) expect(rule![1]).toMatch(new RegExp(`(^|,)\\s*${prop} 400ms`))
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.touchops__walk,[^}]*\{ transition: none; \}/)
+    const dim = /\.touchops \.touchops__cancel\.touchops__walk\.is-dim \{([^}]*)\}/.exec(css)![1]
+    expect(dim).toContain('color: var(--danger, #ff3b6b)')
+    expect(dim).toContain('border-color: rgba(255, 59, 107, 0.4)')
+    expect(dim).toContain('background-image: none')
+    // HOP lit wears COMMIT's look.
+    expect(css).toMatch(/\.touchops__commit\.is-armed,\s*\.touchops__commit\.is-hop\.is-on \{/)
   })
 })
 
@@ -401,8 +520,7 @@ describe('the pad and the commit block with the chain status strip up', () => {
       expect(lifted()).toBe(true)
       press(find('touchops__commit'))
     }
-    // The last press went on to VIEW; RECALL ends it, and HOP at rest has WALK.
-    press(find('touchops__cancel'))
+    // The last press went on to VIEW, on your avatar: WALK is there.
     press(find('touchops__walk'))
     expect(currentPadMode()).toBe('walk')
     expect(lifted()).toBe(true)

@@ -48,6 +48,7 @@ export function addSpeakeasy(s: Speakeasy): string | null {
 
 /** What a speakeasy holding your head, and not where the relay placed you, says instead of ADD RELAY. */
 export function stoppedWords(stop: RelayStop): string {
+  // The day, in UTC, of the last action the relay accepts: where the chain stops.
   const at = stop.lastValid ? new Date(stop.lastValid.createdAt * 1000).toISOString().slice(0, 10) : null
   const where = at ? `Your chain stops at ${at}, outside this region.` : 'Your chain stops at its spawn, outside this region.'
   return stop.kind === 'tall'
@@ -73,9 +74,9 @@ export function openRespawn(): void {
 export function SpeakeasyLine({ lookup, placedLookup = defaultPlacedLookup }: { lookup?: SpeakeasyLookup; placedLookup?: SpeakeasyLookup }): JSX.Element | null {
   // Your published head, and only while LIVE: a string, so the selector is stable.
   const head = useCyberspace((s) => (s.live ? publishedHeadHex(s.actions(), s.published) : null))
-  const placement = useRelayPlacement()
-  const placed = placement?.coordHex ?? null
   const open = usePanelLayout((s) => s.collapsed.position !== true)
+  const placement = useRelayPlacement(open)
+  const placed = placement?.coordHex ?? null
   const atHead = useSpeakeasies(head, open, lookup)
   // Asked about separately only when the relay places you away from your head.
   const atPlaced = useSpeakeasies(placed !== head ? placed : null, open, placedLookup)
@@ -101,7 +102,7 @@ export function SpeakeasyLine({ lookup, placedLookup = defaultPlacedLookup }: { 
               {speakeasyLabel(s)}
             </a>
             {stop
-              ? stop.kind === 'broken' && <button className="speakeasy__add speakeasy__respawn" onClick={openRespawn} title="Start a new chain at your spawn point">RESPAWN</button>
+              ? stop.kind === 'broken' && <button className="speakeasy__add speakeasy__respawn" onClick={openRespawn} title="Open the respawn: it warns and asks before anything is signed">RESPAWN</button>
               : joined(s, relays)
                 ? <span className="speakeasy__joined" title="In your relays">JOINED</span>
                 : <button className="speakeasy__add" onClick={() => addSpeakeasy(s)} title={`Add ${s.url} to your relays`}>ADD RELAY</button>}

@@ -21,25 +21,36 @@
  * | hop taller than max_hop_verify_height (h_max, 5.9) | left unchecked, and strict mode stops there: default h24 | the same, at RELAY_MAX_HOP_HEIGHT |
  * | sidestep with no mn | stands only when on the 6.16 list; a version 1 sidestep is invalid since 2026-09-07 (spec 6.15) | the same list |
  * | ride with no mn | stands only when on the DECK-0001 5.8 list | the same list |
- * | ride the relay's Bitcoin line has not reached | left unchecked, so strict mode stops there | not seen: a ride is taken as checked |
+ * | ride the relay's Bitcoin line has not reached | left unchecked, so strict mode stops there; the line is built again in the background after every relay restart, so for a while after one this is every ride | not seen: a ride is taken as checked |
  * | the work itself: residues, openings, roots, price, entry proof | checked at Level 1 | not checked: too costly to redo for a whole chain in a phone's browser |
  *
  * So the two can differ only where an event has the right form but wrong work
  * (which no honest client signs; ONOSENDAI checks its own moves at Level 1
- * before it sends them), or on a ride published moments ago. Pure.
+ * before it sends them), or on a ride the relay's Bitcoin line has not
+ * reached: one published moments ago, or any ride while the line is still
+ * loading after a relay restart. Pure.
  */
 
-import { isGrandfatheredV2Sidestep } from 'cyberspace-core'
+import { findLcaHeight, isGrandfatheredV2Sidestep } from 'cyberspace-core'
 import { firstBreak, type ActionEvent } from './events'
-import { hopMaxHeight } from './cloudVerify'
 import { GRANDFATHERED_V1_HYPERJUMPS } from './hyperspace/grandfathered'
 
 /**
  * The tallest hop the relay verifies: regiongate DefaultMaxHopHeight, and
  * the max_hop_verify_height the speakeasies run with. A taller hop is left
- * unchecked, and in strict mode its mover stands before it.
+ * unchecked, and in strict mode its mover stands before it. The relay's own
+ * config sets it, and its discovery answer does not say it, so this follows
+ * the relay by hand: change both together.
  */
 export const RELAY_MAX_HOP_HEIGHT = 24
+
+/**
+ * The largest terrain K (5.9): a popcount of four 4-bit nibbles. h_max is the
+ * largest of the three axis heights and K, so while the ceiling is at least
+ * this, K never takes a hop over it, and only the axis heights, which cost no
+ * hashing, need measuring.
+ */
+export const MAX_TERRAIN_K = 16
 
 /** Where the relay stops reading a chain, and why. */
 export interface RelayStop {
@@ -65,24 +76,11 @@ export interface RelayPlacement {
   stop: RelayStop | null
 }
 
-/**
- * h_max of the hops already measured, by event id: the id fixes the hop's c,
- * C and previous event, so its height never changes, and a long chain is
- * measured once rather than at every move. Emptied when it grows past
- * HEIGHTS_KEPT.
- */
-const heights = new Map<string, number>()
-const HEIGHTS_KEPT = 50_000
-
 type Chain = ReadonlyArray<Pick<ActionEvent, 'id' | 'coordHex'> & Partial<ActionEvent>>
 
 /** Whether a chain has a version 1 hop before `end`, so the 5.13 list is needed to place it. */
-export function needsV1HopList(chain: Chain, end: number = chain.length): boolean {
-  for (let i = 0; i < end; i++) {
-    const a = chain[i]
-    if (a.type === 'hop' && a.mn === undefined && a.mp === undefined) return true
-  }
-  return false
+export function needsV1HopList(chain: Chain): boolean {
+  return chain.some((a) => a.type === 'hop' && a.mn === undefined && a.mp === undefined)
 }
 
 /**
@@ -96,13 +94,9 @@ function formStop(a: Chain[number], from: ActionEvent['position'] | undefined, l
     if (listedV1Hops.has(a.id)) return null
     if (a.mn === undefined && a.mp === undefined) return { kind: 'broken', reason: 'a version 1 hop not on the 5.13 list' }
     if (a.mn === undefined || a.mp === undefined) return { kind: 'broken', reason: 'a hop with only one of mn and mp (5.11)' }
-    if (from && a.position && a.plane !== undefined) {
-      let h = heights.get(a.id)
-      if (h === undefined) {
-        if (heights.size >= HEIGHTS_KEPT) heights.clear()
-        h = hopMaxHeight({ from, to: a.position, plane: a.plane })
-        heights.set(a.id, h)
-      }
+    if (from && a.position) {
+      // Above MAX_TERRAIN_K this is h_max itself (MAX_TERRAIN_K says why).
+      const h = Math.max(findLcaHeight(from.x, a.position.x), findLcaHeight(from.y, a.position.y), findLcaHeight(from.z, a.position.z))
       if (h > RELAY_MAX_HOP_HEIGHT) return { kind: 'tall', reason: `a hop of h${h}, above the h${RELAY_MAX_HOP_HEIGHT} the relay verifies` }
     }
     return null

@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildChain, firstBreak, type ActionEvent, type NostrEvent } from '../events'
 import { loadV1HopList } from '../v1HopList'
-import { needsV1HopList, relayPlacement, RELAY_MAX_HOP_HEIGHT } from '../relayPlacement'
+import { MAX_TERRAIN_K, needsV1HopList, relayPlacement, RELAY_MAX_HOP_HEIGHT } from '../relayPlacement'
 import { hopMaxHeight } from '../cloudVerify'
 import owner from './vectors/owner-chain-e8ed3798-through-2026-09-04.json'
 
@@ -49,53 +49,57 @@ function move(id: string, type: string, extra: Partial<ActionEvent> = {}): Actio
 
 describe('relayPlacement', () => {
   const spawn = move('a0', 'spawn')
+
+  it('the ceiling is at least the largest terrain K, so a hop is measured by its axes alone', () => {
+    expect(RELAY_MAX_HOP_HEIGHT).toBeGreaterThanOrEqual(MAX_TERRAIN_K)
+  })
   const v2 = { mn: '0'.repeat(16), mp: 'ab' }
 
   it('accepts a whole chain of version 2 moves: you stand at your head', () => {
-    const chain = [spawn, move('a1', 'hop', v2), move('a2', 'sidestep', { mn: '1'.repeat(16) })]
+    const chain = [spawn, move('t2a1', 'hop', v2), move('t2a2', 'sidestep', { mn: '1'.repeat(16) })]
     expect(relayPlacement(chain, new Set())).toEqual({ coordHex: chain[2].coordHex, stop: null })
   })
 
   it('stops at an unlisted version 1 hop, and accepts a listed one', () => {
-    const chain = [spawn, move('a1', 'hop'), move('a2', 'hop', v2)]
+    const chain = [spawn, move('t3a1', 'hop'), move('t3a2', 'hop', v2)]
     expect(relayPlacement(chain, new Set())?.coordHex).toBe(spawn.coordHex)
-    expect(relayPlacement(chain, new Set(['a1']))?.stop).toBeNull()
+    expect(relayPlacement(chain, new Set(['t3a1']))?.stop).toBeNull()
   })
 
   it('stops at a hop with only one of mn and mp', () => {
-    const placed = relayPlacement([spawn, move('a1', 'hop', { mn: '0'.repeat(16) })], new Set())
+    const placed = relayPlacement([spawn, move('t4a1', 'hop', { mn: '0'.repeat(16) })], new Set())
     expect(placed?.stop?.kind).toBe('broken')
   })
 
   it('stops at a sidestep or a ride with no mn that is on no list', () => {
-    expect(relayPlacement([spawn, move('a1', 'sidestep')], new Set())?.stop?.index).toBe(1)
-    expect(relayPlacement([spawn, move('a1', 'hyperjump')], new Set())?.stop?.index).toBe(1)
+    expect(relayPlacement([spawn, move('t5a1', 'sidestep')], new Set())?.stop?.index).toBe(1)
+    expect(relayPlacement([spawn, move('t5a1', 'hyperjump')], new Set())?.stop?.index).toBe(1)
   })
 
   it(`stops before a hop taller than h${RELAY_MAX_HOP_HEIGHT}, which the relay leaves unchecked, and says it is not broken`, () => {
     const from = { x: 0n, y: 0n, z: 0n }
     const to = { x: 1n << 30n, y: 0n, z: 0n }
     expect(hopMaxHeight({ from, to, plane: 0 })).toBeGreaterThan(RELAY_MAX_HOP_HEIGHT)
-    const chain = [move('a0', 'spawn', { position: from, plane: 0 }), move('a1', 'hop', { ...v2, position: to, plane: 0 })]
+    const chain = [move('t0a0', 'spawn', { position: from, plane: 0 }), move('t6a1', 'hop', { ...v2, position: to, plane: 0 })]
     const placed = relayPlacement(chain, new Set())
     expect(placed?.stop?.kind).toBe('tall')
     expect(placed?.coordHex).toBe(chain[0].coordHex)
   })
 
   it('a structural break buildChain finds is a stop too, at the last valid position', () => {
-    const chain = [spawn, move('a1', 'hop', v2), move('a2', 'hop', { ...v2, breaks: 'starts elsewhere' })]
+    const chain = [spawn, move('t7a1', 'hop', v2), move('t7a2', 'hop', { ...v2, breaks: 'starts elsewhere' })]
     const placed = relayPlacement(chain, new Set())
     expect(placed?.stop).toMatchObject({ index: 2, kind: 'broken' })
     expect(placed?.coordHex).toBe(chain[1].coordHex)
   })
 
   it('a form stop before a structural break is the one that counts', () => {
-    const chain = [spawn, move('a1', 'sidestep'), move('a2', 'hop', { ...v2, breaks: 'starts elsewhere' })]
+    const chain = [spawn, move('t8a1', 'sidestep'), move('t8a2', 'hop', { ...v2, breaks: 'starts elsewhere' })]
     expect(relayPlacement(chain, new Set())?.stop?.index).toBe(1)
   })
 
   it('needs the 5.13 list only when a version 1 hop is on the chain', () => {
-    expect(needsV1HopList([spawn, move('a1', 'hop', v2)])).toBe(false)
-    expect(needsV1HopList([spawn, move('a1', 'hop')])).toBe(true)
+    expect(needsV1HopList([spawn, move('t9a1', 'hop', v2)])).toBe(false)
+    expect(needsV1HopList([spawn, move('t9a1', 'hop')])).toBe(true)
   })
 })

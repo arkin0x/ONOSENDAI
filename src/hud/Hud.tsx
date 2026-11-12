@@ -232,7 +232,7 @@ export function PositionPanel(): JSX.Element {
         SPEAKEASY shows up when you are inside one: a private relay for that
         region. ADD RELAY adds it to your relays. The relay goes by the last
         point of your chain it accepts, so if your chain stops before your
-        head, it says where, and RESPAWN when only that gets you in.
+        head, it shows where, with RESPAWN when only a respawn gets you in.
       </Explanation>
     </section>
   )

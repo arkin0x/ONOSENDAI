@@ -28,6 +28,15 @@ const cs = vi.hoisted(() => ({
   published: {} as Record<string, string>,
   actions: [] as Array<{ id: string; coordHex: string } & Record<string, unknown>>,
 }))
+// The 5.13 list: the real one, behind a gate a test can hold shut or fail.
+const v1 = vi.hoisted(() => ({ gate: Promise.resolve() as Promise<void>, fail: false }))
+vi.mock('../../lib/v1HopList', () => ({
+  loadV1HopList: async () => {
+    await v1.gate
+    if (v1.fail) throw new Error('chunk failed to load')
+    return (await import('../../../node_modules/cyberspace-core/dist/grandfathered_v1_hops.js')).GRANDFATHERED_V1_HOPS
+  },
+}))
 vi.mock('../../store/useCyberspace', () => {
   const state = (): { live: boolean; published: Record<string, string>; actions: () => unknown[]; coordHex: () => string } =>
     ({ live: cs.live, published: cs.published, actions: () => cs.actions, coordHex: () => cs.actions[cs.actions.length - 1]?.coordHex ?? '' })
@@ -207,6 +216,22 @@ describe('where the relay places you, not your head (a chain the relay stopped)'
 
   beforeEach(() => { useRelays.getState().reset(); cs.live = true })
 
+  // First in this block: once loaded, the list is kept for every later mount.
+  it('while the 5.13 list loads, and when it fails: nothing, never ADD RELAY on a guess', async () => {
+    let open = (): void => undefined
+    v1.gate = new Promise<void>((r) => { open = r })
+    cs.actions = [{ id: 'spawn', type: 'spawn', coordHex: AWAY }, { id: 'oldhop', type: 'hop', coordHex: HEAD }]
+    allSent()
+    const loading = await mount(<SpeakeasyLine lookup={fakeLookup([NAMED])} placedLookup={fakeLookup([])} />)
+    expect(loading.all()).toHaveLength(0)
+    v1.fail = true
+    open()
+    await settle()
+    expect(loading.all()).toHaveLength(0)
+    await loading.unmount()
+    v1.fail = false
+  })
+
   it('a valid chain with its head inside: ADD RELAY, as before', async () => {
     cs.actions = [{ id: 'spawn', type: 'spawn', coordHex: AWAY }, { id: 'hop', type: 'hop', coordHex: HEAD, ...V2 }]
     allSent()
@@ -241,6 +266,50 @@ describe('where the relay places you, not your head (a chain the relay stopped)'
     await m.press('RESPAWN')
     expect(usePanelLayout.getState().collapsed.derezz).not.toBe(true)
     expect(useChainUi.getState().brokenView).toBeNull()
+    await m.unmount()
+    usePanelLayout.setState({ collapsed: {} })
+  })
+
+  it('RESPAWN opens the broken-chain notice when ONOSENDAI sees the break too', async () => {
+    cs.actions = [{ id: 'spawn', type: 'spawn', coordHex: AWAY, createdAt: SEP_4 }, { id: 'bad', type: 'hop', coordHex: HEAD, createdAt: SEP_4, breaks: 'starts elsewhere', ...V2 }]
+    allSent()
+    const m = await mount(<SpeakeasyLine lookup={fakeLookup([NAMED])} placedLookup={fakeLookup([])} />)
+    await m.press('RESPAWN')
+    expect(useChainUi.getState().brokenView).toBe('notice')
+    useChainUi.getState().setBrokenView(null)
+    await m.unmount()
+  })
+
+  it('a stop only in the part not yet on the relays: ADD RELAY, and no unpublished place is ever asked about', async () => {
+    cs.actions = [{ id: 'spawn', type: 'spawn', coordHex: AWAY }, { id: 'hop', type: 'hop', coordHex: HEAD, ...V2 }, { id: 'v1side', type: 'sidestep', coordHex: UNSENT }]
+    cs.published = { spawn: 'ok', hop: 'ok', v1side: 'sending' }
+    const head = fakeLookup([NAMED])
+    const placed = fakeLookup([])
+    const m = await mount(<SpeakeasyLine lookup={head} placedLookup={placed} />)
+    expect(m.buttons('ADD RELAY')).toHaveLength(1)
+    expect([...head.asked, ...placed.asked]).not.toContain(UNSENT)
+    expect(placed.asked.filter(Boolean)).toEqual([])
+    await m.unmount()
+  })
+
+  it('a fork whose second branch never reached the relays: nothing, not a respawn the relay does not ask for', async () => {
+    cs.actions = [
+      { id: 'spawn', type: 'spawn', coordHex: AWAY, breaks: 'a fork', fork: { previousId: 'spawn', branchIds: ['b1', 'b2'] } },
+      { id: 'b1', type: 'hop', coordHex: HEAD, ...V2 },
+    ]
+    cs.published = { spawn: 'ok', b1: 'ok', b2: 'held' }
+    const m = await mount(<SpeakeasyLine lookup={fakeLookup([NAMED])} placedLookup={fakeLookup([])} />)
+    expect(m.all()).toHaveLength(0)
+    await m.unmount()
+  })
+
+  it('a folded Position panel walks nothing and shows nothing', async () => {
+    if (usePanelLayout.getState().collapsed.position !== true) usePanelLayout.getState().toggle('position')
+    cs.actions = [{ id: 'spawn', type: 'spawn', coordHex: AWAY }, { id: 'hop', type: 'hop', coordHex: HEAD, ...V2 }]
+    allSent()
+    const m = await mount(<SpeakeasyLine lookup={fakeLookup([NAMED])} placedLookup={fakeLookup([])} />)
+    expect(m.all()).toHaveLength(0)
+    usePanelLayout.getState().toggle('position')
     await m.unmount()
   })
 

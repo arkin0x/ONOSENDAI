@@ -52,7 +52,7 @@ afterEach(() => {
 
 // One sequence: a registration cannot be taken back, so games-off is checked before games-on.
 describe('the DUNGEON choice', () => {
-  it('is not offered with games off (the default)', () => {
+  it('is not offered with games off (the default), for the DEV game every test plays (src/test/noNetwork.ts)', () => {
     localStorage.removeItem(GAMES_KEY)
     // Loading the module with games off registered nothing, and asking again registers nothing.
     expect(registerDungeonChoice()).toBe(false)

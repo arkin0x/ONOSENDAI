@@ -27,6 +27,7 @@ import { resetChainStops, setV1HopListForTests } from '../../lib/chainStop'
 import { loadV1HopList } from '../../lib/v1HopList'
 import type { ActionEvent, NostrEvent } from '../../lib/events'
 import owner from '../../lib/__tests__/vectors/owner-chain-e8ed3798-through-2026-09-04.json'
+import { TUTORIAL_GAME } from '../../lib/games/tutorialGame'
 
 const S = () => useCyberspace.getState()
 const EVENT_22 = 'daf160627616b019dff4d1363e510b09bde200894b1aba8eb1bc9e5e9b2bce64'
@@ -57,6 +58,13 @@ describe("the owner's chain, stopped at 2026-09-04", () => {
     expect(S().proof.message).toBe(RELAY_STOPPED_MESSAGE)
     expect(S().events).toHaveLength(count)
     expect(RELAY_STOPPED_MESSAGE).toMatch(/Respawn/)
+  })
+
+  it('entering a game is refused the same way, and signs nothing (DECK-0002 §2.1)', async () => {
+    setV1HopListForTests(list)
+    const count = S().events.length
+    expect(await S().enterGame(TUTORIAL_GAME)).toEqual({ refused: RELAY_STOPPED_MESSAGE })
+    expect(S().events).toHaveLength(count)
   })
 
   it('RESPAWN leaves End of Chain at event 22, where the chain stops', async () => {

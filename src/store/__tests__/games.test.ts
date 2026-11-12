@@ -54,7 +54,7 @@ if (typeof localStorage === 'undefined') {
 import { firstBreak, type NostrEvent } from '../../lib/events'
 import { GAME_CHOOSE_FIRST_MESSAGE, GAME_OTHER_BRACKET_MESSAGE, GAME_NEEDS_CHAIN_MESSAGE, GAME_NOT_OPEN_MESSAGE, IN_GAME_HERE_MESSAGE, GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
-import { GAMES_OFF_MESSAGE, GAME_ALREADY_MESSAGE, enterTutorialDungeon, recordedPosition, useGame } from '../useGame'
+import { GAMES_OFF_MESSAGE, GAME_ALREADY_MESSAGE, enterTutorialDungeon, loadProgress, recordedPosition, useGame } from '../useGame'
 import { TUTORIAL_ENTRY, TUTORIAL_GAME } from '../../lib/games/tutorialGame'
 import { teleportTemplate } from '../../lib/games/bracket'
 import { positionHex } from '../../lib/events'
@@ -178,7 +178,7 @@ describe('entering, playing and leaving (store, DECK-0002 §2, §4, §7)', () =>
 })
 
 describe('in-game mode (useGame)', () => {
-  it('is refused with games off', async () => {
+  it('is refused with games off, for the DEV game every test plays (src/test/noNetwork.ts)', async () => {
     localStorage.removeItem('onosendai:games')
     expect(await enterTutorialDungeon()).toBe(GAMES_OFF_MESSAGE)
     expect(G().session).toBeNull()
@@ -259,6 +259,29 @@ describe('in-game mode (useGame)', () => {
     const chain = S().actions()
     const entry = chain.find((a) => a.role === 'enter')!
     expect(recordedPosition(chain, entry, TUTORIAL_GAME)).toBeNull()
+  })
+
+  it('after a reload, LEAVE works straight from the chain without going back in (DECK-0002 §7: offer both)', async () => {
+    await enterTutorialDungeon()
+    const entry = last()
+    await worldLoaded()
+    // A pad's teleport on the record: the exit writes it as the last game position, from the chain alone.
+    const pad = TUTORIAL_GAME.pads[0].to
+    await S().signGameAction(TUTORIAL_GAME, entry.id, (l) => teleportTemplate({ ...l, toHex: positionHex(pad, 1) }))
+    useGame.setState({ session: null })
+    expect(loadProgress(entry.id)).not.toBeNull()
+    // Games on and the game implemented: both are offered, and leaving needs no session.
+    expect(whyNoMove(S().actions())).toBe(IN_GAME_HERE_MESSAGE)
+    expect(await G().exit()).toBeNull()
+    const exit = last()
+    expect(tagOf(exit, 'A')?.[1]).toBe('exit-virtual')
+    expect(tagOf(exit, 'e', 'entry')?.[1]).toBe(entry.id)
+    expect(tagOf(exit, 'C')?.[1]).toBe(tagOf(entry, 'c')?.[1])
+    expect(tagOf(exit, 'c')?.[1]).toBe(positionHex(pad, 1))
+    // The bracket is over, and so is its progress on this device.
+    expect(loadProgress(entry.id)).toBeNull()
+    expect(firstBreak(S().actions())).toBeNull()
+    expect(whyNoMove(S().actions())).toBeNull()
   })
 
   it('a bracket closed elsewhere ends in-game mode', async () => {

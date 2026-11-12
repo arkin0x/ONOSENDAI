@@ -69,12 +69,15 @@ const NAME = /^[a-z0-9-]{3,40}$/
  * ActionEvent). Null when nothing is published yet.
  */
 export function publishedHeadHex(chain: ReadonlyArray<{ id: string; coordHex: string }>, published: Readonly<Record<string, string>>): string | null {
-  let head: string | null = null
-  for (const a of chain) {
-    if (published[a.id] !== 'ok') break
-    head = a.coordHex
-  }
-  return head
+  const n = publishedLength(chain, published)
+  return n > 0 ? chain[n - 1].coordHex : null
+}
+
+/** How many actions from the spawn the relays took, every one of them: the published part of a chain. */
+export function publishedLength(chain: ReadonlyArray<{ id: string }>, published: Readonly<Record<string, string>>): number {
+  let n = 0
+  while (n < chain.length && published[chain[n].id] === 'ok') n++
+  return n
 }
 
 /** The relay's web address, from DEFAULT_RELAY: wss://host becomes https://host. */

@@ -43,10 +43,11 @@ vi.mock('../../lib/relay', async (importOriginal) => ({
 
 import { flyGesture, installFlyTouches, panGesture, sceneHeld, steerToSpend, viewRig, viewOffset, type RigCamera } from '../ViewFly'
 import { steerBy, takeSteer, useViewFly } from '../../lib/viewFly'
-import { FlightPivot, PIVOT_EASE_MS, ViewOffset, FLY_MIN_VEL } from '../../lib/viewCamera'
+import { FlightPivot, LAND_IDLE_MS, LAND_LERP_MS, PIVOT_EASE_MS, ViewOffset, FLY_MIN_VEL } from '../../lib/viewCamera'
 import { alignedOrigin, useCyberspace } from '../../store/useCyberspace'
 import { viewToAvatar } from '../../store/padMode'
 import { originShift, type Position } from '../../lib/space'
+import { ORBIT_MIN_DISTANCE } from '../camera'
 
 const cs = () => useCyberspace.getState()
 const DT = 1 / 60
@@ -326,16 +327,21 @@ describe('1. in flight the camera turns in place; after it, the pivot glides out
     // The turn per frame is the drag's, steady through it all.
     const turn = turns[turns.length - 1]
     for (const t of turns) expect(t).toBeCloseTo(turn, 6)
-    // A full orbit's swing a frame at the end, none at the start of the handover.
-    const orbit = 26 * Math.abs(turn)
+    // A full orbit's swing a frame at the end, none at the start of the handover:
+    // an orbit about the view's centre, come in to ORBIT_MIN_DISTANCE ahead as
+    // the coast stopped (arkinox, 2026-11-12), not the 26 cells it was.
+    const orbit = ORBIT_MIN_DISTANCE * Math.abs(turn)
     expect(steps[first - 1]).toBeLessThan(orbit * 0.05)
     expect(steps[steps.length - 1]).toBeCloseTo(orbit, 3)
-    // No frame jumps: the swing never exceeds an orbit's, and grows by at most
-    // the eased weight's steepest step (1.5 / frames in PIVOT_EASE_MS) a frame.
+    // No frame jumps: the swing never exceeds an orbit's, and through the
+    // handover grows by at most the eased weight's steepest step (1.5 / frames
+    // in PIVOT_EASE_MS) a frame. (The coast before it drifts a little off the
+    // turning line of sight whatever the orbit, so the growth is measured from
+    // the handover's first frame.)
     const steepest = (1.5 * DT * 1000) / PIVOT_EASE_MS
     for (let i = 1; i < steps.length; i++) {
       expect(steps[i]).toBeLessThanOrEqual(orbit * 1.0001 + 1e-9)
-      expect(Math.abs(steps[i] - steps[i - 1])).toBeLessThanOrEqual(orbit * steepest * 1.05 + 1e-9)
+      if (i >= first) expect(Math.abs(steps[i] - steps[i - 1])).toBeLessThanOrEqual(orbit * steepest * 1.05 + 1e-9)
     }
     lift(1, x, 400)
   })
@@ -361,6 +367,140 @@ describe('1. in flight the camera turns in place; after it, the pivot glides out
     expect(controls.target.distanceTo(new Vector3(cx, cy, cz))).toBeLessThan(0.9)
     // The coast's last frames and the landing: never a leap.
     expect(worst).toBeLessThan(1)
+  })
+})
+
+describe('1c. the cursor lands just ahead of the camera (arkinox, 2026-11-12)', () => {
+  // "when I fly in View mode, I expect the cursor to appear directly in front
+  // of me or right around where the camera is. it tends to appear at the same
+  // distance from the camera that it was before the flight."
+  /** The cell's half-diagonal: how far the drawn cursor can be from a point inside its cell. */
+  const HALF_DIAG = Math.sqrt(3) / 2
+  const cursorAt = (): Vector3 => { const [x, y, z] = cs().cursorOffset(); return new Vector3(x, y, z) }
+  const lookDir = (): Vector3 => controls.target.clone().sub(camera.position).normalize()
+  /** Fly forward `frames` frames, let go, and run until the coast has stopped. */
+  const flyAndStop = (frames: number): void => {
+    useViewFly.getState().setButton(1)
+    for (let i = 0; i < frames; i++) frame()
+    useViewFly.getState().setButton(0)
+    let n = 0
+    while (viewOffset.moving && n++ < 200) frame()
+  }
+  /** Frames until the cursor has landed (or `limit` frames). */
+  const untilLanded = (from: Position, limit = 120): number => {
+    let n = 0
+    while (cs().cursor === from && n++ < limit) frame()
+    return n
+  }
+
+  it('after a long flight the cursor lands within a cell or so ahead of the camera along its line of sight, not the 26 cells it orbited at', () => {
+    expect(camera.position.distanceTo(controls.target)).toBeCloseTo(26, 6)
+    const from = cs().cursor
+    // Three seconds of flight: well past a field width, so the view re-anchors on the way.
+    const anchor = cs().anchor
+    flyAndStop(180)
+    expect(cs().anchor).not.toBe(anchor)
+    // The frame the coast stopped: what the camera orbits came in to ORBIT_MIN_DISTANCE ahead.
+    expect(camera.position.distanceTo(controls.target)).toBeCloseTo(ORBIT_MIN_DISTANCE, 6)
+    const stopped = camera.position.clone()
+    const look = lookDir()
+    const frames = untilLanded(from)
+    expect(cs().cursor).not.toBe(from)
+    // Promptly: LAND_IDLE_MS of rest and the LAND_LERP_MS glide, a few frames over.
+    expect(frames * DT * 1000).toBeLessThan(LAND_IDLE_MS + LAND_LERP_MS + 100)
+    const rel = cursorAt().sub(camera.position)
+    // Ahead, and close: ORBIT_MIN_DISTANCE along the line, give or take the cell it rounded to.
+    expect(rel.dot(look)).toBeGreaterThan(ORBIT_MIN_DISTANCE - HALF_DIAG)
+    expect(rel.length()).toBeLessThan(ORBIT_MIN_DISTANCE + HALF_DIAG)
+    expect(across(rel, look)).toBeLessThan(HALF_DIAG)
+    // The camera never moved for any of it.
+    expect(camera.position.distanceTo(stopped)).toBeLessThan(1e-9)
+  })
+
+  it('the camera renders exactly as it was from the coast\'s stop through the handover, the landing and after (camera matrices); the headlamp\'s reach eases in', () => {
+    useViewFly.getState().setButton(1)
+    for (let i = 0; i < 120; i++) frame()
+    useViewFly.getState().setButton(0)
+    const from = cs().cursor
+    let reach = camera.position.distanceTo(controls.target) + viewRig.reachOwed
+    let worstReach = 0
+    let prev = camera.matrixWorld.clone()
+    let worst = 0
+    let coasted = 0
+    for (let i = 0; i < 90; i++) {
+      const wasMoving = viewOffset.moving
+      frame()
+      const r = camera.position.distanceTo(controls.target) + viewRig.reachOwed
+      worstReach = Math.max(worstReach, Math.abs(r - reach))
+      reach = r
+      // The coast still travels down its line: measured from the frame it stops.
+      if (wasMoving) { coasted++; prev = camera.matrixWorld.clone(); continue }
+      const m = camera.matrixWorld
+      for (let k = 0; k < 16; k++) worst = Math.max(worst, Math.abs(m.elements[k] - prev.elements[k]))
+      prev = m.clone()
+    }
+    expect(coasted).toBeGreaterThan(5)
+    expect(cs().cursor).not.toBe(from)
+    expect(worst).toBeLessThan(1e-9)
+    // 26 cells to 2 by the handover's eased weight, never in one frame.
+    expect(worstReach).toBeLessThan(24 * (1.5 * DT * 1000) / PIVOT_EASE_MS * 1.05)
+    expect(viewRig.reachOwed).toBe(0)
+  })
+
+  it('after landing a drag orbits a small radius about a point inside the cursor\'s cell', () => {
+    const from = cs().cursor
+    flyAndStop(120)
+    untilLanded(from)
+    for (let i = 0; i < 30; i++) frame()
+    const centre = controls.target.clone()
+    expect(centre.distanceTo(cursorAt())).toBeLessThan(HALF_DIAG)
+    sceneDown(1, 200, 400, true)
+    let x = 200
+    for (let i = 0; i < 40; i++) { x += 4; moveTo(1, x, 400); frame() }
+    lift(1, x, 400)
+    // Turned about the near point: it stays put and the camera goes round it, ORBIT_MIN_DISTANCE out.
+    expect(controls.target.distanceTo(centre)).toBeLessThan(1e-9)
+    expect(camera.position.distanceTo(centre)).toBeCloseTo(ORBIT_MIN_DISTANCE, 6)
+    expect(Math.abs(yaw())).toBeGreaterThan(0.3)
+  })
+
+  it('a drag through the settle never sends the cursor back out to the old distance', () => {
+    useViewFly.getState().setButton(1)
+    for (let i = 0; i < 120; i++) frame()
+    useViewFly.getState().setButton(0)
+    const from = cs().cursor
+    // A finger down as the coast runs out, and dragging all through the handover and the settle.
+    sceneDown(1, 200, 400, true)
+    let x = 200
+    let n = 0
+    while (viewOffset.moving && n++ < 200) { x += 3; moveTo(1, x, 400); frame() }
+    for (let i = 0; i < 60; i++) {
+      x += 3
+      moveTo(1, x, 400)
+      frame()
+      // A drag is not rest: no landing under it, and the view's centre stays close.
+      expect(cs().cursor).toBe(from)
+      expect(camera.position.distanceTo(controls.target)).toBeCloseTo(ORBIT_MIN_DISTANCE, 6)
+    }
+    lift(1, x, 400)
+    // The hand stops (the controls' damping dies away), the cursor lands: ahead and close.
+    untilLanded(from, 300)
+    expect(cs().cursor).not.toBe(from)
+    const rel = cursorAt().sub(camera.position)
+    expect(rel.length()).toBeLessThan(ORBIT_MIN_DISTANCE + HALF_DIAG)
+    expect(rel.dot(lookDir())).toBeGreaterThan(0)
+  })
+
+  it('a short hop too: the cursor comes to just ahead of the camera, wherever it was before, and the camera stays', () => {
+    const from = cs().cursor
+    flyAndStop(5)
+    const stopped = camera.position.clone()
+    untilLanded(from)
+    expect(cs().cursor).not.toBe(from)
+    const rel = cursorAt().sub(camera.position)
+    expect(rel.length()).toBeLessThan(ORBIT_MIN_DISTANCE + HALF_DIAG)
+    expect(rel.dot(lookDir())).toBeGreaterThan(ORBIT_MIN_DISTANCE - HALF_DIAG)
+    expect(camera.position.distanceTo(stopped)).toBeLessThan(1e-9)
   })
 })
 

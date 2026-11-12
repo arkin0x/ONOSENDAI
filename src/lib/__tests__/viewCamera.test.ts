@@ -1,13 +1,14 @@
 /**
  * viewCamera.test.ts - the camera's offset from its orbit (lib/viewCamera.ts):
- * the fly's linear, frame-rate independent glide; LAND_IDLE_MS of rest, then
- * the cursor box's LAND_LERP_MS glide and the landing; movement calling a
+ * the fly's linear, frame-rate independent glide; the coast, then LAND_IDLE_MS
+ * of rest, then the cursor box's LAND_LERP_MS glide and the landing; the
+ * landing kept under the camera (keep); movement calling a
  * glide off; the pan staying until the cursor moves and then easing back over
  * EASE_BACK_MS; and two fingers told apart as a pinch or a pan.
  */
 
 import { describe, expect, it } from 'vitest'
-import { EASE_BACK_MS, FLY_RAMP_S, LAND_IDLE_MS, LAND_LERP_MS, PAN_SLOP_PX, PanGesture, StartLock, ViewOffset, ease, type OffsetEvent } from '../viewCamera'
+import { EASE_BACK_MS, FLY_RAMP_S, LAND_IDLE_MS, LAND_LERP_MS, nearShift, PAN_SLOP_PX, PanGesture, StartLock, ViewOffset, ease, type OffsetEvent } from '../viewCamera'
 import { FLY_CELLS_PER_SECOND, FLY_MAX_DT } from '../viewFly'
 
 const off = (v: ViewOffset): [number, number, number] => { const o = v.offset({ x: 0, y: 0, z: 0 }); return [o.x, o.y, o.z] }
@@ -20,6 +21,13 @@ function run(v: ViewOffset, ms: number, frameMs: number, sign: 1 | -1 | 0): Offs
     else v.rest()
     events.push(v.step(frameMs))
   }
+  return events
+}
+
+/** Rest frames `frameMs` apart until a let-go fly's coast has stopped; what they asked. */
+function coastOut(v: ViewOffset, frameMs = 16): OffsetEvent[] {
+  const events: OffsetEvent[] = []
+  for (let i = 0; v.moving && i < 1000; i++) { v.rest(); events.push(v.step(frameMs)) }
   return events
 }
 
@@ -71,10 +79,13 @@ describe('the fly: quadratic ease-in to cruise, exponential ease-out (arkinox, 2
   })
 })
 
-describe('the landing: two seconds of rest, then the box glides, then the cursor moves', () => {
-  it('nothing while flying, however long; LAND_IDLE_MS after letting go the glide starts; LAND_LERP_MS later it lands', () => {
+describe('the landing: the coast, a short rest, then the box glides, then the cursor moves', () => {
+  it('nothing while flying, however long, nor while it coasts; LAND_IDLE_MS after the coast stops the glide starts; LAND_LERP_MS later it lands', () => {
     const v = new ViewOffset()
     expect(run(v, 5000, 16, 1)).not.toContain('glide-start')
+    // The coast is not rest (arkinox, 2026-11-12: the cursor comes in close once the flight stops).
+    expect(coastOut(v)).not.toContain('glide-start')
+    expect(LAND_IDLE_MS).toBeLessThanOrEqual(300)
     const rest = run(v, LAND_IDLE_MS - 16, 16, 0)
     expect(rest).not.toContain('glide-start')
     expect(v.glide).toBe(0)
@@ -89,10 +100,10 @@ describe('the landing: two seconds of rest, then the box glides, then the cursor
   it('a long frame while flying (a stall) is not counted as rest', () => {
     const v = new ViewOffset()
     v.fly(0, 0, -1, 1, 0.1)
-    v.step(1900)
+    expect(v.step(1900)).toBe('none')
     v.rest()
-    expect(v.step(200)).toBe('none')
-    expect(run(v, LAND_IDLE_MS - 200, 16, 0)).toContain('glide-start')
+    coastOut(v)
+    expect(run(v, LAND_IDLE_MS + 16, 16, 0)).toContain('glide-start')
   })
 
   it('the glide is eased: slow at both ends', () => {
@@ -110,10 +121,11 @@ describe('the landing: two seconds of rest, then the box glides, then the cursor
     expect(off(v)).toEqual([3, 1, 0])
   })
 
-  it('new movement calls a running glide off: the box goes back the way it came, and the two seconds start again', () => {
+  it('new movement calls a running glide off: the box goes back the way it came, and the rest starts again', () => {
     for (const move of [(v: ViewOffset) => v.fly(0, 0, -1, 1, 0.016), (v: ViewOffset) => v.pan(0.5, 0, 0)]) {
       const v = new ViewOffset()
       run(v, 500, 16, 1)
+      coastOut(v)
       run(v, LAND_IDLE_MS, 16, 0)
       run(v, LAND_LERP_MS / 2, 16, 0)
       const halfway = v.glide
@@ -122,13 +134,48 @@ describe('the landing: two seconds of rest, then the box glides, then the cursor
       v.rest()
       expect(v.step(16)).toBe('none')
       expect(v.glide).toBeLessThan(halfway)
-      // Back to nothing, and no landing until another LAND_IDLE_MS of rest.
-      const after = run(v, LAND_IDLE_MS - 100, 16, 0)
-      expect(after).not.toContain('land')
-      expect(after).not.toContain('glide-start')
-      expect(v.glide).toBe(0)
-      expect(run(v, 200, 16, 0)).toContain('glide-start')
+      // On its way back: no landing, and no new start until it is back.
+      const back = run(v, LAND_LERP_MS / 2 - 40, 16, 0)
+      expect(back).not.toContain('land')
+      expect(back).not.toContain('glide-start')
+      expect(v.glide).toBeLessThan(halfway)
+      // Once back and rested, it starts again.
+      expect(run(v, LAND_IDLE_MS + LAND_LERP_MS, 16, 0)).toContain('glide-start')
     }
+  })
+
+  it('keep: the landing holds what is left over as a pan, so nothing eases and nothing more lands', () => {
+    const v = new ViewOffset()
+    run(v, 500, 16, 1)
+    coastOut(v)
+    const flown = off(v)
+    v.keep()
+    expect(v.flown).toBe(false)
+    expect(v.held).toBe(true)
+    expect(off(v)).toEqual(flown)
+    // The rig takes the cursor's move off it (a pan the other way): what is left stays, however long.
+    v.pan(0, 0, -Math.round(flown[2]))
+    const left = off(v)
+    for (let i = 0; i < 300; i++) expect(v.step(16)).toBe('none')
+    expect(off(v)).toEqual(left)
+    // The next move of the cursor eases it out as ever.
+    v.rebase(0, 0, 0)
+    run(v, EASE_BACK_MS + 32, 16, 0)
+    expect(v.active).toBe(false)
+  })
+
+  it('nearShift: the target comes in along the line of sight to `near` ahead of the camera; a nearer target is left alone', () => {
+    const out = { x: 9, y: 9, z: 9 }
+    // The camera 26 out along (3, 4, 12)/13 from its target.
+    const camLess = { x: 6, y: 8, z: 24 }
+    nearShift(camLess, 2, out)
+    const left = { x: camLess.x - out.x, y: camLess.y - out.y, z: camLess.z - out.z }
+    expect(Math.hypot(left.x, left.y, left.z)).toBeCloseTo(2, 12)
+    // Still the same line: the camera looks exactly where it looked.
+    expect(left.x / 2).toBeCloseTo(3 / 13, 12)
+    expect(left.z / 2).toBeCloseTo(12 / 13, 12)
+    expect(nearShift({ x: 0, y: 0, z: 1.5 }, 2, out)).toEqual({ x: 0, y: 0, z: 0 })
+    expect(nearShift({ x: 0, y: 0, z: 0 }, 2, out)).toEqual({ x: 0, y: 0, z: 0 })
   })
 })
 
@@ -318,11 +365,11 @@ describe('ViewOffset.hold: an orbit or a zoom is not rest (review N5)', () => {
     const v = new ViewOffset()
     v.fly(0, 0, -1, 1, 0.1)
     v.rest()
-    v.step(LAND_IDLE_MS - 100)
+    coastOut(v)
+    v.step(LAND_IDLE_MS - 50)
     v.hold()
-    expect(v.step(200)).toBe('none')
-    expect(run(v, LAND_IDLE_MS - 250, 16, 0)).not.toContain('glide-start')
-    expect(run(v, 100, 16, 0)).toContain('glide-start')
+    expect(run(v, LAND_IDLE_MS - 32, 16, 0)).not.toContain('glide-start')
+    expect(run(v, 48, 16, 0)).toContain('glide-start')
     run(v, 100, 16, 0)
     const g = v.glide
     v.hold()

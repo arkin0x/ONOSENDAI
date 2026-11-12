@@ -15,21 +15,25 @@
  * one offset, in render cells, made of three parts:
  *
  * - FLOWN: VIEW's fly (lib/viewFly.ts). Held, the view glides along its line
- *   of sight, linear and frame-rate independent; the cursor waits. After
- *   LAND_IDLE_MS with nothing moving, the cursor box glides (LAND_LERP_MS) to
- *   where the view now centres, and only when it gets there does the cursor
- *   itself (what BUILD, DEPLOY and the coordinates read) move.
+ *   of sight, linear and frame-rate independent; the cursor waits. Once the
+ *   coast has stopped the view's centre comes in to just ahead of the camera
+ *   (nearShift), and after LAND_IDLE_MS more with nothing moving the cursor
+ *   box glides (LAND_LERP_MS) there, and only when it gets there does the
+ *   cursor itself (what BUILD, DEPLOY and the coordinates read) move.
  * - PANNED: a two-finger drag (PanGesture), or a right or Shift drag of the
  *   mouse. It never moves the cursor and never lands.
  * - EASING: what is left of the other two once the cursor has moved, eased
  *   to nothing over EASE_BACK_MS, so the camera goes back to its orbit about
  *   the cursor smoothly rather than jumping.
  *
- * Any move of the cursor (a pad press, a tap, a jump, the fly's own landing,
- * a hop) turns the whole offset into EASING, re-expressed against the moved
- * cursor so the camera does not jump on the frame it moves (rebase). A new
- * fly folds a pan into EASING too: FAR and NEAR count as moving the cursor
- * (the brief), so a fly starts back on the line through the cursor.
+ * Any move of the cursor (a pad press, a tap, a jump, a hop) turns the whole
+ * offset into EASING, re-expressed against the moved cursor so the camera
+ * does not jump on the frame it moves (rebase). A new fly folds a pan into
+ * EASING too: FAR and NEAR count as moving the cursor (the brief), so a fly
+ * starts back on the line through the cursor. The fly's own landing is the
+ * one move that does not ease: what is left over (the view's centre less the
+ * cell the cursor lands in) is held as a pan is (keep), so the camera stays
+ * exactly where the flight stopped.
  *
  * Plain numbers, no three.js, nothing allocated per frame; the scene feeds it
  * render-space vectors and reads the sum back (offset).
@@ -39,8 +43,16 @@ import { create } from 'zustand'
 import { FLY_CELLS_PER_SECOND, FLY_MAX_DT, PINCH_SLOP_PX, PINCH_SLOP_SHARE } from './viewFly'
 import type { Position } from './space'
 
-/** How long nothing must move after a fly before the cursor goes to where the view now is, in ms. */
-export const LAND_IDLE_MS = 2000
+/**
+ * How long nothing must move, once a fly's coast has stopped, before the
+ * cursor box starts for where the view now is, in ms. Was 2000, counted from
+ * letting go (arkinox, 2026-11-09); short now that the view's centre comes in
+ * to just ahead of the camera as the coast stops (arkinox, 2026-11-12: "when
+ * I fly in View mode, I expect the cursor to appear directly in front of me
+ * or right around where the camera is"). Only long enough that a turn's last
+ * frames, or another tap of a fly key, are not taken for rest.
+ */
+export const LAND_IDLE_MS = 150
 /** How long the cursor box takes to glide there, in ms. */
 export const LAND_LERP_MS = 300
 /** How long the camera takes to ease back onto its orbit about the cursor once the cursor moves, in ms. */
@@ -199,9 +211,29 @@ export class ViewOffset {
     this.rampT = 0
   }
 
-  /** Ease the whole offset back from where it is (WALK began, the fly's landing, a fly that may no longer land). */
+  /** Ease the whole offset back from where it is (WALK began, a fly that may no longer land). */
   release(): void {
     this.rebase(0, 0, 0)
+  }
+
+  /**
+   * The fly's own landing (arkinox, 2026-11-12): the camera stays exactly
+   * where the flight stopped. What is still flown becomes PANNED, held until
+   * the cursor next moves, not EASING: the rig takes the landing's move of
+   * the cursor off it (ViewFly.ts), leaving only the view's centre less the
+   * cell the cursor landed in, under a cell, held so neither the camera nor
+   * what it orbits drifts.
+   */
+  keep(): void {
+    this.bakeEasing()
+    this.px += this.fx
+    this.py += this.fy
+    this.pz += this.fz
+    this.fx = this.fy = this.fz = 0
+    this.glideAt = 0
+    this.glideTo = 0
+    this.vel = 0
+    this.rampT = 0
   }
 
   /** Back on the orbit at once: the rig framed the camera itself (a cut, a re-frame, a zoom). */
@@ -233,22 +265,24 @@ export class ViewOffset {
     const dt = Math.max(0, dtMs)
     this.easeMs = Math.min(EASE_BACK_MS, this.easeMs + dt)
     // Let go with speed still on it, the fly coasts: exponential ease-out,
-    // moving on down the last line it flew for a short tail. It is still
-    // counted as rest below, so the coast softens the stop without pushing the
-    // cursor's two-second landing back.
-    if (!this.flying && this.vel > FLY_MIN_VEL) {
+    // moving on down the last line it flew for a short tail. The coast is not
+    // rest: the landing's wait starts once it has stopped, which is when the
+    // view's centre comes in to just ahead of the camera (ViewFly.ts).
+    const coasting = !this.flying && this.vel > FLY_MIN_VEL
+    if (coasting) {
       const cdt = Math.min(dt / 1000, FLY_MAX_DT)
       this.vel *= Math.exp(-(dt / 1000) / FLY_DECAY_TAU)
       const d = this.vel * cdt * this.dirSign
       this.fx += this.ux * d
       this.fy += this.uy * d
       this.fz += this.uz * d
+      this.idleMs = 0
     } else if (!this.flying && this.vel !== 0) {
       this.vel = 0
       this.rampT = 0
     }
-    // A frame that flew is not rest, however long it took.
-    if (!this.flying) this.idleMs += dt
+    // A frame that flew or coasted is not rest, however long it took.
+    if (!this.flying && !coasting) this.idleMs += dt
     if (this.glideTo === 1) {
       this.glideAt = Math.min(1, this.glideAt + dt / LAND_LERP_MS)
       return this.glideAt >= 1 ? 'land' : 'none'
@@ -308,23 +342,44 @@ export class ViewOffset {
 export const PIVOT_EASE_MS = 300
 
 /**
+ * Where a stopped fly's view centre comes in to (arkinox, 2026-11-12: "it
+ * tends to appear at the same distance from the camera that it was before
+ * the flight. [...] I often fly into a room that I want to look around, but
+ * my orbit takes me out of the room immediately"): the slide, into `out`,
+ * that brings the target in along the line of sight to `near` ahead of the
+ * camera, given `camLessTarget` (the camera less its target). Added to the
+ * target alone, the camera stays put and the line it looks down is the same
+ * line, so nothing on screen moves. Never pushes a nearer target out.
+ */
+export function nearShift(camLessTarget: Vec3Out, near: number, out: Vec3Out): Vec3Out {
+  const d = Math.hypot(camLessTarget.x, camLessTarget.y, camLessTarget.z)
+  const k = d > near ? 1 - near / d : 0
+  out.x = camLessTarget.x * k
+  out.y = camLessTarget.y * k
+  out.z = camLessTarget.z * k
+  return out
+}
+
+/**
  * What a drag turns the camera about (arkinox, 2026-11-12): "During flight,
  * the center of orbit for the camera should be the camera itself. Make sure
  * it transitions from this to the cursor smoothly without camera jumps."
  *
  * OrbitControls (and drag-to-steer) always turn the camera about its target,
  * the view's centre: the cursor, or in a fly the point as far ahead of the
- * camera as the cursor was when the fly began, which is where the cursor
- * lands. In flight that swung the camera round a point out in front. So the
- * rig lets the turn happen, then slides the camera and its target together
- * by `shift`: the camera ends exactly where it started and only the line it
- * looks down has turned, a turn of the head. The target goes round the
- * camera at its same distance, and the fly follows the new line of sight.
+ * camera as the cursor was when the fly began (until the coast stops and it
+ * comes in close: nearShift). In flight that swung the camera round a point
+ * out in front. So the rig lets the turn happen, then slides the camera and
+ * its target together by `shift`: the camera ends exactly where it started
+ * and only the line it looks down has turned, a turn of the head. The target
+ * goes round the camera at its same distance, and the fly follows the new
+ * line of sight.
  *
  * `weight` is how much of the slide is made: 1 in flight (the pivot is the
- * camera), 0 at rest (the pivot is the view's centre, as ever), and in
- * between the pivot is that share of the way from the target to the camera,
- * along the line of sight. It eases over PIVOT_EASE_MS as a fly starts and
+ * camera), 0 at rest (the pivot is the view's centre, which a stopped fly has
+ * brought in to just ahead of the camera: nearShift), and in between the
+ * pivot is that share of the way from the target to the camera, along the
+ * line of sight. It eases over PIVOT_EASE_MS as a fly starts and
  * once its coast has stopped, so a drag held across the end of a fly feels
  * its pivot glide out to the cursor rather than switch. Nothing here moves
  * the camera of its own accord: the slide only ever answers a turn, so the

@@ -35,7 +35,7 @@ vi.mock('../../lib/relay', async (importOriginal) => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
-import { flyGesture, installFlyTouches, panGesture, viewRig, type RigCamera } from '../ViewFly'
+import { flyGesture, installFlyTouches, panGesture, viewOffset, viewRig, type RigCamera } from '../ViewFly'
 import { FlyGesture, FLY_HOLD_MS, useViewFly } from '../../lib/viewFly'
 import { LAND_IDLE_MS, LAND_LERP_MS, useViewCentre } from '../../lib/viewCamera'
 import { CURSOR_SETTLE_MS, FLY_REFRESH_MS, settleWait, watchCursorSettle } from '../../hooks/useViewWindow'
@@ -160,6 +160,8 @@ describe('2. the cursor is written once, when the fly lands', () => {
       useViewFly.getState().setButton(1)
       for (let i = 0; i < 60; i++) frame()
       useViewFly.getState().setButton(0)
+      // The coast, then most of the rest after it.
+      for (let i = 0; viewOffset.moving && i < 600; i++) frame()
       for (let i = 0; i < ((LAND_IDLE_MS - 100) / 1000) * 60; i++) frame()
       expect(writes).toBe(0)
       for (let i = 0; i < ((LAND_LERP_MS + 300) / 1000) * 60; i++) frame()

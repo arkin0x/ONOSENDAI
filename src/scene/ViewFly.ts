@@ -6,10 +6,15 @@
  *
  * - viewRig.before, at the top of the frame, before it reads the cursor,
  *   the way it calls WALK's tickFall: it flies the view along the line the
- *   camera looks down while a fly is held, takes the frame's pan, and after
- *   LAND_IDLE_MS of rest glides the cursor box to where the view now centres
- *   and lands the cursor there (aimView) when the glide ends. A zoom, or the
- *   view ceasing to be one that flies (BUILD), lands an unlanded fly at once.
+ *   camera looks down while a fly is held, takes the frame's pan, and the
+ *   frame the fly's coast stops brings the view's centre in along the line
+ *   of sight to ORBIT_MIN_DISTANCE ahead of the camera, the camera staying
+ *   put (arkinox, 2026-11-12: "when I fly in View mode, I expect the cursor
+ *   to appear directly in front of me or right around where the camera is").
+ *   After LAND_IDLE_MS of rest it glides the cursor box there and lands the
+ *   cursor (aimView) when the glide ends, the camera still not moving (keep).
+ *   A zoom, or the view ceasing to be one that flies (BUILD), lands an
+ *   unlanded fly at once.
  * - viewRig.apply, once the rig knows the target it frames this frame and how
  *   far the render frame shifted since the last: it moves the camera and the
  *   follow point by however much the offset changed, whether or not the camera
@@ -52,7 +57,8 @@ import { useBuilder } from '../store/useBuilder'
 import { useTv } from '../store/useTv'
 import { aimCentres, GRID_RADIUS, type AxisName, type Position, type ViewAxes } from '../lib/space'
 import { canFly, flyDir, FlyGesture, landingOf, PINCH_SLOP_PX, setFlyLander, setFlyLanding, takeSteer, useViewFly } from '../lib/viewFly'
-import { cursorGlide, FlightPivot, OFFSET_EPS, PanGesture, setViewCentre, ViewOffset, type Vec3Out } from '../lib/viewCamera'
+import { cursorGlide, FlightPivot, nearShift, OFFSET_EPS, PanGesture, setViewCentre, ViewOffset, type Vec3Out } from '../lib/viewCamera'
+import { ORBIT_MIN_DISTANCE } from './camera'
 
 /** The scene's fly gesture (two and three fingers at rest; off for now), fed by useFlyTouches. */
 export const flyGesture = new FlyGesture()
@@ -69,6 +75,7 @@ const px = { x: 0, y: 0 }
 const want: Vec3Out = { x: 0, y: 0, z: 0 }
 const turned: Vec3Out = { x: 0, y: 0, z: 0 }
 const slid: Vec3Out = { x: 0, y: 0, z: 0 }
+const near: Vec3Out = { x: 0, y: 0, z: 0 }
 const flownCyber: Record<AxisName, number> = { x: 0, y: 0, z: 0 }
 
 /** A render-space offset as cyberspace components (the view's axes are a signed permutation), into flownCyber. */
@@ -173,6 +180,14 @@ export class ViewRigOffset {
   /** The camera less its target when last marked: a turn since then is the hand's (pivot). */
   private turnFrom = new Vector3()
   private turnValid = false
+  /** Whether a fly was under way last frame: the frame it stops brings the view's centre in (before). */
+  private wasMoving = false
+  /** The view's centre's move in to just ahead of the camera, owed to the follow point alone (apply). */
+  private nearOwed = new Vector3()
+  /** The fly has just landed: the cursor's move this frame is held under the camera, not eased (apply, ViewOffset.keep). */
+  private keeping = false
+  /** How much nearer the view's centre came when the fly stopped, in render cells (reachOwed). */
+  private nearGap = 0
 
   /** True while a fly is under way (the rig's glide waits it out). */
   flying = false
@@ -235,6 +250,16 @@ export class ViewRigOffset {
     if (!pans && viewOffset.held) viewOffset.release()
 
     const event = viewOffset.step(dt * 1000)
+    // The frame the fly's coast stops: the view's centre comes in along the
+    // line of sight to just ahead of the camera, so the turn's pivot hands
+    // over to there and the cursor lands there (arkinox, 2026-11-12: "I often
+    // fly into a room that I want to look around, but my orbit takes me out of
+    // the room immediately because my cursor appeared way off from where the
+    // camera stopped"). Before the landing below is worked out from it.
+    const moving = flies && viewOffset.moving
+    if (moving) this.nearGap = 0
+    if (this.wasMoving && !moving && flies && viewOffset.flown) this.comeNear(cam)
+    this.wasMoving = moving
     if (event === 'glide-start') {
       const to = flies ? flownLanding() : null
       if (to) {
@@ -249,22 +274,55 @@ export class ViewRigOffset {
         this.landing = to
       } else viewOffset.cancelGlide()
     } else if (event === 'land') {
-      if (flies && this.landing && cursorGlide.from === s.cursor) this.land(this.landing)
-      // Whatever the landing left over (under a gibson, or the cursor's place
-      // inside its cell) eases out; the cursor's move itself is rebased in apply.
-      viewOffset.release()
+      if (flies && this.landing && cursorGlide.from === s.cursor) {
+        this.land(this.landing)
+        // The camera stays where the flight stopped: what the landing left
+        // over (the view's centre inside the cell the cursor landed in) is
+        // held, and the cursor's move itself is taken off it in apply.
+        viewOffset.keep()
+        this.keeping = true
+      } else viewOffset.release()
       this.landing = null
     }
     cursorGlide.share = viewOffset.glide
     useViewFly.getState().setFlown(viewOffset.flown)
     // In flight a drag turns the camera in place; once the coast has stopped
-    // the pivot eases back out to the view's centre (pivot).
-    this.pivotAt.step(flies && viewOffset.moving, dt * 1000)
+    // the pivot eases back out to the view's centre, now just ahead (pivot).
+    this.pivotAt.step(moving, dt * 1000)
+  }
+
+  /**
+   * Bring the view's centre in along the line of sight to ORBIT_MIN_DISTANCE
+   * ahead of the camera (lib/viewCamera.ts nearShift), the camera staying put.
+   * The orbit's own closest approach, so the controls never push the camera
+   * back out to it. Recorded as flown, so the cursor lands there; owed to the
+   * follow point alone (apply), not the camera.
+   */
+  private comeNear(cam: RigCamera): void {
+    look.copy(cam.position).sub(cam.target)
+    nearShift(look, ORBIT_MIN_DISTANCE, near)
+    if (near.x === 0 && near.y === 0 && near.z === 0) return
+    this.nearGap = Math.hypot(look.x, look.y, look.z) - ORBIT_MIN_DISTANCE
+    viewOffset.slide(near.x, near.y, near.z)
+    this.applied.x += near.x; this.applied.y += near.y; this.applied.z += near.z
+    this.nearOwed.x += near.x; this.nearOwed.y += near.y; this.nearOwed.z += near.z
+    // The camera less its target changes by this, not by a hand: no hold for it.
+    this.orbit.x -= near.x; this.orbit.y -= near.y; this.orbit.z -= near.z
   }
 
   /** How much of a turn is made about the camera now: 1 in flight, 0 at rest (lib/viewCamera.ts FlightPivot). */
   get pivotWeight(): number {
     return this.pivotAt.weight
+  }
+
+  /**
+   * The distance the view's centre came in by when the fly stopped, still
+   * owed to whatever reads the camera's distance from its target as a reach
+   * (the headlamp, Scene.tsx HeadlampRig): it fades with the pivot's handover,
+   * so the lamp's reach comes in over PIVOT_EASE_MS rather than in one frame.
+   */
+  get reachOwed(): number {
+    return this.nearGap * this.pivotAt.weight
   }
 
   /**
@@ -312,6 +370,9 @@ export class ViewRigOffset {
       // The rig framed the camera itself (a zoom, a cut): back on the orbit, nothing owed.
       viewOffset.clear()
       this.applied.set(0, 0, 0)
+      this.nearOwed.set(0, 0, 0)
+      this.nearGap = 0
+      this.keeping = false
       this.last.copy(aim)
       this.lastValid = true
       cursorGlide.share = 0
@@ -325,12 +386,16 @@ export class ViewRigOffset {
       const dy = aim.y - (this.last.y + shift[1])
       const dz = aim.z - (this.last.z + shift[2])
       if (Math.abs(dx) > OFFSET_EPS || Math.abs(dy) > OFFSET_EPS || Math.abs(dz) > OFFSET_EPS) {
-        viewOffset.rebase(dx, dy, dz)
+        // The fly's own landing is held where it is (ViewOffset.keep); any
+        // other move of the cursor eases the camera back onto its orbit.
+        if (this.keeping) viewOffset.pan(-dx, -dy, -dz)
+        else viewOffset.rebase(dx, dy, dz)
         this.applied.x -= dx
         this.applied.y -= dy
         this.applied.z -= dz
       }
     }
+    this.keeping = false
     this.last.copy(aim)
     this.lastValid = true
     viewOffset.offset(want)
@@ -341,6 +406,13 @@ export class ViewRigOffset {
       camera.x += ddx; camera.y += ddy; camera.z += ddz
       follow.x += ddx; follow.y += ddy; follow.z += ddz
       this.applied.set(want.x, want.y, want.z)
+    }
+    // A stopped fly's view centre, come in to just ahead (comeNear): the
+    // follow point goes straight there, along the line of sight, and the
+    // camera does not, so it neither moves nor (locked) chases the follow.
+    if (this.nearOwed.x !== 0 || this.nearOwed.y !== 0 || this.nearOwed.z !== 0) {
+      follow.add(this.nearOwed)
+      this.nearOwed.set(0, 0, 0)
     }
     aim.x += want.x
     aim.y += want.y
@@ -378,6 +450,10 @@ export class ViewRigOffset {
     this.lastValid = false
     this.declined = false
     this.turnValid = false
+    this.wasMoving = false
+    this.nearGap = 0
+    this.nearOwed.set(0, 0, 0)
+    this.keeping = false
     this.pivotAt.clear()
     cursorGlide.share = 0
     setViewCentre(0, 0, 0)

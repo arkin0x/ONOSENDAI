@@ -4,8 +4,9 @@
  * viewRig.apply; arkinox, 2026-11-09):
  *
  * - VIEW's fly moves the camera along its line of sight, linearly, and not
- *   the cursor; two seconds after it stops the cursor box glides to the cell
- *   the view now centres on, and the cursor moves there when it arrives.
+ *   the cursor; once it has stopped the view's centre comes in to just ahead
+ *   of the camera, and a moment later the cursor box glides to that cell and
+ *   the cursor moves there when it arrives, the camera never moving.
  * - Movement calls a glide off; a pad press before the landing steps from
  *   where the view has flown.
  * - A pan moves the camera and its target, never the cursor, and stays until
@@ -37,6 +38,7 @@ import { flyGesture, panGesture, takeFlyReanchor, viewOffset, viewRig, type RigC
 import { readFileSync } from 'node:fs'
 import { FLY_CELLS_PER_SECOND, renderToCyber, useViewFly } from '../../lib/viewFly'
 import { cursorGlide, EASE_BACK_MS, LAND_IDLE_MS, LAND_LERP_MS } from '../../lib/viewCamera'
+import { ORBIT_MIN_DISTANCE } from '../camera'
 import { alignedOrigin, useCyberspace } from '../../store/useCyberspace'
 import { useBuilder } from '../../store/useBuilder'
 import { alignTo, originShift, type Position } from '../../lib/space'
@@ -101,6 +103,9 @@ class Harness {
   }
 }
 
+/** Frames until a let-go fly's coast has stopped. */
+const coast = (): void => { for (let i = 0; viewOffset.moving && i < 600; i++) h.frame() }
+
 /** Where looking down render -z goes, in cyberspace: one axis, with its sign. */
 const ahead = (): { x: number; y: number; z: number } => renderToCyber([0, 0, -1], cs().axes())
 
@@ -158,8 +163,10 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
       h.frame()
       const from = { ...cs().cursor }
       useViewFly.getState().setButton(1)
-      h.run(500)
+      // Long enough to leave the cursor's cell once the view comes in close.
+      h.run(1500)
       useViewFly.getState().setButton(0)
+      coast()
       h.run(LAND_IDLE_MS + LAND_LERP_MS + 100)
       const a = ahead()
       const axis = a.x !== 0 ? 'x' : a.y !== 0 ? 'y' : 'z'
@@ -174,17 +181,21 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
     expect(l0).toBeGreaterThan(0)
   })
 
-  it('two seconds after it stops, the box glides LAND_LERP_MS to the cell the view centres on, and only then does the cursor move', () => {
+  it('once it stops, the view centres just ahead of the camera; LAND_IDLE_MS later the box glides LAND_LERP_MS there, and only then does the cursor move', () => {
     cs().viewHere()
     h.frame()
     const from = cs().cursor
     useViewFly.getState().setButton(1)
-    h.run(500)
+    h.run(1500)
     useViewFly.getState().setButton(0)
-    // Where the view centres once it has eased to a stop (past the coast tail),
-    // which is where the cursor will land.
-    h.run(LAND_IDLE_MS - 50)
+    coast()
+    // Where the view centres once it has eased to a stop: ORBIT_MIN_DISTANCE
+    // ahead of the camera, not the 10 cells it orbited at, which is where the
+    // cursor will land (arkinox, 2026-11-12).
     const flown = h.cam.target.clone()
+    const stopped = h.cam.position.clone()
+    expect(h.orbit().length()).toBeCloseTo(ORBIT_MIN_DISTANCE, 9)
+    h.run(LAND_IDLE_MS - 50)
     expect(cs().cursor).toBe(from)
     expect(cursorGlide.share).toBe(0)
     h.run(100)
@@ -201,29 +212,42 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
     expect(Math.abs(at.x - flown.x)).toBeLessThanOrEqual(0.5)
     expect(Math.abs(at.y - flown.y)).toBeLessThanOrEqual(0.5)
     expect(Math.abs(at.z - flown.z)).toBeLessThanOrEqual(0.5)
-    // The camera does not jump when the cursor lands, and ends framing it exactly.
-    expect(h.cam.target.distanceTo(flown)).toBeLessThan(0.51)
+    // Neither the camera nor what it orbits moves when the cursor lands, nor
+    // after: what the landing left over (the view's centre inside the cell)
+    // is held, not eased out.
     h.run(EASE_BACK_MS + 50)
-    expect(h.cam.target.distanceTo(h.cursorAt())).toBeLessThan(1e-9)
-    expect(viewOffset.active).toBe(false)
+    expect(h.cam.target.distanceTo(flown)).toBeLessThan(1e-9)
+    expect(h.cam.position.distanceTo(stopped)).toBeLessThan(1e-9)
+    expect(h.cam.target.distanceTo(h.cursorAt())).toBeLessThan(0.87)
+    expect(viewOffset.flown).toBe(false)
   })
 
-  it('the landing does not jump the camera: frame to frame it moves less than a fly frame', () => {
+  it('the landing does not jump the camera: frame to frame it moves less than a fly frame, and what it orbits only comes in along its line of sight', () => {
     cs().viewHere()
     h.frame()
     useViewFly.getState().setButton(1)
     h.run(700)
     useViewFly.getState().setButton(0)
-    let last = h.cam.target.clone()
+    let last = h.cam.position.clone()
+    let lastTarget = h.cam.target.clone()
     let worst = 0
-    for (let i = 0; i < ((LAND_IDLE_MS + LAND_LERP_MS + EASE_BACK_MS) / 1000) * 60 + 30; i++) {
+    let sideways = 0
+    for (let i = 0; i < ((1000 + LAND_IDLE_MS + LAND_LERP_MS + EASE_BACK_MS) / 1000) * 60 + 30; i++) {
+      const look = h.cam.target.clone().sub(h.cam.position).normalize()
       h.frame()
-      worst = Math.max(worst, h.cam.target.distanceTo(last))
-      last = h.cam.target.clone()
+      worst = Math.max(worst, h.cam.position.distanceTo(last))
+      // The target's move less the camera's, across the line the camera looked down.
+      const rel = h.cam.target.clone().sub(lastTarget).sub(h.cam.position.clone().sub(last))
+      sideways = Math.max(sideways, rel.clone().addScaledVector(look, -rel.dot(look)).length())
+      last = h.cam.position.clone()
+      lastTarget = h.cam.target.clone()
     }
     // Never more than a fly frame in one frame: the ease-out coast's first
     // frame is the largest, and it is under a cruise frame's travel.
     expect(worst).toBeLessThan(FLY_CELLS_PER_SECOND * DT)
+    // The view's centre came in along the line of sight: nothing turned.
+    expect(sideways).toBeLessThan(1e-9)
+    expect(h.orbit().length()).toBeCloseTo(ORBIT_MIN_DISTANCE, 9)
   })
 
   it('moving again calls a running glide off: the box goes back, and the cursor stays', () => {
@@ -231,8 +255,9 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
     h.frame()
     const from = cs().cursor
     useViewFly.getState().setButton(1)
-    h.run(500)
+    h.run(1500)
     useViewFly.getState().setButton(0)
+    coast()
     h.run(LAND_IDLE_MS + LAND_LERP_MS / 2)
     const halfway = cursorGlide.share
     expect(halfway).toBeGreaterThan(0)
@@ -240,9 +265,13 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
     h.frame()
     useViewFly.getState().setButton(0)
     expect(cursorGlide.share).toBeLessThan(halfway)
-    h.run(LAND_LERP_MS + 50)
-    expect(cursorGlide.share).toBe(0)
+    // On its way back, and the cursor has not moved.
+    h.run(LAND_LERP_MS / 2 - 40)
+    expect(cursorGlide.share).toBeLessThan(halfway / 2)
     expect(cs().cursor).toBe(from)
+    // Rested again, it lands after all.
+    h.run(LAND_IDLE_MS + LAND_LERP_MS + 100)
+    expect(cs().cursor).not.toBe(from)
   })
 
   it('a pad press before the landing steps from where the view has flown, so the camera is not pulled back', () => {
@@ -308,6 +337,27 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
     expect(Math.abs(Number(cs().cursor[axis] - from[axis]))).toBe(flownCells)
     expect(viewOffset.active).toBe(false)
     expect(h.cam.target.distanceTo(h.cursorAt())).toBeLessThan(1e-9)
+  })
+
+  it('a zoom after the landing works as ever: the orbit, now ORBIT_MIN_DISTANCE out, is carried, and the camera frames the cursor again', () => {
+    cs().viewHere()
+    h.frame()
+    const from = cs().cursor
+    useViewFly.getState().setButton(1)
+    h.run(1500)
+    useViewFly.getState().setButton(0)
+    coast()
+    h.run(LAND_IDLE_MS + LAND_LERP_MS + 100)
+    expect(cs().cursor).not.toBe(from)
+    const orbit = h.orbit()
+    expect(orbit.length()).toBeCloseTo(ORBIT_MIN_DISTANCE, 9)
+    for (const step of [1, -1, -1]) {
+      cs().adjustScale(step)
+      h.frame()
+      expect(viewOffset.active).toBe(false)
+      expect(h.cam.target.distanceTo(h.cursorAt())).toBeLessThan(1e-9)
+      expect(h.orbit().distanceTo(orbit)).toBeLessThan(1e-9)
+    }
   })
 
   it('a long fly re-anchors the view on where it has flown, and the cursor still waits', () => {
@@ -484,12 +534,14 @@ describe('review of #635', () => {
     useViewFly.getState().setButton(1)
     h.run(100)
     useViewFly.getState().setButton(0)
+    coast()
     // Panned far off the field (the flight itself is small): the view centre is out of reach, the landing is not.
+    // The stopped fly orbits ORBIT_MIN_DISTANCE out, so a pixel pans that much less.
     const spy = vi.spyOn(cs(), 'reanchorView')
     const calls = (): number => spy.mock.calls.length
     useCyberspace.setState({ reanchorView: spy as never })
     panGesture.down(1, 100, 400); panGesture.down(2, 300, 400)
-    for (let i = 1; i <= 20; i++) { panGesture.move(1, 100 + i * 100, 400); panGesture.move(2, 300 + i * 100, 400) }
+    for (let i = 1; i <= 20; i++) { panGesture.move(1, 100 + i * 600, 400); panGesture.move(2, 300 + i * 600, 400) }
     h.frame()
     panGesture.up(1); panGesture.up(2)
     expect(Math.abs(h.cam.target.x)).toBeGreaterThan(24)

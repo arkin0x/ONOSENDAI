@@ -103,7 +103,7 @@ import { Travel } from './Travel'
 import { TvLayer } from './TvLayer'
 import { TvScreenEffect } from './TvScreenEffect'
 import { useTv } from '../store/useTv'
-import { CAMERA_NEAR, FOV } from './camera'
+import { CAMERA_NEAR, FOV, ORBIT_MIN_DISTANCE } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
 import { canvasPixels, composerSamples } from './composerBudget'
 import './radialFog'
@@ -415,7 +415,8 @@ function HeadlampRig(): null {
   const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
   useFrame((state) => {
     if (!controls) return
-    headlampUniforms.uHeadlampReach.value = headlampReach(state.camera.position.distanceTo(controls.target))
+    // A stopped VIEW fly brings the target in close; the reach follows it over the pivot's handover (ViewFly.ts reachOwed).
+    headlampUniforms.uHeadlampReach.value = headlampReach(state.camera.position.distanceTo(controls.target) + viewRig.reachOwed)
   }, HEADLAMP_PRIORITY)
   return null
 }
@@ -545,8 +546,6 @@ function LensShift(): null {
  * axis-aligned view once you have finished looking. So changing `view` does not
  * merely remap the axes, it also returns the camera to straight-on.
  */
-/** The orbit's closest approach outside WALK, in render cells. */
-const ORBIT_MIN_DISTANCE = 2
 /**
  * The WALK eye's distance from the avatar's centre, in render cells: as good
  * as at it, and far enough off it that the orbit still has a direction to

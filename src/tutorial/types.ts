@@ -55,6 +55,12 @@ export interface TutorialStep {
    * chest); 'chain' is the chain chip (spectating a friend's history).
    */
   keepChips?: Array<'found' | 'chain'>
+  /**
+   * Who says the caption, by pubkey: their profile picture stands to the left
+   * of it, from the profile cache (hud/ProfileBadge ProfilePic), with the
+   * colour-and-initial face until it loads. Nothing waits on it.
+   */
+  speaker?: string
   /** A picture under the caption (T2: one or two lines plus a picture), by its path under public/. */
   image?: { src: string; alt: string }
   /** A longer explanation behind an EXPLAIN pill (T2); never shown unasked. */
@@ -77,6 +83,13 @@ export interface TutorialStep {
   needsWalk?: string
   /** A registered effect run as the step comes up (store/useTutorial.ts registerTutorialEffect). */
   effect?: string
+  /**
+   * A registered effect run on this step's NEXT only, never on BACK or a
+   * choice (store/useTutorial.ts next): the ITEMS step closes the menu it
+   * opened, so on a phone the course is not behind it (feedback 2026-11-12,
+   * item 15).
+   */
+  onNext?: string
   /** A button in the coach that runs a registered effect when tapped (OPEN WORKSHOP); nothing runs untapped. */
   action?: { label: string; effect: string }
   /**

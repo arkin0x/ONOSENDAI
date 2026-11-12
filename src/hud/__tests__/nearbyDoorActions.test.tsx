@@ -169,9 +169,9 @@ describe('a door row in DISCOVERED NEARBY', () => {
 })
 
 describe('a chest row in DISCOVERED NEARBY', () => {
-  it('is as it was: VIEW alone in the row’s end, OPEN in the chest’s head, nothing when nothing held opens it', async () => {
+  it('has OPEN beside VIEW, VIEW on the right, when something held opens it, and VIEW alone when nothing does (tutorial feedback 2026-11-12, item 2)', async () => {
     const held = await row(await found({ door: false, held: true }))
-    expect(actions(held)).toEqual(['VIEW'])
+    expect(actions(held)).toEqual(['OPEN', 'VIEW'])
     expect(held.buttons(/^OPEN$/)).toHaveLength(1)
     await held.unmount()
     useInventory.setState({ items: {} })

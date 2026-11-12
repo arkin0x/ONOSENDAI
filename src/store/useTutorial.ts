@@ -330,6 +330,7 @@ export const useTutorial = create<TutorialState>((set, get) => {
         get().end('finished')
         return
       }
+      if (step?.onNext) runTutorialEffect(step.onNext)
       let i = s.index + 1
       while (i < s.script.steps.length && s.script.steps[i].branch) i++
       if (i < s.script.steps.length) enter(i, s.index)

@@ -71,23 +71,50 @@ export function toWorld(frame: Frame, f: number, r: number, u: number): Position
   }
 }
 
+/** A world point in the box's frame: `toWorld` undone, in whole gibsons. */
+export function toFrame(frame: Frame, p: Position): { f: number; r: number; u: number } {
+  const b = frame.boxBase
+  return {
+    f: Number(frame.fwd === 1 ? p.z - b.z : b.z + 7n - p.z),
+    r: Number(frame.side === 1 ? p.x - b.x : b.x + 7n - p.x),
+    u: Number(p.y - b.y),
+  }
+}
+
+const within = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n))
+
 /**
- * The gibson next to the frame's (f, r, u) on the side `from` lies, in the
- * world: each axis steps one toward `from` where the direction to it leans
- * that way (the unit vector, rounded), so a move from `from` ends facing
- * (f, r, u) as nearly as one gibson's choice allows (feedback item 4: land in
- * front of the chest, facing it).
+ * The treasure chest's cell, in the box's frame: a little toward the near
+ * side (f 3), so it shows from the way in, and in line with the spawn (its
+ * r, and its u, its height), inside the box (0 to 7; only a box lifted a
+ * cube off the spawn's needs the height kept in). The first move from the
+ * spawn then comes straight at the chest along the forward axis.
  */
-export function besideToward(frame: Frame, f: number, r: number, u: number, from: Position): Position {
-  const at = toWorld(frame, f, r, u)
-  // `from` in the frame's own terms: forward, side, up, relative to (f, r, u).
-  const df = Number(frame.fwd === 1 ? from.z - at.z : at.z - from.z)
-  const dr = Number(frame.side === 1 ? from.x - at.x : at.x - from.x)
-  const du = Number(from.y - at.y)
-  const len = Math.hypot(df, dr, du)
-  if (len === 0) return toWorld(frame, f - 1, r, u)
-  const step = (d: number): number => Math.round(d / len)
-  return toWorld(frame, f + step(df), r + step(dr), u + step(du))
+export function chestCell(layout: Pick<TutorialLayout, 'frame' | 'spawn'>): { f: number; r: number; u: number } {
+  const s = toFrame(layout.frame, layout.spawn)
+  return { f: 3, r: within(s.r, 0, 7), u: within(s.u, 0, 7) }
+}
+
+/**
+ * Where the first move lands (tutorial feedback 2026-11-12, item 1): level
+ * with the chest, two gibsons from it along one axis, so one empty gibson
+ * lies between, inside the box (whose region holds the chest's key). In
+ * front of it, toward the spawn, for a player at the spawn: the move runs
+ * straight at the chest at its height, and the avatar, which turns to face
+ * the way it moved (lib/facing.ts), ends looking at it. For a player
+ * elsewhere (`from`, a RESTART from the course, say), the side of the chest
+ * nearest them, so the move still ends facing the chest as nearly as one
+ * axis allows.
+ */
+export function arrivalCell(layout: Pick<TutorialLayout, 'frame' | 'spawn'>, from: Position = layout.spawn): { f: number; r: number; u: number } {
+  const c = chestCell(layout)
+  const p = toFrame(layout.frame, from)
+  const sides = [{ f: c.f - 2, r: c.r }, { f: c.f + 2, r: c.r }, { f: c.f, r: c.r - 2 }, { f: c.f, r: c.r + 2 }]
+    .filter((a) => a.r >= 0 && a.r <= 7)
+  const far = (a: { f: number; r: number }): number => (a.f - p.f) ** 2 + (a.r - p.r) ** 2
+  // In front of the chest unless another side is strictly nearer.
+  const best = sides.reduce((a, b) => (far(b) < far(a) ? b : a))
+  return { ...best, u: c.u }
 }
 
 /** The world box a frame's footprint covers, lowest and highest gibson, inclusive. */

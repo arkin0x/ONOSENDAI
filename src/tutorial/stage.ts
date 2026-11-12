@@ -15,7 +15,7 @@
  *   - the box bag (the blue box's own height-3 region): the treasure chest,
  *     locked to that region (DECK-0004 §3.8, the region's lock), so whoever
  *     stands in the box carries the key that opens it (store/useKeyring). In
- *     it: a shard, a message and the welcome item;
+ *     it: a shard, a message, the welcome item and the tutorial tree's DNA;
  *   - the finish bag (the finish deck's height-3 region): the finish chest,
  *     locked the same way, with course pieces to build a course of your own.
  *
@@ -43,7 +43,7 @@ import { DEFAULT_BAG_SETTINGS, HIDDEN_KIND, bagTemplate, chestInnerTemplate, mes
 import { sealEntries } from '../lib/chests'
 import { lockOf } from '../lib/locks'
 import type { Position } from '../lib/space'
-import { BOX_HEIGHT, regionBase, toWorld, type TutorialLayout } from './layout'
+import { BOX_HEIGHT, chestCell, regionBase, toWorld, type TutorialLayout } from './layout'
 import { BACK_STEP, CATCH_FLOOR, COURSE, FINISH_CHEST, PLOT, PLOT_AT, courseToWorld, type CoursePart } from './course'
 import trophyPayload from './pieces/trophy.json'
 import platSquare6 from './pieces/plat-square-6.json'
@@ -54,6 +54,7 @@ import trampoline from './pieces/trampoline-4.json'
 import flagCheckered from './pieces/flag-checkered.json'
 import padBounce from './pieces/pad-bounce-2.json'
 import welcomeItemSigned from './welcome-item.json'
+import { TUTORIAL_DNA_EVENT } from './dna'
 
 /** Each course piece's payload, by its name in tutorial/course.ts. */
 const PIECES: Record<CoursePart['piece'], unknown> = {
@@ -79,7 +80,7 @@ const REGION_REQUIRES = 'the key of a place'
  * without it still plays the same, and a bump would hand a player a new,
  * unopened chest.
  */
-export const STAGE_VERSION = 6
+export const STAGE_VERSION = 7
 
 /** One player's stage, by pubkey. */
 export const STAGE_PREFIX = 'onosendai:tutorial:stage:'
@@ -200,8 +201,10 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
   const b = frame.boxBase
   // The box's middle gibson, which the blue box is drawn around.
   const boxMiddle: Position = { x: b.x + 4n, y: b.y + 4n, z: b.z + 4n }
-  // The chest sits in the box, a little toward the near side, so it shows from the way in.
-  const chestAt = toWorld(frame, 3, 3, 3)
+  // The chest sits in the box, a little toward the near side, so it shows
+  // from the way in, level with the spawn and in line with it (chestCell).
+  const cell = chestCell(layout)
+  const chestAt = toWorld(frame, cell.f, cell.r, cell.u)
 
   // The finish chest, on the deck, in the deck's own height-3 region (course.ts).
   const finishAt = courseToWorld(frame, FINISH_CHEST)
@@ -223,7 +226,13 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
   const message = rumorOf(messageInnerTemplate(STAGE_TEXT.message, chestAt, plane, createdAt), guide)
   // The owner's own signed welcome item, embedded as theirs, not re-signed.
   const welcome = WELCOME_ITEM
-  const contents: BagEntry[] = [trophy, message, welcome]
+  // The tutorial tree's DNA beside it, the owner's published event placed
+  // unchanged, as DECK-0008 §8.1 asks of another author's DNA carried in a
+  // bag or chest (there, the one holding seeds planted from it; this chest
+  // carries it for the seed the player plants next, which §8.1 does not
+  // describe and nothing forbids): the player TAKEs it, and the plant step
+  // plants it from ITEMS (tutorial feedback 2026-11-12, item 8).
+  const contents: BagEntry[] = [trophy, message, welcome, TUTORIAL_DNA_EVENT]
   const chest = await chestOf(STAGE_TEXT.chestName, boxKey.key, chestAt, contents)
 
   // The finish chest's: pieces to build with, and a line on what they are for.
@@ -235,10 +244,9 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
 
   const blueBox = await sign(shardInnerTemplate(boxModel(), boxMiddle, plane, createdAt))
   const course = await Promise.all(COURSE.map((part, i) => sign(shardInnerTemplate(pieceModel(PIECES[part.piece], `tutorial-course-${i}`), courseToWorld(frame, part.at), plane, createdAt))))
-  // The dirt plot (A5). The tutorial tree's DNA is not staged: a seed names
-  // the owner's published event (TUTORIAL_DNA_ID), or with no id a copy the
-  // player's SEED signs (tutorial/dna.ts); never one the guide signed, since
-  // a DNA's id names its signer.
+  // The dirt plot (A5). The tutorial tree's DNA is in the welcome chest as
+  // the owner signed it, never re-signed by the guide, since a DNA's id names
+  // its signer; a seed names that event (TUTORIAL_DNA_ID).
   const plot = await sign(shardInnerTemplate(pieceModel(PLOT, 'tutorial-plot'), toWorld(frame, PLOT_AT.f, PLOT_AT.r, PLOT_AT.u), plane, createdAt))
 
   const bags = await Promise.all([

@@ -34,6 +34,7 @@ import { CHEST_KIND, entryKey, innerAuthentic, isReference, readItem, sealedAsRu
 import { reachGibsons, type FitPoint } from './deployFit'
 import type { Position } from './space'
 import type { CarriedKey } from './keyringLocks'
+import { DNA_KIND } from './seeds/seedItem'
 
 /** A new key item: a fresh keypair under a name (B1 §3.1). The secret is shown to nobody; the public key is what chests are sealed to. */
 export function forgeKey(name: string, about = ''): KeyItem {
@@ -183,6 +184,8 @@ function readEntry(e: BagEntry, sealer: string | undefined): ChestEntry | null {
     // on the object itself, and a copy made in memory would inherit it.
     const plain = { pubkey: ev.pubkey, created_at: ev.created_at, kind: ev.kind, tags: ev.tags, content: ev.content }
     if (signed && !verifyEvent({ ...plain, id: ev.id, sig: ev.sig })) return null
+    // A DNA must be signed (DECK-0008 §8.1: its id and signature are its identity).
+    if (!signed && ev.kind === DNA_KIND) return null
     // An unsigned entry's id is its hash, whatever it claims: a claimed id
     // could otherwise stand in for a real item's in the inventory.
     const hash = signed ? ev.id : getEventHash(plain)

@@ -1304,8 +1304,15 @@ function loadShowTrail(): boolean {
   try { return localStorage.getItem(SHOW_TRAIL_KEY) !== '0' } catch { return true }
 }
 
+/**
+ * Region keys' cages (scene/SecretRegions.tsx) are off unless turned on
+ * (arkinox, 2026-11-12: "those are confusing people and cluttering the view,
+ * especially during the tutorial"). Only a saved '1', an explicit ON in
+ * SETTINGS, draws them; a device that never touched the switch saved nothing
+ * and now starts off. Nothing saved is rewritten.
+ */
 function loadShowSecrets(): boolean {
-  try { return localStorage.getItem(SHOW_SECRETS_KEY) !== '0' } catch { return true }
+  try { return localStorage.getItem(SHOW_SECRETS_KEY) === '1' } catch { return false }
 }
 
 /** One action per commit, or the whole route in order. */

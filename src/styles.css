@@ -8069,9 +8069,12 @@ select.avatars__input option:checked {
 .nearby__chip .presence__head svg { color: var(--accent); }
 /* VIEW on a Nearby Loot row: a button, not a label. */
 .nearby__view { flex: none; padding: 3px 9px; font-size: 8px; letter-spacing: 0.14em; }
-/* A door row's OPEN or CLOSE beside its VIEW, as tall (ItemRows ChestBlock actionsIn). */
-.nearby__acts { display: flex; gap: 6px; }
+/* A chest row's OPEN, or a door row's OPEN or CLOSE, beside its VIEW, VIEW on
+   the right: equal columns, so each is VIEW's size (ItemRows ChestBlock
+   actionsIn; tutorial feedback 2026-11-12, item 2). */
+.nearby__acts { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(max-content, 1fr); gap: 6px; align-items: stretch; }
 .nearby__door { display: contents; }
+.nearby__acts .chest__act, .nearby__acts .nearby__view { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 26px; padding: 0 9px; border-radius: 3px; }
 
 /* DISCOVERED NEARBY's tabs: each kind with its count, an empty one dimmed and still there. */
 .nearby__tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; flex: none; }
@@ -9681,6 +9684,9 @@ a.feed__act { text-decoration: none; }
 .chest__status { font-size: 9px; line-height: 1.4; color: var(--warn); }
 /* Under OPEN: which key you carry fits (DECK-0004 §3.8). */
 .chest__fits { font-size: 9px; line-height: 1.4; color: var(--ok); }
+/* The chest's card: OPEN or CLOSE across the card, under what opens it (tutorial feedback 2026-11-12, item 3). */
+.chest__below { display: flex; gap: 6px; padding-top: 4px; }
+.chest__below .chest__act { flex: 1 1 0; min-height: 36px; justify-content: center; text-align: center; font-size: 9px; border-radius: 6px; }
 /* The LOCK block: one for chests and doors. */
 .lock { display: flex; flex-direction: column; gap: 4px; }
 .lock .legend__label { margin: 0; }
@@ -9706,6 +9712,8 @@ a.feed__act { text-decoration: none; }
 .secret__badge--audio { color: #9fd0ff; }
 .secret__badge--seed { color: #6fe08a; }
 .chest__glyph--audio, .shards__type--audio { color: #9fd0ff; }
+/* A DNA taken out of a chest (DECK-0008 §8.1): the seed's green, what it is planted from. */
+.chest__glyph--dna { color: #6fe08a; }
 
 /* Hidden audio's card in the item modal (AudioCard, DECK-0007): the note's
    blue where a message has its warm yellow. */
@@ -10751,6 +10759,10 @@ html.tv-broadcast body { overflow: hidden; }
 .tutorial-choice__about { color: var(--dim); font-size: 11px; letter-spacing: 0; text-transform: none; }
 /* A transparent picture: no band behind it, a square at most 160 across, centered. */
 .tutorial__image { display: block; width: 160px; height: 160px; max-width: 100%; margin: 4px auto 0; object-fit: contain; }
+/* Who says the caption: their picture to its left, top-aligned with its first line (feedback 2026-11-12, item 11). */
+.tutorial__speaker { display: flex; align-items: flex-start; gap: 10px; }
+.tutorial__speaker .pfp { flex: none; margin-top: 2px; }
+.tutorial__speaker .demo__caption { flex: 1 1 auto; min-width: 0; margin: 0; }
 .tutorial-card__go--done { background: none; color: var(--dim); border-color: var(--border); }
 .tutorial__note { margin: 0; color: var(--warn); font-size: 12px; }
 .tutorial__note:empty { position: absolute; }

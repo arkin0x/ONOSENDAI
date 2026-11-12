@@ -46,9 +46,10 @@ export const TUTORIAL_DNA_ID = '75156b56dda84154f42581a097dd14691c60550088cafa9a
 /**
  * The owner's published event itself, signed, as the relays hold it
  * (moon-blossom-v2-published.json; its id is TUTORIAL_DNA_ID). It ships with
- * the app so the plant step needs no relay for it: the director notes it on
- * this device (lib/seeds/seedSources dnaResolver, which checks its signature)
- * before resolving the id.
+ * the app and is staged in the welcome chest (tutorial/stage.ts); the plant
+ * step plants the copy the player took from there, noted on this device
+ * (lib/seeds/seedSources dnaResolver, which checks its signature) before
+ * resolving the id, so no relay is needed for it.
  */
 export const TUTORIAL_DNA_EVENT: NostrEvent = moonBlossomPublished
 

@@ -38,7 +38,7 @@
  */
 
 import type { Frame } from './layout'
-import { toWorld } from './layout'
+import { toFrame, toWorld } from './layout'
 import type { Position } from '../lib/space'
 
 /** The course's origin in the box frame. */
@@ -159,6 +159,26 @@ export function onPlot(frame: Frame, at: Position): boolean {
     if (at[k] < lo || at[k] > hi) return false
   }
   return true
+}
+
+/**
+ * Where the plant step puts the build cursor (tutorial feedback 2026-11-12,
+ * item 6): on the dirt, beside the player rather than on or under them. The
+ * cell to one side of where they stand, else to the other, else ahead or
+ * behind: the first of those on the plot, at the plot's standing height,
+ * where a seed sits on the dirt. A side first, because the view looks along
+ * the forward axis (the layout's forward is the starting view's +Z), and a
+ * cell ahead would sit right behind the avatar on screen. Null when the
+ * player is not on the plot.
+ */
+export function plantCell(frame: Frame, at: Position): Position | null {
+  if (!onPlot(frame, at)) return null
+  const p = toFrame(frame, at)
+  for (const [df, dr] of [[0, 1], [0, -1], [1, 0], [-1, 0]] as const) {
+    const cell = toWorld(frame, p.f + df, p.r + dr, PLOT_STAND.u)
+    if (onPlot(frame, cell)) return cell
+  }
+  return null
 }
 
 /** The catch floor: x -7 to 7 and z -12 to 37 of the course (cells), its origin at course z 13, reaching behind the step. */

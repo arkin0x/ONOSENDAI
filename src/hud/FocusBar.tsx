@@ -26,13 +26,14 @@ export const FREE_VIEW_LABEL = 'A COORD'
  * a starred place or a person (arkinox, 2026-11-03, ruled): then the name,
  * for as long as the cursor is on the very place the name was given for, in
  * its plane (CyberFocus.named). Driven off it, re-anchored past it or turned
- * to the other plane, it is A COORD again.
+ * to the other plane, it is A COORD again. A /C/ prefix's name holds in both
+ * planes (named.plane null): the region is the same box in each.
  */
 export function viewingLabel(focus: CyberFocus | null, cursor: Position, plane: number): string | null {
   if (focus === null) return null
   if (!focus.drive) return focus.label
   const at = focus.named
-  const onIt = at !== undefined && at.position.x === cursor.x && at.position.y === cursor.y && at.position.z === cursor.z && at.plane === plane
+  const onIt = at !== undefined && at.position.x === cursor.x && at.position.y === cursor.y && at.position.z === cursor.z && (at.plane === null || at.plane === plane)
   return onIt && focus.label.trim() !== '' ? focus.label : FREE_VIEW_LABEL
 }
 

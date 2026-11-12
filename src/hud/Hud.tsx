@@ -9,7 +9,8 @@ import { formatBig, formatStep } from '../lib/space'
 import { formatCellSizeLong } from 'sno-core/scale'
 import { geocode } from '../lib/geocode'
 import { canonicalViewAt, forgetView, parseViewAt, readRecentViews, rememberView, RECENT_VIEWS_EVENT, RECENT_VIEWS_KEY, type RecentView, type ViewTarget } from '../lib/viewAt'
-import { coordLink, placeHex } from '../lib/coordRoute'
+import { coordLink, placeHex, typedCoordRoute } from '../lib/coordRoute'
+import { openCoordLink } from '../store/useCoordRoute'
 import { useCyberspace, type CyberspaceState } from '../store/useCyberspace'
 import { sectorTag, xyzToSectorId, type Plane } from 'cyberspace-core'
 import type { Position } from '../lib/space'
@@ -298,6 +299,14 @@ export function ViewAtPanel(): JSX.Element {
     const typed = viewText.trim()
     const target = parseViewAt(typed, lookedPlane)
     if (target) { setViewBad(false); look(typed, target); return }
+    // A /C/ link, or its hex: a region opens as the link does, the address
+    // and all (openCoordLink); a whole coordinate is the point, as typed hex is.
+    // A link that names no coordinate is refused here, never sent to the lookup.
+    const link = typedCoordRoute(typed)
+    if (link?.kind === 'prefix') { setViewBad(false); setViewNote(null); openCoordLink(link.hex); return }
+    const point = link?.kind === 'full' ? parseViewAt(link.hex, lookedPlane) : null
+    if (link?.kind === 'full' && point) { setViewBad(false); setViewNote(null); look(link.hex, point); return }
+    if (link) { setViewBad(true); setViewNote(`No place found for "${typed}".`); return }
     if (!/[a-z]/i.test(typed)) { setViewBad(true); return }
     setFinding(true)
     setViewNote(null)

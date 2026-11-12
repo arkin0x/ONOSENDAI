@@ -82,6 +82,30 @@ describe('region mode, a tool inside VIEW', () => {
     expect(region().prefix).toBe(entryPrefix)
   })
 
+  it('lasts through a plane switch: same prefix, and X keeps the plane the view is in', () => {
+    cs().viewHere()
+    region().enter()
+    const entryPrefix = region().prefix
+    const before = cs().anchorPlane
+    const right = cs().axes().right
+    for (let i = 0; i < 20; i++) cs().moveCursor({ axis: right.axis, dir: right.dir as 1 | -1 })
+    const grown = region().prefix
+
+    cs().togglePlane()
+    const after = cs().anchorPlane
+    expect(after).not.toBe(before)
+    expect(cs().viewing()).toBe(true)
+    expect(region().active).toBe(true)
+    expect(region().prefix).toBe(grown)
+
+    // X back to the entry cell: the view stays on the new plane.
+    region().collapseToEntry()
+    expect(cs().cursor).toEqual(region().entry)
+    expect(region().prefix).toBe(entryPrefix)
+    expect(cs().anchorPlane).toBe(after)
+    expect(cs().focus?.plane).toBe(after)
+  })
+
   it('folds when VIEW ends', () => {
     cs().viewHere()
     region().enter()

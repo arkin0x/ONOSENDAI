@@ -44,7 +44,11 @@ vi.mock('zustand', async (importOriginal) => {
   return { ...real, create: (init?: Parameters<typeof real.create>[0]) => (init === undefined ? live : live(init)) }
 })
 
-import { Hud, PositionPanel, ViewAtPanel, viewedPlace } from '../Hud'
+vi.mock('../../lib/geocode', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../lib/geocode')>()), geocode: vi.fn(async () => null) }))
+
+import { Hud, PositionPanel, ViewAtPanel, useViewDraft, viewedPlace } from '../Hud'
+import { geocode } from '../../lib/geocode'
+import { useCoordRoute } from '../../store/useCoordRoute'
 import { PanelSlot } from '../PanelSlot'
 import { FREE_VIEW_LABEL, viewingLabel } from '../FocusBar'
 import { viewStarred } from '../StarredPlaceCard'
@@ -306,5 +310,82 @@ describe('the VIEWING chip (arkinox, 2026-11-03, ruled)', () => {
   it('a fixed look still says what it looks at', () => {
     cs().focusOn({ x: 7n, y: 8n, z: 9n }, 0, 'BLOCK 3')
     expect(label()).toBe('BLOCK 3')
+  })
+})
+
+describe("View's box takes a /C/ region (arkinox, 2026-11-12)", () => {
+  const MIDWEST = '56db6db6db6db6db6db6dbad'
+  const loc = { pathname: '/', search: '', hash: '' }
+  const history = {
+    pushState: vi.fn((_d: unknown, _t: string, url: string) => { loc.pathname = url }),
+    replaceState: vi.fn((_d: unknown, _t: string, url: string) => { loc.pathname = url }),
+  }
+  beforeEach(() => {
+    cs().clearFocus()
+    useCoordRoute.setState({ region: null, label: null })
+    useCyberspace.setState({ plane: 0, anchorPlane: 0 })
+    loc.pathname = '/'
+    history.pushState.mockClear()
+    history.replaceState.mockClear()
+    vi.mocked(geocode).mockClear()
+    ;(globalThis as { window?: unknown }).window = { location: loc, history }
+  })
+  afterEach(() => {
+    cs().clearFocus()
+    useCyberspace.setState({ plane: 0, anchorPlane: 0 })
+    delete (globalThis as { window?: unknown }).window
+  })
+
+  /** Type into the box and press VIEW. */
+  async function submit(text: string): Promise<void> {
+    useViewDraft.getState().setText(text)
+    const form = findAll(tree(ViewAtPanel), (p) => typeof p.onSubmit === 'function')[0]
+    expect(form).toBeDefined()
+    ;(form.props.onSubmit as (e: { preventDefault: () => void }) => void)({ preventDefault: () => {} })
+    await new Promise((r) => setTimeout(r, 0))
+  }
+
+  it('the owner\'s prefix opens its region as the link does: the address, the box, dataspace; no place lookup, no reload', async () => {
+    useCyberspace.setState({ plane: 1, anchorPlane: 1 })
+    await submit(MIDWEST)
+    expect(geocode).not.toHaveBeenCalled()
+    expect(history.pushState).toHaveBeenCalledWith({ onosendaiCoord: 1 }, '', `/C/${MIDWEST}`)
+    expect(useCoordRoute.getState().region?.prefix).toBe(MIDWEST)
+    expect(cs().focus?.label).toBe(`C/${MIDWEST}`)
+    expect(cs().anchorPlane).toBe(0)
+  })
+
+  it('takes C/, /C/ and a whole link too', async () => {
+    for (const typed of [`C/${MIDWEST}`, `/C/${MIDWEST}`, `https://www.onosendai.tech/C/${MIDWEST}`]) {
+      cs().clearFocus()
+      history.pushState.mockClear()
+      await submit(typed)
+      expect(history.pushState, typed).toHaveBeenCalledWith({ onosendaiCoord: 1 }, '', `/C/${MIDWEST}`)
+      expect(useCoordRoute.getState().region?.prefix, typed).toBe(MIDWEST)
+    }
+  })
+
+  it('a full coordinate is still the point, with no link opened', async () => {
+    const full = placeHex({ x: 4n, y: 5n, z: 6n }, 0)
+    await submit(full)
+    expect(history.pushState).not.toHaveBeenCalled()
+    expect(useCoordRoute.getState().region).toBeNull()
+    expect(cs().focus?.position).toEqual({ x: 4n, y: 5n, z: 6n })
+  })
+
+  it('a link that is not valid hex is refused (No place found) and never sent to the place lookup', async () => {
+    for (const typed of ['C/56zz', 'https://www.onosendai.tech/C/zz']) {
+      await submit(typed)
+      expect(history.pushState, typed).not.toHaveBeenCalled()
+      expect(useCoordRoute.getState().region, typed).toBeNull()
+      expect(cs().focus, typed).toBeNull()
+    }
+    expect(geocode).not.toHaveBeenCalled()
+  })
+
+  it('a bare number is not a region', async () => {
+    await submit('55401')
+    expect(history.pushState).not.toHaveBeenCalled()
+    expect(useCoordRoute.getState().region).toBeNull()
   })
 })

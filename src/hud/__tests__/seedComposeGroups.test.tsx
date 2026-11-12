@@ -45,6 +45,8 @@ describe('SEED\'s DNA list', () => {
       expect(names, g).toEqual(SEED_DNAS.filter((d) => d.group === g).map((d) => d.name.toUpperCase()))
     })
     expect(select.trimEnd().endsWith('<option value="paste">PASTE</option>')).toBe(true)
+    // PASTE is a button beside the list too, as it was before the list.
+    expect(html).toMatch(/<button aria-pressed="false" class="seedc__pick ">PASTE<\/button>/)
   })
 
   it('opens on the first original DNA, at its own size limit (LARGE)', () => {

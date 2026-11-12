@@ -568,9 +568,9 @@ describe('the engine', () => {
     const owned = { vertices: 2048, symbols: 2048, generations: 32 }
     expect(tutorialDnaId(id)).toBe(id)
     expect(tutorialSeedDraft(id, owned)).toEqual({ text: TUTORIAL_DNA.text, caps: owned, scale: 0, title: '', dnaId: id })
-    // The tree is not one of the original DNAs (the composer offers those); the plant button lines it up instead.
-    const { ORIGINAL_DNAS } = await import('../../lib/seeds/originalDnas')
-    expect(ORIGINAL_DNAS.some((d) => d.text === TUTORIAL_DNA.text)).toBe(false)
+    // The tree is not one of the DNAs SEED lists (the composer offers those); the plant button lines it up instead.
+    const { SEED_DNAS } = await import('../../lib/seeds/seedDnas')
+    expect(SEED_DNAS.some((d) => d.text === TUTORIAL_DNA.text)).toBe(false)
     const { existsSync } = await import('node:fs')
     const { join } = await import('node:path')
     expect(existsSync(join(__dirname, '../../../public', TUTORIAL_BUD_PICTURE))).toBe(true)

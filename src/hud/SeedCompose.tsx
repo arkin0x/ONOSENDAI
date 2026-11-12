@@ -183,14 +183,17 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
 
   return (
     <div className="shards__compose seedc">
-      <select className="avatars__input compose__select seedc__select" value={String(pick)} onChange={(e) => { setPick(e.target.value === 'paste' ? 'paste' : Number(e.target.value)); setCapsPick(null) }} aria-label="DNA">
-        {DNA_GROUPS.map((g) => (
-          <optgroup key={g} label={g.toUpperCase()}>
-            {SEED_DNAS.map((d, i) => d.group === g && <option key={d.name} value={i}>{d.name.toUpperCase()}</option>)}
-          </optgroup>
-        ))}
-        <option value="paste">PASTE</option>
-      </select>
+      <div className="seedc__row">
+        <select className="avatars__input seedc__select" value={String(pick)} onChange={(e) => { setPick(e.target.value === 'paste' ? 'paste' : Number(e.target.value)); setCapsPick(null) }} aria-label="DNA">
+          {DNA_GROUPS.map((g) => (
+            <optgroup key={g} label={g.toUpperCase()}>
+              {SEED_DNAS.map((d, i) => d.group === g && <option key={d.name} value={i}>{d.name.toUpperCase()}</option>)}
+            </optgroup>
+          ))}
+          <option value="paste">PASTE</option>
+        </select>
+        <button aria-pressed={pick === 'paste'} className={`seedc__pick ${pick === 'paste' ? 'is-on' : ''}`} onClick={() => { setPick('paste'); setCapsPick(null) }}>PASTE</button>
+      </div>
 
       {pick === 'paste' && (
         <>

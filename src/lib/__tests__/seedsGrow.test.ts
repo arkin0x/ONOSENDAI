@@ -128,7 +128,7 @@ describe('the engine, from a seed to a drawn bloom', () => {
         for (const h of heights) { const t = times.get(h); if (t !== undefined) book.add({ height: h, hash: synthetic(h), time: t }) }
         book.markAbsent(heights)
       },
-      tip: () => (o.tip === undefined ? 970524 + 3 * 144 + 6 : o.tip),
+      tip: () => (o.tip === undefined ? 970524 + 3 * 144 : o.tip),
       grow: o.grow ?? grow,
       budget: o.budget ?? DESKTOP_BUDGET,
       onView: (id, v) => views.set(id, v),
@@ -157,6 +157,31 @@ describe('the engine, from a seed to a drawn bloom', () => {
     const bloom = growBloom(parseDna(crystal.content), { coord: seed.coord, planted: 970524, scale: 0 }, v.clock!, synthetic)
     expect({ ...v.shard!, id: 'x' }).toEqual(modelOfPayload(bloom.sno, 'x'))
     for (const k of [1, 2, 3]) expect(fetched).toContain(970524 + k * 144)
+  })
+
+  it('its clock is the trusted tip, NTH\'s newest anchor, never 6 below it; no generation reads a block above the clock', async () => {
+    // The trusted tip puts the third driving block, 970,524 + 3 x 144, exactly at the clock.
+    const tip = 970524 + 3 * 144
+    const { engine, views, fetched, grow } = engineFor([crystal], { tip })
+    engine.want([seed])
+    await settle(engine, seed.id)
+    const v = views.get(seed.id)!
+    expect(v.clock).toBe(tip)
+    expect(v.growth?.generation).toBe(3)
+    // The clock block's own hash drives generation 3, and is fetched like any other.
+    expect(fetched).toContain(tip)
+    expect(Math.max(...fetched)).toBeLessThanOrEqual(tip)
+    for (const [req] of grow.mock.calls) {
+      expect(req.clock).toBe(tip)
+      for (const h of Object.keys(req.hashes)) expect(Number(h)).toBeLessThanOrEqual(tip)
+    }
+    // One block less and the third day has not come: its driving block is above the clock, and is not read.
+    const before = engineFor([crystal], { tip: tip - 1 })
+    before.engine.want([seed])
+    await settle(before.engine, seed.id)
+    expect(before.views.get(seed.id)).toMatchObject({ clock: tip - 1, growth: { generation: 2 } })
+    expect(before.fetched).not.toContain(tip)
+    for (const [req] of before.grow.mock.calls) expect(Object.keys(req.hashes).map(Number)).not.toContain(tip)
   })
 
   it('a slice that made no progress is followed by one that grows it whole; a forgotten seed stops', async () => {
@@ -239,7 +264,7 @@ describe('the engine, from a seed to a drawn bloom', () => {
   }, 60_000) // two seeds mined at 16 bits
 
   it('before its planted height settles, it is drawn as its axiom, pending', async () => {
-    const { engine, views } = engineFor([crystal], { tip: honest.not_settled_at_clock + 6 })
+    const { engine, views } = engineFor([crystal], { tip: honest.not_settled_at_clock })
     engine.want([seed])
     await settle(engine, seed.id)
     expect(views.get(seed.id)).toMatchObject({ status: 'pending', growth: { generation: 0 } })

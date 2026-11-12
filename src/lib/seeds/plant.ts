@@ -11,8 +11,9 @@
  * every item in a bag does.
  */
 
-import { BASE_CAPS, BLOCKS_PER_GENERATION, capsPrice, clockHeight, sha256Hex, tryParseDna, workOk, type Caps } from 'sno-core/seeds'
+import { BASE_CAPS, BLOCKS_PER_GENERATION, capsPrice, sha256Hex, tryParseDna, workOk, type Caps } from 'sno-core/seeds'
 import type { GrowRequest } from './growJob'
+import { clockAtAnchor } from './seedClock'
 import { fitHeightAll, fitsAt } from '../deployFit'
 import { deployPoint, type Position } from '../space'
 import { expectedTries, triesPerSec } from '../avatarMine'
@@ -178,12 +179,13 @@ export function previewHash(height: number): string {
  * made-up hashes where it does not (it fetches none, so a DNA of 128 days,
  * planted about four months back, mostly grows on made-up ones): a preview
  * shows the kind of thing a DNA grows, and the real bloom starts from the
- * block it is planted at.
+ * block it is planted at. `tip` is the height of the newest anchor the page
+ * holds, already 6 deep, so it is the clock block (seedClock clockAtAnchor).
  */
 export function previewRequest(o: { text: string; caps: Caps; coord: string; scale: number; tip: number; day: number; hashOf: (h: number) => string | null | undefined }): Omit<GrowRequest, 'id' | 'type'> {
   const N = BLOCKS_PER_GENERATION
   const last = previewLastDay(o.caps)
-  const planted = clockHeight(o.tip) - last * N - (N - 1)
+  const planted = clockAtAnchor(o.tip) - last * N - (N - 1)
   const day = Math.max(0, Math.min(last, Math.floor(o.day)))
   const clock = planted + day * N + (N - 1)
   const hashes: Record<number, string> = {}

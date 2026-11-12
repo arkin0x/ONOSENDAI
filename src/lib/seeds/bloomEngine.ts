@@ -10,9 +10,11 @@
  *      coming soon; one missing or refused says so.
  *   3. Its work is checked against its DNA's price (sno-core workOk): a seed
  *      that paid less than its DNA asks is skipped, never grown (§7).
- *   4. The clock is the trusted tip minus 6 (§4.1): NTH's newest verified
- *      anchor (seedSources.ts), never the stop index, which any key's kind
- *      321 can fill. The planted height is clamped with header times
+ *   4. The clock is the trusted tip (§4.1): NTH's newest verified anchor
+ *      (seedSources.ts), never the stop index, which any key's kind 321 can
+ *      fill. NTH publishes a block only once it is 6 deep, so the anchor is
+ *      the clock block as it stands, never 6 more below it (seedClock
+ *      clockAtAnchor). The planted height is clamped with header times
  *      (seedClock.ts). Until it is settled the seed draws as its axiom,
  *      generation 0 (§4.2).
  *   5. A DNA whose caps could pass this device's budget (bloomBudget.ts) also
@@ -29,12 +31,12 @@
  * against mock relays and injected headers.
  */
 
-import { BLOCKS_PER_GENERATION, clockHeight, targetGeneration, workOk, type BloomGrowth } from 'sno-core/seeds'
+import { BLOCKS_PER_GENERATION, targetGeneration, workOk, type BloomGrowth } from 'sno-core/seeds'
 import type { ShardModel } from 'sno-core/shards'
 import type { SeedItem } from './seedItem'
 import type { DnaResolver, DnaVerdict } from './dnaStore'
 import type { HeaderBook } from './headerBook'
-import { settlePlanted, type HeaderFetch } from './seedClock'
+import { clockAtAnchor, settlePlanted, type HeaderFetch } from './seedClock'
 import { SLICE_STEPS, tooHeavy } from './bloomBudget'
 import { bloomShard } from './bloomShard'
 import type { GrowRequest, PlantingWire, SeedsResponse } from './growJob'
@@ -75,7 +77,7 @@ export interface BloomDeps {
   dna: Pick<DnaResolver, 'resolve' | 'verdict'>
   book: HeaderBook
   fetchHeaders: HeaderFetch
-  /** The trusted tip height of the Bitcoin line, or null before it is known. */
+  /** The trusted tip: the height of NTH's newest verified anchor, already 6 deep (seedClock clockAtAnchor), or null before one is known. */
   tip: () => number | null
   /** One request to the seeds worker (growClient growInWorker). */
   grow: (req: Omit<GrowRequest, 'id' | 'type'>) => Promise<SeedsResponse>
@@ -222,7 +224,7 @@ export class BloomEngine {
       this.set(id, { seedId: id, status: 'no-clock', dna })
       return
     }
-    const clock = clockHeight(tip)
+    const clock = clockAtAnchor(tip)
     const planted = await settlePlanted(seed.planted, seed.createdAt, clock, this.deps.book, this.deps.fetchHeaders)
     if (planted.state === 'cannot-grow') {
       this.set(id, { seedId: id, status: 'cannot-grow', dna, clock })

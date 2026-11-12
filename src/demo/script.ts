@@ -252,8 +252,9 @@ export const DEMO_SCRIPT: DemoScript = {
     {
       id: 'region-keys', chapter: 'hidden', title: 'Places have keys',
       caption: 'Every aligned region has a key derived from its Cantor root. The green boxes represent regions you have the keys for.',
-      // 2^0, where the regions of the tour's own small hops are drawn (SecretRegions).
-      scene: { target: 'self', scale: 0 },
+      // 2^0, where the regions of the tour's own small hops are drawn (SecretRegions),
+      // the cages shown on this step though Region keys is off by default.
+      scene: { target: 'self', scale: 0, regionKeys: true },
     },
     {
       id: 'district', chapter: 'hidden', title: 'The demo district',

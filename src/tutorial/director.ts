@@ -225,7 +225,7 @@ registerTutorialWatcher('open-chest', (onDone) => watchUntil(() => {
  */
 export function heldTutorialDna(): NostrEvent | null {
   const it = useInventory.getState().items[TUTORIAL_DNA_EVENT.id]
-  return it && !it.cleared && it.type === 'dna' && it.event.id === TUTORIAL_DNA_EVENT.id ? it.event : null
+  return it && !it.cleared && it.type === 'dna' ? it.event : null
 }
 
 /** Taken: the moon blossom's DNA, the thing the plant step plants, is in ITEMS (item 8). */
@@ -253,13 +253,14 @@ onTutorialLifecycle({
  * of it with one empty gibson between (tutorial feedback 2026-11-12, item 1):
  * the chest stands in line with the spawn (layout.ts chestCell), so one
  * COMMIT from there runs straight at it at its own height, and the avatar,
- * which turns to face the way it moved (lib/facing.ts), ends looking at it.
- * While the step is up the camera idles a slow spin around the cursor
- * (feedback item 14); it stops when the step moves on.
+ * which turns to face the way it moved (lib/facing.ts), ends looking at it;
+ * from anywhere else, the chest's side nearest the player. While the step is
+ * up the camera idles a slow spin around the cursor (feedback item 14); it
+ * stops when the step moves on.
  */
 registerTutorialEffect('aim-box', () => {
   setTutorialSpin(true)
-  const off = aimOnce((layout) => { const a = arrivalCell(layout); return toWorld(layout.frame, a.f, a.r, a.u) })()
+  const off = aimOnce((layout) => { const a = arrivalCell(layout, useCyberspace.getState().position); return toWorld(layout.frame, a.f, a.r, a.u) })()
   return () => { setTutorialSpin(false); if (off) off() }
 })
 
@@ -394,8 +395,10 @@ export function copyTutorialShards(): string | null {
   }
   const folder = createFolderPath([TUTORIAL_FOLDER])
   if (folder && ids.length > 0) assignToFolder(ids, folder)
+  // The Trampoline, copied now or on an earlier run; else a piece found this run other than the green box.
   const open = TUTORIAL_SHARD_ID + OPEN_ON.toLowerCase()
-  return ids.includes(open) ? open : ids.find((id) => id !== `${TUTORIAL_SHARD_ID}green-box`) ?? ids[0] ?? null
+  if (useWorkshop.getState().shards.some((m) => m.id === open)) return open
+  return ids.find((id) => id !== `${TUTORIAL_SHARD_ID}green-box`) ?? ids[0] ?? null
 }
 
 /**
@@ -411,22 +414,33 @@ function tutorialWorkshop(opening: boolean): void {
   else { if (id) ws.select(id); useWorkshop.setState({ openPanel: 'menu' }) }
 }
 
-/** Set while OPEN WORKSHOP opens it, so the step's watch below does not set it up a second time. */
-let openingHere = false
+/**
+ * Whether this workshop step has set the workshop up already: only its first
+ * opening is pointed at a course piece with the MENU up, never a later one
+ * (back from a DEPLOY's CANCEL, a REMIX), which keeps the shard it names.
+ */
+let setUp = false
 
-/** OPEN WORKSHOP in the coach: the same workshop the menu's button opens, set up for the tutorial (item 10). */
+/** OPEN WORKSHOP in the coach: the same workshop the menu's button opens, set up for the tutorial the first time (item 10). */
 registerTutorialEffect('open-workshop', () => {
-  openingHere = true
-  try { tutorialWorkshop(true) } finally { openingHere = false }
+  if (setUp) { useWorkshop.getState().openWorkshop(); return }
+  setUp = true
+  tutorialWorkshop(true)
 })
 
-/** The workshop step: the found shards are copied in as it comes up, and a workshop opened any other way is set up the same (item 10). */
+/**
+ * The workshop step: the found shards are copied in as it comes up (again as
+ * the workshop opens, by then all found), and its first opening by any way is
+ * set up the same (item 10).
+ */
 registerTutorialEffect('workshop-step', () => {
+  setUp = false
   copyTutorialShards()
-  // A reload into this step stages again, a moment later: copied once it is in.
-  const offStage = useTutorialStage.subscribe((s, prev) => { if (s.stage && s.stage !== prev.stage) copyTutorialShards() })
-  const offOpen = useWorkshop.subscribe((s, prev) => { if (s.open && !prev.open && !openingHere) tutorialWorkshop(false) })
-  return () => { offStage(); offOpen() }
+  return useWorkshop.subscribe((s, prev) => {
+    if (!s.open || prev.open || setUp) return
+    setUp = true
+    tutorialWorkshop(false)
+  })
 })
 
 /**

@@ -227,10 +227,11 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
   // The owner's own signed welcome item, embedded as theirs, not re-signed.
   const welcome = WELCOME_ITEM
   // The tutorial tree's DNA beside it, the owner's published event placed
-  // unchanged (DECK-0008 §8.1: a DNA MAY be carried as an item in a chest,
-  // and one of another author's is placed unchanged): the player TAKEs it,
-  // and the plant step plants it from ITEMS (tutorial feedback 2026-11-12,
-  // item 8). It ships with the app either way (dna.ts TUTORIAL_DNA_EVENT).
+  // unchanged, as DECK-0008 §8.1 asks of another author's DNA carried in a
+  // bag or chest (there, the one holding seeds planted from it; this chest
+  // carries it for the seed the player plants next, which §8.1 does not
+  // describe and nothing forbids): the player TAKEs it, and the plant step
+  // plants it from ITEMS (tutorial feedback 2026-11-12, item 8).
   const contents: BagEntry[] = [trophy, message, welcome, TUTORIAL_DNA_EVENT]
   const chest = await chestOf(STAGE_TEXT.chestName, boxKey.key, chestAt, contents)
 

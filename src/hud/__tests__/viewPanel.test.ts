@@ -228,11 +228,11 @@ describe('the Settings panel', () => {
     viewSwitch('view-region-keys').props.onCheckedChange(false)
     expect(useCyberspace.getState().showSecrets).toBe(false)
     expect(localStorage.getItem('onosendai:showSecrets')).toBe('0')
-    // Left on for the next test, which starts from every switch on.
-    viewSwitch('view-region-keys').props.onCheckedChange(true)
   })
 
   it('touches no other flag: each switch changes only its own', () => {
+    // From every switch on (Region keys starts off: turned on first).
+    useCyberspace.getState().setShowSecrets(true)
     const flags = () => ({ ...useLayers.getState(), trail: useCyberspace.getState().showTrail, keys: useCyberspace.getState().showSecrets })
     const pick = ({ dots, boxes, trail, keys }: ReturnType<typeof flags>) => ({ dots, boxes, trail, keys })
     const all = { dots: true, boxes: true, trail: true, keys: true }

@@ -86,24 +86,35 @@ const within = (n: number, lo: number, hi: number): number => Math.min(hi, Math.
 /**
  * The treasure chest's cell, in the box's frame: a little toward the near
  * side (f 3), so it shows from the way in, and in line with the spawn (its
- * r, and its u, its height), kept a gibson inside the box. The first move
- * from the spawn then comes straight at the chest along the forward axis.
+ * r, and its u, its height), inside the box (0 to 7; only a box lifted a
+ * cube off the spawn's needs the height kept in). The first move from the
+ * spawn then comes straight at the chest along the forward axis.
  */
 export function chestCell(layout: Pick<TutorialLayout, 'frame' | 'spawn'>): { f: number; r: number; u: number } {
   const s = toFrame(layout.frame, layout.spawn)
-  return { f: 3, r: within(s.r, 1, 6), u: within(s.u, 1, 6) }
+  return { f: 3, r: within(s.r, 0, 7), u: within(s.u, 0, 7) }
 }
 
 /**
  * Where the first move lands (tutorial feedback 2026-11-12, item 1): level
- * with the chest, two gibsons in front of it along the forward axis, so one
- * empty gibson lies between. A move there from the spawn runs along that
- * axis at the chest's height, and the avatar, which turns to face the way it
- * moved (lib/facing.ts), ends looking at the chest.
+ * with the chest, two gibsons from it along one axis, so one empty gibson
+ * lies between, inside the box (whose region holds the chest's key). In
+ * front of it, toward the spawn, for a player at the spawn: the move runs
+ * straight at the chest at its height, and the avatar, which turns to face
+ * the way it moved (lib/facing.ts), ends looking at it. For a player
+ * elsewhere (`from`, a RESTART from the course, say), the side of the chest
+ * nearest them, so the move still ends facing the chest as nearly as one
+ * axis allows.
  */
-export function arrivalCell(layout: Pick<TutorialLayout, 'frame' | 'spawn'>): { f: number; r: number; u: number } {
+export function arrivalCell(layout: Pick<TutorialLayout, 'frame' | 'spawn'>, from: Position = layout.spawn): { f: number; r: number; u: number } {
   const c = chestCell(layout)
-  return { f: c.f - 2, r: c.r, u: c.u }
+  const p = toFrame(layout.frame, from)
+  const sides = [{ f: c.f - 2, r: c.r }, { f: c.f + 2, r: c.r }, { f: c.f, r: c.r - 2 }, { f: c.f, r: c.r + 2 }]
+    .filter((a) => a.r >= 0 && a.r <= 7)
+  const far = (a: { f: number; r: number }): number => (a.f - p.f) ** 2 + (a.r - p.r) ** 2
+  // In front of the chest unless another side is strictly nearer.
+  const best = sides.reduce((a, b) => (far(b) < far(a) ? b : a))
+  return { ...best, u: c.u }
 }
 
 /** The world box a frame's footprint covers, lowest and highest gibson, inclusive. */

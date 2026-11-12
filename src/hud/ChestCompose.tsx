@@ -39,7 +39,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CardSpin } from '../scene/CardSpin'
 import { readContents } from '../lib/chests'
-import { entryKey, keyItemOf, KEY_KIND, type BagEntry, type HiddenType, type KeyItem } from '../lib/hidden'
+import { entryKey, hiddenLabel, keyItemOf, KEY_KIND, type BagEntry, type HiddenType, type KeyItem } from '../lib/hidden'
 import { turnShard } from '../lib/turn'
 import { ItemFeedPicker } from './ItemFeedPicker'
 import { lockFromListing } from '../lib/itemListing'
@@ -185,7 +185,7 @@ export function sealedContents(entries: BagEntry[], sealer: string): ChestConten
     const r = typeof k === 'string' ? read.get(k) ?? [...read.values()].find((x) => (entry as { id?: string }).id === x.id) : undefined
     if (!r) { out.push({ kind: 'sealed', entry, label: 'something this client cannot read', type: 'message' }); continue }
     const body = r.body
-    const label = body.type === 'message' ? (findCashuToken(body.text ?? '') ? 'message with a cashu token' : (body.text ?? '').trim().replace(/\s+/g, ' ').slice(0, 48)) : body.type === 'shard' ? body.shard?.name ?? 'model' : body.type === 'key' ? body.key?.name ?? 'item' : body.type === 'audio' ? body.audio?.title ?? 'audio' : body.chest?.name ?? 'chest'
+    const label = body.type === 'message' ? (findCashuToken(body.text ?? '') ? 'message with a cashu token' : (body.text ?? '').trim().replace(/\s+/g, ' ').slice(0, 48)) : body.type === 'shard' ? body.shard?.name ?? 'model' : body.type === 'key' ? body.key?.name ?? 'item' : body.type === 'audio' ? body.audio?.title ?? 'audio' : body.type === 'chest' ? body.chest?.name ?? 'chest' : hiddenLabel(body, 48)
     out.push({ kind: 'sealed', entry, label, type: body.type })
   }
   return out

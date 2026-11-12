@@ -20,6 +20,7 @@ import { BoxGeometry, EdgesGeometry } from 'three'
 import { GRID_RADIUS, cellDelta, type AxisName, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useSecrets, type HeldKey } from '../store/useSecrets'
+import { useDemo } from '../store/useDemo'
 import { baseOf } from '../lib/secrets/base'
 import { WorldLabel } from './WorldLabel'
 
@@ -94,7 +95,10 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
   const anchor = useCyberspace((s) => s.anchor)
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const show = useCyberspace((s) => s.showSecrets)
+  // Settings' Region keys (off by default), or a /demo step that shows them while it is up.
+  const switchedOn = useCyberspace((s) => s.showSecrets)
+  const demoShows = useDemo((s) => s.active && s.script.steps[s.index]?.scene?.regionKeys === true)
+  const show = switchedOn || demoShows
   // The list's focus dims the rest only when it is a key drawn here. A
   // scanned place is focused too, so RETURN brings the list back, but it is
   // no cage, and dimming every cage for it hid the ones around the spot.

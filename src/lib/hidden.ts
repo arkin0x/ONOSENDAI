@@ -57,7 +57,7 @@ import { verifyOnce } from './verifiedSigs'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from './events'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
-import { tryParseDna } from 'sno-core/seeds'
+import { capsFromTags, tryParseDna } from 'sno-core/seeds'
 import { withAuthoredConstrain } from './walkConstrain'
 import { keepOwnTable } from './carried'
 import { signalRescan } from './rescanSignal'
@@ -240,7 +240,7 @@ export type HiddenType = 'shard' | 'message' | 'key' | 'chest' | 'audio' | 'seed
 
 /** A DNA carried in a chest (DECK-0008 §8.1): its name, the `dna` line of a written one, or null for a mixed one. */
 export interface DnaItem {
-  name: string | null
+  name: string
 }
 
 /** What a key item carries, read out of its event (B1 §2.1). */
@@ -426,10 +426,11 @@ export function readItem(inner: Pick<NostrEvent, 'kind' | 'content' | 'tags' | '
     return seed ? { type: 'seed', seed } : null
   }
   if (inner.kind === DNA_KIND) {
-    // A written DNA by its `dna` line; one whose text the engine refuses is
-    // skipped (a reader never grows it, §3). A mixed DNA's content is empty
-    // (§8.1): kept, unnamed. The resolver checks the rest when it is planted.
-    if (inner.content === '') return { type: 'dna', dna: { name: null } }
+    // A written DNA, by its `dna` line, with caps that price (§7, §8.1); one
+    // whose text the engine refuses is skipped (a reader never grows it, §3).
+    // A mixed DNA (empty content) is not read as a chest item yet. Its
+    // signature is checked by the chest reader (lib/chests.ts readEntry).
+    if (inner.content === '' || capsFromTags(inner.tags) === null) return null
     const read = tryParseDna(inner.content)
     return read.ok ? { type: 'dna', dna: { name: read.dna.name } } : null
   }
@@ -453,7 +454,7 @@ export function hiddenLabel(h: Pick<ItemBody, 'type' | 'text' | 'shard' | 'key' 
   if (h.type === 'key') return h.key?.name ?? 'key'
   if (h.type === 'chest') return h.chest?.name ?? 'chest'
   if (h.type === 'seed') return h.seed?.title || 'seed'
-  if (h.type === 'dna') return h.dna?.name ? `${h.dna.name} DNA` : 'mixed DNA'
+  if (h.type === 'dna') return h.dna ? `${h.dna.name} DNA` : 'DNA'
   return h.shard?.name ?? 'shard'
 }
 

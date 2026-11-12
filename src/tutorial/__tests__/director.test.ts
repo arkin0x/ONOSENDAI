@@ -68,11 +68,11 @@ beforeEach(() => {
 afterEach(() => { useTutorial.getState().pause() })
 
 /**
- * PLANT THE SEED presses the owner's id, and this file's relays hold nothing
- * (query is mocked to answer []): the press gets past the DNA only because the
- * director notes the event the app ships (dna.ts TUTORIAL_DNA_EVENT) first.
+ * The moon blossom's DNA in ITEMS, as TAKE files it out of the welcome chest
+ * (item 8). PLANT THE SEED presses the owner's id, and this file's relays hold
+ * nothing (query is mocked to answer []): the press gets past the DNA only
+ * because the director notes the copy held here first.
  */
-/** The moon blossom's DNA in ITEMS, as TAKE files it out of the welcome chest (item 8). */
 function holdDna(): void {
   useInventory.setState({ items: { ...useInventory.getState().items, [TUTORIAL_DNA_EVENT.id]: { id: TUTORIAL_DNA_EVENT.id, type: 'dna', event: TUTORIAL_DNA_EVENT } as never } })
 }
@@ -308,7 +308,15 @@ describe('the director', () => {
     const folder = Object.entries(tree.folders).find(([, f]) => f.name === TUTORIAL_FOLDER)?.[0]
     expect(folder).toBeDefined()
     for (const id of mine()) expect(tree.assign[id]).toBe(folder)
-    // Opened another way (the menu's button) while the step is up: set up the same.
+    // Only the first opening is set up: back from a DEPLOY's CANCEL, or a REMIX, keeps the shard it names.
+    useWorkshop.setState({ open: false, openPanel: null })
+    useWorkshop.getState().openWorkshop(`${TUTORIAL_SHARD_ID}trophy`)
+    expect(useWorkshop.getState().currentId).toBe(`${TUTORIAL_SHARD_ID}trophy`)
+    expect(useWorkshop.getState().openPanel).toBe(null)
+    useWorkshop.setState({ open: false, openPanel: null })
+    // A fresh workshop step: its first opening by another way (the menu's button) is set up the same.
+    useTutorial.getState().start({ at: 'workshop' })
+    await staged()
     useWorkshop.setState({ open: false, openPanel: null, currentId: `${TUTORIAL_SHARD_ID}trophy` })
     useWorkshop.getState().openWorkshop()
     expect(useWorkshop.getState().currentId).toBe(`${TUTORIAL_SHARD_ID}trampoline`)

@@ -28,7 +28,7 @@ import { BOX_HEIGHT, COVER_MAX, FOOTPRINT, arrivalCell, chestCell, inRegion, reg
 import { TUTORIAL_DNA_EVENT } from '../dna'
 import { STAGE_TEXT, WELCOME_ITEM, boxModel, buildStage, readStage, stageKey, writeStage, type KeyAt } from '../stage'
 import { guideBagsFor, isGuideAuthor, isGuideBag, onGuideBags, passesTaps, setGuideBags } from '../guideBags'
-import { COURSE, FINISH_CHEST, START_STAND, atStart, courseToWorld } from '../course'
+import { COURSE, FINISH_CHEST, PLOT_STAND, START_STAND, atStart, courseToWorld, onPlot, plantCell } from '../course'
 import type { Position } from '../../lib/space'
 
 const MAX_COMPUTE = 20
@@ -271,19 +271,48 @@ describe('the first move lands level with the chest, two gibsons in front of it,
         const spawn = toWorld(frame, -4, r, u)
         const c = chestCell({ frame, spawn })
         const a = arrivalCell({ frame, spawn })
-        // Inside the box, a gibson in from its faces, level with the spawn where it can be.
-        expect(c.f).toBe(3)
-        expect(c.r).toBe(Math.min(6, Math.max(1, r)))
-        expect(c.u).toBe(Math.min(6, Math.max(1, u)))
+        // Inside the box, in line with the spawn and level with it.
+        expect(c).toEqual({ f: 3, r, u })
         // Same height, same side position, two in front: one empty gibson between.
         expect(a).toEqual({ f: c.f - 2, r: c.r, u: c.u })
       }
+      // A box lifted a cube off the spawn keeps the chest inside it.
+      expect(chestCell({ frame, spawn: toWorld(frame, -4, 3, 12) }).u).toBe(7)
+    }
+  })
+  it('from somewhere else (a RESTART on the course), lands on the chest\'s side nearest the player, level with it, inside the box', () => {
+    for (const f of frames) {
+      const frame = { ...f, boxBase }
+      const spawn = toWorld(frame, -4, 3, 3)
+      // Beyond the box, forward: behind the chest (f 5). Off to the side: beside it (r 5), never out of the box.
+      expect(arrivalCell({ frame, spawn }, toWorld(frame, 40, 3, 10))).toEqual({ f: 5, r: 3, u: 3 })
+      expect(arrivalCell({ frame, spawn }, toWorld(frame, 3, 30, 0))).toEqual({ f: 3, r: 5, u: 3 })
+      const edge = toWorld(frame, -4, 7, 3)
+      expect(arrivalCell({ frame, spawn: edge }, toWorld(frame, 3, 30, 3))).toEqual({ f: 1, r: 7, u: 3 })
     }
   })
   it('toFrame undoes toWorld, whichever way the layout faces', () => {
     for (const f of frames) {
       const frame = { ...f, boxBase }
       expect(toFrame(frame, toWorld(frame, -5, 2, 9))).toEqual({ f: -5, r: 2, u: 9 })
+    }
+  })
+})
+
+describe('the plant cursor goes on the dirt beside the player (feedback 2026-11-12, item 6)', () => {
+  const frames = [{ fwd: 1, side: 1 }, { fwd: -1, side: -1 }] as const
+  it('to one side, the other at the plot\'s edge, at the standing height, never on the player; none off the plot', () => {
+    for (const f of frames) {
+      const frame = { ...f, boxBase: { x: 800n, y: 800n, z: 800n } }
+      const u = PLOT_STAND.u
+      expect(plantCell(frame, toWorld(frame, 14, 4, u))).toEqual(toWorld(frame, 14, 5, u))
+      // At the side edge (r 6), the other side.
+      expect(plantCell(frame, toWorld(frame, 14, 6, u))).toEqual(toWorld(frame, 14, 5, u))
+      // Standing a gibson up, still on the dirt's surface.
+      const up = plantCell(frame, toWorld(frame, 13, 3, u + 1))!
+      expect(onPlot(frame, up)).toBe(true)
+      expect(up).toEqual(toWorld(frame, 13, 4, u))
+      expect(plantCell(frame, toWorld(frame, 30, 4, u))).toBe(null)
     }
   })
 })

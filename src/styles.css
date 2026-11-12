@@ -8074,7 +8074,7 @@ select.avatars__input option:checked {
    actionsIn; tutorial feedback 2026-11-12, item 2). */
 .nearby__acts { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(max-content, 1fr); gap: 6px; align-items: stretch; }
 .nearby__door { display: contents; }
-.nearby__acts .chest__act, .nearby__acts .nearby__view { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 26px; padding: 0 9px; }
+.nearby__acts .chest__act, .nearby__acts .nearby__view { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 26px; padding: 0 9px; border-radius: 3px; }
 
 /* DISCOVERED NEARBY's tabs: each kind with its count, an empty one dimmed and still there. */
 .nearby__tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; flex: none; }
@@ -9708,6 +9708,8 @@ a.feed__act { text-decoration: none; }
 .secret__badge--audio { color: #9fd0ff; }
 .secret__badge--seed { color: #6fe08a; }
 .chest__glyph--audio, .shards__type--audio { color: #9fd0ff; }
+/* A DNA taken out of a chest (DECK-0008 §8.1): the seed's green, what it is planted from. */
+.chest__glyph--dna { color: #6fe08a; }
 
 /* Hidden audio's card in the item modal (AudioCard, DECK-0007): the note's
    blue where a message has its warm yellow. */

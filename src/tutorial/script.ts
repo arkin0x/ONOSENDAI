@@ -73,6 +73,8 @@ export const TAKE: TutorialStep = {
   scene: { target: 'keep', highlight: '.foundchip' },
   explain: 'What you take goes in your ITEMS, in the menu. A shard you take can be placed in the world, built with, or changed in the workshop.',
   wait: 'take',
+  // No SKIP: the moon blossom's DNA must be claimed here, or the plant step has nothing to plant (feedback 2026-11-12, item 8).
+  gate: true,
 }
 
 /** To the dirt plot (A5): one COMMIT, the cursor already on it. */

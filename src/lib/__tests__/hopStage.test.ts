@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AVATAR_LERP_MS } from '../avatarLerp'
-import { HOP_SETTLE_SLACK_MS, afterHop, frameBudget, glideDone, glideStart, holdGlide, hopLanding, hopSettling, resetHopStage } from '../hopStage'
+import { HOP_SETTLE_SLACK_MS, afterHop, frameBudget, glideDone, glideStart, holdGlide, hopLanding, hopSettling, resetHopStage, yieldTask } from '../hopStage'
 
 beforeEach(() => { vi.useFakeTimers(); resetHopStage() })
 afterEach(() => { resetHopStage(); vi.useRealTimers() })
@@ -43,6 +43,19 @@ describe('afterHop', () => {
     vi.runOnlyPendingTimers()
     expect(fn).toHaveBeenCalledTimes(1)
     expect(hopSettling()).toBe(false)
+  })
+
+  it('a move landing while one still settles keeps the first deadline: quick moves never put the work off for good', () => {
+    const fn = vi.fn()
+    hopLanding(0)
+    afterHop(fn)
+    for (let t = 400; t < AVATAR_LERP_MS + HOP_SETTLE_SLACK_MS; t += 400) {
+      vi.advanceTimersByTime(400)
+      hopLanding(t)
+    }
+    vi.advanceTimersByTime(400)
+    vi.runOnlyPendingTimers()
+    expect(fn).toHaveBeenCalledTimes(1)
   })
 
   it('a glide that ends with no landing waiting changes nothing', () => {
@@ -95,18 +108,22 @@ describe('frameBudget', () => {
     vi.useRealTimers()
     let now = 0
     const spy = vi.spyOn(performance, 'now').mockImplementation(() => now)
-    const pause = frameBudget(8)
-    const t = vi.spyOn(globalThis, 'setTimeout')
+    const yields = vi.fn(async () => {})
+    const pause = frameBudget(8, yields)
     now = 5
     await pause()
-    expect(t).not.toHaveBeenCalled()
+    expect(yields).not.toHaveBeenCalled()
     now = 9
     await pause()
-    expect(t).toHaveBeenCalledTimes(1)
+    expect(yields).toHaveBeenCalledTimes(1)
     now = 12
     await pause()
-    expect(t).toHaveBeenCalledTimes(1)
-    t.mockRestore()
+    expect(yields).toHaveBeenCalledTimes(1)
     spy.mockRestore()
+  })
+
+  it('yields with a task a hidden tab does not hold back', async () => {
+    vi.useRealTimers()
+    await expect(yieldTask()).resolves.toBeUndefined()
   })
 })

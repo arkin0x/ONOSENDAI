@@ -5559,8 +5559,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const following = now.atHead()
     // What can wait for the avatar's glide (discovery's scan, the tutorial's
     // next camera shot) waits from here (lib/hopStage.ts). The move is not
-    // touched: only what is shown around it is ordered.
-    hopLanding()
+    // touched: only what is shown around it is ordered. A WALK step is not
+    // a hop to watch: it scans as it always did.
+    if (!walking) hopLanding()
     set({
       position: newPosition,
       headPlane: plane,

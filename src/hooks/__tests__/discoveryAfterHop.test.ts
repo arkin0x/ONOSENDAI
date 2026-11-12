@@ -8,7 +8,7 @@
  *
  * The hook runs under the same small stand-in for React as discoveryTv.test.ts.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 interface Effect { deps?: unknown[]; cleanup?: () => void }
 const effects: Effect[] = []
@@ -62,6 +62,14 @@ function render(): void {
   for (const run of pending) run()
 }
 
+// Each test mounts the hook afresh: a new worker, nothing scanned yet.
+beforeEach(() => {
+  effects.length = 0
+  refs.length = 0
+  posted.length = 0
+  scanning.length = 0
+  cs.anchor = { x: 1000n, y: 5n, z: 7n }
+})
 afterEach(() => { resetHopStage() })
 
 describe('the scan after your own hop', () => {
@@ -72,6 +80,7 @@ describe('the scan after your own hop', () => {
   })
 
   it('waits while the avatar glides, and starts once it has arrived', async () => {
+    render()
     posted.length = 0
     scanning.length = 0
     hopLanding()
@@ -86,6 +95,7 @@ describe('the scan after your own hop', () => {
   })
 
   it('a scan overtaken while it waited never starts: only the newest place is scanned', async () => {
+    render()
     posted.length = 0
     hopLanding()
     cs.anchor = { x: 2000n, y: 5n, z: 7n }

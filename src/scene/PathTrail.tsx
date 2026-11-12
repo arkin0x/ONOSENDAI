@@ -208,7 +208,8 @@ const WARM_GEOMETRY = (() => {
 
 /**
  * The trail's kinds of line, drawn with nothing in them while there is no
- * trail yet. A new player has no trail until their first hop lands, and then
+ * trail yet, or none of it unpublished. A new player has no trail until their
+ * first hop lands, and then
  * the unpublished dashed line's program was compiled inside the landing
  * frame, which it held for 200 to 430 ms (headless, 2026-11-12,
  * scripts/hop-probe.mjs): the frame the glide was meant to start in. Drawn
@@ -372,6 +373,10 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   // Each line's color is per vertex (paintTrail), so the materials are white.
   return (
     <>
+      {/* A trail with nothing unpublished yet (a returning player's) has
+          not drawn the dashed line this session: its first move would
+          compile it in the landing frame. */}
+      {!trail.walkedLocal && <TrailWarmup />}
       {trail.walked && (
         <lineSegments geometry={trail.walked.geometry} frustumCulled={false}>
           <lineBasicMaterial vertexColors linewidth={2} toneMapped={false} />

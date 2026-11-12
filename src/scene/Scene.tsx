@@ -1034,7 +1034,7 @@ function Rig(): JSX.Element {
       tz = (a[2] + b[2]) / 2
     } else {
       frameShot.current = null
-      if (framing.current) glideLeft.current = Math.max(glideLeft.current, FRAME_RETURN_S)
+      if (framing.current && !s.walking) glideLeft.current = Math.max(glideLeft.current, FRAME_RETURN_S)
     }
     framing.current = frame !== null
 
@@ -1231,7 +1231,13 @@ function Rig(): JSX.Element {
       dampingFactor={0.12}
       autoRotate={tutorialSpin}
       autoRotateSpeed={0.6}
-      onStart={() => { if (startLock.start(pressed())) locked.current = false }}
+      onStart={() => {
+        if (startLock.start(pressed())) locked.current = false
+        // The player took the camera (a drag, a pinch, the wheel): the
+        // tutorial's shots stand down and leave it with them.
+        clearTutorialZoom()
+        setTutorialFrame(null)
+      }}
     />
   )
 }

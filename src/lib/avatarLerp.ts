@@ -38,11 +38,13 @@ export const AVATAR_LERP_MS = 600
 export const AVATAR_SNAP_CELLS = 400
 
 /**
- * The most of a glide one drawn frame may cover, in milliseconds: a sixth of
- * it, so a glide is always drawn in at least six frames. The glide runs on
- * the clock, so at any frame rate it takes AVATAR_LERP_MS; but a frame that
+ * The most of a glide one drawn frame may cover, in milliseconds, for a lerp
+ * made with `catchUp` (your own avatar's, scene/Travel.tsx): a sixth of it,
+ * so that glide is always drawn in at least six frames. It runs on the clock,
+ * so at ten frames a second or more it takes AVATAR_LERP_MS; but a frame that
  * comes late (a shader compiling, a bag opening, the tab hidden) no longer
- * spends the whole glide unseen. The owner's first hop drew no glide frame at
+ * spends the whole glide unseen. Everyone else's glides stay on the clock
+ * alone, so Cyberspace TV's avatars keep tape time. The owner's first hop drew no glide frame at
  * all: the frames around the landing took 280 to 1,050 ms (owner, 2026-11-12:
  * "I never see the animation it seems to just freeze for a second").
  */
@@ -68,6 +70,13 @@ export class AvatarLerp {
   private startedAt: number | null = null
   /** When the glide was last looked at (a frame drew it), to tell a late frame (MAX_GLIDE_STEP_MS). */
   private lastAt: number | null = null
+  /** Whether a late frame holds the glide back (MAX_GLIDE_STEP_MS) rather than skipping it. */
+  private readonly catchUp: boolean
+
+  /** `catchUp`: a late frame never covers more than MAX_GLIDE_STEP_MS of the glide (your own avatar's). */
+  constructor(opts: { catchUp?: boolean } = {}) {
+    this.catchUp = opts.catchUp === true
+  }
 
   /**
    * The avatar just moved. `was` is where it was drawn before, as an offset
@@ -92,7 +101,7 @@ export class AvatarLerp {
    * wait is held back, so the glide picks up where it was last drawn.
    */
   private advance(now: number): void {
-    if (this.startedAt === null) return
+    if (!this.catchUp || this.startedAt === null) return
     if (this.lastAt !== null && now > this.lastAt) {
       const glided = now - Math.max(this.lastAt, this.startedAt)
       if (glided > MAX_GLIDE_STEP_MS) this.startedAt += glided - MAX_GLIDE_STEP_MS

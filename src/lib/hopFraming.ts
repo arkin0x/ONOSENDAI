@@ -68,7 +68,7 @@ export function liftSide(away: Vector3): Vector3 {
 }
 
 const q = new Quaternion()
-const identity = new Quaternion()
+const part = new Quaternion()
 
 /**
  * The camera's offset `w` of the way (0 to 1) from orbit `from` to orbit
@@ -78,7 +78,7 @@ const identity = new Quaternion()
 export function easeOrbit(from: Orbit, to: Orbit, w: number, out: Vector3): Vector3 {
   const k = Math.min(1, Math.max(0, w))
   q.setFromUnitVectors(from.dir, to.dir)
-  out.copy(from.dir).applyQuaternion(identity.clone().slerp(q, k)).normalize()
+  out.copy(from.dir).applyQuaternion(part.identity().slerp(q, k)).normalize()
   return out.multiplyScalar(from.distance + (to.distance - from.distance) * k)
 }
 

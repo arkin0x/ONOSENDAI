@@ -135,17 +135,18 @@ describe('AvatarLerp.rescale', () => {
 })
 
 /**
- * A late frame never spends the glide unseen (owner, 2026-11-12: "I never see
- * the animation it seems to just freeze for a second and then I appear at the
- * next location"). The glide runs on the clock, but no drawn frame covers
- * more than MAX_GLIDE_STEP_MS of it.
+ * Your own avatar's glide (catchUp, scene/Travel.tsx): a late frame never
+ * spends it unseen (owner, 2026-11-12: "I never see the animation it seems to
+ * just freeze for a second and then I appear at the next location"). The
+ * glide runs on the clock, but no drawn frame covers more than
+ * MAX_GLIDE_STEP_MS of it.
  */
 describe('AvatarLerp: slow frames and a held start', () => {
   const was: Vec3 = [-10, 0, 0]
 
   it('takes AVATAR_LERP_MS at any steady frame rate: time, not frames', () => {
     for (const fps of [120, 60, 30, 15]) {
-      const lerp = new AvatarLerp()
+      const lerp = new AvatarLerp({ catchUp: true })
       lerp.move(was, 0)
       let t = 0
       while (lerp.moving(t)) { t += 1000 / fps; lerp.offset(t) }
@@ -155,7 +156,7 @@ describe('AvatarLerp: slow frames and a held start', () => {
   })
 
   it('a frame that comes a second late still finds the avatar near where it set off, and the rest of the glide is drawn', () => {
-    const lerp = new AvatarLerp()
+    const lerp = new AvatarLerp({ catchUp: true })
     lerp.move(was, 1000)
     // The landing frame stalls for a second (a shader compiling, bags opening).
     const first = lerp.offset(2000)[0]
@@ -170,7 +171,7 @@ describe('AvatarLerp: slow frames and a held start', () => {
   })
 
   it('every stalled frame moves it at most a sixth of the way, so at least six frames show it', () => {
-    const lerp = new AvatarLerp()
+    const lerp = new AvatarLerp({ catchUp: true })
     lerp.move(was, 0)
     let shown = 0
     let t = 0
@@ -179,7 +180,7 @@ describe('AvatarLerp: slow frames and a held start', () => {
   })
 
   it('held to start later, it stays where it was until then and only then sets off', () => {
-    const lerp = new AvatarLerp()
+    const lerp = new AvatarLerp({ catchUp: true })
     lerp.move(was, 0, 500)
     frames(lerp, 0, 500)
     expect(lerp.offset(499)[0]).toBe(was[0])
@@ -190,8 +191,15 @@ describe('AvatarLerp: slow frames and a held start', () => {
     expect(lerp.offset(500 + AVATAR_LERP_MS)).toEqual([0, 0, 0])
   })
 
-  it('a hold already past holds nothing', () => {
+  it('without catchUp (everyone else, TV) a glide is the clock alone: drawn rarely, it is still where the time says', () => {
     const lerp = new AvatarLerp()
+    lerp.move(was, 0)
+    expect(lerp.offset(AVATAR_LERP_MS / 2)[0]).toBeCloseTo(was[0] * lerpRemaining(0.5), 9)
+    expect(lerp.offset(AVATAR_LERP_MS)).toEqual([0, 0, 0])
+  })
+
+  it('a hold already past holds nothing', () => {
+    const lerp = new AvatarLerp({ catchUp: true })
     lerp.move(was, 1000, 400)
     expect(lerp.offset(1000 + 1000 / 60)[0]).toBeGreaterThan(was[0])
   })

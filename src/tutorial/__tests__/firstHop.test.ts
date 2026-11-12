@@ -32,7 +32,7 @@ vi.mock('../../lib/relay', async (orig) => {
 
 import { useCyberspace } from '../../store/useCyberspace'
 import { useTutorial } from '../../store/useTutorial'
-import { HOP_FRAME_MS, useTutorialCam } from '../../store/useTutorialCam'
+import { HOP_FRAME_MS, setTutorialFrame, useTutorialCam } from '../../store/useTutorialCam'
 import { glideDone, glideStart, hopLanding, resetHopStage } from '../../lib/hopStage'
 import { useTutorialStage } from '../director'
 import { TUTORIAL_SCRIPT } from '../script'
@@ -103,6 +103,33 @@ describe('the first hop, shown', () => {
     useCyberspace.setState({ pendingTarget: null })
     expect(useTutorialCam.getState().frame).toBe(null)
     expect(useTutorialCam.getState().spin).toBe(true)
+  })
+
+  it('a player who takes the camera during the hop keeps it: no shot over the shoulder follows', async () => {
+    await atBox()
+    const to = { ...useCyberspace.getState().cursor }
+    useCyberspace.setState({ pendingTarget: to })
+    // A press, a pinch or the wheel on the scene: the rig ends the framing (scene/Scene.tsx).
+    setTutorialFrame(null)
+    hopLanding()
+    useCyberspace.setState({ position: to, pendingTarget: null })
+    glideDone()
+    await new Promise((r) => setTimeout(r, 30))
+    expect(useTutorialCam.getState().zoom).toBe(null)
+    expect(useTutorialCam.getState().frame).toBe(null)
+  })
+
+  it('a hop whose chain is replaced under it (somewhere else, target cleared) does not leave the camera framing it', async () => {
+    await atBox()
+    const from = { ...useCyberspace.getState().position }
+    const to = { ...useCyberspace.getState().cursor }
+    const before = performance.now()
+    useCyberspace.setState({ pendingTarget: to })
+    useCyberspace.setState({ position: { ...from, x: from.x + 5n }, pendingTarget: null })
+    expect(useTutorialCam.getState().frame).toBe(null)
+    expect(useTutorialCam.getState().spin).toBe(true)
+    // Nor is the next glide held for a camera that is not coming.
+    expect(glideStart(before)).toBe(before)
   })
 
   it('the tutorial going away mid-hop leaves the camera alone', async () => {

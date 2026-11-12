@@ -20,15 +20,16 @@
  * as the trail's material compiled and the box's bags opened under it.
  */
 
-import { AVATAR_LERP_MS } from './avatarLerp'
+import { AVATAR_LERP_MS, MAX_GLIDE_STEP_MS } from './avatarLerp'
 
 /**
  * How long past the glide's planned end the deferred work waits at most for
  * the avatar to report that it arrived: a scene that is not drawing (the
  * workshop over it, a hidden tab) never reports, and discovery must not wait
- * on it.
+ * on it. Room for a glide drawn at about three frames a second, where each
+ * frame covers at most MAX_GLIDE_STEP_MS of it (lib/avatarLerp.ts).
  */
-export const HOP_SETTLE_SLACK_MS = 1500
+export const HOP_SETTLE_SLACK_MS = (AVATAR_LERP_MS / MAX_GLIDE_STEP_MS) * 350
 
 let holdUntil = 0
 let landing = false
@@ -61,11 +62,13 @@ export function glideStart(now: number): number {
 /**
  * Your own move is about to land (the store moves next): what asks to wait
  * for the glide waits from now until the avatar arrives (glideDone), or until
- * the planned glide plus HOP_SETTLE_SLACK_MS, whichever is first.
+ * the planned glide plus HOP_SETTLE_SLACK_MS, whichever is first. A move that
+ * lands while one is still settling keeps the first one's deadline, so a run
+ * of quick moves (a route's steps) never puts the waiting work off for good.
  */
 export function hopLanding(now: number = performance.now()): void {
+  if (landing) return
   landing = true
-  if (timer !== null) clearTimeout(timer)
   timer = setTimeout(flush, Math.max(0, holdUntil - now) + AVATAR_LERP_MS + HOP_SETTLE_SLACK_MS)
 }
 
@@ -97,15 +100,28 @@ function flush(): void {
 }
 
 /**
- * A frame budget for a loop of main-thread work (opening a region's bags):
- * the returned pause yields to the browser, so a frame can be drawn, once
- * `ms` have gone since the last yield, and costs nothing before that.
+ * Give the thread back for one task: a message to ourselves, which a hidden
+ * tab does not hold back as it holds back timers (to a second each).
  */
-export function frameBudget(ms = 8): () => Promise<void> {
+export function yieldTask(): Promise<void> {
+  if (typeof MessageChannel === 'undefined') return new Promise((resolve) => setTimeout(resolve, 0))
+  return new Promise((resolve) => {
+    const ch = new MessageChannel()
+    ch.port1.onmessage = () => { ch.port1.close(); resolve() }
+    ch.port2.postMessage(0)
+  })
+}
+
+/**
+ * A frame budget for a loop of main-thread work (opening a region's bags):
+ * the returned pause yields to the browser (`yieldNow`), so a frame can be
+ * drawn, once `ms` have gone since the last yield, and costs nothing before.
+ */
+export function frameBudget(ms = 8, yieldNow: () => Promise<void> = yieldTask): () => Promise<void> {
   let since = performance.now()
   return async () => {
     if (performance.now() - since < ms) return
-    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    await yieldNow()
     since = performance.now()
   }
 }

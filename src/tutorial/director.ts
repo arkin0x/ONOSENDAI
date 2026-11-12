@@ -49,7 +49,7 @@ import { deployPoint, type Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
 import { besideToward, inRegion, toWorld, type TutorialLayout } from './layout'
 import type { Stage } from './stage'
-import { HOP_FRAME_MS, setTutorialFrame, setTutorialSpin, setTutorialZoom } from '../store/useTutorialCam'
+import { HOP_FRAME_MS, setTutorialFrame, setTutorialSpin, setTutorialZoom, useTutorialCam, type HopFrame } from '../store/useTutorialCam'
 import { afterHop, holdGlide } from '../lib/hopStage'
 import { setMenuOpen } from '../hooks/useMenuOpen'
 import { usePanelLayout } from '../store/usePanelLayout'
@@ -268,35 +268,41 @@ registerTutorialEffect('aim-box', () => {
 /**
  * The first hop, shown so a newcomer sees it (owner, 2026-11-12: "when they
  * hit commit we pre-position the camera ... so that the user can tell oh I
- * just moved and this red ball is me"). On COMMIT the spin stops and the
- * camera frames the hop, start and end from the side, while the proof is
- * made; the avatar waits where it is until the camera is there
- * (HOP_FRAME_MS), then glides. Once it has arrived (lib/hopStage.ts
- * afterHop), the camera eases in close over its shoulder, from behind it
- * as seen from the chest (`chest`, the layout's), so the chest is just past
- * it; discovery, which reveals the chest, runs then too. A hop that does
- * not land puts the spin back. Returns the stop.
+ * just moved and this red ball is me"). The first COMMIT while the box step
+ * is up (the cursor is lined up for it) stops the spin and frames that hop,
+ * start and end from the side, while the proof is made; the avatar waits
+ * where it is until the camera is there (HOP_FRAME_MS), then glides. Once it
+ * has arrived (lib/hopStage.ts afterHop), the camera eases in close over its
+ * shoulder, from behind it as seen from the chest (`chest`, the layout's),
+ * so the chest is just past it; discovery, which reveals the chest, runs
+ * then too. A hop that does not land puts the spin back. A player who takes
+ * the camera meanwhile (a press, a pinch, the wheel: scene/Scene.tsx ends the
+ * framing) keeps it: no shot follows. Returns the stop.
  */
 export function showFirstHop(chest: (layout: TutorialLayout) => Position): () => void {
   let live = true
   let to: Position | null = null
+  let framed: HopFrame | null = null
   const offStore = useCyberspace.subscribe((s, prev) => {
     if (to === null) {
       // COMMIT: a hop's proof has started, from where you stand to its target.
       if (!s.pendingTarget || prev.pendingTarget || s.walking) return
       to = { ...s.pendingTarget }
+      framed = { from: { ...s.position }, to }
       setTutorialSpin(false)
-      setTutorialFrame({ from: { ...s.position }, to })
+      setTutorialFrame(framed)
       holdGlide(performance.now() + HOP_FRAME_MS)
       return
     }
     if (s.position !== prev.position && s.position.x === to.x && s.position.y === to.y && s.position.z === to.z) {
-      // Landed: the shot over the shoulder, once the avatar has arrived.
+      // Landed: the shot over the shoulder, once the avatar has arrived, and
+      // only while the hop is still framed (nobody took the camera).
       const landed = { ...s.position }
+      const mine = framed
       to = null
       offStore()
       afterHop(() => {
-        if (!live) return
+        if (!live || useTutorialCam.getState().frame !== mine) return
         setTutorialFrame(null)
         const layout = useTutorialStage.getState().layout
         if (!layout) return
@@ -306,14 +312,19 @@ export function showFirstHop(chest: (layout: TutorialLayout) => Position): () =>
       })
       return
     }
-    if (!s.pendingTarget && prev.pendingTarget && s.position === prev.position) {
-      // The hop did not land (refused, cancelled): the box step as it was.
+    if (!s.pendingTarget) {
+      // The hop did not land (refused, cancelled, or the chain replaced under
+      // it): the box step as it was, and the avatar is not held for it.
       to = null
-      setTutorialFrame(null)
-      setTutorialSpin(true)
+      holdGlide(0)
+      if (useTutorialCam.getState().frame === framed) {
+        setTutorialFrame(null)
+        setTutorialSpin(true)
+      }
+      framed = null
     }
   })
-  return () => { live = false; offStore(); setTutorialFrame(null) }
+  return () => { live = false; offStore(); if (useTutorialCam.getState().frame === framed) setTutorialFrame(null) }
 }
 
 /**

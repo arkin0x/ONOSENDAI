@@ -18,7 +18,7 @@
  * 900 ms); one constant for every avatar replaced that.
  *
  * A glide is never spent unseen: a late frame covers at most a sixth of it
- * (AvatarLerp MAX_GLIDE_STEP_MS), and what can wait for the arrival
+ * (AvatarLerp catchUp, MAX_GLIDE_STEP_MS), and what can wait for the arrival
  * (discovery, the tutorial's next camera shot) waits for it (lib/hopStage.ts).
  *
  * The move is registered in a layout effect, before the browser can paint:
@@ -48,7 +48,8 @@ export function Travel({ axes }: Props): null {
 
   const previous = useRef<Position>(anchor)
   const previousKey = useRef(focusKey)
-  const lerp = useRef(new AvatarLerp())
+  // Catching up: a late frame holds the glide back rather than skipping it.
+  const lerp = useRef(new AvatarLerp({ catchUp: true }))
   const out = useRef<Vec3>([0, 0, 0])
 
   useLayoutEffect(() => {

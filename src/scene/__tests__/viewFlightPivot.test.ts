@@ -569,16 +569,19 @@ describe('1d. review of #690', () => {
     expect(viewRig.takeRestore()).toBeGreaterThan(ORBIT_MIN_DISTANCE + 1)
   })
 
-  it('2: a hand dolly after the fly makes the distance its own: nothing is restored', () => {
+  /** The mouse wheel on the scene: OrbitControls' zoom, which the rig hears too. */
+  const wheel = (deltaY: number): void => { el.dispatchEvent(ev('wheel', { deltaY, deltaMode: 0, clientX: 200, clientY: 400 })) }
+
+  it('2: a hand zoom (the wheel) after the fly makes the distance its own: nothing is restored', () => {
     tap(120)
     rest(90)
-    // A pinch's worth: the camera out along its line.
-    const off = camera.position.clone().sub(controls.target).multiplyScalar(3)
-    camera.position.copy(controls.target).add(off)
+    const d0 = camera.position.distanceTo(controls.target)
+    wheel(300)
     rest(5)
+    expect(camera.position.distanceTo(controls.target)).toBeGreaterThan(d0 + 0.05)
     viewToAvatar()
     frame()
-    expect(viewRig.takeRestore()).toBeNull()
+    expect(viewRig.restoreTo).toBeNull()
   })
 
   it('4: another fly started as the lamp\'s reach comes in does not step it', () => {
@@ -691,9 +694,67 @@ describe('1d. review of #690', () => {
     tap(120)
     rest(90)
     cs().clearFocus()
-    // The rig effect's cut, before any frame sees VIEW gone.
-    viewRig.reset()
+    // The rig effect's cut, keeping the orbit, before any frame sees VIEW gone.
+    viewRig.reset(true)
     expect(viewRig.restoreTo).toBeCloseTo(26, 6)
+  })
+
+  it('round 3, C: a re-frame straight on that ends VIEW sets its own distance: no restore, and one already asked is dropped; only Scene.tsx\'s two cuts keep it', () => {
+    tap(120)
+    rest(90)
+    cs().clearFocus()
+    viewRig.reset()
+    expect(viewRig.restoreTo).toBeNull()
+    viewRig.reset()
+    cs().viewHere()
+    frame()
+    tap(120)
+    rest(90)
+    viewToAvatar()
+    expect(viewRig.restoreTo).not.toBeNull()
+    viewRig.reset()
+    expect(viewRig.restoreTo).toBeNull()
+    const src = readFileSync('src/scene/Scene.tsx', 'utf8')
+    expect(src.match(/viewRig\.reset\(true\)/g)?.length).toBe(2)
+    expect(src.match(/viewRig\.reset\(\)/g)?.length).toBe(1)
+  })
+
+  it('round 3, A: presses that bring the follow point inside the orbit\'s minimum (the controls clamp the camera out) are not a hand zoom', () => {
+    tap(120)
+    rest(90)
+    // Looking down at a slant, then UP: the follow point comes toward the camera.
+    sceneDown(1, 200, 400, true)
+    let y = 400
+    for (let i = 0; i < 12; i++) { y += 8; moveTo(1, 200, y); frame() }
+    lift(1, 200, y)
+    rest(60)
+    const d0 = camera.position.distanceTo(controls.target)
+    // Toward the camera along each axis it has, then UP.
+    const look = lookNow()
+    const axes = cs().axes()
+    for (const [axis, k] of [[axes.right.axis, -look.x * axes.right.dir], [axes.up.axis, -look.y * axes.up.dir], [axes.out.axis, -look.z * axes.out.dir]] as const) {
+      if (Math.abs(k) > 0.2) { cs().moveCursor({ axis, dir: k > 0 ? 1 : -1 }); rest(40) }
+    }
+    cs().moveCursor(up())
+    rest(40)
+    // The controls did clamp: the distance moved off the orbit's minimum and back.
+    expect(d0).toBeCloseTo(ORBIT_MIN_DISTANCE, 6)
+    viewToAvatar()
+    expect(viewRig.restoreTo).toBeCloseTo(26, 6)
+  })
+
+  it('round 3, B: the wheel during the restore ends it: the camera stays where the hand put it', () => {
+    tap(120)
+    rest(90)
+    viewToAvatar()
+    rest(15)
+    expect(viewRig.restoreTo).not.toBeNull()
+    wheel(-300)
+    rest(3)
+    expect(viewRig.restoreTo).toBeNull()
+    const d0 = camera.position.distanceTo(controls.target)
+    rest(120)
+    expect(camera.position.distanceTo(controls.target)).toBeCloseTo(d0, 3)
   })
 
   it('round 2, 6: a pad press with the camera unlocked (its distance changes as the follow point moves) is not a hand dolly', () => {

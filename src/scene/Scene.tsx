@@ -713,7 +713,7 @@ function Rig(): JSX.Element {
       const offset = keptOffset()
       const [x, y, z] = s.cursorOffset()
       glideLeft.current = 0
-      viewRig.reset()
+      viewRig.reset(true)
       smooth.current.set(x, y, z)
       c.target.copy(smooth.current)
       c.object.position.copy(smooth.current).add(offset)
@@ -776,7 +776,7 @@ function Rig(): JSX.Element {
       const offset = keptOffset()
       const [x, y, z] = s.cursorOffset()
       glideLeft.current = 0
-      viewRig.reset()
+      viewRig.reset(true)
       smooth.current.set(x, y, z)
       c.target.copy(smooth.current)
       c.object.position.copy(smooth.current).add(offset)

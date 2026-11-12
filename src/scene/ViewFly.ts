@@ -134,6 +134,14 @@ export function takeFlyReanchor(focus: unknown): boolean {
 export const sceneMouse = { down: false, dragged: false }
 
 /**
+ * A hand zoom since the rig last looked: a wheel or a middle drag on the
+ * scene (a pinch the rig reads off panGesture). Told by the input, not by the
+ * orbit's length, which the controls' own minDistance clamp also changes
+ * (second review of #690, A and B).
+ */
+let handZoomed = false
+
+/**
  * A pen pressed on the scene, by its pointer id: OrbitControls drives it as
  * a mouse. Kept apart from sceneMouse, whose press the follow's unlock
  * counts (StartLock), so a pen's orbit unlocks as it always has.
@@ -221,6 +229,10 @@ export class ViewRigOffset {
     const tv = useTv.getState().on
     useViewFly.getState().setTouch(flyGesture.dir(performance.now()))
     this.lastCam = cam
+    // The hand zoomed (a wheel, a pinch, a middle drag): the orbit's distance
+    // is its own now, nothing to restore, and a restore under way gives way.
+    if (handZoomed || panGesture.pinching) { this.preFlight = null; this.backTo = null }
+    handZoomed = false
     // An orbit, a pinch or a wheel in progress is not rest: no landing under it.
     look.copy(cam.position).sub(cam.target)
     if (this.orbitValid && look.distanceToSquared(this.orbit) > 1e-10) viewOffset.hold()
@@ -378,7 +390,8 @@ export class ViewRigOffset {
    * before a fly (askRestore), along the line the camera looks down, as the
    * tutorial's zoom eases (Scene.tsx). Given up for good when anything else
    * takes the camera: `held` (WALK, a press on the scene, the tutorial's
-   * zoom, a /demo step, WALK's eye), or a fly (review of #690, round 2).
+   * zoom, a /demo step, WALK's eye), a fly (review of #690, round 2), or a
+   * hand zoom (before).
    * Returns whether it moved the camera.
    */
   restoreOrbit(camera: Vector3, target: Vector3, dt: number, held: boolean): boolean {
@@ -429,15 +442,6 @@ export class ViewRigOffset {
    * only marks.
    */
   pivot(camera: Vector3, target: Vector3, follow: Vector3, answer = true): void {
-    // The orbit's distance changed across the controls' update (a pinch, a
-    // wheel), the only thing between a mark and here: the hand dollied, so the
-    // distance is its own, nothing to restore. A pad press moving the follow
-    // point (an unlocked camera's distance changes) is not between the two.
-    if (this.preFlight !== null && this.turnValid) {
-      const was = this.turnFrom.length()
-      const now = Math.hypot(camera.x - target.x, camera.y - target.y, camera.z - target.z)
-      if (Math.abs(now - was) > 1e-6 * Math.max(1, now)) this.preFlight = null
-    }
     if (answer && this.turnValid && viewOffset.flown && this.pivotAt.weight > 0) {
       turned.x = camera.x - target.x; turned.y = camera.y - target.y; turned.z = camera.z - target.z
       this.pivotAt.shift(this.turnFrom, turned, slid)
@@ -549,8 +553,13 @@ export class ViewRigOffset {
     this.landing = null
   }
 
-  /** The rig re-framed the camera itself (a cut or a re-frame in its effect): nothing owed, nothing to compare with. */
-  reset(): void {
+  /**
+   * The rig re-framed the camera itself (a cut or a re-frame in its effect):
+   * nothing owed, nothing to compare with. `keepOrbit`: a cut that keeps the
+   * orbit (Scene.tsx's two), after which a restore still stands; a re-frame
+   * straight on sets its own distance, so none does (second review, C).
+   */
+  reset(keepOrbit = false): void {
     viewOffset.clear()
     this.applied.set(0, 0, 0)
     this.lastValid = false
@@ -560,9 +569,10 @@ export class ViewRigOffset {
     this.nearGap = 0
     this.nearOwed.set(0, 0, 0)
     this.keeping = false
-    // A re-frame. VIEW ended (RETURN's cut, review of #690 round 2): the
-    // restore is asked first, as RECALL asks it; else nothing is left to restore.
-    if (!driven()) this.askRestore()
+    // A cut that ends VIEW (RETURN's, review of #690 round 2) asks the restore
+    // first, as RECALL asks it; a re-frame straight on drops any.
+    if (keepOrbit && !driven()) this.askRestore()
+    if (!keepOrbit) this.backTo = null
     this.preFlight = null
     this.pivotAt.clear()
     cursorGlide.share = 0
@@ -598,7 +608,7 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
   const touch = (e: PointerEvent): boolean => e.pointerType === 'touch'
   let mouse: { id: number; x: number; y: number } | null = null
   // A plain left press: OrbitControls' orbit, once it drags past the slop.
-  let orbiting: { id: number; x: number; y: number } | null = null
+  let orbiting: { id: number; x: number; y: number; button: number } | null = null
   // Fingers that landed off the scene (a HUD button, a panel): never the camera's.
   const elsewhere = new Set<number>()
   // Every finger, on the document first (the capture phase runs from the top
@@ -628,7 +638,7 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
         mouse = { id: e.pointerId, x: e.clientX, y: e.clientY }
         panGesture.setMouse(true)
       // The left button orbits and the middle dollies: either, dragged, is the hand moving the camera (StartLock).
-      } else if (e.button === 0 || e.button === 1) orbiting = { id: e.pointerId, x: e.clientX, y: e.clientY }
+      } else if (e.button === 0 || e.button === 1) orbiting = { id: e.pointerId, x: e.clientX, y: e.clientY, button: e.button }
       return
     }
     if (e.pointerType === 'pen') { elsewhere.delete(e.pointerId); scenePen = e.pointerId; return }
@@ -643,7 +653,11 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
   }
   const move = (ev: Event): void => {
     const e = ev as PointerEvent
-    if (orbiting && e.pointerId === orbiting.id && Math.hypot(e.clientX - orbiting.x, e.clientY - orbiting.y) > PINCH_SLOP_PX) sceneMouse.dragged = true
+    if (orbiting && e.pointerId === orbiting.id && Math.hypot(e.clientX - orbiting.x, e.clientY - orbiting.y) > PINCH_SLOP_PX) {
+      sceneMouse.dragged = true
+      // The middle button drags OrbitControls' dolly: a hand zoom.
+      if (orbiting.button === 1) handZoomed = true
+    }
     if (mouse && e.pointerId === mouse.id) {
       // A release this listener never heard (let go off the page) ends the drag.
       if ((e.buttons & 3) === 0) { mouse = null; panGesture.setMouse(false); return }
@@ -667,6 +681,8 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
     flyGesture.up(e.pointerId, clock())
     panGesture.up(e.pointerId)
   }
+  // The wheel on the scene is OrbitControls' zoom: a hand zoom.
+  const wheel = (): void => { handZoomed = true }
   // After the lift's pointer event: how many fingers the page says are still down.
   const left = (ev: Event): void => {
     const n = (ev as TouchEvent).touches?.length ?? 0
@@ -687,6 +703,7 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
   // In the capture phase, so the gestures have counted a finger before
   // OrbitControls hears it land (the rig's onStart asks how many are down).
   surface.addEventListener('pointerdown', down, { capture: true })
+  surface.addEventListener('wheel', wheel, { capture: true, passive: true } as AddEventListenerOptions)
   doc.addEventListener('pointerdown', landed, true)
   doc.addEventListener('pointermove', move, true)
   doc.addEventListener('pointerup', up, true)
@@ -701,6 +718,7 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
   win.addEventListener('blur', clear)
   return () => {
     surface.removeEventListener('pointerdown', down, { capture: true })
+    surface.removeEventListener('wheel', wheel, { capture: true })
     doc.removeEventListener('pointerdown', landed, true)
     doc.removeEventListener('pointermove', move, true)
     doc.removeEventListener('pointerup', up, true)

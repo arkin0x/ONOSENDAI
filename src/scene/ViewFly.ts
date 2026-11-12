@@ -32,6 +32,17 @@
  * are heard on the document in the capture phase, as the walk look hears
  * them, so a finger that drifts over the HUD or a release a HUD handler stops
  * still counts.
+ *
+ * It also keeps a finger that landed off the scene away from the camera
+ * (arkinox, 2026-11-12: "If I use my right thumb to drag the screen to
+ * rotate while my left thumb holds the forward (or back) button, the camera
+ * kind of jerks around"). OrbitControls hears moves and lifts on the whole
+ * document and never asks whose they are: the resting thumb's every wobble on
+ * the button was read as the dragging thumb, and the camera turned by the
+ * gap between the two thumbs, back and forth, frame after frame; its lift
+ * ended the drag. While a finger is on the scene, the moves and lifts of a
+ * finger that landed anywhere else stop at the page's root on their way out,
+ * after every control's own handlers and before the document hears them.
  */
 
 import { useEffect } from 'react'
@@ -40,8 +51,8 @@ import { alignedOrigin, samePosition, useCyberspace } from '../store/useCyberspa
 import { useBuilder } from '../store/useBuilder'
 import { useTv } from '../store/useTv'
 import { aimCentres, GRID_RADIUS, type AxisName, type Position, type ViewAxes } from '../lib/space'
-import { canFly, flyDir, FlyGesture, landingOf, PINCH_SLOP_PX, setFlyLander, setFlyLanding, useViewFly } from '../lib/viewFly'
-import { cursorGlide, OFFSET_EPS, PanGesture, setViewCentre, ViewOffset, type Vec3Out } from '../lib/viewCamera'
+import { canFly, flyDir, FlyGesture, landingOf, PINCH_SLOP_PX, setFlyLander, setFlyLanding, takeSteer, useViewFly } from '../lib/viewFly'
+import { cursorGlide, FlightPivot, OFFSET_EPS, PanGesture, setViewCentre, ViewOffset, type Vec3Out } from '../lib/viewCamera'
 
 /** The scene's fly gesture (two and three fingers at rest; off for now), fed by useFlyTouches. */
 export const flyGesture = new FlyGesture()
@@ -56,6 +67,8 @@ const right = new Vector3()
 const up = new Vector3()
 const px = { x: 0, y: 0 }
 const want: Vec3Out = { x: 0, y: 0, z: 0 }
+const turned: Vec3Out = { x: 0, y: 0, z: 0 }
+const slid: Vec3Out = { x: 0, y: 0, z: 0 }
 const flownCyber: Record<AxisName, number> = { x: 0, y: 0, z: 0 }
 
 /** A render-space offset as cyberspace components (the view's axes are a signed permutation), into flownCyber. */
@@ -105,6 +118,30 @@ export function takeFlyReanchor(focus: unknown): boolean {
 /** The mouse on the scene, for the rig's follow (StartLock): a button down, and whether a plain left (orbit) or middle (dolly) drag has moved the camera. */
 export const sceneMouse = { down: false, dragged: false }
 
+/**
+ * A pen pressed on the scene, by its pointer id: OrbitControls drives it as
+ * a mouse. Kept apart from sceneMouse, whose press the follow's unlock
+ * counts (StartLock), so a pen's orbit unlocks as it always has.
+ */
+let scenePen: number | null = null
+
+/** Anything pressed on the scene now: a finger, the mouse or a pen. */
+export function sceneHeld(): boolean {
+  return panGesture.fingers > 0 || sceneMouse.down || scenePen !== null
+}
+
+/**
+ * Drag-to-steer's drag for this frame (lib/viewFly.ts steerBy), or null.
+ * Always drained; null while anything is pressed on the scene, which is
+ * already turning the camera (arkinox, 2026-11-12: "ignore dragging on the
+ * button if other dragging is happening"), so a resting thumb's wobble on
+ * the button is never spent.
+ */
+export function steerToSpend(): { dx: number; dy: number } | null {
+  const steer = takeSteer()
+  return (steer.dx !== 0 || steer.dy !== 0) && !sceneHeld() ? steer : null
+}
+
 /** The camera, as the frame sees it: where it is, where it looks, its field of view and the canvas height. */
 export interface RigCamera {
   position: Vector3
@@ -131,6 +168,11 @@ export class ViewRigOffset {
   /** Where (aim, drawn frame) a re-anchor was last asked and declined, so it is not asked again every frame. */
   private declinedAt = new Vector3()
   private declined = false
+  /** What a drag turns the camera about: the camera in flight, the view's centre at rest (lib/viewCamera.ts FlightPivot). */
+  private pivotAt = new FlightPivot()
+  /** The camera less its target when last marked: a turn since then is the hand's (pivot). */
+  private turnFrom = new Vector3()
+  private turnValid = false
 
   /** True while a fly is under way (the rig's glide waits it out). */
   flying = false
@@ -215,6 +257,48 @@ export class ViewRigOffset {
     }
     cursorGlide.share = viewOffset.glide
     useViewFly.getState().setFlown(viewOffset.flown)
+    // In flight a drag turns the camera in place; once the coast has stopped
+    // the pivot eases back out to the view's centre (pivot).
+    this.pivotAt.step(flies && viewOffset.moving, dt * 1000)
+  }
+
+  /** How much of a turn is made about the camera now: 1 in flight, 0 at rest (lib/viewCamera.ts FlightPivot). */
+  get pivotWeight(): number {
+    return this.pivotAt.weight
+  }
+
+  /**
+   * Note the camera less its target, as it stands, so the next pivot can tell
+   * the hand's turn (OrbitControls, drag-to-steer) from the rig's own moves.
+   */
+  mark(camera: Vector3, target: Vector3): void {
+    this.turnFrom.copy(camera).sub(target)
+    this.turnValid = true
+  }
+
+  /**
+   * The camera turned about its target since the last mark: in flight, slide
+   * the camera, the target and the follow point together so the turn is one
+   * about the camera instead (lib/viewCamera.ts FlightPivot), and record the
+   * slide as flown so the cursor lands where the view now centres. Marks
+   * afresh. Never moves the camera but to answer a turn. `answer` false (the
+   * tutorial's auto-rotate is on, whose turn is the camera's, not a hand's)
+   * only marks.
+   */
+  pivot(camera: Vector3, target: Vector3, follow: Vector3, answer = true): void {
+    if (answer && this.turnValid && viewOffset.flown && this.pivotAt.weight > 0) {
+      turned.x = camera.x - target.x; turned.y = camera.y - target.y; turned.z = camera.z - target.z
+      this.pivotAt.shift(this.turnFrom, turned, slid)
+      if (slid.x !== 0 || slid.y !== 0 || slid.z !== 0) {
+        camera.x += slid.x; camera.y += slid.y; camera.z += slid.z
+        target.x += slid.x; target.y += slid.y; target.z += slid.z
+        follow.x += slid.x; follow.y += slid.y; follow.z += slid.z
+        // Already in the camera and the follow point: apply owes nothing for it.
+        viewOffset.slide(slid.x, slid.y, slid.z)
+        this.applied.x += slid.x; this.applied.y += slid.y; this.applied.z += slid.z
+      }
+    }
+    this.mark(camera, target)
   }
 
   /**
@@ -293,6 +377,8 @@ export class ViewRigOffset {
     this.applied.set(0, 0, 0)
     this.lastValid = false
     this.declined = false
+    this.turnValid = false
+    this.pivotAt.clear()
     cursorGlide.share = 0
     setViewCentre(0, 0, 0)
   }
@@ -313,6 +399,9 @@ setFlyLander(() => viewRig.landNow())
 
 type Listening = Pick<EventTarget, 'addEventListener' | 'removeEventListener'>
 
+/** The events a finger from off the scene is kept from the camera by (installFlyTouches' gate). */
+const GATED = ['pointermove', 'pointerup', 'pointercancel'] as const
+
 /**
  * Feed the presses that land on `surface` to the fly and pan gestures:
  * downs on the surface, moves and lifts on `doc` in the capture phase, and
@@ -324,6 +413,26 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
   let mouse: { id: number; x: number; y: number } | null = null
   // A plain left press: OrbitControls' orbit, once it drags past the slop.
   let orbiting: { id: number; x: number; y: number } | null = null
+  // Fingers that landed off the scene (a HUD button, a panel): never the camera's.
+  const elsewhere = new Set<number>()
+  // Every finger, on the document first (the capture phase runs from the top
+  // down): the surface's own listener, which hears it next, takes it back.
+  const landed = (ev: Event): void => {
+    const e = ev as PointerEvent
+    if (e.pointerType === 'mouse') return
+    // The first finger of a touch: any still listed lifted unheard.
+    if (e.isPrimary) elsewhere.clear()
+    elsewhere.add(e.pointerId)
+  }
+  // On the way out of the page, after the controls' own handlers: a finger
+  // (or pen) from elsewhere goes no further while anything is pressed on
+  // the scene, a finger, the mouse or a pen (review of #685, 1).
+  const gate = (ev: Event): void => {
+    const e = ev as PointerEvent
+    if (e.pointerType === 'mouse' || !elsewhere.has(e.pointerId)) return
+    if (e.type !== 'pointermove') elsewhere.delete(e.pointerId)
+    if (sceneHeld()) e.stopImmediatePropagation()
+  }
   const down = (ev: Event): void => {
     const e = ev as PointerEvent
     if (e.pointerType === 'mouse') {
@@ -336,7 +445,9 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
       } else if (e.button === 0 || e.button === 1) orbiting = { id: e.pointerId, x: e.clientX, y: e.clientY }
       return
     }
+    if (e.pointerType === 'pen') { elsewhere.delete(e.pointerId); scenePen = e.pointerId; return }
     if (!touch(e)) return
+    elsewhere.delete(e.pointerId)
     // The first finger of a touch: no other is down, so any finger still
     // counted is one whose lift was never heard (it ended off the page, or
     // a handler swallowed it) and must not turn two fingers into three.
@@ -355,6 +466,8 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
       mouse.y = e.clientY
       return
     }
+    // A pen moving with its tip up let go where the page did not hear it.
+    if (scenePen === e.pointerId && (e.buttons & 1) === 0) scenePen = null
     if (!touch(e)) return
     flyGesture.move(e.pointerId, e.clientX, e.clientY)
     panGesture.move(e.pointerId, e.clientX, e.clientY)
@@ -363,6 +476,7 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
     const e = ev as PointerEvent
     if (e.pointerType === 'mouse') { sceneMouse.down = false; sceneMouse.dragged = false; orbiting = null }
     if (mouse && e.pointerId === mouse.id) { mouse = null; panGesture.setMouse(false); return }
+    if (scenePen === e.pointerId) { scenePen = null; return }
     if (!touch(e)) return
     flyGesture.up(e.pointerId, clock())
     panGesture.up(e.pointerId)
@@ -378,6 +492,8 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
     panGesture.clear()
     mouse = null
     orbiting = null
+    scenePen = null
+    elsewhere.clear()
     sceneMouse.down = false
     sceneMouse.dragged = false
     useViewFly.getState().setTouch(0)
@@ -385,19 +501,27 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
   // In the capture phase, so the gestures have counted a finger before
   // OrbitControls hears it land (the rig's onStart asks how many are down).
   surface.addEventListener('pointerdown', down, { capture: true })
+  doc.addEventListener('pointerdown', landed, true)
   doc.addEventListener('pointermove', move, true)
   doc.addEventListener('pointerup', up, true)
   doc.addEventListener('pointercancel', up, true)
   doc.addEventListener('touchend', left, true)
   doc.addEventListener('touchcancel', left, true)
+  // The page's root element, bubbling: below the document, so the gate runs
+  // before any document listener whenever it was added (OrbitControls adds
+  // its own as each drag starts). Without one (the tests), the document itself.
+  const root: Listening = (doc as { documentElement?: Listening | null }).documentElement ?? doc
+  for (const type of GATED) root.addEventListener(type, gate)
   win.addEventListener('blur', clear)
   return () => {
     surface.removeEventListener('pointerdown', down, { capture: true })
+    doc.removeEventListener('pointerdown', landed, true)
     doc.removeEventListener('pointermove', move, true)
     doc.removeEventListener('pointerup', up, true)
     doc.removeEventListener('pointercancel', up, true)
     doc.removeEventListener('touchend', left, true)
     doc.removeEventListener('touchcancel', left, true)
+    for (const type of GATED) root.removeEventListener(type, gate)
     win.removeEventListener('blur', clear)
     clear()
   }

@@ -108,8 +108,7 @@ import { headlampReach, headlampUniforms } from './headlamp'
 import { canvasPixels, composerSamples } from './composerBudget'
 import './radialFog'
 import { fogFarStep, FOG_FAR, FOG_NEAR, FOG_START_SHARE, VIEW_FOG_SCALE } from './fog'
-import { flyGesture, panGesture, sceneMouse, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
-import { takeSteer } from '../lib/viewFly'
+import { flyGesture, panGesture, sceneMouse, steerToSpend, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
 import { StartLock } from '../lib/viewCamera'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
@@ -607,6 +606,7 @@ function Rig(): JSX.Element {
     minDistance: number
     enableZoom: boolean
     enableRotate: boolean
+    autoRotate: boolean
   } | null>(null)
   // WALK's first person (store/useWalk.ts): whether the last frame was
   // walking, and the eye's glide into the avatar or back out of it, as
@@ -878,8 +878,11 @@ function Rig(): JSX.Element {
     // keeps the new angle; OrbitControls.update at the end derives its spherical
     // from the camera's position, so moving it here sticks. Breaks the lock,
     // as any orbit does: once you have steered you are looking, not following.
-    const steer = takeSteer()
-    if (steer.dx !== 0 || steer.dy !== 0) {
+    // Anything pressed on the scene is already turning the camera: the
+    // button's drag (a resting thumb's wobble) is drained and not spent
+    // (ViewFly.ts steerToSpend; arkinox, 2026-11-12).
+    const steer = steerToSpend()
+    if (steer) {
       steerVec.copy(c.object.position).sub(c.target)
       steerSph.setFromVector3(steerVec)
       const k = (2 * Math.PI) / Math.max(1, state.size.height)
@@ -890,6 +893,11 @@ function Rig(): JSX.Element {
       c.object.position.copy(c.target).add(steerVec)
       locked.current = false
     }
+    // In flight, a turn since the last frame (OrbitControls between frames,
+    // the steer above) turns the camera in place, not about the view's
+    // centre out in front (ViewFly.ts pivot; arkinox, 2026-11-12). The
+    // tutorial's auto-rotate is the camera's own turn, not a hand's.
+    viewRig.pivot(c.object.position, c.target, smooth.current, !c.autoRotate)
     // GRAVITY's fall (store/useWalk.ts) takes its frame first: it can land,
     // which moves the cursor read below.
     tickFall()
@@ -1125,7 +1133,10 @@ function Rig(): JSX.Element {
         if (Math.abs(nd - target) < 0.05) clearTutorialZoom()
       }
     }
+    // The controls' own turn this frame (their damping), in place in flight too.
+    viewRig.mark(c.object.position, c.target)
     c.update()
+    viewRig.pivot(c.object.position, c.target, smooth.current, !c.autoRotate)
     if (s.walking) (walkLook.current ??= new Vector3()).copy(c.object.position).sub(c.target).normalize()
   })
 

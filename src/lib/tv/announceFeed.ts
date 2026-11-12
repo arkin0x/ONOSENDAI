@@ -75,11 +75,13 @@ function tagValue(tags: string[][], name: string): string | undefined {
 /**
  * An event read as an announcement, or null when it is not one TV believes:
  * not the kind, not the announcer, no `t`, a `d` that is not a simple
- * version, a time too far ahead, or a signature that does not verify over
- * every field as it arrived (checked last: it is the costly one).
+ * version, or a signature that does not verify over every field as it
+ * arrived (checked last: it is the costly one). One dated ahead of this
+ * clock is kept: AnnounceBook counts and plays it once the clock is within
+ * ANNOUNCE_SKEW_S of it (a slow clock is not a forgery, and catches up).
  * `announcer` is ANNOUNCER_PUBKEY but in tests, which cannot sign as it.
  */
-export function readAnnouncement(ev: NostrEvent, nowS: number, announcer: string = ANNOUNCER_PUBKEY): HeardAnnouncement | null {
+export function readAnnouncement(ev: NostrEvent, announcer: string = ANNOUNCER_PUBKEY): HeardAnnouncement | null {
   if (!ev || typeof ev !== 'object' || ev.kind !== ANNOUNCE_KIND || ev.pubkey !== announcer) return null
   if (!Array.isArray(ev.tags) || typeof ev.content !== 'string' || !Number.isInteger(ev.created_at)) return null
   const version = tagValue(ev.tags, 'd')
@@ -87,7 +89,6 @@ export function readAnnouncement(ev: NostrEvent, nowS: number, announcer: string
   if (!ev.tags.some((t) => Array.isArray(t) && t[0] === 't' && t[1] === ANNOUNCE_TAG)) return null
   const published = Number(tagValue(ev.tags, 'published_at'))
   const at = Number.isInteger(published) && published > 0 && published <= ev.created_at ? published : ev.created_at
-  if (at > nowS + ANNOUNCE_SKEW_S) return null
   if (!verifiedFresh(ev)) return null
   return { version, text: ev.content, at, created: ev.created_at }
 }

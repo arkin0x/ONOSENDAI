@@ -54,7 +54,7 @@ import {
   type AnnouncePlan, type UpgradeAnnouncement,
 } from '../lib/tv/upgradeAnnounce'
 import { ANNOUNCER_PUBKEY, AnnounceBook, announceFilter, lastSelfUpdate, readAnnouncement, rememberPlayed, rememberSelfUpdate, selfUpdateWanted, wasPlayed } from '../lib/tv/announceFeed'
-import { isBroadcast, reloadBroadcast } from '../lib/tv/broadcast'
+import { isBroadcast, reloadBroadcast, reloadWouldWait } from '../lib/tv/broadcast'
 import { subscribe } from '../lib/relay'
 import type { NostrEvent } from '../lib/events'
 import { holdExplainer, releaseExplainer, useTvExplainer } from './useTvExplainer'
@@ -106,7 +106,9 @@ export function playUpgradeAnnouncement(a: UpgradeAnnouncement, now: number = pe
   if (!plan) return false
   asked.set(plan, a)
   if (useTvAnnounce.getState().showing) {
-    waiting = [...waiting, plan].slice(-QUEUE_MAX)
+    const all = [...waiting, plan]
+    waiting = all.slice(-QUEUE_MAX)
+    for (const out of all.slice(0, -QUEUE_MAX)) dropped(out)
     return true
   }
   begin(plan, now)
@@ -151,6 +153,7 @@ export function announceCutAt(now: number): number {
 }
 
 function begin(plan: AnnouncePlan, now: number): void {
+  shown(plan)
   if (heldAt === null) {
     heldAt = now
     holdExplainer(now)
@@ -175,6 +178,7 @@ export function announceTick(now: number, resumeTv: (heldMs: number, now: number
   if (done) played.push(done)
   const next = waiting.shift()
   if (next) {
+    shown(next)
     useTvAnnounce.setState({ showing: { at: now, plan: next } })
     return true
   }
@@ -245,6 +249,8 @@ interface Feed {
   book: AnnounceBook
   /** Whether what the relays held has been gathered: from then on, what is heard plays at once. */
   gathered: boolean
+  /** Versions handed to playUpgradeAnnouncement that have not come on screen yet: not handed again meanwhile. */
+  queued: Set<string>
   unsubscribe: () => void
   gatherTimer: ReturnType<typeof setTimeout>
   recountTimer: ReturnType<typeof setInterval>
@@ -263,14 +269,14 @@ export function listenForAnnouncements(search: string = typeof window !== 'undef
     refresh(f)
   }
   const f: Feed = {
-    book: new AnnounceBook(), gathered: false, unsubscribe: () => {},
+    book: new AnnounceBook(), gathered: false, queued: new Set(), unsubscribe: () => {},
     gatherTimer: setTimeout(gathered, ANNOUNCE_GATHER_MS),
     recountTimer: setInterval(() => { if (feed === f && f.gathered) refresh(f) }, ANNOUNCE_RECOUNT_MS),
   }
   feed = f
   f.unsubscribe = (subscribeFeed ?? subscribe)(announceFilter(nowSeconds(), announcer), (ev) => {
     if (feed !== f) return
-    const a = readAnnouncement(ev, nowSeconds(), announcer)
+    const a = readAnnouncement(ev, announcer)
     if (a && f.book.add(a) && f.gathered) refresh(f)
   }, gathered)
 }
@@ -282,8 +288,28 @@ function refresh(f: Feed): void {
   const newest = f.book.newest(now)
   if (useTvAnnounce.getState().announcedVersion !== newest) useTvAnnounce.setState({ announcedVersion: newest })
   for (const a of f.book.due(now, (v) => wasPlayed(v, now))) {
-    if (playUpgradeAnnouncement({ version: a.version, text: a.text })) rememberPlayed(a.version, now)
+    if (f.queued.has(a.version)) continue
+    f.queued.add(a.version)
+    if (!playUpgradeAnnouncement({ version: a.version, text: a.text })) f.queued.delete(a.version)
   }
+}
+
+/**
+ * One goes on screen: a version the feed handed over is played on this set
+ * from now (lib/tv/announceFeed rememberPlayed), and not before: one pushed
+ * out of the queue, or still waiting when TV goes off, plays another time.
+ */
+function shown(plan: AnnouncePlan): void {
+  const a = asked.get(plan)
+  const f = feed
+  if (!a || !f || !f.queued.delete(a.version)) return
+  rememberPlayed(a.version, nowSeconds())
+}
+
+/** One pushed out of the queue (QUEUE_MAX): the feed may hand it over again at its next count. */
+function dropped(plan: AnnouncePlan): void {
+  const a = asked.get(plan)
+  if (a) feed?.queued.delete(a.version)
 }
 
 /** TV's own word on whether it is quiet (no HOSAKA spot, no CYBERSPACE STATS board): store/useTv's, which this cannot import. */
@@ -315,6 +341,8 @@ export function maybeSelfUpdate(): boolean {
   if (!selfUpdateWanted(appVersion(), f.book.newest(now), lastSelfUpdate(), now)) return false
   if (announceBusy() || f.book.due(now, (v) => wasPlayed(v, now)).length > 0) return false
   if (useTvExplainer.getState().showing || !tvQuiet()) return false
+  // A stream already reloading over and over waits out its backoff (reloadBroadcast): that reload would land at no quiet moment.
+  if (reloadWouldWait()) return false
   rememberSelfUpdate(now)
   reloadBroadcast()
   return true
@@ -342,7 +370,8 @@ function stopFeed(): void {
 export function setAnnounceFeedForTest(sub: Subscribe | null, clock: (() => number) | null = null, key: string | null = null): void {
   subscribeFeed = sub
   nowSeconds = clock ?? ((): number => Date.now() / 1000)
-  announcer = key ?? ANNOUNCER_PUBKEY
+  // The pinned key is swapped only under the test runner: no other build can un-pin it.
+  announcer = key && import.meta.env.MODE === 'test' ? key : ANNOUNCER_PUBKEY
 }
 
 /** How many wait behind the one on screen: for tests. */

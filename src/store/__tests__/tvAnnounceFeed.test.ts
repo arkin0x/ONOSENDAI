@@ -19,6 +19,16 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
+if (typeof sessionStorage === 'undefined') {
+  const mem = new Map<string, string>()
+  ;(globalThis as { sessionStorage?: unknown }).sessionStorage = {
+    getItem: (k: string) => mem.get(k) ?? null,
+    setItem: (k: string, v: string) => { mem.set(k, String(v)) },
+    removeItem: (k: string) => { mem.delete(k) },
+    clear: () => { mem.clear() },
+  }
+}
+
 vi.mock('../../lib/relay', () => ({
   publish: vi.fn(async () => ({ ok: true })),
   publishMany: vi.fn(async () => ({ ok: true })),
@@ -50,7 +60,7 @@ import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { V2_EPOCH } from '../../lib/tv/tape'
 import { setTvAsk, useTv } from '../useTv'
-import { announceBusy, announceWaitingForTest, listenForAnnouncements, maybeSelfUpdate, playUpgradeAnnouncement, setAnnounceFeedForTest, useTvAnnounce, ANNOUNCE_GATHER_MS } from '../useTvAnnounce'
+import { announceBusy, announceWaitingForTest, listenForAnnouncements, maybeSelfUpdate, playUpgradeAnnouncement, setAnnounceFeedForTest, useTvAnnounce, ANNOUNCE_GATHER_MS, ANNOUNCE_RECOUNT_MS } from '../useTvAnnounce'
 import { useTvExplainer } from '../useTvExplainer'
 import { HOSAKA_1 } from '../../lib/tv/hosakaAd'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
@@ -83,17 +93,17 @@ describe('the announcer and its events', () => {
 
   it('believes the announcer signed it, and nothing else', () => {
     const good = announcement('2.1', 'New things.', NOW - H)
-    expect(readAnnouncement(good, NOW, PK)).toEqual({ version: '2.1', text: 'New things.', at: NOW - H, created: NOW - H })
+    expect(readAnnouncement(good, PK)).toEqual({ version: '2.1', text: 'New things.', at: NOW - H, created: NOW - H })
     // The real pinned key: an event signed by anyone else is never it, whatever it says its author is.
-    expect(readAnnouncement(good, NOW)).toBeNull()
+    expect(readAnnouncement(good)).toBeNull()
     const claimed = { ...announcement('2.1', 'Forged.', NOW - H, { sk: OTHER }), pubkey: ANNOUNCER_PUBKEY }
-    expect(readAnnouncement(claimed, NOW)).toBeNull()
+    expect(readAnnouncement(claimed)).toBeNull()
     // Another author, well signed: not the announcer.
-    expect(readAnnouncement(announcement('2.1', 'Other.', NOW - H, { sk: OTHER }), NOW, PK)).toBeNull()
+    expect(readAnnouncement(announcement('2.1', 'Other.', NOW - H, { sk: OTHER }), PK)).toBeNull()
     // The announcer's own, edited after it was signed: words, version, or the signature itself.
-    expect(readAnnouncement({ ...good, content: 'Edited.' }, NOW, PK)).toBeNull()
-    expect(readAnnouncement({ ...good, tags: [['d', '9.9'], ...good.tags.slice(1)] }, NOW, PK)).toBeNull()
-    expect(readAnnouncement({ ...good, sig: good.sig.replace(/^./, (c) => (c === '0' ? '1' : '0')) }, NOW, PK)).toBeNull()
+    expect(readAnnouncement({ ...good, content: 'Edited.' }, PK)).toBeNull()
+    expect(readAnnouncement({ ...good, tags: [['d', '9.9'], ...good.tags.slice(1)] }, PK)).toBeNull()
+    expect(readAnnouncement({ ...good, sig: good.sig.replace(/^./, (c) => (c === '0' ? '1' : '0')) }, PK)).toBeNull()
   })
 
   it('does not take a signature check remembered on the object for one over the edited fields', () => {
@@ -101,23 +111,33 @@ describe('the announcer and its events', () => {
     expect(verifyEvent(ev as Parameters<typeof verifyEvent>[0])).toBe(true)
     // nostr-tools marks a verified object under a symbol an edit in place keeps.
     ev.content = 'Swapped after a check.'
-    expect(readAnnouncement(ev, NOW, PK)).toBeNull()
+    expect(readAnnouncement(ev, PK)).toBeNull()
   })
 
-  it('wants its kind, its t, a simple version for d, and a time not far ahead', () => {
-    expect(readAnnouncement(announcement('2.1', 'x', NOW, { tags: [['d', '2.1']] }), NOW, PK)).toBeNull()
-    expect(readAnnouncement(announcement('TEST', 'x', NOW, { tags: [['d', 'TEST'], ['t', ANNOUNCE_TAG]] }), NOW, PK)).toBeNull()
-    expect(readAnnouncement(announcement('2.1', 'x', NOW + 2 * H), NOW, PK)).toBeNull()
+  it('wants its kind, its t and a simple version for d', () => {
+    expect(readAnnouncement(announcement('2.1', 'x', NOW, { tags: [['d', '2.1']] }), PK)).toBeNull()
+    expect(readAnnouncement(announcement('TEST', 'x', NOW, { tags: [['d', 'TEST'], ['t', ANNOUNCE_TAG]] }), PK)).toBeNull()
     const k1 = finalizeEvent({ kind: 1, created_at: NOW, tags: [['d', '2.1'], ['t', ANNOUNCE_TAG]], content: 'x' }, SK) as unknown as NostrEvent
-    expect(readAnnouncement(k1, NOW, PK)).toBeNull()
+    expect(readAnnouncement(k1, PK)).toBeNull()
     // published_at after created_at is not believed: created_at is.
     const late = announcement('2.1', 'x', NOW - 2 * H, { tags: [['d', '2.1'], ['t', ANNOUNCE_TAG], ['published_at', String(NOW)]] })
-    expect(readAnnouncement(late, NOW, PK)?.at).toBe(NOW - 2 * H)
+    expect(readAnnouncement(late, PK)?.at).toBe(NOW - 2 * H)
   })
 })
 
 describe('the week, what is due, and the versions', () => {
   const heard = (version: string, at: number, created = at) => ({ version, text: version, at, created })
+
+  it('counts and plays one dated ahead only once this clock is near its time (a slow clock catches up)', () => {
+    const b = new AnnounceBook()
+    const ahead = readAnnouncement(announcement('2.7', 'From a clock ahead.', NOW + 2 * H), PK)!
+    expect(ahead).not.toBeNull()
+    b.add(ahead)
+    expect(b.count(NOW)).toBe(0)
+    expect(b.due(NOW, () => false)).toEqual([])
+    expect(b.count(NOW + 2 * H)).toBe(1)
+    expect(b.due(NOW + 2 * H, () => false).map((a) => a.version)).toEqual(['2.7'])
+  })
 
   it('counts the versions of the week, the newest by number, and plays only those under a day old', () => {
     const b = new AnnounceBook()
@@ -327,6 +347,32 @@ describe('the feed on TV', () => {
     expect(reloads).toEqual([])
   })
 
+  it('marks a version played only once it is on screen: one pushed out of the queue, or waiting when TV goes off, plays later', async () => {
+    useTv.getState().start()
+    await run(2500)
+    for (const v of ['2.2', '2.3', '2.4', '2.5', '2.6']) subs[0].event(announcement(v, `Version ${v}.`, NOW - H))
+    subs[0].eose()
+    // 2.2 on screen, three wait (QUEUE_MAX), 2.3 pushed out.
+    expect(showingVersion()).toBe('2.2')
+    expect(announceWaitingForTest()).toBe(3)
+    expect(wasPlayed('2.2', NOW)).toBe(true)
+    for (const v of ['2.3', '2.4', '2.5', '2.6']) expect(wasPlayed(v, NOW)).toBe(false)
+    // TV off with three waiting: none of them was played.
+    useTv.getState().stop()
+    for (const v of ['2.3', '2.4', '2.5', '2.6']) expect(wasPlayed(v, NOW)).toBe(false)
+    // Back on: the four not played come again; 2.2 does not.
+    useTv.getState().start()
+    await run(2500)
+    for (const v of ['2.2', '2.3', '2.4', '2.5', '2.6']) subs[1].event(announcement(v, `Version ${v}.`, NOW - H))
+    subs[1].eose()
+    expect(showingVersion()).toBe('2.3')
+    expect(announceWaitingForTest()).toBe(3)
+    const each = announceMs(announcePlan({ version: '2.3', text: 'Version 2.3.' })!)
+    await run(4 * each + 2000)
+    expect(announceBusy()).toBe(false)
+    for (const v of ['2.2', '2.3', '2.4', '2.5', '2.6']) expect(wasPlayed(v, NOW)).toBe(true)
+  })
+
   it('leaves the feed alone for /tv?announce=test, which plays the sample', async () => {
     useTv.getState().start()
     await run(2500)
@@ -428,6 +474,40 @@ describe('the stream\'s gentle self-update (owner, 2026-11-12)', () => {
     endSong()
     expect(reloads).toEqual([])
     await run(announceMs(announcePlan({ version: '2.0', text: 'Playing.' })!) + 500)
+    endSong()
+    expect(reloads).toEqual(['reload'])
+  })
+
+  it('waits for an announcement pushed out of the queue to play before it reloads', async () => {
+    const s = await onTheStream()
+    const versions = [1, 2, 3, 4, 5].map((k) => bumped(k))
+    for (const v of versions) s.event(announcement(v, `Version ${v}.`, NOW - H))
+    s.eose()
+    const each = announceMs(announcePlan({ version: versions[0], text: `Version ${versions[0]}.` })!)
+    // Four play through; the one pushed out is still due, not played.
+    await run(4 * each + 2000)
+    expect(announceBusy()).toBe(false)
+    expect(wasPlayed(versions[1], NOW)).toBe(false)
+    endSong()
+    expect(reloads).toEqual([])
+    // The next count hands it over again; once it has played, a song's end reloads.
+    await run(ANNOUNCE_RECOUNT_MS + each + 1000)
+    expect(announceBusy()).toBe(false)
+    expect(wasPlayed(versions[1], NOW)).toBe(true)
+    endSong()
+    expect(reloads).toEqual(['reload'])
+  })
+
+  it('does not reload while the stream is waiting out its reload backoff, nor spend the day on it', async () => {
+    const s = await onTheStream()
+    s.event(announcement(bumped(), 'Week old news.', NOW - 2 * 24 * H))
+    s.eose()
+    const t = Date.now()
+    sessionStorage.setItem('onosendai:tvBroadcastReloads', JSON.stringify([t - 1000, t - 2000, t - 3000]))
+    endSong()
+    expect(reloads).toEqual([])
+    expect(localStorage.getItem(SELF_UPDATE_KEY)).toBeNull()
+    sessionStorage.removeItem('onosendai:tvBroadcastReloads')
     endSong()
     expect(reloads).toEqual(['reload'])
   })

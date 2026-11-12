@@ -7,7 +7,10 @@
  * bloom's SNO payload (DECK-0008 §5.5): whole units and ticks split per axis,
  * colours from the built-in palette, and the wire's Z turned into the
  * model's (fromPayload's flipZ). A bloom stands at its seed's `C`, one model
- * unit 2^scale gibsons (§5.6). A test holds the two equal.
+ * unit 2^scale gibsons (§5.6). A bloom whose expressed `opacity` gene is
+ * below 100 carries it in the buffers exactly when its payload does (§5.4,
+ * §5.5), and the shard keeps it, so the scene draws the bloom see-through as
+ * it draws any shard with an opacity. A test holds the two equal.
  */
 
 import { neededExtent, vertexAt, type ShardModel, type ShardVertex } from 'sno-core/shards'
@@ -16,7 +19,7 @@ import type { BloomBuffers } from 'sno-core/seeds'
 
 /** The shard a bloom draws as. `id` keys its geometry in the scene, so it changes whenever the bloom does. */
 export function bloomShard(buffers: BloomBuffers, name: string, unit: number, id: string): ShardModel {
-  const { positions, colors, faces } = buffers
+  const { positions, colors, faces, opacity } = buffers
   const count = colors.length
   const vertices: ShardVertex[] = new Array(count)
   for (let i = 0; i < count; i++) {
@@ -37,5 +40,7 @@ export function bloomShard(buffers: BloomBuffers, name: string, unit: number, id
     up: false,
     spin: 0,
     updatedAt: 0,
+    // After `faces`, only below 100, as the payload writes it (DECK-0008 §5.5).
+    ...(opacity !== undefined ? { opacity } : {}),
   }
 }

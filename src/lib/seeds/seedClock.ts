@@ -27,10 +27,13 @@ import type { HeaderBook } from './headerBook'
  * would plant and grow seeds 12 blocks behind the network.
  *
  * sno-core clockHeight (the tip minus 6) is for a reader that sees the real
- * tip. ONOSENDAI's seeds never do: the trusted tip is the top of the header
- * book (NTH's anchors and the header blobs, packed to the same depth), and
- * the stop index's tip is kind 321 anchors too. Every block up to the clock
- * is then one the book can hold, the clock block's own header included.
+ * tip. ONOSENDAI's seeds never do: the trusted tip is NTH's newest verified
+ * anchor (HeaderBook top, which counts only headers from NTH-signed anchors,
+ * never the blobs), so the clock block's own header is always in the book,
+ * and every block up to the clock is one the book can hold. Before NTH has
+ * answered, SEED's preview and its hide height fall back to the stop index's
+ * tip (bloomReach.ts, SeedCompose), which any key's kind 321 can fill; that
+ * only changes the preview's weather, never a planted height or a bloom.
  */
 export function clockAtAnchor(anchorHeight: number): number {
   return anchorHeight

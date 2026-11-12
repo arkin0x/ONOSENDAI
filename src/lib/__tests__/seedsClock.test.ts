@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { clockHeight } from 'sno-core/seeds'
+import { CLOCK_DEPTH, clockHeight } from 'sno-core/seeds'
 import anchor975256 from './vectors/nth-anchor-975256.json'
 import { blobChainTimes, fetchAnchorHeaders, headerOfAnchor, HeaderBook, NTH_PUBKEY, B_PER_QUERY } from '../seeds/headerBook'
 import { clockAtAnchor, predictedHeights, settlePlanted } from '../seeds/seedClock'
@@ -28,8 +28,10 @@ function anchorOf(tags: string[][], pubkey = NTH_PUBKEY): NostrEvent {
 describe('the clock height (§4.1)', () => {
   it('is NTH\'s newest anchor itself: NTH publishes a block only once it is 6 deep, so 6 more are not taken', () => {
     expect(clockAtAnchor(975256)).toBe(975256)
+    // NTH's gate (NTH_CONFIRMATIONS, 6) is the spec's own depth: a change to either must be looked at here.
+    expect(CLOCK_DEPTH).toBe(6)
     // The same block a reader that saw the real tip would read: NTH's gate puts that tip 6 or more above its newest anchor.
-    expect(clockAtAnchor(975256)).toBe(clockHeight(975256 + 6))
+    expect(clockAtAnchor(975256)).toBe(clockHeight(975256 + CLOCK_DEPTH))
   })
 })
 

@@ -26,6 +26,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { createPortal } from 'react-dom'
 import { useProfile } from '../hooks/useProfile'
 import { isGuideAuthor } from '../tutorial/guideBags'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
@@ -192,8 +193,12 @@ export function entryLabel(entry: ChestEntry): { label: string; coin: boolean } 
  * readContents); without it, the chest is looked up among this device's
  * finds and deployments by `id`, and rumors read as claims if it is not
  * there. Never the bag's author: a chest inside a chest may be another's.
+ * `actionsIn`, a door row of DISCOVERED NEARBY: OPEN or CLOSE is drawn there,
+ * beside VIEW, nothing until it is mounted (arkinox, 2026-11-12: "For doors, we
+ * should have an OPEN / CLOSE button here as well"), and a door with nothing
+ * held to open it shows OPEN disabled, what it requires as its title.
  */
-export function ChestBlock({ id, chest, author, verified, place, sealer: given, named = true, inChest = false }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string; named?: boolean; inChest?: boolean }): JSX.Element {
+export function ChestBlock({ id, chest, author, verified, place, sealer: given, named = true, inChest = false, actionsIn }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string; named?: boolean; inChest?: boolean; actionsIn?: HTMLElement | null }): JSX.Element {
   const items = useInventory((s) => s.items)
   const me = useCyberspace((s) => s.identity.pubkey)
   const keys = useMemo(() => openingKeys(items), [items])
@@ -354,6 +359,19 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
   const carried = opener?.by === 'key' ? opener.key.carried : undefined
   const opensWith = opener === null ? null : opener.by === 'self' ? 'your identity' : carried ? 'a key you carry' : items[opener.key.id]?.name ?? 'an item you hold'
   const offerOpen = closedHere || (opener && (!entries || owed) && (!canClose || owed))
+  const acts = (
+    <>
+      {canClose && (
+        <button className="chest__act" onClick={() => void shut()} disabled={busy} title="Close it here. Nothing is sent.">CLOSE</button>
+      )}
+      {offerOpen && (
+        <button className="chest__act" onClick={() => void open()} disabled={busy || rereading} title={closedHere ? 'Open it again here. Its secret is kept on this device.' : `Decrypt it here with ${opensWith}`}>{busy || rereading ? 'OPENING' : 'OPEN'}</button>
+      )}
+      {actionsIn !== undefined && door && !opener && !handOpened && !closedHere && (
+        <button className="chest__act" disabled title={`Requires ${requiresLabel(chest)}`}>OPEN</button>
+      )}
+    </>
+  )
   return (
     <div className="chest">
       <div className="chest__head">
@@ -364,12 +382,7 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
             {closedHere ? 'CLOSED' : entries || rereading || canClose ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
           </span>
         </span>
-        {canClose && (
-          <button className="chest__act" onClick={() => void shut()} disabled={busy} title="Close it here. Nothing is sent.">CLOSE</button>
-        )}
-        {offerOpen && (
-          <button className="chest__act" onClick={() => void open()} disabled={busy || rereading} title={closedHere ? 'Open it again here. Its secret is kept on this device.' : `Decrypt it here with ${opensWith}`}>{busy || rereading ? 'OPENING' : 'OPEN'}</button>
-        )}
+        {actionsIn === undefined ? acts : actionsIn && createPortal(acts, actionsIn)}
       </div>
       {offerOpen && !closedHere && carried && <span className="chest__fits">A key you carry fits: {carriedLabel(carried, useCyberspace.getState().position)}</span>}
       {status && <span className="chest__status" role="status">{status}</span>}

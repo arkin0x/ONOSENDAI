@@ -31,7 +31,8 @@ const renderer = Reconciler({
   supportsHydration: false,
   isPrimaryRenderer: false,
   noTimeout: -1,
-  createInstance: (type: string, props: Record<string, unknown>): Host => ({ type, props, children: [] }),
+  // An element as react-dom's createPortal checks one (nodeType 1), so a portal into a host works here too; not enumerable, so no test reads it.
+  createInstance: (type: string, props: Record<string, unknown>): Host => Object.defineProperty({ type, props, children: [] }, 'nodeType', { value: 1 }),
   createTextInstance: text,
   appendInitialChild: add,
   appendChild: add,

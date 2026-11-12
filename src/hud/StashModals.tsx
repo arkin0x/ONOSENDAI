@@ -31,6 +31,7 @@ import { useWorkshop } from '../store/useWorkshop'
 import { usePublished } from '../store/usePublished'
 import { ownObjectCredit } from '../lib/published'
 import { useCyberspace } from '../store/useCyberspace'
+import { GoArrow } from './ui/GoArrow'
 
 export const BAG_EXPLAINER =
   'A bag is a collection of one or more messages, objects, or cashu tokens encrypted to (hidden at) a location. All users can see a bag exists but they have no information about where to find it. Bags are opened automatically by attempting decryption with all your collected Region Keys.'
@@ -70,7 +71,7 @@ export function BagRow({ bag, onOpen }: { bag: Bag; onOpen: () => void }): JSX.E
           {bag.height === 0 ? 'exact gibson' : formatCellSize(bag.height)} · {bag.items.length} item{bag.items.length === 1 ? '' : 's'} · {bag.published ? 'LIVE' : 'LOCAL'}{bag.plane === 1 ? ' · ideaspace' : ''}
         </span>
       </button>
-      <span className="shards__goto-hint" aria-hidden="true">▸</span>
+      <span className="shards__goto-hint" aria-hidden="true"><GoArrow /></span>
     </li>
   )
 }
@@ -134,7 +135,7 @@ function ItemRow({ d, onGo, onMove }: { d: MyDeployment; onGo: () => void; onMov
       </button>
       {!d.published && <PublishSwitch lookupId={d.lookupId} published={false} />}
       {movable(d, me) && <button className="shards__move" onClick={onMove} title="Place it somewhere else: BUILD comes up on it where it stands">MOVE</button>}
-      <span className="shards__goto-hint" aria-hidden="true">▸</span>
+      <span className="shards__goto-hint" aria-hidden="true"><GoArrow /></span>
     </li>
   )
 }

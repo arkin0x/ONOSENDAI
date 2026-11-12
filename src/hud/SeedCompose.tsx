@@ -45,6 +45,7 @@ import { growInWorker } from '../lib/seeds/growClient'
 import { bloomReachAt } from '../lib/seeds/bloomReach'
 import { bloomShard } from '../lib/seeds/bloomShard'
 import { dnaResolver, headerBook, trustedTip } from '../lib/seeds/seedSources'
+import { GoArrow } from './ui/GoArrow'
 
 /** The largest DNA text a written DNA may be (DECK-0008 §3.1), so an import reads no more. */
 const MAX_DNA_BYTES = 8192
@@ -221,7 +222,7 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
 
       <div className="shards__actions">
         <button className="avatars__go" onClick={onDone}>CANCEL</button>
-        <button className="avatars__go" disabled={!ok || seedFit.state === 'pending' || (ownerId !== null && owned.state !== 'ok')} onClick={plant} title="Aim it at the build cursor; its work is mined when you hide it">PLANT ▸</button>
+        <button className="avatars__go" disabled={!ok || seedFit.state === 'pending' || (ownerId !== null && owned.state !== 'ok')} onClick={plant} title="Aim it at the build cursor; its work is mined when you hide it">PLANT<GoArrow /></button>
       </div>
       <Explanation>
         <ul className="buildbar__explain">

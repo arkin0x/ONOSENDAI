@@ -23,6 +23,7 @@ import type { KeyItem } from '../lib/hidden'
 import { useBuilder } from '../store/useBuilder'
 import { useShards } from '../store/useShards'
 import { ItemForgeFields } from './ItemForgeFields'
+import { GoArrow } from './ui/GoArrow'
 
 /** `onDone` runs on CANCEL and once the item has been handed to the deploy. */
 export function KeyCompose({ onDone }: { onDone: () => void }): JSX.Element {
@@ -47,7 +48,7 @@ export function KeyCompose({ onDone }: { onDone: () => void }): JSX.Element {
       <ItemForgeFields item={key} onChange={setKey} />
       <div className="shards__actions">
         <button className="avatars__go" onClick={onDone}>CANCEL</button>
-        <button className="avatars__go" disabled={!key.name.trim()} onClick={place} title="Aim it at the build cursor; the item goes into your ITEMS when it is hidden">PLACE ITEM ▸</button>
+        <button className="avatars__go" disabled={!key.name.trim()} onClick={place} title="Aim it at the build cursor; the item goes into your ITEMS when it is hidden">PLACE ITEM<GoArrow /></button>
       </div>
       <Explanation>
         An item is a keypair hidden in a bag: whoever finds it can TAKE it into their ITEMS. Seal a chest to it and only a holder can open that chest. A mini quest is four steps: forge an item, hide it somewhere, seal a chest to it with a prize inside, and hide the chest somewhere else.

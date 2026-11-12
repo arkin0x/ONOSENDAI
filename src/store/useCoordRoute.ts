@@ -9,7 +9,11 @@
  *
  * A prefix becomes a region: the yellow box (scene/PrefixRegionBox.tsx) and
  * a free view of its middle, framed so the whole box is in view, which also
- * scans the middle, as any view does.
+ * scans the middle, as any view does. Fewer than 64 characters never reach
+ * the plane bit, so the region is the same box in both planes
+ * (CYBERSPACE_V2.md §2.5): the view opens in dataspace, Earth's plane, where
+ * most speakeasies sit (arkinox, 2026-11-12), and switching planes keeps the
+ * region and its box, which is drawn in whichever plane the view shows.
  *
  * A Bitcoin block's merkle root or block hash, as an explorer shows it, is
  * looked up among the loaded anchors as they arrive. A port's root is its
@@ -19,6 +23,9 @@
  *
  * When the view the link opened ends (RETURN, another place, a spectation),
  * the address goes back to the site's root, so a reload does not reopen it.
+ *
+ * The View panel's box opens a /C/ link typed into it the same way, without a
+ * reload (openCoordLink): the address becomes the link and the route opens.
  */
 
 import { create } from 'zustand'
@@ -32,9 +39,9 @@ import { useCyberspace } from './useCyberspace'
 import { getStopIndex, stopScale, useHyperspace, viewHyperspace } from './useHyperspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 
+/** A prefix link's region. It has no plane: the box is the same in both. */
 export interface RouteRegion extends PrefixRegion {
   prefix: string
-  plane: Plane
 }
 
 interface CoordRouteState {
@@ -45,6 +52,9 @@ interface CoordRouteState {
 }
 
 export const useCoordRoute = create<CoordRouteState>(() => ({ region: null, label: null }))
+
+/** Undoes the watching of the route open now, so a link opened over it does not leave it running. */
+let live: (() => void) | null = null
 
 /** How often, at most, the loaded anchors are searched for the link's block while they load. */
 const BLOCK_LOOKUP_MS = 2_000
@@ -69,6 +79,10 @@ export function startCoordRoute(loc: Pick<Location, 'pathname' | 'search' | 'has
     return () => {}
   }
 
+  // A link opened over another (the View panel's box) takes over from it:
+  // the old one's watching stops here, before the new view replaces its
+  // focus, so it does not see that as its end and send the address home.
+  live?.()
   const cs = useCyberspace.getState()
   const stops: Array<() => void> = []
   const end = (): void => {
@@ -79,12 +93,14 @@ export function startCoordRoute(loc: Pick<Location, 'pathname' | 'search' | 'has
 
   if (route.kind === 'prefix') {
     const region = prefixRegion(route.hex)
-    // Only all 64 characters fix the plane bit: a region is drawn in the
-    // plane you are in.
-    const plane = cs.anchorPlane
+    // Only all 64 characters fix the plane bit, so a region opens in
+    // dataspace, Earth's plane (arkinox, 2026-11-12). A plane switch from
+    // there keeps the focus label (useCyberspace setPlane), so the link and
+    // its box last through it, and the name is given for both planes, so
+    // VIEWING keeps saying it on either.
     const label = `C/${route.hex}`
-    useCoordRoute.setState({ region: { ...region, prefix: route.hex, plane }, label })
-    cs.viewAt(region.center, plane, label, frameScale(region.maxHeight, MAX_SCALE_EXP))
+    useCoordRoute.setState({ region: { ...region, prefix: route.hex }, label })
+    cs.viewAt(region.center, 0, label, frameScale(region.maxHeight, MAX_SCALE_EXP), { named: { position: { ...region.center }, plane: null } })
   } else {
     const { position, plane } = coordPlace(route.hex)
     const label = `C/${route.hex.slice(0, 8)}…${route.hex.slice(-4)}`
@@ -98,7 +114,22 @@ export function startCoordRoute(loc: Pick<Location, 'pathname' | 'search' | 'has
     const label = useCoordRoute.getState().label
     if (label !== null && s.focus?.label !== label) end()
   }))
-  return () => { for (const s of stops.splice(0)) s() }
+  const stop = (): void => {
+    for (const s of stops.splice(0)) s()
+    if (live === stop) live = null
+  }
+  live = stop
+  return stop
+}
+
+/**
+ * Open /C/<hex> from inside the app, as the View panel's box does with a link
+ * typed into it: the address becomes the link (pushState, no reload) and the
+ * route opens on it exactly as when the page loads there.
+ */
+export function openCoordLink(hex: string, loc: Pick<Location, 'pathname' | 'search' | 'hash'> = window.location, history: Pick<History, 'pushState' | 'replaceState'> = window.history): void {
+  try { history.pushState(null, '', `/C/${hex}${loc.search}${loc.hash}`) } catch { /* no history here */ }
+  startCoordRoute(loc, history)
 }
 
 /**

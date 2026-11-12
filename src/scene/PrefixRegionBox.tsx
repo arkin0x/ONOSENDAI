@@ -8,7 +8,9 @@
  * axes can stop at different heights and the box is a slab or a cube: each
  * axis is sized on its own. Labelled with the prefix, so a shared region
  * says what it is. Skipped when it would be too large or too small to read
- * at the zoom, as the other boxes are.
+ * at the zoom, as the other boxes are. A prefix has no plane (CYBERSPACE_V2.md
+ * §2.5), so the box is drawn in whichever plane the view shows and stays
+ * through a plane switch.
  */
 
 import { useMemo } from 'react'
@@ -32,13 +34,12 @@ function cells(h: number, scaleExp: number): number {
 export function PrefixRegionBox({ axes }: Props): JSX.Element | null {
   const region = useCoordRoute((s) => s.region)
   const anchor = useCyberspace((s) => s.anchor)
-  const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
 
   const geometry = useMemo(() => new EdgesGeometry(new BoxGeometry(1, 1, 1)), [])
 
   const box = useMemo(() => {
-    if (!region || region.plane !== anchorPlane) return null
+    if (!region) return null
     const origin = alignedOrigin(anchor, scaleExp)
     const centre: [number, number, number] = [0, 0, 0]
     const size: [number, number, number] = [1, 1, 1]
@@ -54,7 +55,7 @@ export function PrefixRegionBox({ axes }: Props): JSX.Element | null {
     })
     if (tooBig || tooSmall) return null
     return { centre, size }
-  }, [region, anchor, anchorPlane, scaleExp, axes])
+  }, [region, anchor, scaleExp, axes])
 
   if (!box || !region) return null
   const top: [number, number, number] = [box.centre[0] - box.size[0] / 2, box.centre[1] + box.size[1] / 2, box.centre[2]]

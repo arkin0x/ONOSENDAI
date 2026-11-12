@@ -17,10 +17,13 @@
  * The prefix math is coordRoute's, shared with the relay's region vectors, so
  * a region picked here is exactly the one relay.onosendai.tech/<hex> serves
  * (the relay path is the bare hex; /C/<hex> is the app's own form).
+ *
+ * A prefix of 1 to 63 hex has no plane (CYBERSPACE_V2.md §2.5): the region is
+ * the same box in both, so a plane switch keeps region mode and its prefix,
+ * and everything here reads the plane the view shows now.
  */
 
 import { create } from 'zustand'
-import type { Plane } from 'cyberspace-core'
 import { coveringRegion } from '../lib/coordRoute'
 import type { Position } from '../lib/space'
 import { samePosition, useCyberspace } from './useCyberspace'
@@ -36,8 +39,6 @@ interface RegionState {
   entryPrefix: string | null
   /** The region's current prefix hex, null when no valid prefix covers the cells. */
   prefix: string | null
-  /** The plane the region is read in (the view's). */
-  plane: Plane
   enter: () => void
   exit: () => void
   /** X: cursor back to the entry cell, region collapsed to that one cell at the current zoom. */
@@ -46,9 +47,9 @@ interface RegionState {
   resetSize: () => void
 }
 
-/** The region holding only `at`, at `scaleExp`, in `plane`; its prefix or null. */
-function regionFor(at: Position, scaleExp: number, plane: Plane): string | null {
-  return coveringRegion([at], scaleExp, plane)?.prefix ?? null
+/** The region holding only `at`, at `scaleExp`; its prefix or null. The plane never reaches a prefix, so the view's is as good as any. */
+function regionFor(at: Position, scaleExp: number): string | null {
+  return coveringRegion([at], scaleExp, useCyberspace.getState().anchorPlane)?.prefix ?? null
 }
 
 /** Watches the view while region mode is on; torn down on exit. */
@@ -60,18 +61,17 @@ export const useRegion = create<RegionState>((set, get) => ({
   entryScale: 0,
   entryPrefix: null,
   prefix: null,
-  plane: 0,
 
   enter: () => {
     const cs = useCyberspace.getState()
     if (!cs.viewing() || get().active) return
     const entry = { ...cs.cursor }
-    const plane = cs.anchorPlane
-    const prefix = regionFor(entry, cs.scaleExp, plane)
-    set({ active: true, entry, entryScale: cs.scaleExp, entryPrefix: prefix, prefix, plane })
+    const prefix = regionFor(entry, cs.scaleExp)
+    set({ active: true, entry, entryScale: cs.scaleExp, entryPrefix: prefix, prefix })
     // Grow (or reject) the region as the cursor moves or the zoom changes, and
     // fold region mode the moment VIEW ends (RECALL, a mode change, a hop) or
-    // another view takes its place (a search, a block, a star).
+    // another view takes its place (a search, a block, a star). A plane
+    // switch is neither: it keeps the view, its label and the region.
     let last = { cursor: cs.cursor, scaleExp: cs.scaleExp }
     const label = cs.focus?.label
     watch?.()
@@ -84,7 +84,7 @@ export const useRegion = create<RegionState>((set, get) => ({
       if (!self.entry) return
       // Both whole cells, at the zoom now: the smallest prefix over them, or
       // the one we have if there is none (reject the move's effect).
-      const grown = coveringRegion([self.entry, s.cursor], s.scaleExp, self.plane)
+      const grown = coveringRegion([self.entry, s.cursor], s.scaleExp, s.anchorPlane)
       if (grown) set({ prefix: grown.prefix })
     })
   },
@@ -100,11 +100,12 @@ export const useRegion = create<RegionState>((set, get) => ({
     const self = get()
     const cs = useCyberspace.getState()
     if (!self.active || !self.entry) return
-    const prefix = regionFor(self.entry, cs.scaleExp, self.plane)
+    const prefix = regionFor(self.entry, cs.scaleExp)
     // Move the cursor home first (this fires the watch, which recomputes the
     // same one-cell prefix), then settle the prefix in case the move was a
-    // no-op (the cursor was already on the entry cell).
-    if (!samePosition(cs.cursor, self.entry)) cs.aimView({ ...self.entry }, self.plane)
+    // no-op (the cursor was already on the entry cell). The view keeps the
+    // plane it is in, which may not be the one region mode began in.
+    if (!samePosition(cs.cursor, self.entry)) cs.aimView({ ...self.entry }, cs.anchorPlane)
     set({ prefix })
   },
 

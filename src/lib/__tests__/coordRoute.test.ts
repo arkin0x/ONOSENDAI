@@ -4,12 +4,36 @@
  */
 import { describe, expect, it } from 'vitest'
 import { coordToXyz, xyzToCoord } from 'cyberspace-core'
-import { coordLink, coordPlace, frameScale, parseCoordRoute, placeHex, prefixRegion } from '../coordRoute'
+import { coordLink, coordPlace, frameScale, parseCoordRoute, placeHex, prefixRegion, typedCoordRoute } from '../coordRoute'
 import { appendStops, createStopIndex, rowByRootOrHash } from '../hyperspace/compactIndex'
 import { hexToBytes } from '../events'
 import type { Stop } from '../hyperspace/stops'
 
 const FULL = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9f'
+
+describe('typedCoordRoute, a /C/ link typed into the View box (arkinox, 2026-11-12)', () => {
+  const MIDWEST = '56db6db6db6db6db6db6dbad'
+  it('reads the hex alone, C/, /C/ and a whole link, as a region', () => {
+    for (const typed of [MIDWEST, ` ${MIDWEST} `, `C/${MIDWEST}`, `c/${MIDWEST}`, `/C/${MIDWEST}`, `https://www.onosendai.tech/C/${MIDWEST}`, `http://localhost:5173/C/${MIDWEST}/`, `C/0x${MIDWEST.toUpperCase()}`]) {
+      expect(typedCoordRoute(typed), typed).toEqual({ kind: 'prefix', hex: MIDWEST })
+    }
+  })
+  it('reads 64 hex in any of those forms as a full coordinate', () => {
+    expect(typedCoordRoute(FULL)).toEqual({ kind: 'full', hex: FULL })
+    expect(typedCoordRoute(`C/${FULL}`)).toEqual({ kind: 'full', hex: FULL })
+    expect(typedCoordRoute(`https://www.onosendai.tech/C/${FULL}`)).toEqual({ kind: 'full', hex: FULL })
+  })
+  it('refuses what is not valid hex, too long, or not a /C/ link', () => {
+    for (const typed of ['', 'C/', 'C/56zz', `${MIDWEST}g`, '56db 6db6', FULL + '0', `C/${FULL}0`, 'https://www.onosendai.tech/', 'https://www.onosendai.tech/X/56db', 'ftp://x/C/56db', 'Kansas City']) {
+      expect(typedCoordRoute(typed), typed).toBeNull()
+    }
+  })
+  it('leaves hex-letter words to the place lookup unless written as a link', () => {
+    expect(typedCoordRoute('cafe')).toBeNull()
+    expect(typedCoordRoute('dead')).toBeNull()
+    expect(typedCoordRoute('C/cafe')).toEqual({ kind: 'prefix', hex: 'cafe' })
+  })
+})
 
 describe('parseCoordRoute', () => {
   it('is null away from /C/', () => {

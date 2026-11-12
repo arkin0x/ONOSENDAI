@@ -60,6 +60,29 @@ export function parseCoordRoute(pathname: string): CoordRoute | null {
   return clean.length === 64 ? { kind: 'full', hex: clean } : { kind: 'prefix', hex: clean }
 }
 
+/**
+ * A /C/ link typed into the View panel's box (arkinox, 2026-11-12): the hex
+ * alone, `C/<hex>`, `/C/<hex>`, or a whole http(s) link to one. Read by
+ * parseCoordRoute, so the box takes exactly what a link takes. Hex alone
+ * counts only with a digit in it, so a place name spelled in hex letters
+ * ("cafe", "dead") is still looked up by name. Null for anything else,
+ * including a link that is not valid hex.
+ */
+export function typedCoordRoute(text: string): Exclude<CoordRoute, { kind: 'invalid' }> | null {
+  const t = text.trim()
+  let path: string
+  if (/^https?:\/\//i.test(t)) {
+    try { path = new URL(t).pathname } catch { return null }
+  } else if (/^\/?c\//i.test(t)) {
+    path = t.startsWith('/') ? t : `/${t}`
+  } else {
+    if (!/\d/.test(t)) return null
+    path = `/C/${t}`
+  }
+  const route = parseCoordRoute(path)
+  return route && route.kind !== 'invalid' ? route : null
+}
+
 /** A full coordinate as a place and a plane. */
 export function coordPlace(hex: string): { position: Position; plane: Plane } {
   const c = coordToXyz(BigInt('0x' + hex))

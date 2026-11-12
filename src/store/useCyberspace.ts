@@ -697,14 +697,18 @@ export interface CyberFocus {
 
 /** How `viewAt` frames and names a view. */
 export interface ViewHow {
-  /** The label names the place (CyberFocus.named); default true. */
-  named?: boolean
+  /** The label names the place (CyberFocus.named); default true. A NamedPlace names it on other terms (a /C/ prefix: both planes). */
+  named?: boolean | NamedPlace
   item?: boolean
   fit?: boolean
 }
 
-/** Where a focus's name applies (CyberFocus.named). */
-export interface NamedPlace { position: Position; plane: Plane }
+/**
+ * Where a focus's name applies (CyberFocus.named). `plane` null: in both
+ * planes, as a /C/ prefix's name is, since a prefix never reaches the plane
+ * bit (CYBERSPACE_V2.md §2.5; store/useCoordRoute.ts).
+ */
+export interface NamedPlace { position: Position; plane: Plane | null }
 
 export interface CyberspaceState {
   identity: { pubkey: string; npub: string }
@@ -7127,7 +7131,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const focusAxes = viewAxes(view)
     // A fitted view frames the thing as a plain look does while the cursor is on it (CyberFocus.fit).
     const fitted = focus !== null && focus.drive === true && (focus.fit === true || focus.item === true) && focus.named !== undefined &&
-      samePosition(cursor, focus.named.position) && anchorPlane === focus.named.plane
+      samePosition(cursor, focus.named.position) && (focus.named.plane === null || anchorPlane === focus.named.plane)
     // A focus is a continuous point (a stop, Earth's centre), and everything
     // drawn at it uses pointCentre. Framing [0,0,0], the aligned CORNER of
     // its cell, put the viewed block up-and-right of screen centre by the

@@ -2,8 +2,10 @@
  * SeedCompose.tsx - SEED in BUILD (DECK-0008): pick a DNA, see what it grows,
  * and plant it at the build cursor.
  *
- * A DNA is one of the six original DNAs (the spec's vectors, the Seed Garden's) or
- * one pasted or imported as text, checked as it is typed (sno-core
+ * A DNA is one SEED lists (lib/seeds/seedDnas: the six original DNAs, then
+ * the owner's designed DNAs, in the Seed Garden's groups, picked from one
+ * grouped list that fits a phone) or one pasted or imported as text,
+ * checked as it is typed (sno-core
  * tryParseDna; the engine's words under the box). The preview grows the bloom
  * in the seeds worker at the build cursor's terroir, at a block age from day
  * 0 to day 30 of the past month's blocks, at the chosen scale. The price is
@@ -13,9 +15,11 @@
  *
  * Caps (§7), shown to people as the SIZE LIMIT (owner, 2026-11-10: "size
  * limit" reads at once; the code and the DNA's `caps` tag keep the spec's
- * word): the original DNAs' (8,000 vertices, 6,000 symbols, 40 days; 21 bits) or
- * the free caps (2,048, 2,048, 32 days; 16 bits). An original DNA defaults to its
- * own, a pasted DNA to the free caps; a bloom stops growing at its caps.
+ * word): a listed DNA's own (the original DNAs' 8,000 vertices, 6,000 symbols,
+ * 40 days, 21 bits; each designed DNA's as designed, 16 to 21 bits) or the
+ * free caps (2,048, 2,048, 32 days; 16 bits); a pasted DNA's LARGE is the
+ * original DNAs'. A listed DNA defaults to its own, a pasted DNA to the free
+ * caps; a bloom stops growing at its caps.
  *
  * The bloom at day 31, grown where the seed lands, says how far it reaches;
  * that sizes its hide height, from 3 to 12 (owner ruling 2026-11-10), shown
@@ -36,8 +40,9 @@ import { positionHex } from '../lib/events'
 import { useCalibration } from '../lib/calibration'
 import { minerCount } from '../lib/avatarWorker'
 import { describeDuration } from '../lib/avatarMine'
-import { ORIGINAL_CAPS, ORIGINAL_DNAS, originalDnaId } from '../lib/seeds/originalDnas'
-import { dnaTextRefusal, miningSeconds, PREVIEW_DAYS, previewRequest, readDnaText, seedFitFor, seedHideFor, SEED_HIDE_MAX, type SeedFit } from '../lib/seeds/plant'
+import { ORIGINAL_CAPS } from '../lib/seeds/originalDnas'
+import { DNA_GROUPS, SEED_DNAS, seedDnaId } from '../lib/seeds/seedDnas'
+import { dnaTextRefusal, miningSeconds, PREVIEW_DAYS, previewRequest, readDnaText, sameCaps, seedFitFor, seedHideFor, SEED_HIDE_MAX, type SeedFit } from '../lib/seeds/plant'
 import type { Position } from '../lib/space'
 import type { Plane } from 'cyberspace-core'
 import { MAX_COMPUTE_HEIGHT } from '../store/useCyberspace'
@@ -106,7 +111,12 @@ function useSeedFit(text: string, ok: boolean, caps: Caps, cursor: Position, pla
   return result
 }
 
-/** The owner's published event for an original DNA, resolved (lib/seeds/dnaStore), and its size limit. */
+/** How a size limit reads in a tooltip: "8,192 vertices, 8,192 symbols, 32 days". */
+function capsWords(c: Caps): string {
+  return `${c.vertices.toLocaleString('en-US')} vertices, ${c.symbols.toLocaleString('en-US')} symbols, ${c.generations} days`
+}
+
+/** The owner's published event for a listed DNA, resolved (lib/seeds/dnaStore), and its size limit. */
 function useOwnerDna(id: string | null): { state: 'none' | 'fetching' | 'missing' } | { state: 'ok'; caps: Caps } {
   const [got, setGot] = useState<{ id: string; caps: Caps | null } | null>(null)
   useEffect(() => {
@@ -121,27 +131,28 @@ function useOwnerDna(id: string | null): { state: 'none' | 'fetching' | 'missing
 }
 
 export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
-  // An original DNA by index, or the pasted text.
+  // A listed DNA by index (SEED_DNAS), or the pasted text.
   const [pick, setPick] = useState<number | 'paste'>(0)
   const [pasted, setPasted] = useState('')
   const [importError, setImportError] = useState<string | null>(null)
   const [day, setDay] = useState(PREVIEW_DAYS)
   const [scale, setScale] = useState(0)
   const fileRef = useRef<HTMLInputElement>(null)
-  // Small caps or the original DNAs'; null follows the pick (an original DNA its own, a pasted DNA the free caps).
+  // The free caps or the DNA's own (a pasted DNA's: the original DNAs'); null follows the pick (a listed DNA its own, a pasted DNA the free caps).
   const [capsPick, setCapsPick] = useState<'small' | 'large' | null>(null)
   const cursor = useCyberspace((s) => s.cursor)
   const plane = useCyberspace(buildPlane)
   const step = useCyberspace(buildStepOf)
   const sha256PerSec = useCalibration((s) => s.sha256PerSec)
 
-  const text = pick === 'paste' ? pasted : ORIGINAL_DNAS[pick].text
+  const text = pick === 'paste' ? pasted : SEED_DNAS[pick].text
   const refusal = pick === 'paste' && !pasted.trim() ? null : dnaTextRefusal(text)
   const ok = refusal === null && text.trim() !== ''
-  // An original DNA the owner has published is planted as that event, at its own size limit (owner ruling 2026-11-10).
-  const ownerId = pick === 'paste' ? null : originalDnaId(ORIGINAL_DNAS[pick].name)
+  // A listed DNA the owner has published is planted as that event, at its own size limit (owner ruling 2026-11-10).
+  const ownerId = pick === 'paste' ? null : seedDnaId(SEED_DNAS[pick].name)
   const owned = useOwnerDna(ownerId)
-  const chosen: Caps = (capsPick ?? (pick === 'paste' ? 'small' : 'large')) === 'small' ? BASE_CAPS : ORIGINAL_CAPS
+  const own: Caps = pick === 'paste' ? ORIGINAL_CAPS : SEED_DNAS[pick].caps
+  const chosen: Caps = (capsPick ?? (pick === 'paste' ? 'small' : 'large')) === 'small' ? BASE_CAPS : own
   const caps: Caps = ownerId && owned.state === 'ok' ? owned.caps : chosen
   // Where the seed lands, at the height it will hide at, and that height.
   const seedFit = useSeedFit(text, ok, caps, cursor, plane, step, scale)
@@ -172,12 +183,14 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
 
   return (
     <div className="shards__compose seedc">
-      <div className="seedc__picks" role="group" aria-label="DNA">
-        {ORIGINAL_DNAS.map((d, i) => (
-          <button key={d.name} aria-pressed={pick === i} className={`seedc__pick ${pick === i ? 'is-on' : ''}`} onClick={() => { setPick(i); setCapsPick(null) }}>{d.name.toUpperCase()}</button>
+      <select className="avatars__input compose__select seedc__select" value={String(pick)} onChange={(e) => { setPick(e.target.value === 'paste' ? 'paste' : Number(e.target.value)); setCapsPick(null) }} aria-label="DNA">
+        {DNA_GROUPS.map((g) => (
+          <optgroup key={g} label={g.toUpperCase()}>
+            {SEED_DNAS.map((d, i) => d.group === g && <option key={d.name} value={i}>{d.name.toUpperCase()}</option>)}
+          </optgroup>
         ))}
-        <button aria-pressed={pick === 'paste'} className={`seedc__pick ${pick === 'paste' ? 'is-on' : ''}`} onClick={() => { setPick('paste'); setCapsPick(null) }}>PASTE</button>
-      </div>
+        <option value="paste">PASTE</option>
+      </select>
 
       {pick === 'paste' && (
         <>
@@ -209,8 +222,8 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
       ) : (
       <div className="seedc__row" role="group" aria-label="Size limit">
         <span className="secret__label seedc__label--wide">SIZE LIMIT</span>
-        <button aria-pressed={caps === BASE_CAPS} className={`seedc__pick ${caps === BASE_CAPS ? 'is-on' : ''}`} onClick={() => setCapsPick('small')} title="2,048 vertices, 2,048 symbols, 32 days">SMALL</button>
-        <button aria-pressed={caps === ORIGINAL_CAPS} className={`seedc__pick ${caps === ORIGINAL_CAPS ? 'is-on' : ''}`} onClick={() => setCapsPick('large')} title="8,000 vertices, 6,000 symbols, 40 days">LARGE</button>
+        <button aria-pressed={sameCaps(caps, BASE_CAPS)} className={`seedc__pick ${sameCaps(caps, BASE_CAPS) ? 'is-on' : ''}`} onClick={() => setCapsPick('small')} title={capsWords(BASE_CAPS)}>SMALL</button>
+        {!sameCaps(own, BASE_CAPS) && <button aria-pressed={!sameCaps(caps, BASE_CAPS)} className={`seedc__pick ${!sameCaps(caps, BASE_CAPS) ? 'is-on' : ''}`} onClick={() => setCapsPick('large')} title={capsWords(own)}>LARGE</button>}
       </div>
       )}
       <p className="seedc__price">

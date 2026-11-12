@@ -31,8 +31,8 @@ export interface SeedDraft {
   /** The planter's name for this planting, or empty. */
   title: string
   /**
-   * The owner's published event for this original DNA (originalDnas
-   * ORIGINAL_DNA_IDS): every seed of it names that event, and none signs a
+   * The owner's published event for this DNA SEED lists (seedDnas
+   * SEED_DNA_IDS): every seed of it names that event, and none signs a
    * DNA of its own. Absent for a pasted DNA, or while it is unpublished.
    */
   dnaId?: string
@@ -92,7 +92,8 @@ export function dnaTextRefusal(text: string): string | null {
   return read.ok ? null : read.error
 }
 
-function sameCaps(a: Caps, b: Caps): boolean {
+/** Whether two caps are the same three numbers. */
+export function sameCaps(a: Caps, b: Caps): boolean {
   return a.vertices === b.vertices && a.symbols === b.symbols && a.generations === b.generations
 }
 

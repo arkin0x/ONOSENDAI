@@ -7,13 +7,13 @@
  * free caps 2,048 / 2,048 / 32: 16 bits a seed). Its bud picture beside it
  * (public/tutorial/bud.png) is the tree on day 3.
  *
- * Every new tutorial seed names that published event, as every seed of an
- * original DNA names the owner's event once it is set
- * (lib/seeds/originalDnas.ts ORIGINAL_DNA_IDS): TUTORIAL_DNA_ID holds the
+ * Every new tutorial seed names that published event, as every seed of a
+ * DNA SEED lists names the owner's event once it is set
+ * (lib/seeds/seedDnas.ts SEED_DNA_IDS): TUTORIAL_DNA_ID holds the
  * event id. Were it empty, the player's SEED would sign a copy of the DNA
  * under their own key instead.
  *
- * The SEED composer offers the original DNAs and PASTE, not this tree, so the
+ * The SEED composer offers the DNAs it lists and PASTE, not this tree, so the
  * plant step lines the seed up itself, through the same deploy SEED's PLANT
  * starts (tutorialSeedDraft, tutorial/director.ts), and the player plants it
  * with HIDE. Nothing in the Seeds client is changed.

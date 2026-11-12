@@ -398,8 +398,8 @@ registerTutorialWatcher('plant', (onDone) => {
 /**
  * PLANT THE SEED (the plant step's button): BUILD on the player, where they
  * stand on the dirt, with the tutorial tree lined up to hide, as SEED's
- * PLANT lines one up (hud/SeedCompose; the composer offers the original
- * DNAs, not this tree). The seed names the owner's published event at its
+ * PLANT lines one up (hud/SeedCompose; the composer offers the DNAs it
+ * lists, not this tree). The seed names the owner's published event at its
  * own size limit; that event ships with the app (dna.ts TUTORIAL_DNA_EVENT)
  * and is noted on this device first, so no relay is needed for it. Another
  * id waits until its event is on this device's relays, as SEED does; with

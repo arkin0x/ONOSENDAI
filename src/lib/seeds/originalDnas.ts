@@ -9,8 +9,9 @@
  *
  * The owner will publish them under their own npub (ruling of 2026-11-10), and
  * every new seed of one then names that event: one DNA id, one author credited
- * wherever its seeds grow. ORIGINAL_DNA_IDS holds those ids; until one is set,
- * SEED signs a DNA of its own for the planter, as it always has.
+ * wherever its seeds grow. SEED_DNA_IDS (seedDnas.ts, every DNA SEED lists)
+ * holds those ids; until one is set, SEED signs a DNA of its own for the
+ * planter, as it always has.
  * Each is planted at the prototype's caps, 8,000 vertices, 6,000 symbols and
  * 40 generations: a price of 21 bits a seed (§7), seconds of mining on a phone.
  * A test holds every text equal to `seedo   1` and the vectors' text, valid
@@ -20,7 +21,7 @@
 import type { Caps } from 'sno-core/seeds'
 
 export interface OriginalDna {
-  /** Its `dna` line. */
+  /** Its `dna` line (in SEED's list, a name unique there: seedDnas.ts). */
   name: string
   text: string
   caps: Caps
@@ -61,23 +62,3 @@ export const ORIGINAL_DNAS: readonly OriginalDna[] = [
     caps: ORIGINAL_CAPS,
   },
 ]
-
-/**
- * The owner's published event for each original DNA, by name, or empty while
- * it is unpublished (owner ruling 2026-11-10). A set id is what every new seed
- * of that DNA names; its own `caps` tag is the size limit it is planted at.
- */
-export const ORIGINAL_DNA_IDS: Readonly<Record<string, string>> = {
-  'fiddlehead': '',
-  'sword fern': '',
-  'oak': '',
-  'willow': '',
-  'coral': '',
-  'crystal': '',
-}
-
-/** The owner's event id for an original DNA, or null while none is set. */
-export function originalDnaId(name: string, ids: Readonly<Record<string, string>> = ORIGINAL_DNA_IDS): string | null {
-  const id = ids[name]
-  return typeof id === 'string' && /^[0-9a-f]{64}$/.test(id) ? id : null
-}

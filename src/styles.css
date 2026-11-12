@@ -10628,8 +10628,8 @@ html.tv-broadcast body { overflow: hidden; }
 .bloom__who { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .bloom__who .secret__label { flex: 0 0 64px; }
 
-/* The SEED composer (SeedCompose, DECK-0008): the DNAs as chips, the bloom turning, then day, scale and price. */
-.seedc__picks { display: flex; flex-wrap: wrap; gap: 4px; }
+/* The SEED composer (SeedCompose, DECK-0008): the DNAs in one grouped list, the bloom turning, then day, scale and price. */
+.seedc__select { width: 100%; height: 30px; }
 .seedc__pick {
   font-family: inherit;
   font-size: 8px;

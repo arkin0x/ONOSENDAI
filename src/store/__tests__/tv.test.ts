@@ -86,6 +86,8 @@ async function ask(f: Filter): Promise<RelayAnswer[]> {
 beforeEach(() => {
   down = 0
   lag = 0
+  // Every test that reaches a picture picks the next start: none carries over to the next test.
+  localStorage.removeItem(NEXT_START_KEY)
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'] })
   // The random moment lands before the tape, and the random pick is the
   // oldest event after it (relays answer newest first): the tape's first.
@@ -184,11 +186,11 @@ describe('Cyberspace TV', () => {
     expect(Number(localStorage.getItem(NEXT_START_KEY))).toBeGreaterThanOrEqual(V2_EPOCH)
   })
 
-  it('a start picked ahead is used once, and nothing but a v2 second is taken for one', () => {
+  it('a start picked ahead is used once, and nothing but a v2 second gone by is taken for one', () => {
     localStorage.setItem(NEXT_START_KEY, String(T0))
     expect(takeNextStart()).toBe(T0)
     expect(takeNextStart()).toBeNull()
-    for (const junk of ['abc', '5', String(V2_EPOCH - 1), '1.5e9', '']) {
+    for (const junk of ['abc', '5', String(V2_EPOCH - 1), '1.5e9', '', String(Math.floor(Date.now() / 1000) + 3600)]) {
       localStorage.setItem(NEXT_START_KEY, junk)
       expect(takeNextStart()).toBeNull()
     }

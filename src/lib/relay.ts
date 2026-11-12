@@ -19,7 +19,7 @@ import { answerChecks } from './sigCheck'
 import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, VerifiedEvent } from 'nostr-tools/core'
 import type { NostrEvent } from './events'
-import { currentRelays, DEFAULT_RELAY, isRetiredRelay } from '../store/useRelays'
+import { currentRelays, DEFAULT_RELAY, PINNED_RELAYS, isRetiredRelay } from '../store/useRelays'
 import { LiveRegistry, type Transport } from './liveSub'
 import { signerHeld } from './authOpen'
 import { AUTH_STALLED, classifyClose, mergeAnswers, type RelayAnswer } from './relayOutcome'
@@ -1121,8 +1121,9 @@ const NO_ANSWER = 'no answer in time'
  * (HIDDEN BAGS) can take longer than the deadline on a busy socket or a busy
  * page, and its first events alone were taken for the whole answer: 29 bags
  * of 105, or none (the owner, 2026-11-04).
- * `graceMs`: once any relay has answered, the rest have this long more, not
- * the whole deadline: for a read any one relay's answer will do (TV's tape).
+ * `graceMs`: once a pinned relay (each holds the whole history) has answered,
+ * the rest have this long more, not the whole deadline (TV's tape). A relay
+ * a viewer added answering first starts nothing: it may hold none of it.
  */
 export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?: { quietMs: number; capMs: number }; graceMs?: number }
 
@@ -1275,12 +1276,13 @@ async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_
   const asked = opts.evenHung ? urls : skipHung(urls)
   await authAll(asked)
   const deadline = Date.now() + maxWait
-  // `graceMs`: once one relay has answered, the others have this long more,
-  // then end as no answer in time with what they sent. Ended early, none hung.
+  // `graceMs`: once a pinned relay has answered, the others have this long
+  // more, then end as no answer in time with what they sent. Ended early, none hung.
   const early = new AbortController()
+  const pinned = PINNED_RELAYS.map((r) => normalizeURL(r))
   const answers = await Promise.all(urls.map((url): Promise<RelayAnswer> => asked.includes(url)
     ? askOne(url, filter, deadline, { deferChecks: opts.deferChecks, stop: early.signal, ...(opts.stream ? { quietMs: opts.stream.quietMs, capAt: Date.now() + opts.stream.capMs } : {}) }).then((a) => {
-      if (opts.graceMs !== undefined && a.outcome === 'answered') setTimeout(() => early.abort(), opts.graceMs)
+      if (opts.graceMs !== undefined && a.outcome === 'answered' && pinned.includes(url)) setTimeout(() => early.abort(), opts.graceMs)
       opts.onAnswer?.(a)
       return a
     })

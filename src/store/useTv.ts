@@ -317,12 +317,14 @@ export function setStatsSnapshotForTest(s: StatsSnapshot | null): void {
 let timer: number | null = null
 let ask: Ask = (f) => queryEach(f)
 /**
- * Once one relay has answered a tape question, how long the others have, ms.
- * Either relay holds the whole history, and waiting on the slower one cost
- * TUNING two to three seconds a question (measured 2026-11-11).
+ * Once a pinned relay has answered a tape question, how long the others
+ * have, ms (relay.ts ReadOptions graceMs). Each pinned relay holds the whole
+ * history, and waiting on the slower one, up to the 8 s deadline, cost TUNING
+ * two to three seconds a question (measured 2026-11-11). Long enough for the
+ * other's usual answer, so an event only one of them holds is still merged.
  */
-export const TAPE_GRACE_MS = 400
-/** The tape's own questions (where it starts, and its windows): settled once one relay answers, TAPE_GRACE_MS on. */
+export const TAPE_GRACE_MS = 1_000
+/** The tape's own questions (where it starts, and its windows): settled once a pinned relay answers, TAPE_GRACE_MS on. */
 let askTape: Ask = (f) => queryEach(f, undefined, { graceMs: TAPE_GRACE_MS })
 
 /** How long one question may take before it counts as unanswered. */
@@ -1087,12 +1089,12 @@ function tick(id: number): void {
 /** Where the next tape starts, picked ahead (pickNextStart): kept on the device, so a return visit plays at once. */
 export const NEXT_START_KEY = 'onosendai:tvNextStart'
 
-/** The start picked ahead, used once: null when there is none (or no storage), and a new random start is asked for. */
+/** The start picked ahead, used once: null when there is none (or no storage, or it is not a v2 second gone by), and a new random start is asked for. */
 export function takeNextStart(): number | null {
   try {
     const t = Number(localStorage.getItem(NEXT_START_KEY))
     localStorage.removeItem(NEXT_START_KEY)
-    return Number.isInteger(t) && t >= V2_EPOCH ? t : null
+    return Number.isInteger(t) && t >= V2_EPOCH && t <= Date.now() / 1000 ? t : null
   } catch { return null }
 }
 

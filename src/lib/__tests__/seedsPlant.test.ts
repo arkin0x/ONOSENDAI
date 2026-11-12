@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest'
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import { fromPayload } from 'sno-core/shards'
-import { BASE_CAPS, growBloom, parseDna, tryParseDna, workOk } from 'sno-core/seeds'
+import { BASE_CAPS, growBloom, mixDna, parseDna, tryParseDna, workOk } from 'sno-core/seeds'
 import { ORIGINAL_CAPS, ORIGINAL_DNAS } from '../seeds/originalDnas'
 import { bloomReachGibsons, seedDraftHeight, seedHideFor, seedHideHeight, SEED_HIDE_MAX, SEED_HIDE_MIN, dnaMatches, dnaTemplate, dnaTextRefusal, readDnaText, draftPrice, miningSeconds, previewHash, previewRequest, seedTemplate, seedWorkHolds, PREVIEW_DAYS } from '../seeds/plant'
 import { mineChunk, nonceTagged } from '../avatarMine'
@@ -36,6 +36,16 @@ describe('the original DNAs', () => {
       if (read.ok) expect(read.dna.name).toBe(d.name)
       if (read.ok) expect(read.dna.revision).toBe(1)
       expect(d.caps).toEqual(ORIGINAL_CAPS)
+    }
+  })
+
+  it('a planter\'s copy of the old text, without the line, is the same species and still mixes with the new one, either way round (§3.9, §6.5)', () => {
+    for (const d of ORIGINAL_DNAS) {
+      const now = parseDna(d.text), before = parseDna(vectors.growth.dnas[d.name])
+      expect(before.revision).toBe(now.revision)
+      expect(before.speciesKey).toBe(now.speciesKey)
+      expect(mixDna(now, before, 0x12345678).refused, d.name).toBeUndefined()
+      expect(mixDna(before, now, 0x12345678).refused, d.name).toBeUndefined()
     }
   })
 

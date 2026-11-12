@@ -1,0 +1,482 @@
+{
+ "fiddlehead": {
+  "created_at": 1794460063,
+  "tags": [
+   [
+    "caps",
+    "8000",
+    "6000",
+    "40"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): fiddlehead, one of the six original DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "53295807bfb003d661df90aafc377c535c4ad4f05aeba24e3b625efb6944aafe731804678bd06e8e01384f5922e4c737c67fef50037b0f1bca86a81e14bed43f"
+ },
+ "sword fern": {
+  "created_at": 1794460088,
+  "tags": [
+   [
+    "caps",
+    "8000",
+    "6000",
+    "40"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): sword fern, one of the six original DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "61c33b4683fc64607bbc950595bc1e1b1e3f115662aaed656138dde92013a2dc31717f3fb56fa47ba16ff7fab55818694cafbcc20a5f0ee4783dc49514898dec"
+ },
+ "oak": {
+  "created_at": 1794460076,
+  "tags": [
+   [
+    "caps",
+    "8000",
+    "6000",
+    "40"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): oak, one of the six original DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "6071d51f64b368fa6eaceb8f928ec1d0245db146ae8c22dc64f6a7536236b3ff7b35a8c74839257e6592285e509e6c6252f7c4045eeb9645fa4de8eec8a16979"
+ },
+ "willow": {
+  "created_at": 1794460097,
+  "tags": [
+   [
+    "caps",
+    "8000",
+    "6000",
+    "40"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): willow, one of the six original DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "978609ec5c9273bb6ece64c38d57d3ea2c5482bcc5f0926bf7f7250f4cab39c7f00cd6c0ed6106295eb5b7c402ac5bc07c3bad2a68905b7eea90d95a823bffa9"
+ },
+ "coral": {
+  "created_at": 1794460058,
+  "tags": [
+   [
+    "caps",
+    "8000",
+    "6000",
+    "40"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): coral, one of the six original DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "60f6498f6451bdf89b2bb6554b314de7d3e01b1b7e38b329d40ef85e647f15503ebbee95fc88ae0d6ada377c978f48fb7d1fc5d0c9df5b0f75d1d84f36bf1d7d"
+ },
+ "crystal": {
+  "created_at": 1794460061,
+  "tags": [
+   [
+    "caps",
+    "8000",
+    "6000",
+    "40"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): crystal, one of the six original DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "ec30952bca9498ca3762f9b62675da569163c78c6939f5f13c2e3a4ecbc5b24b6b39cc6265805038358680bfb3cf8232de7147e9bd7e69dad7e7b33d343add7d"
+ },
+ "winter star": {
+  "created_at": 1794460099,
+  "tags": [
+   [
+    "caps",
+    "8192",
+    "8192",
+    "32"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): winter star, one of the Crystals DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "d09984e08be7e154e4999e549e7a6c5724a87ec0ef0a8b03b674876732a0538a7e3ff7324502b9ef5ae2269e2dab66640f120d8fe8edb34c8d0aabea57110bed"
+ },
+ "trefoil frost": {
+  "created_at": 1794460093,
+  "tags": [
+   [
+    "caps",
+    "8192",
+    "4096",
+    "32"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): trefoil frost, one of the Crystals DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "cead3d562e8755fec8043eff5f7a88865287cc6f34235a9e2d6d439d530472e806e6266b86ebac6aac955bb179ed6ca78b5ebc04355483101efcf05240b705b3"
+ },
+ "penta frost": {
+  "created_at": 1794460079,
+  "tags": [
+   [
+    "caps",
+    "8192",
+    "8192",
+    "32"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): penta frost, one of the Crystals DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "525a61c6b10ced5152c8ac01734ef3eae9ecabcae48cd6eefc3cf1a6f2988794da25d5ea6810c9aeba57f347f30841bdc3b745bbad7731385d2ca5fb4f199b54"
+ },
+ "twelve-armed flake": {
+  "created_at": 1794460095,
+  "tags": [
+   [
+    "caps",
+    "8192",
+    "8192",
+    "32"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): twelve-armed flake, one of the Crystals DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "adce058349427edbbebdfd0c5217e0d57aeadbb0cd5e80c69b85a7c48763e076dbcce9d65a41d46eb6cf2cfff7ff0411fa99716a3fc84c23bc3c6ce8183f09c0"
+ },
+ "amethyst tetrapod": {
+  "created_at": 1794460034,
+  "tags": [
+   [
+    "caps",
+    "2048",
+    "2048",
+    "32"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): amethyst tetrapod, one of the Crystals DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "64f62d96d52c23e994b34698898503689423976c65a2175fab1d970f85154a47c643ac7d11819326d92e77e78823924b316f3573fbf6966db6d0e312bc547f9f"
+ },
+ "citrine compass": {
+  "created_at": 1794460052,
+  "tags": [
+   [
+    "caps",
+    "2048",
+    "2048",
+    "32"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): citrine compass, one of the Crystals DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "b25329dbf6d710ef0d9f0445e7cd34c29b0b835debeceafbca66db2eee3b99bef7da8a44621c0730da0af6ded49c79fb5a73f2dd8b788e4ad778b0db20ea77d7"
+ },
+ "rose quartz star": {
+  "created_at": 1794460083,
+  "tags": [
+   [
+    "caps",
+    "4096",
+    "4096",
+    "32"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): rose quartz star, one of the Crystals DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "594c4d9cdd48995ffddf0c3e75225c9a83ff832e6ea7ddc09ba68aba979a14d5a0e2d1773147959a1f2d16280dacba272f73772a2a29987e68c0b82a343fbeb6"
+ },
+ "aquamarine geode": {
+  "created_at": 1794460039,
+  "tags": [
+   [
+    "caps",
+    "4096",
+    "4096",
+    "32"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): aquamarine geode, one of the Crystals DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "d4aeaed88d82554ba2748253c8d2073e4faac7cce8d58b0c718c63a3e9f764aa625fe01e74d10c7fc07a3282f9b574b3c851abeec78977e6a5ab6548385d25ce"
+ },
+ "winter star v3": {
+  "created_at": 1794460101,
+  "tags": [
+   [
+    "caps",
+    "2048",
+    "2048",
+    "128"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): winter star v3, one of the Crystals v3 DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "6060892c50471b96fbd10d00be561ee9c5a31ce383b9698a4b46d6cd8c5f0641b1168b524b4fc0dea8f5a7d9c9a0f1af561a5894f5aacad5d7bda290ca8428f1"
+ },
+ "rose frost v3": {
+  "created_at": 1794460081,
+  "tags": [
+   [
+    "caps",
+    "4096",
+    "4096",
+    "128"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): rose frost v3, one of the Crystals v3 DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "fa4afbb5d9866c8e7b0668a9c7d0dd588a15c49f62de3034292a50be4280d445b67ef8a394b0370575b879b2341533aaae55f563a95c360b22c0b95cb00d431d"
+ },
+ "amethyst cluster v3": {
+  "created_at": 1794460031,
+  "tags": [
+   [
+    "caps",
+    "2048",
+    "2048",
+    "128"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): amethyst cluster v3, one of the Crystals v3 DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "e808d202f0a56868f5a005b18d7d3b47f26e7e618d7882418e9d9b1f9675abc7939f4208ef387a306540255d63e83dfedb849a14b9740b0fbebb0a752c3991f2"
+ },
+ "aquamarine spire v3": {
+  "created_at": 1794460041,
+  "tags": [
+   [
+    "caps",
+    "2048",
+    "2048",
+    "128"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): aquamarine spire v3, one of the Crystals v3 DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "0e9293b4deb6b4fe2305724c9c46e5e9b10d7697f6241278a3b55e0416c0670e79e80b1f7c539c0019dc201214f3d66791f0b79a04e01af4c8d513e411fdf174"
+ },
+ "citrine cross v3": {
+  "created_at": 1794460054,
+  "tags": [
+   [
+    "caps",
+    "2048",
+    "2048",
+    "128"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): citrine cross v3, one of the Crystals v3 DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "39ea632c8cf684c9f279e9edaa3bc3f8ca07a84472e7ef2fda0f753a812cd1eaeaac658b0d861f1c46214a1bcfa051f4ae8a1c5aacb51b0ecc07ac89da55a25e"
+ },
+ "fiddlehead (ferns)": {
+  "created_at": 1794460065,
+  "tags": [
+   [
+    "caps",
+    "8192",
+    "8192",
+    "32"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): fiddlehead, one of the Ferns DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "adfa05f551169f010bf459965cddc5cf712332128ff3a8d622cf81cd470bb2a5c3ded6e4e7afea40220db3675c1bef5f617eae563872dbbb4b7f479ffbc5eadb"
+ },
+ "sword fern (ferns)": {
+  "created_at": 1794460091,
+  "tags": [
+   [
+    "caps",
+    "16384",
+    "8192",
+    "32"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): sword fern, one of the Ferns DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "0dd13a10816b94f418471a81713424023bde621b73064682ec523db60c165e59bedd8ff7c232b68f45d7e5abc1865e45c2a080db4ced62e8508adfe754221b53"
+ },
+ "juniper": {
+  "created_at": 1794460074,
+  "tags": [
+   [
+    "caps",
+    "2048",
+    "2048",
+    "32"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): juniper, one of the Bonsai DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "dd8f1116ebcee81e912d2ee17983033b4b6ada19a0f3bf1eaf90a1740cea5027e361cff2223aa2c73f598ea518caf72103e22a5ed4c1144f57d3642f33a30b2f"
+ },
+ "cascade pine": {
+  "created_at": 1794460048,
+  "tags": [
+   [
+    "caps",
+    "2048",
+    "2048",
+    "32"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): cascade pine, one of the Bonsai DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "a751f8ddf200b41bd0e0c32ac925d4282c74c9612fecf95e56f78f9349e853916e29eb40ee90ca05581592aeb0dae30967dbf0510469a8cc7981e26a45f0a2ef"
+ },
+ "japanese maple": {
+  "created_at": 1794460072,
+  "tags": [
+   [
+    "caps",
+    "4096",
+    "4096",
+    "32"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): japanese maple, one of the Bonsai DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "692b427b8a65180d34bb51e033a2a5db02b6d4cf0fe58a21416fc4004391bd2e7082822a6dcf8ac29c304a40a16954cbe9806bac1633b6905e53a496d1a48653"
+ },
+ "cherry": {
+  "created_at": 1794460050,
+  "tags": [
+   [
+    "caps",
+    "8192",
+    "8192",
+    "32"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): cherry, one of the Bonsai DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "aec13625203ce1ad453a8e4975565150249cb2c4f16fff08f115a640f14f7b9dddea9d6db9f60f61796308b6c1423d11d6057429401f8a8e9f7952c7f7899a85"
+ },
+ "italian cypress": {
+  "created_at": 1794460069,
+  "tags": [
+   [
+    "caps",
+    "4096",
+    "4096",
+    "128"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): italian cypress, one of the Tall trees DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "b0cef0cdcf0cffbc984aecb0c4bd08b28623fbc8c91f0fbcdfbea3a9a3670220005394183cb0169e5e13da6b053dbd7a749867f88b39124d859ddf53bc2c0f02"
+ },
+ "amur maple": {
+  "created_at": 1794460036,
+  "tags": [
+   [
+    "caps",
+    "8192",
+    "4096",
+    "64"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): amur maple, one of the Tall trees DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "a446f551d416f61c72c49fd6f3847de03bec8820c0335a430191b7541335bd9781ffa7885e96f458dfd381ba202113f1468332fa8d1118fc564f66063ff697b1"
+ },
+ "coconut palm": {
+  "created_at": 1794460056,
+  "tags": [
+   [
+    "caps",
+    "4096",
+    "4096",
+    "128"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): coconut palm, one of the Tall trees DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "be1300c76e031b2ea013c777edb2eba9b8a48e06920679a8dd73eb3c0dfe464ead17a78ce5f45f761fe2dd1b8c9b97169a76b6a2f282b18345a31a063de70f0d"
+ },
+ "silver birch": {
+  "created_at": 1794460086,
+  "tags": [
+   [
+    "caps",
+    "8192",
+    "4096",
+    "64"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): silver birch, one of the Tall trees DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "71e79f1e5bc7a28cf2f49ea64ef1f7a82dd7efedb8a5be758fad6ef0f299e802b2542bcd3d1b8404a2d1f79c391d3fb6e8ceccb842ad67e48d99cbad6f41059c"
+ },
+ "giant sequoia": {
+  "created_at": 1794460067,
+  "tags": [
+   [
+    "caps",
+    "4096",
+    "4096",
+    "128"
+   ],
+   [
+    "alt",
+    "Seeds DNA (SEEDO): giant sequoia, one of the Tall trees DNAs of ONOSENDAI's Seed Garden"
+   ]
+  ],
+  "sig": "1c7c2548b47c0d041f9f865525cc2426f95c12f3d1f79b3aa10c34c8addf3fbf761e2cd1d863830e2a4f938835acc50ba67cf1e1a81a706358062bd33e7c0f9c"
+ }
+}

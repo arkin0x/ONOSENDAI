@@ -458,7 +458,7 @@ export async function lineUpTutorialSeed(id: string | null = tutorialDnaId(), re
     return 'Stand on the dirt first.'
   }
   // Its hide height, as SEED finds it (owner ruling 2026-11-10): the smallest
-  // from 3 to 12 whose cube holds this DNA's day-31 bloom where it lands, 12
+  // from 3 to 12 whose cube holds this DNA's bloom at its last day where it lands, 12
   // when none does; carried as the draft's fit, which the deploy uses for
   // this very cursor and step (plant.ts seedDraftHeight).
   const cursor = { ...s.cursor }

@@ -367,9 +367,9 @@ describe('the director', () => {
     expect(useShards.getState().pending).toMatchObject({ type: 'seed', seed: { text: TUTORIAL_DNA.text, caps: TUTORIAL_DNA.caps, scale: 0 } })
     expect((useShards.getState().pending as { seed: { dnaId?: string } }).seed.dnaId).toBeUndefined()
     // Its hide height is the one SEED's seedHideFor picks for this tree at this spot, with the bloom measured
-    // from the same Seeds pieces SEED's useSeedFit uses (day 31, where it lands). This holds the wiring
+    // from the same Seeds pieces SEED's useSeedFit uses (its last day, where it lands). This holds the wiring
     // (cursor, plane, step, ceiling, the deploy's rule); if lib/seeds/bloomReach bloomReachAt changes, change seedReach here.
-    const { seedHideFor, previewRequest, bloomReachGibsons, PREVIEW_DAYS } = await import('../../lib/seeds/plant')
+    const { seedHideFor, previewRequest, bloomReachGibsons, previewLastDay } = await import('../../lib/seeds/plant')
     const { growInWorker } = await import('../../lib/seeds/growClient')
     const { headerBook, trustedTip } = await import('../../lib/seeds/seedSources')
     const { getStopByHeight, useHyperspace } = await import('../../store/useHyperspace')
@@ -377,7 +377,7 @@ describe('the director', () => {
     const { MAX_COMPUTE_HEIGHT } = await import('../../store/useCyberspace')
     const now = trustedTip() ?? useHyperspace.getState().tipHeight ?? 975_300
     const seedReach = async (p: { x: bigint; y: bigint; z: bigint }): Promise<number | undefined> => {
-      const req = previewRequest({ text: TUTORIAL_DNA.text, caps: TUTORIAL_DNA.caps, coord: positionHex(p, layout!.plane), scale: 0, tip: now, day: PREVIEW_DAYS, hashOf: (h) => headerBook.hash(h) ?? getStopByHeight(h)?.blockHash })
+      const req = previewRequest({ text: TUTORIAL_DNA.text, caps: TUTORIAL_DNA.caps, coord: positionHex(p, layout!.plane), scale: 0, tip: now, day: previewLastDay(TUTORIAL_DNA.caps), hashOf: (h) => headerBook.hash(h) ?? getStopByHeight(h)?.blockHash })
       const answer = await growInWorker({ ...req, key: 'preview-reach' })
       return answer.type === 'bloom' ? bloomReachGibsons(answer.buffers.positions, 0) : undefined
     }

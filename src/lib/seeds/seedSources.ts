@@ -20,6 +20,7 @@ import { DnaResolver, idbDnaCache } from './dnaStore'
 import { fetchAnchorHeaders, fetchNthTip, HeaderBook } from './headerBook'
 import { blobTimesInWorker } from './growClient'
 import { DNA_KIND, setBagDnaSink } from './seedItem'
+import { SEED_DNA_EVENTS } from './seedDnas'
 
 /** The DNAs this page knows: one resolver for every seed. */
 export const dnaResolver = new DnaResolver({
@@ -29,6 +30,9 @@ export const dnaResolver = new DnaResolver({
 })
 
 setBagDnaSink((ev) => dnaResolver.note(ev as NostrEvent))
+// The owner's published DNAs SEED lists ship with the app: planting one, or
+// growing a seed of one, needs no relay for its DNA (checked when asked for).
+dnaResolver.hold(SEED_DNA_EVENTS)
 
 /** Header times and hashes this page has read. */
 export const headerBook = new HeaderBook()

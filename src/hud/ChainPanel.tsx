@@ -30,8 +30,9 @@ import { useEffect, useMemo, useRef } from 'react'
 import { formatMs, formatOps } from '../lib/space'
 import { expectedRidePairs } from '../lib/hyperspace/ride'
 import { TriangleAlert } from 'lucide-react'
-import { actionKind, actionLabel, firstBreak, openBracket } from '../lib/events'
-import { BrokenChainNotice } from './BrokenChain'
+import { actionKind, actionLabel, openBracket } from '../lib/events'
+import { BrokenChainNotice, RelayCeilingNote, RelayStopNotice } from './BrokenChain'
+import { useChainStop } from '../hooks/useChainStop'
 import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
 import { useCyberspace } from '../store/useCyberspace'
 import { enterTutorialDungeon, gamesEnabled, useGame } from '../store/useGame'
@@ -76,8 +77,12 @@ export function ChainPanel(): JSX.Element {
   const byId = useMemo(() => new Map(actions.map((a) => [a.id, a])), [actions])
   // A game holds the avatar: its entry, when the chain ends inside a bracket.
   const game = useMemo(() => openBracket(actions), [actions])
-  // The first row a verifier rejects, if any (events.ts firstBreak).
-  const broken = useMemo(() => firstBreak(actions), [actions])
+  // Where the chain stops, if it does (lib/chainStop.ts): the first row a
+  // verifier rejects, structurally or by its proof's form, or a hop above
+  // the relay's ceiling.
+  const stop = useChainStop()
+  const broken = stop?.source === 'rules' ? stop.broken : null
+  const relayStop = stop?.source === 'relay' ? stop.stop : null
 
   // The newest action is at the bottom, because that is the order the
   // publisher sends in and the order the chain is read in. Keep it in view as
@@ -193,12 +198,13 @@ export function ChainPanel(): JSX.Element {
           // A row that breaks a rule reads BROKEN whatever its role, with the
           // warning glyph, so it is never mistaken for a game's pink row.
           const kind = a ? actionKind(a) : 'broken'
-          const breaks = kind === 'broken'
+          // The row a rejected proof stops the chain at reads BROKEN too.
+          const breaks = kind === 'broken' || (relayStop?.kind === 'broken' && relayStop.action.id === e.id)
           const label = a ? actionLabel(a) : 'UNREADABLE'
           return (
             <li key={e.id} className={`chainrows__row ${breaks ? 'chainrows__row--broken' : ''}`}>
               <span className="chainrows__n">{i}</span>
-              <span className={`chainrows__type chainrows__type--${kind}`} title={a?.breaks ?? a?.name}>
+              <span className={`chainrows__type chainrows__type--${breaks ? 'broken' : kind}`} title={a?.breaks ?? (breaks ? relayStop?.reason : a?.name)}>
                 {breaks && <TriangleAlert size={10} strokeWidth={2.5} aria-hidden className="chainrows__warn" />}
                 {label}
               </span>
@@ -278,6 +284,15 @@ export function ChainPanel(): JSX.Element {
           </>
         )} />
       )}
+      {relayStop?.kind === 'broken' && (
+        <RelayStopNotice stop={relayStop} actions={(
+          <>
+            <button className="tag tag--tap" onClick={() => walkChain(relayStop.index)}>SHOW THE ROW</button>
+            <button className="brokenchain__respawn" onClick={() => useChainUi.getState().setBrokenView('confirm')}>RESPAWN</button>
+          </>
+        )} />
+      )}
+      {relayStop?.kind === 'tall' && <RelayCeilingNote stop={relayStop} />}
 
       <Explanation>
         To alter your position in cyberspace, you must compute the cantor root for

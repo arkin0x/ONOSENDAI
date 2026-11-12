@@ -9,6 +9,10 @@
  * Bottom right, under the zoom keys (arkinox, 2026-11-03). It says how far
  * up the screen it reaches in --spectate-top, so the pad stands above it
  * however many lines its words wrap to (styles.css).
+ *
+ * Where their chain stops, if it does (lib/chainStop.ts, the rules your own
+ * chain is held to), as a plain fact: the day, never a RESPAWN, which is
+ * theirs to do and not yours (2026-11-12).
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -18,10 +22,13 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
 import { ProfileBadge } from './ProfileBadge'
 import { everyWhileVisible } from '../lib/whileVisible'
+import { useChainStopOf } from '../hooks/useChainStop'
+import { spectatedStopWords } from '../lib/chainBreak'
 
 export function SpectateBar(): JSX.Element | null {
   const spectate = useCyberspace((s) => s.spectate)
   const building = useBuilder((s) => s.active)
+  const stop = useChainStopOf(spectate?.actions ?? null, 'spectate')
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
     return everyWhileVisible(() => setNow(Date.now() / 1000), 5_000)
@@ -61,6 +68,7 @@ export function SpectateBar(): JSX.Element | null {
             <span title={formatStamp(spectate.lastActive)}>LAST ACTIVE {formatAgo(spectate.lastActive, now).toUpperCase()} · </span>
           )}
           <span title={spectate.status === 'partial' ? 'The relays are missing part of this chain, so it is drawn up to the gap. Their real head may be further on than what you see here.' : undefined}>{status}</span>
+          {stop && <span className="spectate__stop" title={spectatedStopWords(stop).title}> · {spectatedStopWords(stop).text}</span>}
         </span>
       </span>
       {/* VIEW HERE: where they are on screen becomes your VIEW (arkinox, 2026-11-11). Not in BUILD. */}

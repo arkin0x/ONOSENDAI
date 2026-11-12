@@ -23,6 +23,8 @@
  */
 
 import { FORK_RULE_WORDS, PLANE_BIT_APOLOGY_UNTIL, type ActionEvent, type RuleChange } from './events'
+import { RELAY_MAX_HOP_HEIGHT, type RelayRule, type RelayStop } from './relayPlacement'
+import type { ChainStop } from './chainStop'
 
 /**
  * The words the broken-chain notice, its modal and its chip use for a
@@ -86,4 +88,57 @@ export function apologyFor(a: Broken): string | null {
 /** The label of the Recent entry a respawn leaves at the end of the broken chain. */
 export function endOfChainLabel(lastValidId: string): string {
   return `End of Chain ${lastValidId.slice(0, 8)}`
+}
+
+/**
+ * The day, in UTC, a chain stops: the day of the last action that counts
+ * (the stopped action's own day when none does, a broken spawn).
+ */
+export function stopDay(stop: { action: Pick<ActionEvent, 'createdAt'>; lastValid: Pick<ActionEvent, 'createdAt'> | null }): string {
+  return new Date((stop.lastValid ?? stop.action).createdAt * 1000).toISOString().slice(0, 10)
+}
+
+/** When version 1 sidesteps stopped counting (spec 6.15). */
+export const V1_SIDESTEP_CUTOFF = Date.parse('2026-09-07T00:00:00Z') / 1000
+
+/** Why a form stop stops the chain, as the second half of "Why: ...". */
+const FORM_WHY: Record<Exclude<RelayRule, 'chain-rule' | 'tall-hop'>, string> = {
+  'v1-hop': 'it is a hop in the old proof format, and not one of the old hops the rules still accept',
+  'partial-hop': 'it is a hop with only half of the new proof: one of mn and mp is missing',
+  'v1-sidestep': 'it is a sidestep in the old proof format, and those stopped counting on 2026-09-07',
+  'v1-ride': 'it is a ride in the old proof format, and not one of the old rides the rules still accept',
+}
+
+/**
+ * The words for a stop lib/chainStop.ts found in a proof's form, or above
+ * the relay's hop ceiling (lib/relayPlacement.ts). Short, as the owner asked
+ * (2026-11-12). A tall hop is no break: the relay leaves it unchecked, a
+ * respawn would not help, and nothing offers one.
+ */
+export function relayStopWords(stop: Pick<RelayStop, 'kind' | 'rule' | 'action' | 'lastValid'>): { title: string; chip: string; chipMeta: string; why: string; sorry: string | null; respawnPlace: string } {
+  const day = stopDay(stop)
+  if (stop.kind === 'tall') {
+    return {
+      title: `The relay reads your chain up to ${day}`,
+      chip: `RELAY CHECKS HOPS UP TO H${RELAY_MAX_HOP_HEIGHT}`,
+      chipMeta: `IT READS YOUR CHAIN UP TO ${day} · NO RESPAWN NEEDED`,
+      why: `the hop after it is taller than h${RELAY_MAX_HOP_HEIGHT}, so the relay leaves it and everything after it unchecked. Respawning would not help`,
+      sorry: null,
+      respawnPlace: '',
+    }
+  }
+  const why = stop.rule === 'chain-rule' || stop.rule === 'tall-hop' ? 'it breaks a chain rule' : FORM_WHY[stop.rule]
+  const sorry = stop.rule === 'v1-sidestep' && stop.action.createdAt < V1_SIDESTEP_CUTOFF
+    ? 'It was valid when you signed it. The rules changed on 2026-09-07. Sorry.'
+    : null
+  return { title: `Your chain stops at ${day}`, chip: `CHAIN STOPS AT ${day}`, chipMeta: 'TAP FOR WHY AND RESPAWN', why, sorry, respawnPlace: 'where your chain stops' }
+}
+
+/** What a spectator is told about the chain they watch stopping (SpectateBar): neutral, the day only, never a respawn, which is not theirs to do. */
+export function spectatedStopWords(stop: ChainStop): { text: string; title: string } {
+  if (stop.source === 'rules' && stop.broken.action.fork) return { text: 'CHAIN FORKED', title: 'Two actions on this chain name the same action before them, so none of it counts.' }
+  const s = stop.source === 'rules' ? stop.broken : stop.stop
+  const day = stopDay(s)
+  if (stop.source === 'relay' && stop.stop.kind === 'tall') return { text: `RELAY READS IT UP TO ${day}`, title: `A hop after ${day} is taller than h${RELAY_MAX_HOP_HEIGHT}, which the relay does not check.` }
+  return { text: `CHAIN STOPS AT ${day}`, title: `An action after ${day} breaks the chain rules, so nothing after it counts.` }
 }

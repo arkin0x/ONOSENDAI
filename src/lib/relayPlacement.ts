@@ -6,10 +6,14 @@
  * The relay walks the chain from the newest spawn and stops at the first event
  * it does not accept, or cannot judge, and places you where the event before
  * it left you. A frozen identity stays there until it respawns, so a speakeasy
- * admits you by that point, not by your head. ONOSENDAI lets you keep moving
- * on a chain only the relay has stopped (2026-11-12: the owner's chain stops
- * at a version 1 sidestep of 2026-09-04, one cube from midwest), so the
+ * admits you by that point, not by your head (2026-11-12: the owner's chain
+ * stops at a version 1 sidestep of 2026-09-04, one cube from midwest), so the
  * speakeasy line asks this module instead of reading the head.
+ *
+ * The same form rules are ONOSENDAI's own since the owner's ruling of
+ * 2026-11-12 ("make our chain checks match the relay's, app-wide"):
+ * lib/chainStop.ts runs scanFormStops over your chain, kept as it grows, for
+ * the broken-chain chip, its notice, RESPAWN and every move (store whyNoMove).
  *
  * What the relay checks, and what this client checks of it:
  *
@@ -65,9 +69,17 @@ export interface RelayStop {
    * check, so it stands before it until its ceiling is raised.
    */
   kind: 'broken' | 'tall'
+  /** Which rule, for the words the person reads (lib/chainBreak.ts relayStopWords). */
+  rule: RelayRule
   /** Why, in words, for the tests and the logs. */
   reason: string
 }
+
+/**
+ * The rule a stop is for: one of the form rules this module adds, or
+ * `chain-rule`, a structural break buildChain found (its `breaks` says which).
+ */
+export type RelayRule = 'v1-hop' | 'partial-hop' | 'tall-hop' | 'v1-sidestep' | 'v1-ride' | 'chain-rule'
 
 export interface RelayPlacement {
   /** The coordinate the relay places you at. */
@@ -83,31 +95,65 @@ export function needsV1HopList(chain: Chain): boolean {
   return chain.some((a) => a.type === 'hop' && a.mn === undefined && a.mp === undefined)
 }
 
+type FormStop = Pick<RelayStop, 'kind' | 'rule' | 'reason'>
+
 /**
- * Why the relay does not accept one action by its proof's form, or null when
- * it does. `from`: where the action starts, the position of the action before
- * it, which buildChain does not keep on the action.
+ * Why the relay does not accept one action by its proof's form, null when it
+ * does, or `unknown` when only the 5.13 list can say and `listedV1Hops` is
+ * null (not loaded yet). `from`: where the action starts, the position of the
+ * action before it, which buildChain does not keep on the action.
  */
-function formStop(a: Chain[number], from: ActionEvent['position'] | undefined, listedV1Hops: ReadonlySet<string>): { kind: RelayStop['kind']; reason: string } | null {
+function formStop(a: Chain[number], from: ActionEvent['position'] | undefined, listedV1Hops: ReadonlySet<string> | null): FormStop | null | 'unknown' {
   if (a.type === 'hop') {
-    // A listed hop is accepted as audited, whatever it carries (5.13).
-    if (listedV1Hops.has(a.id)) return null
-    if (a.mn === undefined && a.mp === undefined) return { kind: 'broken', reason: 'a version 1 hop not on the 5.13 list' }
-    if (a.mn === undefined || a.mp === undefined) return { kind: 'broken', reason: 'a hop with only one of mn and mp (5.11)' }
+    // A listed hop is accepted as audited, whatever it carries (5.13), so
+    // a hop missing either tag waits for the list rather than be judged.
+    if (listedV1Hops === null && (a.mn === undefined || a.mp === undefined)) return 'unknown'
+    if (listedV1Hops?.has(a.id)) return null
+    if (a.mn === undefined && a.mp === undefined) return { kind: 'broken', rule: 'v1-hop', reason: 'a version 1 hop not on the 5.13 list' }
+    if (a.mn === undefined || a.mp === undefined) return { kind: 'broken', rule: 'partial-hop', reason: 'a hop with only one of mn and mp (5.11)' }
     if (from && a.position) {
       // Above MAX_TERRAIN_K this is h_max itself (MAX_TERRAIN_K says why).
       const h = Math.max(findLcaHeight(from.x, a.position.x), findLcaHeight(from.y, a.position.y), findLcaHeight(from.z, a.position.z))
-      if (h > RELAY_MAX_HOP_HEIGHT) return { kind: 'tall', reason: `a hop of h${h}, above the h${RELAY_MAX_HOP_HEIGHT} the relay verifies` }
+      if (h > RELAY_MAX_HOP_HEIGHT) return { kind: 'tall', rule: 'tall-hop', reason: `a hop of h${h}, above the h${RELAY_MAX_HOP_HEIGHT} the relay verifies` }
     }
     return null
   }
   if (a.type === 'sidestep' && a.mn === undefined && !isGrandfatheredV2Sidestep(a.id)) {
-    return { kind: 'broken', reason: 'a sidestep with no mn, not on the 6.16 list (a version 1 sidestep is invalid since 2026-09-07, spec 6.15)' }
+    return { kind: 'broken', rule: 'v1-sidestep', reason: 'a sidestep with no mn, not on the 6.16 list (a version 1 sidestep is invalid since 2026-09-07, spec 6.15)' }
   }
   if (a.type === 'hyperjump' && a.mn === undefined && !GRANDFATHERED_V1_HYPERJUMPS.has(a.id)) {
-    return { kind: 'broken', reason: 'a ride with no mn, not on the DECK-0001 5.8 list' }
+    return { kind: 'broken', rule: 'v1-ride', reason: 'a ride with no mn, not on the DECK-0001 5.8 list' }
   }
   return null
+}
+
+/** What scanFormStops found. */
+export interface FormScan {
+  /** The first form stop in the stretch, or null. */
+  stop: RelayStop | null
+  /** Where the scan ended: at the stop, at the first event only the 5.13 list can judge, or at `end`. */
+  scanned: number
+  /** True when it ended at an event only the 5.13 list can judge (the list was null). */
+  unknown: boolean
+}
+
+/**
+ * The first form stop among `chain[start]` to `chain[end - 1]` (start at 1:
+ * the spawn has no proof). `listedV1Hops` null means the 5.13 list is not
+ * loaded: the scan then ends, `unknown`, at the first hop only the list can
+ * judge, and says nothing about it or anything after it. Resumable: a later
+ * scan from `scanned` over the same chain, or one that extends it, goes on
+ * where this one ended. Pure.
+ */
+export function scanFormStops(chain: Chain, listedV1Hops: ReadonlySet<string> | null, start: number, end: number): FormScan {
+  for (let i = Math.max(1, start); i < end; i++) {
+    const a = chain[i]
+    const before = chain[i - 1]
+    const why = formStop(a, before.position, listedV1Hops)
+    if (why === 'unknown') return { stop: null, scanned: i, unknown: true }
+    if (why) return { stop: { index: i, action: a as ActionEvent, lastValid: before as ActionEvent, ...why }, scanned: i, unknown: false }
+  }
+  return { stop: null, scanned: Math.max(1, end), unknown: false }
 }
 
 /**
@@ -119,15 +165,9 @@ export function relayPlacement(chain: Chain, listedV1Hops: ReadonlySet<string>):
   if (chain.length === 0) return null
   const structural = firstBreak(chain as ActionEvent[])
   const end = structural ? structural.index : chain.length
-  let stop: RelayStop | null = null
-  for (let i = 1; i < end && !stop; i++) {
-    const a = chain[i]
-    const before = chain[i - 1]
-    const why = formStop(a, before.position, listedV1Hops)
-    if (why) stop = { index: i, action: a as ActionEvent, lastValid: before as ActionEvent, ...why }
-  }
+  let stop = scanFormStops(chain, listedV1Hops, 1, end).stop
   if (!stop && structural) {
-    stop = { index: structural.index, action: structural.action, lastValid: structural.lastValid, kind: 'broken', reason: structural.action.breaks ?? 'it breaks a chain rule' }
+    stop = { index: structural.index, action: structural.action, lastValid: structural.lastValid, kind: 'broken', rule: 'chain-rule', reason: structural.action.breaks ?? 'it breaks a chain rule' }
   }
   if (!stop) return { coordHex: chain[chain.length - 1].coordHex, stop: null }
   // A broken spawn or a fork: buildChain froze every row at the spawn

@@ -158,7 +158,7 @@ const tick = (ms = 0): Promise<void> => new Promise((r) => setTimeout(r, ms))
  * slow part: 0.6 to 1.4 s a test alone, 5 to 7 times that under a loaded
  * parallel suite, where tests passed 5 s at random (2026-11-12). The first
  * test also pays the graph's cold transform, over 4 s alone. So 20 s for this
- * file, as 16 of its tests already had by hand (30 s each, kept). A warm-up in
+ * file, as closedDoorsStorage.test.ts has; the tests that had 30 s keep it. A warm-up in
  * beforeAll is not used instead: a store loaded there keeps working (its
  * probe, its version look) into the first test.
  */
@@ -167,7 +167,7 @@ afterAll(() => { vi.resetConfig() })
 /**
  * A wait for what another tab or the database does: polled, and bounded by 3 s
  * rather than waitFor's 1 s, which a loaded machine passed while the work was
- * still on its way (2026-11-12). Under the test's own 5 s, so a wait that
+ * still on its way (2026-11-12). Under the file's 20 s, so a wait that
  * fails says what it waited for.
  */
 const SOON = { timeout: 3_000, interval: 20 }

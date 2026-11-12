@@ -148,6 +148,24 @@ describe('a door row in DISCOVERED NEARBY', () => {
     await vi.waitFor(() => expect(actions(r)).toEqual(['CLOSE', 'VIEW']))
     await r.unmount()
   })
+
+  it('closed, its kept secret gone and the key too: only the key opens it, so OPEN is disabled again', async () => {
+    const d = await found({ door: true, held: true })
+    const r = await row(d)
+    await r.press(/^OPEN$/)
+    await vi.waitFor(() => expect(actions(r)).toEqual(['CLOSE', 'VIEW']))
+    await r.press(/^CLOSE$/)
+    await vi.waitFor(() => expect(r.says('CLOSED · hidden by')).toBe(true))
+    await r.unmount()
+    localStorage.removeItem('onosendai:door-secrets')
+    resetDoorSecrets()
+    useInventory.setState({ items: {} })
+    const again = await row(d)
+    expect(actions(again)).toEqual(['OPEN', 'VIEW'])
+    expect(button(again, /^OPEN$/).props.disabled).toBe(true)
+    expect(button(again, /^OPEN$/).props.title).toBe('Requires the Silver Key')
+    await again.unmount()
+  })
 })
 
 describe('a chest row in DISCOVERED NEARBY', () => {

@@ -1484,14 +1484,15 @@ kbd {
 }
 
 /* The arrow ending a button that goes or does (hud/ui/GoArrow): taller than the
- * capitals beside it, centred on them, its negative margins keeping the line box
- * the label's, so no button grows (arkinox, 2026-11-12). */
+ * capitals beside it, centred on them (their middle stands about 0.35em up, so
+ * the margin box sits 0.125em up), its negative margins keeping the line box the
+ * label's, so no button grows (arkinox, 2026-11-12). */
 .go-arrow {
   display: inline-block;
   width: 1em;
   height: 1.25em;
   margin: -0.4em 0 -0.4em 0.5em;
-  vertical-align: middle;
+  vertical-align: 0.125em;
 }
 
 .avatars__list {

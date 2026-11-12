@@ -8,7 +8,6 @@ import { create } from 'zustand'
 import { formatBig, formatStep } from '../lib/space'
 import { formatCellSizeLong } from 'sno-core/scale'
 import { geocode } from '../lib/geocode'
-import { onEarthSurface } from '../lib/hyperspace/interest'
 import { canonicalViewAt, forgetView, parseViewAt, readRecentViews, rememberView, RECENT_VIEWS_EVENT, RECENT_VIEWS_KEY, type RecentView, type ViewTarget } from '../lib/viewAt'
 import { coordLink, placeHex } from '../lib/coordRoute'
 import { useCyberspace, type CyberspaceState } from '../store/useCyberspace'
@@ -279,14 +278,9 @@ export function ViewAtPanel(): JSX.Element {
     // a place found by name, a star's name, a recent place's name. VIEWING
     // then says it (FocusBar viewingLabel).
     const named = target.label !== parseViewAt(typed, target.plane)?.label
-    useCyberspace.getState().focusOn(target.position, target.plane, target.label, target.scaleExp, true, named)
-    // A place on Earth gets the pin: marking the focal point is the whole
-    // purpose of typing a latitude and longitude or a place name. A
-    // coordinate or a triple of axes that is not on the ground gets none,
-    // and leaves any standing pin alone.
-    if (target.plane === 0 && onEarthSurface(target.position)) {
-      useCyberspace.getState().dropPin(target.position, target.label, target.scaleExp, named)
-    }
+    // VIEW there. No pin: the cross marker is off (arkinox, 2026-11-11);
+    // the star marks a place.
+    useCyberspace.getState().viewAt(target.position, target.plane, target.label, target.scaleExp, { named })
     const next = rememberView(recent, { input: canonicalViewAt(typed), label: target.label, plane: target.plane })
     setRecent(next)
     saveRecent(next)
@@ -458,7 +452,7 @@ const OFFICIAL: Array<{ href: string; name: string; what: string }> = [
   { href: 'https://cyberspace.international', name: 'cyberspace.international', what: 'education, proliferation, adoption of cyberspace' },
   { href: 'https://snocrash.art', name: 'SnoCrash', what: 'SNO format 3D model builder' },
   { href: 'https://github.com/arkin0x/ONOSENDAI/tree/v2', name: 'ONOSENDAI v2 Codebase', what: 'this client, on GitHub' },
-  { href: 'https://www.youtube.com/watch?v=e7uVFkwxKh8', name: 'Cyberspace TV', what: 'the 24/7 stream, live' },
+  { href: 'https://www.youtube.com/@onosendaitv', name: 'Cyberspace TV', what: 'the 24/7 stream, live' },
 ]
 
 function LinksPanel(): JSX.Element {

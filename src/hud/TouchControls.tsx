@@ -21,14 +21,15 @@
  * already signed out with it (see lib/release.ts). Cancelling leaves the
  * switch exactly where it was, on LOCAL.
  *
- * The commit slot is also the pad's mode switch, four states in a ring
- * (arkinox, 2026-10-13 and 2026-11-02; store/padMode.ts): HOP, the resting
- * state, where the pad lines up a move and COMMIT sends it; VIEW, a free
- * look from your head; WALK, first person, where every press is a step
- * (store/useWalk.ts); BUILD, placing things at a build cursor
- * (store/useBuilder.ts). HOP turns VIEW on, VIEW turns WALK on, WALK turns
- * BUILD on, BUILD goes back to HOP, and RECALL goes back to HOP from any of
- * them. Each mode tints the pad's keys its own color, blue, yellow, red,
+ * The commit slot is also the pad's mode switch (arkinox, 2026-10-13,
+ * 2026-11-02 and 2026-11-11; store/padMode.ts): HOP, the resting state,
+ * where the pad lines up a move and COMMIT sends it; VIEW, a free look from
+ * your head; BUILD, placing things at a build cursor (store/useBuilder.ts).
+ * HOP turns VIEW on, VIEW turns BUILD on where it was looking, BUILD goes
+ * back to HOP. WALK, first person, where every press is a step
+ * (store/useWalk.ts), is RECALL's slot at rest in HOP; in WALK both RECALL
+ * and the mode button go back to HOP, and RECALL goes back to HOP from VIEW
+ * and BUILD too. Each mode tints the pad's keys its own color, blue, yellow, red,
  * white, so the hand knows what a press will do before it presses.
  *
  * WALK's pad is its own (arkinox, 2026-11-02): no scale keys, one large
@@ -51,7 +52,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react'
-import { Box, Globe, MapPinOff, Scan } from 'lucide-react'
+import { Box, Footprints, Globe, Scan } from 'lucide-react'
 import { ConfirmModal } from './ConfirmModal'
 import { busyLabel, useCyberspace } from '../store/useCyberspace'
 import { DEFAULT_RELAY } from '../store/useRelays'
@@ -64,6 +65,7 @@ import { ACTION_LABEL, useNextAction, useOffer } from '../store/useOffer'
 import { useUiHints } from '../store/useUiHints'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ChainStatusStrip, useChainStatus } from './ChainStatus'
+import { moveUnderWay } from '../lib/buildCursor'
 import { useWalk } from '../store/useWalk'
 import { useBuilder } from '../store/useBuilder'
 import { buildHeld, buildToHop, cycleMode, padMode } from '../store/padMode'
@@ -183,7 +185,6 @@ export function TouchControls(): JSX.Element {
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const pin = useCyberspace((s) => s.pin)
   const live = useCyberspace((s) => s.live)
   // What the chain's publishing is doing when the switch alone cannot say:
   // held, a conflict waiting for a choice, or LIVE with nothing reachable.
@@ -212,6 +213,8 @@ export function TouchControls(): JSX.Element {
   const home = useCyberspace((s) => s.atHead())
   const viewing = useCyberspace((s) => s.viewing())
   const walking = useCyberspace((s) => s.walking)
+  // No move planned or under way, and no cloud job: with the cursor home in HOP, RECALL's slot is WALK.
+  const resting = useCyberspace((s) => s.plan === null && !moveUnderWay(s) && s.cloud.status === 'idle')
   // A WALK key held as the pad goes away (the menu covers it, an offer comes
   // up) or WALK ends gets no pointerup: let go of it here.
   useEffect(() => { if (!walking) holdEndAll('pad:') }, [walking])
@@ -242,6 +245,8 @@ export function TouchControls(): JSX.Element {
 
   const computing = proof.status === 'computing'
   const armed = !(position.x === cursor.x && position.y === cursor.y && position.z === cursor.z)
+  // WALK in RECALL's slot at rest in HOP, RECALL as before otherwise (arkinox, 2026-11-11; store/padMode.ts).
+  const walkSlot = mode === 'hop' && home && resting && !armed && !deploying
   // The button names the one action the next commit takes: COMMIT for a hop
   // to the cursor, HOP TO BOUNDARY or SIDESTEP for a step of the way, OFFLOAD
   // in blue when the step is HOSAKA's (pressing it brings up the card;
@@ -327,16 +332,6 @@ export function TouchControls(): JSX.Element {
             ladder. Viewing cyberspace itself is the CYBERSPACE button in the
             view menu, which is a different thing and stays where it is.
             On every pad, at your head or off it. */}
-        {/* REMOVE PIN: only while there is a pin to remove, so the cell is
-            empty the rest of the time and nothing moves when it appears.
-            The pin itself is dropped by a click on the globe or a View
-            panel VIEW, and RETURN already clears it; this is the way to put
-            a look down without leaving the place you are looking at. */}
-        {pin && (
-          <button className="touchpad__key touchpad__key--pin" title={`Remove the pin at ${pin.label}`} aria-label="Remove the pin" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().clearPin() }}>
-            <MapPinOff size={16} strokeWidth={2.25} aria-hidden />
-          </button>
-        )}
         {/* The planet at 2^52, the scale the view menu's EARTH
             button means, through the same function so the two can never
             drift: dataspace lined up, no viewed stop, the planet's centre.
@@ -352,9 +347,9 @@ export function TouchControls(): JSX.Element {
           <>
             {/* Region (lucide scan): picks a speakeasy region, VIEW only, left
                 of the globe. On turns region mode on and opens the REGION chip
-                (store/useRegion.ts, hud/RegionChip.tsx). It stands in the pin
-                cell, so it waits while a pin is down (rare in a region hunt). */}
-            {viewing && !pin && (
+                (store/useRegion.ts, hud/RegionChip.tsx). The pin cell is its
+                own: REMOVE PIN is gone with the cross marker (arkinox, 2026-11-11). */}
+            {viewing && !building && (
               <button
                 className={`touchpad__key touchpad__key--region${regionActive ? ' is-on' : ''}`}
                 title="Region: pick a region for a private speakeasy"
@@ -410,11 +405,14 @@ export function TouchControls(): JSX.Element {
 
       {opsUp && <div ref={opsRef} className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
         {/* RECALL is RESET while a grown region is up (store/useRegion.ts): it
-            returns the region to the size it had when region mode started. It
-            is hidden in HOP with the cursor on your avatar, where recalling
-            does nothing; the mode button keeps its place and size. */}
-        {!(mode === 'hop' && !armed && !deploying && !computing) && (
-        <button
+            returns the region to the size it had when region mode started.
+            At rest in HOP, where recalling does nothing, the slot is WALK
+            (arkinox, 2026-11-11); the mode button keeps its place and size. */}
+        {walkSlot ? (
+          <button className="touchops__cancel touchops__walk" aria-label="Walk: first person, every press a step" title="Walk: first person, every press a step" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().enter() }}>
+            <Footprints size={12} strokeWidth={2.25} aria-hidden /> WALK
+          </button>
+        ) : <button
           className="touchops__cancel"
           title={walking
             ? (computing || behind > 0 ? 'Stop the walk where the chain is now (X)' : 'End WALK and go back to HOP (X)')
@@ -441,11 +439,10 @@ export function TouchControls(): JSX.Element {
           }}
         >
           {computing || (walking && behind > 0) ? 'STOP' : regionActive && regionGrown ? 'RESET' : 'RECALL'}
-        </button>
-        )}
+        </button>}
         {/* The mode switch, in the commit slot while there is nothing to
-            commit: HOP to VIEW to WALK to BUILD and back to HOP
-            (store/padMode.ts). VIEW (arkinox, 2026-10-10) is a free view
+            commit: HOP to VIEW to BUILD and back to HOP, and WALK back to
+            HOP (store/padMode.ts, arkinox 2026-11-11). VIEW (arkinox, 2026-10-10) is a free view
             from your head, the pad moving the cursor to look around without
             planning a hop; WALK (2026-10-13) is first person, every press a
             step; BUILD (2026-11-02 in the ring) places things and never moves
@@ -454,7 +451,7 @@ export function TouchControls(): JSX.Element {
           <button
             className="touchops__commit is-walk is-on"
             aria-pressed
-            title="Walking: every press is a step, proved behind you. Keys: W forward, S back, A and D sideways, Space or R jump, C or F down. Press for BUILD, or RECALL for HOP"
+            title="Walking: every press is a step, proved behind you. Keys: W forward, S back, A and D sideways, Space or R jump, C or F down. Press or RECALL for HOP"
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); cycleMode() }}
           >WALK</button>
@@ -471,7 +468,7 @@ export function TouchControls(): JSX.Element {
           <button
             className="touchops__commit is-view is-on"
             aria-pressed
-            title="Viewing: the pad moves the cursor without planning a hop. Press for WALK, or RECALL to end it"
+            title="Viewing: the pad moves the cursor without planning a hop. Press for BUILD here, or RECALL to end it"
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); cycleMode() }}
           >VIEW</button>

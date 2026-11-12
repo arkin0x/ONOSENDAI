@@ -1,8 +1,7 @@
 /**
  * MessageCompose.tsx - writing a message to hide, before aiming it.
  *
- * One composer, used in two places: inline in the Stash panel, and in the
- * Builder's HIDE MESSAGE modal (StashModals). PLACE MESSAGE hands the text to
+ * The composer in the BUILD bar's MESSAGE modal (StashModals). PLACE MESSAGE hands the text to
  * the deploy (useShards `startDeployMessage`), which happens in BUILD mode
  * at the build cursor (store/useBuilder.ts). A message whose deploy BUILD
  * mode had to end comes back into the composer that opens next.

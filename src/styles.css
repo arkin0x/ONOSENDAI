@@ -1175,6 +1175,7 @@ body {
   cursor: pointer;
   touch-action: none;
 }
+.explorer__return + .explorer__return { margin-left: 6px; }
 
 .explorer__detail {
   color: var(--dim);
@@ -2946,6 +2947,14 @@ kbd {
 
 .spectate__end:hover {
   background: #ff5c5c;
+}
+
+/* VIEW HERE, in VIEW's yellow beside END SPECTATION. */
+.spectate__end--view,
+.spectate__end--view:hover {
+  color: var(--warn);
+  background: transparent;
+  border-color: var(--warn);
 }
 
 
@@ -4879,9 +4888,10 @@ kbd {
   touch-action: none;
   padding: 0;
 }
-/* Pinned to their columns so the mode button keeps its size and place when
-   RECALL hides in HOP on your avatar (arkinox, 2026-11-11): without this the
-   commit button auto-flows into RECALL's narrower column. */
+/* Pinned to their columns so the mode button keeps its size and place
+   whichever fills the first cell, WALK at rest in HOP or RECALL otherwise
+   (arkinox, 2026-11-11): without this the commit button auto-flows into the
+   narrower column. */
 .touchops__cancel { grid-column: 1; grid-row: 1; }
 .touchops__commit { grid-column: 2; grid-row: 1; }
 
@@ -4928,7 +4938,7 @@ kbd {
 /* HOP, the resting mode: blue words on the dark button, and nothing to do
    but turn VIEW on. */
 .touchops__commit.is-hop { color: var(--accent, #00e5ff); border-color: rgba(0, 229, 255, 0.45); }
-/* Under HOP: pressing it switches modes (HOP, VIEW, WALK, BUILD). */
+/* Under HOP: pressing it switches modes (HOP, VIEW, BUILD). */
 .touchops__sub { display: block; margin-top: 2px; font-size: 7px; letter-spacing: 0.08em; opacity: 0.7; }
 /* WALK: first person, every press a step. Red, lit, while it is on. */
 .touchops__commit.is-walk.is-on {
@@ -4937,6 +4947,15 @@ kbd {
   border-color: var(--danger, #ff3b6b);
   font-weight: 700;
 }
+/* WALK in RECALL's slot at rest in HOP (arkinox, 2026-11-11): WALK's red
+   outline on a dark red ground, in place of HOP's blue tint. */
+.touchops.touchops--mode-hop .touchops__cancel.touchops__walk {
+  color: var(--danger, #ff3b6b);
+  border-color: var(--danger, #ff3b6b);
+  background: rgba(60, 8, 22, 0.85);
+  font-weight: 700;
+}
+.touchops__walk svg { vertical-align: -2px; }
 .touchops__commit.is-view { color: var(--warn, #ffb020); border-color: rgba(255, 176, 32, 0.45); }
 .touchops__commit.is-view.is-on {
   color: #05070d;
@@ -8041,8 +8060,8 @@ kbd {
    existing rules.
 
    The pad's top row had two empty cells beside the cube. They are now the
-   pin key and the Earth key, so no key that a hand already knows the position
-   of has moved, and the pin cell simply stands empty while there is no pin.
+   pin cell (the Region key in VIEW) and the Earth key, so no key that a hand
+   already knows the position of has moved.
    --------------------------------------------------------------------------- */
 /* DOWN sits under UP, and the scale reads between the two keys that change
    it. It used to be the other way round, with the scale marooned among the
@@ -8065,15 +8084,6 @@ kbd {
    frames the whole space and the other the planet, and the glyph tells them
    apart. */
 .touchpad__key--earth { grid-area: earth; }
-/* Amber, the pin's own colour in the scene (palette WARN), so the key and the
-   marker it removes are plainly the same thing. */
-.touchpad__key--pin {
-  grid-area: pin;
-  color: #ffe3b0;
-  background: rgba(255, 176, 32, 0.42);
-  border-color: rgba(255, 200, 110, 0.9);
-}
-.touchpad__key--pin:active { background: rgba(255, 190, 70, 0.8); border-color: #fff4e0; }
 
 
 /* ---------------------------------------------------------------------------
@@ -8933,7 +8943,8 @@ kbd {
 /* Every button in a cell of one size, always in the same order, wrapping to
  * another row when the bar is narrow (arkinox, 2026-11-09: "sit nicely in
  * the same spot every time"). The cell is the longest label, MESSAGE, with
- * its icon. */
+ * its icon. AGAIN, last, is left out while it has nothing to do (2026-11-11);
+ * auto-fill keeps the columns, so the others never move. */
 .buildbar__acts {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
@@ -8962,12 +8973,8 @@ kbd {
 .buildbar__icon {
   flex: none;
 }
-.buildbar__act:hover:not(:disabled) {
+.buildbar__act:hover {
   background: rgba(242, 247, 255, 0.1);
-}
-.buildbar__act:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 .buildbar .explain {
   letter-spacing: 0.04em;
@@ -9003,7 +9010,7 @@ kbd {
 }
 
 /* The wrench inside the Stash panel's BUILD control, on the text's line. */
-/* The icon before a stash button's label: one size for all six, large enough
+/* The icon before a stash button's label: one size for all, large enough
  * to read at the label's small type. The four composer buttons used text
  * glyphs here until 2026-10-09, which drew at the label's size and were too
  * small to read (arkinox). */
@@ -9996,15 +10003,6 @@ a.feed__act { text-decoration: none; }
   grid-template-rows: 22px 54px 38px;
   grid-template-areas:
     "gravity gravity  gravity"
-    "forward forward  forward"
-    "left    backward right";
-}
-/* A pin to remove gets its row back. The pad is anchored at the bottom, so no key moves. */
-.touchpad--mode-walk:has(> .touchpad__key--pin) {
-  grid-template-rows: 22px 38px 54px 38px;
-  grid-template-areas:
-    "gravity gravity  gravity"
-    "pin     .        ."
     "forward forward  forward"
     "left    backward right";
 }

@@ -136,7 +136,7 @@ export function NearbyList(): JSX.Element {
     viewedTab = tab
     close()
     const unit = item.type === 'shard' ? item.shard?.unit ?? 0 : 0
-    useCyberspace.getState().focusItem(item.at, item.plane, labelOf(item).toUpperCase(), unit)
+    useCyberspace.getState().viewAt(item.at, item.plane, labelOf(item).toUpperCase(), unit, { item: true })
   }
   return (
     <div className="modal" role="dialog" aria-label="Discovered nearby" aria-modal="true" onPointerDown={close}>

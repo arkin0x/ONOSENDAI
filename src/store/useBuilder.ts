@@ -194,9 +194,10 @@ function viewStands(s: ReturnType<typeof useCyberspace.getState>): boolean {
 /** The center of all cyberspace, where HyperspacePanel's EARTH, CYBERSPACE and THE RIDE views point. */
 const CUBE_CENTER = 1n << 84n
 
-/** A plain view of the whole cube (EARTH, CYBERSPACE, THE RIDE), not of a place in it. */
-function wholeCube(f: { position: { x: bigint; y: bigint; z: bigint }; drive?: boolean }): boolean {
-  return !f.drive && f.position.x === CUBE_CENTER && f.position.y === CUBE_CENTER && f.position.z === CUBE_CENTER
+/** A view of the whole cube (EARTH, CYBERSPACE, THE RIDE), not of a place in it: its cursor, or a plain look, still on the centre. */
+function wholeCube(s: ReturnType<typeof useCyberspace.getState>): boolean {
+  const at = s.focus?.drive ? s.cursor : s.focus?.position
+  return at !== undefined && at.x === CUBE_CENTER && at.y === CUBE_CENTER && at.z === CUBE_CENTER
 }
 
 /** The build cursor sits on your avatar, in the plane your head shows. */
@@ -260,7 +261,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     // second bar up whose RETURN would end the mode.
     const hs = useHyperspace.getState()
     if (hs.viewOwned || hs.scrubHeight !== null) {
-      useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null, returnFocus: null, viewedStop: null })
+      useHyperspace.setState({ scrubHeight: null, viewOwned: false, viewedStop: null })
     }
     // VIEW's fly not yet landed lands now: the cursor below, and whether it
     // has left your avatar, are where the view has flown (lib/viewFly.ts).
@@ -284,9 +285,11 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       set({ active: true, via, scrub, leftAvatar: !onAvatar(useCyberspace.getState()) })
       return
     }
-    const looking = cs.focus !== null && !wholeCube(cs.focus)
+    const looking = cs.focus !== null && !wholeCube(cs)
     if (!looking) cs.focusOn(cs.position, cs.plane, BUILD_FOCUS_LABEL, undefined, true)
     else if (!cs.focus?.drive) cs.focusOn(cs.anchor, cs.anchorPlane, BUILD_FOCUS_LABEL, undefined, true)
+    // A VIEW framed on the thing frames the build cursor's cell, as BUILD always has.
+    else if (cs.focus.fit || cs.focus.item) useCyberspace.setState({ focus: { ...cs.focus, fit: undefined, item: undefined } })
     set({ active: true, via, scrub: null, leftAvatar: !onAvatar(useCyberspace.getState()) })
   },
 

@@ -15,11 +15,13 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { stopSpectating } from '../lib/spectator'
 import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
+import { useBuilder } from '../store/useBuilder'
 import { ProfileBadge } from './ProfileBadge'
 import { everyWhileVisible } from '../lib/whileVisible'
 
 export function SpectateBar(): JSX.Element | null {
   const spectate = useCyberspace((s) => s.spectate)
+  const building = useBuilder((s) => s.active)
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
     return everyWhileVisible(() => setNow(Date.now() / 1000), 5_000)
@@ -61,6 +63,8 @@ export function SpectateBar(): JSX.Element | null {
           <span title={spectate.status === 'partial' ? 'The relays are missing part of this chain, so it is drawn up to the gap. Their real head may be further on than what you see here.' : undefined}>{status}</span>
         </span>
       </span>
+      {/* VIEW HERE: where they are on screen becomes your VIEW (arkinox, 2026-11-11). Not in BUILD. */}
+      {!building && <button className="spectate__end spectate__end--view" title="VIEW from here: move the cursor, pick a region; RECALL goes home" onClick={() => useCyberspace.getState().viewHere()}>VIEW HERE</button>}
       <button className="spectate__end" onClick={stopSpectating}>END SPECTATION</button>
     </div>
   )

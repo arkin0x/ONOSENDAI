@@ -125,14 +125,14 @@ export const TO_COURSE: TutorialStep = {
   effect: 'to-course',
 }
 
-/** WALK: the mode button goes round HOP, VIEW, WALK, BUILD. */
+/** WALK: the WALK button in RECALL's slot, at rest in HOP. */
 export const WALK: TutorialStep = {
   id: 'walk',
   title: 'Walk',
   caption: 'Switch to WALK. Every step you take is a real move.',
-  hint: 'Tap the mode button (HOP) until it says WALK.',
+  hint: 'Tap WALK under the pad.',
   explain: 'In WALK you see through your own eyes, and every step is proved and signed like a hop.',
-  scene: { target: 'keep', highlight: '.touchops__commit.is-hop, .touchops__commit.is-view' },
+  scene: { target: 'keep', highlight: '.touchops__walk' },
   wait: 'walk',
 }
 

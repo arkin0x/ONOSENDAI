@@ -277,8 +277,10 @@ let countingRun = -1
 let countedAt = -Infinity
 /** The movement events read so far (lib/tv/cyberspaceStats readActions): a later count reads only what is new. Kept across runs. */
 let actionsKept: ActionStore | null = null
-/** The census being read, if one is: start, a retune and a count share it. */
+/** The census being read, if one is: a tape's first shot and a count share it. */
 let censusLoad: Promise<Census> | null = null
+/** The tape whose first shot asked for the census and the next start, so each tape asks once. */
+let censusTape = -1
 /** When the profiles of the counts' keys were asked for, and last asked again (performance.now()): a break holds for them (PROFILE_HOLD_MS). */
 let profilesAskedAt = -Infinity
 let profilesAgainAt = -Infinity
@@ -314,6 +316,16 @@ export function setStatsSnapshotForTest(s: StatsSnapshot | null): void {
 }
 let timer: number | null = null
 let ask: Ask = (f) => queryEach(f)
+/**
+ * Once a pinned relay has answered a tape question, how long the others
+ * have, ms (relay.ts ReadOptions graceMs). Each pinned relay holds the whole
+ * history, and waiting on the slower one, up to the 8 s deadline, cost TUNING
+ * two to three seconds a question (measured 2026-11-11). Long enough for the
+ * other's usual answer, so an event only one of them holds is still merged.
+ */
+export const TAPE_GRACE_MS = 1_000
+/** The tape's own questions (where it starts, and its windows): settled once a pinned relay answers, TAPE_GRACE_MS on. */
+let askTape: Ask = (f) => queryEach(f, undefined, { graceMs: TAPE_GRACE_MS })
 
 /** How long one question may take before it counts as unanswered. */
 export const READ_STUCK_MS = 25_000
@@ -327,10 +339,10 @@ export const READ_STUCK_MS = 25_000
  * READ_STUCK_MS it is taken as no relay answering, which is asked again,
  * never skipped; whatever it brings back late is dropped.
  */
-function askWithin(f: Parameters<Ask>[0]): ReturnType<Ask> {
+function askWithin(f: Parameters<Ask>[0], via: Ask = ask): ReturnType<Ask> {
   return new Promise((resolve, reject) => {
     const late = setTimeout(() => reject(new TapeUnanswered()), READ_STUCK_MS)
-    ask(f).then((a) => { clearTimeout(late); resolve(a) }, (e) => { clearTimeout(late); reject(e) })
+    via(f).then((a) => { clearTimeout(late); resolve(a) }, (e) => { clearTimeout(late); reject(e) })
   })
 }
 /** When the reader may ask again after no relay answered, and how many times in a row that has happened. */
@@ -398,8 +410,10 @@ export function cueBeats(beats: Beat[]): void {
   shotBegan = -Infinity
 }
 
-/** Swap the relay read, for tests. */
-export function setTvAsk(fn: Ask): void { ask = fn }
+/** Swap the relay read, the tape's too, for tests. */
+export function setTvAsk(fn: Ask): void { ask = fn; askTape = fn }
+
+const askTapeWithin: Ask = (f) => askWithin(f, askTape)
 
 const live = (id: number, t: number): boolean => id === run && t === tape
 
@@ -831,8 +845,8 @@ function beginShot(shot: Shot, now: number, id: number): void {
 /**
  * The census, read at or after `minReadAt` (unix s): the one in hand when it
  * is, else the one being read, else a new read of what is new since the one
- * in hand (lib/tv/stats loadCensus). Start, a retune and a count share it, so
- * TV coming on and counting read it once (review of #537).
+ * in hand (lib/tv/stats loadCensus). A tape's first shot and a count share
+ * it, so TV coming on and counting read it once (review of #537).
  */
 async function freshCensus(minReadAt: number): Promise<Census> {
   for (let tries = 0; ; tries++) {
@@ -1010,7 +1024,20 @@ function tick(id: number): void {
     const taken = queue.splice(0, 'play' in pick ? pick.play + 1 : queue.length)
     const next = 'play' in pick ? taken.pop() : undefined
     for (const q of taken) { if (q.kind === 'arrival') arrive(q); else if (q.kind === 'reaction') react(q) }
-    if (next) { beginShot(next, now, id); return }
+    if (next) {
+      beginShot(next, now, id)
+      // The ticker's numbers once a picture is up, not before: every bag and
+      // object, megabytes, read ahead of the tape's first questions on the
+      // same sockets held TUNING for seconds. Again on a new tape if they
+      // did not come. And the next tape's start, picked ahead: first, as
+      // it is one small question and the census is megabytes.
+      if (censusTape !== t) {
+        censusTape = t
+        pickNextStart()
+        if (!useTv.getState().census) freshCensus(0).catch(() => {})
+      }
+      return
+    }
     // The relays stopped answering mid-tape: say so over the last picture
     // rather than holding on it in silence. A read that answers plays on.
     if (failures >= NO_SIGNAL_AFTER && s.status === 'playing') useTv.setState({ status: 'no-signal' })
@@ -1059,6 +1086,29 @@ function tick(id: number): void {
   if (at && (zoomed || at.plane !== cs.anchorPlane || cells(at.position, cs.anchor, scaleExp) > REANCHOR_CELLS)) frame(at.position, at.plane, scaleExp)
 }
 
+/** Where the next tape starts, picked ahead (pickNextStart): kept on the device, so a return visit plays at once. */
+export const NEXT_START_KEY = 'onosendai:tvNextStart'
+
+/** The start picked ahead, used once: null when there is none (or no storage, or it is not a v2 second gone by), and a new random start is asked for. */
+export function takeNextStart(): number | null {
+  try {
+    const t = Number(localStorage.getItem(NEXT_START_KEY))
+    localStorage.removeItem(NEXT_START_KEY)
+    return Number.isInteger(t) && t >= V2_EPOCH && t <= Date.now() / 1000 ? t : null
+  } catch { return null }
+}
+
+/**
+ * The next tape's random start, picked now, while a picture is up, rather
+ * than while TUNING: the same pick (randomStart), only earlier. A read no
+ * relay answers leaves none, and the next tape asks as before.
+ */
+function pickNextStart(): void {
+  randomStart(V2_EPOCH, askTapeWithin).then((t) => {
+    try { if (t !== null) localStorage.setItem(NEXT_START_KEY, String(t)) } catch { /* no storage: asked for when needed */ }
+  }, () => {})
+}
+
 /** Pick a random event, and play from it: a new tape, nothing of the last one kept. */
 async function tune(id: number): Promise<void> {
   if (id !== run) return
@@ -1078,10 +1128,10 @@ async function tune(id: number): Promise<void> {
   dwell.onScreen(null, performance.now())
   prepared.clear()
   useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, ad: null, stats: null, skipped: 0, cutAt: performance.now(), found: {}, finds: [] })
-  let from: number | null = null
+  let from = takeNextStart()
   for (let attempt = 0; from === null; attempt++) {
     try {
-      from = await randomStart(V2_EPOCH, askWithin)
+      from = await randomStart(V2_EPOCH, askTapeWithin)
       if (from === null) break
     } catch {
       // No relay answered: try again, and say so after a few.
@@ -1096,9 +1146,7 @@ async function tune(id: number): Promise<void> {
   useTv.setState({ status: 'tuning' })
   // From a shot's length before the event, so the trip it belongs to is
   // seen from its start rather than joined in the middle.
-  reader = new TapeReader(Math.max(V2_EPOCH, from - MAX_SHOT_S), askWithin)
-  // The numbers, again, if they did not come the first time.
-  if (!useTv.getState().census) freshCensus(0).catch(() => {})
+  reader = new TapeReader(Math.max(V2_EPOCH, from - MAX_SHOT_S), askTapeWithin)
   void readMore(id, t)
 }
 
@@ -1184,7 +1232,6 @@ export const useTv = create<TvState>((set, get) => ({
     const id = run
     timer = setInterval(() => tick(id), TICK_MS) as unknown as number
     void tune(id)
-    if (!get().census) freshCensus(0).catch(() => {})
     // The boards' counts: after the tape's own first reads, or at once for a board asked for by name.
     if (statsOn(isBroadcast())) statsTimer = setTimeout(() => { statsTimer = null; void countBoards(id) }, forcedStats ? 0 : STATS_LOAD_DELAY_MS)
     return true

@@ -335,8 +335,13 @@ function ChainExplorerChip(): JSX.Element {
             {atHead ? (
               <span className="explorer__live">{spectate ? 'THEIR HEAD' : 'LATEST'}</span>
             ) : (
-              <button className="explorer__return" {...noCallout}
-                onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); go(null) }}>{spectate ? 'TO THEIR HEAD' : 'RETURN TO LATEST'}</button>
+              <>
+                {/* VIEW HERE: this action's place becomes your VIEW (arkinox, 2026-11-11). */}
+                {!building && <button className="explorer__return" title="VIEW from here: move the cursor, pick a region; RECALL goes home" {...noCallout}
+                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().viewHere() }}>VIEW HERE</button>}
+                <button className="explorer__return" {...noCallout}
+                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); go(null) }}>{spectate ? 'TO THEIR HEAD' : 'RETURN TO LATEST'}</button>
+              </>
             )}
           </div>
 

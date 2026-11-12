@@ -45,7 +45,7 @@ import { tickFall, useWalk, walkDown } from '../store/useWalk'
 import { orbitOffset } from '../workshop/benchAxes'
 import { WalkProbe } from './WalkProbe'
 import { commitAnchor, commitScale, committedAnchor } from '../lib/renderFrame'
-import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { alignedOrigin, samePosition, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
 import { useHyperspace } from '../store/useHyperspace'
@@ -173,7 +173,12 @@ function World(): JSX.Element {
   const win = useViewWindow()
   // The gibson K field is meaningless wallpaper while an Earth or hyperspace
   // view holds the camera, and its scans are real CPU: suspend both together.
-  const hyperView = useHyperspace((s) => s.viewOwned || s.scrubHeight !== null)
+  // A hyperspace VIEW counts only while its cursor is on the thing: driven
+  // off it, the VIEW is any VIEW and the field comes back.
+  const owned = useHyperspace((s) => s.viewOwned)
+  const scrubbing = useHyperspace((s) => s.scrubHeight !== null)
+  const offThing = useCyberspace((s) => s.focus?.view === true && !(s.focus.named !== undefined && samePosition(s.cursor, s.focus.named.position)))
+  const hyperView = (owned && !offThing) || scrubbing
   // The two layers the View panel can turn off (store/useLayers).
   // The dots switched off suspend exactly as a hyperspace view does: no scans,
   // no terrain runs queued, no per-frame uniforms. Only drawing changes.

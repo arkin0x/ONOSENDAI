@@ -167,7 +167,7 @@ describe('a session from DEPLOY that never left your avatar', () => {
 
 describe('entering BUILD mode from a hyperspace view', () => {
   it('takes the camera back, so the gibson field returns and no second bar offers RETURN', () => {
-    useHyperspace.setState({ viewOwned: true, scrubHeight: 3, viewedStop: 3, returnScaleExp: 52 })
+    useHyperspace.setState({ viewOwned: true, scrubHeight: 3, viewedStop: 3 })
     S().focusOn({ x: 0n, y: 0n, z: 0n }, 0, 'EARTH', 52)
     B().enter('build')
     const hs = useHyperspace.getState()

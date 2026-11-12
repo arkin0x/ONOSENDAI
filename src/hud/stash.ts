@@ -70,7 +70,7 @@ export function depName(d: MyDeployment): string {
 export function goToDeployment(d: MyDeployment): void {
   const unit = d.type === 'shard' ? d.shard?.unit ?? 0 : 0
   useStash.setState(NONE_OPEN)
-  useCyberspace.getState().focusItem({ x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }, d.plane, depName(d), unit)
+  useCyberspace.getState().viewAt({ x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }, d.plane, depName(d), unit, { item: true })
   useShards.getState().selectSecret(d.eventId)
 }
 

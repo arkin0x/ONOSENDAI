@@ -338,7 +338,7 @@ export function applyScene(scene: DemoScene, walkStep = false, push: (c: () => v
     } else if (typeof target === 'object' && 'block' in target) {
       // The /C/ route's own machinery: a merkle root or block hash lands on
       // its hyperspace stop, with the block's toast (useCoordRoute.ts).
-      push(startCoordRoute({ pathname: `/C/${target.block}`, search: '', hash: '' }, tourHistory))
+      push(startCoordRoute({ pathname: `/C/${target.block}`, search: '', hash: '' }, tourHistory, true))
       // The block's toast waits for a tap; the tour takes its own toast with it.
       push(dismissBlockToast)
     } else if (typeof target === 'object' && 'head' in target) {

@@ -1175,6 +1175,7 @@ body {
   cursor: pointer;
   touch-action: none;
 }
+.explorer__return + .explorer__return { margin-left: 6px; }
 
 .explorer__detail {
   color: var(--dim);
@@ -2935,6 +2936,14 @@ kbd {
 
 .spectate__end:hover {
   background: #ff5c5c;
+}
+
+/* VIEW HERE, in VIEW's yellow beside END SPECTATION. */
+.spectate__end--view,
+.spectate__end--view:hover {
+  color: var(--warn);
+  background: transparent;
+  border-color: var(--warn);
 }
 
 
@@ -8027,8 +8036,8 @@ kbd {
    existing rules.
 
    The pad's top row had two empty cells beside the cube. They are now the
-   pin key and the Earth key, so no key that a hand already knows the position
-   of has moved, and the pin cell simply stands empty while there is no pin.
+   pin cell (the Region key in VIEW) and the Earth key, so no key that a hand
+   already knows the position of has moved.
    --------------------------------------------------------------------------- */
 /* DOWN sits under UP, and the scale reads between the two keys that change
    it. It used to be the other way round, with the scale marooned among the
@@ -8051,15 +8060,6 @@ kbd {
    frames the whole space and the other the planet, and the glyph tells them
    apart. */
 .touchpad__key--earth { grid-area: earth; }
-/* Amber, the pin's own colour in the scene (palette WARN), so the key and the
-   marker it removes are plainly the same thing. */
-.touchpad__key--pin {
-  grid-area: pin;
-  color: #ffe3b0;
-  background: rgba(255, 176, 32, 0.42);
-  border-color: rgba(255, 200, 110, 0.9);
-}
-.touchpad__key--pin:active { background: rgba(255, 190, 70, 0.8); border-color: #fff4e0; }
 
 
 /* ---------------------------------------------------------------------------
@@ -9982,15 +9982,6 @@ a.feed__act { text-decoration: none; }
   grid-template-rows: 22px 54px 38px;
   grid-template-areas:
     "gravity gravity  gravity"
-    "forward forward  forward"
-    "left    backward right";
-}
-/* A pin to remove gets its row back. The pad is anchored at the bottom, so no key moves. */
-.touchpad--mode-walk:has(> .touchpad__key--pin) {
-  grid-template-rows: 22px 38px 54px 38px;
-  grid-template-areas:
-    "gravity gravity  gravity"
-    "pin     .        ."
     "forward forward  forward"
     "left    backward right";
 }

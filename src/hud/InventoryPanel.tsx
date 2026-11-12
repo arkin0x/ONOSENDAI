@@ -89,7 +89,7 @@ function Copyable({ label, value, title }: { label: string; value: string; title
 export function Provenance({ item }: { item: HeldItem }): JSX.Element | null {
   const p = provenanceOf(item)
   if (!p) return null
-  const view = (label: string): void => useCyberspace.getState().focusItem(p.at, p.plane, label.toUpperCase(), 0)
+  const view = (label: string): void => useCyberspace.getState().viewAt(p.at, p.plane, label.toUpperCase(), 0, { item: true })
   const where = `${regionLabel(p.height)} · ${p.plane === 0 ? 'dataspace' : 'ideaspace'}`
   return (
     <>

@@ -218,7 +218,7 @@ describe('leaving a step cleanly (rehearsal, 2026-10-15)', () => {
     const cs = useCyberspace.getState()
     const far = { x: cs.position.x + 1000n, y: cs.position.y, z: cs.position.z }
     // As a block step leaves it: the stop view owned, the focus on the stop, the cursor out there.
-    useHyperspace.setState({ viewOwned: true, returnScaleExp: cs.scaleExp, returnFocus: null })
+    useHyperspace.setState({ viewOwned: true })
     useCyberspace.getState().focusOn(far, cs.headPlane, 'BLOCK 900000 · LANDFALL')
     useCyberspace.setState({ cursor: far })
     useDemo.getState().next() // avatars: your own position

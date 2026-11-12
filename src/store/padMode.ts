@@ -19,6 +19,8 @@ import { useCyberspace } from './useCyberspace'
 import { useBuilder } from './useBuilder'
 import { copyLinedUp, useShards } from './useShards'
 import { useWalk } from './useWalk'
+import { useSecrets } from './useSecrets'
+import { resetDoorReturn } from '../lib/doorReturn'
 
 export type PadMode = 'hop' | 'view' | 'walk' | 'build'
 
@@ -61,11 +63,24 @@ export function buildToHop(): void {
   if (cs.spectate === null && cs.focus?.drive) cs.clearFocus(true)
 }
 
+/**
+ * VIEW to BUILD: BUILD starts where the view is looking (useBuilder `enter`
+ * keeps a driven view's cursor). The view is left for a mode, not for a
+ * RETURN, so a Nearby list, a door's card or the Secrets list it came from
+ * stays shut (#675).
+ */
+function viewToBuild(): void {
+  useShards.getState().setNearbyReturn(null)
+  resetDoorReturn()
+  useSecrets.getState().focus(null)
+  useBuilder.getState().enter('build')
+}
+
 /** The mode button: one step round the ring. */
 export function cycleMode(): void {
   switch (currentPadMode()) {
     case 'hop': useCyberspace.getState().viewHere(); return
-    case 'view': useBuilder.getState().enter('build'); return
+    case 'view': viewToBuild(); return
     // Out of the ring: the walk ends as leaving WALK always has (steps not
     // yet proved are dropped, what was signed stays), back to HOP.
     case 'walk': useWalk.getState().exit(); return

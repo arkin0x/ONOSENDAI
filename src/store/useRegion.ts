@@ -70,12 +70,14 @@ export const useRegion = create<RegionState>((set, get) => ({
     const prefix = regionFor(entry, cs.scaleExp, plane)
     set({ active: true, entry, entryScale: cs.scaleExp, entryPrefix: prefix, prefix, plane })
     // Grow (or reject) the region as the cursor moves or the zoom changes, and
-    // fold region mode the moment VIEW ends (RECALL, a mode change, a hop).
+    // fold region mode the moment VIEW ends (RECALL, a mode change, a hop) or
+    // another view takes its place (a search, a block, a star).
     let last = { cursor: cs.cursor, scaleExp: cs.scaleExp }
+    const label = cs.focus?.label
     watch?.()
     watch = useCyberspace.subscribe((s) => {
       if (!get().active) return
-      if (!s.viewing()) { get().exit(); return }
+      if (!s.viewing() || s.focus?.label !== label) { get().exit(); return }
       if (s.cursor === last.cursor && s.scaleExp === last.scaleExp) return
       last = { cursor: s.cursor, scaleExp: s.scaleExp }
       const self = get()

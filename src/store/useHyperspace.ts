@@ -15,8 +15,11 @@ import { create } from 'zustand'
 import { anchorIndex, runAnchorSync, type SyncSource } from '../lib/hyperspace/anchors'
 import { stopByHeight } from '../lib/hyperspace/compactIndex'
 import type { Stop } from '../lib/hyperspace/stops'
+import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import type { StopIndex } from '../lib/hyperspace/station'
-import { useCyberspace, type CyberFocus } from './useCyberspace'
+import type { Plane } from 'cyberspace-core'
+import type { Position } from '../lib/space'
+import { useCyberspace } from './useCyberspace'
 
 export interface HyperspaceSync {
   status: 'idle' | 'loading-cache' | 'syncing' | 'ready' | 'error'
@@ -60,24 +63,12 @@ interface HyperspaceState {
   tipHeight: number | null
   /** The stop being viewed on the line; null = scrubber off. */
   scrubHeight: number | null
-  /** True while hyperspace UI owns the camera focus (VIEW, EARTH, the scrubber). */
-  viewOwned: boolean
-  /** The zoom to restore when the owned view exits; captured when hyperspace
-   * first takes the focus, because its views re-frame at their own scales. */
-  returnScaleExp: number | null
   /**
-   * The focus that was standing when hyperspace took the camera, restored
-   * whole when it gives it back. Null means there was none and the exit goes
-   * home to the avatar, which is what it always did.
-   *
-   * This exists because "give the camera back" and "go home" are not the same
-   * instruction. Tapping a block while looking at a place in the POSITION
-   * panel used to end with the place thrown away and the zoom wound back to
-   * whatever it was before the place was ever typed, because clearFocus
-   * restores the scale remembered at the FIRST focus of the session, not the
-   * one hyperspace borrowed from.
+   * True while the view on screen is hyperspace's (a block, a station, EARTH,
+   * CYBERSPACE, the ride). It ends with the view: RECALL always goes home to
+   * your avatar, never back to an earlier view (arkinox, 2026-11-11).
    */
-  returnFocus: CyberFocus | null
+  viewOwned: boolean
   /** The stop height the owned hyperspace focus is on, or null when the
    * focus is not a stop (EARTH's centre) or hyperspace has no view. */
   viewedStop: number | null
@@ -113,8 +104,6 @@ export const useHyperspace = create<HyperspaceState>((set) => ({
   tipHeight: null,
   scrubHeight: null,
   viewOwned: false,
-  returnScaleExp: null,
-  returnFocus: null,
   viewedStop: null,
   destination: null,
 
@@ -185,12 +174,27 @@ export function stopCount(): number {
 
 /** Mark the current camera focus as hyperspace's, so RETURN and Escape know to clear it. */
 export function ownHyperspaceView(): void {
-  if (useHyperspace.getState().viewOwned) return
-  // First ownership: remember the zoom the user was actually at, because the
-  // hyperspace views re-frame at their own scales and RETURN must not strand
-  // the camera there.
-  const cs = useCyberspace.getState()
-  useHyperspace.setState({ viewOwned: true, returnScaleExp: cs.scaleExp, returnFocus: cs.focus })
+  if (!useHyperspace.getState().viewOwned) useHyperspace.setState({ viewOwned: true })
+}
+
+/**
+ * The zoom a block is viewed at, from every way to view one (arkinox,
+ * 2026-11-11: every view arrives framed to fit): a landfall is a place on
+ * Earth, so the globe with its side toward the camera; a port at 2^34, where
+ * a cell is 2 meters and the stop reads as a place you could stand at.
+ */
+export function stopScale(stop: Pick<Stop, 'kind'>): number {
+  return stop.kind === 'landfall' ? EARTH_SCALE_EXP : 34
+}
+
+/**
+ * VIEW a hyperspace thing (a block, a station, EARTH, CYBERSPACE, a point on
+ * the globe): the standard VIEW, framed on the thing (CyberFocus.fit), owned
+ * by hyperspace with `height` the block it is on, null for none.
+ */
+export function viewHyperspace(position: Position, plane: Plane, label: string, scaleExp: number | undefined, height: number | null): void {
+  useCyberspace.getState().viewAt(position, plane, label, scaleExp, { fit: true })
+  useHyperspace.setState({ viewOwned: true, viewedStop: height })
 }
 
 /** Record which stop the owned focus is on (null for a non-stop focus like
@@ -211,43 +215,30 @@ export function closeScrubber(): void {
 
 /**
  * Leave the hyperspace view: close the scrubber, and clear the focus only if
- * hyperspace set it (never a shard's focus, never a running spectate).
+ * hyperspace set it (never a shard's focus, never a running spectate). Home
+ * to your avatar, at the zoom from before the look began (clearFocus).
  */
 export function exitHyperspaceView(): void {
-  const { viewOwned: owned, returnScaleExp, returnFocus } = useHyperspace.getState()
-  useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null, returnFocus: null, viewedStop: null })
+  const owned = useHyperspace.getState().viewOwned
+  useHyperspace.setState({ scrubHeight: null, viewOwned: false, viewedStop: null })
   const cs = useCyberspace.getState()
-  if (!owned || cs.spectate !== null || cs.focus === null) return
-
-  // Hand the camera back to whoever had it, which is not always the avatar.
-  // A place typed into the View panel is a focus of its own, and tapping a
-  // block from it borrows the camera rather than replacing what the person was
-  // doing; closing the overlay is "give it back", not "go home".
-  if (returnFocus !== null) {
-    cs.focusOn(returnFocus.position, returnFocus.plane, returnFocus.label, returnScaleExp ?? undefined, returnFocus.drive, returnFocus.named)
-    return
-  }
-
-  cs.clearFocus()
-  // Back at the zoom the user left, not whatever a stop view chose. Read the
-  // scale fresh: clearFocus has just written one, and comparing against the
-  // snapshot taken before it ran let the two disagree silently.
-  if (returnScaleExp !== null && returnScaleExp !== useCyberspace.getState().scaleExp) {
-    useCyberspace.setState({ scaleExp: returnScaleExp })
-  }
+  if (owned && cs.spectate === null && cs.focus !== null) cs.clearFocus()
 }
 
 // Spectating a person replaces any hyperspace view: drop the scrubber and the
 // ownership without touching the focus (beginSpectate already cleared it).
+// A view that ends any other way (RECALL, RETURN, Esc) ends the hyperspace
+// view with it, scrubber and all, and another VIEW taking its place drops the
+// ownership, so no bar or marked block is left behind (arkinox, 2026-11-11).
 useCyberspace.subscribe((s, prev) => {
+  const hs = useHyperspace.getState()
   if (s.spectate !== null && prev.spectate === null) {
-    const hs = useHyperspace.getState()
-    if (hs.scrubHeight !== null || hs.viewOwned) {
-      // No zoom restore here: the spectate is taking the camera somewhere
-      // else on purpose, and yanking the scale under it would fight that.
-      useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null, viewedStop: null })
-    }
+    if (hs.scrubHeight !== null || hs.viewOwned) useHyperspace.setState({ scrubHeight: null, viewOwned: false, viewedStop: null })
+    return
   }
+  if (!hs.viewOwned || s.focus === prev.focus) return
+  if (s.focus === null) useHyperspace.setState({ scrubHeight: null, viewOwned: false, viewedStop: null })
+  else if (s.focus.view === true && s.focus.label !== prev.focus?.label) useHyperspace.setState({ viewOwned: false, viewedStop: null })
 })
 
 

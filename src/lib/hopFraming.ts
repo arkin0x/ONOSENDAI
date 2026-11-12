@@ -61,10 +61,18 @@ export function frameHop(a: readonly number[], b: readonly number[], current: Ve
   return { dir, distance: Math.min(FRAME_MAX_DISTANCE, Math.max(FRAME_MIN_DISTANCE, fit)) }
 }
 
-/** The side `away` (render, from the target out to the camera), raised for an over-the-shoulder look; unit. */
+/**
+ * The side `away` (render, from the target out to the camera), level, then
+ * raised for an over-the-shoulder look; unit. Level first, so a chest a
+ * gibson above or below the avatar still has the camera above its shoulder,
+ * not looking up at it from below. A chest straight above or below has no
+ * level side: then straight out of the screen.
+ */
 export function liftSide(away: Vector3): Vector3 {
-  const d = away.lengthSq() > 1e-12 ? away.clone().normalize() : new Vector3(0, 0, 1)
-  return d.addScaledVector(UP, SHOULDER_LIFT).normalize()
+  const d = away.clone()
+  d.y = 0
+  if (d.lengthSq() < 1e-12) d.set(0, 0, 1)
+  return d.normalize().addScaledVector(UP, SHOULDER_LIFT).normalize()
 }
 
 const q = new Quaternion()

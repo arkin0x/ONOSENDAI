@@ -70,6 +70,17 @@ describe('liftSide', () => {
     expect(d.y).toBeGreaterThan(0.3)
     expect(d.length()).toBeCloseTo(1, 9)
   })
+
+  it('looks from above the shoulder even when the chest is a gibson above or below the avatar', () => {
+    // The chest one up and one ahead: away from it points down and back.
+    const up = liftSide(new Vector3(0, -1, 1))
+    expect(up.y).toBeGreaterThan(0.3)
+    expect(up.z).toBeGreaterThan(0.7)
+    const down = liftSide(new Vector3(0, 1, 1))
+    expect(down.toArray()).toEqual(up.toArray())
+    // Straight above: no level side, still from above.
+    expect(liftSide(new Vector3(0, -1, 0)).y).toBeGreaterThan(0.3)
+  })
 })
 
 describe('easeOrbit', () => {

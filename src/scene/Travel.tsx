@@ -17,6 +17,10 @@
  * used to scale with distance here (220 ms plus 45 ms per cell, capped at
  * 900 ms); one constant for every avatar replaced that.
  *
+ * A glide is never spent unseen: a late frame covers at most a sixth of it
+ * (AvatarLerp MAX_GLIDE_STEP_MS), and what can wait for the arrival
+ * (discovery, the tutorial's next camera shot) waits for it (lib/hopStage.ts).
+ *
  * The move is registered in a layout effect, before the browser can paint:
  * a passive effect could let one frame draw the avatar at its new place with
  * no offset yet, a flash at the destination before the glide began.
@@ -27,6 +31,7 @@ import { useFrame } from '@react-three/fiber'
 import { AvatarLerp, type Vec3 } from '../lib/avatarLerp'
 import { anchorCentre, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import { travelOffset } from '../lib/travel'
+import { glideDone, glideStart } from '../lib/hopStage'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
 interface Props {
@@ -49,13 +54,19 @@ export function Travel({ axes }: Props): null {
   useLayoutEffect(() => {
     const old = previous.current
     previous.current = anchor
+    // The key is taken whether or not the anchor moved. A newcomer's first
+    // COMMIT signs the spawn where they stand (a new genesis, the anchor
+    // unmoved) and then the hop: left behind here, the stale key made that
+    // hop read as a new chain, a cut, and the first hop of every new player
+    // was drawn with no glide at all (measured 2026-11-12, scripts/hop-probe.mjs).
+    const keyChanged = previousKey.current !== focusKey
+    previousKey.current = focusKey
     if (old.x === anchor.x && old.y === anchor.y && old.z === anchor.z) return
 
-    const cut = previousKey.current !== focusKey || exploring
-    previousKey.current = focusKey
-    if (cut) {
+    if (keyChanged || exploring) {
       lerp.current.clear()
       travelOffset.set(0, 0, 0)
+      glideDone()
       return
     }
 
@@ -68,9 +79,13 @@ export function Travel({ axes }: Props): null {
     const [sx, sy, sz] = anchorCentre(anchor, scaleExp, axes)
     // A hop far enough to leave the drawn world snaps (AVATAR_SNAP_CELLS);
     // one that lands mid-glide continues from where the avatar is drawn.
+    // It may be held a moment where it was, while the camera frames the hop
+    // (lib/hopStage.ts holdGlide, the tutorial's first hop).
     const now = performance.now()
-    lerp.current.move([x - sx, y - sy, z - sz], now)
+    lerp.current.move([x - sx, y - sy, z - sz], now, glideStart(now))
     travelOffset.set(...lerp.current.offset(now, out.current))
+    // A snap is an arrival too: what waited for the glide goes now.
+    if (!lerp.current.moving(now)) glideDone()
     // scaleExp and axes are read at commit time on purpose: a zoom or a rotation
     // mid-flight must not restart or re-aim a journey already under way.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -79,6 +94,8 @@ export function Travel({ axes }: Props): null {
   useFrame(() => {
     if (travelOffset.lengthSq() === 0) return
     travelOffset.set(...lerp.current.offset(performance.now(), out.current))
+    // Arrived: discovery and the camera's next shot, held for the glide, go now.
+    if (travelOffset.lengthSq() === 0) glideDone()
   })
 
   return null

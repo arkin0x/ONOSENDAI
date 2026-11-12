@@ -27,6 +27,7 @@ import { useSecrets, type CurrentKey } from '../store/useSecrets'
 import { useTv } from '../store/useTv'
 import type { RegionRequest, RegionResponse } from '../workers/region.worker'
 import { guideBagsFor, onGuideBags } from '../tutorial/guideBags'
+import { afterHop, frameBudget } from '../lib/hopStage'
 
 /** The aligned base of a value at a height: what decides "same region". */
 function base(v: bigint, h: number): bigint {
@@ -90,7 +91,6 @@ export function useDiscovery(): void {
     const id = ++reqId.current
     const w = worker.current
     if (!w) return
-    useShards.getState().setScanning(true)
 
     // Collect this scan's keys, then query the relay once for all of them.
     const keys = new Map<string, string>() // lookupId -> keyHex
@@ -143,7 +143,11 @@ export function useDiscovery(): void {
         const found: Hidden[] = []
         const opened: string[] = []
         const unread = new Set<string>()
+        // A frame between bags whenever the opening has held the thread for
+        // 8 ms, so a full region never stalls the view while it opens.
+        const pause = frameBudget()
         for (const ev of events) {
+          await pause()
           // A scan superseded while it opens its list stops opening it: the
           // newer one is opening the same bags, and its finds are the ones
           // kept. What already opened still holds its keys, below.
@@ -253,7 +257,6 @@ export function useDiscovery(): void {
       }
     }
 
-    w.addEventListener('message', onMessage)
     const request: RegionRequest = {
       id,
       x: anchor.x.toString(),
@@ -262,8 +265,20 @@ export function useDiscovery(): void {
       heights: Array.from({ length: SCAN_MAX_HEIGHT + 1 }, (_, h) => h),
       maxComputeHeight: MAX_COMPUTE_HEIGHT,
     }
-    w.postMessage(request)
+    // After your own hop, the scan starts once the avatar has arrived
+    // (lib/hopStage.ts): what it finds, the tutorial's chest among them,
+    // appears after the glide instead of stalling the frames it is drawn in
+    // (owner, 2026-11-12). Any other move of the anchor scans at once. A scan
+    // superseded or stopped while it waited never starts.
+    let listening = false
+    afterHop(() => {
+      if (id !== reqId.current || worker.current !== w) return
+      useShards.getState().setScanning(true)
+      w.addEventListener('message', onMessage)
+      listening = true
+      w.postMessage(request)
+    })
 
-    return () => w.removeEventListener('message', onMessage)
+    return () => { if (listening) w.removeEventListener('message', onMessage) }
   }, [anchor, tvOn, guideVersion])
 }

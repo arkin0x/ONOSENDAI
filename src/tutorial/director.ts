@@ -49,7 +49,8 @@ import { deployPoint, type Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
 import { besideToward, inRegion, toWorld, type TutorialLayout } from './layout'
 import type { Stage } from './stage'
-import { setTutorialSpin, setTutorialZoom } from '../store/useTutorialCam'
+import { HOP_FRAME_MS, setTutorialFrame, setTutorialSpin, setTutorialZoom } from '../store/useTutorialCam'
+import { afterHop, holdGlide } from '../lib/hopStage'
 import { setMenuOpen } from '../hooks/useMenuOpen'
 import { usePanelLayout } from '../store/usePanelLayout'
 
@@ -59,6 +60,12 @@ import { usePanelLayout } from '../store/usePanelLayout'
  * (feedback item 6). START_DISTANCE is 26; this is closer.
  */
 const COURSE_ZOOM = 12
+
+/**
+ * How close the camera comes after the first hop, in render cells: over the
+ * avatar's shoulder, the chest just past it in view (owner, 2026-11-12).
+ */
+const SHOULDER_ZOOM = 6
 
 /**
  * arkinox's pubkey (npub1arkn0x...), the owner, offered as a friend to add and
@@ -236,6 +243,7 @@ onTutorialLifecycle({
   stop: (how) => {
     setTutorialSpin(false)
     setTutorialZoom(null)
+    setTutorialFrame(null)
     if (how !== 'finished') unstage()
   },
   restore: (player) => { void restoreKept(player) },
@@ -253,8 +261,60 @@ onTutorialLifecycle({
 registerTutorialEffect('aim-box', () => {
   setTutorialSpin(true)
   const off = aimOnce((layout) => besideToward(layout.frame, 3, 3, 3, useCyberspace.getState().position))()
-  return () => { setTutorialSpin(false); if (off) off() }
+  const offHop = showFirstHop((layout) => toWorld(layout.frame, 3, 3, 3))
+  return () => { setTutorialSpin(false); if (off) off(); offHop() }
 })
+
+/**
+ * The first hop, shown so a newcomer sees it (owner, 2026-11-12: "when they
+ * hit commit we pre-position the camera ... so that the user can tell oh I
+ * just moved and this red ball is me"). On COMMIT the spin stops and the
+ * camera frames the hop, start and end from the side, while the proof is
+ * made; the avatar waits where it is until the camera is there
+ * (HOP_FRAME_MS), then glides. Once it has arrived (lib/hopStage.ts
+ * afterHop), the camera eases in close over its shoulder, from behind it
+ * as seen from the chest (`chest`, the layout's), so the chest is just past
+ * it; discovery, which reveals the chest, runs then too. A hop that does
+ * not land puts the spin back. Returns the stop.
+ */
+export function showFirstHop(chest: (layout: TutorialLayout) => Position): () => void {
+  let live = true
+  let to: Position | null = null
+  const offStore = useCyberspace.subscribe((s, prev) => {
+    if (to === null) {
+      // COMMIT: a hop's proof has started, from where you stand to its target.
+      if (!s.pendingTarget || prev.pendingTarget || s.walking) return
+      to = { ...s.pendingTarget }
+      setTutorialSpin(false)
+      setTutorialFrame({ from: { ...s.position }, to })
+      holdGlide(performance.now() + HOP_FRAME_MS)
+      return
+    }
+    if (s.position !== prev.position && s.position.x === to.x && s.position.y === to.y && s.position.z === to.z) {
+      // Landed: the shot over the shoulder, once the avatar has arrived.
+      const landed = { ...s.position }
+      to = null
+      offStore()
+      afterHop(() => {
+        if (!live) return
+        setTutorialFrame(null)
+        const layout = useTutorialStage.getState().layout
+        if (!layout) return
+        const c = chest(layout)
+        const from = { x: Number(landed.x - c.x), y: Number(landed.y - c.y), z: Number(landed.z - c.z) }
+        if (from.x !== 0 || from.y !== 0 || from.z !== 0) setTutorialZoom(SHOULDER_ZOOM, from)
+      })
+      return
+    }
+    if (!s.pendingTarget && prev.pendingTarget && s.position === prev.position) {
+      // The hop did not land (refused, cancelled): the box step as it was.
+      to = null
+      setTutorialFrame(null)
+      setTutorialSpin(true)
+    }
+  })
+  return () => { live = false; offStore(); setTutorialFrame(null) }
+}
 
 /**
  * Arrival (T7): `inside` is true of where the player stands, their chain's

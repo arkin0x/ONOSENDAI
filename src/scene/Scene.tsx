@@ -36,7 +36,7 @@ import { keepPrograms } from '../lib/keepPrograms'
 import { sortWithoutBoxing } from '../lib/sortNoAlloc'
 import { FrameDriver } from './frameDriver'
 import { BG } from '../lib/palette'
-import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, renderDirection, viewAxes, type AxisName, type Position } from '../lib/space'
+import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, placeCentre, renderDirection, viewAxes, type AxisName, type Position } from '../lib/space'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
 import { setWalkFacing, walkEye, walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
@@ -70,7 +70,8 @@ import { StopCubes } from './StopCubes'
 import { StopBurst } from './StopBurst'
 import { TourLine } from './TourLine'
 import { useDemo } from '../store/useDemo'
-import { clearTutorialZoom, useTutorialCam } from '../store/useTutorialCam'
+import { HOP_FRAME_MS, clearTutorialZoom, setTutorialFrame, useTutorialCam, type HopFrame } from '../store/useTutorialCam'
+import { easeOrbit, frameHop, liftSide, smooth01, type Orbit } from '../lib/hopFraming'
 import { TourCameraState } from '../demo/tourDistance'
 import { TransitAvatar } from './TransitAvatar'
 import { RidePath } from './RidePath'
@@ -149,6 +150,13 @@ const FOLLOW_TAU = 0.09
 const GLIDE_TAU = 0.45
 const GLIDE_SECONDS = 1.6
 const GLIDE_MAX_CELLS = 300
+
+/**
+ * Seconds of the stretched follow (GLIDE_TAU) the view's centre takes back
+ * from a framed hop's middle to the avatar, once the tutorial stops framing
+ * it, so the camera settles onto the avatar rather than flicking there.
+ */
+const FRAME_RETURN_S = 0.6
 
 /**
  * Records the anchor the scene is being drawn against, in the commit that
@@ -655,6 +663,12 @@ function Rig(): JSX.Element {
   // The first-arrival tutorial's idle orbit spin around the cursor (feedback
   // item 14); off for everyone else, so the controls are untouched.
   const tutorialSpin = useTutorialCam((s) => s.spin)
+  // The tutorial's framed hop (useTutorialCam frame): the shot under way,
+  // and whether the last frame was framing one.
+  const frameShot = useRef<{ frame: HopFrame; t0: number; from: Orbit; to: Orbit } | null>(null)
+  const framing = useRef(false)
+  const sideVec = useMemo(() => new Vector3(), [])
+  const turnVec = useMemo(() => new Vector3(), [])
   // The rig re-framed on its own (a cut or a straight-on reframe): the step's
   // camera comes back only when the view has just arrived at the step's own
   // place. A block landing late reframed straight on, which put the camera on
@@ -1003,6 +1017,27 @@ function Rig(): JSX.Element {
     ty = aimAt.y
     tz = aimAt.z
 
+    // The tutorial frames its first hop (useTutorialCam frame): while it
+    // asks, the view's centre is the hop's middle in the drawn frame, so the
+    // start, the path and the end are all on screen as the avatar goes. When
+    // it stops, the centre settles back onto the avatar over the stretched
+    // follow rather than flicking there.
+    const frame = s.walking ? null : useTutorialCam.getState().frame
+    let hopEnds: [number[], number[]] | null = null
+    if (frame) {
+      const axes = s.axes()
+      const a = placeCentre(frame.from, origin, s.scaleExp, axes)
+      const b = placeCentre(frame.to, origin, s.scaleExp, axes)
+      hopEnds = [a, b]
+      tx = (a[0] + b[0]) / 2
+      ty = (a[1] + b[1]) / 2
+      tz = (a[2] + b[2]) / 2
+    } else {
+      frameShot.current = null
+      if (framing.current) glideLeft.current = Math.max(glideLeft.current, FRAME_RETURN_S)
+    }
+    framing.current = frame !== null
+
     // A zoom rescales every render coordinate, so there is no continuous path
     // between the old framing and the new one to ease along.
     if (prevScale.current !== s.scaleExp) {
@@ -1119,18 +1154,52 @@ function Rig(): JSX.Element {
     // WALK ends the ask, and so does a finger or the mouse on the scene (the
     // player taking the camera), not the step moving on, which comes before
     // the ease is done.
-    const tutorialZoom = useTutorialCam.getState().zoom
-    if (tutorialZoom !== null && (s.walking || pressed() > 0)) clearTutorialZoom()
-    else if (want === null && !eye.current) {
-      if (tutorialZoom !== null) {
+    // With a side (`from`, after the first hop: behind the avatar from the
+    // chest), it eases round to that side as it eases in, over the avatar's
+    // shoulder. A framed hop eases the camera to its shot over HOP_FRAME_MS,
+    // the time the avatar is held for it (lib/hopStage.ts holdGlide).
+    const cam = useTutorialCam.getState()
+    const tutorialZoom = cam.zoom
+    if ((tutorialZoom !== null || cam.frame !== null) && (s.walking || pressed() > 0)) {
+      clearTutorialZoom()
+      setTutorialFrame(null)
+    } else if (want === null && !eye.current) {
+      if (frame !== null && hopEnds !== null) {
+        let shot = frameShot.current
+        if (shot === null || shot.frame !== frame) {
+          const off = walkDir.copy(c.object.position).sub(c.target)
+          const cur = off.length()
+          const aspect = state.size.width / Math.max(1, state.size.height)
+          shot = frameShot.current = {
+            frame,
+            t0: performance.now(),
+            from: { dir: cur > 1e-4 ? off.clone().divideScalar(cur) : new Vector3(0, 0, 1), distance: Math.max(ORBIT_MIN_DISTANCE, cur) },
+            to: frameHop(hopEnds[0], hopEnds[1], off, rigCam.fov, aspect),
+          }
+        }
+        c.object.position.copy(c.target).add(easeOrbit(shot.from, shot.to, smooth01((performance.now() - shot.t0) / HOP_FRAME_MS), turnVec))
+        lastOffset.current.copy(c.object.position).sub(c.target)
+      } else if (tutorialZoom !== null) {
         const off = walkDir.copy(c.object.position).sub(c.target)
         const cur = off.length()
         if (cur < 1e-4) off.set(0, 0, 1)
+        off.normalize()
         const target = Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, tutorialZoom))
-        const nd = cur < 1e-4 ? target : cur + (target - cur) * (1 - Math.exp(-dt / 0.4))
-        c.object.position.copy(c.target).addScaledVector(off.normalize(), nd)
+        const k = 1 - Math.exp(-dt / 0.4)
+        const nd = cur < 1e-4 ? target : cur + (target - cur) * k
+        let turned = true
+        if (cam.from) {
+          // Cyberspace x, y, z put into the view's render axes, as the tour's side is.
+          const axes = s.axes()
+          const comp = cam.from
+          const side = liftSide(sideVec.set(comp[axes.right.axis] * axes.right.dir, comp[axes.up.axis] * axes.up.dir, comp[axes.out.axis] * axes.out.dir))
+          easeOrbit({ dir: off, distance: 1 }, { dir: side, distance: 1 }, k, turnVec)
+          off.copy(turnVec)
+          turned = off.angleTo(side) < 0.01
+        }
+        c.object.position.copy(c.target).addScaledVector(off, nd)
         lastOffset.current.copy(c.object.position).sub(c.target)
-        if (Math.abs(nd - target) < 0.05) clearTutorialZoom()
+        if (Math.abs(nd - target) < 0.05 && turned) clearTutorialZoom()
       }
     }
     // A VIEW fly brought the orbit in, and RECALL or VIEW's end asks for it
@@ -1142,7 +1211,7 @@ function Rig(): JSX.Element {
       const back = viewRig.takeRestore()
       if (back !== null) outTo.current = back
     }
-    if (viewRig.restoreOrbit(c.object.position, c.target, dt, s.walking || pressed() > 0 || tutorialZoom !== null || want !== null || eye.current !== null)) {
+    if (viewRig.restoreOrbit(c.object.position, c.target, dt, s.walking || pressed() > 0 || tutorialZoom !== null || frame !== null || want !== null || eye.current !== null)) {
       lastOffset.current.copy(c.object.position).sub(c.target)
     }
     // The controls' own turn this frame (their damping), in place in flight too.

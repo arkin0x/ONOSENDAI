@@ -194,6 +194,44 @@ interface Props {
   scaleExp: number
 }
 
+/**
+ * Nothing to draw, in the trail's own geometry layout (positions and a color
+ * per vertex): what TrailWarmup draws its materials on.
+ */
+const WARM_GEOMETRY = (() => {
+  const g = new BufferGeometry()
+  g.setAttribute('position', new Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3))
+  g.setAttribute('color', new Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3))
+  g.setDrawRange(0, 0)
+  return g
+})()
+
+/**
+ * The trail's kinds of line, drawn with nothing in them while there is no
+ * trail yet. A new player has no trail until their first hop lands, and then
+ * the unpublished dashed line's program was compiled inside the landing
+ * frame, which it held for 200 to 430 ms (headless, 2026-11-12,
+ * scripts/hop-probe.mjs): the frame the glide was meant to start in. Drawn
+ * in the scene's own pass (its render target, its fog), with the trail's own
+ * options, so three compiles exactly the programs the trail will use, early;
+ * lib/keepPrograms keeps them. An empty draw range draws no pixel.
+ */
+function TrailWarmup(): JSX.Element {
+  return (
+    <>
+      <lineSegments geometry={WARM_GEOMETRY} frustumCulled={false}>
+        <lineBasicMaterial vertexColors linewidth={2} toneMapped={false} />
+      </lineSegments>
+      <lineSegments geometry={WARM_GEOMETRY} frustumCulled={false}>
+        <lineBasicMaterial vertexColors transparent opacity={0.22} toneMapped={false} />
+      </lineSegments>
+      <lineSegments geometry={WARM_GEOMETRY} frustumCulled={false}>
+        <lineDashedMaterial vertexColors dashSize={DASH} gapSize={GAP} transparent opacity={0.7} toneMapped={false} />
+      </lineSegments>
+    </>
+  )
+}
+
 export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   const ownHistory = useCyberspace((s) => s.positionHistory)
   const spectate = useCyberspace((s) => s.spectate)
@@ -328,7 +366,8 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   // does too.
   // BUILD mode's view is the exception: it frames the chain at its true
   // place, and the riding vertex above stands down under any focus.
-  if (!trail || (focus !== null && !placed) || !showTrail) return null
+  if (!trail) return showTrail && focus === null ? <TrailWarmup /> : null
+  if ((focus !== null && !placed) || !showTrail) return null
 
   // Each line's color is per vertex (paintTrail), so the materials are white.
   return (

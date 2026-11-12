@@ -1,4 +1,5 @@
 import { signerWaiting } from '../lib/authOpen'
+import { hopLanding } from '../lib/hopStage'
 import { flyLanding } from '../lib/viewFly'
 import { chainHolders } from '../lib/chainHolders'
 import { bigintBitLimit, movementCapabilityIssue } from '../lib/proofCapability'
@@ -5556,6 +5557,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const nextPublished = { ...now.published, [event.id]: 'queued' as const }
 
     const following = now.atHead()
+    // What can wait for the avatar's glide (discovery's scan, the tutorial's
+    // next camera shot) waits from here (lib/hopStage.ts). The move is not
+    // touched: only what is shown around it is ordered.
+    hopLanding()
     set({
       position: newPosition,
       headPlane: plane,

@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest'
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import { fromPayload } from 'sno-core/shards'
-import { BASE_CAPS, clockHeight, growBloom, mixDna, parseDna, tryParseDna, workOk } from 'sno-core/seeds'
+import { BASE_CAPS, growBloom, mixDna, parseDna, tryParseDna, workOk } from 'sno-core/seeds'
 import { ORIGINAL_CAPS, ORIGINAL_DNAS } from '../seeds/originalDnas'
 import { SEED_DNAS } from '../seeds/seedDnas'
 import { bloomReachGibsons, seedDraftHeight, seedHideFor, seedHideHeight, SEED_HIDE_MAX, SEED_HIDE_MIN, dnaMatches, dnaTemplate, dnaTextRefusal, readDnaText, draftPrice, miningSeconds, previewHash, previewRequest, seedTemplate, seedWorkHolds, previewLastDay } from '../seeds/plant'
@@ -143,8 +143,8 @@ describe('the seed event and its work (§8.2, §7)', () => {
 
 describe('the preview', () => {
   const blocks = vectorBlocks()
-  // A tip that puts the preview's planted block, for the original DNAs' caps, at the vectors' 970,400.
-  const tip = 970400 + previewLastDay(ORIGINAL_CAPS) * 144 + 143 + 6
+  // A tip (NTH's newest anchor, the clock block itself) that puts the preview's planted block, for the original DNAs' caps, at the vectors' 970,400.
+  const tip = 970400 + previewLastDay(ORIGINAL_CAPS) * 144 + 143
 
   it('grows the bloom sno-core grows, with the real blocks where the page has them', () => {
     const req = previewRequest({ text: ORIGINAL_DNAS[0].text, caps: ORIGINAL_CAPS, coord: vectors.growth.cases[0].coord, scale: 0, tip, day: 30, hashOf: (h) => blocks.get(h) })
@@ -193,7 +193,8 @@ describe('the preview', () => {
       const last = previewLastDay(caps)
       const req = previewRequest({ text: ORIGINAL_DNAS[2].text, caps, coord: positionHex(at, 0), scale: 0, tip: 975_400, day: last, hashOf: () => undefined })
       // Its last day ends at the clock block, whatever the DNA's days: the preview is the blocks up to now.
-      expect(req.clock).toBe(clockHeight(975_400))
+      // NTH's newest anchor is already 6 deep, so it is the clock block (seedClock clockAtAnchor).
+      expect(req.clock).toBe(975_400)
       expect(req.clock - req.seed.planted!).toBe(last * 144 + 143)
       // Every generation's driving block, and no more.
       expect(Object.keys(req.hashes)).toHaveLength(caps.generations)

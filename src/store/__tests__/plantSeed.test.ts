@@ -1,7 +1,8 @@
 /**
  * plantSeed.test.ts: SEED through the deploy (DECK-0008 §8.2). The seed is
  * written into the bag at the build cursor by the same bag writer as every
- * item, planted at the trusted clock block (NTH's newest anchor minus 6), its
+ * item, planted at the trusted clock block (NTH's newest anchor, already 6
+ * deep, so not 6 more below it: seedClock clockAtAnchor, DECK-0008 §4.1), its
  * work mined at its DNA's price; LOCAL keeps the DNA and the bag here, LIVE
  * sends the DNA before the bag (free), and CANCEL stops the mining with
  * nothing signed or placed. The relays are mocks; the miner runs inline.
@@ -142,7 +143,8 @@ describe('planting a seed', () => {
     const cs = useCyberspace.getState()
     const seed = seedItemOf(ev)!
     expect(seed.coord).toBe(positionHex(deployPoint(cs.cursor, cs.scaleExp, 0), row!.plane))
-    expect(seed.planted).toBe(975256 - 6)
+    // NTH's newest anchor is 975,256 and is already 6 deep: the seed is planted at it, not at 975,250.
+    expect(seed.planted).toBe(975256)
     expect(seed.target).toBe(16)
     expect(workOk(ev, 16)).toBe(true)
     expect(ev.tags.some((t) => t[0] === '-')).toBe(true)

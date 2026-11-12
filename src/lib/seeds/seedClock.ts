@@ -2,8 +2,9 @@
  * seedClock.ts - a seed's clock: the clock height, and its planted height
  * after the clamp, with the headers it needs fetched as it goes.
  *
- * The clock height is the tip of ONOSENDAI's Bitcoin line minus 6 (DECK-0008
- * §4.1). The effective planted height reads header times (§4.2): the median
+ * The clock height is NTH's newest anchor this page holds, which is already
+ * 6 blocks deep (clockAtAnchor, DECK-0008 §4.1). The effective planted height
+ * reads header times (§4.2): the median
  * time past at the clock, then the times around the seed's own `created_at`
  * found by galloping down from the clock and bisecting (sno-core
  * effectivePlantedHeight). Each pass that meets a header this page lacks
@@ -13,10 +14,27 @@
  * "waiting for blocks", and it draws as its axiom until then (§4.2).
  */
 
-import { clockHeight, effectivePlantedHeight, type PlantedHeight } from 'sno-core/seeds'
+import { effectivePlantedHeight, type PlantedHeight } from 'sno-core/seeds'
 import type { HeaderBook } from './headerBook'
 
-export { clockHeight }
+/**
+ * The clock height (DECK-0008 §4.1) from the height of NTH's newest anchor
+ * this page holds. §4.1 reads the best chain's tip minus 6, so that the clock
+ * block is at least 6 deep. NTH publishes block h only once the tip it reads
+ * from mempool.space is at h + 6 or higher (nth src/index.ts, the
+ * confirmation gate, NTH_CONFIRMATIONS = 6), so its newest anchor is already
+ * the tip minus 6 or deeper: it is the clock block itself. Taking 6 more
+ * would plant and grow seeds 12 blocks behind the network.
+ *
+ * sno-core clockHeight (the tip minus 6) is for a reader that sees the real
+ * tip. ONOSENDAI's seeds never do: the trusted tip is the top of the header
+ * book (NTH's anchors and the header blobs, packed to the same depth), and
+ * the stop index's tip is kind 321 anchors too. Every block up to the clock
+ * is then one the book can hold, the clock block's own header included.
+ */
+export function clockAtAnchor(anchorHeight: number): number {
+  return anchorHeight
+}
 
 /** What a pass of the clamp says about a seed's planted height. */
 export type PlantedState = PlantedHeight & {

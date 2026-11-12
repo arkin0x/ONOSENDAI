@@ -7,7 +7,7 @@
  *    goes to the relays first when it is not there yet: publishing a DNA is
  *    free, and a finder must be able to fetch it. LOCAL keeps it on this
  *    device, and BROADCAST sends it with the bag later (useShards).
- * 2. The seed at the clock block (the tip minus 6, §4.2), at the build
+ * 2. The seed at the clock block (NTH's newest anchor, already 6 deep, §4.1, §4.2), at the build
  *    cursor's point, its work mined in workers at its DNA's price with the
  *    committed target equal to that price. The deploy bar shows how far the
  *    mining is and about how long is left, and CANCEL stops it.
@@ -16,7 +16,6 @@
  * the work still holds on what came back.
  */
 
-import { clockHeight } from 'sno-core/seeds'
 import { describeDuration, expectedTries, nonceTagged, type MineTemplate } from '../lib/avatarMine'
 import { MineCancelled, mineInWorker, type AvatarMiner, type MineProgress } from '../lib/avatarWorker'
 import { publishMany, query, relaySet } from '../lib/relay'
@@ -27,6 +26,7 @@ import type { Position } from '../lib/space'
 import { dnaMatches, dnaTemplate, draftPrice, dnaTextRefusal, readDnaText, seedTemplate, type SeedDraft } from '../lib/seeds/plant'
 import { checkDna, idbDnaCache } from '../lib/seeds/dnaStore'
 import { dnaResolver, refreshTrustedTip, trustedTip } from '../lib/seeds/seedSources'
+import { clockAtAnchor } from '../lib/seeds/seedClock'
 import { DNA_KIND, type SeedStand } from '../lib/seeds/seedItem'
 
 /** The name a seed draft goes by: its DNA's, or its title. Parsed once per text (plant.ts readDnaText). */
@@ -141,14 +141,15 @@ export async function plantedTemplate(pending: { type: 'seed'; seed: SeedDraft }
   o.note('Getting the DNA ready')
   const dna = await dnaFor(draft, o.owner, o.live, o.createdAt, o.sign)
   // The writer's clock block (§4.2): the tip this client trusts, NTH's newest verified anchor, asked
-  // for now (a tab left idle may hold an old one), minus 6.
+  // for now (a tab left idle may hold an old one). NTH publishes a block only once it is 6 deep, so
+  // that anchor is the clock block itself (seedClock clockAtAnchor, §4.1), not 6 more below it.
   await refreshTrustedTip(null, Date.now(), true)
   const tip = trustedTip()
   if (tip === null) throw new Error('No block yet to plant at. Try again in a moment.')
   if (!o.current()) throw new MineCancelled()
   // Attributed before it is mined, as an avatar is (lib/client.ts): the signer adds no client tag to a
   // template that names one, so the work, done over every tag, still holds on what it signs.
-  const template = attributed(seedTemplate({ dnaId: dna.event.id, relayHint: dna.hint, planted: clockHeight(tip), scale: draft.scale, at: o.at, plane: o.plane, title: draft.title, createdAt: o.createdAt, ...(o.stand ? { stand: o.stand } : {}) }))
+  const template = attributed(seedTemplate({ dnaId: dna.event.id, relayHint: dna.hint, planted: clockAtAnchor(tip), scale: draft.scale, at: o.at, plane: o.plane, title: draft.title, createdAt: o.createdAt, ...(o.stand ? { stand: o.stand } : {}) }))
   o.note('Mining the seed')
   o.mining(true)
   const mineable: MineTemplate = { pubkey: o.owner, created_at: template.created_at, kind: template.kind, tags: template.tags, content: template.content }

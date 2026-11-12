@@ -189,6 +189,7 @@ import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary }
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { addRecentView } from '../lib/viewAt'
 import { endOfChainLabel } from '../lib/chainBreak'
+import { chainStopOf, respawnPointOf } from '../lib/chainStop'
 import { moveStepOf } from '../lib/buildCursor'
 import { targetColor, type CyberTarget } from '../lib/targets'
 import { useSecrets } from './useSecrets'
@@ -302,10 +303,31 @@ export function brokenChainMessage(broken: NonNullable<ReturnType<typeof firstBr
   return broken.action.fork ? FORKED_CHAIN_MESSAGE : BROKEN_CHAIN_MESSAGE
 }
 
+/**
+ * A chain that stops at a proof in a form the rules reject (lib/chainStop.ts:
+ * a version 1 hop off the 5.13 list, a hop with one of mn and mp, a sidestep
+ * or a ride with no mn off its list) refuses every move too, since the
+ * owner's ruling of 2026-11-12: nothing added after the stop counts. Only
+ * once known: while the 5.13 list loads, a chain only it can judge is not
+ * refused on a guess. A hop above the relay's verify ceiling refuses nothing.
+ */
+export const RELAY_STOPPED_MESSAGE =
+  'Your chain stops at a move the rules reject, so nothing added after it counts. ONOSENDAI will not sign a move onto it. Respawn to move again: tap the red CHAIN STOPS chip.'
+
+/** The refusal for a chain that needs a respawn (lib/chainStop.ts), or null: a break's words, or a rejected proof's. */
+function stoppedChainMessage(chain: ActionEvent[]): string | null {
+  const stop = chainStopOf(chain)
+  if (stop?.source === 'relay') return stop.stop.kind === 'broken' ? RELAY_STOPPED_MESSAGE : null
+  if (stop) return brokenChainMessage(stop.broken)
+  // Not known yet (the 5.13 list loading): a structural break is certain whatever the list says.
+  const broken = stop === undefined ? firstBreak(chain) : null
+  return broken ? brokenChainMessage(broken) : null
+}
+
 export function whyNoMove(chain: ActionEvent[]): string | null {
   if (movementBlocked()) return VERSION_BLOCKED_MESSAGE
-  const broken = REFUSE_MOVES_ON_BROKEN_CHAIN ? firstBreak(chain) : null
-  if (broken) return brokenChainMessage(broken)
+  const stopped = REFUSE_MOVES_ON_BROKEN_CHAIN ? stoppedChainMessage(chain) : null
+  if (stopped) return stopped
   const open = openBracket(chain)
   if (open) return gameFor(open.game?.pubkey) || canLeave(open.game?.pubkey) ? IN_GAME_HERE_MESSAGE : GAME_HOLDS_MESSAGE
   return null
@@ -5723,14 +5745,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // below): asked before the End of Chain entry is added for it.
     const versionLook = lookBeforeMove()
     if (!(versionLook instanceof Promise ? await versionLook : versionLook)) throw new Error(VERSION_BLOCKED_MESSAGE)
-    const broken = firstBreak(get().actions())
-    if (broken) {
-      // With no valid event at all (an invalid spawn, Q7), the spawn row
-      // names the entry, and it stands where the identity is frozen: the
-      // spawn coordinate.
-      const at = broken.lastValid ?? broken.action
-      addRecentView({ input: at.coordHex, label: endOfChainLabel(at.id), plane: at.plane, pinned: true })
-    }
+    // The stop that asks for this respawn: a structural break, or a proof
+    // in a form the rules reject (lib/chainStop.ts). With no valid event at
+    // all (an invalid spawn, Q7), the spawn row names the entry, and it
+    // stands where the identity is frozen: the spawn coordinate.
+    const at = await respawnPointOf(get().actions())
+    if (at) addRecentView({ input: at.coordHex, label: endOfChainLabel(at.id), plane: at.plane, pinned: true })
     await get().respawn()
   },
 
@@ -6118,16 +6138,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const open = openBracket(chain)
     if (!open || open.game?.pubkey !== game.pubkey) return GAME_NOT_OPEN_MESSAGE
     if (open.id !== entryId) return GAME_OTHER_BRACKET_MESSAGE
-    const broken = firstBreak(chain)
-    return broken ? brokenChainMessage(broken) : null
+    return stoppedChainMessage(chain)
   }, (links) => build(links)),
 
   exitGame: async (entryId, gameHex) => signGameEvent(get, set, (chain) => {
     const open = openBracket(chain)
     if (!open) return GAME_NOT_OPEN_MESSAGE
     if (entryId && open.id !== entryId) return GAME_OTHER_BRACKET_MESSAGE
-    const broken = firstBreak(chain)
-    return broken ? brokenChainMessage(broken) : null
+    return stoppedChainMessage(chain)
   }, (links, chain) => {
     const open = openBracket(chain)
     if (!open) throw new Error(GAME_NOT_OPEN_MESSAGE)

@@ -258,14 +258,15 @@ describe('where the relay places you, not your head (a chain the relay stopped)'
     await m.unmount()
   })
 
-  it('RESPAWN opens the respawn there is: the Derezz panel when ONOSENDAI sees no break, unfolded', async () => {
+  it('RESPAWN on a chain only a rejected proof stops opens the broken-chain notice: ONOSENDAI holds it to the same rules now (2026-11-12)', async () => {
     cs.actions = [{ id: 'spawn', type: 'spawn', coordHex: AWAY, createdAt: SEP_4 }, { id: 'v1side', type: 'sidestep', coordHex: HEAD, createdAt: SEP_4 }]
     allSent()
     if (usePanelLayout.getState().collapsed.derezz !== true) usePanelLayout.getState().toggle('derezz')
     const m = await mount(<SpeakeasyLine lookup={fakeLookup([NAMED])} placedLookup={fakeLookup([])} />)
     await m.press('RESPAWN')
-    expect(usePanelLayout.getState().collapsed.derezz).not.toBe(true)
-    expect(useChainUi.getState().brokenView).toBeNull()
+    expect(useChainUi.getState().brokenView).toBe('notice')
+    expect(usePanelLayout.getState().collapsed.derezz).toBe(true)
+    useChainUi.getState().setBrokenView(null)
     await m.unmount()
     usePanelLayout.setState({ collapsed: {} })
   })
@@ -365,6 +366,6 @@ describe('where the relay places you, not your head (a chain the relay stopped)'
   })
 
   it('a stop with no valid point at all says so', () => {
-    expect(stoppedWords({ index: 0, action: {} as never, lastValid: null, kind: 'broken', reason: 'fork' })).toBe('Your chain stops at its spawn, outside this region. Respawn to enter.')
+    expect(stoppedWords({ index: 0, action: {} as never, lastValid: null, kind: 'broken', rule: 'chain-rule', reason: 'fork' })).toBe('Your chain stops at its spawn, outside this region. Respawn to enter.')
   })
 })

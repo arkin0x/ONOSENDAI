@@ -374,7 +374,7 @@ export default function App(): JSX.Element {
                   which each stop you; then the chips a step names, FOUND HERE
                   while opening a chest, the chain chip while spectating a friend. */}
               {versionBlocked && <VersionChip />}
-              <BrokenChainChip />
+              <BrokenChainChip stopsOnly />
               <GameChip />
               {keepsChip('found') && <KeyFoundChip />}
               {keepsChip('chain') && <ChainExplorer />}

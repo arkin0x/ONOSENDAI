@@ -4,8 +4,9 @@
  * while LIVE: the relay judges the chain it holds.
  *
  * Undefined while it cannot be said yet: a chain with version 1 hops waits for
- * the 5.13 list (lib/v1HopList). The list is kept here once loaded, so a panel
- * mounted again has it on its first render and shows nothing stale. Null when
+ * the 5.13 list (lib/v1HopList). The list is the app's one copy
+ * (lib/chainStop.ts), so a panel mounted again has it on its first render and
+ * shows nothing stale. Null when
  * nothing is published, not LIVE, or `watching` is off (the Position panel is
  * folded): then nothing is loaded or walked at all.
  *
@@ -16,29 +17,23 @@
  * relay does not ask for.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { publishedLength } from '../lib/speakeasy'
 import { needsV1HopList, relayPlacement, type RelayPlacement } from '../lib/relayPlacement'
-import { loadV1HopList } from '../lib/v1HopList'
+import { ensureV1HopList } from '../lib/chainStop'
+import { useV1HopList } from './useChainStop'
 
 const NO_LIST: ReadonlySet<string> = new Set()
-/** The 5.13 list once loaded, for the first render of every later mount. */
-let listed: ReadonlySet<string> | null = null
 
 export function useRelayPlacement(watching = true): RelayPlacement | null | undefined {
   const actions = useCyberspace((s) => (s.live && watching ? s.actions() : null))
   const published = useCyberspace((s) => s.published)
-  const [list, setList] = useState<ReadonlySet<string> | null>(listed)
+  const list = useV1HopList()
   const chain = useMemo(() => (actions ? actions.slice(0, publishedLength(actions, published)) : null), [actions, published])
   const need = useMemo(() => !!chain && needsV1HopList(chain), [chain])
-  useEffect(() => {
-    if (!need || list) return
-    let on = true
-    // A failed load says nothing, and leaves the line empty: asked again on the next mount.
-    loadV1HopList().then((l) => { listed = l; if (on) setList(l) }, () => undefined)
-    return () => { on = false }
-  }, [need, list])
+  // A failed load says nothing, and leaves the line empty: asked again on the next mount.
+  useEffect(() => { if (need && !list) ensureV1HopList() }, [need, list])
   return useMemo(() => {
     if (!chain || chain.length === 0) return null
     const fork = chain[0].fork

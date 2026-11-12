@@ -42,7 +42,8 @@ function formatDuration(ms: number): string {
   if (h < 48) return `${h.toFixed(1)} h`
   return `${(h / 24).toFixed(1)} d`
 }
-import { GAME_HOLDS_MESSAGE, IN_GAME_HERE_MESSAGE, STALE_CONFIRMATION, useCyberspace, whyNoMove, type CompletedRide } from '../store/useCyberspace'
+import { GAME_HOLDS_MESSAGE, IN_GAME_HERE_MESSAGE, RELAY_STOPPED_MESSAGE, STALE_CONFIRMATION, useCyberspace, whyNoMove, type CompletedRide } from '../store/useCyberspace'
+import { useV1HopList } from '../hooks/useChainStop'
 import { closeScrubber, exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, stopScale, useHyperspace, viewHyperspace } from '../store/useHyperspace'
 import { Explanation } from './Explanation'
 import { useChainUi } from '../store/useChainUi'
@@ -390,8 +391,10 @@ export function HyperspacePanel(): JSX.Element {
   // gate's verdict is read here so a block shows at once, not at the next
   // change of chain.
   const versionVerdict = useVersionGate((s) => s.verdict)
+  // The 5.13 list arriving can stop the chain (lib/chainStop.ts): read again then too.
+  const hopList = useV1HopList()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const noMove = useMemo(() => whyNoMove(useCyberspace.getState().actions()), [events, versionVerdict])
+  const noMove = useMemo(() => whyNoMove(useCyberspace.getState().actions()), [events, versionVerdict, hopList])
   const inGame = noMove !== null
   const atStop = line !== null && line.fromHeight !== null
   const onLine = transit !== null || line !== null
@@ -705,7 +708,7 @@ export function HyperspacePanel(): JSX.Element {
         ? <p className="hyper__why">IN A GAME: EXIT GAME TO BOARD OR RIDE</p>
         : (
           <p className="hyper__why">
-            YOUR CHAIN IS BROKEN: NOTHING MOVES UNTIL YOU RESPAWN
+            {noMove === RELAY_STOPPED_MESSAGE ? 'YOUR CHAIN STOPS' : 'YOUR CHAIN IS BROKEN'}: NOTHING MOVES UNTIL YOU RESPAWN
             <button className="tag tag--tap hyper__whybtn" onClick={() => useChainUi.getState().setBrokenView('notice')}>WHY</button>
           </p>
         ))}

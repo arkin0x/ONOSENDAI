@@ -301,10 +301,12 @@ export function ViewAtPanel(): JSX.Element {
     if (target) { setViewBad(false); look(typed, target); return }
     // A /C/ link, or its hex: a region opens as the link does, the address
     // and all (openCoordLink); a whole coordinate is the point, as typed hex is.
+    // A link that names no coordinate is refused here, never sent to the lookup.
     const link = typedCoordRoute(typed)
     if (link?.kind === 'prefix') { setViewBad(false); setViewNote(null); openCoordLink(link.hex); return }
-    const point = link ? parseViewAt(link.hex, lookedPlane) : null
-    if (link && point) { setViewBad(false); setViewNote(null); look(link.hex, point); return }
+    const point = link?.kind === 'full' ? parseViewAt(link.hex, lookedPlane) : null
+    if (link?.kind === 'full' && point) { setViewBad(false); setViewNote(null); look(link.hex, point); return }
+    if (link) { setViewBad(true); setViewNote(`No place found for "${typed}".`); return }
     if (!/[a-z]/i.test(typed)) { setViewBad(true); return }
     setFinding(true)
     setViewNote(null)

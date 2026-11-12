@@ -321,6 +321,9 @@ describe("View's box takes a /C/ region (arkinox, 2026-11-12)", () => {
     replaceState: vi.fn((_d: unknown, _t: string, url: string) => { loc.pathname = url }),
   }
   beforeEach(() => {
+    cs().clearFocus()
+    useCoordRoute.setState({ region: null, label: null })
+    useCyberspace.setState({ plane: 0, anchorPlane: 0 })
     loc.pathname = '/'
     history.pushState.mockClear()
     history.replaceState.mockClear()
@@ -328,6 +331,8 @@ describe("View's box takes a /C/ region (arkinox, 2026-11-12)", () => {
     ;(globalThis as { window?: unknown }).window = { location: loc, history }
   })
   afterEach(() => {
+    cs().clearFocus()
+    useCyberspace.setState({ plane: 0, anchorPlane: 0 })
     delete (globalThis as { window?: unknown }).window
   })
 
@@ -344,11 +349,10 @@ describe("View's box takes a /C/ region (arkinox, 2026-11-12)", () => {
     useCyberspace.setState({ plane: 1, anchorPlane: 1 })
     await submit(MIDWEST)
     expect(geocode).not.toHaveBeenCalled()
-    expect(history.pushState).toHaveBeenCalledWith(null, '', `/C/${MIDWEST}`)
+    expect(history.pushState).toHaveBeenCalledWith({ onosendaiCoord: 1 }, '', `/C/${MIDWEST}`)
     expect(useCoordRoute.getState().region?.prefix).toBe(MIDWEST)
     expect(cs().focus?.label).toBe(`C/${MIDWEST}`)
     expect(cs().anchorPlane).toBe(0)
-    useCyberspace.setState({ plane: 0 })
   })
 
   it('takes C/, /C/ and a whole link too', async () => {
@@ -356,7 +360,7 @@ describe("View's box takes a /C/ region (arkinox, 2026-11-12)", () => {
       cs().clearFocus()
       history.pushState.mockClear()
       await submit(typed)
-      expect(history.pushState, typed).toHaveBeenCalledWith(null, '', `/C/${MIDWEST}`)
+      expect(history.pushState, typed).toHaveBeenCalledWith({ onosendaiCoord: 1 }, '', `/C/${MIDWEST}`)
       expect(useCoordRoute.getState().region?.prefix, typed).toBe(MIDWEST)
     }
   })
@@ -369,10 +373,19 @@ describe("View's box takes a /C/ region (arkinox, 2026-11-12)", () => {
     expect(cs().focus?.position).toEqual({ x: 4n, y: 5n, z: 6n })
   })
 
-  it('a link that is not valid hex is not a region: it goes to the place lookup, which finds nothing', async () => {
-    await submit('C/56zz')
+  it('a link that is not valid hex is refused (No place found) and never sent to the place lookup', async () => {
+    for (const typed of ['C/56zz', 'https://www.onosendai.tech/C/zz']) {
+      await submit(typed)
+      expect(history.pushState, typed).not.toHaveBeenCalled()
+      expect(useCoordRoute.getState().region, typed).toBeNull()
+      expect(cs().focus, typed).toBeNull()
+    }
+    expect(geocode).not.toHaveBeenCalled()
+  })
+
+  it('a bare number is not a region', async () => {
+    await submit('55401')
     expect(history.pushState).not.toHaveBeenCalled()
     expect(useCoordRoute.getState().region).toBeNull()
-    expect(geocode).toHaveBeenCalledWith('C/56zz')
   })
 })

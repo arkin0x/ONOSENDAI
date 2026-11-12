@@ -18,7 +18,7 @@ vi.hoisted(() => {
 })
 
 import { useCyberspace } from '../useCyberspace'
-import { openCoordLink, startCoordRoute, useCoordRoute } from '../useCoordRoute'
+import { openCoordLink, startCoordRoute, useCoordRoute, watchCoordRouteHistory } from '../useCoordRoute'
 import { useToast } from '../useToast'
 import { useRegion } from '../useRegion'
 import { recall } from '../padMode'
@@ -30,6 +30,31 @@ const FULL = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9f'
 const FULL_DATA = FULL.slice(0, 63) + 'e'
 /** arkinox's midwest region (2026-11-12): 24 hex, so no plane bit. */
 const MIDWEST = '56db6db6db6db6db6db6dbad'
+
+/**
+ * A browser's session history for one tab: entries with their state, Back
+ * and Forward firing popstate, and watchCoordRouteHistory listening to it.
+ */
+function fakeBrowser(start: string) {
+  const entries: Array<{ path: string; state: unknown }> = [{ path: start, state: null }]
+  let i = 0
+  const loc = { pathname: start, search: '', hash: '' }
+  const listeners = new Set<() => void>()
+  const go = (to: number): void => { i = to; loc.pathname = entries[i].path; for (const l of [...listeners]) l() }
+  const history = {
+    get state() { return entries[i].state },
+    pushState: vi.fn((state: unknown, _t: string, url: string) => { entries.splice(i + 1); entries.push({ path: url, state }); i++; loc.pathname = url }),
+    replaceState: vi.fn((state: unknown, _t: string, url: string) => { entries[i] = { path: url, state }; loc.pathname = url }),
+    back: vi.fn(() => { if (i > 0) go(i - 1) }),
+    forward: () => { if (i < entries.length - 1) go(i + 1) },
+  }
+  const events = {
+    addEventListener: (_t: string, l: () => void) => { listeners.add(l) },
+    removeEventListener: (_t: string, l: () => void) => { listeners.delete(l) },
+  }
+  const unwatch = watchCoordRouteHistory(events as never, loc, history)
+  return { loc, history, unwatch, entries: () => entries.map((e) => e.path), index: () => i }
+}
 
 /** Stand in ideaspace at your head, as a visitor might before opening a link. */
 function standInIdeaspace(): void {
@@ -171,30 +196,59 @@ describe('startCoordRoute', () => {
     expect(replaceState).toHaveBeenCalledWith(null, '', '/')
   })
 
-  it('openCoordLink (the View box): the address becomes the link with no reload, and the region opens in dataspace', () => {
+  it('openCoordLink (the View box): the address becomes the link on a marked entry, no reload, the region in dataspace', () => {
     standInIdeaspace()
-    const loc = { pathname: '/', search: '', hash: '' }
-    const history = {
-      pushState: vi.fn((_d: unknown, _t: string, url: string) => { loc.pathname = url }),
-      replaceState: vi.fn((_d: unknown, _t: string, url: string) => { loc.pathname = url }),
-    }
-    openCoordLink(MIDWEST, loc, history)
-    expect(history.pushState).toHaveBeenCalledWith(null, '', `/C/${MIDWEST}`)
-    expect(history.replaceState).not.toHaveBeenCalled()
+    const b = fakeBrowser('/')
+    openCoordLink(MIDWEST, b.loc, b.history)
+    expect(b.history.pushState).toHaveBeenCalledTimes(1)
+    expect(b.entries()).toEqual(['/', `/C/${MIDWEST}`])
+    expect(b.history.state).toEqual({ onosendaiCoord: 1 })
     expect(useCoordRoute.getState().region?.prefix).toBe(MIDWEST)
     expect(useCyberspace.getState().focus?.label).toBe(`C/${MIDWEST}`)
     expect(useCyberspace.getState().anchorPlane).toBe(0)
+    b.unwatch()
+  })
 
-    // A second link over the first takes over: the first's end does not send
-    // the address home, and only the second's view is watched now.
-    openCoordLink('f0', loc, history)
-    expect(loc.pathname).toBe('/C/f0')
-    expect(history.replaceState).not.toHaveBeenCalled()
+  it('a link typed over a link takes its entry; ending the view steps Back off it, leaving no dead entry', () => {
+    const b = fakeBrowser('/')
+    openCoordLink(MIDWEST, b.loc, b.history)
+    openCoordLink('f0', b.loc, b.history)
+    openCoordLink('f0', b.loc, b.history)
+    expect(b.entries()).toEqual(['/', '/C/f0'])
     expect(useCoordRoute.getState().region?.prefix).toBe('f0')
-    useCyberspace.getState().clearFocus()
+    // RECALL home: the view ends, the address steps Back to /.
+    recall()
     expect(useCoordRoute.getState().region).toBeNull()
-    expect(history.replaceState).toHaveBeenCalledTimes(1)
-    expect(loc.pathname).toBe('/')
+    expect(b.history.back).toHaveBeenCalledTimes(1)
+    expect(b.loc.pathname).toBe('/')
+    expect(b.index()).toBe(0)
+    b.unwatch()
+  })
+
+  it('a link typed over the address the page loaded on keeps it unmarked, so its end puts back the root and never leaves the site', () => {
+    const b = fakeBrowser(`/C/${MIDWEST}`)
+    startCoordRoute(b.loc, b.history)
+    openCoordLink('f0', b.loc, b.history)
+    expect(b.entries()).toEqual(['/C/f0'])
+    useCyberspace.getState().clearFocus()
+    expect(b.history.back).not.toHaveBeenCalled()
+    expect(b.entries()).toEqual(['/'])
+    expect(useCoordRoute.getState().region).toBeNull()
+    b.unwatch()
+  })
+
+  it('Back off a typed link closes its view; Forward onto it opens it again', () => {
+    const b = fakeBrowser('/')
+    openCoordLink(MIDWEST, b.loc, b.history)
+    b.history.back()
+    expect(b.loc.pathname).toBe('/')
+    expect(useCoordRoute.getState().region).toBeNull()
+    expect(useCyberspace.getState().focus).toBeNull()
+    b.history.forward()
+    expect(b.loc.pathname).toBe(`/C/${MIDWEST}`)
+    expect(useCoordRoute.getState().region?.prefix).toBe(MIDWEST)
+    expect(useCyberspace.getState().focus?.label).toBe(`C/${MIDWEST}`)
+    b.unwatch()
   })
 
   it('nonsense says so and puts the address back', () => {

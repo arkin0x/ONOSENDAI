@@ -11,7 +11,9 @@
  * them fill an aligned box. The app draws that box in yellow and frames it.
  *
  * The plane is the coordinate's lowest bit, so only all 64 characters fix
- * it. A region is drawn in the plane you are in.
+ * it (CYBERSPACE_V2.md §2.5). A region link opens in dataspace, Earth's
+ * plane, and its box is drawn in whichever plane the view shows
+ * (store/useCoordRoute.ts).
  *
  * A Bitcoin block's merkle root as an explorer shows it is a coordinate
  * already (DECK-0001 §1: big-endian, display order): when its low bit is 1
@@ -62,25 +64,32 @@ export function parseCoordRoute(pathname: string): CoordRoute | null {
 
 /**
  * A /C/ link typed into the View panel's box (arkinox, 2026-11-12): the hex
- * alone, `C/<hex>`, `/C/<hex>`, or a whole http(s) link to one. Read by
- * parseCoordRoute, so the box takes exactly what a link takes. Hex alone
- * counts only with a digit in it, so a place name spelled in hex letters
- * ("cafe", "dead") is still looked up by name. Null for anything else,
- * including a link that is not valid hex.
+ * alone, `C/<hex>`, `/C/<hex>`, or a whole link to one (http, https, a
+ * speakeasy's ws or wss, or a host with no scheme). Read by parseCoordRoute,
+ * so the box takes exactly what a link takes.
+ *
+ * Hex alone counts only with both a digit and a letter in it: a place name
+ * spelled in hex letters ("cafe", "dead") is still looked up by name, and a
+ * bare number (a zip code, a year, "5") is not taken for a region.
+ *
+ * Null when the text is not shaped like a link, so it goes on to the place
+ * lookup; `invalid` when it is (C/, /C/, a URL) but does not name a /C/
+ * coordinate, so the box refuses it without sending it to the lookup.
  */
-export function typedCoordRoute(text: string): Exclude<CoordRoute, { kind: 'invalid' }> | null {
+export function typedCoordRoute(text: string): CoordRoute | null {
   const t = text.trim()
+  const invalid: CoordRoute = { kind: 'invalid', raw: t }
   let path: string
-  if (/^https?:\/\//i.test(t)) {
-    try { path = new URL(t).pathname } catch { return null }
+  if (/^(https?|wss?):\/\//i.test(t) || /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?\//i.test(t)) {
+    try { path = new URL(/^[a-z]+:\/\//i.test(t) ? t : `https://${t}`).pathname } catch { return invalid }
   } else if (/^\/?c\//i.test(t)) {
     path = t.startsWith('/') ? t : `/${t}`
   } else {
-    if (!/\d/.test(t)) return null
-    path = `/C/${t}`
+    if (!/\d/.test(t) || !/[a-f]/i.test(t)) return null
+    const route = parseCoordRoute(`/C/${t}`)
+    return route && route.kind !== 'invalid' ? route : null
   }
-  const route = parseCoordRoute(path)
-  return route && route.kind !== 'invalid' ? route : null
+  return parseCoordRoute(path) ?? invalid
 }
 
 /** A full coordinate as a place and a plane. */

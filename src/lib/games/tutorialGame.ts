@@ -5,22 +5,26 @@
  *
  * The dungeon is real; its key is not yet. The owner rules (2026-11-10) that
  * the game is a new npub he creates and holds, and that he deploys the
- * pieces himself. Until then:
+ * pieces himself. THE ONE LINE is TUTORIAL_PUBKEY, below. While it is the
+ * DEV key:
  *
- * - `pubkey` is a DEV key generated on the build machine. Its secret is not in
+ * - the DEV key was generated on the build machine. Its secret is not in
  *   this repository. Nothing it signed has been, or may be, sent to any relay.
  * - `world` is a bundled fixture: the dungeon's one bag, signed by that key
  *   and sealed to the region. It is loaded only when the game is entered, so
  *   it costs the main bundle nothing.
+ * - `relayHint` is empty, and the game is off on the production host
+ *   (lib/games/flag.ts): entries are permanent public history, and they
+ *   would name a throwaway key.
  *
- * The owner's key drops in here and nowhere else: `pubkey`, `relayHint`, and
- * `world: { kind: 'relays' }`. The region, the layout and the rules stay as
- * they are, and his bag is built from the same layout (DEPLOY.md); the entry
- * point comes with the world, as the `entry` item of its bag (DECK-0002
- * §2.2), which the generator places at TUTORIAL_ENTRY. Entering
- * publishes the player's own enter-virtual, pad teleports and exit-virtual,
- * which name this pubkey, so the switch that lets anyone enter
- * (lib/games/flag.ts) stays OFF in production until it is real.
+ * Set to the owner's hex pubkey, and nothing else changed, the game is LIVE
+ * (lib/games/flag.ts gameLive): `world` becomes `{ kind: 'relays' }` (his
+ * world, published per DEPLOY.md), `relayHint` becomes the canonical relay,
+ * and the game is on everywhere, production included, so the tutorial's
+ * final card offers DUNGEON. The region, the layout and the rules stay as
+ * they are; his world is built from the DEV fixture's own items
+ * (lib/games/worldDeploy.ts), so it is the same dungeon, entry point
+ * included (the `entry` item, DECK-0002 §2.2, at TUTORIAL_ENTRY).
  *
  * The dungeon, in order (cyberspace -Z is forward, the way the camera faces):
  * the ARRIVAL hall, where you appear by virtue of entering, runs to a shrine with a
@@ -32,7 +36,7 @@
  * Regenerating the fixture: src/lib/games/__tests__/tutorialDungeon.gen.test.ts.
  */
 
-import type { GameDef } from './types'
+import type { GameDef, GameWorldSource } from './types'
 
 /**
  * The region: a cube of height 6 (64 gibsons a side, a key a phone computes
@@ -66,22 +70,44 @@ const KEY_AT = at(37, 26, 43)
 /** The hall gate's coordinate: the sill of the rotunda's hallway, in its rim plane. */
 const GATE_AT = at(40, 16, 32)
 
-export const TUTORIAL_GAME: GameDef = {
-  pubkey: TUTORIAL_DEV_PUBKEY,
-  relayHint: '',
-  name: 'TUTORIAL DUNGEON',
-  region: { base: BASE, height: 6, plane: 1 },
-  pads: [
-    // The arrival shrine's pad: to the climb, which nothing joins to the arrival.
-    { at: at(8, 17, 24), to: at(40, 17, 45) },
-  ],
-  world: { kind: 'fixture', load: async () => (await import('./tutorialDungeon.fixture.json')).default.events },
-  gravity: true,
-  key: { at: KEY_AT },
-  door: { at: GATE_AT },
-  // Standing on the finish tile in the exit shrine.
-  exit: { lo: at(38, 18, 6), hi: at(42, 19, 10) },
+/**
+ * THE ONE LINE: the tutorial dungeon's game key, 64 lowercase hex. The DEV
+ * key until the owner's npub (as hex) goes here; nothing else changes.
+ */
+export const TUTORIAL_PUBKEY: string = TUTORIAL_DEV_PUBKEY
+
+/** The relay the owner publishes the world to (DEPLOY.md), and every live entry's relay hint (DECK-0002 §2.1). */
+export const TUTORIAL_RELAY = 'wss://relay.onosendai.tech'
+
+/** The DEV world: the bundled fixture, signed by the DEV key, never on any relay. */
+export const TUTORIAL_FIXTURE_WORLD: GameWorldSource = { kind: 'fixture', load: async () => (await import('./tutorialDungeon.fixture.json')).default.events }
+
+/**
+ * The tutorial dungeon under game key `pubkey`: the DEV key reads the
+ * bundled fixture with no relay hint, as it always has; any other key reads
+ * its world from the relays, hinted at TUTORIAL_RELAY.
+ */
+export function tutorialGameFor(pubkey: string): GameDef {
+  const dev = pubkey === TUTORIAL_DEV_PUBKEY
+  return {
+    pubkey,
+    relayHint: dev ? '' : TUTORIAL_RELAY,
+    name: 'TUTORIAL DUNGEON',
+    region: { base: BASE, height: 6, plane: 1 },
+    pads: [
+      // The arrival shrine's pad: to the climb, which nothing joins to the arrival.
+      { at: at(8, 17, 24), to: at(40, 17, 45) },
+    ],
+    world: dev ? TUTORIAL_FIXTURE_WORLD : { kind: 'relays' },
+    gravity: true,
+    key: { at: KEY_AT },
+    door: { at: GATE_AT },
+    // Standing on the finish tile in the exit shrine.
+    exit: { lo: at(38, 18, 6), hi: at(42, 19, 10) },
+  }
 }
+
+export const TUTORIAL_GAME: GameDef = tutorialGameFor(TUTORIAL_PUBKEY)
 
 /**
  * Where each piece stands, for the generator and for the owner's deploy: a

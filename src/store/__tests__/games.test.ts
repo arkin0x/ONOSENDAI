@@ -261,6 +261,21 @@ describe('in-game mode (useGame)', () => {
     expect(recordedPosition(chain, entry, TUTORIAL_GAME)).toBeNull()
   })
 
+  it('after a reload, LEAVE works straight from the chain without going back in (DECK-0002 §7: offer both)', async () => {
+    await enterTutorialDungeon()
+    const entry = last()
+    useGame.setState({ session: null })
+    // Games on and the game implemented: both are offered, and leaving needs no session.
+    expect(whyNoMove(S().actions())).toBe(IN_GAME_HERE_MESSAGE)
+    expect(await G().exit()).toBeNull()
+    const exit = last()
+    expect(tagOf(exit, 'A')?.[1]).toBe('exit-virtual')
+    expect(tagOf(exit, 'e', 'entry')?.[1]).toBe(entry.id)
+    expect(tagOf(exit, 'C')?.[1]).toBe(tagOf(entry, 'c')?.[1])
+    expect(firstBreak(S().actions())).toBeNull()
+    expect(whyNoMove(S().actions())).toBeNull()
+  })
+
   it('a bracket closed elsewhere ends in-game mode', async () => {
     await enterTutorialDungeon()
     await S().exitGame()

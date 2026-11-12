@@ -9,7 +9,7 @@
  */
 
 import { verifyEvent } from 'nostr-tools/pure'
-import { HIDDEN_KIND, ciphertextOf, dOf, innerAuthentic, unbag, type Rumor } from '../hidden'
+import { HIDDEN_KIND, ciphertextOf, dOf, innerAuthentic, rumorHolds, unbag, type Rumor } from '../hidden'
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { decryptForRegion } from '../shardCrypto'
 import { inRegion } from './play'
@@ -60,26 +60,46 @@ async function worldBags(game: GameDef, lookupId: string): Promise<NostrEvent[]>
   return [...ours, ...hinted]
 }
 
-/**
- * The entry point a bag's own list names (DECK-0002 §2.2): the `C` of its
- * first entry stored inline that carries the `entry` tag, is authentic as an
- * item of the bag (signed by the game key, or a rumor the bag vouches for)
- * and lies inside the region, in its plane, whatever its kind, drawable or
- * not. Read from the list itself, before any item is read for drawing, so a
- * kind this client cannot read still counts. A reference never counts: its
- * tags are its author's (review of #667). Null when none does.
- */
-async function entryOf(game: GameDef, bag: NostrEvent, key: Uint8Array): Promise<Position | null> {
+/** A bag's list of entries, opened with `key` (spec §7.6), as written: null when it does not open or is not a list. */
+export async function bagList(bag: NostrEvent, key: Uint8Array): Promise<unknown[] | null> {
   const ct = ciphertextOf(bag)
   const json = ct ? await decryptForRegion(key, ct) : null
   let list: unknown
   try { list = json ? JSON.parse(json) : null } catch { list = null }
-  if (!Array.isArray(list)) return null
+  return Array.isArray(list) ? list : null
+}
+
+/**
+ * Whether an inline item is authentic as an item of a bag signed by
+ * `signer`, for the entry point (DECK-0002 §2.2, spec §7.6): signed by that
+ * key, or a rumor the bag vouches for (its `pubkey` the bag's, its `id`
+ * canonical), WHATEVER ITS KIND. Not innerAuthentic, which keeps only the
+ * kinds this client draws as rumors (messages, hidden audio): an entry counts
+ * whatever its kind (§2.2), and a rumor of the bag's signer is vouched for by
+ * the bag whatever its kind (§7.6 Rumors).
+ */
+function entryAuthentic(e: Partial<Rumor>, signer: string): boolean {
+  if (e.pubkey !== signer) return false
+  return e.sig === undefined || e.sig === '' ? rumorHolds(e) : innerAuthentic(e, signer)
+}
+
+/**
+ * The entry point a bag's own list names (DECK-0002 §2.2): the `C` of its
+ * first entry stored inline that carries the `entry` tag, is authentic as an
+ * item of the bag (entryAuthentic: signed by the game key, or a rumor the bag
+ * vouches for) and lies inside the region, in its plane, whatever its kind,
+ * drawable or not. Read from the list itself, before any item is read for
+ * drawing, so a kind this client cannot read still counts. A reference never
+ * counts: its tags are its author's (review of #667). Null when none does.
+ */
+async function entryOf(game: GameDef, bag: NostrEvent, key: Uint8Array): Promise<Position | null> {
+  const list = await bagList(bag, key)
+  if (!list) return null
   for (const e of list) {
     if (!e || typeof e !== 'object' || Array.isArray(e)) continue
     const tags = (e as { tags?: unknown }).tags
     if (!Array.isArray(tags) || !tags.some((t) => Array.isArray(t) && t[0] === ENTRY_TAG)) continue
-    if (!innerAuthentic(e as Partial<Rumor>, game.pubkey)) continue
+    if (!entryAuthentic(e as Partial<Rumor>, game.pubkey)) continue
     const c = tags.find((t) => Array.isArray(t) && t[0] === 'C')?.[1]
     if (typeof c !== 'string' || !/^[0-9a-f]{64}$/.test(c)) continue
     const { x, y, z, plane } = coordToXyz(hexToCoord(c))

@@ -14,7 +14,7 @@
  * carries the fall (lib/games/gravity.ts); TAKE and OPEN are the key door;
  * the clock runs from the entry to the exit zone (lib/games/progress.ts). All
  * of that is the game's logic, kept on this device: nothing is signed for it.
- * Its run is not anchored (DECK-0002 §6.1): its steps are not events anyone
+ * Its run is not anchored (DECK-0002 §6.2, play kept on the device): its steps are not events anyone
  * keeps, so an anchor would commit to nothing checkable. EXIT publishes exit-virtual, which puts you back where
  * you entered (spec §8.11.4 rule 2), and the view comes back exactly as it was
  * when you entered: the same place, zoom, look and mode (DECK-0002 §7).
@@ -37,7 +37,7 @@ import { teleportTemplate } from '../lib/games/bracket'
 import { canLeave, gameFor } from '../lib/games/registry'
 import { useWorkshop } from './useWorkshop'
 import { tvIsOn } from './tvOn'
-import { gamesEnabled } from '../lib/games/flag'
+import { gameEnabled, gamesEnabled } from '../lib/games/flag'
 import { TUTORIAL_GAME } from '../lib/games/tutorialGame'
 import { inRegion, padUnder, stepIn, type WorldShard } from '../lib/games/play'
 import { jump as jumpBody, move as moveBody, tick as tickBody, type Arc, type Body } from '../lib/games/gravity'
@@ -217,7 +217,7 @@ export const useGame = create<GameState>((set, get) => {
     message: null,
 
     enter: async (game) => {
-      if (!gamesEnabled()) return GAMES_OFF_MESSAGE
+      if (!gameEnabled(game)) return GAMES_OFF_MESSAGE
       if (get().session || get().busy) return GAME_ALREADY_MESSAGE
       const refuse = (why: string): string => { set({ message: why }); return why }
       if (walkBusy()) return refuse(WALK_BUSY_MESSAGE)
@@ -343,10 +343,15 @@ export const useGame = create<GameState>((set, get) => {
  * THE ENTRY POINT for the first-arrival tutorial (Track A, step 10, DUNGEON):
  * enter the tutorial dungeon from where the player stands. Resolves to null
  * once they are in, or to the words it was refused with, for the tutorial to
- * show. Ask gamesEnabled() first: with games off it is refused.
+ * show. Ask tutorialDungeonEnabled() first: with the game off it is refused.
  */
 export function enterTutorialDungeon(): Promise<string | null> {
   return useGame.getState().enter(TUTORIAL_GAME)
+}
+
+/** Whether the tutorial dungeon is on here: everywhere once its key is the owner's, else by this device's switch (lib/games/flag.ts). */
+export function tutorialDungeonEnabled(): boolean {
+  return gameEnabled(TUTORIAL_GAME)
 }
 
 export { gamesEnabled }

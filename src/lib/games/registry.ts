@@ -2,11 +2,12 @@
  * registry.ts - the games this client implements (DECK-0002, "implements a
  * game"): today only the first-arrival tutorial's dungeon. A game is its
  * pubkey, so this is how a chain's open bracket is matched to rules this
- * client knows. Behind THE SWITCH (lib/games/flag.ts): with it off, no game
- * is implemented here, and a chain inside one reads as before.
+ * client knows. Behind THE SWITCH (lib/games/flag.ts gameEnabled): a game
+ * that is neither live nor switched on for this device is not implemented
+ * here, and a chain inside one reads as before.
  */
 
-import { gamesEnabled } from './flag'
+import { gameEnabled } from './flag'
 import { TUTORIAL_GAME } from './tutorialGame'
 import type { GameDef } from './types'
 
@@ -28,8 +29,9 @@ export function canLeave(pubkey: string | undefined): boolean {
   return !!pubkey && EVER_SHIPPED.has(pubkey)
 }
 
-/** The game this client implements under `pubkey`, or null (always null with the switch off). */
+/** The game this client implements under `pubkey`, or null (null for a game that is off here: flag.ts gameEnabled). */
 export function gameFor(pubkey: string | undefined): GameDef | null {
-  if (!pubkey || !gamesEnabled()) return null
-  return GAMES.find((g) => g.pubkey === pubkey) ?? null
+  if (!pubkey) return null
+  const game = GAMES.find((g) => g.pubkey === pubkey)
+  return game && gameEnabled(game) ? game : null
 }

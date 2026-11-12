@@ -273,17 +273,20 @@ describe('version 1 hops not on the list do not count on the boards', () => {
     return statsSnapshotForTest()?.chain.get(pk)
   }
 
+  // Genuinely slow, as the boards above (60 s each): TV runs a whole simulated stats break over the 4000-hop tape, a
+  // frame every 100 ms, about 2.5 s each in a parallel run. Past 5 s under load one stopped part way, TV still on, and
+  // the next test counted its list.
   it('a list with ids on it takes the hop off the chain', async () => {
     expect(await chainCounted(async () => new Set(['ab'.repeat(32)]))).toBe(1)
-  })
+  }, 20_000)
 
   it('an empty list, from a core older than the census, cuts nothing', async () => {
     expect(await chainCounted(async () => new Set())).toBe(2)
-  })
+  }, 20_000)
 
   it('a list that does not load cuts nothing', async () => {
     expect(await chainCounted(async () => { throw new Error('chunk failed') })).toBe(2)
-  })
+  }, 20_000)
 })
 
 describe('who is an agent: a break holds for the profiles (review of #537)', () => {

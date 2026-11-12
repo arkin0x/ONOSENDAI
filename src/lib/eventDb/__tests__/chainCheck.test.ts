@@ -161,7 +161,8 @@ describe('checkChainRows', () => {
       await check()
     } finally { proto.transaction = real }
     expect(writes).toBe(3)
-  })
+    // Genuinely slow: 250 events moved into the database and checked, about 3.5 s alone in a parallel run, past 5 s under load.
+  }, 20_000)
 
   it('no chain: nothing to check', async () => {
     expect(await check()).toEqual({ bad: [], signed: 0, rehashed: 0, unchecked: [] })

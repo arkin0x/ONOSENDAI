@@ -174,7 +174,8 @@ describe('computeRideProof (sequential fallback under node)', () => {
       blockHashFor: synthetic,
     })
     expect(result.ok).toBe(true)
-  })
+    // Genuinely slow: a 40-block ride searched past two nonces, then Level-1-verified, about 3.7 s in a parallel run, past 5 s under load.
+  }, 20_000)
 
   it('rejects a second concurrent call', async () => {
     const first = computeRideProof({ previousEventIdHex: PREV, blocks: syntheticBlocks(6, 10) }, () => {})

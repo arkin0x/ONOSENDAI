@@ -122,7 +122,12 @@ beforeEach(() => {
 })
 
 describe('the case he hit: localStorage full, a live door placed', () => {
-  it('keeps the row and the secret through a reload, with no toast', async () => {
+  // The file's first test pays the first import of the store's module graph
+  // (a cold transform, over 4 s alone, that later page loads do not pay), so
+  // under a parallel suite it passed 5 s on the import alone, and the next
+  // test failed on a row it left behind. A warm-up in beforeAll is not used: a
+  // store loaded there keeps working into the first test's fresh database.
+  it('keeps the row and the secret through a reload, with no toast', { timeout: 20_000 }, async () => {
     const p = await page()
     expect(p.st.storageMode()).toBe('indexeddb')
     h.state.full = true

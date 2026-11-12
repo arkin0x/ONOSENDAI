@@ -22,7 +22,11 @@ import { provedFor } from '../fixtures/provedHop'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
-  const m = new Map<string, string>()
+  // One fixed identity, so one fixed spawn (identity IS position): with a
+  // fresh key each run, about 1 spawn in 230 has no cap that puts a big
+  // boundary 16 to 4095 gibsons under it (capNear), and (C) failed at random.
+  // A throwaway key, only ever used here.
+  const m = new Map<string, string>([['onosendai:nsec', 'nsec1tkpfjw7uzeyjxgrpr4mujt7nkzdpxw9n4dmwjcse57sjag83yq4q790w5c']])
   ;(globalThis as { localStorage?: Storage }).localStorage = {
     get length() { return m.size },
     clear: () => m.clear(),
@@ -701,8 +705,9 @@ describe('exactly on a face', () => {
 describe('as far as a hop can afford (C)', () => {
   /**
    * A cap low enough that a big boundary is a few dozen gibsons under the
-   * step-off point, wherever the spawn put it: the walk's own budget is
-   * h <= hopHeight - 3 here.
+   * step-off point: the walk's own budget is h <= hopHeight - 3 here. The
+   * spawn is the file's fixed identity's (top of the file); not every spawn
+   * has such a cap.
    */
   function capNear(off: Position): { cap: number; hover: Position } {
     for (let cap = 5; cap < 30; cap++) {

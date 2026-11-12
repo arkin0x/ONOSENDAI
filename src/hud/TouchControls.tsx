@@ -62,7 +62,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Box, Globe, Scan } from 'lucide-react'
 import { ConfirmModal } from './ConfirmModal'
-import { busyLabel, useCyberspace } from '../store/useCyberspace'
+import { busyLabel, samePosition, useCyberspace } from '../store/useCyberspace'
 import { DEFAULT_RELAY } from '../store/useRelays'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
@@ -82,6 +82,7 @@ import { useCover } from '../hooks/useCover'
 import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
 import { regionAtOriginalSize, useRegion } from '../store/useRegion'
 import { holdEnd, holdEndAll, holdStart } from '../store/walkHold'
+import { flyDir, useViewFly } from '../lib/viewFly'
 import { walkHeldDir, type HeldDir } from '../lib/walkKeys'
 
 /**
@@ -231,6 +232,11 @@ export function TouchControls(): JSX.Element {
   const ownHead = useCyberspace((s) => s.spectate === null && s.exploreIndex === null && s.transit === null)
   // BUILD's build cursor on your avatar (useBuilder onAvatar): the slot is WALK there.
   const buildHome = useCyberspace((s) => onAvatar(s))
+  // VIEW's camera away from your avatar while its cursor still says home: a
+  // fly not yet landed (lib/viewFly.ts), or a long one that moved the view's
+  // anchor. RECALL then, not WALK (review of #683).
+  const viewAway = useCyberspace((s) => !samePosition(s.anchor, s.position))
+  const flown = useViewFly((s) => s.flown || flyDir(s) !== 0)
   // A WALK key held as the pad goes away (the menu covers it, an offer comes
   // up) or WALK ends gets no pointerup: let go of it here.
   useEffect(() => { if (!walking) holdEndAll('pad:') }, [walking])
@@ -271,7 +277,7 @@ export function TouchControls(): JSX.Element {
   const stopping = walking && (computing || behind > 0)
   const walkSlot = walking ? !stopping : resting && !computing && (
     mode === 'hop' ? home && !armed && !deploying
-    : mode === 'view' ? ownHead && !armed && !deploying && !(regionActive && regionGrown)
+    : mode === 'view' ? ownHead && !armed && !deploying && !viewAway && !flown && !(regionActive && regionGrown)
     : ownHead && buildHome
   )
   const walkHeld = !walking && building && held
@@ -479,6 +485,7 @@ export function TouchControls(): JSX.Element {
           className="touchops__cancel"
           title={walking ? 'Stop the walk where the chain is now (X)'
             : computing ? 'Cancel proof (X)'
+            : !resting ? 'Cancel the route or the HOSAKA job (X)'
             : regionActive && regionGrown ? 'Reset the region to its size when region mode started (RECALL)'
             : building ? 'Bring the build cursor back to your avatar, still in BUILD (X)'
             : regionActive ? 'Recall the cursor to where region mode started; there already, end region mode and recall it home, still in VIEW'

@@ -79,6 +79,7 @@ import { useCyberspace } from '../../store/useCyberspace'
 import { useBuilder } from '../../store/useBuilder'
 import { useWalk } from '../../store/useWalk'
 import { useShards } from '../../store/useShards'
+import { useViewFly } from '../../lib/viewFly'
 import { walkKeyDown, walkKeysReleased } from '../../hooks/useKeyboard'
 import { walkFacing } from '../../lib/walkEye'
 import { currentPadMode } from '../../store/padMode'
@@ -435,6 +436,18 @@ describe('the WALK toggle', () => {
     expect(S().cursor).toEqual(home)
     expect(S().focus?.position).toEqual(home)
     expect(cls(find('touchops__walk'))).toContain('is-dim')
+  })
+
+  it('in VIEW is RECALL while a fly is under way or not yet landed, the cursor still home (review of #683)', () => {
+    S().viewHere()
+    expect(has('touchops__walk')).toBe(true)
+    useViewFly.setState({ flown: true })
+    expect(has('touchops__walk')).toBe(false)
+    expect(find('touchops__cancel').props.children).toBe('RECALL')
+    useViewFly.setState({ flown: false, pad: 1 })
+    expect(has('touchops__walk')).toBe(false)
+    useViewFly.setState({ pad: 0 })
+    expect(has('touchops__walk')).toBe(true)
   })
 
   it('entered from VIEW keeps VIEW, dim, and goes back to VIEW at your avatar', () => {

@@ -139,19 +139,23 @@ export function leaveWalk(): void {
  * RECALL in VIEW (arkinox, 2026-11-12): the cursor, and the view with it,
  * home to your avatar, still in VIEW and at the zoom you are at. BUILD's
  * is useBuilder `toAvatar`, the same move. A fly not yet landed lands
- * first, so it cannot carry the cursor off again.
+ * first, so it cannot carry the cursor off again. What the view was a look
+ * at goes as the old RECALL's RETURN let it go: the pin, and the Nearby
+ * list, door card or Secrets list a later RETURN would have reopened.
  */
 export function viewToAvatar(): void {
   if (!useCyberspace.getState().viewing()) return
   landFly()
+  leaveViewForMode()
   const cs = useCyberspace.getState()
+  cs.clearPin()
   cs.focusOn(cs.position, cs.plane, VIEW_FOCUS_LABEL, undefined, true, false, { view: true })
 }
 
 /**
- * RECALL on the pad, outside WALK. A grown region is RESET (useRegion
- * `resetSize`). A proof, a route or a cloud job is stopped (useCyberspace
- * `cancel`). Otherwise the cursor comes home and the mode stays: BUILD's
+ * RECALL on the pad, outside WALK. A proof, a route or a cloud job is
+ * stopped first (useCyberspace `cancel`), as the STOP on the button says.
+ * A grown region is RESET (useRegion `resetSize`). Otherwise the cursor comes home and the mode stays: BUILD's
  * build cursor (`toAvatar`), VIEW's (viewToAvatar), HOP's (`cancel`). In
  * region mode, as X: the cursor back to where region mode started
  * (`collapseToEntry`); already there, region mode ends and the cursor comes
@@ -160,8 +164,8 @@ export function viewToAvatar(): void {
 export function recall(): void {
   const cs = useCyberspace.getState()
   const region = useRegion.getState()
-  if (region.active && !regionAtOriginalSize(region)) { region.resetSize(); return }
   if (cs.proof.status === 'computing' || cs.cloud.status !== 'idle' || cs.plan !== null) { cs.cancel(); return }
+  if (region.active && !regionAtOriginalSize(region)) { region.resetSize(); return }
   if (useBuilder.getState().active) { useBuilder.getState().toAvatar(); return }
   if (cs.viewing()) {
     if (region.active && region.entry && !samePosition(cs.cursor, region.entry)) { region.collapseToEntry(); return }

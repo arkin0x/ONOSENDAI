@@ -513,7 +513,7 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build', { title: string; rows
       ['Shift + W A S D', 'rotate view 90°'],
       ['B', 'build mode in / out'],
     ],
-    hint: 'HOP lines up a move with the cursor and commits it with Space, which computes its proof and signs it. W A S D move the cursor, R and F move it FAR and NEAR along the depth axis, and Q and E zoom. X recalls the cursor to your avatar. B goes into build mode. On the pad, WALK beside the mode button goes into WALK whenever the cursor is on your avatar.',
+    hint: 'HOP lines up a move with the cursor and commits it with Space, which computes its proof and signs it. W A S D move the cursor, R and F move it FAR and NEAR along the depth axis, and Q and E zoom. X recalls the cursor to your avatar. B goes into build mode. On the pad, WALK beside the mode button goes into WALK when the cursor is on your avatar and nothing is under way.',
   },
   view: {
     title: 'Controls · VIEW',

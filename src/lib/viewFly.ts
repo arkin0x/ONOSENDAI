@@ -193,6 +193,13 @@ interface ViewFlyState {
   pad: FlyDir
   key: FlyDir
   touch: FlyDir
+  /**
+   * The view has flown off the cursor and not yet landed (scene/ViewFly.ts
+   * keeps it): the cursor still says home while the camera is away, so the
+   * pad's slot is RECALL, not WALK, until it lands (hud/TouchControls).
+   */
+  flown: boolean
+  setFlown: (flown: boolean) => void
   setButton: (dir: FlyDir) => void
   setPad: (dir: FlyDir) => void
   setKey: (dir: FlyDir) => void
@@ -204,6 +211,8 @@ export const useViewFly = create<ViewFlyState>((set, get) => ({
   pad: 0,
   key: 0,
   touch: 0,
+  flown: false,
+  setFlown: (flown) => { if (get().flown !== flown) set({ flown }) },
   setButton: (button) => { if (get().button !== button) set({ button }) },
   setPad: (pad) => { if (get().pad !== pad) set({ pad }) },
   setKey: (key) => { if (get().key !== key) set({ key }) },

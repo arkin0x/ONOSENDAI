@@ -287,6 +287,28 @@ describe('RECALL stays in the mode (arkinox, 2026-11-12)', () => {
     expect(S().scaleExp).toBe(3)
   })
 
+  it('in VIEW lets go of what the view was a look at: the pin and a Nearby list a later RETURN would reopen', () => {
+    S().viewHere()
+    S().moveCursor({ axis: 'x', dir: 1 })
+    useShards.getState().setNearbyReturn({ spectate: null, exploreIndex: null, anchor: { ...S().position }, anchorPlane: S().plane })
+    S().dropPin({ ...S().cursor }, 'a pin')
+    recall()
+    expect(currentPadMode()).toBe('view')
+    expect(useShards.getState().nearbyReturn).toBeNull()
+    expect(S().pin).toBeNull()
+  })
+
+  it('stops a proof before it touches a grown region, as its STOP says', () => {
+    S().viewHere()
+    useRegion.getState().enter()
+    useRegion.setState({ prefix: 'grown' })
+    useCyberspace.setState({ proof: { ...S().proof, status: 'computing' } })
+    recall()
+    expect(S().proof.status).not.toBe('computing')
+    expect(useRegion.getState().prefix).toBe('grown')
+    useRegion.getState().exit()
+  })
+
   it('in BUILD: the build cursor comes home, BUILD stays', () => {
     const home = { ...S().position }
     B().enter('build')

@@ -33,7 +33,7 @@ import { Explanation } from './Explanation'
 import { useStash } from './stash'
 import { useCover } from '../hooks/useCover'
 import { useLayoutEffect, useRef } from 'react'
-import { DoorClosedLocked, House, Wrench } from 'lucide-react'
+import { CopyPlus, DoorClosedLocked, House, Wrench } from 'lucide-react'
 import { ItemIcon } from './ItemIcon'
 import { sealAChest, sealADoor } from './ShardsPanel'
 
@@ -57,7 +57,6 @@ export function BuildBar(): JSX.Element | null {
   const moving = useCyberspace(moveUnderWay)
   // The last placement, for AGAIN after a CANCEL: its name, or null.
   const again = useAgainName()
-  const againType = useShards((s) => s.placedLast?.pending.type ?? 'shard')
   // A mark from the chain explorer ([ ] Home End) can stand with the cursor
   // on your avatar (your own head, a boarding head): RETURN TO AVATAR still
   // clears it (toAvatar), so it stays while the mark does.
@@ -113,13 +112,14 @@ export function BuildBar(): JSX.Element | null {
         </div>
       )}
 
-      {/* Nouns, not verbs, every button always there in the same cell
-          (arkinox, 2026-11-09): what can be placed, then AGAIN. RETURN TO
-          AVATAR moved up beside EXIT the same day.
-          AGAIN stays in its cell, dimmed, when there is nothing to place
-          again, so nothing after it moves. The tooltips keep the verbs, and
-          so do the accessible names, each holding its visible word (WCAG
-          2.5.3, label in name). */}
+      {/* Nouns, not verbs, each in the same cell every time (arkinox,
+          2026-11-09): what can be placed, then AGAIN. RETURN TO AVATAR moved
+          up beside EXIT the same day.
+          AGAIN wears copy-plus and is not shown at all while there is
+          nothing to place again (arkinox, 2026-11-11). It is the last cell,
+          so nothing else moves when it comes and goes. The tooltips keep the
+          verbs, and so do the accessible names, each holding its visible
+          word (WCAG 2.5.3, label in name). */}
       <div className="buildbar__acts">
         <button className="buildbar__act" onClick={() => useStash.getState().openModels()} aria-label="Place object" title="Place object: choose one of your models and place it at the build cursor"><ItemIcon type="shard" className="buildbar__icon" size={ICON} />OBJECT</button>
         <button className="buildbar__act" onClick={() => useStash.getState().openMessage()} aria-label="Hide message" title="Hide message: write a message and hide it at the build cursor"><ItemIcon type="message" className="buildbar__icon" size={ICON} />MESSAGE</button>
@@ -128,7 +128,9 @@ export function BuildBar(): JSX.Element | null {
         <button className="buildbar__act" onClick={sealAChest} aria-label="Seal a chest" title="Seal a chest: place a chest, then seal a message, a model or an item in it to an item or a person"><ItemIcon type="chest" className="buildbar__icon" size={ICON} />CHEST</button>
         <button className="buildbar__act" onClick={sealADoor} aria-label="Seal a door" title="Seal a door: place a door, then whatever you place in its red cube at its height is sealed to it"><DoorClosedLocked className="item-icon buildbar__icon" size={ICON} strokeWidth={2.5} aria-hidden />DOOR</button>
         <button className="buildbar__act" onClick={() => useStash.getState().openSeed()} aria-label="Plant a seed" title="Plant a seed: pick a DNA, see what it grows, and plant it at the build cursor; everyone who finds it grows the same bloom"><ItemIcon type="seed" className="buildbar__icon" size={ICON} />SEED</button>
-        <button className="buildbar__act" disabled={again === null} onClick={() => useShards.getState().placeAgain()} aria-label="Place again" title={again === null ? 'Place again: nothing placed yet this session' : `Place "${again}" again, with the same settings`}><ItemIcon type={againType} className="buildbar__icon" size={ICON} />AGAIN</button>
+        {again !== null && (
+          <button className="buildbar__act" onClick={() => useShards.getState().placeAgain()} aria-label="Place again" title={`Place "${again}" again, with the same settings`}><CopyPlus className="item-icon buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />AGAIN</button>
+        )}
       </div>
 
       <Explanation>

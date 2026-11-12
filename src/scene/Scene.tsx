@@ -669,6 +669,14 @@ function Rig(): JSX.Element {
   const framing = useRef(false)
   const sideVec = useMemo(() => new Vector3(), [])
   const turnVec = useMemo(() => new Vector3(), [])
+  // The player took the camera (OrbitControls starts on a drag, a pinch and
+  // the wheel alike): the tutorial's shots stand down and leave it with them.
+  useEffect(() => {
+    const c = controls.current as unknown as { addEventListener?: (t: string, f: () => void) => void; removeEventListener?: (t: string, f: () => void) => void } | null
+    const standDown = (): void => { clearTutorialZoom(); setTutorialFrame(null) }
+    c?.addEventListener?.('start', standDown)
+    return () => c?.removeEventListener?.('start', standDown)
+  }, [])
   // The rig re-framed on its own (a cut or a straight-on reframe): the step's
   // camera comes back only when the view has just arrived at the step's own
   // place. A block landing late reframed straight on, which put the camera on
@@ -1231,13 +1239,7 @@ function Rig(): JSX.Element {
       dampingFactor={0.12}
       autoRotate={tutorialSpin}
       autoRotateSpeed={0.6}
-      onStart={() => {
-        if (startLock.start(pressed())) locked.current = false
-        // The player took the camera (a drag, a pinch, the wheel): the
-        // tutorial's shots stand down and leave it with them.
-        clearTutorialZoom()
-        setTutorialFrame(null)
-      }}
+      onStart={() => { if (startLock.start(pressed())) locked.current = false }}
     />
   )
 }

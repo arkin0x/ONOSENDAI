@@ -145,7 +145,7 @@ export function leaveWalk(): void {
  */
 export function viewToAvatar(): void {
   if (!useCyberspace.getState().viewing()) return
-  landFly()
+  landFly(true)
   leaveViewForMode()
   const cs = useCyberspace.getState()
   cs.clearPin()

@@ -254,9 +254,10 @@ export function landingOf(cursor: Position, flown: Readonly<Record<AxisName, num
 
 /**
  * Where an unlanded fly would put the cursor right now, asked by the store's
- * pad move (useCyberspace moveCursor): a press within the two seconds before
- * a fly lands steps from where the view has flown, not from where the cursor
- * still waits, so the camera is not pulled back the whole way. The scene's
+ * pad move (useCyberspace moveCursor): a press before a fly lands steps from
+ * where the view has flown (in the coast, where it comes to rest just ahead
+ * of the camera), not from where the cursor still waits, so the camera is not
+ * pulled back the whole way. The scene's
  * fly registers the answer (scene/ViewFly.ts); null when nothing is flown.
  */
 let landingSource: (() => Position | null) | null = null
@@ -286,12 +287,14 @@ export function takeSteer(): { dx: number; dy: number } {
 /**
  * Land an unlanded VIEW fly now, before something reads the cursor as it
  * stands: BUILD entering asks whether the cursor has left your avatar
- * (useBuilder enter). The scene's fly registers how (scene/ViewFly.ts).
+ * (useBuilder enter). RECALL (`home`) lands it on its way home, and the
+ * orbit a fly brought in goes back out. The scene's fly registers how
+ * (scene/ViewFly.ts).
  */
-let lander: (() => void) | null = null
-export function setFlyLander(fn: (() => void) | null): void {
+let lander: ((home: boolean) => void) | null = null
+export function setFlyLander(fn: ((home: boolean) => void) | null): void {
   lander = fn
 }
-export function landFly(): void {
-  lander?.()
+export function landFly(home = false): void {
+  lander?.(home)
 }

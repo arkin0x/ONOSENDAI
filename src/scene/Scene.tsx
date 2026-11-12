@@ -103,7 +103,7 @@ import { Travel } from './Travel'
 import { TvLayer } from './TvLayer'
 import { TvScreenEffect } from './TvScreenEffect'
 import { useTv } from '../store/useTv'
-import { CAMERA_NEAR, FOV } from './camera'
+import { CAMERA_NEAR, FOV, ORBIT_MIN_DISTANCE } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
 import { canvasPixels, composerSamples } from './composerBudget'
 import './radialFog'
@@ -415,7 +415,8 @@ function HeadlampRig(): null {
   const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
   useFrame((state) => {
     if (!controls) return
-    headlampUniforms.uHeadlampReach.value = headlampReach(state.camera.position.distanceTo(controls.target))
+    // A stopped VIEW fly brings the target in close; the reach fades in after it rather than stepping (ViewFly.ts reachOwed).
+    headlampUniforms.uHeadlampReach.value = headlampReach(state.camera.position.distanceTo(controls.target) + viewRig.reachOwed)
   }, HEADLAMP_PRIORITY)
   return null
 }
@@ -545,8 +546,6 @@ function LensShift(): null {
  * axis-aligned view once you have finished looking. So changing `view` does not
  * merely remap the axes, it also returns the camera to straight-on.
  */
-/** The orbit's closest approach outside WALK, in render cells. */
-const ORBIT_MIN_DISTANCE = 2
 /**
  * The WALK eye's distance from the avatar's centre, in render cells: as good
  * as at it, and far enough off it that the orbit still has a direction to
@@ -714,7 +713,7 @@ function Rig(): JSX.Element {
       const offset = keptOffset()
       const [x, y, z] = s.cursorOffset()
       glideLeft.current = 0
-      viewRig.reset()
+      viewRig.reset(true)
       smooth.current.set(x, y, z)
       c.target.copy(smooth.current)
       c.object.position.copy(smooth.current).add(offset)
@@ -777,7 +776,7 @@ function Rig(): JSX.Element {
       const offset = keptOffset()
       const [x, y, z] = s.cursorOffset()
       glideLeft.current = 0
-      viewRig.reset()
+      viewRig.reset(true)
       smooth.current.set(x, y, z)
       c.target.copy(smooth.current)
       c.object.position.copy(smooth.current).add(offset)
@@ -1062,7 +1061,8 @@ function Rig(): JSX.Element {
     if (s.walking !== walkWas.current) {
       walkWas.current = s.walking
       const from = c.object.position.distanceTo(smooth.current)
-      if (s.walking) outTo.current = from >= 2 ? from : START_DISTANCE
+      // A stopped VIEW fly's orbit is ORBIT_MIN_DISTANCE to within rounding: a real orbit, not a collapsed one.
+      if (s.walking) outTo.current = from >= ORBIT_MIN_DISTANCE - 1e-6 ? from : START_DISTANCE
       eye.current = { from, to: s.walking ? WALK_EYE : outTo.current, t0: performance.now() }
       c.enableZoom = !s.walking
       c.enableRotate = !s.walking
@@ -1132,6 +1132,18 @@ function Rig(): JSX.Element {
         lastOffset.current.copy(c.object.position).sub(c.target)
         if (Math.abs(nd - target) < 0.05) clearTutorialZoom()
       }
+    }
+    // A VIEW fly brought the orbit in, and RECALL or VIEW's end asks for it
+    // back (ViewFly.ts restoreOrbit; review of #690): eased out as the
+    // tutorial's zoom is, and given up when anything else takes the camera
+    // (WALK, a press on the scene, the tutorial's zoom, a /demo step, WALK's
+    // eye) or a fly starts. In WALK it is where leaving WALK returns to.
+    if (s.walking) {
+      const back = viewRig.takeRestore()
+      if (back !== null) outTo.current = back
+    }
+    if (viewRig.restoreOrbit(c.object.position, c.target, dt, s.walking || pressed() > 0 || tutorialZoom !== null || want !== null || eye.current !== null)) {
+      lastOffset.current.copy(c.object.position).sub(c.target)
     }
     // The controls' own turn this frame (their damping), in place in flight too.
     viewRig.mark(c.object.position, c.target)

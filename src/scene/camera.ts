@@ -11,3 +11,11 @@ export const FOV = 55
  * this is drawn, which bounds how large anything can ever appear.
  */
 export const CAMERA_NEAR = 0.05
+
+/**
+ * The orbit's closest approach outside WALK, in render cells (OrbitControls'
+ * minDistance in Scene.tsx). Also how far ahead of the camera VIEW's flight
+ * brings the view's centre, and so the cursor, when it stops (ViewFly.ts):
+ * any nearer and the controls would push the camera back out to this.
+ */
+export const ORBIT_MIN_DISTANCE = 2

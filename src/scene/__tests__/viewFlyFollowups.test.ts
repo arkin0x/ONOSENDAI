@@ -35,7 +35,7 @@ vi.mock('../../lib/relay', async (importOriginal) => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
-import { flyGesture, installFlyTouches, panGesture, viewRig, type RigCamera } from '../ViewFly'
+import { flyGesture, installFlyTouches, panGesture, viewOffset, viewRig, type RigCamera } from '../ViewFly'
 import { FlyGesture, FLY_HOLD_MS, useViewFly } from '../../lib/viewFly'
 import { LAND_IDLE_MS, LAND_LERP_MS, useViewCentre } from '../../lib/viewCamera'
 import { CURSOR_SETTLE_MS, FLY_REFRESH_MS, settleWait, watchCursorSettle } from '../../hooks/useViewWindow'
@@ -93,8 +93,10 @@ describe('1. the rig is wired', () => {
     // Applied once the frame's shift is known, before the zoom's carry.
     expect(loop.indexOf('viewRig.apply(')).toBeGreaterThan(loop.indexOf('originShift('))
     expect(loop.indexOf('viewRig.apply(')).toBeLessThan(loop.indexOf('carryOrbit('))
-    // Every re-frame of the camera in the rig's effect starts the offset afresh.
-    expect(body.match(/viewRig\.reset\(\)/g)?.length).toBe(3)
+    // Every re-frame of the camera in the rig's effect starts the offset afresh:
+    // the two cuts that keep the orbit (a restore stands) and the re-frame straight on.
+    expect(body.match(/viewRig\.reset\(true\)/g)?.length).toBe(2)
+    expect(body.match(/viewRig\.reset\(\)/g)?.length).toBe(1)
   })
 
   it('installFlyTouches feeds touches from the scene to both gestures, and a right or Shift drag of the mouse to the pan', () => {
@@ -160,6 +162,8 @@ describe('2. the cursor is written once, when the fly lands', () => {
       useViewFly.getState().setButton(1)
       for (let i = 0; i < 60; i++) frame()
       useViewFly.getState().setButton(0)
+      // The coast, then most of the rest after it.
+      for (let i = 0; viewOffset.moving && i < 600; i++) frame()
       for (let i = 0; i < ((LAND_IDLE_MS - 100) / 1000) * 60; i++) frame()
       expect(writes).toBe(0)
       for (let i = 0; i < ((LAND_LERP_MS + 300) / 1000) * 60; i++) frame()

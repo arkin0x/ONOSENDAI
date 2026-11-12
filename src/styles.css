@@ -4298,6 +4298,29 @@ select.avatars__input option:checked {
   flex-shrink: 0;
 }
 
+/* Your head is in it, but the relay placed you outside it (lib/relayPlacement):
+   a short warning under the name, and RESPAWN when only that fixes it. */
+.speakeasy__row--stopped {
+  flex-wrap: wrap;
+}
+
+.speakeasy__respawn {
+  color: var(--warn);
+  background: rgba(255, 176, 32, 0.06);
+  border-color: rgba(255, 176, 32, 0.32);
+}
+
+.speakeasy__respawn:hover {
+  background: rgba(255, 176, 32, 0.16);
+}
+
+.speakeasy__stopped {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--warn);
+  line-height: 1.4;
+}
+
 /* ---------- Derezz ----------
  *
  * The one panel that destroys something. Red throughout, last in the column,

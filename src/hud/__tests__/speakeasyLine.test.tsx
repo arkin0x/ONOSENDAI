@@ -26,19 +26,24 @@ const UNSENT = 'f'.repeat(64)
 const cs = vi.hoisted(() => ({
   live: true,
   published: {} as Record<string, string>,
-  actions: [] as Array<{ id: string; coordHex: string }>,
+  actions: [] as Array<{ id: string; coordHex: string } & Record<string, unknown>>,
 }))
-vi.mock('../../store/useCyberspace', () => ({
-  useCyberspace: (sel: (s: { live: boolean; published: Record<string, string>; actions: () => unknown[]; coordHex: () => string }) => unknown) =>
-    sel({ live: cs.live, published: cs.published, actions: () => cs.actions, coordHex: () => cs.actions[cs.actions.length - 1]?.coordHex ?? '' }),
-}))
+vi.mock('../../store/useCyberspace', () => {
+  const state = (): { live: boolean; published: Record<string, string>; actions: () => unknown[]; coordHex: () => string } =>
+    ({ live: cs.live, published: cs.published, actions: () => cs.actions, coordHex: () => cs.actions[cs.actions.length - 1]?.coordHex ?? '' })
+  return { useCyberspace: Object.assign((sel: (s: ReturnType<typeof state>) => unknown) => sel(state()), { getState: state }) }
+})
 
 import { mount, type Host } from '../../test/elementRoot'
 import { mountHook, settle } from '../../test/hookRoot'
 import { createSpeakeasyLookup, type Speakeasy, type SpeakeasyLookup } from '../../lib/speakeasy'
 import { useSpeakeasies } from '../../hooks/useSpeakeasies'
 import { useRelays } from '../../store/useRelays'
-import { SpeakeasyLine, addSpeakeasy, joined } from '../SpeakeasyLine'
+import { SpeakeasyLine, addSpeakeasy, joined, stoppedWords } from '../SpeakeasyLine'
+import { buildChain, type NostrEvent } from '../../lib/events'
+import { usePanelLayout } from '../../store/usePanelLayout'
+import { useChainUi } from '../../store/useChainUi'
+import owner from '../../lib/__tests__/vectors/owner-chain-e8ed3798-through-2026-09-04.json'
 
 // The relay lists a named speakeasy at its region path too (public_url/C/<region>, the owner, 2026-11-09).
 const NAMED: Speakeasy = { region: '0fe6b3deeb67e952f852e8c1df15', name: 'fiatjafs-speakeasy', url: 'wss://relay.onosendai.tech/C/0fe6b3deeb67e952f852e8c1df15', created_at: 1762300000 }
@@ -190,5 +195,107 @@ describe('joined and the add path', () => {
     expect(addSpeakeasy(PLAIN)).toBe('wss://relay.onosendai.tech/C/0fe6')
     expect(addSpeakeasy(PLAIN)).toBe('wss://relay.onosendai.tech/C/0fe6')
     expect(useRelays.getState().relays.filter((r) => r === 'wss://relay.onosendai.tech/C/0fe6')).toHaveLength(1)
+  })
+})
+
+describe('where the relay places you, not your head (a chain the relay stopped)', () => {
+  const V2 = { mn: '0'.repeat(16), mp: 'ab' }
+  /** Outside every region below. */
+  const AWAY = '1'.repeat(64)
+  const SEP_4 = Date.UTC(2026, 8, 4, 0, 22) / 1000
+  const allSent = (): void => { cs.published = Object.fromEntries(cs.actions.map((a) => [a.id, 'ok'])) }
+
+  beforeEach(() => { useRelays.getState().reset(); cs.live = true })
+
+  it('a valid chain with its head inside: ADD RELAY, as before', async () => {
+    cs.actions = [{ id: 'spawn', type: 'spawn', coordHex: AWAY }, { id: 'hop', type: 'hop', coordHex: HEAD, ...V2 }]
+    allSent()
+    const m = await mount(<SpeakeasyLine lookup={fakeLookup([NAMED])} placedLookup={fakeLookup([])} />)
+    expect(m.buttons('ADD RELAY')).toHaveLength(1)
+    expect(m.says('Your chain stops')).toBe(false)
+    await m.unmount()
+  })
+
+  it('a chain stopped outside, with its head inside: the warning and RESPAWN, no ADD RELAY', async () => {
+    cs.actions = [
+      { id: 'spawn', type: 'spawn', coordHex: AWAY, createdAt: SEP_4 - 60 },
+      { id: 'hop1', type: 'hop', coordHex: AWAY, createdAt: SEP_4, ...V2 },
+      { id: 'v1side', type: 'sidestep', coordHex: AWAY, createdAt: SEP_4 + 60 },
+      { id: 'hop2', type: 'hop', coordHex: HEAD, createdAt: SEP_4 + 120, ...V2 },
+    ]
+    allSent()
+    const m = await mount(<SpeakeasyLine lookup={fakeLookup([NAMED])} placedLookup={fakeLookup([])} />)
+    expect(m.says('fiatjafs-speakeasy')).toBe(true)
+    expect(m.buttons('ADD RELAY')).toHaveLength(0)
+    expect(m.says('JOINED')).toBe(false)
+    expect(m.says('Your chain stops at 2026-09-04, outside this region. Respawn to enter.')).toBe(true)
+    expect(m.buttons('RESPAWN')).toHaveLength(1)
+    await m.unmount()
+  })
+
+  it('RESPAWN opens the respawn there is: the Derezz panel when ONOSENDAI sees no break, unfolded', async () => {
+    cs.actions = [{ id: 'spawn', type: 'spawn', coordHex: AWAY, createdAt: SEP_4 }, { id: 'v1side', type: 'sidestep', coordHex: HEAD, createdAt: SEP_4 }]
+    allSent()
+    if (usePanelLayout.getState().collapsed.derezz !== true) usePanelLayout.getState().toggle('derezz')
+    const m = await mount(<SpeakeasyLine lookup={fakeLookup([NAMED])} placedLookup={fakeLookup([])} />)
+    await m.press('RESPAWN')
+    expect(usePanelLayout.getState().collapsed.derezz).not.toBe(true)
+    expect(useChainUi.getState().brokenView).toBeNull()
+    await m.unmount()
+  })
+
+  it('a hop above the relay ceiling: says so, and offers no RESPAWN, since a respawn would not help', async () => {
+    cs.actions = [
+      { id: 'spawn', type: 'spawn', coordHex: AWAY, createdAt: SEP_4, position: { x: 0n, y: 0n, z: 0n }, plane: 0 },
+      { id: 'tall', type: 'hop', coordHex: HEAD, createdAt: SEP_4 + 60, position: { x: 1n << 30n, y: 0n, z: 0n }, plane: 0, ...V2 },
+    ]
+    allSent()
+    const m = await mount(<SpeakeasyLine lookup={fakeLookup([NAMED])} placedLookup={fakeLookup([])} />)
+    expect(m.says('This relay checks hops up to h24. Your chain stops at 2026-09-04, outside this region.')).toBe(true)
+    expect(m.buttons('RESPAWN')).toHaveLength(0)
+    expect(m.buttons('ADD RELAY')).toHaveLength(0)
+    await m.unmount()
+  })
+
+  it('frozen inside a region, head moved out since: the relay still admits you there, so ADD RELAY', async () => {
+    cs.actions = [{ id: 'spawn', type: 'spawn', coordHex: HEAD }, { id: 'v1side', type: 'sidestep', coordHex: AWAY }]
+    allSent()
+    const head = fakeLookup([])
+    const placed = fakeLookup([NAMED])
+    const m = await mount(<SpeakeasyLine lookup={head} placedLookup={placed} />)
+    expect(head.asked).toContain(AWAY)
+    expect(placed.asked).toContain(HEAD)
+    expect(m.buttons('ADD RELAY')).toHaveLength(1)
+    expect(m.says('Your chain stops')).toBe(false)
+    await m.unmount()
+  })
+
+  it('placed at your head: the second lookup is asked nothing', async () => {
+    cs.actions = [{ id: 'spawn', type: 'spawn', coordHex: AWAY }, { id: 'hop', type: 'hop', coordHex: HEAD, ...V2 }]
+    allSent()
+    const placed = fakeLookup([])
+    const m = await mount(<SpeakeasyLine lookup={fakeLookup([NAMED])} placedLookup={placed} />)
+    expect(placed.asked.filter(Boolean)).toEqual([])
+    await m.unmount()
+  })
+
+  it("the owner's real chain: placed at 2026-09-04, so midwest, where he stands now, warns instead of ADD RELAY", async () => {
+    const MIDWEST: Speakeasy = { region: '56db6db6db6db6db6db6dbad', name: 'midwest', url: 'wss://relay.onosendai.tech/C/56db6db6db6db6db6db6dbad', created_at: 1762900000 }
+    const chain = buildChain(owner as NostrEvent[], 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a')
+    // His head inside midwest, one more hop on the chain ONOSENDAI still lets him extend.
+    const last = chain[chain.length - 1]
+    cs.actions = [...chain, { ...last, id: 'into-midwest', coordHex: MIDWEST.region + '0'.repeat(40), previousId: last.id, ...V2 }] as unknown as typeof cs.actions
+    allSent()
+    const m = await mount(<SpeakeasyLine lookup={fakeLookup([MIDWEST])} placedLookup={fakeLookup([])} />)
+    await settle()
+    expect(m.says('midwest')).toBe(true)
+    expect(m.says('Your chain stops at 2026-09-04, outside this region. Respawn to enter.')).toBe(true)
+    expect(m.buttons('ADD RELAY')).toHaveLength(0)
+    expect(m.buttons('RESPAWN')).toHaveLength(1)
+    await m.unmount()
+  })
+
+  it('a stop with no valid point at all says so', () => {
+    expect(stoppedWords({ index: 0, action: {} as never, lastValid: null, kind: 'broken', reason: 'fork' })).toBe('Your chain stops at its spawn, outside this region. Respawn to enter.')
   })
 })

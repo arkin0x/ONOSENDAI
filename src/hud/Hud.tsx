@@ -229,8 +229,10 @@ export function PositionPanel(): JSX.Element {
         the coordinate of your chain head. Tap any figure to copy it. LINK
         copies a link that opens ONOSENDAI looking at your avatar. To look
         somewhere else without moving, use the View panel. While LIVE,
-        SPEAKEASY shows up when your chain head is inside one: a private relay
-        for that region. ADD RELAY adds it to your relays.
+        SPEAKEASY shows up when you are inside one: a private relay for that
+        region. ADD RELAY adds it to your relays. The relay goes by the last
+        point of your chain it accepts, so if your chain stops before your
+        head, it says where, and RESPAWN when only that gets you in.
       </Explanation>
     </section>
   )

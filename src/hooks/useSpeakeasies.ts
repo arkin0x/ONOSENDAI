@@ -8,6 +8,12 @@ import { createSpeakeasyLookup, inRegion, type Speakeasy, type SpeakeasyLookup }
 
 /** fetch read on each call, not at import, so a test's stub is the one used. */
 const lookup = createSpeakeasyLookup({ fetchFn: (input, init) => globalThis.fetch(input, init) })
+/**
+ * A second lookup, for where the relay places you when that is not your head
+ * (hooks/useRelayPlacement): a frozen chain inside a region is admitted there
+ * wherever its head has moved since.
+ */
+export const placedLookup = createSpeakeasyLookup({ fetchFn: (input, init) => globalThis.fetch(input, init) })
 
 const NONE: Speakeasy[] = []
 

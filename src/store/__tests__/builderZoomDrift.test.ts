@@ -31,12 +31,16 @@ vi.mock('../../lib/relay', () => ({
 
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from '../useCyberspace'
-import { positionOf, useShards } from '../useShards'
+import { atLastSpot, copyLinedUp, positionOf, spotOf, useShards } from '../useShards'
 import type { AudioItem } from '../../lib/audioItem'
 import { useWorkshop } from '../useWorkshop'
 import { useBuilder } from '../useBuilder'
 import { stepBuild } from '../buildStep'
-import { buildStepOf, moveStepOf } from '../../lib/buildCursor'
+import { buildPlane, buildStepOf, moveStepOf } from '../../lib/buildCursor'
+import { BASE_CAPS } from 'sno-core/seeds'
+import { ORIGINAL_DNAS } from '../../lib/seeds/originalDnas'
+import { seedDraftHeight, seedFitFor } from '../../lib/seeds/plant'
+import { cycleMode } from '../padMode'
 import { deployPoint, type Position } from '../../lib/space'
 
 const S = () => useCyberspace.getState()
@@ -353,6 +357,68 @@ describe('a zoom never moves a lined-up placement', () => {
     D().cancelDeploy()
     expect(useBuilder.getState().active).toBe(true)
     expect(S().cursor).toEqual(c)
+  })
+
+  it('a seed lined up in BUILD keeps its place and its measured hide height through zooms', () => {
+    at(SPOT)
+    useCyberspace.setState({ scaleExp: 8 })
+    D().startDeployShard(benchShard().id)
+    S().moveCursor({ axis: 'x', dir: 1 })
+    // SEED measures the seed at this cursor and STEP, and PLANT lines it up in place of the shard.
+    const fit = seedFitFor({ height: 10, reach: 6 }, S().cursor, buildPlane(S()), buildStepOf(S()))
+    D().startDeploySeed({ text: ORIGINAL_DNAS[5].text, caps: BASE_CAPS, scale: 0, title: '', fit })
+    useShards.setState({ deployHeight: 10, deployHeightAuto: false })
+    expect(useBuilder.getState().active).toBe(true)
+    const height = (): number => {
+      const p = D().pending
+      return seedDraftHeight(p?.type === 'seed' ? p.seed.fit : undefined, S().cursor, buildPlane(S()), buildStepOf(S()), 20)
+    }
+    const want = placed()
+    expect(height()).toBe(10)
+    zoom(3); expect(placed()).toEqual(want); expect(height()).toBe(10)
+    zoom(-6); expect(placed()).toEqual(want); expect(height()).toBe(10)
+    zoom(3); expect(placed()).toEqual(want); expect(height()).toBe(10)
+  })
+
+  it('BUILD entered from VIEW with the mode button, then a deploy and a zoom: nothing drifts', () => {
+    at(SPOT)
+    useCyberspace.setState({ scaleExp: 9 })
+    S().viewHere()
+    S().moveCursor({ axis: 'z', dir: 1 })
+    const aimed = { ...S().cursor }
+    cycleMode()
+    expect(useBuilder.getState().active).toBe(true)
+    expect(S().cursor).toEqual(aimed)
+    D().startDeployShard(benchShard().id)
+    useShards.setState({ deployHeight: 40, deployHeightAuto: false })
+    const want = placed()
+    zoom(4); expect(placed()).toEqual(want)
+    zoom(-7); expect(placed()).toEqual(want)
+    zoom(3); expect(placed()).toEqual(want)
+  })
+
+  // Review of the v2 merge: re-keying the seed's fit made a new deploy object,
+  // so a copy lined up again stopped being that copy.
+  it('a seed copy lined up again stays that copy through a zoom, and the same-spot refusal stands', () => {
+    at(SPOT)
+    useCyberspace.setState({ scaleExp: 8 })
+    D().startDeployShard(benchShard().id)
+    S().moveCursor({ axis: 'x', dir: 1 })
+    const fit = seedFitFor({ height: 10, reach: 6 }, S().cursor, buildPlane(S()), buildStepOf(S()))
+    D().startDeploySeed({ text: ORIGINAL_DNAS[5].text, caps: BASE_CAPS, scale: 0, title: '', fit })
+    useShards.setState({ deployHeight: 10, deployHeightAuto: false })
+    // What a placement leaves: the same object lined up again, on the spot it landed.
+    const sh = D()
+    const settings = { deployHeight: 10, deployHeightAuto: false, deployUnit: sh.deployUnit, deployUp: sh.deployUp, deploySpin: sh.deploySpin, deployTurn: sh.deployTurn, deployFollow: sh.deployFollow, deployLink: sh.deployLink }
+    useShards.setState({ placedLast: { pending: sh.pending!, settings, step: S().buildStep, spot: spotOf(placed(), buildPlane(S()), settings), count: 1 } })
+    expect(copyLinedUp(D())).toBe(true)
+    expect(atLastSpot(D(), S())).toBe(true)
+    const want = placed()
+    zoom(3)
+    expect(placed()).toEqual(want)
+    expect(D().pending).toBe(D().placedLast?.pending)
+    expect(copyLinedUp(D())).toBe(true)
+    expect(atLastSpot(D(), S())).toBe(true)
   })
 })
 

@@ -617,11 +617,16 @@ useCyberspace.subscribe((s, prev) => {
   // A seed's hide height was measured for the cursor and STEP it was composed
   // at (plant.ts seedDraftHeight). Where that is the very point now held, the
   // measure is kept for it, at the held point and 2^0, so the zoom does not
-  // send the seed to SEED_HIDE_MAX (useShards keeps the deploy as measured).
+  // send the seed to SEED_HIDE_MAX. After the hold above, never before it:
+  // useShards keeps the deploy only because the fit now matches the held
+  // cursor and 2^0 (its `measured`). A copy lined up again stays that copy
+  // (`placedLast`), or AGAIN and its same-spot refusal would be lost.
   const p = sh.pending
   const plane = buildPlane(s)
   const fit = p.type === 'seed' ? p.seed.fit : undefined
   if (p.type === 'seed' && fit && fit.step === was && fit.cursor === positionHex(s.cursor, plane) && samePosition(deployPoint(s.cursor, was, fit.height), at)) {
-    useShards.setState({ pending: { ...p, seed: { ...p.seed, fit: { ...fit, cursor: positionHex(at, plane), step: 0 } } } })
+    const next = { ...p, seed: { ...p.seed, fit: { ...fit, cursor: positionHex(at, plane), step: 0 } } }
+    const last = sh.placedLast
+    useShards.setState({ pending: next, ...(last?.pending === p ? { placedLast: { ...last, pending: next } } : {}) })
   }
 })

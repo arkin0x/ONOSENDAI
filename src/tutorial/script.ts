@@ -241,7 +241,7 @@ export const BUILD_PLACE: TutorialStep = {
   id: 'build-place',
   title: 'Build something',
   caption: 'Move a shard from ITEMS to your workshop, then place it in BUILD.',
-  hint: 'ITEMS: MOVE TO WORKSHOP. Then BUILD, OBJECT, pick it, PLACE.',
+  hint: 'ITEMS: ACTIONS, MOVE TO WORKSHOP. Then BUILD, OBJECT, pick it, PLACE.',
   explain: 'BUILD puts what you hold into the world where the cursor is. The workshop is where you change or make a shard; it will not interrupt this.',
   scene: { target: 'keep', highlight: '.hamburger-menu' },
   effect: 'teach-build',

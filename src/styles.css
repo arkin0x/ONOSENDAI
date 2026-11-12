@@ -9738,8 +9738,11 @@ a.feed__act { text-decoration: none; }
 .held__row--item > .chest__glyph, .held__row--loot > .chest__glyph, .held__row--loot > .shardthumb { flex: none; }
 .held__row--item > .item__line, .held__row--loot > .item__line, .held__row--loot > .chest { flex: 1 1 120px; }
 .held__row--item > .held__acts, .held__row--loot > .held__acts { flex: 0 1 auto; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
-.held__row--item > .held__refusal, .held__row--item > .held__details,
-.held__row--loot > .held__refusal, .held__row--loot > .held__details { flex: 1 1 100%; }
+.held__row--item > .held__refusal, .held__row--item > .held__details, .held__row--item > .held__menu,
+.held__row--loot > .held__refusal, .held__row--loot > .held__details, .held__row--loot > .held__menu { flex: 1 1 100%; }
+/* What ACTIONS opens: the row's actions on a line of their own under it,
+ * on the right where ACTIONS is, wrapping on a narrow phone (arkinox, 2026-11-12). */
+.held__menu { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; justify-content: flex-end; min-width: 0; }
 .held__refusal { grid-column: 1 / -1; font-size: 10px; color: var(--danger); padding-left: 22px; }
 .held__details { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; padding: 2px 0 2px 22px; font-size: 10px; }
 .held__details dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }

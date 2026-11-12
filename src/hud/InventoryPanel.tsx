@@ -27,11 +27,19 @@
  * 2026-11-06). An archived key still opens and seals what it did; DELETE of
  * the last copy of a key your chests or doors are sealed to is refused, and
  * offers ARCHIVE instead.
+ *
+ * Each row shows one ACTIONS button, and its actions open in a line under
+ * the row (arkinox, 2026-11-12: "make a single 'Actions' button per item that
+ * reveals all these actions. Right now this is too much clutter"). One row's
+ * actions are open at a time; Escape or a tap outside the row closes them.
+ * LISTED is said on the row's line, not as a button: it is not an action.
  */
 
 import { takeIntoKeeping, you } from '../lib/carried'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { create } from 'zustand'
 import { ConfirmModal } from './ConfirmModal'
+import { useEscape } from '../hooks/useEscape'
 import { useItemFeed } from '../store/useItemFeed'
 import { X } from 'lucide-react'
 import { useProfile } from '../hooks/useProfile'
@@ -179,7 +187,44 @@ function PlaceButton({ item, onRefused }: { item: HeldItem; onRefused: (why: str
   return <button className="chest__act" onClick={() => onRefused(useShards.getState().placeFromItems(item.id))} title="Place a new instance of it at the build cursor, with every setting it has">PLACE</button>
 }
 
-/** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, DETAILS, COPY, PLACE and DELETE. */
+/** Which row's ACTIONS are open: one at a time across ITEMS, so opening another closes the last. */
+export const useOpenActions = create<{ open: string | null }>(() => ({ open: null }))
+
+/**
+ * A row's ACTIONS button and the labelled line of actions it opens under
+ * the row. Closed again by its button, by Escape (before the menu it is in,
+ * focus going back to ACTIONS), by a tap outside the row (a click, so a
+ * scroll on a phone leaves it open), never by a tap in a confirmation it
+ * opened, and when the row leaves the list or stops being drawn (`shown`).
+ */
+function useRowActions(id: string, name: string, shown = true): { button: JSX.Element; group: (acts: ReactNode) => JSX.Element | null; close: () => void } {
+  const open = useOpenActions((s) => s.open === id) && shown
+  const close = useCallback((): void => { if (useOpenActions.getState().open === id) useOpenActions.setState({ open: null }) }, [id])
+  const gid = `held-actions-${id}`
+  useEscape('menu', open, () => {
+    const focused = typeof document === 'undefined' ? null : document.activeElement
+    close()
+    if (focused?.closest?.(`#${gid}`)) document.getElementById(`${gid}-toggle`)?.focus()
+  })
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') return
+    const tap = (e: MouseEvent): void => {
+      const t = e.target
+      if (t instanceof Element && (t.closest(`[data-actions-row="${id}"]`) || t.closest('.modal'))) return
+      close()
+    }
+    document.addEventListener('click', tap, true)
+    return () => document.removeEventListener('click', tap, true)
+  }, [open, id, close])
+  useEffect(() => close, [close])
+  return {
+    button: <button id={`${gid}-toggle`} className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => useOpenActions.setState({ open: open ? null : id })} aria-expanded={open} aria-controls={open ? gid : undefined} aria-label={`Actions for ${name}`} title={`What you can do with ${name}`}>ACTIONS</button>,
+    group: (acts) => (open ? <span className="held__menu" id={gid} role="group" aria-label={`Actions for ${name}`}>{acts}</span> : null),
+    close,
+  }
+}
+
+/** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, and ACTIONS: DETAILS, COPY, PLACE, PUBLISH, ARCHIVE and DELETE. */
 function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
   const profile = useProfile(item.author || null)
@@ -200,6 +245,7 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
   const busy = useItemFeed((s) => s.publishing === pubkey)
   const [confirming, setConfirming] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
+  const actions = useRowActions(item.id, item.name)
   const list = async (): Promise<void> => {
     if (!item.key) return
     setRefusal(null)
@@ -211,26 +257,30 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
     // Laid out as an OTHER LOOT row, with its small buttons (arkinox,
     // 2026-11-09): on the right, beside the name when they fit, under it when
     // they do not, so they never squeeze the name to "Si..." (2026-11-03).
-    <li className="secrets__row held__row held__row--item">
+    <li className="secrets__row held__row held__row--item" data-actions-row={item.id}>
       <ItemFace className="chest__glyph chest__glyph--key" type="key" image={item.key?.image} />
       <span className="item__line">
         <span className="item__name" title={item.name}>{item.name}</span>
         <span className="item__meta">
           {item.source === 'forged' ? 'forged by you' : `forged by ${who}`} · {item.source === 'forged' ? 'hidden' : SOURCE[item.source]} <span title={formatStamp(item.at)}>{formatAgo(item.at)}</span>
           {opens > 0 && <> · <span className="secrets__found" title="Discovered chests whose lock is this item">opens {opens} chest{opens === 1 ? '' : 's'}</span></>}
+          {listed && <> · <span className="secrets__found" title="Listed in the ITEM FEED: anyone can seal a chest to it">LISTED</span></>}
           {!item.verified && <> · <Unsigned /></>}
         </span>
       </span>
-      <span className="held__acts">
-        <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>DETAILS</button>
-        <button className={`chest__act ${copied ? 'is-on' : ''}`} onClick={copy} title="Copy the item as text, to paste into ITEMS on another device">{copied ? 'COPIED' : 'COPY'}</button>
-        <PlaceButton item={item} onRefused={setRefusal} />
-        {mine && (
-          <button className={`chest__act ${listed ? 'is-on' : ''}`} disabled={listed || busy} onClick={() => setConfirming(true)} title={listed ? 'Listed in the ITEM FEED: anyone can seal a chest to it' : 'Publish this item to the ITEM FEED so anyone can seal a chest to it'}>{busy ? 'LISTING…' : listed ? 'LISTED' : 'PUBLISH'}</button>
-        )}
-        <ArchiveButton item={item} />
-        <DeleteItem item={item} />
-      </span>
+      <span className="held__acts">{actions.button}</span>
+      {actions.group(
+        <>
+          <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>DETAILS</button>
+          <button className={`chest__act ${copied ? 'is-on' : ''}`} onClick={copy} title="Copy the item as text, to paste into ITEMS on another device">{copied ? 'COPIED' : 'COPY'}</button>
+          <PlaceButton item={item} onRefused={setRefusal} />
+          {mine && !listed && (
+            <button className="chest__act" disabled={busy} onClick={() => setConfirming(true)} title="Publish this item to the ITEM FEED so anyone can seal a chest to it">{busy ? 'LISTING…' : 'PUBLISH'}</button>
+          )}
+          <ArchiveButton item={item} />
+          <DeleteItem item={item} />
+        </>,
+      )}
       {refusal && <span className="held__refusal" role="status">{refusal}</span>}
       {confirming && (
         <ConfirmModal
@@ -321,8 +371,11 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const cashu = useCashu(raw ? item.text : null)
   const coin = raw !== null
   const label = coin ? (token ? cashuLabel(token) : 'cashu token') : item.name
+  // Never open behind MOVED INTO WORKSHOP, so Escape is not spent on it.
+  const actions = useRowActions(item.id, label, !moved)
   const moveToWorkshop = (): void => {
     if (!item.shard || moved) return
+    actions.close()
     // Its carried parts keyed under you, so your copy keeps them when you hide it (R15).
     useWorkshop.getState().importShard(takeIntoKeeping(item.shard, you()))
     setMoved(true)
@@ -339,7 +392,7 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   }
   return (
     // Laid out as a key item row: its buttons wrap under the name on a narrow phone, the X with them (arkinox, 2026-11-09).
-    <li className="secrets__row held__row held__row--loot">
+    <li className="secrets__row held__row held__row--loot" data-actions-row={item.id}>
       {item.type === 'shard' && item.shard ? <ShardThumb shard={item.shard} /> : <ItemIcon className={`chest__glyph chest__glyph--${coin ? 'cashu' : item.type}`} type={item.type} coin={coin} />}
       {item.type === 'chest' && item.chest
         ? <ChestBlock id={item.id} chest={item.chest} author={item.author} verified={item.verified} place={item.place} sealer={item.verified ? item.event.pubkey : undefined} />
@@ -354,18 +407,23 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
           </span>
         )}
       <span className="held__acts">
-        {item.type === 'shard' && <button className="chest__act" onClick={moveToWorkshop} title="Move this model into your workshop">MOVE TO WORKSHOP</button>}
-        {item.type === 'message' && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>{coin || hasNftLink(item.text) ? 'CARD' : 'READ'}</button>}
-        {item.type === 'audio' && item.audio && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open} title="Play it or save it">LISTEN</button>}
-        {item.place && <button className={`chest__act ${details ? 'is-on' : ''}`} onClick={() => setDetails((d) => !d)} aria-expanded={details}>DETAILS</button>}
-        <PlaceButton item={item} onRefused={setRefusal} />
-        <ArchiveButton item={item} />
+        {actions.button}
         {clearable && (
           <button className="held__clear" onClick={() => useInventory.getState().clearTaken([item.id])} title="Clear it from OTHER LOOT" aria-label={`Clear ${label} from OTHER LOOT`}>
             <X size={14} aria-hidden />
           </button>
         )}
       </span>
+      {actions.group(
+        <>
+          {item.type === 'shard' && <button className="chest__act" onClick={moveToWorkshop} title="Move this model into your workshop">MOVE TO WORKSHOP</button>}
+          {item.type === 'message' && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>{coin || hasNftLink(item.text) ? 'CARD' : 'READ'}</button>}
+          {item.type === 'audio' && item.audio && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open} title="Play it or save it">LISTEN</button>}
+          {item.place && <button className={`chest__act ${details ? 'is-on' : ''}`} onClick={() => setDetails((d) => !d)} aria-expanded={details}>DETAILS</button>}
+          <PlaceButton item={item} onRefused={setRefusal} />
+          <ArchiveButton item={item} />
+        </>,
+      )}
       {refusal && <span className="held__refusal" role="status">{refusal}</span>}
       {details && (
         <div className="held__details">

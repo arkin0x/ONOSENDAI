@@ -90,8 +90,9 @@ function idle(): Promise<void> {
 let fresh: Pick<ReturnType<typeof S>, 'events' | 'prevEventId' | 'genesisId' | 'published' | 'position' | 'plane' | 'headPlane' | 'positionHistory' | 'chain'> | null = null
 
 beforeEach(async () => {
-  // Nothing an earlier test began reading may land in this one.
+  // Nothing an earlier test began, a world read or a teleport being signed, may land in this one.
   await worldLoaded()
+  await idle()
   localStorage.setItem('onosendai:games', '1')
   if (!fresh) {
     await placeSpawn()

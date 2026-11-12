@@ -151,6 +151,7 @@ describe('computeRideProof (sequential fallback under node)', () => {
     expect(seen[seen.length - 1]).toEqual({ done: 4, total: 4, etaMs: null, price: { attempts: 1, expected: 1 } })
   }, 60_000)
 
+  // Genuinely slow: a 40-block ride searched past two nonces, then Level-1-verified, about 3.7 s in a parallel run, past 5 s under load.
   it('searches past nonces that miss the price, and matches the one-thread proof', async () => {
     // A 40-block synthetic ride (decks/hyperjump-reference.py's line) under
     // 'ab' x 32: A is 2 and nonces 0 and 1 both miss, so the search has to
@@ -174,7 +175,6 @@ describe('computeRideProof (sequential fallback under node)', () => {
       blockHashFor: synthetic,
     })
     expect(result.ok).toBe(true)
-    // Genuinely slow: a 40-block ride searched past two nonces, then Level-1-verified, about 3.7 s in a parallel run, past 5 s under load.
   }, 20_000)
 
   it('rejects a second concurrent call', async () => {

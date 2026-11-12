@@ -111,6 +111,7 @@ describe('which action a pubkey shows', () => {
     expect(out.list.map((a) => a.id)).toEqual([late.id, early.id])
   })
 
+  // Genuinely slow: ROSTER_KEPT + 3 events, each under a key of its own and signed, about 4 s in a parallel run, past 5 s under load.
   it('keeps at most ROSTER_KEPT pubkeys, letting the least recently active go', () => {
     const events = Array.from({ length: ROSTER_KEPT + 3 }, (_, i) => hop(1_000 + i))
     const out = foldRoster({}, [], events)!
@@ -118,7 +119,6 @@ describe('which action a pubkey shows', () => {
     expect(Object.keys(out.events)).toHaveLength(ROSTER_KEPT)
     expect(out.list.at(-1)!.createdAt).toBe(1_003)
     expect(out.list.some((a) => a.createdAt < 1_003)).toBe(false)
-    // Genuinely slow: ROSTER_KEPT + 3 events, each under a key of its own and signed, about 4 s in a parallel run, past 5 s under load.
   }, 20_000)
 })
 

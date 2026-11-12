@@ -150,6 +150,7 @@ describe('checkChainRows', () => {
     expect(await flagged(signed.id)).toBe(2)
   })
 
+  // Genuinely slow: 250 events moved into the database and checked, about 3.5 s alone in a parallel run, past 5 s under load.
   it('flags land in batches: a long chain is not one long transaction', async () => {
     const chain = Array.from({ length: 250 }, (_, i) => action(i))
     await migrate(chain)
@@ -161,7 +162,6 @@ describe('checkChainRows', () => {
       await check()
     } finally { proto.transaction = real }
     expect(writes).toBe(3)
-    // Genuinely slow: 250 events moved into the database and checked, about 3.5 s alone in a parallel run, past 5 s under load.
   }, 20_000)
 
   it('no chain: nothing to check', async () => {

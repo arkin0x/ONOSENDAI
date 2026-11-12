@@ -152,11 +152,12 @@ async function oldRecord(): Promise<unknown> {
 
 const tick = (ms = 0): Promise<void> => new Promise((r) => setTimeout(r, ms))
 /**
- * A wait for what another tab or the database does: polled, and bounded by the
- * test's own 5 s rather than waitFor's 1 s, which a loaded machine passed
- * while the work was still on its way (2026-11-12).
+ * A wait for what another tab or the database does: polled, and bounded by 3 s
+ * rather than waitFor's 1 s, which a loaded machine passed while the work was
+ * still on its way (2026-11-12). Under the test's own 5 s, so a wait that
+ * fails says what it waited for.
  */
-const SOON = { timeout: 4_500, interval: 20 }
+const SOON = { timeout: 3_000, interval: 20 }
 
 beforeEach(() => {
   posted.length = 0

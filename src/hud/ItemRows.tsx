@@ -196,9 +196,13 @@ export function entryLabel(entry: ChestEntry): { label: string; coin: boolean } 
  * `actionsIn`, a door row of DISCOVERED NEARBY: OPEN or CLOSE is drawn there,
  * beside VIEW, nothing until it is mounted (arkinox, 2026-11-12: "For doors, we
  * should have an OPEN / CLOSE button here as well"), and a door with nothing
- * held to open it shows OPEN disabled, what it requires as its title.
+ * held to open it shows OPEN disabled, what it requires as its title. A
+ * chest row of DISCOVERED NEARBY draws its OPEN there too, beside VIEW and
+ * the same size (tutorial feedback 2026-11-12, item 2).
+ * `actsBelow`, the chest's card: OPEN or CLOSE across the card's width,
+ * under what opens it (tutorial feedback 2026-11-12, item 3).
  */
-export function ChestBlock({ id, chest, author, verified, place, sealer: given, named = true, inChest = false, actionsIn }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string; named?: boolean; inChest?: boolean; actionsIn?: HTMLElement | null }): JSX.Element {
+export function ChestBlock({ id, chest, author, verified, place, sealer: given, named = true, inChest = false, actionsIn, actsBelow = false }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string; named?: boolean; inChest?: boolean; actionsIn?: HTMLElement | null; actsBelow?: boolean }): JSX.Element {
   const items = useInventory((s) => s.items)
   const me = useCyberspace((s) => s.identity.pubkey)
   const keys = useMemo(() => openingKeys(items), [items])
@@ -382,10 +386,11 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
             {closedHere ? 'CLOSED' : entries || rereading || canClose ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
           </span>
         </span>
-        {actionsIn === undefined ? acts : actionsIn && createPortal(acts, actionsIn)}
+        {actionsIn !== undefined ? actionsIn && createPortal(acts, actionsIn) : !actsBelow && acts}
       </div>
       {offerOpen && !closedHere && carried && <span className="chest__fits">A key you carry fits: {carriedLabel(carried, useCyberspace.getState().position)}</span>}
       {status && <span className="chest__status" role="status">{status}</span>}
+      {actsBelow && (offerOpen || canClose) && <div className="chest__below">{acts}</div>}
       {shown && shown.length > 0 && <ChestContents entries={shown} from={from} place={place} />}
     </div>
   )

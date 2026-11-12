@@ -14,7 +14,7 @@
  * carries the fall (lib/games/gravity.ts); TAKE and OPEN are the key door;
  * the clock runs from the entry to the exit zone (lib/games/progress.ts). All
  * of that is the game's logic, kept on this device: nothing is signed for it.
- * Its run is not anchored (DECK-0002 §6.1): its steps are not events anyone
+ * Its run is not anchored (DECK-0002 §6.2, play kept on the device): its steps are not events anyone
  * keeps, so an anchor would commit to nothing checkable. EXIT publishes exit-virtual, which puts you back where
  * you entered (spec §8.11.4 rule 2), and the view comes back exactly as it was
  * when you entered: the same place, zoom, look and mode (DECK-0002 §7).
@@ -37,7 +37,7 @@ import { teleportTemplate } from '../lib/games/bracket'
 import { canLeave, gameFor } from '../lib/games/registry'
 import { useWorkshop } from './useWorkshop'
 import { tvIsOn } from './tvOn'
-import { gamesEnabled } from '../lib/games/flag'
+import { gameEnabled, gamesEnabled } from '../lib/games/flag'
 import { TUTORIAL_GAME } from '../lib/games/tutorialGame'
 import { inRegion, padUnder, stepIn, type WorldShard } from '../lib/games/play'
 import { jump as jumpBody, move as moveBody, tick as tickBody, type Arc, type Body } from '../lib/games/gravity'
@@ -217,7 +217,7 @@ export const useGame = create<GameState>((set, get) => {
     message: null,
 
     enter: async (game) => {
-      if (!gamesEnabled()) return GAMES_OFF_MESSAGE
+      if (!gameEnabled(game)) return GAMES_OFF_MESSAGE
       if (get().session || get().busy) return GAME_ALREADY_MESSAGE
       const refuse = (why: string): string => { set({ message: why }); return why }
       if (walkBusy()) return refuse(WALK_BUSY_MESSAGE)
@@ -264,15 +264,21 @@ export const useGame = create<GameState>((set, get) => {
       const open = openBracket(useCyberspace.getState().actions())
       if (!session && !canLeave(open?.game?.pubkey)) return GAME_NOT_HERE_MESSAGE
       set({ busy: 'exiting', message: null })
+      // The last game position, written in the exit's free `c` (DECK-0002 §7): where you are, or, left without going back
+      // in (after a reload), the last one on the record of a game played here (review of #697).
+      const game = session?.game ?? gameFor(open?.game?.pubkey)
+      const lastAt = session ? (session.at ?? session.resumeAt) : open && game ? recordedPosition(useCyberspace.getState().actions(), open, game) : null
+      const entryId = session?.entryId ?? open?.id
       let left: Awaited<ReturnType<CyberspaceState['exitGame']>>
       try {
-        left = await useCyberspace.getState().exitGame(session?.entryId ?? open?.id, (session?.at ?? session?.resumeAt) ? hexAt(session!.game, (session!.at ?? session!.resumeAt)!) : undefined)
+        left = await useCyberspace.getState().exitGame(entryId, lastAt && game ? hexAt(game, lastAt) : undefined)
       } catch (err) {
         left = { refused: failed(err) }
       }
       if ('refused' in left) { set({ busy: null, message: left.refused }); return left.refused }
       set({ session: null, busy: null })
-      if (session) saveProgress(session.entryId, null)
+      // That bracket is over: its key, gate and clock are of no more use here.
+      if (entryId) saveProgress(entryId, null)
       // The view you entered from, exactly (DECK-0002 §7). The base position
       // needs nothing: the exit's C is the entry's c, so you stand where you did.
       if (session?.snapshot) useCyberspace.setState({ ...session.snapshot })
@@ -343,10 +349,15 @@ export const useGame = create<GameState>((set, get) => {
  * THE ENTRY POINT for the first-arrival tutorial (Track A, step 10, DUNGEON):
  * enter the tutorial dungeon from where the player stands. Resolves to null
  * once they are in, or to the words it was refused with, for the tutorial to
- * show. Ask gamesEnabled() first: with games off it is refused.
+ * show. Ask tutorialDungeonEnabled() first: with the game off it is refused.
  */
 export function enterTutorialDungeon(): Promise<string | null> {
   return useGame.getState().enter(TUTORIAL_GAME)
+}
+
+/** Whether the tutorial dungeon is on here: everywhere once its key is the owner's, else by this device's switch (lib/games/flag.ts). */
+export function tutorialDungeonEnabled(): boolean {
+  return gameEnabled(TUTORIAL_GAME)
 }
 
 export { gamesEnabled }

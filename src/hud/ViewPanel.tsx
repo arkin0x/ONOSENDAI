@@ -109,6 +109,7 @@ export function ViewPanel(): JSX.Element {
       on: showTrail,
       set: (v) => useCyberspace.getState().setShowTrail(v),
     },
+    // Off by default (arkinox, 2026-11-12); a saved ON is kept (useCyberspace loadShowSecrets).
     {
       id: 'view-region-keys',
       title: 'Region keys',

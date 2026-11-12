@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { newShard } from 'sno-core/shards'
-import { bagTemplate, shardInnerTemplate } from '../../hidden'
+import { bagTemplate, rumorOf, shardInnerTemplate } from '../../hidden'
 import { positionHex, type NostrEvent } from '../../events'
 import { ENTRY_TAG, loadWorld, regionCentre, worldKey } from '../world'
 import { TUTORIAL_GAME } from '../tutorialGame'
@@ -91,6 +91,22 @@ describe('loading a game world', () => {
     expect(world.entry).toEqual(p2)
     // The far shard is not drawn either: the world is inside its region.
     expect(world.shards.map((w) => w.shard.name)).toEqual(['good'])
+  })
+
+  it('counts a rumor of any kind the bag vouches for, not one of another key or with a forged id (DECK-0002 §2.2, spec §7.6 Rumors)', async () => {
+    const p1 = { ...at, z: at.z + 3n }
+    const p2 = { ...at, z: at.z + 5n }
+    const p3 = { ...at, z: at.z + 9n }
+    const gamePk = getPublicKey(gameSk)
+    const marker = (where: typeof at, who: string) => rumorOf({ kind: 3330, created_at: 100, tags: [['C', positionHex(where, 1)], ['-'], [ENTRY_TAG]], content: '{}' }, who)
+    const theirs = marker(p1, getPublicKey(stranger))
+    const forged = { ...marker(p2, gamePk), id: 'ab'.repeat(32) }
+    const vouched = marker(p3, gamePk)
+    const b = await bag(gameSk, 'x', 100, undefined, [theirs as NostrEvent, forged as NostrEvent, vouched as NostrEvent, item(gameSk, 'shard', 101)])
+    const world = await loadWorld(gameOf([b]))
+    expect(world.entry).toEqual(p3)
+    // A rumor of a shard is never drawn here (spec §7.6: a reader MAY drop one); only the signed shard is.
+    expect(world.shards.map((w) => w.shard.name)).toEqual(['shard'])
   })
 
   it('the region\'s centre at height 0 is its base', () => {

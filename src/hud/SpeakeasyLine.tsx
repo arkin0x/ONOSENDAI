@@ -29,7 +29,8 @@ import { placedLookup as defaultPlacedLookup, useSpeakeasies } from '../hooks/us
 import { useRelayPlacement } from '../hooks/useRelayPlacement'
 import { dashboardUrl, inRegion, publishedHeadHex, speakeasyLabel, type Speakeasy, type SpeakeasyLookup } from '../lib/speakeasy'
 import { RELAY_MAX_HOP_HEIGHT, type RelayStop } from '../lib/relayPlacement'
-import { firstBreak } from '../lib/events'
+import { needsRespawnNow } from '../lib/chainStop'
+import { stopDay } from '../lib/chainBreak'
 import { normalizeRelay, useRelays } from '../store/useRelays'
 import { useCyberspace } from '../store/useCyberspace'
 import { useChainUi } from '../store/useChainUi'
@@ -49,7 +50,7 @@ export function addSpeakeasy(s: Speakeasy): string | null {
 /** What a speakeasy holding your head, and not where the relay placed you, says instead of ADD RELAY. */
 export function stoppedWords(stop: RelayStop): string {
   // The day, in UTC, of the last action the relay accepts: where the chain stops.
-  const at = stop.lastValid ? new Date(stop.lastValid.createdAt * 1000).toISOString().slice(0, 10) : null
+  const at = stop.lastValid ? stopDay(stop) : null
   const where = at ? `Your chain stops at ${at}, outside this region.` : 'Your chain stops at its spawn, outside this region.'
   return stop.kind === 'tall'
     ? `This relay checks hops up to h${RELAY_MAX_HOP_HEIGHT}. ${where}`
@@ -58,11 +59,12 @@ export function stoppedWords(stop: RelayStop): string {
 
 /**
  * The respawn there already is: the broken-chain notice when ONOSENDAI sees
- * the break too, else the Derezz panel, unfolded and brought into view. Both
- * warn and ask before anything is signed.
+ * the stop too (lib/chainStop.ts, the same rules since 2026-11-12), else the
+ * Derezz panel, unfolded and brought into view. Both warn and ask before
+ * anything is signed.
  */
 export function openRespawn(): void {
-  if (firstBreak(useCyberspace.getState().actions())) {
+  if (needsRespawnNow(useCyberspace.getState().actions())) {
     useChainUi.getState().setBrokenView('notice')
     return
   }

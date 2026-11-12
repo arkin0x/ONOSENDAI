@@ -51,6 +51,12 @@ export interface DemoScene {
    * the block hash, so it needs no header index to be pinned.
    */
   select?: { height: number; blockHash: string; label: string }
+  /**
+   * Draw the region key cages while this step is up, whatever Settings'
+   * Region keys says (off by default since 2026-11-12); nothing is saved
+   * (scene/SecretRegions.tsx).
+   */
+  regionKeys?: boolean
   /** Scene layers to set on this step (useLayers); omitted layers stay as they are. */
   layers?: Partial<Record<SceneLayer, boolean>>
   /** Open the local chat dock. */

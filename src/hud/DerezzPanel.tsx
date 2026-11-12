@@ -14,7 +14,7 @@
 
 import { useState } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
-import { firstBreak } from '../lib/events'
+import { respawnPointOf } from '../lib/chainStop'
 import { confirmRespawn, respawnFailed } from './BrokenChain'
 import { Explanation } from './Explanation'
 
@@ -26,8 +26,9 @@ import { Explanation } from './Explanation'
  */
 export async function derezzNow(): Promise<string | null> {
   const s = useCyberspace.getState()
-  const broken = firstBreak(s.actions())
-  if (broken) return confirmRespawn(s.identity.pubkey, (broken.lastValid ?? broken.action).id)
+  // A chain that needs a respawn: a break, or a proof the rules reject (lib/chainStop.ts).
+  const at = await respawnPointOf(s.actions())
+  if (at) return confirmRespawn(s.identity.pubkey, at.id)
   try {
     await s.respawn()
     return null

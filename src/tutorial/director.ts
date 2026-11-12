@@ -12,7 +12,7 @@
  *   - 'see-chest': the treasure chest has been found (the scan revealed it,
  *     which it does by itself as the player enters the blue box);
  *   - 'open-chest': the player opened it, by hand (useOpenedChests);
- *   - 'take': something from it is in their ITEMS;
+ *   - 'take': the tutorial tree's DNA from it is in their ITEMS;
  *   - 'at-start': the player stands on the course's start square
  *     (useArrival: where they stand, as their chain's head says);
  *   - 'gravity': WALK with GRAVITY on;
@@ -39,20 +39,23 @@ import { dnaResolver } from '../lib/seeds/seedSources'
 import { TUTORIAL_DNA, TUTORIAL_DNA_EVENT, tutorialDnaId, tutorialSeedDraft } from './dna'
 import { SEED_HIDE_MAX, dnaMatches, seedHideFor } from '../lib/seeds/plant'
 import { bloomReachAt } from '../lib/seeds/bloomReach'
-import { positionHex } from '../lib/events'
+import { positionHex, type NostrEvent } from '../lib/events'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { viewHyperspace } from '../store/useHyperspace'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
-import { PLOT_STAND, START_STAND, atStart, courseToWorld, onDeck, onPlot } from './course'
+import { PLOT_STAND, START_STAND, atStart, courseToWorld, onDeck, onPlot, plantCell } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { deployPoint, type Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
-import { besideToward, inRegion, toWorld, type TutorialLayout } from './layout'
+import { OWNER_PUBKEY } from './script'
+import { arrivalCell, chestCell, inRegion, toWorld, type TutorialLayout } from './layout'
 import type { Stage } from './stage'
 import { HOP_FRAME_MS, setTutorialFrame, setTutorialSpin, setTutorialZoom, useTutorialCam, type HopFrame } from '../store/useTutorialCam'
 import { afterHop, holdGlide } from '../lib/hopStage'
 import { setMenuOpen } from '../hooks/useMenuOpen'
 import { usePanelLayout } from '../store/usePanelLayout'
+import { assignToFolder, createFolderPath } from '../store/useShardFolders'
+import type { ShardModel } from 'sno-core/shards'
 
 /**
  * A comfortable orbit distance (render cells) to ease in to once the player
@@ -66,13 +69,6 @@ const COURSE_ZOOM = 12
  * avatar's shoulder, the chest just past it in view (owner, 2026-11-12).
  */
 const SHOULDER_ZOOM = 6
-
-/**
- * arkinox's pubkey (npub1arkn0x...), the owner, offered as a friend to add and
- * spectate (feedback item 11a). The decoded hex, the same key demo/script.ts
- * curates under.
- */
-const OWNER_PUBKEY = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
 
 /** Lift the ITEMS panel to the top of the left menu column (feedback items 2 and 11b). */
 function itemsToTop(): void {
@@ -229,11 +225,22 @@ registerTutorialWatcher('open-chest', (onDone) => watchUntil(() => {
   return !!id && !!me && !!useOpenedChests.getState().opened[openedKey(me, id)]
 }, onDone, [onStage, (l) => useOpenedChests.subscribe(l)]))
 
-registerTutorialWatcher('take', (onDone) => watchUntil(() => {
-  const ids = useTutorialStage.getState().stage?.ids.chestContents ?? []
-  const items = useInventory.getState().items
-  return ids.some((id) => { const it = items[id]; return !!it && !it.cleared })
-}, onDone, [onStage, (l) => useInventory.subscribe((s, prev) => { if (s.items !== prev.items) l() })]))
+/**
+ * The tutorial tree's DNA as this identity holds it, taken from the welcome
+ * chest (tutorial feedback 2026-11-12, item 8): the owner's signed event, in
+ * ITEMS (archived counts, cleared off the list does not), or null.
+ */
+export function heldTutorialDna(): NostrEvent | null {
+  const it = useInventory.getState().items[TUTORIAL_DNA_EVENT.id]
+  return it && !it.cleared && it.type === 'dna' ? it.event : null
+}
+
+/** Taken: the moon blossom's DNA, the thing the plant step plants, is in ITEMS (item 8). */
+registerTutorialWatcher('take', (onDone) => watchUntil(
+  () => heldTutorialDna() !== null,
+  onDone,
+  [(l) => useInventory.subscribe((s, prev) => { if (s.items !== prev.items) l() })],
+))
 
 onTutorialLifecycle({
   start: (player, restart) => { void stageFor(player, restart) },
@@ -250,18 +257,20 @@ onTutorialLifecycle({
 })
 
 /**
- * The box step lines the cursor up one gibson in front of the chest, facing
- * it, so one COMMIT lands the player there rather than beside and behind it
- * (feedback item 4). The chest sits at the frame's (3, 3, 3); the cursor goes
- * to its neighbor on the player's side (besideToward), so the avatar, which
- * turns to face the way it moved (lib/facing.ts), ends looking at the chest.
- * While the step is up the camera idles a slow spin around the cursor
- * (feedback item 14); it stops when the step moves on.
+ * The box step lines the cursor up level with the chest, two gibsons in front
+ * of it with one empty gibson between (tutorial feedback 2026-11-12, item 1):
+ * the chest stands in line with the spawn (layout.ts chestCell), so one
+ * COMMIT from there runs straight at it at its own height, and the avatar,
+ * which turns to face the way it moved (lib/facing.ts), ends looking at it;
+ * from anywhere else, the chest's side nearest the player. While the step is
+ * up the camera idles a slow spin around the cursor (feedback item 14); it
+ * stops when the step moves on.
  */
 registerTutorialEffect('aim-box', () => {
   setTutorialSpin(true)
-  const off = aimOnce((layout) => besideToward(layout.frame, 3, 3, 3, useCyberspace.getState().position))()
-  const offHop = showFirstHop((layout) => toWorld(layout.frame, 3, 3, 3))
+  const off = aimOnce((layout) => { const a = arrivalCell(layout, useCyberspace.getState().position); return toWorld(layout.frame, a.f, a.r, a.u) })()
+  // COMMIT frames the hop; the landing eases in over the shoulder toward the chest where the stage put it.
+  const offHop = showFirstHop((layout) => { const c = chestCell(layout); return toWorld(layout.frame, c.f, c.r, c.u) })
   return () => { setTutorialSpin(false); if (off) off(); offHop() }
 })
 
@@ -393,6 +402,9 @@ registerTutorialEffect('to-course', () => {
 /** The inventory step opens the menu and lifts ITEMS to the top of it (feedback item 2). */
 registerTutorialEffect('teach-inventory', () => { setMenuOpen(true); itemsToTop() })
 
+/** NEXT on the inventory step closes the menu again, as the hamburger does (feedback 2026-11-12, item 15). */
+registerTutorialEffect('close-menu', () => { setMenuOpen(false) })
+
 /** The friend step adds the owner as a TARGET and opens the menu (feedback item 11a). */
 registerTutorialEffect('add-friend', () => {
   setMenuOpen(true)
@@ -416,8 +428,92 @@ registerTutorialWatcher('workshop', (onDone) => {
   }, onDone, [(l) => useWorkshop.subscribe((s, prev) => { if (s.open !== prev.open) l() }), (l) => useShards.subscribe((s, prev) => { if (s.pending !== prev.pending) l() })])
 })
 
-/** OPEN WORKSHOP in the coach: the same workshop the menu's button opens, on the newest model. */
-registerTutorialEffect('open-workshop', () => { useWorkshop.getState().openWorkshop() })
+/** The folder the tutorial files its copies in, and the prefix of their ids: how a copy is told from the player's own shards. */
+export const TUTORIAL_FOLDER = 'Tutorial'
+export const TUTORIAL_SHARD_ID = 'tutorial-'
+
+/** The course piece the workshop opens on: one the player ran across. */
+const OPEN_ON = 'Trampoline'
+
+/**
+ * Every shard the player found in this run, copied into the workshop
+ * (tutorial feedback 2026-11-12, item 10; never done outside the tutorial, so
+ * the workshop is not empty on its first visit): what the guide sealed in the
+ * world that the scan revealed (the green box, the course, the dirt), and what
+ * the player took out of the tutorial's chests. One copy per name, under an id
+ * made from it (TUTORIAL_SHARD_ID), so running this again adds nothing
+ * (useWorkshop addShard refuses an id it has), filed in the Tutorial folder.
+ * Local only: nothing is published. The copy to open the workshop on, or null.
+ */
+export function copyTutorialShards(): string | null {
+  const stage = useTutorialStage.getState().stage
+  if (!stage) return null
+  const found = new Map<string, ShardModel>()
+  for (const h of Object.values(useShards.getState().discovered)) {
+    if (h.author === stage.guide && h.type === 'shard' && h.shard && !found.has(h.shard.name)) found.set(h.shard.name, h.shard)
+  }
+  const chests = new Set([stage.ids.chest, stage.ids.finishChest])
+  for (const it of Object.values(useInventory.getState().items)) {
+    if (it.cleared || it.type !== 'shard' || !it.shard || !it.from || !chests.has(it.from.chestId) || found.has(it.shard.name)) continue
+    found.set(it.shard.name, it.shard)
+  }
+  if (found.size === 0) return null
+  const ws = useWorkshop.getState()
+  const ids: string[] = []
+  for (const [name, model] of found) {
+    const id = TUTORIAL_SHARD_ID + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    ws.addShard(model, name, id)
+    if (useWorkshop.getState().shards.some((m) => m.id === id)) ids.push(id)
+  }
+  const folder = createFolderPath([TUTORIAL_FOLDER])
+  if (folder && ids.length > 0) assignToFolder(ids, folder)
+  // The Trampoline, copied now or on an earlier run; else a piece found this run other than the green box.
+  const open = TUTORIAL_SHARD_ID + OPEN_ON.toLowerCase()
+  if (useWorkshop.getState().shards.some((m) => m.id === open)) return open
+  return ids.find((id) => id !== `${TUTORIAL_SHARD_ID}green-box`) ?? ids[0] ?? null
+}
+
+/**
+ * The workshop as the tutorial opens it (item 10): the shards found copied in,
+ * one of the course's on the bench, and its MENU open so the player sees
+ * their stuff. `opening` opens it too (OPEN WORKSHOP); otherwise the workshop
+ * was just opened some other way (the menu's button) and is pointed at it.
+ */
+function tutorialWorkshop(opening: boolean): void {
+  const id = copyTutorialShards()
+  const ws = useWorkshop.getState()
+  if (opening) ws.openWorkshop(id ?? undefined, 'menu')
+  else { if (id) ws.select(id); useWorkshop.setState({ openPanel: 'menu' }) }
+}
+
+/**
+ * Whether this workshop step has set the workshop up already: only its first
+ * opening is pointed at a course piece with the MENU up, never a later one
+ * (back from a DEPLOY's CANCEL, a REMIX), which keeps the shard it names.
+ */
+let setUp = false
+
+/** OPEN WORKSHOP in the coach: the same workshop the menu's button opens, set up for the tutorial the first time (item 10). */
+registerTutorialEffect('open-workshop', () => {
+  if (setUp) { useWorkshop.getState().openWorkshop(); return }
+  setUp = true
+  tutorialWorkshop(true)
+})
+
+/**
+ * The workshop step: the found shards are copied in as it comes up (again as
+ * the workshop opens, by then all found), and its first opening by any way is
+ * set up the same (item 10).
+ */
+registerTutorialEffect('workshop-step', () => {
+  setUp = false
+  copyTutorialShards()
+  return useWorkshop.subscribe((s, prev) => {
+    if (!s.open || prev.open || setUp) return
+    setUp = true
+    tutorialWorkshop(false)
+  })
+})
 
 /**
  * Earth through the free view, as the view menu's EARTH shows it, but in the
@@ -471,8 +567,9 @@ registerTutorialWatcher('plant', (onDone) => {
  * stand on the dirt, with the tutorial tree lined up to hide, as SEED's
  * PLANT lines one up (hud/SeedCompose; the composer offers the DNAs it
  * lists, not this tree). The seed names the owner's published event at its
- * own size limit; that event ships with the app (dna.ts TUTORIAL_DNA_EVENT)
- * and is noted on this device first, so no relay is needed for it. Another
+ * own size limit; that event is in the welcome chest, and the player plants
+ * the copy they took into ITEMS (heldTutorialDna), noted on this device
+ * first, so no relay is needed for it; not taken, it says to take it. Another
  * id waits until its event is on this device's relays, as SEED does; with
  * no id the player's SEED signs a copy of the DNA. HIDE
  * is still the player's: nothing is mined or hidden here. `reachAt` measures
@@ -494,7 +591,14 @@ export async function lineUpTutorialSeed(id: string | null = tutorialDnaId(), re
   if (first !== null) return first || null
   let draft = tutorialSeedDraft(null)
   if (id) {
-    if (id === TUTORIAL_DNA_EVENT.id) dnaResolver.note(TUTORIAL_DNA_EVENT)
+    // The tutorial tree comes from the welcome chest (item 8): planted from
+    // the DNA the player took, noted on this device (the resolver checks its
+    // signature), so no relay is needed for it.
+    if (id === TUTORIAL_DNA_EVENT.id) {
+      const held = heldTutorialDna()
+      if (!held) return TAKE_DNA_FIRST
+      dnaResolver.note(held)
+    }
     const v = await dnaResolver.resolve(id)
     if (v.state === 'ok' && !dnaMatches(v.event, TUTORIAL_DNA.text, v.caps)) return 'The tutorial tree on your relays is not this one. Tell the owner.'
     if (v.state !== 'ok') return 'The tutorial tree is not on your relays yet. Try again soon.'
@@ -503,24 +607,26 @@ export async function lineUpTutorialSeed(id: string | null = tutorialDnaId(), re
     const again = lined()
     if (again !== null) return again || null
   }
-  // On the dirt, at zoom 2^0, with the build cursor on your avatar: the seed
-  // then lands exactly where you stand (space.ts deployPoint at step 0),
-  // never on a cursor moved elsewhere or a view's cell.
+  // On the dirt, at zoom 2^0, with the build cursor on the dirt beside your
+  // avatar (course.ts plantCell; feedback 2026-11-12, item 6): the seed then
+  // lands exactly there (space.ts deployPoint at step 0), never on a cursor
+  // moved elsewhere or a view's cell.
   const layout = useTutorialStage.getState().layout
   const cs = useCyberspace.getState()
   if (!layout) return 'The dirt is not placed yet.'
   if (cs.spectate) return 'Stop watching, then PLANT THE SEED.'
-  if (cs.walking || cs.events.length === 0 || cs.headPlane !== layout.plane || !onPlot(layout.frame, cs.position)) return 'Stand on the dirt first.'
+  const plantAt = plantCell(layout.frame, cs.position)
+  if (cs.walking || cs.events.length === 0 || cs.headPlane !== layout.plane || !plantAt) return 'Stand on the dirt first.'
   if (useBuilder.getState().active) useBuilder.getState().exit()
   if (useCyberspace.getState().focus) useCyberspace.getState().clearFocus(true)
   if (useCyberspace.getState().scaleExp !== 0) useCyberspace.getState().adjustScale(-useCyberspace.getState().scaleExp)
   useBuilder.getState().enter('build')
   // BUILD starts its cursor, and its plane, where you look, which is not
-  // always your avatar (a cursor moved before, a view in the other plane):
-  // both are put on you, where you stand. In BUILD's driven view setPlane
-  // sets the plane you build in.
+  // always the dirt (a cursor moved before, a view in the other plane): the
+  // cursor goes on the dirt beside you, and the plane is the one you stand
+  // in. In BUILD's driven view setPlane sets the plane you build in.
   const here = useCyberspace.getState()
-  useCyberspace.setState({ cursor: { ...here.position } })
+  useCyberspace.setState({ cursor: { ...plantAt } })
   useCyberspace.getState().setPlane(here.headPlane)
   const s = useCyberspace.getState()
   const point = deployPoint(s.cursor, buildStepOf(s), SEED_HIDE_MAX)
@@ -551,6 +657,9 @@ export async function lineUpTutorialSeed(id: string | null = tutorialDnaId(), re
   useShards.getState().startDeploySeed(draft)
   return null
 }
+
+/** The plant step's note when the moon blossom was never taken from the welcome chest (item 8). */
+export const TAKE_DNA_FIRST = `Take the ${TUTORIAL_DNA.name.toUpperCase()} DNA from the welcome chest first.`
 
 /** Whether a PLANT THE SEED is measuring now: a second tap meanwhile does nothing. */
 let planting = false

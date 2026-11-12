@@ -36,7 +36,7 @@ import { HOP_FRAME_MS, setTutorialFrame, useTutorialCam } from '../../store/useT
 import { glideDone, glideStart, hopLanding, resetHopStage } from '../../lib/hopStage'
 import { useTutorialStage } from '../director'
 import { TUTORIAL_SCRIPT } from '../script'
-import { toWorld } from '../layout'
+import { chestCell, toWorld } from '../layout'
 
 async function staged(): Promise<void> {
   for (let i = 0; i < 200 && !useTutorialStage.getState().stage; i++) await new Promise((r) => setTimeout(r, 10))
@@ -91,7 +91,8 @@ describe('the first hop, shown', () => {
     expect(useTutorialCam.getState().frame).toBe(null)
     expect(useTutorialCam.getState().zoom).toBeLessThan(12)
     // From the avatar away from the chest: the camera is behind it, the chest ahead.
-    const chest = toWorld(layout.frame, 3, 3, 3)
+    const cell = chestCell(layout)
+    const chest = toWorld(layout.frame, cell.f, cell.r, cell.u)
     expect(useTutorialCam.getState().from).toEqual({ x: Number(to.x - chest.x), y: Number(to.y - chest.y), z: Number(to.z - chest.z) })
   })
 

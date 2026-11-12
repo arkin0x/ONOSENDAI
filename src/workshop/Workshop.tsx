@@ -797,6 +797,14 @@ export function Workshop(): JSX.Element | null {
   // Parts that came to you sealed go public only if you say so (DECK-0003 §1.10; lib/carried.ts).
   const [publishAsk, setPublishAsk] = useState<string | null>(null)
   const [panel, setPanel] = useState<Panel | null>(null)
+  // A panel asked for as it opened (useWorkshop openWorkshop `panel`: the
+  // tutorial's MENU, feedback 2026-11-12 item 10), shown once, then let go.
+  const openPanel = useWorkshop((s) => s.openPanel)
+  useEffect(() => {
+    if (!open || !openPanel) return
+    setPanel(openPanel)
+    useWorkshop.setState({ openPanel: null })
+  }, [open, openPanel])
   // Only while SHARD is open, the one panel that shows them. Each is the whole
   // object written out and measured or hashed: a cost on every paint of a big
   // shard (a Basilica nave's payload is hundreds of KB), for lines nobody could see.

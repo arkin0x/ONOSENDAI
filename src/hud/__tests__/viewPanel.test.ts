@@ -215,21 +215,24 @@ describe('the Settings panel', () => {
     expect(localStorage.getItem('onosendai:showTrail')).toBe('1')
   })
 
-  it('Region keys drives showSecrets, the flag the scene draws the cages from, remembered on this device', () => {
-    expect(useCyberspace.getState().showSecrets).toBe(true)
-    expect(switchTag(view(), 'view-region-keys')).toContain('aria-checked="true"')
-
-    viewSwitch('view-region-keys').props.onCheckedChange(false)
+  it('Region keys drives showSecrets, the flag the scene draws the cages from, off until turned on, remembered on this device', () => {
+    // Off by default (arkinox, 2026-11-12): a device that never touched the switch saved nothing.
     expect(useCyberspace.getState().showSecrets).toBe(false)
-    expect(localStorage.getItem('onosendai:showSecrets')).toBe('0')
     expect(switchTag(view(), 'view-region-keys')).toContain('aria-checked="false"')
 
     viewSwitch('view-region-keys').props.onCheckedChange(true)
     expect(useCyberspace.getState().showSecrets).toBe(true)
     expect(localStorage.getItem('onosendai:showSecrets')).toBe('1')
+    expect(switchTag(view(), 'view-region-keys')).toContain('aria-checked="true"')
+
+    viewSwitch('view-region-keys').props.onCheckedChange(false)
+    expect(useCyberspace.getState().showSecrets).toBe(false)
+    expect(localStorage.getItem('onosendai:showSecrets')).toBe('0')
   })
 
   it('touches no other flag: each switch changes only its own', () => {
+    // From every switch on (Region keys starts off: turned on first).
+    useCyberspace.getState().setShowSecrets(true)
     const flags = () => ({ ...useLayers.getState(), trail: useCyberspace.getState().showTrail, keys: useCyberspace.getState().showSecrets })
     const pick = ({ dots, boxes, trail, keys }: ReturnType<typeof flags>) => ({ dots, boxes, trail, keys })
     const all = { dots: true, boxes: true, trail: true, keys: true }

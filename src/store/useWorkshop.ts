@@ -399,7 +399,14 @@ export interface WorkshopState {
    */
   placeObject: (at: P3, self?: string) => void
 
-  openWorkshop: (id?: string) => void
+  /**
+   * Open the workshop on `id` (else the shard last open, else the newest),
+   * with `panel` up: the first-arrival tutorial opens it with its MENU
+   * showing (tutorial feedback 2026-11-12, item 10).
+   */
+  openWorkshop: (id?: string, panel?: 'menu') => void
+  /** A panel the workshop shows as it next draws open (openWorkshop `panel`), then null again (workshop/Workshop.tsx). */
+  openPanel: 'menu' | null
   closeWorkshop: () => void
   create: (name?: string) => string
   select: (id: string | null) => void
@@ -954,6 +961,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     storageError: null,
     currentId: null,
     open: false,
+    openPanel: null,
     tool: 'view',
     selection: [], partSel: [],
     invert: false,
@@ -978,10 +986,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     future: [],
     notice: null,
 
-    openWorkshop: (id) => {
+    openWorkshop: (id, panel) => {
       const { shards } = get()
       const currentId = id ?? get().currentId ?? newestId(shards) ?? get().create()
-      set({ open: true, currentId, selection: [], partSel: [], selectedFaces: [], facePick: [], tool: 'view', plane: FLOOR, aim: null, past: [], future: [], notice: null })
+      set({ open: true, currentId, openPanel: panel ?? null, selection: [], partSel: [], selectedFaces: [], facePick: [], tool: 'view', plane: FLOOR, aim: null, past: [], future: [], notice: null })
     },
 
     closeWorkshop: () => set({ open: false, selection: [], partSel: [], selectedFaces: [], facePick: [], aim: null }),

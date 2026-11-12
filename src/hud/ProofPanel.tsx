@@ -19,8 +19,8 @@ import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
 import { previewWindow, routeLabel, useRoutePreview } from './routePreview'
 import { formatMs, formatOps } from '../lib/space'
-import { BROKEN_CHAIN_MESSAGE, FORKED_CHAIN_MESSAGE, MAX_COMPUTE_HEIGHT, brokenChainMessage, useCyberspace, type CloudState, type MovePlan, type MoveMode, type ProofState } from '../store/useCyberspace'
-import { useBrokenChain } from './BrokenChain'
+import { BROKEN_CHAIN_MESSAGE, FORKED_CHAIN_MESSAGE, MAX_COMPUTE_HEIGHT, RELAY_STOPPED_MESSAGE, brokenChainMessage, useCyberspace, type CloudState, type MovePlan, type MoveMode, type ProofState } from '../store/useCyberspace'
+import { useChainStop } from '../hooks/useChainStop'
 import { useChainUi } from '../store/useChainUi'
 
 const MOVE_MODES: Array<[MoveMode, string, string]> = [
@@ -61,7 +61,7 @@ function StatusLabel({ status }: { status: string }): JSX.Element {
  */
 export function noticeWhileAimed(previewing: boolean, proof: Pick<ProofState, 'message'>, broken: boolean): string | null {
   if (!previewing || proof.message === null) return null
-  if (broken && (proof.message === BROKEN_CHAIN_MESSAGE || proof.message === FORKED_CHAIN_MESSAGE)) return null
+  if (broken && (proof.message === BROKEN_CHAIN_MESSAGE || proof.message === FORKED_CHAIN_MESSAGE || proof.message === RELAY_STOPPED_MESSAGE)) return null
   return proof.message
 }
 
@@ -102,9 +102,10 @@ export function ProofPanel(): JSX.Element {
   // A broken chain refuses every move (store whyNoMove). Said here whatever
   // the panel is showing, since a preview of a move that cannot be signed
   // would otherwise stand in for the reason, with the way to the notice.
-  const brokenAt = useBrokenChain()
-  const broken = brokenAt !== null
-  const brokenLine = brokenAt ? brokenChainMessage(brokenAt) : null
+  // A rejected proof's stop refuses them too (lib/chainStop.ts); a hop above the relay's ceiling does not.
+  const stop = useChainStop()
+  const brokenLine = stop?.source === 'rules' ? brokenChainMessage(stop.broken) : stop?.source === 'relay' && stop.stop.kind === 'broken' ? RELAY_STOPPED_MESSAGE : null
+  const broken = brokenLine !== null
 
   const previewing = preview !== null && proof.status !== 'computing' && plan === null
   const aimedNotice = noticeWhileAimed(previewing, proof, broken)

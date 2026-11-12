@@ -415,7 +415,7 @@ function HeadlampRig(): null {
   const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
   useFrame((state) => {
     if (!controls) return
-    // A stopped VIEW fly brings the target in close; the reach follows it over the pivot's handover (ViewFly.ts reachOwed).
+    // A stopped VIEW fly brings the target in close; the reach fades in after it rather than stepping (ViewFly.ts reachOwed).
     headlampUniforms.uHeadlampReach.value = headlampReach(state.camera.position.distanceTo(controls.target) + viewRig.reachOwed)
   }, HEADLAMP_PRIORITY)
   return null
@@ -617,9 +617,6 @@ function Rig(): JSX.Element {
   const walkLook = useRef<Vector3 | null>(null)
   const eye = useRef<{ from: number; to: number; t0: number } | null>(null)
   const outTo = useRef(START_DISTANCE)
-  // The orbit distance a VIEW fly brought in, eased back out to on RECALL or
-  // VIEW's end (ViewFly.ts takeRestore), as the tutorial's zoom eases; null when none.
-  const orbitBack = useRef<number | null>(null)
 
   // Locked means the camera travels with the cursor, so an axis-aligned view
   // stays framed on it as you drive. Aligning with Shift+WASD re-locks; orbiting
@@ -1122,27 +1119,31 @@ function Rig(): JSX.Element {
     // WALK ends the ask, and so does a finger or the mouse on the scene (the
     // player taking the camera), not the step moving on, which comes before
     // the ease is done.
-    // A VIEW fly brought the orbit in, and RECALL or VIEW's end asks for it
-    // back (ViewFly.ts takeRestore; review of #690, 2): eased out below as the
-    // tutorial's zoom is; in WALK, it is where leaving WALK returns to. A
-    // finger or the mouse on the scene takes the camera, and ends it.
-    const back = viewRig.takeRestore()
-    if (back !== null) { if (s.walking) outTo.current = back; else orbitBack.current = back }
-    if (orbitBack.current !== null && (s.walking || pressed() > 0)) orbitBack.current = null
     const tutorialZoom = useTutorialCam.getState().zoom
     if (tutorialZoom !== null && (s.walking || pressed() > 0)) clearTutorialZoom()
     else if (want === null && !eye.current) {
-      const zoomTo = tutorialZoom ?? orbitBack.current
-      if (zoomTo !== null) {
+      if (tutorialZoom !== null) {
         const off = walkDir.copy(c.object.position).sub(c.target)
         const cur = off.length()
         if (cur < 1e-4) off.set(0, 0, 1)
-        const target = Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, zoomTo))
+        const target = Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, tutorialZoom))
         const nd = cur < 1e-4 ? target : cur + (target - cur) * (1 - Math.exp(-dt / 0.4))
         c.object.position.copy(c.target).addScaledVector(off.normalize(), nd)
         lastOffset.current.copy(c.object.position).sub(c.target)
-        if (Math.abs(nd - target) < 0.05) { if (tutorialZoom !== null) clearTutorialZoom(); else orbitBack.current = null }
+        if (Math.abs(nd - target) < 0.05) clearTutorialZoom()
       }
+    }
+    // A VIEW fly brought the orbit in, and RECALL or VIEW's end asks for it
+    // back (ViewFly.ts restoreOrbit; review of #690): eased out as the
+    // tutorial's zoom is, and given up when anything else takes the camera
+    // (WALK, a press on the scene, the tutorial's zoom, a /demo step, WALK's
+    // eye) or a fly starts. In WALK it is where leaving WALK returns to.
+    if (s.walking) {
+      const back = viewRig.takeRestore()
+      if (back !== null) outTo.current = back
+    }
+    if (viewRig.restoreOrbit(c.object.position, c.target, dt, s.walking || pressed() > 0 || tutorialZoom !== null || want !== null || eye.current !== null)) {
+      lastOffset.current.copy(c.object.position).sub(c.target)
     }
     // The controls' own turn this frame (their damping), in place in flight too.
     viewRig.mark(c.object.position, c.target)

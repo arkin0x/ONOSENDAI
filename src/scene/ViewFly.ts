@@ -201,11 +201,12 @@ export class ViewRigOffset {
   private lastCam: RigCamera | null = null
   /**
    * The orbit's distance before a fly brought it in, render cells: RECALL or
-   * VIEW ending eases the camera back out to it (takeRestore). Forgotten when
-   * the hand dollies, whose distance it then is.
+   * VIEW ending eases the camera back out to it (restoreOrbit). Forgotten when
+   * the hand dollies, whose distance it then is (pivot).
    */
   private preFlight: number | null = null
-  private restoreAsk: number | null = null
+  /** The orbit distance being eased back out to (restoreOrbit, or WALK's exit: takeRestore); null when none. */
+  private backTo: number | null = null
 
   /** True while a fly is under way (the rig's glide waits it out). */
   flying = false
@@ -223,11 +224,6 @@ export class ViewRigOffset {
     // An orbit, a pinch or a wheel in progress is not rest: no landing under it.
     look.copy(cam.position).sub(cam.target)
     if (this.orbitValid && look.distanceToSquared(this.orbit) > 1e-10) viewOffset.hold()
-    // The hand dollied (a pinch, a wheel): the orbit's distance is its own now, nothing to restore.
-    if (this.orbitValid && this.preFlight !== null) {
-      const len = look.length()
-      if (Math.abs(len - this.orbit.length()) > 1e-6 * Math.max(1, len)) this.preFlight = null
-    }
     this.orbit.copy(look)
     this.orbitValid = true
     // VIEW ended (HOP, history, RETURN) after a fly brought the orbit in: back out to where it was.
@@ -345,29 +341,57 @@ export class ViewRigOffset {
   /**
    * A fly that will not wait out its coast (a pad press, a zoom, BUILD): the
    * coast stops where it is and the view's centre comes in just ahead of the
-   * camera now, so the landing is there (review of #690, 3). Not while a fly
-   * key is held: that fly goes on. Between frames, with the last frame's camera.
+   * camera now, so the landing is there (review of #690, 3). Only a coast
+   * still running: once it has stopped the view has already come in, and the
+   * camera here (between frames, the last frame's, whose target was the far
+   * one) would bring it in a second time, past the camera. Not while a fly
+   * key is held: that fly goes on.
    */
   settle(cam: RigCamera | null = this.lastCam): void {
-    if (!viewOffset.flown || flyDir() !== 0 || !cam) return
+    if (!viewOffset.flown || !viewOffset.moving || flyDir() !== 0 || !cam) return
     viewOffset.stopCoast()
-    if (viewOffset.moving) return
     this.wasMoving = false
     this.comeNear(cam)
   }
 
-  /** RECALL or VIEW ending: the orbit goes back out to its distance before the fly brought it in (takeRestore). */
+  /** RECALL or VIEW ending: the orbit goes back out to its distance before the fly brought it in (restoreOrbit). */
   private askRestore(): void {
     if (this.preFlight === null) return
-    this.restoreAsk = this.preFlight
+    this.backTo = this.preFlight
     this.preFlight = null
   }
 
-  /** The orbit distance to ease the camera back out to, once (Scene.tsx Rig), or null. */
+  /** The orbit distance being eased back out to, or null. */
+  get restoreTo(): number | null {
+    return this.backTo
+  }
+
+  /** In WALK, which eases nothing: the distance leaving WALK returns to, once (Scene.tsx), or null. */
   takeRestore(): number | null {
-    const r = this.restoreAsk
-    this.restoreAsk = null
+    const r = this.backTo
+    this.backTo = null
     return r
+  }
+
+  /**
+   * One frame, `dt` seconds, of the orbit easing back out to its distance
+   * before a fly (askRestore), along the line the camera looks down, as the
+   * tutorial's zoom eases (Scene.tsx). Given up for good when anything else
+   * takes the camera: `held` (WALK, a press on the scene, the tutorial's
+   * zoom, a /demo step, WALK's eye), or a fly (review of #690, round 2).
+   * Returns whether it moved the camera.
+   */
+  restoreOrbit(camera: Vector3, target: Vector3, dt: number, held: boolean): boolean {
+    if (this.backTo === null) return false
+    if (held || this.flying || viewOffset.flown) { this.backTo = null; return false }
+    look.copy(camera).sub(target)
+    const cur = look.length()
+    if (cur < 1e-4) look.set(0, 0, 1)
+    const to = Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, this.backTo))
+    const d = cur < 1e-4 ? to : cur + (to - cur) * (1 - Math.exp(-Math.max(0, dt) / 0.4))
+    camera.copy(target).addScaledVector(look.normalize(), d)
+    if (Math.abs(d - to) < 0.05) this.backTo = null
+    return true
   }
 
   /** How much of a turn is made about the camera now: 1 in flight, 0 at rest (lib/viewCamera.ts FlightPivot). */
@@ -405,6 +429,15 @@ export class ViewRigOffset {
    * only marks.
    */
   pivot(camera: Vector3, target: Vector3, follow: Vector3, answer = true): void {
+    // The orbit's distance changed across the controls' update (a pinch, a
+    // wheel), the only thing between a mark and here: the hand dollied, so the
+    // distance is its own, nothing to restore. A pad press moving the follow
+    // point (an unlocked camera's distance changes) is not between the two.
+    if (this.preFlight !== null && this.turnValid) {
+      const was = this.turnFrom.length()
+      const now = Math.hypot(camera.x - target.x, camera.y - target.y, camera.z - target.z)
+      if (Math.abs(now - was) > 1e-6 * Math.max(1, now)) this.preFlight = null
+    }
     if (answer && this.turnValid && viewOffset.flown && this.pivotAt.weight > 0) {
       turned.x = camera.x - target.x; turned.y = camera.y - target.y; turned.z = camera.z - target.z
       this.pivotAt.shift(this.turnFrom, turned, slid)
@@ -527,7 +560,9 @@ export class ViewRigOffset {
     this.nearGap = 0
     this.nearOwed.set(0, 0, 0)
     this.keeping = false
-    // A re-frame: nothing left to restore (a restore already asked stands).
+    // A re-frame. VIEW ended (RETURN's cut, review of #690 round 2): the
+    // restore is asked first, as RECALL asks it; else nothing is left to restore.
+    if (!driven()) this.askRestore()
     this.preFlight = null
     this.pivotAt.clear()
     cursorGlide.share = 0

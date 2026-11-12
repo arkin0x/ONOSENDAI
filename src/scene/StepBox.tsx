@@ -13,7 +13,9 @@
  * Below a twenty-fifth of the cube the true size would be invisible, so it is
  * drawn at that size, centered on the same point: at 2^0 inside 2^15 it marks
  * the gibson rather than measuring it. At the zoom there is nothing to draw:
- * the snap cell is the cube itself.
+ * the snap cell is the cube itself. Once a zoom holds the placement on the
+ * cursor (useCyberspace `buildExact`) the snap is 2^0, so the box marks the
+ * exact gibson it lands on.
  */
 
 import { useMemo } from 'react'

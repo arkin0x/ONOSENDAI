@@ -318,4 +318,41 @@ describe('a zoom never moves a lined-up placement', () => {
     zoom(-4)
     expect(placed()).toEqual(want)
   })
+
+  // Review of #676: a place gone to at its own zoom came with a new cursor,
+  // and the hold snapped it with the old zoom's cell, far from the place.
+  it('going to a place at its own zoom while lined up aims there exactly, and holds it', () => {
+    at(SPOT)
+    useCyberspace.setState({ scaleExp: 20 })
+    D().startDeployShard(benchShard().id)
+    useShards.setState({ deployHeight: 40, deployHeightAuto: false })
+    S().moveCursor({ axis: 'x', dir: 1 })
+    const target: Position = { x: SPOT.x + 0x5a5a5n, y: SPOT.y - 0x33n, z: SPOT.z + 0x777n }
+    S().focusOn(target, S().anchorPlane, 'STARRED', 3, true)
+    expect(useBuilder.getState().active).toBe(true)
+    expect(S().cursor).toEqual(target)
+    expect(placed()).toEqual(target)
+    zoom(4); zoom(-6); zoom(2)
+    expect(placed()).toEqual(target)
+  })
+
+  // Review of #676: ending or replacing the deploy after a zoom in threw the
+  // cursor back to where it stood before the zoom, across the magnified view.
+  it('ending or replacing the deploy after a zoom in, off your avatar, leaves the cursor where it is', () => {
+    at(SPOT)
+    useCyberspace.setState({ scaleExp: 20 })
+    D().startDeployMessage('first')
+    useShards.setState({ deployHeight: 30 })
+    S().moveCursor({ axis: 'x', dir: 1 })
+    zoom(-18)
+    const here = { ...S().cursor }
+    D().startDeployMessage('second')
+    expect(S().cursor).toEqual(here)
+    zoom(3)
+    const c = { ...S().cursor }
+    D().cancelDeploy()
+    expect(useBuilder.getState().active).toBe(true)
+    expect(S().cursor).toEqual(c)
+  })
 })
+

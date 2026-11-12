@@ -592,12 +592,18 @@ useBuilder.subscribe((s, prev) => {
 // placement as it stands, and from then on the placement is the cursor
 // itself (useCyberspace `buildExact`): no zoom moves it, each move steps it
 // one cell of the zoom you are at, and the camera and the cursor cube sit on
-// it. Like lowering STEP, putting the cursor there is not a move of yours
-// (`buildSettle`), so it still counts as being on your avatar.
+// it. A zoom that came with a new cursor (a place gone to at its own zoom:
+// VIEW, a starred place, the pin) is aim, not zoom: the placement is held on
+// that cursor exactly (review of #676). On your avatar, putting the cursor
+// there is not a move of yours (`buildSettle`), as with lowering STEP, so it
+// still counts as being on your avatar; anywhere else nothing is kept to go
+// back to, or ending the deploy would throw the cursor back across the
+// magnified view (review of #676).
 useCyberspace.subscribe((s, prev) => {
   if (s.scaleExp === prev.scaleExp || s.buildExact || !useBuilder.getState().active) return
   const sh = useShards.getState()
   if (sh.pending === null) return
-  const at = deployPoint(s.cursor, buildStepOf({ ...s, scaleExp: prev.scaleExp }), sh.deployHeight)
-  useCyberspace.setState({ cursor: at, buildExact: true, buildSettle: { at, from: { ...placedCursor(s) } } })
+  const at = s.cursor !== prev.cursor ? { ...s.cursor } : deployPoint(s.cursor, buildStepOf({ ...s, scaleExp: prev.scaleExp }), sh.deployHeight)
+  const onAvatar = samePosition(placedCursor(s), s.position)
+  useCyberspace.setState({ cursor: at, buildExact: true, buildSettle: onAvatar ? { at, from: { ...s.position } } : null })
 })

@@ -49,9 +49,16 @@ describe('SEED\'s DNA list', () => {
     expect(html).toMatch(/<button aria-pressed="false" class="seedc__pick ">PASTE<\/button>/)
   })
 
-  it('opens on the first original DNA, at its own size limit (LARGE)', () => {
+  it('opens on the first original DNA, at the size limit the owner\'s published event sets (no SMALL or LARGE to pick)', () => {
     expect(select).toMatch(/<option value="0" selected="">FIDDLEHEAD<\/option>/)
-    expect(html).toContain('title="8,000 vertices, 6,000 symbols, 40 days"')
-    expect(html).toMatch(/aria-pressed="true"[^>]*title="8,000 vertices/)
+    // Every listed DNA is published (seedDnas SEED_DNA_IDS): its event's caps decide, read as it resolves (this render is before).
+    expect(html).toContain('FETCHING THIS DNA')
+    expect(html).not.toContain('>SMALL<')
+    expect(html).not.toContain('>LARGE<')
+    expect(html).toContain('PRICE 21 BITS')
+  })
+
+  it('its preview runs to the DNA\'s last day, its generations cap plus one: day 41 for the original DNAs (owner ruling "A")', () => {
+    expect(html).toMatch(/<input type="range" min="0" max="41"[^>]*value="41"\/>/)
   })
 })

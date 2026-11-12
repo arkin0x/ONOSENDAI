@@ -14,7 +14,8 @@ const TREE = TUTORIAL_DNA.name.toUpperCase()
 
 /**
  * The COMMIT button alone (feedback items 5 and 14): the mode button beside it
- * shares the class, wearing is-hop, is-view, is-walk or is-build.
+ * shares the class, wearing is-hop, is-view or is-build (is-walk, from before
+ * WALK left the commit slot, is still passed over).
  */
 export const COMMIT = '.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build)'
 
@@ -125,7 +126,7 @@ export const TO_COURSE: TutorialStep = {
   effect: 'to-course',
 }
 
-/** WALK: the WALK button in RECALL's slot, at rest in HOP. */
+/** WALK: the WALK button in RECALL's slot, with the cursor on your avatar. */
 export const WALK: TutorialStep = {
   id: 'walk',
   title: 'Walk',

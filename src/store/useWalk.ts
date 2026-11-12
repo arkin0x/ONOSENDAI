@@ -189,6 +189,9 @@ function clearSettle(): void {
   settleTimer = null
 }
 
+/** The pad modes WALK can be entered from and goes back to (store/padMode.ts). */
+export type WalkFrom = 'hop' | 'view' | 'build'
+
 interface WalkState {
   /** Closed segments not yet landed, by their ends, oldest first. The first is the one in flight. */
   queue: Position[]
@@ -202,11 +205,17 @@ interface WalkState {
   gravity: boolean
   /** A fall or a jump is in the air: its hops are made when it resolves. */
   falling: boolean
+  /**
+   * The pad mode WALK was entered from, and goes back to when it is left
+   * (store/padMode.ts enterWalk and leaveWalk; arkinox, 2026-11-12). HOP
+   * unless the pad's WALK button said otherwise.
+   */
+  from: WalkFrom
   /** GRAVITY on or off. Off mid-fall ends the fall where it is (one hop there). */
   setGravity: (on: boolean) => void
   /** Turn WALK on. Only at your own head; a VIEW in progress ends first. */
   enter: () => void
-  /** Stop the walk and go back to HOP. */
+  /** Stop the walk and go back to HOP. The pad's way out, back to the mode WALK came from, is padMode `leaveWalk`. */
   exit: () => void
   /** Stop the walk where the chain is now, and stay in WALK. */
   stop: (message?: string | null) => void
@@ -240,6 +249,7 @@ export const useWalk = create<WalkState>((set, get) => ({
   behind: 0,
   gravity: loadGravity(),
   falling: false,
+  from: 'hop',
 
   setGravity: (on) => {
     if (get().gravity === on) return
@@ -269,7 +279,7 @@ export const useWalk = create<WalkState>((set, get) => ({
     warmWalls(useCyberspace.getState().plane, useCyberspace.getState().position)
     clearSettle()
     dropFall()
-    set({ queue: [], open: null, running: null, behind: 0 })
+    set({ queue: [], open: null, running: null, behind: 0, from: 'hop' })
     refreshDown()
     if (get().gravity) fallIfAirborne()
   },

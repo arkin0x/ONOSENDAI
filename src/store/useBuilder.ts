@@ -201,8 +201,8 @@ function wholeCube(s: ReturnType<typeof useCyberspace.getState>): boolean {
   return at !== undefined && at.x === CUBE_CENTER && at.y === CUBE_CENTER && at.z === CUBE_CENTER
 }
 
-/** The build cursor sits on your avatar, in the plane your head shows. */
-function onAvatar(s: ReturnType<typeof useCyberspace.getState>): boolean {
+/** The build cursor sits on your avatar, in the plane your head shows: the pad's RECALL slot is WALK then (hud/TouchControls). */
+export function onAvatar(s: ReturnType<typeof useCyberspace.getState>): boolean {
   return samePosition(placedCursor(s), s.position) && buildPlane(s) === s.plane
 }
 

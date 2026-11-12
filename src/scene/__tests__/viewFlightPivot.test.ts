@@ -45,6 +45,7 @@ import { flyGesture, installFlyTouches, panGesture, viewRig, viewOffset, type Ri
 import { useViewFly } from '../../lib/viewFly'
 import { FlightPivot, PIVOT_EASE_MS, ViewOffset, FLY_MIN_VEL } from '../../lib/viewCamera'
 import { alignedOrigin, useCyberspace } from '../../store/useCyberspace'
+import { viewToAvatar } from '../../store/padMode'
 import { originShift, type Position } from '../../lib/space'
 
 const cs = () => useCyberspace.getState()
@@ -348,6 +349,46 @@ describe('1. in flight the camera turns in place; after it, the pivot glides out
     // The coast's last frames and the landing: never a leap.
     expect(worst).toBeLessThan(1)
   })
+})
+
+describe('1b. RECALL in VIEW (#683) and the pivot', () => {
+  for (const when of ['mid-flight, the fly still held', 'in the handover, after the coast'] as const) {
+    it(`RECALL ${when}: the fly lands, the pivot stops sliding at once, and the camera does not jump on that frame`, () => {
+      useViewFly.getState().setButton(1)
+      for (let i = 0; i < 25; i++) frame()
+      sceneDown(1, 200, 400, true)
+      let x = 200
+      for (let i = 0; i < 10; i++) { x += 3; moveTo(1, x, 400); frame() }
+      if (when === 'in the handover, after the coast') {
+        useViewFly.getState().setButton(0)
+        let n = 0
+        while (viewOffset.moving && n++ < 200) { x += 3; moveTo(1, x, 400); frame() }
+        expect(viewRig.pivotWeight).toBeGreaterThan(0)
+        expect(viewRig.pivotWeight).toBeLessThan(1)
+      }
+      const flownBefore = viewOffset.flown
+      expect(flownBefore).toBe(true)
+      viewToAvatar()
+      // The landing released the offset: nothing flown, so nothing for the pivot to slide.
+      expect(viewOffset.flown).toBe(false)
+      const prev = camera.position.clone()
+      x += 3
+      moveTo(1, x, 400)
+      const f = frame()
+      // The frame RECALL lands in: the camera moves no more than one frame of a drag, a fly and the ease home.
+      expect(movedFrom(prev, f).length()).toBeLessThan(2)
+      if (when === 'in the handover, after the coast') {
+        // Nothing flies now: the drag orbits the view's centre again (its distance kept), no slide.
+        const d0 = camera.position.distanceTo(controls.target)
+        x += 3
+        moveTo(1, x, 400)
+        frame()
+        expect(viewOffset.flown).toBe(false)
+        expect(camera.position.distanceTo(controls.target)).toBeCloseTo(d0, 6)
+      }
+      lift(1, x, 400)
+    })
+  }
 })
 
 describe('2. a finger that landed on a HUD control never moves the camera', () => {

@@ -232,6 +232,7 @@ export class ViewRigOffset {
       this.landing = null
     }
     cursorGlide.share = viewOffset.glide
+    useViewFly.getState().setFlown(viewOffset.flown)
     // In flight a drag turns the camera in place; once the coast has stopped
     // the pivot eases back out to the view's centre (pivot).
     this.pivotAt.step(flies && viewOffset.moving, dt * 1000)

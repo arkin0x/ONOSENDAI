@@ -264,7 +264,7 @@ export const GAME_HOLDS_MESSAGE =
  * (DECK-0002 §2.3): every move inside the bracket is the game's, and EXIT
  * GAME, here, brings you back to where you entered.
  */
-export const IN_GAME_HERE_MESSAGE = 'You are in a game. Leave it (EXIT GAME, or the IN A GAME chip) to move in cyberspace again; you come back where you entered.'
+export const IN_GAME_HERE_MESSAGE = 'You are in a game. Leave it to move in cyberspace again: EXIT GAME in the game (the IN A GAME chip takes you back in), or LEAVE THE GAME in the Proof chain panel. You come back where you entered.'
 
 /**
  * THE SWITCH for refusing moves on a broken chain (review of #224, S2), on

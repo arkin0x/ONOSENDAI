@@ -14,7 +14,7 @@ import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { decryptForRegion } from '../shardCrypto'
 import { inRegion } from './play'
 import { resolveReference } from '../references'
-import { query, queryAny } from '../relay'
+import { query, queryAny, relaySet } from '../relay'
 import { regionKeyAt } from '../shardCrypto'
 import type { NostrEvent } from '../events'
 import type { WorldShard } from './play'
@@ -55,7 +55,8 @@ async function worldBags(game: GameDef, lookupId: string): Promise<NostrEvent[]>
   const filter = { kinds: [HIDDEN_KIND], authors: [game.pubkey], '#d': [lookupId] }
   const [ours, hinted] = await Promise.all([
     query(filter),
-    game.relayHint ? queryAny([game.relayHint], filter).catch(() => []) : Promise.resolve([]),
+    // The hint is asked on its own only when it is not one of this player's relays already (review of #697).
+    game.relayHint && !relaySet().includes(game.relayHint) ? queryAny([game.relayHint], filter).catch(() => []) : Promise.resolve([]),
   ])
   return [...ours, ...hinted]
 }
@@ -92,9 +93,7 @@ function entryAuthentic(e: Partial<Rumor>, signer: string): boolean {
  * drawing, so a kind this client cannot read still counts. A reference never
  * counts: its tags are its author's (review of #667). Null when none does.
  */
-async function entryOf(game: GameDef, bag: NostrEvent, key: Uint8Array): Promise<Position | null> {
-  const list = await bagList(bag, key)
-  if (!list) return null
+function entryOf(game: GameDef, list: readonly unknown[]): Position | null {
   for (const e of list) {
     if (!e || typeof e !== 'object' || Array.isArray(e)) continue
     const tags = (e as { tags?: unknown }).tags
@@ -123,9 +122,16 @@ export async function loadWorld(game: GameDef): Promise<World> {
   const newest = bags[0]
   if (!newest) return { shards: [], entry: regionCentre(game) }
   const { base, height, plane } = game.region
-  const entry = (await entryOf(game, newest, key)) ?? regionCentre(game)
+  const list = (await bagList(newest, key)) ?? []
+  const entry = entryOf(game, list) ?? regionCentre(game)
+  const all = await unbag(newest, key, resolveReference, { at: base, plane }, height)
+  // A piece the bag names by reference that did not come back would leave a hole: a floor to fall through, a wall to
+  // walk through. Said, so nobody moves in half a world (useGame step), rather than drawn as if whole (review of #697).
+  const named = list.filter((e) => Array.isArray(e) && e[0] === 'a').length
+  const missing = named - all.filter((it) => (it.ref ?? it.sealedRef)?.[0] === 'a').length
+  if (missing > 0) throw new Error(`${missing} piece${missing === 1 ? '' : 's'} of this game's world could not be read. Leave the game and try again in a minute.`)
   // Only what lies inside the region, in its plane: the world is drawn there and nowhere else (review of #667).
-  const items = (await unbag(newest, key, resolveReference, { at: base, plane }, height)).filter((it) => it.plane === plane && inRegion(game, it.at))
+  const items = all.filter((it) => it.plane === plane && inRegion(game, it.at))
   return {
     shards: items.filter((it) => it.type === 'shard' && it.shard).map((it) => ({ key: it.eventId, shard: it.shard!, at: it.at, height: it.height })),
     entry,

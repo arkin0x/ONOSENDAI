@@ -23,6 +23,7 @@ vi.mock('../../relay', async (orig) => {
   const held = (f: Filter): NostrEvent[] => published.filter((e) => matches(f, e))
   return {
     ...(await orig<typeof import('../../relay')>()),
+    ...(await import('../../../test/offlineRelay')).offlineRelay,
     relaySet: () => ['wss://relay.onosendai.tech'],
     query: async (f: Filter) => held(f),
     queryAny: async (_relays: string[], f: Filter) => held(f),
@@ -81,6 +82,16 @@ describe('the owner\'s world, unsigned, signed one event at a time', () => {
     const wrong = generateSecretKey()
     for (const f of await unsignedWorld(live, source, TUTORIAL_DEV_PUBKEY, 1_800_000_000)) published.push(nakSign(f.event, wrong))
     expect((await loadWorld(live)).shards).toHaveLength(0)
+  })
+
+  it('a piece that did not come back is a world error, never a world with a hole in it (review of #697)', async () => {
+    // A key of its own: references.ts keeps each answer for a minute, and the earlier tests fetched this key's rotunda.
+    const own = generateSecretKey()
+    const live = tutorialGameFor(getPublicKey(own))
+    const files = await unsignedWorld(live, source, TUTORIAL_DEV_PUBKEY, 1_800_000_000)
+    // The rotunda's object never reached the relay.
+    for (const f of files) if (!f.name.includes('rotunda')) published.push(nakSign(f.event, own))
+    await expect(loadWorld(live)).rejects.toThrow(/1 piece of this game's world could not be read/)
   })
 
   it('refuses the DEV key and a malformed key', async () => {

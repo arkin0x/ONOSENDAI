@@ -264,15 +264,21 @@ export const useGame = create<GameState>((set, get) => {
       const open = openBracket(useCyberspace.getState().actions())
       if (!session && !canLeave(open?.game?.pubkey)) return GAME_NOT_HERE_MESSAGE
       set({ busy: 'exiting', message: null })
+      // The last game position, written in the exit's free `c` (DECK-0002 §7): where you are, or, left without going back
+      // in (after a reload), the last one on the record of a game played here (review of #697).
+      const game = session?.game ?? gameFor(open?.game?.pubkey)
+      const lastAt = session ? (session.at ?? session.resumeAt) : open && game ? recordedPosition(useCyberspace.getState().actions(), open, game) : null
+      const entryId = session?.entryId ?? open?.id
       let left: Awaited<ReturnType<CyberspaceState['exitGame']>>
       try {
-        left = await useCyberspace.getState().exitGame(session?.entryId ?? open?.id, (session?.at ?? session?.resumeAt) ? hexAt(session!.game, (session!.at ?? session!.resumeAt)!) : undefined)
+        left = await useCyberspace.getState().exitGame(entryId, lastAt && game ? hexAt(game, lastAt) : undefined)
       } catch (err) {
         left = { refused: failed(err) }
       }
       if ('refused' in left) { set({ busy: null, message: left.refused }); return left.refused }
       set({ session: null, busy: null })
-      if (session) saveProgress(session.entryId, null)
+      // That bracket is over: its key, gate and clock are of no more use here.
+      if (entryId) saveProgress(entryId, null)
       // The view you entered from, exactly (DECK-0002 §7). The base position
       // needs nothing: the exit's C is the entry's c, so you stand where you did.
       if (session?.snapshot) useCyberspace.setState({ ...session.snapshot })

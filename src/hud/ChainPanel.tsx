@@ -57,6 +57,7 @@ export function ChainPanel(): JSX.Element {
   // Why the last ENTER GAME was refused, while no game is on screen to say it.
   const gameNote = useGame((s) => (s.session ? null : s.message))
   const entering = useGame((s) => s.busy === 'entering')
+  const leaving = useGame((s) => s.busy === 'exiting')
   // While the tutorial runs and offers the dungeon (tutorial/dungeon.ts), its final card is the way in.
   const tutorialDoor = useTutorial((s) => s.active && choiceOffered({ when: DUNGEON_CHOICE }))
   const published = useCyberspace((s) => s.published)
@@ -242,8 +243,8 @@ export function ChainPanel(): JSX.Element {
         // A game ONOSENDAI plays (DECK-0002 §7): back into it, or leave it from here, the exit built from the chain alone.
         <p className="notice notice--game">
           IN A GAME: {gameFor(game.game?.pubkey)?.name}. You stand where you entered it until you leave it.{gameNote ? ` ${gameNote}` : ''}
-          <button className="tag tag--tap" onClick={() => useGame.getState().resume()}>BACK INTO THE GAME</button>
-          <button className="tag tag--tap" onClick={() => { void useGame.getState().exit() }}>LEAVE THE GAME</button>
+          <button className="tag tag--tap" disabled={leaving} onClick={() => useGame.getState().resume()}>BACK INTO THE GAME</button>
+          <button className="tag tag--tap" disabled={leaving} onClick={() => { void useGame.getState().exit() }}>{leaving ? 'LEAVING' : 'LEAVE THE GAME'}</button>
         </p>
       ) : game && canLeave(game.game?.pubkey) ? (
         // A game ONOSENDAI once played, not here now: it can still be left (registry canLeave).

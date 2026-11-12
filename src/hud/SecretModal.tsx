@@ -222,7 +222,7 @@ export function SecretModal(): JSX.Element | null {
           <>
             <h3 className="secret__look-name">{item.chest.name}</h3>
             {look && <div className="secret__spin secret__spin--look"><CardSpin shard={drawnLook(look, openedByHand(me, item.key, item.chest.lockPubkey)) ?? look.closed} size={180} wide /></div>}
-            <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} named={false} /></div>
+            <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} named={false} actsBelow /></div>
             {doorOfMine && wire && <DoorOwnerBlock door={wire} />}
           </>
         ) : item.type === 'audio' && item.audio ? (

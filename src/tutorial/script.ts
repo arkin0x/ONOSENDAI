@@ -9,6 +9,13 @@
 import type { TutorialScript, TutorialStep } from './types'
 import { TUTORIAL_BUD_PICTURE, TUTORIAL_DNA } from './dna'
 
+/**
+ * arkinox's pubkey (npub1arkn0x...), the owner: offered as a friend to add and
+ * spectate (feedback item 11a), and the face beside that step's caption. The
+ * decoded hex, the same key demo/script.ts curates under.
+ */
+export const OWNER_PUBKEY = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
+
 /** The tutorial tree's name as the SEED composer shows it. */
 const TREE = TUTORIAL_DNA.name.toUpperCase()
 
@@ -21,8 +28,8 @@ export const COMMIT = '.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk
 
 export const WELCOME: TutorialStep = {
   id: 'welcome',
-  title: 'Welcome!',
-  caption: "A treasure chest has appeared near your location. Go see what's in it! 🪎👀",
+  title: 'Welcome to cyberspace',
+  caption: "A treasure chest has appeared near your location. Go see what's in it! 👀",
   modal: true,
   go: 'FIND IT',
 }
@@ -60,7 +67,7 @@ export const OPEN: TutorialStep = {
 export const TAKE: TutorialStep = {
   id: 'take',
   title: 'Take it',
-  caption: "What's in the chest is yours once you TAKE it.",
+  caption: "What's in the chest is yours, but you must claim each item.",
   hint: 'Tap the chest again, then TAKE ALL.',
   keepChips: ['found'],
   scene: { target: 'keep', highlight: '.foundchip' },
@@ -71,8 +78,8 @@ export const TAKE: TutorialStep = {
 /** To the dirt plot (A5): one COMMIT, the cursor already on it. */
 export const TO_PLOT: TutorialStep = {
   id: 'to-plot',
-  title: 'The dirt',
-  caption: 'The dirt is for a seed. Go stand on it.',
+  title: 'Planting seeds',
+  caption: "Let's plant code that grows into something beautiful. Go stand on that platform.",
   hint: 'Tap COMMIT to move there.',
   scene: { target: 'self' },
   wait: 'at-plot',
@@ -97,8 +104,8 @@ export const PLANT: TutorialStep = {
 /** The bud preview: a reason to come back. */
 export const BUD: TutorialStep = {
   id: 'bud',
-  title: 'It grows',
-  caption: 'It will grow over time. Check back later.',
+  title: 'It grows!',
+  caption: 'Seeds grow over time. Check back tomorrow.',
   effect: 'leave-build',
   image: { src: TUTORIAL_BUD_PICTURE, alt: `The ${TUTORIAL_DNA.name} as it starts to bud` },
 }
@@ -107,12 +114,14 @@ export const BUD: TutorialStep = {
 export const INVENTORY: TutorialStep = {
   id: 'inventory',
   title: 'Your items',
-  caption: "What you took is in ITEMS, in the menu. That's your stuff.",
+  caption: "Whatever you take from chests appears in ITEMS in the menu. That's your stuff.",
   hint: 'Look in ITEMS at the top of the menu.',
   explain: 'A shard in ITEMS can be placed in the world, built with, or changed in the workshop.',
   // The ITEMS panel by its slot id: DISCOVERED shares the .panel--loot class.
   scene: { target: 'keep', highlight: '[data-panel-id="items"]' },
   effect: 'teach-inventory',
+  // NEXT closes the menu, so on a phone the course step is not behind it (feedback 2026-11-12, item 15).
+  onNext: 'close-menu',
 }
 
 /** To the start of the course: one COMMIT, the cursor already on the start square. */
@@ -178,6 +187,8 @@ export const WORKSHOP: TutorialStep = {
   hint: 'OPEN WORKSHOP. Close it when you are done.',
   explain: 'The workshop is where shards are made, on a grid. Anything you make there can go into the world: place it in BUILD.',
   action: { label: 'OPEN WORKSHOP', effect: 'open-workshop' },
+  // The shards found copied in, and the workshop opened on one with its MENU up (feedback 2026-11-12, item 10).
+  effect: 'workshop-step',
   wait: 'workshop',
 }
 
@@ -227,7 +238,9 @@ export const AGENTS: TutorialStep = {
 export const FRIEND: TutorialStep = {
   id: 'friend',
   title: 'See a friend',
-  caption: "I'm in cyberspace too. I added myself to your TARGET panel. Watch where I have been.",
+  caption: "I'm arkinox, the creator of cyberspace. I'm in cyberspace too. I added myself to your TARGET panel. Watch where I have been.",
+  // The owner's picture to the left of the caption (feedback 2026-11-12, item 11).
+  speaker: OWNER_PUBKEY,
   hint: 'Open TARGET, then tap the chain chip to SPECTATE me.',
   explain: 'A TARGET is anyone you want to keep an eye on. The chain chip walks their moves, oldest to newest. SPECTATE rides along from your own head.',
   keepChips: ['chain'],

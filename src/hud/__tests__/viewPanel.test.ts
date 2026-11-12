@@ -215,18 +215,21 @@ describe('the Settings panel', () => {
     expect(localStorage.getItem('onosendai:showTrail')).toBe('1')
   })
 
-  it('Region keys drives showSecrets, the flag the scene draws the cages from, remembered on this device', () => {
-    expect(useCyberspace.getState().showSecrets).toBe(true)
-    expect(switchTag(view(), 'view-region-keys')).toContain('aria-checked="true"')
-
-    viewSwitch('view-region-keys').props.onCheckedChange(false)
+  it('Region keys drives showSecrets, the flag the scene draws the cages from, off until turned on, remembered on this device', () => {
+    // Off by default (arkinox, 2026-11-12): a device that never touched the switch saved nothing.
     expect(useCyberspace.getState().showSecrets).toBe(false)
-    expect(localStorage.getItem('onosendai:showSecrets')).toBe('0')
     expect(switchTag(view(), 'view-region-keys')).toContain('aria-checked="false"')
 
     viewSwitch('view-region-keys').props.onCheckedChange(true)
     expect(useCyberspace.getState().showSecrets).toBe(true)
     expect(localStorage.getItem('onosendai:showSecrets')).toBe('1')
+    expect(switchTag(view(), 'view-region-keys')).toContain('aria-checked="true"')
+
+    viewSwitch('view-region-keys').props.onCheckedChange(false)
+    expect(useCyberspace.getState().showSecrets).toBe(false)
+    expect(localStorage.getItem('onosendai:showSecrets')).toBe('0')
+    // Left on for the next test, which starts from every switch on.
+    viewSwitch('view-region-keys').props.onCheckedChange(true)
   })
 
   it('touches no other flag: each switch changes only its own', () => {

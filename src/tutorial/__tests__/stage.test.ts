@@ -17,14 +17,15 @@ import { describe, expect, it } from 'vitest'
 import { generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from 'nostr-tools'
 import { regionKeyAt } from '../../lib/shardCrypto'
-import { unbag, type Hidden } from '../../lib/hidden'
+import { hiddenLabel, unbag, type Hidden } from '../../lib/hidden'
 import { decryptForRegion } from '../../lib/shardCrypto'
 import { DNA_KIND } from '../../lib/seeds/seedItem'
 import { lockOf } from '../../lib/locks'
 import { NIP44_MAX_PLAINTEXT, openWithSecret, plaintextBytes, readContents } from '../../lib/chests'
 import { BAG_SAFE_BYTES } from '../../lib/bagSize'
 import { CLIENT_TAG } from '../../lib/client'
-import { BOX_HEIGHT, COVER_MAX, FOOTPRINT, besideToward, inRegion, regionBase, toWorld, tutorialLayout } from '../layout'
+import { BOX_HEIGHT, COVER_MAX, FOOTPRINT, arrivalCell, chestCell, inRegion, regionBase, toFrame, toWorld, tutorialLayout } from '../layout'
+import { TUTORIAL_DNA_EVENT } from '../dna'
 import { STAGE_TEXT, WELCOME_ITEM, boxModel, buildStage, readStage, stageKey, writeStage, type KeyAt } from '../stage'
 import { guideBagsFor, isGuideAuthor, isGuideBag, onGuideBags, passesTaps, setGuideBags } from '../guideBags'
 import { COURSE, FINISH_CHEST, START_STAND, atStart, courseToWorld } from '../course'
@@ -118,7 +119,7 @@ describe('the stage', () => {
     const coverItems = await open(coverBag, MID, l.cover.height)
     expect(coverItems[0].eventId).toBe(stage.ids.blueBox)
     // The blue box and the whole course, every piece where the course puts it, all in the cover (§7.6).
-    // ... and the dirt plot (A5). No DNA: the player's composer signs the tree's own (stage.ts).
+    // ... and the dirt plot (A5). No DNA here: the tree's DNA is in the welcome chest (item 8).
     expect(coverItems).toHaveLength(1 + COURSE.length + 1)
     expect(coverItems[coverItems.length - 1].eventId).toBe(stage.ids.plot)
     const json = await decryptForRegion(regionKeyAt(l.cover.base, l.cover.height, MAX_COMPUTE).key, coverBag.tags.find((t) => t[0] === 'encrypted')![2])
@@ -147,13 +148,16 @@ describe('the stage', () => {
     expect(chest.eventId).toBe(stage.ids.chest)
     expect(stage.ids.boxLookup).toBe(chest.lookupId)
     expect(inRegion(chest.at, l.frame.boxBase, BOX_HEIGHT)).toBe(true)
+    // At its cell in line with the spawn (layout.ts chestCell; feedback 2026-11-12, item 1).
+    const cell = chestCell(l)
+    expect(chest.at).toEqual(toWorld(l.frame, cell.f, cell.r, cell.u))
     expect(chest.chest?.name).toBe(STAGE_TEXT.chestName)
 
     // Locked to the box region's lock: whoever stands there carries its key.
     const lock = lockOf(regionKeyAt(l.frame.boxBase, BOX_HEIGHT, MAX_COMPUTE).key)!
     expect(chest.chest?.lockPubkey).toBe(lock.pubkey)
     const contents = readContents(openWithSecret(chest.chest!, lock.secretHex), stage.guide)
-    expect(contents.map((c) => c.body.type)).toEqual(['shard', 'message', 'key'])
+    expect(contents.map((c) => c.body.type)).toEqual(['shard', 'message', 'key', 'dna'])
     expect(contents.map((c) => c.id)).toEqual(stage.ids.chestContents)
     // Every entry verifies. The trophy and the message are the guide's; the
     // welcome item is the owner's own published event, embedded as theirs.
@@ -170,6 +174,13 @@ describe('the stage', () => {
     expect(contents[2].event.tags).not.toContainEqual(CLIENT_TAG)
     expect(contents[1].body.text).toBe(STAGE_TEXT.message)
     expect(contents[2].body.key?.name).toBe('Black Sun')
+    // The tutorial tree's DNA beside the welcome item (feedback 2026-11-12,
+    // item 8): the owner's published event, placed unchanged, a TAKE-able item.
+    expect(contents[3].event.id).toBe(TUTORIAL_DNA_EVENT.id)
+    expect(contents[3].event.pubkey).toBe(TUTORIAL_DNA_EVENT.pubkey)
+    expect(contents[3].event.sig).toBe(TUTORIAL_DNA_EVENT.sig)
+    expect(contents[3].body.dna?.name).toBe('moon blossom')
+    expect(hiddenLabel(contents[3].body)).toBe('moon blossom DNA')
 
     // The finish chest: in the deck's own height-3 region, locked to it, with pieces to build with.
     const finishAt = courseToWorld(l.frame, FINISH_CHEST)
@@ -250,19 +261,29 @@ describe('the green box (feedback item 1)', () => {
   })
 })
 
-describe('the first move lands in front of the chest, facing it (feedback item 4)', () => {
+describe('the first move lands level with the chest, two gibsons in front of it, facing it (feedback 2026-11-12, item 1)', () => {
   const frames = [{ fwd: 1, side: 1 }, { fwd: -1, side: -1 }] as const
-  it('from straight behind: the neighbor nearer the way in', () => {
+  const boxBase = { x: 800n, y: 800n, z: 800n }
+  it('the chest stands in line with the spawn, and the landing is two along the forward axis with one empty gibson between', () => {
     for (const f of frames) {
-      const frame = { ...f, boxBase: { x: 800n, y: 800n, z: 800n } }
-      expect(besideToward(frame, 3, 3, 3, toWorld(frame, -5, 3, 3))).toEqual(toWorld(frame, 2, 3, 3))
+      const frame = { ...f, boxBase }
+      for (const [r, u] of [[3, 3], [0, 7], [5, 1]]) {
+        const spawn = toWorld(frame, -4, r, u)
+        const c = chestCell({ frame, spawn })
+        const a = arrivalCell({ frame, spawn })
+        // Inside the box, a gibson in from its faces, level with the spawn where it can be.
+        expect(c.f).toBe(3)
+        expect(c.r).toBe(Math.min(6, Math.max(1, r)))
+        expect(c.u).toBe(Math.min(6, Math.max(1, u)))
+        // Same height, same side position, two in front: one empty gibson between.
+        expect(a).toEqual({ f: c.f - 2, r: c.r, u: c.u })
+      }
     }
   })
-  it('from off to a side and above: the neighbor on that line, so the move points at the chest', () => {
+  it('toFrame undoes toWorld, whichever way the layout faces', () => {
     for (const f of frames) {
-      const frame = { ...f, boxBase: { x: 800n, y: 800n, z: 800n } }
-      // From (-1, 7, 7) the chest at (3, 3, 3) is along (1, -1, -1): land at (2, 4, 4), on that line.
-      expect(besideToward(frame, 3, 3, 3, toWorld(frame, -1, 7, 7))).toEqual(toWorld(frame, 2, 4, 4))
+      const frame = { ...f, boxBase }
+      expect(toFrame(frame, toWorld(frame, -5, 2, 9))).toEqual({ f: -5, r: 2, u: 9 })
     }
   })
 })

@@ -70,6 +70,9 @@ export function lootOf(entries: readonly ChestEntry[], held: (e: ChestEntry) => 
       out.push(o)
     } else if (body.type === 'key' && body.key) {
       out.push({ key: `item:${e.id}`, kind: 'item', ids: [e.id], ...(body.key.model ? { model: body.key.model } : {}) })
+    } else if (body.type === 'dna') {
+      // A DNA (DECK-0008 §8.1) floats out as an item, with no model of its own.
+      out.push({ key: `item:${e.id}`, kind: 'item', ids: [e.id] })
     } else if (body.type === 'chest' && body.chest) {
       out.push({ key: `chest:${e.id}`, kind: 'chest', ids: [e.id] })
     }

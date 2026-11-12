@@ -32,6 +32,12 @@ vi.mock('../../lib/relay', async (orig) => {
   }
 })
 
+const menu = vi.hoisted(() => ({ calls: [] as boolean[] }))
+vi.mock('../../hooks/useMenuOpen', async (orig) => {
+  const real = await orig<typeof import('../../hooks/useMenuOpen')>()
+  return { ...real, setMenuOpen: vi.fn((open: boolean) => { menu.calls.push(open) }) }
+})
+
 import { useCyberspace } from '../../store/useCyberspace'
 import { runTutorialEffect, useTutorial } from '../../store/useTutorial'
 import { usePanelLayout } from '../../store/usePanelLayout'
@@ -43,7 +49,8 @@ import { guideBagsFor } from '../guideBags'
 import { GUIDE_KEY } from '../guide'
 import { TUTORIAL_SCRIPT } from '../script'
 import { PLOT_STAND, START_STAND, courseToWorld } from '../course'
-import { besideToward, toWorld } from '../layout'
+import { arrivalCell, chestCell, toWorld } from '../layout'
+import { TUTORIAL_DNA_EVENT } from '../dna'
 import { useWalk } from '../../store/useWalk'
 
 const pubkey = (): string => useCyberspace.getState().identity.pubkey
@@ -65,6 +72,11 @@ afterEach(() => { useTutorial.getState().pause() })
  * (query is mocked to answer []): the press gets past the DNA only because the
  * director notes the event the app ships (dna.ts TUTORIAL_DNA_EVENT) first.
  */
+/** The moon blossom's DNA in ITEMS, as TAKE files it out of the welcome chest (item 8). */
+function holdDna(): void {
+  useInventory.setState({ items: { ...useInventory.getState().items, [TUTORIAL_DNA_EVENT.id]: { id: TUTORIAL_DNA_EVENT.id, type: 'dna', event: TUTORIAL_DNA_EVENT } as never } })
+}
+
 async function expectShippedTree(): Promise<void> {
   const { tutorialDnaId, TUTORIAL_DNA_EVENT } = await import('../dna')
   expect(TUTORIAL_DNA_EVENT.id).toBe(tutorialDnaId())
@@ -116,18 +128,21 @@ describe('the director', () => {
     useShards.setState({ discovered: {} })
   })
 
-  it('lines the first move up one gibson in front of the chest, facing it (feedback item 4)', async () => {
+  it('lines the first move up level with the chest, two gibsons in front of it, one empty gibson between (feedback 2026-11-12, item 1)', async () => {
     useTutorial.getState().start({ restart: true })
     await staged()
     const layout = useTutorialStage.getState().layout!
     useTutorial.getState().start({ at: 'box' })
     await staged()
-    // The chest sits at the frame's (3, 3, 3); the cursor lands on its neighbor toward the player.
     const cursor = useCyberspace.getState().cursor
-    expect(cursor).toEqual(besideToward(layout.frame, 3, 3, 3, useCyberspace.getState().position))
-    const chest = toWorld(layout.frame, 3, 3, 3)
+    const a = arrivalCell(layout)
+    expect(cursor).toEqual(toWorld(layout.frame, a.f, a.r, a.u))
+    // Same height as the chest, and two apart along exactly one axis.
+    const c = chestCell(layout)
+    const chest = toWorld(layout.frame, c.f, c.r, c.u)
+    expect(cursor.y).toBe(chest.y)
     const off = [cursor.x - chest.x, cursor.y - chest.y, cursor.z - chest.z].map((d) => (d < 0n ? -d : d))
-    expect(off.every((d) => d <= 1n) && off.some((d) => d === 1n)).toBe(true)
+    expect(off.filter((d) => d !== 0n)).toEqual([2n])
   })
 
   it('never lets a staging a RESTART overtook overwrite the kept stage', async () => {
@@ -182,8 +197,13 @@ describe('the director', () => {
     useTutorial.getState().next()
     expect(useTutorial.getState().index).toBe(at('take'))
     expect(useTutorial.getState().done).toBe(false)
+    // Something else taken is not enough: the step waits for the moon blossom's DNA (feedback 2026-11-12, item 8).
     useInventory.setState({ items: { [stage.ids.chestContents[1]]: { id: stage.ids.chestContents[1] } as never } })
+    expect(useTutorial.getState().done).toBe(false)
+    expect(stage.ids.chestContents).toContain(TUTORIAL_DNA_EVENT.id)
+    holdDna()
     expect(useTutorial.getState().done).toBe(true)
+    useInventory.setState({ items: {} })
   })
 
   it('counts the course: the start reached, WALK and GRAVITY on, the finish chest found and taken from', async () => {
@@ -247,6 +267,70 @@ describe('the director', () => {
     expect(useTutorial.getState().done).toBe(false)
     useWorkshop.getState().closeWorkshop()
     expect(useTutorial.getState().done).toBe(true)
+  })
+
+  it('copies the shards found into the workshop on the tutorial\'s workshop step, once, filed under Tutorial, and opens it on a course piece with its MENU up (feedback 2026-11-12, item 10)', async () => {
+    const { useWorkshop } = await import('../../store/useWorkshop')
+    const { useShardFolders } = await import('../../store/useShardFolders')
+    const { copyTutorialShards, TUTORIAL_SHARD_ID, TUTORIAL_FOLDER } = await import('../director')
+    const { fromPayload } = await import('sno-core/shards')
+    const trampoline = fromPayload((await import('../pieces/trampoline-4.json')).default, 't')!
+    const platform = fromPayload((await import('../pieces/plat-square-6.json')).default, 'p')!
+    const trophy = fromPayload((await import('../pieces/trophy.json')).default, 'w')!
+    useWorkshop.setState({ open: false, shards: [], currentId: null, openPanel: null })
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    useTutorial.getState().start({ at: 'workshop' })
+    await staged()
+    const stage = useTutorialStage.getState().stage!
+    const mine = (): string[] => useWorkshop.getState().shards.map((m) => m.id).filter((id) => id.startsWith(TUTORIAL_SHARD_ID)).sort()
+    expect(mine()).toEqual([])
+    // Found: two course pieces in the world (one twice), a shard someone else hid, and the trophy taken from the welcome chest.
+    useShards.setState({ discovered: {
+      a: { author: stage.guide, type: 'shard', shard: trampoline } as never,
+      b: { author: stage.guide, type: 'shard', shard: platform } as never,
+      c: { author: stage.guide, type: 'shard', shard: platform } as never,
+      d: { author: 'f'.repeat(64), type: 'shard', shard: { ...platform, name: 'Not ours' } } as never,
+    } })
+    useInventory.setState({ items: { w: { id: 'w', type: 'shard', shard: trophy, from: { chestId: stage.ids.chest, chestName: 'x' } } as never } })
+    // Nothing is copied until the workshop step asks: OPEN WORKSHOP copies them, and opens on the trampoline with the MENU asked for.
+    expect(mine()).toEqual([])
+    runTutorialEffect('open-workshop')
+    expect(mine()).toEqual([`${TUTORIAL_SHARD_ID}platform-6`, `${TUTORIAL_SHARD_ID}trampoline`, `${TUTORIAL_SHARD_ID}trophy`])
+    expect(useWorkshop.getState().open).toBe(true)
+    expect(useWorkshop.getState().currentId).toBe(`${TUTORIAL_SHARD_ID}trampoline`)
+    expect(useWorkshop.getState().openPanel).toBe('menu')
+    // Once: running it again adds nothing.
+    expect(copyTutorialShards()).toBe(`${TUTORIAL_SHARD_ID}trampoline`)
+    expect(mine()).toHaveLength(3)
+    // Filed in the Tutorial folder.
+    const tree = useShardFolders.getState().tree
+    const folder = Object.entries(tree.folders).find(([, f]) => f.name === TUTORIAL_FOLDER)?.[0]
+    expect(folder).toBeDefined()
+    for (const id of mine()) expect(tree.assign[id]).toBe(folder)
+    // Opened another way (the menu's button) while the step is up: set up the same.
+    useWorkshop.setState({ open: false, openPanel: null, currentId: `${TUTORIAL_SHARD_ID}trophy` })
+    useWorkshop.getState().openWorkshop()
+    expect(useWorkshop.getState().currentId).toBe(`${TUTORIAL_SHARD_ID}trampoline`)
+    expect(useWorkshop.getState().openPanel).toBe('menu')
+    useWorkshop.setState({ open: false, openPanel: null })
+    useShards.setState({ discovered: {} })
+    useInventory.setState({ items: {} })
+  })
+
+  it('NEXT on the ITEMS step closes the menu it opened; BACK does not (feedback 2026-11-12, item 15)', async () => {
+    useTutorial.getState().start({ restart: true })
+    menu.calls.length = 0
+    useTutorial.getState().start({ at: 'inventory' })
+    expect(menu.calls).toEqual([true])
+    useTutorial.getState().back()
+    expect(menu.calls).toEqual([true])
+    useTutorial.getState().next()
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('inventory')
+    expect(menu.calls).toEqual([true, true])
+    useTutorial.getState().next()
+    expect(menu.calls).toEqual([true, true, false])
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('to-course')
   })
 
   it('counts the plot reached and a seed of the player\'s own planted, lining the cursor up on the dirt', async () => {
@@ -361,6 +445,13 @@ describe('the director', () => {
     expect(useBuilder.getState().active).toBe(true)
     expect(useCyberspace.getState().scaleExp).toBe(0)
     expect(onPlot(layout!.frame, useCyberspace.getState().cursor)).toBe(true)
+    // On the dirt beside the avatar, at its height, never on it (feedback 2026-11-12, item 6).
+    const planted = useCyberspace.getState().cursor
+    expect(planted).not.toEqual(stand)
+    expect(planted.y).toBe(stand.y)
+    // To one side (the world's X here), so it is not right behind the avatar down the view's forward axis.
+    expect(planted.z).toBe(stand.z)
+    expect(planted.x - stand.x === 1n || planted.x - stand.x === -1n).toBe(true)
     // Built in the plane the player stands in, whatever plane a view had.
     const { buildPlane } = await import('../../lib/buildCursor')
     expect(buildPlane(useCyberspace.getState())).toBe(layout!.plane)
@@ -429,6 +520,14 @@ describe('the director', () => {
     useTutorial.getState().start({ at: 'plant' })
     await staged()
     useCyberspace.setState({ events: [{ id: 'e', tags: [] } as never], position: { x: 0n, y: 0n, z: 0n } })
+    // The moon blossom not taken from the welcome chest: the note says to take it (feedback 2026-11-12, item 8).
+    useInventory.setState({ items: {} })
+    const { TAKE_DNA_FIRST } = await import('../director')
+    runTutorialEffect('plant-tutorial-seed')
+    await vi.waitFor(() => { expect(useTutorial.getState().stepNote).toBe(TAKE_DNA_FIRST) })
+    expect(TAKE_DNA_FIRST).toBe('Take the MOON BLOSSOM DNA from the welcome chest first.')
+    // Taken: planted from the DNA held, which gets it past the DNA to where the player stands.
+    holdDna()
     runTutorialEffect('plant-tutorial-seed')
     await vi.waitFor(() => { expect(useTutorial.getState().stepNote).toMatch(/Stand on the dirt/) })
     useTutorial.getState().next()
@@ -452,7 +551,7 @@ describe('the director', () => {
       useCyberspace.setState({ events: [{ id: 'e', tags: [] } as never], position: stand, cursor: stand, headPlane: layout!.plane })
     }
     const meanwhile: Array<[string, () => void, RegExp | null]> = [
-      ['the cursor moved', () => useCyberspace.setState({ cursor: { ...stand, x: stand.x + 1n } }), /cursor moved/],
+      ['the cursor moved', () => useCyberspace.setState({ cursor: { ...stand, x: stand.x + 3n } }), /cursor moved/],
       ['the step changed', () => useCyberspace.getState().adjustScale(2), /cursor moved/],
       ['the plane changed', () => useCyberspace.getState().setPlane((1 - layout!.plane) as 0 | 1), /cursor moved/],
       ['BUILD was left', () => useBuilder.getState().exit(), /BUILD was left/],
@@ -492,6 +591,7 @@ describe('the director', () => {
     useTutorial.getState().start({ at: 'plant' })
     await staged()
     useCyberspace.setState({ events: [{ id: 'e', tags: [] } as never], position: { x: 0n, y: 0n, z: 0n } })
+    holdDna()
     runTutorialEffect('plant-tutorial-seed')
     expect(director.tutorialSeedMeasuring()).toBe(true)
     expect(useTutorial.getState().stepNote).toBe('One moment.')

@@ -19,6 +19,7 @@ import { useCover } from '../hooks/useCover'
 import { useEscape } from '../hooks/useEscape'
 import { CaptionText, useCoachOffsets } from './DemoCoach'
 import { useTutorialStage } from '../tutorial/director'
+import { ProfilePic } from './ProfileBadge'
 
 /** How far along a step is, 0 to 1, along the steps that are not branches; a branch is the end. */
 export function progressOf(steps: ReadonlyArray<{ branch?: boolean }>, index: number): number {
@@ -157,7 +158,14 @@ export function TutorialCoach(): JSX.Element | null {
         <div className="demo__titlerow">
           <h2 className="demo__title">{step.title}</h2>
         </div>
-        <p className="demo__caption"><CaptionText caption={caption} /></p>
+        {step.speaker
+          ? (
+            <div className="tutorial__speaker">
+              <ProfilePic pubkey={step.speaker} size={44} />
+              <p className="demo__caption"><CaptionText caption={caption} /></p>
+            </div>
+          )
+          : <p className="demo__caption"><CaptionText caption={caption} /></p>}
         {step.image && <img className="tutorial__image" src={step.image.src} alt={step.image.alt} width={160} height={160} onError={(e) => { e.currentTarget.style.display = 'none' }} />}
         {step.explain && explaining && <p className="demo__caption tutorial__explain">{step.explain}</p>}
       </div>

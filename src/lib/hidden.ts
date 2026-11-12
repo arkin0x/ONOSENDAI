@@ -57,6 +57,7 @@ import { verifyOnce } from './verifiedSigs'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from './events'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
+import { tryParseDna } from 'sno-core/seeds'
 import { withAuthoredConstrain } from './walkConstrain'
 import { keepOwnTable } from './carried'
 import { signalRescan } from './rescanSignal'
@@ -230,7 +231,17 @@ export function referenceTo(object: NostrEvent, at: Position, plane: Plane, rela
  */
 export const MAX_MESSAGE_LENGTH = 10_000
 
-export type HiddenType = 'shard' | 'message' | 'key' | 'chest' | 'audio' | 'seed'
+/**
+ * 'dna' is read only out of a chest (DECK-0008 §8.1, Public or hidden: a DNA
+ * carried as an item in a chest): a bag's DNA is handed to the resolver and is
+ * never an item of its own (fromInner), so nothing in the world is one.
+ */
+export type HiddenType = 'shard' | 'message' | 'key' | 'chest' | 'audio' | 'seed' | 'dna'
+
+/** A DNA carried in a chest (DECK-0008 §8.1): its name, the `dna` line of a written one, or null for a mixed one. */
+export interface DnaItem {
+  name: string | null
+}
 
 /** What a key item carries, read out of its event (B1 §2.1). */
 export interface KeyItem {
@@ -371,6 +382,8 @@ export interface ItemBody {
   audio?: AudioItem
   /** A seed (DECK-0008 §8.2), read with every check before its DNA. */
   seed?: SeedItem
+  /** A DNA taken out of a chest (DECK-0008 §8.1). */
+  dna?: DnaItem
 }
 
 /**
@@ -412,6 +425,14 @@ export function readItem(inner: Pick<NostrEvent, 'kind' | 'content' | 'tags' | '
     const seed = seedItemOf({ id: ev.id, kind: ev.kind, pubkey: ev.pubkey, created_at: ev.created_at, tags: ev.tags, content: ev.content })
     return seed ? { type: 'seed', seed } : null
   }
+  if (inner.kind === DNA_KIND) {
+    // A written DNA by its `dna` line; one whose text the engine refuses is
+    // skipped (a reader never grows it, §3). A mixed DNA's content is empty
+    // (§8.1): kept, unnamed. The resolver checks the rest when it is planted.
+    if (inner.content === '') return { type: 'dna', dna: { name: null } }
+    const read = tryParseDna(inner.content)
+    return read.ok ? { type: 'dna', dna: { name: read.dna.name } } : null
+  }
   return null
 }
 
@@ -426,12 +447,13 @@ export function messagePreview(text: string, max = 32): string {
 }
 
 /** What a hidden thing is called in a row, a chip or a ghost: a message's preview, else its name. */
-export function hiddenLabel(h: Pick<ItemBody, 'type' | 'text' | 'shard' | 'key' | 'chest' | 'audio' | 'seed'>, max = 32): string {
+export function hiddenLabel(h: Pick<ItemBody, 'type' | 'text' | 'shard' | 'key' | 'chest' | 'audio' | 'seed' | 'dna'>, max = 32): string {
   if (h.type === 'message') return messagePreview(h.text ?? '', max)
   if (h.type === 'audio') return h.audio?.title ?? 'audio'
   if (h.type === 'key') return h.key?.name ?? 'key'
   if (h.type === 'chest') return h.chest?.name ?? 'chest'
   if (h.type === 'seed') return h.seed?.title || 'seed'
+  if (h.type === 'dna') return h.dna?.name ? `${h.dna.name} DNA` : 'mixed DNA'
   return h.shard?.name ?? 'shard'
 }
 

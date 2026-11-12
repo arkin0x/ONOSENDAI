@@ -7,8 +7,8 @@
  * first among things made in the same second, undated things last. Reached from the found chip,
  * which says how many, and from NEARBY on the DISCOVERED panel. VIEW flies to
  * the thing the way the bag record's VIEW does. A key row has TAKE until it
- * is held; a chest row opens here when you hold what opens it (ItemRows), and a
- * door row has its OPEN or CLOSE beside VIEW (arkinox, 2026-11-12).
+ * is held; a chest row has its OPEN, and a door row its OPEN or CLOSE, beside
+ * VIEW and the same size, VIEW on the right (arkinox, 2026-11-12).
  * Tabs sort the list by kind, ITEMS first (lib/nearbyTabs.ts); every opening
  * starts on the first tab, left to right, with anything in it (arkinox,
  * 2026-11-01), and RETURN from a VIEW comes back to the tab it left.
@@ -31,7 +31,7 @@ import { rememberNearbyReturn } from '../lib/nearbyReturn'
 import { ProfilePic } from './ProfileBadge'
 import { ChestBlock, KeyLine, listedOnce, useChestOpen } from './ItemRows'
 import { useEscape } from '../hooks/useEscape'
-import { NEARBY_TABS, byTab, firstFilledTab, tabOf, type NearbyTab } from '../lib/nearbyTabs'
+import { NEARBY_TABS, byTab, firstFilledTab, type NearbyTab } from '../lib/nearbyTabs'
 import { lockWord, useOpenedChests } from '../store/useOpenedChests'
 import { GoArrow } from './ui/GoArrow'
 
@@ -64,9 +64,10 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
   const profile = useProfile(item.author ?? null)
   const author = item.author ?? ''
   const name = author === me ? 'you' : profileLabel(profile, safeNpub(author))
-  // A door's OPEN or CLOSE is drawn here, beside VIEW (ItemRows ChestBlock actionsIn).
-  const [doorActs, setDoorActs] = useState<HTMLElement | null>(null)
-  const door = tabOf(item) === 'doors'
+  // A chest's OPEN, or a door's OPEN or CLOSE, is drawn here, beside VIEW and
+  // the same size (ItemRows ChestBlock actionsIn; tutorial feedback 2026-11-12, item 2).
+  const [chestActs, setChestActs] = useState<HTMLElement | null>(null)
+  const chest = item.type === 'chest' && !!item.chest
   return (
     <li className="secrets__row nearby__row">
       {item.type === 'shard' && item.shard ? <ShardThumb shard={item.shard} /> : <ItemIcon className="nearby__glyph" type={item.type} coin={item.type === 'message' && findCashuToken(item.text) !== null} size={14} />}
@@ -74,7 +75,7 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
         {item.type === 'key' && item.keyItem
           ? <KeyLine id={item.key} name={item.keyItem.name} author={author} />
           : item.type === 'chest' && item.chest
-            ? <ChestBlock id={item.key} chest={item.chest} author={author} verified place={placeOf(item)} actionsIn={door ? doorActs : undefined} />
+            ? <ChestBlock id={item.key} chest={item.chest} author={author} verified place={placeOf(item)} actionsIn={chestActs} />
             : <span className="nearby__label">{labelOf(item)}</span>}
         <span className="nearby__where">{whereOf(item)}{item.type === 'chest' && item.chest && <> · <LockStatus id={item.key} lock={item.chest.lockPubkey} me={me} /></>}</span>
         <span className="nearby__meta">
@@ -84,7 +85,7 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
         </span>
       </div>
       <span className="nearby__acts">
-        {door && <span className="nearby__door" ref={setDoorActs} />}
+        {chest && <span className="nearby__door" ref={setChestActs} />}
         <button className="avatars__go nearby__view" onClick={() => onView(item)} title="Fly to it">VIEW<GoArrow /></button>
       </span>
     </li>

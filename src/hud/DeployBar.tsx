@@ -373,7 +373,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   }, [pending, plane])
   // A seed hides where the automatic discovery finds it (owner ruling
   // 2026-11-10): the smallest height from 3 to 12 whose cube holds this DNA's
-  // own bloom at day 31 where it lands (SeedCompose measures it for this cursor
+  // own bloom at its last day where it lands (SeedCompose measures it for this cursor
   // and step; anywhere else, AGAIN included, it is 12), 12 when none does, and
   // the bloom draws past its cube. + still hides it higher, by hand. It used to fit
   // the 64 units every bloom is held to, a 128-gibson span that straddles some

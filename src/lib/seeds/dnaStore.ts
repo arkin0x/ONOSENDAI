@@ -105,7 +105,7 @@ export const idbDnaCache: Pick<DnaSources, 'load' | 'save'> & { all: () => Promi
 /** A DNA resolver: one per page in the app (dnaResolver), one per test. */
 export class DnaResolver {
   private verdicts = new Map<string, DnaVerdict>()
-  /** DNAs this page holds without fetching: from a bag, or signed here. Never persisted. */
+  /** DNAs this page holds without fetching: from a bag, signed here, or shipped with the app (hold). Never persisted. */
   private local = new Map<string, NostrEvent>()
   private missingAt = new Map<string, number>()
   /** Misses in a row, by id: each waits twice as long as the one before. */
@@ -136,6 +136,15 @@ export class DnaResolver {
     if (was && was.state !== 'missing' && was.state !== 'fetching') return
     const v = checkDna(ev, ev.id, this.verify)
     if (v.state === 'ok' || v.state === 'mixed') { this.set(v); this.missingAt.delete(ev.id); this.misses.delete(ev.id) }
+  }
+
+  /**
+   * DNAs that ship with the app (seedDnas SEED_DNA_EVENTS): held as this
+   * page's own, unchecked until one is asked for, then checked as any DNA is
+   * and never fetched. Holding costs nothing at load: no hash, no signature.
+   */
+  hold(events: readonly NostrEvent[]): void {
+    for (const ev of events) if (ev && ev.kind === DNA_KIND && typeof ev.id === 'string' && HEX64.test(ev.id) && !this.local.has(ev.id)) this.local.set(ev.id, ev)
   }
 
   /** Resolve a DNA: memory, then the bag's or this page's own, then IndexedDB, then relays. */

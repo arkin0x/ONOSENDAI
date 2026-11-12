@@ -151,8 +151,18 @@ export function miningSeconds(bits: number, sha256PerSec: number | null, workers
   return expectedTries(bits) / triesPerSec(sha256PerSec, bytes, workers)
 }
 
-/** The preview's slider runs over the last month of blocks: day 0 to day 30. */
-export const PREVIEW_DAYS = 30
+/**
+ * The preview's last day for a DNA at these caps: its generations cap plus
+ * one, as the Seed Garden's workbench plays a DNA to (owner ruling "A",
+ * 2026-11-12). Its last generation comes on day `generations` (sno-core
+ * generationAt) and grows through that day, so on the day after the bloom is
+ * fully grown and grows no more: 33 for the free caps' 32 days, 41 for the
+ * original DNAs, 129 for a DNA of 128 days. The slider runs from day 0 to
+ * here, and the hide height is measured here (bloomReach.ts).
+ */
+export function previewLastDay(caps: Pick<Caps, 'generations'>): number {
+  return Math.max(0, Math.floor(caps.generations)) + 1
+}
 
 /** A made-up block hash for the preview, where this page holds no real one. Never used for a real bloom. */
 export function previewHash(height: number): string {
@@ -161,16 +171,20 @@ export function previewHash(height: number): string {
 
 /**
  * The worker request that grows the preview: the DNA planted at the build
- * cursor PREVIEW_DAYS days before the clock block, seen after `day` whole
+ * cursor its last day's worth of days (previewLastDay) before the clock
+ * block, so its last day ends at the clock block, seen after `day` whole
  * days of blocks (to the last block of that day, so each day's new growth is
  * nearly grown). Its weather is the real blocks' where the page has them, and
- * made-up hashes where it does not: a preview shows the kind of thing a DNA
- * grows, and the real bloom starts from the block it is planted at.
+ * made-up hashes where it does not (it fetches none, so a DNA of 128 days,
+ * planted about four months back, mostly grows on made-up ones): a preview
+ * shows the kind of thing a DNA grows, and the real bloom starts from the
+ * block it is planted at.
  */
 export function previewRequest(o: { text: string; caps: Caps; coord: string; scale: number; tip: number; day: number; hashOf: (h: number) => string | null | undefined }): Omit<GrowRequest, 'id' | 'type'> {
   const N = BLOCKS_PER_GENERATION
-  const planted = clockHeight(o.tip) - PREVIEW_DAYS * N - (N - 1)
-  const day = Math.max(0, Math.min(PREVIEW_DAYS, Math.floor(o.day)))
+  const last = previewLastDay(o.caps)
+  const planted = clockHeight(o.tip) - last * N - (N - 1)
+  const day = Math.max(0, Math.min(last, Math.floor(o.day)))
   const clock = planted + day * N + (N - 1)
   const hashes: Record<number, string> = {}
   for (let k = 1; k <= Math.min(day, o.caps.generations); k++) {
@@ -197,8 +211,9 @@ export const REACH_PAD_GIBSONS = 2
 /**
  * How far a drawn bloom reaches from its seed, in gibsons, with the margin:
  * its farthest vertex (positions in ticks, 120 a unit) at 2^scale gibsons a
- * unit. Measured on the bloom at day 31 (the preview's last day), it sizes the
- * cube to this DNA, never to the 64 units every bloom is held to.
+ * unit. Measured on the bloom at its DNA's last day (previewLastDay, fully
+ * grown), it sizes the cube to this DNA, never to the 64 units every bloom
+ * is held to.
  */
 export function bloomReachGibsons(positions: ArrayLike<number>, scale: number): number {
   let r2 = 0

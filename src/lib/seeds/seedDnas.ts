@@ -14,15 +14,24 @@
  * line, except the two designed ferns, whose `dna` lines are the original
  * fiddlehead's and sword fern's: in SEED they are named for their group.
  *
- * The owner publishes each under his npub (ruling of 2026-11-10, for the
- * original DNAs; the same for these). SEED_DNA_IDS holds those event ids;
- * until one is set, SEED signs a DNA of its own for the planter, as it
- * always has. A test holds every text valid SEEDO under the 8,192 byte
- * limit, every caps priced, every id empty or 64 hex, and every DNA growing
- * from day 0 to its last generation.
+ * The owner published each under his npub (ruling of 2026-11-10, for the
+ * original DNAs; the same for these), all 30 on 2026-11-12. SEED_DNA_IDS
+ * holds those event ids, and every new seed of a listed DNA names its
+ * event. SEED_DNA_EVENTS is each event itself, signed, rebuilt from its text
+ * here and its signature (seedDnasSigned.json): it ships with the app, so
+ * planting one needs no relay for it (lib/seeds/seedSources holds them in
+ * the page's DNA resolver), as the tutorial tree's does (tutorial/dna.ts).
+ * A test holds every text valid SEEDO under the 8,192 byte limit, every caps
+ * priced, every id 64 hex, every DNA growing from day 0 to its last
+ * generation, and each rebuilt event equal to the relays' copy
+ * (__fixtures__/seed-dnas-published.json): its id is the hash of this text,
+ * so a text edited here no longer verifies, and the test says so.
  */
 
 import { ORIGINAL_DNAS, type OriginalDna } from './originalDnas'
+import type { NostrEvent } from '../events'
+import { DNA_KIND } from './seedItem'
+import signed from './seedDnasSigned.json'
 
 /** The Seed Garden's groups, in its order. */
 export const DNA_GROUPS = ['Originals', 'Crystals', 'Crystals v3', 'Ferns', 'Bonsai', 'Tall trees'] as const
@@ -185,42 +194,43 @@ const DESIGNED_DNAS: readonly SeedDna[] = [
 export const SEED_DNAS: readonly SeedDna[] = [...ORIGINAL_DNAS.map((d) => ({ ...d, group: 'Originals' as const })), ...DESIGNED_DNAS]
 
 /**
- * The owner's published event for each DNA SEED lists, by name, or empty
- * while it is unpublished (owner ruling 2026-11-10). A set id is what every
- * new seed of that DNA names; its own `caps` tag is the size limit it is
- * planted at.
+ * The owner's published event for each DNA SEED lists, by name (owner
+ * ruling 2026-11-10; all published 2026-11-12, kind 3350 under npub
+ * e8ed3798...). A set id is what every new seed of that DNA names; its own
+ * `caps` tag is the size limit it is planted at. An empty one would mean
+ * unpublished: SEED would sign a DNA of its own for the planter.
  */
 export const SEED_DNA_IDS: Readonly<Record<string, string>> = {
-  'fiddlehead': '',
-  'sword fern': '',
-  'oak': '',
-  'willow': '',
-  'coral': '',
-  'crystal': '',
-  'winter star': '',
-  'trefoil frost': '',
-  'penta frost': '',
-  'twelve-armed flake': '',
-  'amethyst tetrapod': '',
-  'citrine compass': '',
-  'rose quartz star': '',
-  'aquamarine geode': '',
-  'winter star v3': '',
-  'rose frost v3': '',
-  'amethyst cluster v3': '',
-  'aquamarine spire v3': '',
-  'citrine cross v3': '',
-  'fiddlehead (ferns)': '',
-  'sword fern (ferns)': '',
-  'juniper': '',
-  'cascade pine': '',
-  'japanese maple': '',
-  'cherry': '',
-  'italian cypress': '',
-  'amur maple': '',
-  'coconut palm': '',
-  'silver birch': '',
-  'giant sequoia': '',
+  'fiddlehead': '8341518c9564598f7baaebea9417aca0dffb49f759ede0c5d1d00d5e0ccf6bd5',
+  'sword fern': '9663e5b69a1cfac13a548322c38bdb1434eb1a76417be7d3af9d8b76add55026',
+  'oak': 'f5c64c0997dac6821b9e8b35a71825cafcac7a34163ffcb8b50802e5b96b0709',
+  'willow': 'e1c17ffa6a56a577fbe64d711a7c6b6d041074e712e06f0a057f462afc173686',
+  'coral': '51b33181f70c794215e25c5fcd5eac58ccf08013476d16a7761557b29812e13d',
+  'crystal': 'ffdd7f6e121b32722ffaa12bca395f1c60c06c52c4036f767d33e40be53170ac',
+  'winter star': '771f3b9d4f208544e04fb8f44099402a0ef5cd29480797d1e28037125cdaae9e',
+  'trefoil frost': '4de42d38e712c0201c09701af472468b90adc94ef14baf9707bc847e29c1988c',
+  'penta frost': '1d99392ba3e5122e35461ea782799730f75a564b6a98dc4376cf9203c608e3bc',
+  'twelve-armed flake': '7ce9fe493de7c7b3863f9b0bb27db24e1ca91087a52e4330d176ddd79f39ec68',
+  'amethyst tetrapod': '417eeb6bf4beee6c84f99396062fbe070b6ccda96e45e128e30371f22d0d12ab',
+  'citrine compass': 'dfba99562576d12fe8260fbfc4fcd218ca1759c3dbb6871ca3a128d7325643fe',
+  'rose quartz star': 'fd62641eb4b76e1eb62d9e684da580b953724aaee9a24ccb790fedfe56b908aa',
+  'aquamarine geode': 'd44b31ac7de03409338c540abddf57e03bc2ea0733f8819cc4b38e74249563f0',
+  'winter star v3': '892bdd83d2687c90b9672adad28cae4534230c977073b1b58fd99a3505d73d5d',
+  'rose frost v3': '2ae9fea2233ce9fc685a9d0ba635023d1b291e020d6b78025ee70365f447b0d3',
+  'amethyst cluster v3': 'b1a023005c436efd8bc1daa2ce9189edba0db46a22eb11d79f6ce44f1e7c160c',
+  'aquamarine spire v3': '785049fe417c0eb2238c7769ab4f6185d305ce57b5589ba11485a69b5d8e5318',
+  'citrine cross v3': 'c0762e87466c6d539f47585d6994fdeb73784e737b80438d544a58b28eda024e',
+  'fiddlehead (ferns)': '426b415cd71105459c0352a7c569ac15a1001f0fa8343878e636f74639da5453',
+  'sword fern (ferns)': 'e3428eb336d80dc36e7cabb65b5eb1fa0b81dcf9a2447c7e3a1623011cdeb1d5',
+  'juniper': 'd76dba04f861b6c15f5722fd7781c6303d43a52c2adcc5de9dc62fa5b670eb90',
+  'cascade pine': '52a7dd9dd3fd4b3d92f3d70abd68a6ca0509913dbe1252eb7fa7f1a97bd175dd',
+  'japanese maple': 'c8e4902702da00741c4c24b2e6d7566f5a63b5232a3902bedd00c7bb55877727',
+  'cherry': 'fd3b3c59e3415d4028fc63fa06dd1ef343d1b17adbf34c8b12beddf4cf576038',
+  'italian cypress': '5a6700ebc1856830a5263572ae5a939aa9a22ec67b6f887d12269608539d899c',
+  'amur maple': '7da0060350fc92985cfcbf7f2f2fab4008e3acbcc3d038489ed63227d9435a3a',
+  'coconut palm': '8b1ba8480685fc1bd174ed3d251ad389ef32882203777b829a7bd466305d6b69',
+  'silver birch': '4828eafafbb71a975cd0dad3cc6053a2f71df7b668aba5a7b793d6b1031a5482',
+  'giant sequoia': '78878b4d41f859d1e10af47bf72960f2570e6ba84543c54c75f83f428d5ea0ec',
 }
 
 /** The owner's event id for a DNA SEED lists, or null while none is set. */
@@ -228,3 +238,21 @@ export function seedDnaId(name: string, ids: Readonly<Record<string, string>> = 
   const id = ids[name]
   return typeof id === 'string' && /^[0-9a-f]{64}$/.test(id) ? id : null
 }
+
+/** The owner's key, who signed every DNA SEED lists. */
+export const SEED_DNA_AUTHOR = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
+
+/** What ships of each published event besides its text: its time, tags (caps and alt) and signature. */
+const SIGNED: Readonly<Record<string, { created_at: number; tags: string[][]; sig: string }>> = signed
+
+/**
+ * The owner's published events, signed, as the relays hold them: each one's
+ * text from SEED_DNAS, its id from SEED_DNA_IDS, the rest from
+ * seedDnasSigned.json. Checked when first asked for, as any DNA is (dnaStore
+ * checkDna: its id is its hash, its signature verifies), so a text that
+ * drifted from the published one is refused, never planted under its id.
+ */
+export const SEED_DNA_EVENTS: readonly NostrEvent[] = SEED_DNAS.flatMap((d) => {
+  const id = seedDnaId(d.name), s = SIGNED[d.name]
+  return id && s ? [{ id, pubkey: SEED_DNA_AUTHOR, created_at: s.created_at, kind: DNA_KIND, tags: s.tags, content: d.text, sig: s.sig }] : []
+})

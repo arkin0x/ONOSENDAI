@@ -9,9 +9,10 @@
 import { describe, expect, it } from 'vitest'
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import { fromPayload } from 'sno-core/shards'
-import { BASE_CAPS, growBloom, mixDna, parseDna, tryParseDna, workOk } from 'sno-core/seeds'
+import { BASE_CAPS, clockHeight, growBloom, mixDna, parseDna, tryParseDna, workOk } from 'sno-core/seeds'
 import { ORIGINAL_CAPS, ORIGINAL_DNAS } from '../seeds/originalDnas'
-import { bloomReachGibsons, seedDraftHeight, seedHideFor, seedHideHeight, SEED_HIDE_MAX, SEED_HIDE_MIN, dnaMatches, dnaTemplate, dnaTextRefusal, readDnaText, draftPrice, miningSeconds, previewHash, previewRequest, seedTemplate, seedWorkHolds, PREVIEW_DAYS } from '../seeds/plant'
+import { SEED_DNAS } from '../seeds/seedDnas'
+import { bloomReachGibsons, seedDraftHeight, seedHideFor, seedHideHeight, SEED_HIDE_MAX, SEED_HIDE_MIN, dnaMatches, dnaTemplate, dnaTextRefusal, readDnaText, draftPrice, miningSeconds, previewHash, previewRequest, seedTemplate, seedWorkHolds, previewLastDay } from '../seeds/plant'
 import { mineChunk, nonceTagged } from '../avatarMine'
 import { seedItemOf } from '../seeds/seedItem'
 import { GrowCache, handleGrow } from '../seeds/growJob'
@@ -142,8 +143,8 @@ describe('the seed event and its work (§8.2, §7)', () => {
 
 describe('the preview', () => {
   const blocks = vectorBlocks()
-  // A tip that puts the preview's planted block at the vectors' 970,400.
-  const tip = 970400 + PREVIEW_DAYS * 144 + 143 + 6
+  // A tip that puts the preview's planted block, for the original DNAs' caps, at the vectors' 970,400.
+  const tip = 970400 + previewLastDay(ORIGINAL_CAPS) * 144 + 143 + 6
 
   it('grows the bloom sno-core grows, with the real blocks where the page has them', () => {
     const req = previewRequest({ text: ORIGINAL_DNAS[0].text, caps: ORIGINAL_CAPS, coord: vectors.growth.cases[0].coord, scale: 0, tip, day: 30, hashOf: (h) => blocks.get(h) })
@@ -172,15 +173,49 @@ describe('the preview', () => {
     expect('opacity' in bloomShard({ ...answer.buffers, opacity: undefined }, 'crystal', 0, 'x')).toBe(false)
   })
 
-  it('made-up hashes where the page has none, day 0 is the axiom, and the day is held to 0..30', () => {
+  it('made-up hashes where the page has none, day 0 is the axiom, and the day is held to 0..its last day', () => {
     const req = previewRequest({ text: ORIGINAL_DNAS[2].text, caps: ORIGINAL_CAPS, coord: positionHex(at, 0), scale: 2, tip: 975400, day: 99, hashOf: () => undefined })
-    expect(req.clock - req.seed.planted!).toBe(30 * 144 + 143)
+    expect(req.clock - req.seed.planted!).toBe(41 * 144 + 143)
     const first = req.seed.planted! + 144
     expect(req.hashes[first]).toBe(previewHash(first))
     const zero = previewRequest({ text: ORIGINAL_DNAS[2].text, caps: ORIGINAL_CAPS, coord: positionHex(at, 0), scale: 2, tip: 975400, day: 0, hashOf: () => undefined })
     expect(zero.hashes).toEqual({})
     const { answer } = handleGrow({ type: 'grow', id: 2, ...zero }, new GrowCache())
     expect(answer.type === 'bloom' && answer.growth.generation).toBe(0)
+  })
+
+  it('runs to each DNA\'s own last day, its generations cap plus one, ending at the clock block (owner ruling "A", 2026-11-12)', () => {
+    expect(previewLastDay(BASE_CAPS)).toBe(33)
+    expect(previewLastDay(ORIGINAL_CAPS)).toBe(41)
+    expect(previewLastDay({ generations: 64 })).toBe(65)
+    expect(previewLastDay({ generations: 128 })).toBe(129)
+    for (const caps of [BASE_CAPS, ORIGINAL_CAPS, { ...BASE_CAPS, generations: 128 }]) {
+      const last = previewLastDay(caps)
+      const req = previewRequest({ text: ORIGINAL_DNAS[2].text, caps, coord: positionHex(at, 0), scale: 0, tip: 975_400, day: last, hashOf: () => undefined })
+      // Its last day ends at the clock block, whatever the DNA's days: the preview is the blocks up to now.
+      expect(req.clock).toBe(clockHeight(975_400))
+      expect(req.clock - req.seed.planted!).toBe(last * 144 + 143)
+      // Every generation's driving block, and no more.
+      expect(Object.keys(req.hashes)).toHaveLength(caps.generations)
+    }
+  })
+
+  it('a DNA of 128 days shows its grown form on its last day: the last generation, fully grown, grown no further after', () => {
+    const d = SEED_DNAS.find((x) => x.name === 'giant sequoia')!
+    expect(d.caps.generations).toBe(128)
+    const last = previewLastDay(d.caps)
+    const req = previewRequest({ text: d.text, caps: d.caps, coord: positionHex(at, 1), scale: 0, tip: 975_400, day: last, hashOf: () => undefined })
+    const { answer } = handleGrow({ type: 'grow', id: 1, ...req }, new GrowCache())
+    if (answer.type !== 'bloom') throw new Error(answer.type)
+    expect(answer.growth.generation).toBe(128)
+    // A day later than the slider goes draws the very same bloom: nothing is still growing on its last day.
+    const later = handleGrow({ type: 'grow', id: 2, ...req, clock: req.clock + 144 * 5 }, new GrowCache()).answer
+    if (later.type !== 'bloom') throw new Error(later.type)
+    expect(Array.from(later.buffers.positions)).toEqual(Array.from(answer.buffers.positions))
+    // ... and it is well past where day 30 left it, which is where the slider used to stop.
+    const day30 = handleGrow({ type: 'grow', id: 3, ...previewRequest({ text: d.text, caps: d.caps, coord: positionHex(at, 1), scale: 0, tip: 975_400, day: 30, hashOf: () => undefined }) }, new GrowCache()).answer
+    if (day30.type !== 'bloom') throw new Error(day30.type)
+    expect(bloomReachGibsons(answer.buffers.positions, 0)).toBeGreaterThan(2 * bloomReachGibsons(day30.buffers.positions, 0))
   })
 })
 
@@ -223,13 +258,32 @@ describe('the hide height (owner ruling 2026-11-10)', () => {
     expect(none.height).toBe(SEED_HIDE_MAX)
   })
 
-  it('bloomReachAt, the measure SEED and the tutorial hand seedHideFor, is the day-31 bloom grown at the point', async () => {
+  it('bloomReachAt, the measure SEED and the tutorial hand seedHideFor, is the bloom at its DNA\'s last day grown at the point', async () => {
     const at = { x: (1n << 40n) + 123_457n, y: (1n << 41n) + 987_651n, z: (1n << 42n) + 55_555n }
     const reach = await bloomReachAt(ORIGINAL_DNAS[2].text, ORIGINAL_CAPS, 1, 0)(at)
-    const req = previewRequest({ text: ORIGINAL_DNAS[2].text, caps: ORIGINAL_CAPS, coord: positionHex(at, 1), scale: 0, tip: 975_300, day: PREVIEW_DAYS, hashOf: () => undefined })
+    const req = previewRequest({ text: ORIGINAL_DNAS[2].text, caps: ORIGINAL_CAPS, coord: positionHex(at, 1), scale: 0, tip: 975_300, day: previewLastDay(ORIGINAL_CAPS), hashOf: () => undefined })
     const { answer } = handleGrow({ type: 'grow', id: 1, ...req }, new GrowCache())
     if (answer.type !== 'bloom') throw new Error(answer.type)
+    expect(answer.growth.generation).toBe(40)
     expect(reach).toBe(bloomReachGibsons(answer.buffers.positions, 0))
+  })
+
+  it('a long grower\'s hide height is measured on its last day: the giant sequoia (128 days) at day 129, not day 30', async () => {
+    const d = SEED_DNAS.find((x) => x.name === 'giant sequoia')!
+    // A cell's centre (build step 12), where only the bloom's size decides the height.
+    const cursor = { x: (1n << 40n) + 123_457n, y: (1n << 41n) + 987_651n, z: (1n << 42n) + 55_555n }
+    const reachAt = bloomReachAt(d.text, d.caps, 1, 0)
+    const found = await seedHideFor(cursor, 1, 12, 20, reachAt)
+    const grownAt = (p: typeof cursor, day: number): number => {
+      const { answer } = handleGrow({ type: 'grow', id: 1, ...previewRequest({ text: d.text, caps: d.caps, coord: positionHex(p, 1), scale: 0, tip: 975_300, day, hashOf: () => undefined }) }, new GrowCache())
+      if (answer.type !== 'bloom') throw new Error(answer.type)
+      return bloomReachGibsons(answer.buffers.positions, 0)
+    }
+    expect(found.reach).toBe(grownAt(found.point, 129))
+    // Measured at day 30 it would hide lower, in a cube the grown tree outgrows.
+    const before = await seedHideFor(cursor, 1, 12, 20, async (p) => grownAt(p, 30))
+    expect(found.height).toBeGreaterThan(before.height)
+    expect(found.height).toBeLessThanOrEqual(SEED_HIDE_MAX)
   })
 
   it('the deploy uses the height SEED found only for that cursor and step; anywhere else 12', () => {
@@ -247,7 +301,7 @@ describe('the hide height (owner ruling 2026-11-10)', () => {
     expect(bloomReachGibsons(new Int32Array([0, 1200, 0]), 3)).toBe(Math.ceil(80 * 1.25) + 2)
   })
 
-  it('the six original DNAs at three spots, measured on their day-31 preview, all hide at 3 to 12', () => {
+  it('the six original DNAs at three spots, measured on their last day\'s preview, all hide at 3 to 12', () => {
     const spots = [
       { x: (1n << 40n) + 123_457n, y: (1n << 41n) + 987_651n, z: (1n << 42n) + 55_555n },
       nearEdge,
@@ -255,7 +309,7 @@ describe('the hide height (owner ruling 2026-11-10)', () => {
     ]
     for (const d of ORIGINAL_DNAS) {
       for (const at of spots) {
-        const req = previewRequest({ text: d.text, caps: ORIGINAL_CAPS, coord: positionHex(at, 1), scale: 0, tip: 975_400, day: PREVIEW_DAYS, hashOf: () => undefined })
+        const req = previewRequest({ text: d.text, caps: ORIGINAL_CAPS, coord: positionHex(at, 1), scale: 0, tip: 975_400, day: previewLastDay(ORIGINAL_CAPS), hashOf: () => undefined })
         const { answer } = handleGrow({ type: 'grow', id: 1, ...req }, new GrowCache())
         if (answer.type !== 'bloom') throw new Error(answer.type)
         const h = seedHideHeight(bloomReachGibsons(answer.buffers.positions, 0), at, 0, 20)

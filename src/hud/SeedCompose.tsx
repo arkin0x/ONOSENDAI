@@ -8,7 +8,9 @@
  * checked as it is typed (sno-core
  * tryParseDna; the engine's words under the box). The preview grows the bloom
  * in the seeds worker at the build cursor's terroir, at a block age from day
- * 0 to day 30 of the past month's blocks, at the chosen scale. The price is
+ * 0 to the DNA's last day (plant.ts previewLastDay: its generations cap plus
+ * one, when it is fully grown; owner ruling "A", 2026-11-12), on the blocks
+ * up to now, at the chosen scale. The price is
  * the DNA's caps in bits (§7), with about how long this device takes to mine
  * it. PLANT ▸ hands it to the deploy (useShards `startDeploySeed`), which
  * mines the work at COMMIT, once its place and time are fixed.
@@ -21,8 +23,8 @@
  * original DNAs'. A listed DNA defaults to its own, a pasted DNA to the free
  * caps; a bloom stops growing at its caps.
  *
- * The bloom at day 31, grown where the seed lands, says how far it reaches;
- * that sizes its hide height, from 3 to 12 (owner ruling 2026-11-10), shown
+ * The bloom at the DNA's last day, grown where the seed lands, says how far it
+ * reaches; that sizes its hide height, from 3 to 12 (owner ruling 2026-11-10), shown
  * here and carried to the deploy (plant.ts seedHideHeight).
  */
 
@@ -42,7 +44,7 @@ import { minerCount } from '../lib/avatarWorker'
 import { describeDuration } from '../lib/avatarMine'
 import { ORIGINAL_CAPS } from '../lib/seeds/originalDnas'
 import { DNA_GROUPS, SEED_DNAS, seedDnaId } from '../lib/seeds/seedDnas'
-import { dnaTextRefusal, miningSeconds, PREVIEW_DAYS, previewRequest, readDnaText, sameCaps, seedFitFor, seedHideFor, SEED_HIDE_MAX, type SeedFit } from '../lib/seeds/plant'
+import { dnaTextRefusal, miningSeconds, previewLastDay, previewRequest, readDnaText, sameCaps, seedFitFor, seedHideFor, SEED_HIDE_MAX, type SeedFit } from '../lib/seeds/plant'
 import type { Position } from '../lib/space'
 import type { Plane } from 'cyberspace-core'
 import { MAX_COMPUTE_HEIGHT } from '../store/useCyberspace'
@@ -62,7 +64,7 @@ const MAX_DNA_BYTES = 8192
  */
 const MAX_SCALE = 30
 
-/** The bloom a DNA grows at the cursor, at a day of the past month, grown in the worker. */
+/** The bloom a DNA grows at the cursor, at a day from 0 to the DNA's last day (plant.ts previewLastDay), grown in the worker. */
 function usePreview(text: string, ok: boolean, caps: Caps, coord: string, scale: number, day: number): ShardModel | null {
   const [shard, setShard] = useState<ShardModel | null>(null)
   const tip = useHyperspace((s) => s.tipHeight)
@@ -87,7 +89,7 @@ function usePreview(text: string, ok: boolean, caps: Caps, coord: string, scale:
 
 /**
  * The hide height SEED finds here (plant.ts seedHideFor): each height's own
- * landing point, the bloom grown there at day 31 in the worker, the smallest
+ * landing point, the bloom grown there at its last day in the worker, the smallest
  * from 3 to 12 that holds it. With the point the preview grows at, so the
  * preview is the bloom that lands.
  */
@@ -126,7 +128,11 @@ function useOwnerDna(id: string | null): { state: 'none' | 'fetching' | 'missing
     return () => { stale = true }
   }, [id])
   if (!id) return { state: 'none' }
-  if (!got || got.id !== id) return { state: 'fetching' }
+  if (!got || got.id !== id) {
+    // Known already (the owner's DNAs ship with the app; one asked for before): no FETCHING for a render.
+    const known = dnaResolver.verdict(id)
+    return known?.state === 'ok' ? { state: 'ok', caps: known.caps } : { state: 'fetching' }
+  }
   return got.caps ? { state: 'ok', caps: got.caps } : { state: 'missing' }
 }
 
@@ -135,7 +141,8 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
   const [pick, setPick] = useState<number | 'paste'>(0)
   const [pasted, setPasted] = useState('')
   const [importError, setImportError] = useState<string | null>(null)
-  const [day, setDay] = useState(PREVIEW_DAYS)
+  // The preview's day: null follows the DNA's last day, whatever DNA and size limit are picked.
+  const [dayPick, setDay] = useState<number | null>(null)
   const [scale, setScale] = useState(0)
   const fileRef = useRef<HTMLInputElement>(null)
   // The free caps or the DNA's own (a pasted DNA's: the original DNAs'); null follows the pick (a listed DNA its own, a pasted DNA the free caps).
@@ -154,6 +161,8 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
   const own: Caps = pick === 'paste' ? ORIGINAL_CAPS : SEED_DNAS[pick].caps
   const chosen: Caps = (capsPick ?? (pick === 'paste' ? 'small' : 'large')) === 'small' ? BASE_CAPS : own
   const caps: Caps = ownerId && owned.state === 'ok' ? owned.caps : chosen
+  const lastDay = previewLastDay(caps)
+  const day = Math.min(dayPick ?? lastDay, lastDay)
   // Where the seed lands, at the height it will hide at, and that height.
   const seedFit = useSeedFit(text, ok, caps, cursor, plane, step, scale)
   const coord = useMemo(() => positionHex(seedFit.point, plane), [seedFit.point, plane])
@@ -184,7 +193,7 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
   return (
     <div className="shards__compose seedc">
       <div className="seedc__row">
-        <select className="avatars__input seedc__select" value={String(pick)} onChange={(e) => { setPick(e.target.value === 'paste' ? 'paste' : Number(e.target.value)); setCapsPick(null) }} aria-label="DNA">
+        <select className="avatars__input seedc__select" value={String(pick)} onChange={(e) => { setPick(e.target.value === 'paste' ? 'paste' : Number(e.target.value)); setCapsPick(null); setDay(null) }} aria-label="DNA">
           {DNA_GROUPS.map((g) => (
             <optgroup key={g} label={g.toUpperCase()}>
               {SEED_DNAS.map((d, i) => d.group === g && <option key={d.name} value={i}>{d.name.toUpperCase()}</option>)}
@@ -192,7 +201,7 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
           ))}
           <option value="paste">PASTE</option>
         </select>
-        <button aria-pressed={pick === 'paste'} className={`seedc__pick ${pick === 'paste' ? 'is-on' : ''}`} onClick={() => { setPick('paste'); setCapsPick(null) }}>PASTE</button>
+        <button aria-pressed={pick === 'paste'} className={`seedc__pick ${pick === 'paste' ? 'is-on' : ''}`} onClick={() => { setPick('paste'); setCapsPick(null); setDay(null) }}>PASTE</button>
       </div>
 
       {pick === 'paste' && (
@@ -211,7 +220,7 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
       </div>
       <label className="seedc__row seedc__slider">
         <span className="secret__label">DAY</span>
-        <input type="range" min={0} max={PREVIEW_DAYS} step={1} value={day} onChange={(e) => setDay(Number(e.target.value))} aria-label="Block age in days" />
+        <input type="range" min={0} max={lastDay} step={1} value={day} onChange={(e) => { const d = Number(e.target.value); setDay(d >= lastDay ? null : d) }} aria-label="Block age in days" />
         <span className="seedc__value">{day}</span>
       </label>
       <div className="seedc__row">
@@ -244,7 +253,7 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <ul className="buildbar__explain">
           <li>A seed grows from its DNA, one generation a day of blocks.</li>
           <li>Everyone who finds it grows the same bloom.</li>
-          <li>The preview uses the last month of blocks. The real bloom starts today.</li>
+          <li>The preview grows to the DNA's last day. The real bloom starts today.</li>
           <li>Planting pays once, in work mined on this device.</li>
         </ul>
       </Explanation>

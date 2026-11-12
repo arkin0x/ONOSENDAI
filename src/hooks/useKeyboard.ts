@@ -36,6 +36,7 @@ import { holdEnd, holdReleaseAll, holdStart } from '../store/walkHold'
 import { addWalkInputCloser, setWalkMenuCovering, walkMenuCovering } from '../store/walkInput'
 import { canFly, useViewFly } from '../lib/viewFly'
 import { useRegion } from '../store/useRegion'
+import { leaveWalk, viewToAvatar } from '../store/padMode'
 
 // Cyberspace TV is watching only: WALK's input is closed while it is on (store/walkInput.ts).
 addWalkInputCloser(() => useTv.getState().on)
@@ -142,11 +143,11 @@ function pageHidden(): void {
   if (typeof document !== 'undefined' && document.hidden) holdReleaseAll()
 }
 
-/** X in WALK: stop the steps still to prove (a fall still in the air is some), or with none, back to HOP. */
+/** X in WALK: stop the steps still to prove (a fall still in the air is some), or with none, back to the mode WALK came from (padMode `leaveWalk`). */
 export function walkCancel(): void {
   const walk = useWalk.getState()
   if (walk.behind > 0 || walk.open !== null || walk.falling || useCyberspace.getState().proof.status === 'computing') walk.stop()
-  else walk.exit()
+  else leaveWalk()
 }
 
 /** Space (forward) or Shift (back) let go in VIEW: the fly that key drove stops, a different one held keeps its own. */
@@ -281,7 +282,9 @@ export function useKeyboard(): void {
       // While building, X stops a move or a route from before, running,
       // paused or failed (that is stopping a move, not making one), and
       // otherwise brings the build cursor back to your avatar, the builder's
-      // own recall.
+      // own recall. In VIEW, X brings the cursor and the view home and VIEW
+      // stays, as the pad's RECALL does (store/padMode.ts viewToAvatar;
+      // arkinox, 2026-11-12); Esc is VIEW's RETURN.
       if (event.code === 'KeyX') {
         event.preventDefault()
         if (store.walking) { walkCancel(); return }
@@ -289,7 +292,9 @@ export function useKeyboard(): void {
         // collapses the region to that one cell at the zoom you are now at
         // (store/useRegion.ts; arkinox, 2026-11-11).
         if (useRegion.getState().active) { useRegion.getState().collapseToEntry(); return }
-        if (building && store.proof.status !== 'computing' && store.cloud.status === 'idle' && store.plan === null) useBuilder.getState().toAvatar()
+        const idle = store.proof.status !== 'computing' && store.cloud.status === 'idle' && store.plan === null
+        if (building && idle) useBuilder.getState().toAvatar()
+        else if (idle && store.viewing()) viewToAvatar()
         else store.cancel()
         return
       }

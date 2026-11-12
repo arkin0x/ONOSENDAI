@@ -70,7 +70,7 @@ export interface TutorialStep {
   aim?: DemoStep['aim']
   /**
    * The step needs WALK: shown while not walking (a reload, which never
-   * keeps WALK; RECALL; leaving WALK mid-run), the tutorial goes back to the
+   * keeps WALK; the lit WALK or the dim mode button; leaving WALK mid-run), the tutorial goes back to the
    * step with this id instead. Passed by SKIP on that step, the steps that
    * need WALK are passed over too.
    */

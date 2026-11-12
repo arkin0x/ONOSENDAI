@@ -513,7 +513,7 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build', { title: string; rows
       ['Shift + W A S D', 'rotate view 90°'],
       ['B', 'build mode in / out'],
     ],
-    hint: 'HOP lines up a move with the cursor and commits it with Space, which computes its proof and signs it. W A S D move the cursor, R and F move it FAR and NEAR along the depth axis, and Q and E zoom. X recalls the cursor to your avatar. B goes into build mode.',
+    hint: 'HOP lines up a move with the cursor and commits it with Space, which computes its proof and signs it. W A S D move the cursor, R and F move it FAR and NEAR along the depth axis, and Q and E zoom. X recalls the cursor to your avatar. B goes into build mode. On the pad, WALK beside the mode button goes into WALK when the cursor is on your avatar and nothing is under way.',
   },
   view: {
     title: 'Controls · VIEW',
@@ -522,11 +522,11 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build', { title: string; rows
       ['R / F', 'cursor FAR / NEAR along the depth axis'],
       ['Space', 'fly the view forward (hold)'],
       ['Shift', 'fly the view back (hold)'],
-      ['X', 'recall cursor (region mode: reset the cursor, collapse the region)'],
+      ['X', 'recall cursor and view to your avatar, still in VIEW (region mode: reset the cursor, collapse the region)'],
       ['Q / E', 'scale step out / in (zoom)'],
       ['Shift + W A S D', 'rotate view 90°'],
     ],
-    hint: 'VIEW is a free look from your head: the cursor moves without lining up a hop. Space and Shift fly the view forward and back the way the camera faces; R and F are FAR and NEAR, a cell at a time. The Region button picks a region for a private speakeasy.',
+    hint: 'VIEW is a free look from your head: the cursor moves without lining up a hop. Space and Shift fly the view forward and back the way the camera faces; R and F are FAR and NEAR, a cell at a time. X, or RECALL on the pad, brings the cursor home and VIEW stays; Esc ends VIEW. The Region button picks a region for a private speakeasy.',
   },
   walk: {
     title: 'Controls · WALK',
@@ -535,9 +535,9 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build', { title: string; rows
       ['Space / R', 'jump (gravity on) or up a cell'],
       ['C / F', 'down a cell, or absorb a bounce'],
       ['Z', 'gravity on / off'],
-      ['X', 'stop the walk, or end WALK'],
+      ['X', 'stop the walk, or leave WALK for the mode you came from'],
     ],
-    hint: 'WALK is first person: every press is a step, proved behind you. W A S D walk, Space jumps, C goes down, and Z switches gravity. X stops the steps still to prove, or ends WALK.',
+    hint: 'WALK is first person: every press is a step, proved behind you. W A S D walk, Space jumps, C goes down, and Z switches gravity. X stops the steps still to prove, or leaves WALK for HOP, VIEW or BUILD, whichever you came from; on the pad, so do WALK and the dim mode button.',
   },
   build: {
     title: 'Controls · BUILD',
@@ -549,7 +549,7 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build', { title: string; rows
       ['X', 'recall the build cursor to your avatar'],
       ['B', 'leave build mode'],
     ],
-    hint: 'BUILD places things at a build cursor and never moves you. The movement keys and zoom move that cursor; , and . change the step it places at; Space places. B or X leaves.',
+    hint: 'BUILD places things at a build cursor and never moves you. The movement keys and zoom move that cursor; , and . change the step it places at; Space places. X, or RECALL on the pad, brings the build cursor home and BUILD stays; B leaves.',
   },
 }
 

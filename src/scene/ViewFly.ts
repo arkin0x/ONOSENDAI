@@ -214,6 +214,7 @@ export class ViewRigOffset {
       this.landing = null
     }
     cursorGlide.share = viewOffset.glide
+    useViewFly.getState().setFlown(viewOffset.flown)
   }
 
   /**

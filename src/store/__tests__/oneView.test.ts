@@ -159,15 +159,20 @@ describe('D3: viewing a block only views it', () => {
   })
 })
 
-describe('VIEW to WALK', () => {
-  it('ends the view without bringing back the list the view came from', async () => {
+// The mode button goes VIEW to BUILD since 2026-11-11 (store/padMode.ts).
+describe('VIEW to BUILD, the mode button', () => {
+  it('leaves the view for BUILD without bringing back the list the view came from', async () => {
     const { cycleMode } = await import('../padMode')
     const { useShards } = await import('../useShards')
+    const { useBuilder } = await import('../useBuilder')
     useShards.getState().setNearbyReturn({ scrollTop: 0 } as never)
     cs().viewAt({ x: 5n, y: 6n, z: 7n }, 0, 'SHARD', 0, { item: true })
     cycleMode()
+    expect(useBuilder.getState().active).toBe(true)
     expect(useShards.getState().nearbyReturn).toBeNull()
     expect(useShards.getState().nearbyOpen).toBe(false)
+    useBuilder.getState().exit()
+    cs().clearFocus()
   })
 })
 

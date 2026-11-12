@@ -34,7 +34,7 @@ vi.mock('../../hooks/useCover', () => ({ useCover: () => () => undefined }))
 import { mount, settled, textOf, type Host, type Mounted } from '../../test/elementRoot'
 import { useBuilder } from '../../store/useBuilder'
 import { useCyberspace } from '../../store/useCyberspace'
-import { useShards } from '../../store/useShards'
+import { useShards, type PlacedLast } from '../../store/useShards'
 import { useStash } from '../stash'
 import { placeSpawn } from '../../store/fixtures/placeSpawn'
 import { moveDirection } from '../../lib/moves'
@@ -42,6 +42,8 @@ import { useKeyboard } from '../../hooks/useKeyboard'
 import { BuildBar } from '../BuildBar'
 
 const ORDER = ['OBJECT', 'MESSAGE', 'AUDIO', 'ITEM', 'CHEST', 'DOOR', 'SEED', 'AGAIN']
+/** A message placed once, so AGAIN has something to line up. */
+const placedOnce = (): void => useShards.setState({ placedLast: { pending: { type: 'message', text: 'hello' } } as unknown as PlacedLast })
 
 const acts = (bar: Mounted): Host[] => bar.all().filter((h) => h.type === 'button' && h.props.className === 'buildbar__act')
 const act = (bar: Mounted, label: string): Host => acts(bar).find((h) => textOf(h) === label)!
@@ -61,6 +63,7 @@ afterEach(() => {
 
 describe('the BUILD bar: ITEM, CHEST, DOOR, and no verbs', () => {
   it('shows every button by its noun, in one fixed order', async () => {
+    placedOnce()
     const bar = await mount(<BuildBar />)
     expect(acts(bar).map(textOf)).toEqual(ORDER)
     for (const verb of ['PLACE OBJECT', 'HIDE MESSAGE', 'PLACE AUDIO', 'PLACE AGAIN', 'FORGE AN ITEM', 'SEAL A CHEST', 'SEAL A DOOR', 'PLANT A SEED']) expect(bar.says(verb)).toBe(false)
@@ -77,6 +80,7 @@ describe('the BUILD bar: ITEM, CHEST, DOOR, and no verbs', () => {
   })
 
   it('names each button by its full phrase, its visible word inside it (label in name)', async () => {
+    placedOnce()
     const bar = await mount(<BuildBar />)
     const names = ['Place object', 'Hide message', 'Place audio', 'Forge an item', 'Seal a chest', 'Seal a door', 'Plant a seed', 'Place again']
     expect(acts(bar).map((h) => h.props['aria-label'])).toEqual(names)
@@ -84,10 +88,18 @@ describe('the BUILD bar: ITEM, CHEST, DOOR, and no verbs', () => {
     await bar.unmount()
   })
 
-  it('AGAIN holds its cell, dimmed, when there is nothing to place again: nothing after it moves', async () => {
+  // AGAIN is copy-plus, and gone while there is nothing to place again (arkinox, 2026-11-11).
+  it('leaves AGAIN out when there is nothing to place again, the rest in their order', async () => {
     const bar = await mount(<BuildBar />)
-    expect(acts(bar)).toHaveLength(ORDER.length)
-    expect(act(bar, 'AGAIN').props.disabled).toBe(true)
+    expect(acts(bar).map(textOf)).toEqual(ORDER.slice(0, -1))
+    await bar.unmount()
+  })
+
+  it('shows AGAIN with the copy-plus icon after a placement', async () => {
+    placedOnce()
+    const bar = await mount(<BuildBar />)
+    expect(act(bar, 'AGAIN').props.title).toBe('Place "hello" again, with the same settings')
+    expect(bar.all().some((h) => h.type === 'svg' && String(h.props.className).includes('lucide-copy-plus'))).toBe(true)
     await bar.unmount()
   })
 
@@ -181,7 +193,7 @@ describe('the BUILD bar: RETURN TO AVATAR beside EXIT', () => {
     away()
     const bar = await mount(<BuildBar />)
     expect(headButtons(bar)).toEqual(['RETURN TO AVATAR', 'EXIT'])
-    expect(acts(bar).map(textOf)).toEqual(ORDER)
+    expect(acts(bar).map(textOf)).toEqual(ORDER.slice(0, -1))
     const b = home(bar)!
     expect(b.props.disabled).toBeFalsy()
     expect(b.props['aria-label']).toBe('Return to avatar')

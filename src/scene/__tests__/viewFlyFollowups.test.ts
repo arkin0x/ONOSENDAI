@@ -93,8 +93,10 @@ describe('1. the rig is wired', () => {
     // Applied once the frame's shift is known, before the zoom's carry.
     expect(loop.indexOf('viewRig.apply(')).toBeGreaterThan(loop.indexOf('originShift('))
     expect(loop.indexOf('viewRig.apply(')).toBeLessThan(loop.indexOf('carryOrbit('))
-    // Every re-frame of the camera in the rig's effect starts the offset afresh.
-    expect(body.match(/viewRig\.reset\(\)/g)?.length).toBe(3)
+    // Every re-frame of the camera in the rig's effect starts the offset afresh:
+    // the two cuts that keep the orbit (a restore stands) and the re-frame straight on.
+    expect(body.match(/viewRig\.reset\(true\)/g)?.length).toBe(2)
+    expect(body.match(/viewRig\.reset\(\)/g)?.length).toBe(1)
   })
 
   it('installFlyTouches feeds touches from the scene to both gestures, and a right or Shift drag of the mouse to the pan', () => {

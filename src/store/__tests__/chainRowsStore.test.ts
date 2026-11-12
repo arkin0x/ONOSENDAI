@@ -9,7 +9,7 @@
 import { provedHop } from '../fixtures/provedHop'
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const version = vi.hoisted(() => ({ v: 2 as 1 | 2 }))
 const posted = vi.hoisted(() => [] as unknown[])
@@ -151,6 +151,19 @@ async function oldRecord(): Promise<unknown> {
 }
 
 const tick = (ms = 0): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/*
+ * Every test here loads one or more fresh copies of the store (openTab: the
+ * whole module graph evaluated again after vi.resetModules), the genuinely
+ * slow part: 0.6 to 1.4 s a test alone, 5 to 7 times that under a loaded
+ * parallel suite, where tests passed 5 s at random (2026-11-12). The first
+ * test also pays the graph's cold transform, over 4 s alone. So 20 s for this
+ * file, as 16 of its tests already had by hand (30 s each, kept). A warm-up in
+ * beforeAll is not used instead: a store loaded there keeps working (its
+ * probe, its version look) into the first test.
+ */
+vi.setConfig({ testTimeout: 20_000 })
+afterAll(() => { vi.resetConfig() })
 /**
  * A wait for what another tab or the database does: polled, and bounded by 3 s
  * rather than waitFor's 1 s, which a loaded machine passed while the work was
@@ -194,12 +207,7 @@ afterEach(async () => {
 })
 
 describe('moving a chain to rows', () => {
-  // The file's first test pays the first import of the store's module graph
-  // (a cold transform, over 4 s alone, that later tabs do not pay), so under a
-  // parallel suite it passed 5 s on the import alone, and the next test failed
-  // on what it left running. A warm-up in beforeAll is not used: a store loaded
-  // there keeps working (its probe, its version look) into the first test.
-  it('copies the chain whole, and the load after it reads the rows', { timeout: 20_000 }, async () => {
+  it('copies the chain whole, and the load after it reads the rows', async () => {
     const chain = chainOf(30)
     await seedOldStores(chain, { published: chain.slice(0, 10).map((e) => e.id) })
     const a = await openTab()
@@ -1828,9 +1836,7 @@ describe('what went out and what lost, noted where it matters (review round 2, N
     await b.rows.chainRowsSettled()
   }
 
-  // These three open three tabs each (every one a fresh load of the store) and then wait up to 10 s for the hold, which
-  // their 5 s limit undercut: about 0.8 s alone, one passed 5 s under load (2026-11-12).
-  it('an action let go with no write running, whose line then loses, holds the chain', { timeout: 20_000 }, async () => {
+  it('an action let go with no write running, whose line then loses, holds the chain', async () => {
     const { b, m } = await refusedThenRace()
     // Nothing is running now; the publisher asks, and it may go out.
     expect(await b.rows.chainLanded(pk, m)).toBe(true)
@@ -1838,7 +1844,7 @@ describe('what went out and what lost, noted where it matters (review round 2, N
     await vi.waitFor(() => expect(b.rows.chainHeld(pk)).toBe(true), { timeout: 10_000, interval: 20 })
   })
 
-  it('an action let go when its write was refused, whose line then loses, holds the chain', { timeout: 20_000 }, async () => {
+  it('an action let go when its write was refused, whose line then loses, holds the chain', async () => {
     let asked: Promise<boolean> | null = null
     const { b } = await refusedThenRace((tab, m) => { asked = tab.rows.chainLanded(pk, m) })
     expect(await asked).toBe(true)
@@ -1846,7 +1852,7 @@ describe('what went out and what lost, noted where it matters (review round 2, N
     await vi.waitFor(() => expect(b.rows.chainHeld(pk)).toBe(true), { timeout: 10_000, interval: 20 })
   })
 
-  it('a held chain sends nothing, though an action is queued and committed', { timeout: 20_000 }, async () => {
+  it('a held chain sends nothing, though an action is queued and committed', async () => {
     const { b, m, moveA } = await refusedThenRace()
     await b.rows.chainLanded(pk, m)
     await bLoses(b)

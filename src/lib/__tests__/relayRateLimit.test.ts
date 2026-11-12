@@ -213,6 +213,9 @@ describe('a backlog sent as fast as the caller can', () => {
   }, 30_000)
 
   it('all at once: the sends queue up behind each other rather than going together', async () => {
+    // Opened first: sends queued behind a socket still opening go out together once it opens, as many as turns passed
+    // meanwhile (paceSends holds turns, not the wire), which grain's burst allows and this strict fake relay refuses.
+    await socketOpen()
     const backlog = Array.from({ length: 12 }, anEvent)
     const results = await Promise.all(backlog.map((e) => publishMany([net.CANON], e)))
     expect(results.every((r) => r.ok)).toBe(true)

@@ -4,7 +4,9 @@
  * large. Make them like the buttons below on the 'taken' things", and the
  * headings KEY ITEMS — MAY UNLOCK DOORS OR CHESTS and OTHER LOOT), the
  * header chip named after them, and the OTHER LOOT rows wrapping as the key
- * item rows do, so nothing runs off the panel at 320px. Mounted,
+ * item rows do, so nothing runs off the panel at 320px. Each row shows one
+ * ACTIONS button that opens its actions under it, one row at a time, and a
+ * listed item says LISTED on its line (arkinox, 2026-11-12). Mounted,
  * each store brought up to date first; the size is read from styles.css.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -42,6 +44,7 @@ import { heldFromForged, type HeldItem } from '../../lib/inventory'
 import { mount, textOf, type Host } from '../../test/elementRoot'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
+import { useItemFeed } from '../../store/useItemFeed'
 import { useShards } from '../../store/useShards'
 import { heldCount, InventoryPanel, KEY_ITEMS_HEADING, OTHER_LOOT_HEADING } from '../InventoryPanel'
 
@@ -119,21 +122,70 @@ describe('the header chip', () => {
 })
 
 describe('key item buttons', () => {
-  it('are the OTHER LOOT rows’ chest__act buttons, DELETE keeping its danger class and LISTED its disabled state', async () => {
+  it('are one ACTIONS button a row, opening DETAILS, COPY, PLACE, PUBLISH, ARCHIVE and DELETE in a labelled line under it, all chest__act, DELETE keeping its danger class', async () => {
     const restore = seed()
     const m = await mount(createElement(InventoryPanel))
     const [held] = rowsOf(m.all(), true)
     const [taken] = rowsOf(m.all(), false)
     expect(held).toBeDefined()
     expect(taken).toBeDefined()
-    const heldButtons = buttonsIn(held)
-    expect(heldButtons.map(textOf)).toEqual(expect.arrayContaining(['DETAILS', 'COPY', 'PUBLISH', 'ARCHIVE', 'DELETE']))
+    // Closed: ACTIONS alone on each row, the taken row's X beside it.
+    expect(buttonsIn(held).map(textOf)).toEqual(['ACTIONS'])
+    expect(buttonsIn(taken).filter((b) => cls(b) !== 'held__clear').map(textOf)).toEqual(['ACTIONS'])
+    expect(buttonsIn(held)[0].props['aria-expanded']).toBe(false)
+    await m.press(/^ACTIONS$/)
+    const [open] = rowsOf(m.all(), true)
+    const heldButtons = buttonsIn(open)
+    expect(heldButtons.map(textOf)).toEqual(['ACTIONS', 'DETAILS', 'COPY', 'PLACE', 'PUBLISH', 'ARCHIVE', 'DELETE'])
+    expect(heldButtons[0].props['aria-expanded']).toBe(true)
+    const group = m.all().find((h) => cls(h) === 'held__menu')!
+    expect(group.props.role).toBe('group')
+    expect(group.props['aria-label']).toBe('Actions for Silver Key')
+    expect(heldButtons[0].props['aria-controls']).toBe(group.props.id)
     for (const b of heldButtons) expect(cls(b).split(' ')).toContain('chest__act')
     expect(cls(heldButtons.find((b) => textOf(b) === 'DELETE')!)).toBe('chest__act chest__act--danger')
-    // A taken row's buttons are the same class.
-    for (const b of buttonsIn(taken).filter((b) => cls(b) !== 'held__clear')) expect(cls(b).split(' ')).toContain('chest__act')
+    expect(heldButtons.find((b) => textOf(b) === 'PUBLISH')!.props.disabled).toBe(false)
+    // ACTIONS again hides them.
+    await m.press(/^ACTIONS$/)
+    expect(buttonsIn(rowsOf(m.all(), true)[0]).map(textOf)).toEqual(['ACTIONS'])
     await m.unmount()
     restore()
+  })
+
+  it('open one row at a time: the taken row’s ACTIONS closes the key item’s, and shows READ, DETAILS and ARCHIVE in chest__act', async () => {
+    const restore = seed()
+    const m = await mount(createElement(InventoryPanel))
+    await m.press(/^ACTIONS$/)
+    expect(m.all().filter((h) => cls(h) === 'held__menu')).toHaveLength(1)
+    const takenActions = buttonsIn(rowsOf(m.all(), false)[0]).find((b) => textOf(b) === 'ACTIONS')!
+    ;(takenActions.props.onClick as () => void)()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(m.all().filter((h) => cls(h) === 'held__menu')).toHaveLength(1)
+    expect(buttonsIn(rowsOf(m.all(), true)[0]).map(textOf)).toEqual(['ACTIONS'])
+    const taken = buttonsIn(rowsOf(m.all(), false)[0]).filter((b) => cls(b) !== 'held__clear')
+    expect(taken.map(textOf)).toEqual(['ACTIONS', 'READ', 'DETAILS', 'ARCHIVE'])
+    for (const b of taken) expect(cls(b).split(' ')).toContain('chest__act')
+    await m.unmount()
+    restore()
+  })
+
+  it('say LISTED on the line of an item already in the ITEM FEED, never as a button, and offer no PUBLISH', async () => {
+    const restore = seed()
+    const was = useItemFeed.getState().listedBy
+    useItemFeed.setState({ listedBy: () => true })
+    try {
+      const m = await mount(createElement(InventoryPanel))
+      const meta = m.all().find((h) => cls(h) === 'item__meta' && /forged by you/.test(textOf(h)))!
+      expect(textOf(meta)).toMatch(/· LISTED/)
+      await m.press(/^ACTIONS$/)
+      const held = buttonsIn(rowsOf(m.all(), true)[0]).map(textOf)
+      expect(held).toEqual(['ACTIONS', 'DETAILS', 'COPY', 'PLACE', 'ARCHIVE', 'DELETE'])
+      expect(m.buttons(/LISTED|PUBLISH/)).toHaveLength(0)
+      await m.unmount()
+    } finally {
+      useItemFeed.setState({ listedBy: was })
+      restore()
+    }
   })
 
   it('share one wrapping row with the OTHER LOOT rows: the taken row carries held__row--loot, and both classes get the same flex-wrap layout, buttons pushed right and allowed to wrap', async () => {

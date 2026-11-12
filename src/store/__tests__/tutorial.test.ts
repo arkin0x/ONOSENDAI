@@ -243,7 +243,7 @@ describe('the script', () => {
   it('teaches the real build flow, with no HOLD button (item 11b)', () => {
     const build = TUTORIAL_SCRIPT.steps.find((s) => s.id === 'build-place')!
     expect(build.hint).not.toMatch(/HOLD/)
-    expect(build.hint).toMatch(/MOVE TO WORKSHOP[\s\S]*BUILD[\s\S]*OBJECT[\s\S]*PLACE/)
+    expect(build.hint).toMatch(/ACTIONS[\s\S]*MOVE TO WORKSHOP[\s\S]*BUILD[\s\S]*OBJECT[\s\S]*PLACE/)
   })
 
   it('has no em dash in any line the player reads', () => {

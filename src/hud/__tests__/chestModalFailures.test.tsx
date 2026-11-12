@@ -129,6 +129,7 @@ describe('MOVE TO WORKSHOP', () => {
     useWorkshop.setState({ shards: [] })
     const item = { id: 'i'.repeat(64), type: 'shard', name: 'Statue', shard, at: 1 } as unknown as HeldItem
     const row = await mount(<TakenRow item={item} />)
+    await row.press(/^ACTIONS$/)
     await row.press('MOVE TO WORKSHOP')
     const copy = useWorkshop.getState().shards[0]
     expect(Object.keys(copy.objects!)[0].startsWith(`33331:${ME}:`)).toBe(true)

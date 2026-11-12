@@ -44,12 +44,12 @@ describe("the owner's chain", () => {
     expect(w.chipMeta).toBe('TAP FOR WHY AND RESPAWN')
     expect(w.sorry).toBe('It was valid when you signed it. The rules changed on 2026-09-07. Sorry.')
     expect(needsRespawn(stop)).toBe(true)
-    expect(respawnPointOf(ownerChain)?.id).toBe(EVENT_22)
+    expect((await respawnPointOf(ownerChain))?.id).toBe(EVENT_22)
   })
 
-  it('while the 5.13 list loads: undefined, never a verdict the list would take back', () => {
+  it('while the 5.13 list loads: undefined, never a verdict the list would take back; a respawn waits for it', async () => {
     expect(chainStopOf(ownerChain)).toBeUndefined()
-    expect(respawnPointOf(ownerChain)).toBeNull()
+    expect((await respawnPointOf(ownerChain))?.id).toBe(EVENT_22)
   })
 
   it('the list arriving finishes the same scan from the hop it waited at', async () => {
@@ -86,12 +86,12 @@ describe('chainStopOf', () => {
     expect(chainStopOf([spawn, move('c3c', 'hyperjump')], 'c')).toMatchObject({ source: 'relay', stop: { rule: 'v1-ride' } })
   })
 
-  it(`a hop above h${RELAY_MAX_HOP_HEIGHT}: said, the relay's ceiling, and no respawn`, () => {
+  it(`a hop above h${RELAY_MAX_HOP_HEIGHT}: said, the relay's ceiling, and no respawn`, async () => {
     const chain = [move('c4s', 'spawn', { position: at(0n) }), move('c4a', 'hop', { ...V2, position: at(1n << 30n), createdAt: 1_793_000_000 })]
     const stop = chainStopOf(chain)
     expect(stop?.source === 'relay' && stop.stop.kind).toBe('tall')
     expect(needsRespawn(stop)).toBe(false)
-    expect(respawnPointOf(chain)).toBeNull()
+    expect(await respawnPointOf(chain)).toBeNull()
     if (stop?.source !== 'relay') return
     const w = relayStopWords(stop.stop)
     expect(w.chip).toBe(`RELAY CHECKS HOPS UP TO H${RELAY_MAX_HOP_HEIGHT}`)
@@ -99,10 +99,10 @@ describe('chainStopOf', () => {
     expect(w.chipMeta).not.toMatch(/TAP FOR/)
   })
 
-  it('a structural break after a tall hop still asks for a respawn: the break wins', () => {
+  it('a structural break after a tall hop still asks for a respawn: the break wins', async () => {
     const chain = [move('c5s', 'spawn', { position: at(0n) }), move('c5a', 'hop', { ...V2, position: at(1n << 30n) }), move('c5b', 'hop', { ...V2, position: at(1n << 30n), breaks: 'starts elsewhere' })]
     expect(chainStopOf(chain)?.source).toBe('rules')
-    expect(respawnPointOf(chain)?.id).toBe('c5a')
+    expect((await respawnPointOf(chain))?.id).toBe('c5a')
   })
 
   it('a rejected proof before a structural break is the stop', () => {
@@ -110,9 +110,44 @@ describe('chainStopOf', () => {
     expect(chainStopOf(chain)).toMatchObject({ source: 'relay', stop: { index: 1 } })
   })
 
-  it('a structural break with the list still loading is said at once', () => {
+  it('a structural break with the list still loading: nothing said yet, since the list may find an earlier stop', async () => {
     const chain = [spawn, move('c7a', 'hop'), move('c7b', 'hop', { ...V2, breaks: 'starts elsewhere' })]
-    expect(chainStopOf(chain)?.source).toBe('rules')
+    expect(chainStopOf(chain)).toBeUndefined()
+    setV1HopListForTests(new Set())
+    expect(chainStopOf(chain)).toMatchObject({ source: 'relay', stop: { index: 1, rule: 'v1-hop' } })
+  })
+
+  it('a rejected proof after a tall hop still asks for a respawn, at the action before it', async () => {
+    setV1HopListForTests(new Set())
+    const chain = [move('c9s', 'spawn', { position: at(0n) }), move('c9a', 'hop', { ...V2, position: at(1n << 30n) }), move('c9b', 'sidestep', { position: at((1n << 30n) + 1n) })]
+    expect(chainStopOf(chain)).toMatchObject({ source: 'relay', stop: { index: 2, kind: 'broken', rule: 'v1-sidestep' } })
+    expect((await respawnPointOf(chain))?.id).toBe('c9a')
+    // And appended after a tall hop alone, the scan goes on from where it ended.
+    const tallOnly = chain.slice(0, 2)
+    expect(chainStopOf(tallOnly, 'grow')).toMatchObject({ source: 'relay', stop: { kind: 'tall' } })
+    expect(chainStopOf(tallOnly.concat([chain[2]]), 'grow')).toMatchObject({ source: 'relay', stop: { index: 2, kind: 'broken' } })
+  })
+
+  it("a game's rows and skipped actions between moves are never judged by their form", () => {
+    setV1HopListForTests(new Set())
+    const chain = [spawn, move('g1', 'hop', V2), move('g2', 'enter-virtual'), move('g3', 'other', { role: 'virtual' }), move('g4', 'exit-virtual'), move('g5', 'other', { role: 'skipped' }), move('g6', 'hop', V2)]
+    expect(chainStopOf(chain)).toBeNull()
+  })
+
+  it('a chain replaced (a respawn, an adopted chain) is read afresh, never answered from the old one', async () => {
+    setV1HopListForTests(await loadV1HopList())
+    expect(chainStopOf(ownerChain)?.source).toBe('relay')
+    expect(chainStopOf([move('r0', 'spawn')])).toBeNull()
+    expect(chainStopOf([move('r0b', 'spawn'), move('r1', 'hop', V2)])).toBeNull()
+  })
+
+  it('the list arriving after the chain grew: the scan goes on from the hop it waited at, over the new rows too', () => {
+    const chain = [spawn, move('w1', 'hop', V2), move('w2', 'hop')]
+    expect(chainStopOf(chain)).toBeUndefined()
+    const grown = chain.concat([move('w3', 'sidestep')])
+    expect(chainStopOf(grown)).toBeUndefined()
+    setV1HopListForTests(new Set(['w2']))
+    expect(chainStopOf(grown)).toMatchObject({ source: 'relay', stop: { index: 3, rule: 'v1-sidestep' } })
   })
 
   it('the spectated chain is kept apart from your own', () => {

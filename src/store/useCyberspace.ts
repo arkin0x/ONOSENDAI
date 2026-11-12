@@ -318,7 +318,10 @@ export const RELAY_STOPPED_MESSAGE =
 function stoppedChainMessage(chain: ActionEvent[]): string | null {
   const stop = chainStopOf(chain)
   if (stop?.source === 'relay') return stop.stop.kind === 'broken' ? RELAY_STOPPED_MESSAGE : null
-  return stop ? brokenChainMessage(stop.broken) : null
+  if (stop) return brokenChainMessage(stop.broken)
+  // Not known yet (the 5.13 list loading): a structural break is certain whatever the list says.
+  const broken = stop === undefined ? firstBreak(chain) : null
+  return broken ? brokenChainMessage(broken) : null
 }
 
 export function whyNoMove(chain: ActionEvent[]): string | null {
@@ -5746,7 +5749,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // in a form the rules reject (lib/chainStop.ts). With no valid event at
     // all (an invalid spawn, Q7), the spawn row names the entry, and it
     // stands where the identity is frozen: the spawn coordinate.
-    const at = respawnPointOf(get().actions())
+    const at = await respawnPointOf(get().actions())
     if (at) addRecentView({ input: at.coordHex, label: endOfChainLabel(at.id), plane: at.plane, pinned: true })
     await get().respawn()
   },

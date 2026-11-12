@@ -146,7 +146,7 @@ export function RelayStopNotice({ stop, actions }: { stop: RelayStop; actions?: 
       <p className="brokenchain__line"><b>Where:</b> {rowName(stop.index, stop.action)}.</p>
       <p className="brokenchain__line"><b>Why:</b> {sentence(w.why)}.</p>
       <p className="brokenchain__line">
-        <b>What it means:</b> Nothing after it counts, so the relay places you where {stop.lastValid ? `row ${stop.index - 1}` : 'your spawn'} left you on {stopDay(stop)}. ONOSENDAI will not sign a move onto this chain. Respawn to move again.
+        <b>What it means:</b> Nothing after it counts, so your chain ends where {stop.lastValid ? `row ${stop.index - 1}` : 'your spawn'} left you on {stopDay(stop)}. ONOSENDAI will not sign a move onto this chain. Respawn to move again.
       </p>
       {w.sorry && <p className="brokenchain__sorry brokenchain__sorry--spec-change">{w.sorry}</p>}
       {actions && <div className="brokenchain__actions">{actions}</div>}
@@ -165,14 +165,18 @@ export function RelayCeilingNote({ stop }: { stop: RelayStop }): JSX.Element {
  * tap for the notice and RESPAWN, for a break or a rejected proof; quiet,
  * and no RESPAWN, for a hop above the relay's ceiling. Nothing while that
  * cannot be said yet (the 5.13 list loading), nothing while you spectate.
+ * `stopsOnly`: the quiet one stands down too (the tutorial shows only what
+ * stops you).
  */
-export function BrokenChainChip(): JSX.Element | null {
+export function BrokenChainChip({ stopsOnly = false }: { stopsOnly?: boolean }): JSX.Element | null {
   const stop = useChainStop()
   const spectating = useCyberspace((s) => s.spectate !== null)
   if (!stop || spectating) return null
   if (stop.source === 'relay') {
     const w = relayStopWords(stop.stop)
     if (stop.stop.kind === 'tall') {
+      // `stopsOnly` (the tutorial): only chips that stop you; this one does not.
+      if (stopsOnly) return null
       return (
         <div className="hyperbar hyperbar--ceiling" role="status" title={`${w.title}: ${w.why}.`}>
           <Gauge size={14} strokeWidth={2.5} aria-hidden className="hyperbar__glyph" />

@@ -29,7 +29,7 @@ import { placedLookup as defaultPlacedLookup, useSpeakeasies } from '../hooks/us
 import { useRelayPlacement } from '../hooks/useRelayPlacement'
 import { dashboardUrl, inRegion, publishedHeadHex, speakeasyLabel, type Speakeasy, type SpeakeasyLookup } from '../lib/speakeasy'
 import { RELAY_MAX_HOP_HEIGHT, type RelayStop } from '../lib/relayPlacement'
-import { respawnPointOf } from '../lib/chainStop'
+import { needsRespawnNow } from '../lib/chainStop'
 import { stopDay } from '../lib/chainBreak'
 import { normalizeRelay, useRelays } from '../store/useRelays'
 import { useCyberspace } from '../store/useCyberspace'
@@ -64,7 +64,7 @@ export function stoppedWords(stop: RelayStop): string {
  * anything is signed.
  */
 export function openRespawn(): void {
-  if (respawnPointOf(useCyberspace.getState().actions())) {
+  if (needsRespawnNow(useCyberspace.getState().actions())) {
     useChainUi.getState().setBrokenView('notice')
     return
   }

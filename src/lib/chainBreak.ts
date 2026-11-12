@@ -104,7 +104,7 @@ export const V1_SIDESTEP_CUTOFF = Date.parse('2026-09-07T00:00:00Z') / 1000
 /** Why a form stop stops the chain, as the second half of "Why: ...". */
 const FORM_WHY: Record<Exclude<RelayRule, 'chain-rule' | 'tall-hop'>, string> = {
   'v1-hop': 'it is a hop in the old proof format, and not one of the old hops the rules still accept',
-  'partial-hop': 'it is a hop with only half of the new proof: one of mn and mp is missing',
+  'partial-hop': 'it is a hop carrying only half of the new proof',
   'v1-sidestep': 'it is a sidestep in the old proof format, and those stopped counting on 2026-09-07',
   'v1-ride': 'it is a ride in the old proof format, and not one of the old rides the rules still accept',
 }
@@ -140,5 +140,5 @@ export function spectatedStopWords(stop: ChainStop): { text: string; title: stri
   const s = stop.source === 'rules' ? stop.broken : stop.stop
   const day = stopDay(s)
   if (stop.source === 'relay' && stop.stop.kind === 'tall') return { text: `RELAY READS IT UP TO ${day}`, title: `A hop after ${day} is taller than h${RELAY_MAX_HOP_HEIGHT}, which the relay does not check.` }
-  return { text: `CHAIN STOPS AT ${day}`, title: `An action after ${day} breaks the chain rules, so nothing after it counts.` }
+  return { text: `CHAIN STOPS AT ${day}`, title: `Their chain counts up to ${day}. The action after that breaks the chain rules, so nothing after it counts.` }
 }

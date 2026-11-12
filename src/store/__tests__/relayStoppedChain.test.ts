@@ -19,7 +19,7 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
-import { RELAY_STOPPED_MESSAGE, useCyberspace, whyNoMove } from '../useCyberspace'
+import { BROKEN_CHAIN_MESSAGE, RELAY_STOPPED_MESSAGE, useCyberspace, whyNoMove } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
 import { derezzNow } from '../../hud/DerezzPanel'
 import { RECENT_VIEWS_KEY, type RecentView } from '../../lib/viewAt'
@@ -74,6 +74,15 @@ describe("the owner's chain, stopped at 2026-09-04", () => {
     useCyberspace.setState({ respawn: async () => undefined })
     try { expect(await derezzNow()).toBeNull() } finally { useCyberspace.setState({ respawn: realRespawn }) }
     expect(recent()[0]?.label).toBe('End of Chain daf16062')
+  })
+})
+
+describe('a known break while the list loads', () => {
+  it('is refused at once: the break is certain whatever the list says', () => {
+    const row = (id: string, type: string, extra: Partial<ActionEvent> = {}): ActionEvent =>
+      ({ id, type, coordHex: id.padEnd(64, '0'), role: 'base', createdAt: 1_790_000_000, ...extra }) as unknown as ActionEvent
+    const chain = [row('b0', 'spawn'), row('b1', 'hop'), row('b2', 'hop', { mn: '0'.repeat(16), mp: 'ab', breaks: 'starts elsewhere' })]
+    expect(whyNoMove(chain)).toBe(BROKEN_CHAIN_MESSAGE)
   })
 })
 

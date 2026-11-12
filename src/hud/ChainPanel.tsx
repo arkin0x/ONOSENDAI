@@ -33,6 +33,7 @@ import { TriangleAlert } from 'lucide-react'
 import { actionKind, actionLabel, openBracket } from '../lib/events'
 import { BrokenChainNotice, RelayCeilingNote, RelayStopNotice } from './BrokenChain'
 import { useChainStop } from '../hooks/useChainStop'
+import { relayStopWords } from '../lib/chainBreak'
 import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
 import { useCyberspace } from '../store/useCyberspace'
 import { enterTutorialDungeon, gamesEnabled, useGame } from '../store/useGame'
@@ -204,7 +205,7 @@ export function ChainPanel(): JSX.Element {
           return (
             <li key={e.id} className={`chainrows__row ${breaks ? 'chainrows__row--broken' : ''}`}>
               <span className="chainrows__n">{i}</span>
-              <span className={`chainrows__type chainrows__type--${breaks ? 'broken' : kind}`} title={a?.breaks ?? (breaks ? relayStop?.reason : a?.name)}>
+              <span className={`chainrows__type chainrows__type--${breaks ? 'broken' : kind}`} title={a?.breaks ?? (breaks && relayStop ? relayStopWords(relayStop).why : a?.name)}>
                 {breaks && <TriangleAlert size={10} strokeWidth={2.5} aria-hidden className="chainrows__warn" />}
                 {label}
               </span>

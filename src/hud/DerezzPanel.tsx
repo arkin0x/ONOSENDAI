@@ -27,7 +27,7 @@ import { Explanation } from './Explanation'
 export async function derezzNow(): Promise<string | null> {
   const s = useCyberspace.getState()
   // A chain that needs a respawn: a break, or a proof the rules reject (lib/chainStop.ts).
-  const at = respawnPointOf(s.actions())
+  const at = await respawnPointOf(s.actions())
   if (at) return confirmRespawn(s.identity.pubkey, at.id)
   try {
     await s.respawn()

@@ -100,7 +100,7 @@ describe("the owner's chain: the chip says where it stops, and RESPAWN", () => {
     expect(said).toContain('YOUR CHAIN STOPS AT ROW 23')
     expect(said).toContain('row 23, event d334293b… (SIDESTEP)')
     expect(said).toContain('It is a sidestep in the old proof format, and those stopped counting on 2026-09-07.')
-    expect(said).toContain('Nothing after it counts, so the relay places you where row 22 left you on 2026-09-04. ONOSENDAI will not sign a move onto this chain. Respawn to move again.')
+    expect(said).toContain('Nothing after it counts, so your chain ends where row 22 left you on 2026-09-04. ONOSENDAI will not sign a move onto this chain. Respawn to move again.')
     expect(said).toContain('It was valid when you signed it. The rules changed on 2026-09-07. Sorry.')
     expect(said).not.toContain('—')
     expect(modalButtons().map(textOf)).toEqual(['SHOW THE ROW', 'CLOSE', 'RESPAWN'])
@@ -145,6 +145,18 @@ describe('other chains', () => {
     const modal = await mount(<BrokenChainModal />)
     expect(modalText()).toBe('')
     await modal.unmount()
+    await chip.unmount()
+    // The tutorial shows only chips that stop you: this one stands down there.
+    const tutorial = await mount(<BrokenChainChip stopsOnly />)
+    expect(tutorial.all()).toHaveLength(0)
+    await tutorial.unmount()
+  })
+
+  it('the tutorial still shows a chain that stops', async () => {
+    yourChain(ownerChain)
+    const chip = await mount(<BrokenChainChip stopsOnly />)
+    await settled(30)
+    expect(chip.says('CHAIN STOPS AT 2026-09-04')).toBe(true)
     await chip.unmount()
   })
 

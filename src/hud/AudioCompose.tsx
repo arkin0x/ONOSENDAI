@@ -14,7 +14,7 @@
  * a deploy) comes back already uploaded, so it is not uploaded twice.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { explainUpload, serverAnswered } from '../lib/blossom'
 import { audioFileRefusal, audioTypeOf, iphoneMayNotPlay, sealAndUpload, type UploadedAudio } from '../lib/audioFile'
 import { MAX_AUDIO_TITLE, titleFromFileName, type AudioItem } from '../lib/audioItem'
@@ -23,6 +23,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { BlossomServerPicker, useBlossomChoice } from './BlossomServer'
 import { Field, Switch } from './ui/Switch'
+import { GoArrow } from './ui/GoArrow'
 
 /** A person reads the upload prompt, as for a profile picture. */
 const UPLOAD_SIGN_PATIENCE_MS = 60_000
@@ -47,7 +48,7 @@ export function AudioUpload({ idPrefix, initial, submitLabel, onReady, onCancel 
   idPrefix: string
   /** An item already uploaded (a kept draft): its choices can change, its file cannot. */
   initial?: AudioItem
-  submitLabel: string
+  submitLabel: ReactNode
   /** The item, and the server it was uploaded to (absent for a kept draft that never said). */
   onReady: (audio: AudioItem, server?: string) => void
   onCancel: () => void
@@ -186,7 +187,7 @@ export function AudioCompose({ onDone }: { onDone: () => void }): JSX.Element {
     <AudioUpload
       idPrefix="audio"
       initial={initial}
-      submitLabel="PLACE AUDIO ▸"
+      submitLabel={<>PLACE AUDIO<GoArrow /></>}
       onReady={(audio, server) => { useShards.getState().startDeployAudio(audio, placeAudioOpts(audio, server, kept)); onDone() }}
       onCancel={onDone}
     />

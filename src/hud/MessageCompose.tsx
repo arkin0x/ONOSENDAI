@@ -17,6 +17,7 @@ import { useSettled } from './useSettled'
 import { MAX_MESSAGE_LENGTH } from '../lib/hidden'
 import { useShards } from '../store/useShards'
 import { useBuilder } from '../store/useBuilder'
+import { GoArrow } from './ui/GoArrow'
 
 /** `onDone` runs on CANCEL and once the message has been handed to the deploy. */
 export function MessageCompose({ onDone }: { onDone: () => void }): JSX.Element {
@@ -51,7 +52,7 @@ export function MessageCompose({ onDone }: { onDone: () => void }): JSX.Element 
       {verdict.note && <span className={`shards__compose-note shards__compose-note--${verdict.tone}`} role="status">{verdict.note}</span>}
       <div className="shards__actions">
         <button className="avatars__go" onClick={() => { setMessage(''); onDone() }}>CANCEL</button>
-        <button className="avatars__go" disabled={!message.trim() || !verdict.ready} onClick={place}>PLACE MESSAGE ▸</button>
+        <button className="avatars__go" disabled={!message.trim() || !verdict.ready} onClick={place}>PLACE MESSAGE<GoArrow /></button>
       </div>
     </div>
   )

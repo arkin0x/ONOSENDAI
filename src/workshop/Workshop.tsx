@@ -66,6 +66,7 @@ import { useEscape } from '../hooks/useEscape'
 import { useScrollMemory } from '../hooks/useScrollMemory'
 import { useShardFolders } from '../store/useShardFolders'
 import { ShardThumb } from '../hud/ShardThumb'
+import { GoArrow } from '../hud/ui/GoArrow'
 
 const TOOLS: Tool[] = ['view', 'stamp', 'add', 'select', 'face']
 const TOOL_ICON: Record<Tool, LucideIcon> = { view: Eye, stamp: Stamp, add: Plus, select: MousePointer2, face: Triangle }
@@ -1311,7 +1312,7 @@ export function Workshop(): JSX.Element | null {
           disabled={!hasContent}
           onClick={() => { if (shard) { useShards.getState().startDeployShard(shard.id, 'workshop'); w().closeWorkshop() } }}
           title="Place this object in the world"
-        >DEPLOY ▸</button>
+        >DEPLOY<GoArrow /></button>
         <button className="chip ws__icon" onClick={() => w().closeWorkshop()} title="Close the workshop (Esc)" aria-label="Close"><X size={15} strokeWidth={2.25} aria-hidden /></button>
       </div>
       {/* Where the one selected point is: top right under DEPLOY (arkinox,

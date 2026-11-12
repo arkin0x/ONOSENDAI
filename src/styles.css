@@ -1483,6 +1483,18 @@ kbd {
   cursor: default;
 }
 
+/* The arrow ending a button that goes or does (hud/ui/GoArrow): taller than the
+ * capitals beside it, centred on them (their middle stands about 0.35em up, so
+ * the margin box sits 0.125em up), its negative margins keeping the line box the
+ * label's, so no button grows (arkinox, 2026-11-12). */
+.go-arrow {
+  display: inline-block;
+  width: 1em;
+  height: 1.25em;
+  margin: -0.4em 0 -0.4em 0.5em;
+  vertical-align: 0.125em;
+}
+
 .avatars__list {
   list-style: none;
   margin: 0;
@@ -7992,6 +8004,9 @@ kbd {
 .nearby__chip .presence__head svg { color: var(--accent); }
 /* VIEW on a Nearby Loot row: a button, not a label. */
 .nearby__view { flex: none; padding: 3px 9px; font-size: 8px; letter-spacing: 0.14em; }
+/* A door row's OPEN or CLOSE beside its VIEW, as tall (ItemRows ChestBlock actionsIn). */
+.nearby__acts { display: flex; gap: 6px; }
+.nearby__door { display: contents; }
 
 /* DISCOVERED NEARBY's tabs: each kind with its count, an empty one dimmed and still there. */
 .nearby__tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; flex: none; }

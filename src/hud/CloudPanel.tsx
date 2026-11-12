@@ -21,6 +21,7 @@ import { RATIO_MIN_SAMPLES, ratioOf, useExperience } from '../lib/experience'
 import { offloadFrom } from '../lib/crossover'
 import { useCalibration } from '../lib/calibration'
 import { Explanation } from './Explanation'
+import { GoArrow } from './ui/GoArrow'
 
 const MODES: Array<[CloudMode, string]> = [['auto', 'AUTO'], ['ask', 'ASK'], ['off', 'OFF']]
 /** The amounts most people want, so the common case is one tap. */
@@ -265,7 +266,7 @@ export function CloudPanel(): JSX.Element {
               onChange={(e) => setTopUpSats(e.target.value)}
               aria-label="Top-up amount in sats"
             />
-            <button className="avatars__go" type="submit">GET INVOICE ▸</button>
+            <button className="avatars__go" type="submit">GET INVOICE<GoArrow /></button>
           </div>
           <span className="cloud__profile-note">
             HOSAKA sends a lightning invoice. The balance updates the moment the node reports it paid, and nothing is spent until a move needs it.

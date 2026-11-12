@@ -110,6 +110,22 @@ export class ViewOffset {
     return this.easeMs < EASE_BACK_MS && (Math.abs(this.rx) > OFFSET_EPS || Math.abs(this.ry) > OFFSET_EPS || Math.abs(this.rz) > OFFSET_EPS)
   }
 
+  /** Whether a fly is under way: held, or still coasting out after it was let go (FLY_MIN_VEL). */
+  get moving(): boolean {
+    return this.flying || this.vel > FLY_MIN_VEL
+  }
+
+  /**
+   * The view slid by `(dx, dy, dz)` render cells as the camera turned in
+   * place in flight (FlightPivot): part of where the view has flown, so the
+   * cursor lands where the view now centres. Only asked while flown.
+   */
+  slide(dx: number, dy: number, dz: number): void {
+    this.fx += dx
+    this.fy += dy
+    this.fz += dz
+  }
+
   /** The cursor box's glide toward the landing, eased, 0..1. */
   get glide(): number {
     return ease(this.glideAt)
@@ -285,6 +301,73 @@ export class ViewOffset {
     this.rz = this.pz
     this.px = this.py = this.pz = 0
     this.easeMs = 0
+  }
+}
+
+/** How long a drag's pivot takes to slide between the camera and the view's centre as a fly starts or ends, in ms. */
+export const PIVOT_EASE_MS = 300
+
+/**
+ * What a drag turns the camera about (arkinox, 2026-11-12): "During flight,
+ * the center of orbit for the camera should be the camera itself. Make sure
+ * it transitions from this to the cursor smoothly without camera jumps."
+ *
+ * OrbitControls (and drag-to-steer) always turn the camera about its target,
+ * the view's centre: the cursor, or in a fly the point as far ahead of the
+ * camera as the cursor was when the fly began, which is where the cursor
+ * lands. In flight that swung the camera round a point out in front. So the
+ * rig lets the turn happen, then slides the camera and its target together
+ * by `shift`: the camera ends exactly where it started and only the line it
+ * looks down has turned, a turn of the head. The target goes round the
+ * camera at its same distance, and the fly follows the new line of sight.
+ *
+ * `weight` is how much of the slide is made: 1 in flight (the pivot is the
+ * camera), 0 at rest (the pivot is the view's centre, as ever), and in
+ * between the pivot is that share of the way from the target to the camera,
+ * along the line of sight. It eases over PIVOT_EASE_MS as a fly starts and
+ * once its coast has stopped, so a drag held across the end of a fly feels
+ * its pivot glide out to the cursor rather than switch. Nothing here moves
+ * the camera of its own accord: the slide only ever answers a turn, so the
+ * frame the weight changes draws exactly what the frame before it would have.
+ */
+export class FlightPivot {
+  private t = 0
+
+  /** A frame of `dtMs`: `moving` while a fly is under way (ViewOffset.moving). Returns the weight. */
+  step(moving: boolean, dtMs: number): number {
+    const k = Math.max(0, dtMs) / PIVOT_EASE_MS
+    this.t = moving ? Math.min(1, this.t + k) : Math.max(0, this.t - k)
+    return this.weight
+  }
+
+  /** How much of a turn is made about the camera rather than the target, 0..1. */
+  get weight(): number {
+    return ease(this.t)
+  }
+
+  /** Back to turning about the target at once (the rig re-framed the camera). */
+  clear(): void {
+    this.t = 0
+  }
+
+  /**
+   * The camera less its target went from `before` to `now` by a turn about
+   * the target: the slide, into `out`, that moves the turn's pivot `weight`
+   * of the way to the camera when added to both. Only the turn is answered:
+   * a change of distance (a pinch, a wheel) is left as OrbitControls made it.
+   */
+  shift(before: Vec3Out, now: Vec3Out, out: Vec3Out): Vec3Out {
+    const w = this.weight
+    const lb = Math.hypot(before.x, before.y, before.z)
+    const ln = Math.hypot(now.x, now.y, now.z)
+    if (w === 0 || lb === 0 || ln === 0) { out.x = 0; out.y = 0; out.z = 0; return out }
+    // `now` at the old distance is the turn alone; the slide undoes the
+    // camera's swing by `weight` of it.
+    const k = lb / ln
+    out.x = w * (before.x - now.x * k)
+    out.y = w * (before.y - now.y * k)
+    out.z = w * (before.z - now.z * k)
+    return out
   }
 }
 

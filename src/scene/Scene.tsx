@@ -878,8 +878,12 @@ function Rig(): JSX.Element {
     // keeps the new angle; OrbitControls.update at the end derives its spherical
     // from the camera's position, so moving it here sticks. Breaks the lock,
     // as any orbit does: once you have steered you are looking, not following.
+    // A finger or the mouse on the scene is already turning the camera: the
+    // button's drag (a resting thumb's wobble) is drained and not spent
+    // (arkinox, 2026-11-12: "ignore dragging on the button if other dragging
+    // is happening").
     const steer = takeSteer()
-    if (steer.dx !== 0 || steer.dy !== 0) {
+    if ((steer.dx !== 0 || steer.dy !== 0) && pressed() === 0) {
       steerVec.copy(c.object.position).sub(c.target)
       steerSph.setFromVector3(steerVec)
       const k = (2 * Math.PI) / Math.max(1, state.size.height)
@@ -890,6 +894,10 @@ function Rig(): JSX.Element {
       c.object.position.copy(c.target).add(steerVec)
       locked.current = false
     }
+    // In flight, a turn since the last frame (OrbitControls between frames,
+    // the steer above) turns the camera in place, not about the view's
+    // centre out in front (ViewFly.ts pivot; arkinox, 2026-11-12).
+    viewRig.pivot(c.object.position, c.target, smooth.current)
     // GRAVITY's fall (store/useWalk.ts) takes its frame first: it can land,
     // which moves the cursor read below.
     tickFall()
@@ -1125,7 +1133,10 @@ function Rig(): JSX.Element {
         if (Math.abs(nd - target) < 0.05) clearTutorialZoom()
       }
     }
+    // The controls' own turn this frame (their damping), in place in flight too.
+    viewRig.mark(c.object.position, c.target)
     c.update()
+    viewRig.pivot(c.object.position, c.target, smooth.current)
     if (s.walking) (walkLook.current ??= new Vector3()).copy(c.object.position).sub(c.target).normalize()
   })
 

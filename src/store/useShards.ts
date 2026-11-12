@@ -96,6 +96,12 @@ import {
   isReference,
   learnSealed,
 } from '../lib/hidden'
+import { dnaTextRefusal, draftPrice, seedWorkHolds, type SeedDraft } from '../lib/seeds/plant'
+import { MineCancelled } from '../lib/avatarWorker'
+import { cancelMining, isMining, plantedTemplate, seedDraftName } from './plantSeed'
+import { dnaResolver } from '../lib/seeds/seedSources'
+import { seedSnapOffered } from '../lib/seeds/orientation'
+import { seedItemOf } from '../lib/seeds/seedItem'
 import { SEALED_KIND, freshSealedD, isSealedRef, refOf, rememberSealed, utf8Bytes, retractSealed, sealedChanges, sealedEventOf, sealedItemOf, sealedRefParts, sealedTemplate, sendBagWithSealed, type OutgoingSealed } from '../lib/sealed'
 import { retractionTemplate } from '../lib/published'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
@@ -580,6 +586,13 @@ export type DeployPending =
    * where a copy goes too: a server may answer with a URL on another host.
    */
   | { type: 'audio'; audio: AudioItem; reseal?: true; server?: string; move?: { eventId: string } }
+  /**
+   * A seed (DECK-0008): one planting of a DNA at the build cursor. Its work
+   * is mined at COMMIT, once its place, its time and its planted block are
+   * fixed (lib/seeds/plant.ts), and its DNA goes to the relays first when it
+   * is not there yet (free). `dna` is the signed DNA once there is one.
+   */
+  | { type: 'seed'; seed: SeedDraft }
 
 /**
  * Whether a deployment can be moved with EDIT: a shard of yours, inline or
@@ -862,6 +875,8 @@ export function repeatable(pending: DeployPending): boolean {
     case 'key': return false
     case 'chest': return false
     case 'audio': return !pending.move
+    // Another planting of the same DNA: its own work, mined again.
+    case 'seed': return true
     default: {
       const unknown: never = pending
       return unknown
@@ -1251,6 +1266,7 @@ export function pendingName(pending: DeployPending, shard: ShardModel | null): s
     case 'key': return pending.key.name
     case 'chest': return pending.name
     case 'audio': return pending.audio.title
+    case 'seed': return seedDraftName(pending.seed)
     default: return shard?.name ?? 'shard'
   }
 }
@@ -1264,6 +1280,7 @@ export function pendingEmpty(pending: DeployPending, shard: ShardModel | null): 
     // A door holds no contents of its own: only its name is asked for.
     case 'chest': return !!pending.spot && !pending.move && (pending.name.trim().length === 0 || (!pending.door && pending.contents.length === 0))
     case 'audio': return !pending.audio.url
+    case 'seed': return dnaTextRefusal(pending.seed.text) !== null
     default: return !shard || (shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0)
   }
 }
@@ -1505,6 +1522,8 @@ interface ShardsState {
   placeAgain: () => boolean
   /** What the deploy is doing right now, for the button: computing, buying, publishing. */
   deployNote: string | null
+  /** A seed's work being mined (DECK-0008 §7): the one stage of a hide CANCEL may still stop. */
+  deployMining: boolean
   /** A HOSAKA purchase waiting for a yes: the price and the wait. Null when not asking. */
   deployAsk: { sats: number | null; seconds: number | null } | null
   deployError: string | null
@@ -1548,6 +1567,8 @@ interface ShardsState {
   startDeployMessage: (text: string) => void
   /** Hide a key the composer forged (B1 §3.1). */
   startDeployKey: (key: KeyItem) => void
+  /** SEED: plant a DNA at the build cursor (DECK-0008). Its work is mined at COMMIT. */
+  startDeploySeed: (seed: SeedDraft) => void
   /** Hide audio the composer encrypted and uploaded (DECK-0007). */
   startDeployAudio: (audio: AudioItem, opts?: { server?: string; reseal?: boolean }) => void
   /** The FADE stepper: the pending audio's full-volume sphere (a one-shot's trigger zone), in gibsons; undefined for the default, half the way to the wall. */
@@ -2903,8 +2924,10 @@ export const useShards = create<ShardsState>((set, get) => {
    * §7.7): the sector hint goes off above height 30 the way the snap goes off
    * below its own height.
    */
+  /** Whether the snap is offered for what is lined up: a seed in dataspace at any height (orientation.ts seedSnapOffered), anything else at 27 and up. */
+  const snapHere = (height: number): boolean => (get().pending?.type === 'seed' ? seedSnapOffered(buildPlane(cyber())) : snapOffered(buildPlane(cyber()), height))
   const heightPatch = (height: number): Partial<ShardsState> => {
-    const offered = snapOffered(buildPlane(cyber()), height)
+    const offered = snapHere(height)
     const bag = get().deployBag
     const hintGone = bag.hint !== null && !hintFits(bag.hint, height)
     return { deployHeight: height, deployAsk: null, ...(offered ? {} : { deployUp: false, deployFollow: false }), ...(hintGone ? { deployBag: { ...bag, hint: null } } : {}) }
@@ -2914,7 +2937,7 @@ export const useShards = create<ShardsState>((set, get) => {
   const leaveRoom = (snap: NonNullable<ShardsState['deployRoomSnap']>): Partial<ShardsState> => {
     const patch: Partial<ShardsState> = { deployRoomSnap: null, ...heightPatch(snap.chosen) }
     const s = get()
-    if (snap.kept.up && !s.deployUp && snapOffered(buildPlane(cyber()), snap.chosen)) Object.assign(patch, { deployUp: true, deployFollow: snap.kept.follow })
+    if (snap.kept.up && !s.deployUp && snapHere(snap.chosen)) Object.assign(patch, { deployUp: true, deployFollow: snap.kept.follow })
     const bag = patch.deployBag ?? s.deployBag
     if (snap.kept.hint && !bag.hint && hintFits(snap.kept.hint, snap.chosen)) patch.deployBag = { ...bag, hint: snap.kept.hint }
     return patch
@@ -2923,6 +2946,8 @@ export const useShards = create<ShardsState>((set, get) => {
   const freshDeploy = {
     deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0] as Turns, deployFollow: false, deployConstrain: CONSTRAIN_DEFAULT,
     deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle' as const, deployError: null,
+    // A seed still mining for the deploy this replaces stops itself (plantSeed `current`); nothing of it stays on this bar.
+    deployNote: null, deployMining: false,
   }
 
   /**
@@ -3561,6 +3586,25 @@ export const useShards = create<ShardsState>((set, get) => {
         // An empty hint stays empty (sealHint); one an older build wrote names a relay that took it now.
         if (d.sealedRef[2] && d.sealedRef[2] !== took) rehinted.set(d.eventId, [d.sealedRef[0], d.sealedRef[1], took, ...d.sealedRef.slice(3)])
       }
+      // A seed planted while LOCAL kept its DNA here: it goes out before the
+      // bag, or no finder could grow the seed (DECK-0008 §8.2). A DNA this
+      // device does not have was on the relays already.
+      const sentDnas = new Set<string>()
+      for (const d of items) {
+        const seed = d.type === 'seed' && d.inner ? seedItemOf(d.inner) : null
+        const dnaId = seed?.dnaId
+        // Each DNA once; one another author planted from is theirs to publish, and was public when planted.
+        if (!dnaId || sentDnas.has(dnaId)) continue
+        sentDnas.add(dnaId)
+        const v = await dnaResolver.resolve(dnaId)
+        if (v.state === 'ok' && v.author !== owner) continue
+        if (v.state !== 'ok' && v.state !== 'mixed') continue
+        const took = await republish(v.event)
+        if (!took) {
+          set({ broadcasting: null, broadcastError: 'No relay took the DNA a seed in this bag plants. Try again when one is reachable.', broadcastFailed: lookupId })
+          return false
+        }
+      }
       for (const d of items) {
         if (!d.ref) continue
         const foreign = d.inner.pubkey !== me
@@ -3640,6 +3684,7 @@ export const useShards = create<ShardsState>((set, get) => {
       return true
     },
     deployNote: null,
+    deployMining: false,
     deployAsk: null,
     deployError: null,
     deployLeaveOut: [],
@@ -3737,6 +3782,8 @@ export const useShards = create<ShardsState>((set, get) => {
     }),
     startDeployMessage: (text) => set({ pending: { type: 'message', text }, ...freshDeploy }),
     startDeployKey: (key) => set({ pending: { type: 'key', key }, ...freshDeploy }),
+    // Its height fits the largest bloom its scale allows (DeployBar seedReach), until + or - is pressed.
+    startDeploySeed: (seed) => set({ pending: { type: 'seed', seed }, ...freshDeploy, deployHeightAuto: true }),
     setDeployFade: (fade) => {
       const p = get().pending
       if (p?.type !== 'audio') return
@@ -4326,15 +4373,18 @@ export const useShards = create<ShardsState>((set, get) => {
     },
     cancelDeploy: (asked = false) => {
       // Working, it is not stopped, except while it waits on the bag lock having signed nothing (review of #599).
-      if (get().deployStatus === 'working' && !(deployWaiting !== null && deployWaiting === get().pending)) return
+      // Or while it mines a seed's work, which has signed nothing yet either (DECK-0008 §7).
+      const mining = isMining(get().pending)
+      if (get().deployStatus === 'working' && !(deployWaiting !== null && deployWaiting === get().pending) && !mining) return
       deployWaiting = null
+      if (mining) cancelMining()
       // A shard being aimed into a chest gives the chest back as it was: the
       // composer reopens with the draft intact and that shard as before.
       const { pending } = get()
       const chestBack = pending?.type === 'shard' && pending.intoChest ? pending.intoChest.draft : null
       // From the workshop, CANCEL goes back to the workshop (useBuilder).
       const workshopBack = asked && pending?.type === 'shard' && pending.from === 'workshop' ? pending.shardId : null
-      set({ pending: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null, chestBack, ...(workshopBack ? { workshopBack } : {}) })
+      set({ pending: null, deployStatus: 'idle', deployError: null, deployNote: null, deployMining: false, deployAsk: null, chestBack, ...(workshopBack ? { workshopBack } : {}) })
     },
     confirmDeploy: () => { set({ deployAsk: null }); void get().deploy(true) },
     declineDeploy: () => set({ deployAsk: null }),
@@ -4540,6 +4590,9 @@ export const useShards = create<ShardsState>((set, get) => {
         // set again, for the room it has at the new place.
         if (movedItem) innerTemplate = movedTemplate(movedItem.inner, at, plane, movedAt, { names: ['fade'], tags: audio.fade !== undefined ? [['fade', String(Math.max(0, Math.floor(audio.fade)))]] : [] })
         else if (!pending.reseal) innerTemplate = audioInnerTemplate(audio, at, plane, createdAt)
+      } else if (pending.type === 'seed') {
+        // Its template is made, and its work mined, inside the try below, once its key is in hand.
+        if (dnaTextRefusal(pending.seed.text) !== null || draftPrice(pending.seed) === null) return
       } else {
         text = movedItem?.text ?? pending.text.trim()
         if (!text.trim()) return
@@ -4650,6 +4703,24 @@ export const useShards = create<ShardsState>((set, get) => {
         if (into?.secret && !heldRoom) {
           const key = roomKey(rk.key, hexToBytes(into.secret))
           rk = { key, lookupId: roomLookupIn(key, plane) }
+        }
+        // A seed: its DNA on the relays first when it is not there yet (free;
+        // LOCAL keeps it here), then the seed at the clock block, its work
+        // mined in workers at its DNA's price (DECK-0008 §7, §8.2). After the
+        // key, so a key that cannot be had wastes no work. CANCEL still stops
+        // it while it mines: nothing is signed until the work is done, and a
+        // deploy lined up in its place stops it too (plantSeed `current`).
+        let seedPrice: number | null = null
+        if (pending.type === 'seed') {
+          seedPrice = draftPrice(pending.seed)
+          const current = (): boolean => get().pending === pending
+          // TURN, SNAP TO EARTH and FINE ROTATION, as the seed's tags write them (§5.7): turns in Cyberspace's axes, as the bar
+          // turns a shard, so as they are; standing on Earth only in dataspace.
+          const stand = { turn: [...deployTurn] as Turns, up: deployUp && seedSnapOffered(plane), spin: wrapSpin(deploySpin) }
+          const planted = await plantedTemplate(pending, { at, plane, createdAt, owner, live: cs.live, sign: signAsOwner, current, stand, note: (n) => { if (current()) set({ deployNote: n }) }, mining: (on) => { if (current()) set({ deployMining: on }) } })
+          if (!current()) return
+          innerTemplate = planted
+          still()
         }
         set({ deployNote: 'Sealing and publishing' })
         // A move of something already on the relays goes to the relays, LOCAL
@@ -4775,6 +4846,8 @@ export const useShards = create<ShardsState>((set, get) => {
           // Typed as the signed event the rest of this path carries; a rumor
           // only ever goes into the bag as its entry, never out on its own.
           inner = pending.type === 'message' || pending.type === 'audio' ? rumorOf(innerTemplate, owner) as NostrEvent : await signAsOwner(innerTemplate)
+          // A signer that changed the seed (its time, its tags) changed its id, and its work with it.
+          if (pending.type === 'seed' && seedPrice !== null && !seedWorkHolds(inner, seedPrice)) throw new Error('Your signer changed the seed, so its work no longer holds. Nothing was hidden.')
         }
         // A door's secret reaches disk before the door goes anywhere. Its id needs the
         // signature, and a signature sends nothing. If this device cannot keep it, nothing goes out.
@@ -4983,8 +5056,10 @@ export const useShards = create<ShardsState>((set, get) => {
         }
         if (moveError) useToast.getState().show({ label: 'MOVED, OLD COPY STAYED', meta: `It stands at the new place; the old one could not be taken down (${moveError}). Tap it and DELETE it.`, mark: 'build' })
       } catch (err) {
+        // CANCEL while a seed's work was mining: nothing was signed or placed, and nothing failed.
+        if (err instanceof MineCancelled) return
         const reason = err instanceof Error ? err.message : String(err)
-        if (get().pending === pending) set({ deployStatus: 'error', deployNote: null, deployError: reason })
+        if (get().pending === pending) set({ deployStatus: 'error', deployNote: null, deployMining: false, deployError: reason })
         else useToast.getState().show({ label: 'AN EARLIER HIDE FAILED', meta: `${reason} Nothing from it was placed.`, mark: 'build' })
       }
     },
@@ -5539,11 +5614,17 @@ export function closedRoomTest(state: Pick<ShardsState, 'mine' | 'discovered'>, 
 // placement lined up again (`placedLast`) keeps them, as it keeps every other
 // setting, and so does the same deploy edited in place (a fade, a look, a
 // chest's spot: `edit`), or a zoom's held placement would fall back to the
-// STEP's cell (review of #676).
+// STEP's cell (review of #676). So does a seed SEED measured at this very
+// STEP and cursor: its hide height was found for them (plant.ts
+// seedDraftHeight), and taking the step back to the zoom, and the cursor
+// with it, would hide it at 12 at another spot (found by the tutorial's
+// review, 2026-11-11).
 useShards.subscribe((s, prev) => {
   const cs = useCyberspace.getState()
   const again = s.pending !== null && s.pending === s.placedLast?.pending
-  if (s.pending === prev.pending || again || editingPending) return
+  const fit = s.pending?.type === 'seed' ? s.pending.seed.fit : undefined
+  const measured = fit !== undefined && fit.step === buildStepOf(cs) && fit.cursor === positionHex(cs.cursor, buildPlane(cs))
+  if (s.pending === prev.pending || again || editingPending || measured) return
   if (cs.buildExact) useCyberspace.setState({ buildExact: false })
   if (cs.buildStep !== null || cs.buildSettle !== null) cs.setBuildStep(null)
 })

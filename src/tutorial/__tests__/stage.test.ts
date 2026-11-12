@@ -18,12 +18,14 @@ import { generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from 'nostr-tools'
 import { regionKeyAt } from '../../lib/shardCrypto'
 import { unbag, type Hidden } from '../../lib/hidden'
+import { decryptForRegion } from '../../lib/shardCrypto'
+import { DNA_KIND } from '../../lib/seeds/seedItem'
 import { lockOf } from '../../lib/locks'
 import { NIP44_MAX_PLAINTEXT, openWithSecret, plaintextBytes, readContents } from '../../lib/chests'
 import { BAG_SAFE_BYTES } from '../../lib/bagSize'
 import { CLIENT_TAG } from '../../lib/client'
-import { BOX_HEIGHT, COVER_MAX, FOOTPRINT, inRegion, regionBase, toWorld, tutorialLayout } from '../layout'
-import { STAGE_TEXT, buildStage, readStage, stageKey, writeStage, type KeyAt } from '../stage'
+import { BOX_HEIGHT, COVER_MAX, FOOTPRINT, besideToward, inRegion, regionBase, toWorld, tutorialLayout } from '../layout'
+import { STAGE_TEXT, WELCOME_ITEM, boxModel, buildStage, readStage, stageKey, writeStage, type KeyAt } from '../stage'
 import { guideBagsFor, isGuideAuthor, isGuideBag, onGuideBags, passesTaps, setGuideBags } from '../guideBags'
 import { COURSE, FINISH_CHEST, START_STAND, atStart, courseToWorld } from '../course'
 import type { Position } from '../../lib/space'
@@ -116,7 +118,11 @@ describe('the stage', () => {
     const coverItems = await open(coverBag, MID, l.cover.height)
     expect(coverItems[0].eventId).toBe(stage.ids.blueBox)
     // The blue box and the whole course, every piece where the course puts it, all in the cover (§7.6).
-    expect(coverItems).toHaveLength(1 + COURSE.length)
+    // ... and the dirt plot (A5). No DNA: the player's composer signs the tree's own (stage.ts).
+    expect(coverItems).toHaveLength(1 + COURSE.length + 1)
+    expect(coverItems[coverItems.length - 1].eventId).toBe(stage.ids.plot)
+    const json = await decryptForRegion(regionKeyAt(l.cover.base, l.cover.height, MAX_COMPUTE).key, coverBag.tags.find((t) => t[0] === 'encrypted')![2])
+    expect((JSON.parse(json ?? '[]') as NostrEvent[]).some((e) => e.kind === DNA_KIND)).toBe(false)
     COURSE.forEach((part, i) => {
       const item = coverItems[1 + i]
       expect(item.type).toBe('shard')
@@ -149,16 +155,21 @@ describe('the stage', () => {
     const contents = readContents(openWithSecret(chest.chest!, lock.secretHex), stage.guide)
     expect(contents.map((c) => c.body.type)).toEqual(['shard', 'message', 'key'])
     expect(contents.map((c) => c.id)).toEqual(stage.ids.chestContents)
-    for (const c of contents) {
-      expect(c.verified).toBe(true)
-      expect(c.event.pubkey).toBe(stage.guide)
-    }
-    // The signed items inside are attributed too; the message is a rumor, never signed, so never tagged.
+    // Every entry verifies. The trophy and the message are the guide's; the
+    // welcome item is the owner's own published event, embedded as theirs.
+    for (const c of contents) expect(c.verified).toBe(true)
+    expect(contents[0].event.pubkey).toBe(stage.guide)
+    expect(contents[1].event.pubkey).toBe(stage.guide)
+    expect(contents[2].event.id).toBe(WELCOME_ITEM.id)
+    expect(contents[2].event.pubkey).toBe(WELCOME_ITEM.pubkey)
+    // The guide's signed shard carries the client tag; the message is a rumor,
+    // never signed, so never tagged; the owner's welcome item is theirs, not
+    // re-signed here, so it carries no guide tag of ours.
     expect(contents[0].event.tags).toContainEqual(CLIENT_TAG)
-    expect(contents[2].event.tags).toContainEqual(CLIENT_TAG)
     expect(contents[1].event.tags).not.toContainEqual(CLIENT_TAG)
+    expect(contents[2].event.tags).not.toContainEqual(CLIENT_TAG)
     expect(contents[1].body.text).toBe(STAGE_TEXT.message)
-    expect(contents[2].body.key?.name).toBe(STAGE_TEXT.welcomeName)
+    expect(contents[2].body.key?.name).toBe('Black Sun')
 
     // The finish chest: in the deck's own height-3 region, locked to it, with pieces to build with.
     const finishAt = courseToWorld(l.frame, FINISH_CHEST)
@@ -219,5 +230,39 @@ describe('the guide\'s bags on this device', () => {
     expect(heard).toBe(3)
     expect(guideBagsFor(lookups)).toEqual([])
     off()
+  })
+})
+
+describe('the green box (feedback item 1)', () => {
+  it('is a lime outline of exactly the twelve cube edges: no faces, so no face diagonals in LINES', () => {
+    const m = boxModel()
+    expect(m.mode).toBe('lines')
+    expect(m.faces).toEqual([])
+    const v = m.vertices.map((x) => x.p.join(','))
+    const edges = new Set<string>()
+    for (let i = 1; i < v.length; i++) edges.add([v[i - 1], v[i]].sort().join('|'))
+    expect(edges.size).toBe(12)
+    // Every segment runs along one axis: an edge, never a diagonal.
+    for (let i = 1; i < m.vertices.length; i++) {
+      const a = m.vertices[i - 1].p, b = m.vertices[i].p
+      expect([0, 1, 2].filter((k) => a[k] !== b[k])).toHaveLength(1)
+    }
+  })
+})
+
+describe('the first move lands in front of the chest, facing it (feedback item 4)', () => {
+  const frames = [{ fwd: 1, side: 1 }, { fwd: -1, side: -1 }] as const
+  it('from straight behind: the neighbor nearer the way in', () => {
+    for (const f of frames) {
+      const frame = { ...f, boxBase: { x: 800n, y: 800n, z: 800n } }
+      expect(besideToward(frame, 3, 3, 3, toWorld(frame, -5, 3, 3))).toEqual(toWorld(frame, 2, 3, 3))
+    }
+  })
+  it('from off to a side and above: the neighbor on that line, so the move points at the chest', () => {
+    for (const f of frames) {
+      const frame = { ...f, boxBase: { x: 800n, y: 800n, z: 800n } }
+      // From (-1, 7, 7) the chest at (3, 3, 3) is along (1, -1, -1): land at (2, 4, 4), on that line.
+      expect(besideToward(frame, 3, 3, 3, toWorld(frame, -1, 7, 7))).toEqual(toWorld(frame, 2, 4, 4))
+    }
   })
 })

@@ -77,7 +77,8 @@ describe('the `door` contents word (spec §7.7, #82)', () => {
     const c = bagContents([chest([['door', '4']]), chest([]), chest([['door', '4']])])
     expect(c.door).toBe(2)
     expect(c.chest).toBe(1)
-    expect(CONTENTS_KINDS.at(-1)).toBe('door')
+    // Right after audio; seed and dna (DECK-0008 §8.2) come after it.
+    expect(CONTENTS_KINDS.slice(CONTENTS_KINDS.indexOf('audio') + 1)).toEqual(['door', 'seed', 'dna'])
     expect(bagContentsTags([chest([['door', '4']])], { contents: true, money: false })).toEqual([['contents', 'door', '1']])
   })
 })

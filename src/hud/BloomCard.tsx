@@ -9,6 +9,7 @@ import { CardSpin } from '../scene/CardSpin'
 import { ProfileBadge } from './ProfileBadge'
 import { growAnyway, useBlooms, wantSeeds } from '../store/useBlooms'
 import { seedItemOf } from '../lib/seeds/seedItem'
+import { standBloom } from '../lib/seeds/orientation'
 import { bloomDays, bloomStateLine } from '../lib/seeds/bloomWords'
 import type { NostrEvent } from '../lib/events'
 
@@ -25,7 +26,8 @@ export function BloomCard({ event }: { event: NostrEvent | undefined }): JSX.Ele
   return (
     <div className="bloom">
       <h3 className="secret__look-name">{view?.dna?.name ?? seed.title ?? 'seed'}</h3>
-      {view?.shard && <div className="secret__spin"><CardSpin shard={view.shard} /></div>}
+      {/* Turned as it stands (§5.7); the card has no Earth to stand it on. */}
+      {view?.shard && <div className="secret__spin"><CardSpin shard={standBloom(view.shard, seed.stand, 1)} /></div>}
       {line && <p className="bloom__state">{line}</p>}
       {view?.status === 'heavy' && (
         <button className="secret__act bloom__anyway" onClick={() => growAnyway(seed.id)}>GROW ANYWAY</button>

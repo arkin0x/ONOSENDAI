@@ -35,7 +35,7 @@ let scroll: DoorReturn | null = null
 export function viewFromDoor(back: Omit<DoorReturn, 'owner'>, at: Position, plane: Plane, label: string, scaleExp: number): void {
   waiting = { ...back, owner: useCyberspace.getState().identity.pubkey }
   useShards.getState().selectSecret(null)
-  useCyberspace.getState().focusItem(at, plane, label, scaleExp)
+  useCyberspace.getState().viewAt(at, plane, label, scaleExp, { item: true })
 }
 
 /** The scrolls a door's list should take as it mounts, once: what RETURN brought back for this door, or null. */

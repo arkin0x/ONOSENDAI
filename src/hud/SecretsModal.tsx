@@ -146,7 +146,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
     }
     useSecrets.getState().setOpen(false)
     useSecrets.getState().focus(k.lookupId)
-    useCyberspace.getState().focusOn({ x: mid('x'), y: mid('y'), z: mid('z') }, k.plane, `REGION ${sizeLabel(k)}`, Math.max(0, k.height - 3))
+    useCyberspace.getState().viewAt({ x: mid('x'), y: mid('y'), z: mid('z') }, k.plane, `REGION ${sizeLabel(k)}`, Math.max(0, k.height - 3), { fit: true })
   }
 
   // A place is one gibson, the spot itself; the zoom stays where it is. The
@@ -155,7 +155,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   const look = (p: Place): void => {
     useSecrets.getState().setOpen(false)
     useSecrets.getState().focus(p.id)
-    useCyberspace.getState().focusOn({ x: BigInt(p.position.x), y: BigInt(p.position.y), z: BigInt(p.position.z) }, p.plane, 'SCANNED PLACE')
+    useCyberspace.getState().viewAt({ x: BigInt(p.position.x), y: BigInt(p.position.y), z: BigInt(p.position.z) }, p.plane, 'SCANNED PLACE')
   }
 
   // One SCAN button's answer, shown for a few seconds: a held key's lookup id

@@ -28,7 +28,7 @@ import { COAST, EARTH, MERIDIAN } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, stepFor, type ViewAxes } from '../lib/space'
 import { EARTH_RADIUS_KM, formatLatLonDeg, originCsMetres, surfaceHit, surfaceVertex } from '../lib/earthSurface'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { markViewedStop, ownHyperspaceView } from '../store/useHyperspace'
+import { viewHyperspace } from '../store/useHyperspace'
 import { useCoastline } from '../hooks/useCoastline'
 import { WorldLabel } from './WorldLabel'
 
@@ -183,8 +183,6 @@ export function Earth({ axes }: Props): JSX.Element | null {
             if (e.delta > 8 || useTv.getState().on) return
             e.stopPropagation()
             markSceneTapHandled()
-            ownHyperspaceView()
-            markViewedStop(null)
             // Back faces only, so the raycaster's hit is the FAR inner
             // surface: where the ray leaves the planet, not the ground
             // under the pointer. Re-intersect the same ray with the sphere
@@ -201,11 +199,9 @@ export function Earth({ axes }: Props): JSX.Element | null {
             const near = o.addScaledVector(d, -b - Math.sqrt(Math.max(0, disc)))
             const hit = surfaceHit([near.x, near.y, near.z], scaleExp, axes)
             const label = `EARTH · ${formatLatLonDeg(hit.lat, hit.lon)}`
-            useCyberspace.getState().focusOn(hit.position, 0, label)
-            // Leave the pin standing at what was clicked, so the focal point
-            // is a thing in the scene and not just a camera target. It
-            // survives clicking a block; RETURN and REMOVE PIN take it away.
-            useCyberspace.getState().dropPin(hit.position, label)
+            // VIEW there, the cursor on the point clicked. No pin: the cross
+            // marker is off (arkinox, 2026-11-11); the star marks a place.
+            viewHyperspace(hit.position, 0, label, undefined, null)
           }}
         >
           <sphereGeometry args={[globe.radius * 0.995, 32, 16]} />

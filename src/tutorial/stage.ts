@@ -9,8 +9,9 @@
  * discovery scan opens them as a stranger's.
  *
  * Three bags:
- *   - the covering bag (tutorial/layout.ts cover): the blue box and the
- *     bounce course (tutorial/course.ts), seen from the spawn;
+ *   - the covering bag (tutorial/layout.ts cover): the blue box, the
+ *     bounce course (tutorial/course.ts) and the dirt plot, seen from the
+ *     spawn;
  *   - the box bag (the blue box's own height-3 region): the treasure chest,
  *     locked to that region (DECK-0004 §3.8, the region's lock), so whoever
  *     stands in the box carries the key that opens it (store/useKeyring). In
@@ -23,9 +24,10 @@
  * client tag as a player's own do (the chests' messages are unsigned rumors,
  * untagged, as a player's are); nothing it signs is published either way.
  *
- * The welcome item is a placeholder signed by the guide key until the owner
- * publishes theirs; theirs then goes in as their own signed event, which a
- * chest reads as theirs (lib/chests.ts readContents).
+ * The welcome item is the owner's own published key item (kind 3340, the
+ * Black Sun, signed by arkinox, WELCOME_ITEM), embedded as their signed event
+ * rather than re-signed by the guide, so a chest reads it as theirs
+ * (lib/chests.ts readContents). It is never published from here.
  *
  * A stage is kept per player on this device (STAGE_PREFIX), so a reload
  * finds the same chest (an opened chest stays opened, by its id) and nothing
@@ -37,12 +39,12 @@ import type { NostrEvent } from 'nostr-tools'
 import type { EventTemplate } from '../lib/events'
 import { localSigner } from '../lib/signers'
 import { fromPayload, type ShardModel, type ShardPayload } from 'sno-core/shards'
-import { DEFAULT_BAG_SETTINGS, HIDDEN_KIND, bagTemplate, chestInnerTemplate, keyInnerTemplate, messageInnerTemplate, rumorOf, shardInnerTemplate, type BagEntry, type ChestItem, type KeyItem } from '../lib/hidden'
-import { forgeKey, sealEntries } from '../lib/chests'
+import { DEFAULT_BAG_SETTINGS, HIDDEN_KIND, bagTemplate, chestInnerTemplate, messageInnerTemplate, rumorOf, shardInnerTemplate, type BagEntry, type ChestItem } from '../lib/hidden'
+import { sealEntries } from '../lib/chests'
 import { lockOf } from '../lib/locks'
 import type { Position } from '../lib/space'
 import { BOX_HEIGHT, regionBase, toWorld, type TutorialLayout } from './layout'
-import { BACK_STEP, CATCH_FLOOR, COURSE, FINISH_CHEST, courseToWorld, type CoursePart } from './course'
+import { BACK_STEP, CATCH_FLOOR, COURSE, FINISH_CHEST, PLOT, PLOT_AT, courseToWorld, type CoursePart } from './course'
 import trophyPayload from './pieces/trophy.json'
 import platSquare6 from './pieces/plat-square-6.json'
 import platSquare4 from './pieces/plat-square-4.json'
@@ -51,6 +53,7 @@ import lineFinish from './pieces/line-finish-8x2.json'
 import trampoline from './pieces/trampoline-4.json'
 import flagCheckered from './pieces/flag-checkered.json'
 import padBounce from './pieces/pad-bounce-2.json'
+import welcomeItemSigned from './welcome-item.json'
 
 /** Each course piece's payload, by its name in tutorial/course.ts. */
 const PIECES: Record<CoursePart['piece'], unknown> = {
@@ -76,7 +79,7 @@ const REGION_REQUIRES = 'the key of a place'
  * without it still plays the same, and a bump would hand a player a new,
  * unopened chest.
  */
-export const STAGE_VERSION = 3
+export const STAGE_VERSION = 6
 
 /** One player's stage, by pubkey. */
 export const STAGE_PREFIX = 'onosendai:tutorial:stage:'
@@ -98,6 +101,8 @@ export interface StageIds {
   finishChest: string
   finishContents: string[]
   finishLookup: string
+  /** The dirt plot shard. */
+  plot: string
 }
 
 export interface Stage {
@@ -114,35 +119,52 @@ export interface Stage {
 
 /** Caption copy that lives in the staged things, drafts in the owner's voice (design §7, question 7). */
 export const STAGE_TEXT = {
-  chestName: 'Treasure chest',
+  chestName: 'Tutorial welcome chest',
   message: 'You found it. Whatever you TAKE is yours, in your ITEMS.',
-  welcomeName: 'Welcome',
-  welcomeAbout: 'Your first day in cyberspace.',
-  finishName: 'Finish chest',
+  finishName: 'Tutorial course chest',
   finishMessage: 'Pieces for a course of your own. Place them in BUILD.',
 } as const
 
-/** The blue box: a see-through cube filling the box region, nothing a walker bumps into. */
-export function blueBoxModel(): ShardModel {
+/**
+ * The owner's own welcome item (kind 3340, the Black Sun), as they published
+ * it: a sign-only key item whose secret tag is the item and whose model is the
+ * live object 33331:e8ed3798...:welcome-black-sun. Embedded as the owner's
+ * signed event, never published from here (D1).
+ */
+export const WELCOME_ITEM = welcomeItemSigned as unknown as NostrEvent
+
+/**
+ * The box: a lime-green outline cube filling the box region, nothing a walker
+ * bumps into. An outline, not a filled cube, and green rather than blue, which
+ * read too close to the HOP region colour (tutorial feedback 2026-11-11, item
+ * 1). No faces: in LINES mode a faced cube draws every triangle edge, the six
+ * face diagonals too (scene/ShardMesh.tsx outlineGeometry). Without faces it
+ * is one line through its points, so the points trace the twelve edges once
+ * each, retracing three to get round (16 points).
+ */
+export function boxModel(): ShardModel {
   // Drawn from its origin at a gibson's centre (the box's middle gibson,
   // base + 4), so corners at -4.5 and +3.5 meet the region's faces exactly:
   // the whole numbers -5 and 3, with 60 of 120 ticks.
-  const c = [[-5, -5, -5], [3, -5, -5], [3, -5, 3], [-5, -5, 3], [-5, 3, -5], [3, 3, -5], [3, 3, 3], [-5, 3, 3]] as Array<[number, number, number]>
+  const corner = [[-5, -5, -5], [3, -5, -5], [3, -5, 3], [-5, -5, 3], [-5, 3, -5], [3, 3, -5], [3, 3, 3], [-5, 3, 3]] as Array<[number, number, number]>
+  const c = [0, 1, 2, 3, 0, 4, 5, 6, 7, 4, 5, 1, 2, 6, 7, 3].map((i) => corner[i])
   const payload: ShardPayload = {
     v: 2,
-    name: 'Blue box',
+    name: 'Green box',
     unit: 0,
     extent: 8,
-    mode: 'solid',
+    mode: 'lines',
     vertices: c,
     ticks: c.map(() => [60, 60, 60] as [number, number, number]),
-    colors: c.map(() => 36),
-    faces: [[4, 7, 6], [4, 6, 5], [0, 1, 2], [0, 2, 3], [3, 2, 6], [3, 6, 7], [1, 0, 4], [1, 4, 5], [2, 1, 5], [2, 5, 6], [0, 3, 7], [0, 7, 4]],
-    opacity: 22,
+    colors: c.map(() => 159),
+    faces: [],
+    // The outline reads clearly from across the region, but short of solid so
+    // it never hides the chest inside it (readOpacity takes 1..99).
+    opacity: 85,
     constrain: 'off',
   } as ShardPayload
-  const model = fromPayload(payload, 'tutorial-blue-box')
-  if (!model) throw new Error('The blue box did not read as a shard.')
+  const model = fromPayload(payload, 'tutorial-green-box')
+  if (!model) throw new Error('The green box did not read as a shard.')
   return model
 }
 
@@ -168,11 +190,6 @@ function signer(secret: Uint8Array): Sign {
  */
 async function sealBag(sign: Sign, inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, createdAt: number, at: Position, plane: TutorialLayout['plane']): Promise<NostrEvent> {
   return sign(await bagTemplate(inners, key, lookupId, height, createdAt, HIDDEN_KIND, DEFAULT_BAG_SETTINGS, { at, plane }))
-}
-
-/** The welcome item, a placeholder until the owner publishes theirs (design §7, question 6). */
-export function welcomeItem(): KeyItem {
-  return forgeKey(STAGE_TEXT.welcomeName, STAGE_TEXT.welcomeAbout)
 }
 
 /** Stage the tutorial for a player, signed by the guide key `secret`, for the layout from their spawn. */
@@ -204,7 +221,8 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
   // The treasure chest's contents, each placed at the chest, sealed to the box region's lock.
   const trophy = await sign(shardInnerTemplate(pieceModel(trophyPayload, 'tutorial-trophy'), chestAt, plane, createdAt))
   const message = rumorOf(messageInnerTemplate(STAGE_TEXT.message, chestAt, plane, createdAt), guide)
-  const welcome = await sign(keyInnerTemplate(welcomeItem(), chestAt, plane, createdAt))
+  // The owner's own signed welcome item, embedded as theirs, not re-signed.
+  const welcome = WELCOME_ITEM
   const contents: BagEntry[] = [trophy, message, welcome]
   const chest = await chestOf(STAGE_TEXT.chestName, boxKey.key, chestAt, contents)
 
@@ -215,11 +233,16 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
   ]
   const finishChest = await chestOf(STAGE_TEXT.finishName, finishKey.key, finishAt, finishContents)
 
-  const blueBox = await sign(shardInnerTemplate(blueBoxModel(), boxMiddle, plane, createdAt))
+  const blueBox = await sign(shardInnerTemplate(boxModel(), boxMiddle, plane, createdAt))
   const course = await Promise.all(COURSE.map((part, i) => sign(shardInnerTemplate(pieceModel(PIECES[part.piece], `tutorial-course-${i}`), courseToWorld(frame, part.at), plane, createdAt))))
+  // The dirt plot (A5). The tutorial tree's DNA is not staged: a seed names
+  // the owner's published event (TUTORIAL_DNA_ID), or with no id a copy the
+  // player's SEED signs (tutorial/dna.ts); never one the guide signed, since
+  // a DNA's id names its signer.
+  const plot = await sign(shardInnerTemplate(pieceModel(PLOT, 'tutorial-plot'), toWorld(frame, PLOT_AT.f, PLOT_AT.r, PLOT_AT.u), plane, createdAt))
 
   const bags = await Promise.all([
-    sealBag(sign, [blueBox, ...course], coverKey.key, coverKey.lookupId, cover.height, createdAt, cover.base, plane),
+    sealBag(sign, [blueBox, ...course, plot], coverKey.key, coverKey.lookupId, cover.height, createdAt, cover.base, plane),
     sealBag(sign, [chest], boxKey.key, boxKey.lookupId, BOX_HEIGHT, createdAt, b, plane),
     sealBag(sign, [finishChest], finishKey.key, finishKey.lookupId, BOX_HEIGHT, createdAt, finishBase, plane),
   ])
@@ -238,6 +261,7 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
       finishChest: finishChest.id,
       finishContents: finishContents.map(entryId),
       finishLookup: finishKey.lookupId,
+      plot: plot.id,
     },
   }
 }

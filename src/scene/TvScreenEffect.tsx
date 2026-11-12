@@ -56,6 +56,8 @@ import { useTvWatching } from '../store/useTvWatching'
 import { CALM, GlitchDirector } from '../lib/tv/glitch'
 import { EXPLAINER_PIP_ENABLED, explainerLayout, explainerMix, lerpRect, type Rect } from '../lib/tv/explainer'
 import { explainerCaption, explainerSoundHeld, explainerVideo, useTvExplainer } from '../store/useTvExplainer'
+import { announceCutAt, useTvAnnounce } from '../store/useTvAnnounce'
+import { appVersion, releaseTicker } from '../lib/tv/upgradeAnnounce'
 import type { ShardModel } from 'sno-core/shards'
 
 /** Kept for what still names the old static: a cut's transition, ms. */
@@ -447,6 +449,12 @@ export function TvScreenEffect(): JSX.Element {
   // tube frame by frame: it opens the spot and plays once through. Its file
   // is asked for only once TV is on.
   const hosakaFor = useRef<number | null>(null)
+  /**
+   * An UPGRADE ANNOUNCEMENT came over a spot whose banner had started
+   * (`spot`), and paused it mid-play (`playing`): after it, the same spot
+   * with its clock moved on, the banner played on from there or left as it was.
+   */
+  const hosakaHeld = useRef<{ spot: boolean; playing: boolean }>({ spot: false, playing: false })
   const hosaka = useMemo(() => {
     if (typeof document === 'undefined') return null
     const v = document.createElement('video')
@@ -551,12 +559,26 @@ export function TvScreenEffect(): JSX.Element {
       if (hosaka && !hosaka.getAttribute('src')) hosaka.src = hosaka.canPlayType('video/webm; codecs=av01') ? '/hosaka.webm' : '/hosaka-vp9.webm'
     }
     wasOn.current = tv.on
+    // An UPGRADE ANNOUNCEMENT over everything (store/useTvAnnounce): all of TV stands still under it.
+    const announce = useTvAnnounce.getState().showing
     // The banner runs only while the commercial is on.
     if (hosaka) {
       // From its start once per spot, when the spot's own clock starts
-      // (after the cut into it), then left on its last frame.
-      if (tv.on && tv.ad && hosakaFor.current !== tv.ad.at && now - tv.ad.at >= CUT_MS) { hosakaFor.current = tv.ad.at; hosaka.currentTime = 0; void hosaka.play().catch(() => {}) }
-      else if (!(tv.on && tv.ad) && !hosaka.paused) hosaka.pause()
+      // (after the cut into it), then left on its last frame. Paused under
+      // an announcement, and on from where it was after it: the spot's clock
+      // moved on by as long (store/useTv resumeTv), so it stays in step.
+      const held = hosakaHeld.current
+      if (announce) {
+        if (tv.ad && hosakaFor.current === tv.ad.at) held.spot = true
+        if (!hosaka.paused) { hosaka.pause(); held.playing = held.spot }
+      } else if (held.spot) {
+        if (tv.on && tv.ad) { hosakaFor.current = tv.ad.at; if (held.playing) void hosaka.play().catch(() => {}) }
+        hosakaHeld.current = { spot: false, playing: false }
+      } else if (tv.on && tv.ad && hosakaFor.current !== tv.ad.at && now - tv.ad.at >= CUT_MS) {
+        hosakaFor.current = tv.ad.at
+        hosaka.currentTime = 0
+        void hosaka.play().catch(() => {})
+      } else if (!(tv.on && tv.ad) && !hosaka.paused) hosaka.pause()
     }
     if (!tv.on) {
       // TV went off over an explainer: its texture goes with it.
@@ -570,22 +592,26 @@ export function TvScreenEffect(): JSX.Element {
     u.get('uFlicker')!.value = tubeFlicker(state.clock.elapsedTime)
     tubeDrift(state.clock.elapsedTime, u.get('uDrift')!.value as Vector2)
     u.get('uPx')!.value = state.gl.getPixelRatio()
-    const since = now - tv.cutAt
+    // An announcement cuts in, from one of its screens to the next, and back
+    // to TV, as a shot does (announceCutAt); the tape's own cuts are TV's.
+    const cutFrom = Math.max(tv.cutAt, announceCutAt(now))
+    const since = now - cutFrom
     // Over an explainer a cut in the live picture's corner is a plain cut: a
     // dip, a roll or a burst of snow would take the whole tube, video and all.
-    const explaining = useTvExplainer.getState().showing !== null
+    const explaining = useTvExplainer.getState().showing !== null && !announce && cutFrom === tv.cutAt
     u.get('uCut')!.value = explaining ? 1 : Math.min(1, Math.max(0, since / CUT_MS))
-    u.get('uCutKind')!.value = cutKind(tv.cutAt, reduced)
+    u.get('uCutKind')!.value = cutKind(cutFrom, reduced)
     // Snow that stays: while tuning or without a signal, and under a bag
     // with no public place (the last picture behind its inset is often its
     // author's own trip, which would hint at where it went).
     const secret = tv.shot?.item?.kind === 'bag' && !placeable(tv.shot.item.hint)
-    u.get('uSnow')!.value = tv.status === 'tuning' || tv.status === 'no-signal' ? 0.7 : secret ? 0.85 : 0
+    u.get('uSnow')!.value = announce ? 0 : tv.status === 'tuning' || tv.status === 'no-signal' ? 0.7 : secret ? 0.85 : 0
     // Now and then the set acts up (lib/tv/glitch.ts): never over a cut, the
     // tunnel or tuning, and never with reduced motion asked for.
     // Nor over a commercial: the sponsor's spot plays clean.
     // A CYBERSPACE STATS break plays clean too.
-    const onBreak = tv.ad !== null || tv.stats !== null
+    // An announcement plays clean too.
+    const onBreak = tv.ad !== null || tv.stats !== null || announce !== null
     const held = since < CUT_MS || tv.jump?.phase === 'warp' || tv.status !== 'playing' || onBreak
     // And one already on ends as the spot or the tunnel comes in, not over them.
     const g = reduced ? CALM : glitches.levels(now, held, onBreak || tv.jump?.phase === 'warp')
@@ -600,7 +626,8 @@ export function TvScreenEffect(): JSX.Element {
     // (explainerPipRect, above). Laid out every frame, so a moving frame
     // tracks it.
     const { width, height } = state.size
-    const ex = useTvExplainer.getState().showing
+    // Not under an announcement, which holds it paused (store/useTvExplainer holdExplainer).
+    const ex = announce ? null : useTvExplainer.getState().showing
     const ev = explainerVideo()
     const mix = ex && ev ? explainerMix(ex.phase, ex.at, now, ex.outMs) : 0
     let explainer: TvExplainer | null = null
@@ -657,6 +684,8 @@ export function TvScreenEffect(): JSX.Element {
       hosaka: !tv.ad ? null : hosaka && hosaka.readyState >= 2 ? hosaka : pictureFor('/hosaka-poster.jpg'),
       hosakaMark: tv.ad ? pictureFor('/hosaka-mark.png') : null,
       explainer,
+      announce,
+      release: releaseTicker(appVersion(), useTvAnnounce.getState().updatesThisWeek),
     }
     // The turning shard's next frame, for the next paint: this one copies the
     // last (TvSegments tvSpin).

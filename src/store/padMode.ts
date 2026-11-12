@@ -16,6 +16,8 @@ import { useCyberspace } from './useCyberspace'
 import { useBuilder } from './useBuilder'
 import { copyLinedUp, useShards } from './useShards'
 import { useWalk } from './useWalk'
+import { useSecrets } from './useSecrets'
+import { resetDoorReturn } from '../lib/doorReturn'
 
 export type PadMode = 'hop' | 'view' | 'walk' | 'build'
 
@@ -69,11 +71,22 @@ export function walkToBuild(): void {
   useBuilder.getState().enter('build')
 }
 
+/**
+ * VIEW to WALK: the view ends for WALK, not for a RETURN, so a Nearby list, a
+ * door's card or the Secrets list the view came from stays shut.
+ */
+function walkFromView(): void {
+  useShards.getState().setNearbyReturn(null)
+  resetDoorReturn()
+  useSecrets.getState().focus(null)
+  useWalk.getState().enter()
+}
+
 /** The mode button: one step round the ring. */
 export function cycleMode(): void {
   switch (currentPadMode()) {
     case 'hop': useCyberspace.getState().viewHere(); return
-    case 'view': useWalk.getState().enter(); return
+    case 'view': walkFromView(); return
     case 'walk': walkToBuild(); return
     case 'build': buildToHop(); return
   }

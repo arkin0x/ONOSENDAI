@@ -8,13 +8,13 @@ import { create } from 'zustand'
 import { formatBig, formatStep } from '../lib/space'
 import { formatCellSizeLong } from 'sno-core/scale'
 import { geocode } from '../lib/geocode'
-import { onEarthSurface } from '../lib/hyperspace/interest'
 import { canonicalViewAt, forgetView, parseViewAt, readRecentViews, rememberView, RECENT_VIEWS_EVENT, RECENT_VIEWS_KEY, type RecentView, type ViewTarget } from '../lib/viewAt'
 import { coordLink, placeHex } from '../lib/coordRoute'
 import { useCyberspace, type CyberspaceState } from '../store/useCyberspace'
 import { sectorTag, xyzToSectorId, type Plane } from 'cyberspace-core'
 import type { Position } from '../lib/space'
 import { useBuilder } from '../store/useBuilder'
+import { padMode } from '../store/padMode'
 import { shortHex } from '../lib/time'
 import { ProfilePic } from './ProfileBadge'
 import { AskBubble } from './AskBubble'
@@ -33,6 +33,8 @@ import { DerezzPanel } from './DerezzPanel'
 import { HyperspacePanel } from './HyperspacePanel'
 import { useHyperspace } from '../store/useHyperspace'
 import { RelaysPanel } from './RelaysPanel'
+import { TutorialPanel } from './TutorialPanel'
+import { useTutorialSwitch } from '../tutorial/gate'
 import { TargetsPanel } from './TargetsPanel'
 import { ShardsPanel } from './ShardsPanel'
 import { Legend } from './Legend'
@@ -48,6 +50,7 @@ import { jobInProgress } from '../lib/cloud'
 import { useMutes } from '../store/useMutes'
 import { MuteListModal } from './MuteListModal'
 import { useCover } from '../hooks/useCover'
+import { SpeakeasyLine } from './SpeakeasyLine'
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
 
@@ -215,11 +218,14 @@ export function PositionPanel(): JSX.Element {
         <PlaneTag plane={plane} />
       </header>
       <PlaceReadout position={position} sector={sector} coordHex={coordHex} linkHex={coordHex} />
+      <SpeakeasyLine />
       <Explanation>
         Where your avatar stands: its X, Y and Z, the sector they fall in, and
         the coordinate of your chain head. Tap any figure to copy it. LINK
         copies a link that opens ONOSENDAI looking at your avatar. To look
-        somewhere else without moving, use the View panel.
+        somewhere else without moving, use the View panel. While LIVE,
+        SPEAKEASY shows up when your chain head is inside one: a private relay
+        for that region. ADD RELAY adds it to your relays.
       </Explanation>
     </section>
   )
@@ -272,14 +278,9 @@ export function ViewAtPanel(): JSX.Element {
     // a place found by name, a star's name, a recent place's name. VIEWING
     // then says it (FocusBar viewingLabel).
     const named = target.label !== parseViewAt(typed, target.plane)?.label
-    useCyberspace.getState().focusOn(target.position, target.plane, target.label, target.scaleExp, true, named)
-    // A place on Earth gets the pin: marking the focal point is the whole
-    // purpose of typing a latitude and longitude or a place name. A
-    // coordinate or a triple of axes that is not on the ground gets none,
-    // and leaves any standing pin alone.
-    if (target.plane === 0 && onEarthSurface(target.position)) {
-      useCyberspace.getState().dropPin(target.position, target.label, target.scaleExp, named)
-    }
+    // VIEW there. No pin: the cross marker is off (arkinox, 2026-11-11);
+    // the star marks a place.
+    useCyberspace.getState().viewAt(target.position, target.plane, target.label, target.scaleExp, { named })
     const next = rememberView(recent, { input: canonicalViewAt(typed), label: target.label, plane: target.plane })
     setRecent(next)
     saveRecent(next)
@@ -480,31 +481,88 @@ function LinksPanel(): JSX.Element {
   )
 }
 
+/**
+ * The keys for the mode the pad is in (arkinox, 2026-11-11: the Controls panel
+ * always showed HOP's; it shows the current mode's now). HOP lines up a move,
+ * VIEW is a free look that flies, WALK is first person, BUILD places things.
+ * Shared keys (Tab, Esc, P, H, the chain explorer) sit under every mode.
+ */
+const SHARED_ROWS: Array<[string, string]> = [
+  ['Tab', 'previous view'],
+  ['C', 'canonical view (facing the black sun)'],
+  ['P', 'toggle plane'],
+  ['H', 'hyperspace line scrubber'],
+  ['[ / ]', 'chain explorer: back / forward one action'],
+  ['Home / End', 'chain explorer: spawn / live head'],
+  ['Esc', 'close: dialog, then menu, then the latest chip'],
+]
+
+const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build', { title: string; rows: Array<[string, string]>; hint: string }> = {
+  hop: {
+    title: 'Controls · HOP',
+    rows: [
+      ['W A S D', 'move cursor one step'],
+      ['R / F', 'cursor FAR / NEAR along the depth axis'],
+      ['Space', 'commit hop or sidestep (compute proof)'],
+      ['X', 'cancel proof / recall cursor'],
+      ['Q / E', 'scale step out / in (zoom)'],
+      ['Shift + W A S D', 'rotate view 90°'],
+      ['B', 'build mode in / out'],
+    ],
+    hint: 'HOP lines up a move with the cursor and commits it with Space, which computes its proof and signs it. W A S D move the cursor, R and F move it FAR and NEAR along the depth axis, and Q and E zoom. X recalls the cursor to your avatar. B goes into build mode.',
+  },
+  view: {
+    title: 'Controls · VIEW',
+    rows: [
+      ['W A S D', 'move cursor one step'],
+      ['R / F', 'cursor FAR / NEAR along the depth axis'],
+      ['Space', 'fly the view forward (hold)'],
+      ['Shift', 'fly the view back (hold)'],
+      ['X', 'recall cursor (region mode: reset the cursor, collapse the region)'],
+      ['Q / E', 'scale step out / in (zoom)'],
+      ['Shift + W A S D', 'rotate view 90°'],
+    ],
+    hint: 'VIEW is a free look from your head: the cursor moves without lining up a hop. Space and Shift fly the view forward and back the way the camera faces; R and F are FAR and NEAR, a cell at a time. The Region button picks a region for a private speakeasy.',
+  },
+  walk: {
+    title: 'Controls · WALK',
+    rows: [
+      ['W A S D', 'walk: forward, left, back, right'],
+      ['Space / R', 'jump (gravity on) or up a cell'],
+      ['C / F', 'down a cell, or absorb a bounce'],
+      ['Z', 'gravity on / off'],
+      ['X', 'stop the walk, or end WALK'],
+    ],
+    hint: 'WALK is first person: every press is a step, proved behind you. W A S D walk, Space jumps, C goes down, and Z switches gravity. X stops the steps still to prove, or ends WALK.',
+  },
+  build: {
+    title: 'Controls · BUILD',
+    rows: [
+      ['W A S D', 'move the build cursor'],
+      ['R / F', 'build cursor FAR / NEAR'],
+      [', / .', 'build step finer / coarser'],
+      ['Space', 'place what is lined up'],
+      ['X', 'recall the build cursor to your avatar'],
+      ['B', 'leave build mode'],
+    ],
+    hint: 'BUILD places things at a build cursor and never moves you. The movement keys and zoom move that cursor; , and . change the step it places at; Space places. B or X leaves.',
+  },
+}
+
 function Controls(): JSX.Element {
-  const rows: Array<[string, string]> = [
-    ['W A S D', 'move cursor one step'],
-    ['Space', 'commit hop or sidestep (compute proof)'],
-    ['X', 'cancel proof / recall cursor (building: stop a move or route from before, else build cursor to your avatar)'],
-    ['B', 'build mode in / out: the movement keys and zoom then move the build cursor, never your avatar'],
-    ['Shift + W A S D', 'rotate view 90°'],
-    ['Tab', 'previous view'],
-    ['Esc', 'close: dialog, then menu, then the latest chip'],
-    ['C', 'canonical view (facing the black sun)'],
-    ['Q / E', 'scale step up / down (zoom out / in)'],
-    ['R / F', 'cursor along depth axis'],
-    ['P', 'toggle plane'],
-    ['H', 'hyperspace line scrubber'],
-    ['[ / ]', 'chain explorer: back / forward one action (building: the build cursor goes to it)'],
-    ['Home / End', 'chain explorer: spawn / live head (building: the same)'],
-  ]
+  const walking = useCyberspace((s) => s.walking)
+  const viewing = useCyberspace((s) => s.viewing())
+  const building = useBuilder((s) => s.active)
+  const mode = padMode(walking, building, viewing)
+  const { title, rows, hint } = MODE_ROWS[mode]
 
   return (
     <section className="panel panel--controls">
       <header className="panel__head">
-        <h2>Controls</h2>
+        <h2>{title}</h2>
       </header>
       <dl className="keys">
-        {rows.map(([key, description]) => (
+        {[...rows, ...SHARED_ROWS].map(([key, description]) => (
           <div key={key}>
             <dt>
               <kbd>{key}</kbd>
@@ -514,19 +572,12 @@ function Controls(): JSX.Element {
         ))}
       </dl>
       <Explanation>
-        These are the keyboard keys; on a touch screen the pad and its buttons do
-        the moving, zooming and committing. W A S D move the cursor one step at
-        the current zoom, R and F move it along the depth axis, and Space commits
-        the move the cursor lines up, which computes its proof and signs it. X
-        cancels a proof in progress or brings the cursor back to your avatar. Q
-        and E zoom out and in by one power of two. Shift with W A S D turns the
-        view 90 degrees, Tab goes back to the view before, and C faces the black
-        sun. P switches the plane between dataspace and ideaspace, and H opens the
-        hyperspace line scrubber. [ and ] step through your chain one action at a
-        time, and Home and End jump to its spawn and its live head. B goes in and
-        out of build mode, where the movement keys and zoom move the build cursor
-        instead of your avatar. Esc closes the topmost thing: a dialog first, then
-        the menu, then the latest chip.
+        These are the keys for the mode you are in; the pad and its buttons do
+        the same on a touch screen. {hint} Tab goes back to the view before, C
+        faces the black sun, and P switches the plane. H opens the hyperspace
+        line scrubber. [ and ] step through your chain, Home and End jump to its
+        spawn and live head. Esc closes the topmost thing: a dialog, then the
+        menu, then the latest chip.
       </Explanation>
     </section>
   )
@@ -544,7 +595,7 @@ function Controls(): JSX.Element {
  * Hyperspace, View (what the scene draws, just above the Legend that decodes
  * it), Legend, Controls, Derezz and Relays.
  */
-const PANELS: Record<PanelId, () => JSX.Element> = {
+const PANELS: Record<PanelId, () => JSX.Element | null> = {
   identity: IdentityPanel,
   agents: AgentsPanel,
   hidden: HiddenPanel,
@@ -566,6 +617,7 @@ const PANELS: Record<PanelId, () => JSX.Element> = {
   controls: Controls,
   derezz: DerezzPanel,
   relays: RelaysPanel,
+  tutorial: TutorialPanel,
 }
 
 /**
@@ -641,7 +693,11 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // drawn only for someone a bot profile named as operator, while TALK and
   // the follow rule were missing; both have shipped. It sits in its saved
   // place, which the hidden days kept.
-  const hidden = (id: PanelId): boolean => leads.includes(id)
+  // The TUTORIAL panel (feedback item 17) is drawn only where the tutorial
+  // switch is on; off (everyone in production), it is filtered out so no empty
+  // slot shows for a panel that would render nothing.
+  const tutorialShown = useTutorialSwitch((s) => s.value) === true
+  const hidden = (id: PanelId): boolean => leads.includes(id) || (id === 'tutorial' && !tutorialShown)
   const left = [...leads, ...order.left.filter((id) => !hidden(id))]
   const right = order.right.filter((id) => !hidden(id))
 

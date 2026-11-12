@@ -112,6 +112,8 @@ import { depName, useStash } from '../hud/stash'
 import { registerEscape } from '../hooks/useEscape'
 import { buildPlane, buildStepOf, placedCursor } from '../lib/buildCursor'
 import { landFly } from '../lib/viewFly'
+import { positionHex } from '../lib/events'
+import { useRegion } from './useRegion'
 
 /** How a session of BUILD mode began: the BUILD control (or B), or a DEPLOY. */
 export type BuildEntry = 'build' | 'deploy'
@@ -193,9 +195,10 @@ function viewStands(s: ReturnType<typeof useCyberspace.getState>): boolean {
 /** The center of all cyberspace, where HyperspacePanel's EARTH, CYBERSPACE and THE RIDE views point. */
 const CUBE_CENTER = 1n << 84n
 
-/** A plain view of the whole cube (EARTH, CYBERSPACE, THE RIDE), not of a place in it. */
-function wholeCube(f: { position: { x: bigint; y: bigint; z: bigint }; drive?: boolean }): boolean {
-  return !f.drive && f.position.x === CUBE_CENTER && f.position.y === CUBE_CENTER && f.position.z === CUBE_CENTER
+/** A view of the whole cube (EARTH, CYBERSPACE, THE RIDE), not of a place in it: its cursor, or a plain look, still on the centre. */
+function wholeCube(s: ReturnType<typeof useCyberspace.getState>): boolean {
+  const at = s.focus?.drive ? s.cursor : s.focus?.position
+  return at !== undefined && at.x === CUBE_CENTER && at.y === CUBE_CENTER && at.z === CUBE_CENTER
 }
 
 /** The build cursor sits on your avatar, in the plane your head shows. */
@@ -252,12 +255,14 @@ export const useBuilder = create<BuilderState>((set, get) => ({
 
   enter: (via = 'build') => {
     if (get().active) return
+    // Region mode is a VIEW tool: BUILD ends it (arkinox, 2026-11-11).
+    useRegion.getState().exit()
     // The camera back from a hyperspace view first, as spectating does
     // (useHyperspace.ts): its ownership hides the gibson field and stands a
     // second bar up whose RETURN would end the mode.
     const hs = useHyperspace.getState()
     if (hs.viewOwned || hs.scrubHeight !== null) {
-      useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null, returnFocus: null, viewedStop: null })
+      useHyperspace.setState({ scrubHeight: null, viewOwned: false, viewedStop: null })
     }
     // VIEW's fly not yet landed lands now: the cursor below, and whether it
     // has left your avatar, are where the view has flown (lib/viewFly.ts).
@@ -281,9 +286,11 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       set({ active: true, via, scrub, leftAvatar: !onAvatar(useCyberspace.getState()) })
       return
     }
-    const looking = cs.focus !== null && !wholeCube(cs.focus)
+    const looking = cs.focus !== null && !wholeCube(cs)
     if (!looking) cs.focusOn(cs.position, cs.plane, BUILD_FOCUS_LABEL, undefined, true)
     else if (!cs.focus?.drive) cs.focusOn(cs.anchor, cs.anchorPlane, BUILD_FOCUS_LABEL, undefined, true)
+    // A VIEW framed on the thing frames the build cursor's cell, as BUILD always has.
+    else if (cs.focus.fit || cs.focus.item) useCyberspace.setState({ focus: { ...cs.focus, fit: undefined, item: undefined } })
     set({ active: true, via, scrub: null, leftAvatar: !onAvatar(useCyberspace.getState()) })
   },
 
@@ -603,7 +610,18 @@ useCyberspace.subscribe((s, prev) => {
   if (s.scaleExp === prev.scaleExp || s.buildExact || !useBuilder.getState().active) return
   const sh = useShards.getState()
   if (sh.pending === null) return
-  const at = s.cursor !== prev.cursor ? { ...s.cursor } : deployPoint(s.cursor, buildStepOf({ ...s, scaleExp: prev.scaleExp }), sh.deployHeight)
+  const was = buildStepOf({ ...s, scaleExp: prev.scaleExp })
+  const at = s.cursor !== prev.cursor ? { ...s.cursor } : deployPoint(s.cursor, was, sh.deployHeight)
   const onAvatar = samePosition(placedCursor(s), s.position)
   useCyberspace.setState({ cursor: at, buildExact: true, buildSettle: onAvatar ? { at, from: { ...s.position } } : null })
+  // A seed's hide height was measured for the cursor and STEP it was composed
+  // at (plant.ts seedDraftHeight). Where that is the very point now held, the
+  // measure is kept for it, at the held point and 2^0, so the zoom does not
+  // send the seed to SEED_HIDE_MAX (useShards keeps the deploy as measured).
+  const p = sh.pending
+  const plane = buildPlane(s)
+  const fit = p.type === 'seed' ? p.seed.fit : undefined
+  if (p.type === 'seed' && fit && fit.step === was && fit.cursor === positionHex(s.cursor, plane) && samePosition(deployPoint(s.cursor, was, fit.height), at)) {
+    useShards.setState({ pending: { ...p, seed: { ...p.seed, fit: { ...fit, cursor: positionHex(at, plane), step: 0 } } } })
+  }
 })

@@ -78,6 +78,7 @@ import { useShards } from '../../store/useShards'
 import { walkKeyDown, walkKeysReleased } from '../../hooks/useKeyboard'
 import { walkFacing } from '../../lib/walkEye'
 import { currentPadMode } from '../../store/padMode'
+import { viewEarth } from '../HyperspacePanel'
 import { placeSpawn } from '../../store/fixtures/placeSpawn'
 import { spectate, stopSpectating } from '../../lib/spectator'
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
@@ -276,6 +277,20 @@ describe('HOP and VIEW keep their pad', () => {
     expect(cells()).toEqual(expect.arrayContaining(['away', 'up', 'toward', 'left', 'right', 'zoomout', 'down', 'zoomin']))
     expect(cells()).not.toContain('forward')
     expect(drawn().some((b) => b.props.className === 'touchpad__hub')).toBe(true)
+  })
+
+  it('EARTH from the compass is a full VIEW: every direction, the Region key in its cell, VIEW lit, and no pin key even with a pin down (arkinox, 2026-11-11)', () => {
+    viewEarth()
+    S().dropPin({ x: 1n, y: 2n, z: 3n }, 'OLD PIN')
+    expect(cells()).toEqual(expect.arrayContaining(['region', 'earth', 'cube', 'away', 'up', 'toward', 'left', 'right']))
+    expect(cells()).not.toContain('pin')
+    expect(keys().some((b) => (b.props.className ?? '').includes('is-standdown'))).toBe(false)
+    expect(find('is-view').props.children).toBe('VIEW')
+    // BUILD from the view keeps it, but region mode is VIEW's: no Region key there.
+    useBuilder.getState().enter('build')
+    expect(cells()).not.toContain('region')
+    useBuilder.getState().exit()
+    S().clearFocus()
   })
 })
 

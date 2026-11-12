@@ -70,7 +70,7 @@ export function depName(d: MyDeployment): string {
 export function goToDeployment(d: MyDeployment): void {
   const unit = d.type === 'shard' ? d.shard?.unit ?? 0 : 0
   useStash.setState(NONE_OPEN)
-  useCyberspace.getState().focusItem({ x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }, d.plane, depName(d), unit)
+  useCyberspace.getState().viewAt({ x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }, d.plane, depName(d), unit, { item: true })
   useShards.getState().selectSecret(d.eventId)
 }
 
@@ -91,6 +91,8 @@ interface StashModals {
   chestSaving: boolean
   /** The PLACE AUDIO composer (DECK-0007). */
   audio: boolean
+  /** The SEED composer (DECK-0008). */
+  seed: boolean
   /** The SHARD FEED window: everyone's published objects, outside the Builder. */
   feed: boolean
   /** A deploy was started from the Models modal: cancelling it reopens the modal. */
@@ -120,6 +122,8 @@ interface StashModals {
   openChestEdit: (eventId: string, fields: boolean) => void
   /** Hide audio at the build cursor (DECK-0007). */
   openAudio: () => void
+  /** Plant a seed at the build cursor (DECK-0008). */
+  openSeed: () => void
   /** Browse the Shard Feed. */
   openFeed: () => void
   close: () => void
@@ -130,7 +134,7 @@ interface StashModals {
 }
 
 /** Every modal closed: what each open sets before opening its own. */
-const NONE_OPEN = { models: false, bags: false, bag: null, message: false, key: false, chest: false, chestEdit: null, audio: false, feed: false }
+const NONE_OPEN = { models: false, bags: false, bag: null, message: false, key: false, chest: false, chestEdit: null, audio: false, seed: false, feed: false }
 
 export const useStash = create<StashModals>((set) => ({
   models: false,
@@ -142,6 +146,7 @@ export const useStash = create<StashModals>((set) => ({
   chestEdit: null,
   chestSaving: false,
   audio: false,
+  seed: false,
   feed: false,
   returnToModels: false,
   returnToFeed: false,
@@ -154,6 +159,7 @@ export const useStash = create<StashModals>((set) => ({
   openKey: () => set({ ...NONE_OPEN, key: true }),
   openChestEdit: (eventId, fields) => set({ ...NONE_OPEN, chestEdit: { eventId, fields } }),
   openAudio: () => set({ ...NONE_OPEN, audio: true }),
+  openSeed: () => set({ ...NONE_OPEN, seed: true }),
   openFeed: () => set({ ...NONE_OPEN, feed: true }),
   close: () => set(NONE_OPEN),
   deployModel: (id) => {

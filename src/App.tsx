@@ -26,7 +26,7 @@ import { watchDoorReturn } from './lib/doorReturn'
 import { startCoordRoute } from './store/useCoordRoute'
 import { DemoCoach } from './hud/DemoCoach'
 import { TutorialCoach } from './hud/TutorialCoach'
-import { watchFirstArrival } from './store/useTutorial'
+import { useTutorial, watchFirstArrival } from './store/useTutorial'
 // The tutorial's staged things and the waits on them (registered on load; stages only while it runs).
 import './tutorial/director'
 // The final card's DUNGEON, when games are on for this device.
@@ -51,7 +51,7 @@ import { ChainStatusModal } from './hud/ChainStatus'
 import { ChainStoreTrial } from './hud/ChainStoreTrial'
 import { BrokenChainChip, BrokenChainModal } from './hud/BrokenChain'
 import { VersionChip } from './hud/VersionChip'
-import { startVersionGate } from './lib/versionGate'
+import { startVersionGate, useVersionGate } from './lib/versionGate'
 import { HosakaPulse } from './hud/HosakaPulse'
 import { useOfferView } from './store/useOffer'
 import { useDiscovery } from './hooks/useDiscovery'
@@ -62,6 +62,8 @@ import { ProfileView } from './hud/ProfileView'
 import { ProfileModal } from './hud/ProfileModal'
 import { useProfileView } from './store/useProfileView'
 import { TouchControls } from './hud/TouchControls'
+import { RegionChip } from './hud/RegionChip'
+import { useRegion } from './store/useRegion'
 import { WalkLookSphere } from './hud/WalkLookSphere'
 import { ViewFlyButtons } from './hud/ViewFlyButtons'
 import { SyncWarning } from './hud/SyncWarning'
@@ -103,7 +105,15 @@ import { useShards } from './store/useShards'
 import { useBuilder } from './store/useBuilder'
 import { CHAT_COVERS_PAD, linkChatAndPad, tapScene, usePad } from './store/usePad'
 
+/** A stable empty list for a step that keeps no chips, so the selector never churns. */
+const EMPTY_KEEP: ReadonlyArray<'found' | 'chain'> = []
+
 export default function App(): JSX.Element {
+  // Landing on /tv, the first render is already TV's alone, as it will be
+  // once TV starts (in the effect below): the panels would mount for one
+  // render and ask the relays for megabytes (every bag, the avatars) ahead
+  // of TV's first question, on the same sockets.
+  const [tvLanding, setTvLanding] = useState(() => isTvPath(window.location.pathname))
   // Reactions and comments that tag you: the first page per identity, then a poll.
   useNotificationsLoop()
   // New private messages from your agents, for the dot on AGENTS and the
@@ -152,6 +162,7 @@ export default function App(): JSX.Element {
       try { window.history.replaceState(null, '', '/') } catch { /* no history here */ }
     }
     if (isTvPath(window.location.pathname)) open()
+    setTvLanding(false)
     const onPop = (): void => {
       const at = isTvPath(window.location.pathname)
       const tv = useTv.getState()
@@ -229,6 +240,15 @@ export default function App(): JSX.Element {
   // where building happens, so on a phone the panels fold away.
   const building = useBuilder((s) => s.active)
   const touring = useDemo((s) => s.active)
+  // The first-arrival tutorial hides the top-left chips to cut clutter, save
+  // the few a step teaches with by name (feedback item 3). They all come back
+  // when it is exited or finished.
+  const tutorialActive = useTutorial((s) => s.active)
+  const tutorialKeep = useTutorial((s) => (s.active ? (s.script.steps[s.index]?.keepChips ?? EMPTY_KEEP) : EMPTY_KEEP))
+  const keepsChip = (name: 'found' | 'chain'): boolean => !tutorialActive || tutorialKeep.includes(name)
+  const versionBlocked = useVersionGate((s) => s.verdict === 'blocked')
+  // Region mode (store/useRegion.ts) clears the stack under its chip the same way.
+  const regionOn = useRegion((s) => s.active)
   // The question bubble lives in the menu; on a phone the menu covers the
   // scene, so starting the tour from it closes it. Only on the start:
   // opening the menu during the tour (its menu step) leaves it open.
@@ -300,6 +320,9 @@ export default function App(): JSX.Element {
     // A tap while the view menu is up dismisses that first, so one gesture never
     // has two meanings.
     if (viewMenuOpen) { setViewMenuOpen(false); return }
+    // While the tutorial runs the controls stay out, so a stray tap never
+    // folds them and COMMIT is always there to press (feedback item 5).
+    if (useTutorial.getState().active && usePad.getState().open) return
     // With the chat open over the controls, this folds the chat (usePad).
     tapScene()
   }, [viewMenuOpen])
@@ -309,7 +332,7 @@ export default function App(): JSX.Element {
   const tv = useTv((s) => s.on)
   useCanvasTap(onSceneTap, !crowded && !tv)
 
-  if (tv) {
+  if (tv || tvLanding) {
     return (
       <div className="app">
         <WorldScans />
@@ -336,8 +359,21 @@ export default function App(): JSX.Element {
               <FocusBar />
               {/* BUILD mode, where the free view's bar would be: it rides that view. */}
               <BuildBar />
+              {/* Region mode's readout, under RETURN (hud/RegionChip.tsx):
+                  null unless region mode is on (arkinox, 2026-11-11). */}
+              <RegionChip />
             </>,
-            status: <>
+            status: tutorialActive ? <>
+              {/* During the tutorial only what is needed shows (feedback item
+                  3): RELOAD TO MOVE, a broken chain and a game you are in,
+                  which each stop you; then the chips a step names, FOUND HERE
+                  while opening a chest, the chain chip while spectating a friend. */}
+              {versionBlocked && <VersionChip />}
+              <BrokenChainChip />
+              <GameChip />
+              {keepsChip('found') && <KeyFoundChip />}
+              {keepsChip('chain') && <ChainExplorer />}
+            </> : <>
               {/* A newer deploy, first of all when it requires a RELOAD to move (lib/versionGate.ts). */}
               <VersionChip />
               {/* A broken chain first: nothing else moves you until you respawn.
@@ -349,15 +385,15 @@ export default function App(): JSX.Element {
               <GoalChip />
               {/* BUILD mode keeps the stack to what building needs (arkinox,
                   2026-10-08): the line and XOR BITS step aside and come back
-                  on exit. */}
+                  on exit. Region mode does the same (arkinox, 2026-11-11). */}
               {/* Not during the /demo tour (arkinox, 2026-10-15). */}
-              {!building && !touring && <LineScrubber />}
+              {!building && !touring && !regionOn && <LineScrubber />}
               <HyperspaceBar />
               {/* Not in BUILD mode, and neither is NEARBY (arkinox,
                   2026-11-02); each chip stands down itself. [ ] Home End
                   still aim the build cursor along a chain (useBuilder walkChain). */}
               <ChainExplorer />
-              {!building && <BitReadout />}
+              {!building && !regionOn && <BitReadout />}
               {/* Under XOR BITS while anything is unread (arkinox, 2026-09-28). */}
               <NotificationsToast />
               {/* What was just found, what is open to you here, then the scan. */}

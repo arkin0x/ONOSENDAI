@@ -153,6 +153,7 @@ export function stopExplainers(): void {
   gen++
   pending?.abort?.abort()
   pending = null
+  heldAt = null
   due = Infinity
   guardAt = Infinity
   dropVideo()
@@ -219,7 +220,8 @@ function show(ex: Explainer, now: number): void {
   useTvExplainer.setState({ showing: { id: ex.id, title: ex.title, phase: 'in', at: now, outMs: EXPLAINER_OUT_MS } })
   const mine = gen
   v.play().catch((e: unknown) => {
-    if (mine !== gen || video !== v) return
+    // Paused by an announcement before it began (an AbortError): releaseExplainer plays it.
+    if (mine !== gen || video !== v || heldAt !== null) return
     // The browser holds the sound back (no tap yet): the picture plays
     // without it, and the next tap brings it in.
     if ((e as { name?: string })?.name === 'NotAllowedError' && !v.muted) {
@@ -246,6 +248,8 @@ function soundOnTap(v: HTMLVideoElement): void {
   if (typeof window === 'undefined' || unlock) return
   const go = (): void => {
     if (video !== v || !useTvExplainer.getState().showing) { unlock?.(); return }
+    // Not under an UPGRADE ANNOUNCEMENT, which holds it paused: the next tap after it.
+    if (heldAt !== null) return
     policyMuted = false
     setSound(v)
     void v.play().then(() => unlock?.(), () => { policyMuted = true; v.muted = true; void v.play().catch(() => {}) })
@@ -261,6 +265,8 @@ function soundOnTap(v: HTMLVideoElement): void {
 /** The video stopped working on screen: the picture straight back. */
 function fail(): void {
   failedOut = true
+  // Under an announcement nothing goes out, nor does the music come up: the first look after it does (onScreen).
+  if (heldAt !== null) return
   const s = useTvExplainer.getState().showing
   if (s && s.phase !== 'out') goOut(performance.now(), EXPLAINER_FAIL_OUT_MS)
 }
@@ -297,6 +303,49 @@ function onScreen(s: ExplainerShowing, now: number): void {
   if (v.currentTime !== progress.t) progress = { t: v.currentTime, at: now }
   else if (now - progress.at >= EXPLAINER_STALL_MS) { goOut(now, EXPLAINER_FAIL_OUT_MS); return }
   if (s.phase === 'in' && now - s.at >= EXPLAINER_IN_MS) useTvExplainer.setState({ showing: { ...s, phase: 'play', at: now } })
+}
+
+/** When an UPGRADE ANNOUNCEMENT began holding this (store/useTvAnnounce), performance.now(); null when none is. */
+let heldAt: number | null = null
+
+/**
+ * An UPGRADE ANNOUNCEMENT stops TV where it is (store/useTvAnnounce): the
+ * one on screen pauses where it is, as the page's own pause, and every clock
+ * here stands still until releaseExplainer. TV's engine does not tick this
+ * meanwhile, so nothing comes due, stalls or runs out.
+ */
+export function holdExplainer(now: number): void {
+  if (heldAt !== null) return
+  heldAt = now
+  if (useTvExplainer.getState().showing) pauseOwn(video)
+}
+
+/**
+ * The announcement is over: every clock moves on by the time it held, and
+ * the one on screen plays on from where it paused. One that will not play
+ * again gives the picture straight back, as a failure while it plays does.
+ */
+export function releaseExplainer(now: number): void {
+  if (heldAt === null) return
+  const held = Math.max(0, now - heldAt)
+  heldAt = null
+  due += held
+  endedAt += held
+  guardAt += held
+  if (pending) pending.began += held
+  const s = useTvExplainer.getState().showing
+  if (!s) return
+  useTvExplainer.setState({ showing: { ...s, at: s.at + held } })
+  const v = video
+  progress = { t: v ? v.currentTime : -1, at: now }
+  if (!v || s.phase === 'out' || v.ended) return
+  const mine = gen
+  v.play().catch(() => { if (mine === gen && video === v) fail() })
+}
+
+/** Whether an announcement is holding this: for tests. */
+export function explainerHeldForTest(): boolean {
+  return heldAt !== null
 }
 
 /** Pause the video as the page's own pause, not the viewer's. */

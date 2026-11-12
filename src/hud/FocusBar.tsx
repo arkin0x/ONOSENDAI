@@ -43,8 +43,10 @@ export function FocusBar(): JSX.Element | null {
   const viewOwned = useHyperspace((s) => s.viewOwned)
   // BUILD mode rides the free view and has its own bar (BuildBar), with its
   // own EXIT and RETURN TO AVATAR; this one comes back when the mode ends.
+  // Every VIEW has this bar, hyperspace's too; the ride's look has its own
+  // (HyperspaceViewBar).
   const building = useBuilder((s) => s.active)
-  const shown = !(focusLabel === null || spectating || viewOwned || building)
+  const shown = !(focusLabel === null || spectating || (viewOwned && !focus?.view) || building)
   // Escape is RETURN while this bar stands, a chip on the Escape stack
   // (arkinox, 2026-10-01); it used to be a fallback in the keyboard hook.
   useEscape('chip', shown, () => useCyberspace.getState().clearFocus())

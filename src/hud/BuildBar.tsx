@@ -80,7 +80,8 @@ export function BuildBar(): JSX.Element | null {
   const stop = (): void => {
     const s = useCyberspace.getState()
     if (s.plan) s.cancelPlan()
-    else s.cancel()
+    // Finished since the render: X here would end BUILD's view, not a move.
+    else if (moveUnderWay(s)) s.cancel()
   }
 
   return (
@@ -126,6 +127,7 @@ export function BuildBar(): JSX.Element | null {
         <button className="buildbar__act" onClick={() => useStash.getState().openKey()} aria-label="Forge an item" title="Forge an item: a keypair hidden at the build cursor; whoever finds it can TAKE it, and a chest can be sealed to it"><ItemIcon type="key" className="buildbar__icon" size={ICON} />ITEM</button>
         <button className="buildbar__act" onClick={sealAChest} aria-label="Seal a chest" title="Seal a chest: place a chest, then seal a message, a model or an item in it to an item or a person"><ItemIcon type="chest" className="buildbar__icon" size={ICON} />CHEST</button>
         <button className="buildbar__act" onClick={sealADoor} aria-label="Seal a door" title="Seal a door: place a door, then whatever you place in its red cube at its height is sealed to it"><DoorClosedLocked className="item-icon buildbar__icon" size={ICON} strokeWidth={2.5} aria-hidden />DOOR</button>
+        <button className="buildbar__act" onClick={() => useStash.getState().openSeed()} aria-label="Plant a seed" title="Plant a seed: pick a DNA, see what it grows, and plant it at the build cursor; everyone who finds it grows the same bloom"><ItemIcon type="seed" className="buildbar__icon" size={ICON} />SEED</button>
         <button className="buildbar__act" disabled={again === null} onClick={() => useShards.getState().placeAgain()} aria-label="Place again" title={again === null ? 'Place again: nothing placed yet this session' : `Place "${again}" again, with the same settings`}><ItemIcon type={againType} className="buildbar__icon" size={ICON} />AGAIN</button>
       </div>
 

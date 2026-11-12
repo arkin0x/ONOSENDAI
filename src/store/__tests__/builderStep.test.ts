@@ -34,6 +34,10 @@ import { positionOf, regionOf, useShards } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 import { useBuilder } from '../useBuilder'
 import { stepBuild } from '../buildStep'
+import { BASE_CAPS } from 'sno-core/seeds'
+import { ORIGINAL_DNAS } from '../../lib/seeds/originalDnas'
+import { seedDraftHeight, seedFitFor, type SeedFit } from '../../lib/seeds/plant'
+import { buildPlane } from '../../lib/buildCursor'
 import { buildCursorOf, buildStepOf, moveStepOf } from '../../lib/buildCursor'
 import { alignTo, deployPoint, type Position } from '../../lib/space'
 
@@ -294,5 +298,49 @@ describe('STEP', () => {
     const p = placed()
     for (const a of ['x', 'y', 'z'] as const) expect(p[a]).toBe(alignTo(S().cursor[a], 5) + (1n << 4n))
     expect(alignTo(p.x, 12)).toBe(alignTo(SPOT.x, 12))
+  })
+})
+
+describe('STEP lowered before SEED (found by the tutorial\'s review, 2026-11-11)', () => {
+  const seedDraft = (fit?: SeedFit) => ({ text: ORIGINAL_DNAS[5].text, caps: BASE_CAPS, scale: 0, title: '', ...(fit ? { fit } : {}) })
+
+  it('a seed SEED measured at the lowered STEP keeps it, and its cursor, and hides at its measured height, not 12', () => {
+    lineUp(15, 20)
+    stepTo(10)
+    const at = { ...S().cursor }
+    // The composer measures where the seed lands at this STEP and cursor (plant.ts seedHideFor) ...
+    const fit = seedFitFor({ height: 5, reach: 6 }, at, buildPlane(S()), buildStepOf(S()))
+    // ... and PLANT lines the seed up in place of what was lined up.
+    D().startDeploySeed(seedDraft(fit))
+    expect(D().pending?.type).toBe('seed')
+    expect(buildStepOf(S())).toBe(10)
+    expect(S().cursor).toEqual(at)
+    expect(seedDraftHeight(fit, S().cursor, buildPlane(S()), buildStepOf(S()), 20)).toBe(5)
+  })
+
+  it('anything else lined up in its place still takes STEP back to the zoom; so does a seed measured elsewhere', () => {
+    lineUp(15, 20)
+    stepTo(10)
+    D().startDeploySeed(seedDraft())
+    expect(S().buildStep).toBeNull()
+    lineUp(15, 20)
+    stepTo(10)
+    D().startDeploySeed(seedDraft(seedFitFor({ height: 5, reach: 6 }, S().cursor, buildPlane(S()), 9)))
+    expect(S().buildStep).toBeNull()
+    lineUp(15, 20)
+    stepTo(10)
+    D().startDeploySeed(seedDraft(seedFitFor({ height: 5, reach: 6 }, { ...S().cursor, x: S().cursor.x + 1n }, buildPlane(S()), buildStepOf(S()))))
+    expect(S().buildStep).toBeNull()
+  })
+
+  it('a bloom the worker could not measure still keeps the STEP it was composed at, and hides at 12 there', () => {
+    lineUp(15, 20)
+    stepTo(10)
+    const at = { ...S().cursor }
+    const fit = seedFitFor({ height: 12, reach: undefined }, at, buildPlane(S()), buildStepOf(S()))
+    D().startDeploySeed(seedDraft(fit))
+    expect(buildStepOf(S())).toBe(10)
+    expect(S().cursor).toEqual(at)
+    expect(seedDraftHeight(fit, S().cursor, buildPlane(S()), buildStepOf(S()), 20)).toBe(12)
   })
 })

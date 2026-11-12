@@ -36,8 +36,8 @@ import type { Filter } from 'nostr-tools'
 import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { coordToXyz } from 'cyberspace-core'
-import { V2_EPOCH } from '../../lib/tv/tape'
-import { READ_STUCK_MS, TV_FOCUS_LABEL, adEndedAtForTest, fitScale, pathAfter, placeable, rideEnds, rideView, setTvAsk, shotOpening, useTv, type TvJump } from '../useTv'
+import { START_LOOK_S, V2_EPOCH } from '../../lib/tv/tape'
+import { NEXT_START_KEY, READ_STUCK_MS, TV_FOCUS_LABEL, resetStatsReadsForTest, takeNextStart, adEndedAtForTest, fitScale, pathAfter, placeable, rideEnds, rideView, setTvAsk, shotOpening, useTv, type TvJump } from '../useTv'
 import { useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { usePersonCard } from '../usePersonCard'
@@ -86,6 +86,8 @@ async function ask(f: Filter): Promise<RelayAnswer[]> {
 beforeEach(() => {
   down = 0
   lag = 0
+  // Every test that reaches a picture picks the next start: none carries over to the next test.
+  localStorage.removeItem(NEXT_START_KEY)
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'] })
   // The random moment lands before the tape, and the random pick is the
   // oldest event after it (relays answer newest first): the tape's first.
@@ -150,6 +152,48 @@ describe('Cyberspace TV', () => {
     expect(useCyberspace.getState().focus).toBeNull()
     expect(useCyberspace.getState().scaleExp).toBe(zoomBefore)
     expect(publishedBesidesPings()).toEqual([])
+  })
+
+  it('reads the ticker\'s numbers only once the first shot is on screen, never ahead of the tape (2026-11-11: TUNING waited behind them)', async () => {
+    const census: boolean[] = []
+    setTvAsk((f) => {
+      // The census's whole reads: every object, and the scoped deletions (lib/tv/stats loadCensus).
+      if (f.kinds?.includes(5) || (f.kinds?.[0] === 33331 && f.until === undefined)) census.push(useTv.getState().shot !== null)
+      return ask(f)
+    })
+    // Kept across runs of TV: this run starts with none.
+    resetStatsReadsForTest()
+    useTv.setState({ census: null })
+    useTv.getState().start()
+    await run(1500)
+    expect(useTv.getState().shot).not.toBeNull()
+    expect(census.length).toBeGreaterThan(0)
+    expect(census.every((onScreen) => onScreen)).toBe(true)
+  })
+
+  it('a return visit starts where the last one picked ahead, asking nowhere to start, and picks the next once a picture is up', async () => {
+    localStorage.setItem(NEXT_START_KEY, String(T0 + 100))
+    const asked: Filter[] = []
+    setTvAsk((f) => { asked.push(f); return ask(f) })
+    useTv.getState().start()
+    await run(1500)
+    expect(useTv.getState().shot?.pubkey).toBe(B)
+    // The random start's question (a window START_LOOK_S long) came only after the picture, for the next visit.
+    const where = asked.findIndex((f) => f.until !== undefined && f.since !== undefined && f.until - f.since === START_LOOK_S)
+    const window = asked.findIndex((f) => f.kinds?.includes(33330) && f.since !== undefined)
+    expect(window).toBeGreaterThanOrEqual(0)
+    expect(where).toBeGreaterThan(window)
+    expect(Number(localStorage.getItem(NEXT_START_KEY))).toBeGreaterThanOrEqual(V2_EPOCH)
+  })
+
+  it('a start picked ahead is used once, and nothing but a v2 second gone by is taken for one', () => {
+    localStorage.setItem(NEXT_START_KEY, String(T0))
+    expect(takeNextStart()).toBe(T0)
+    expect(takeNextStart()).toBeNull()
+    for (const junk of ['abc', '5', String(V2_EPOCH - 1), '1.5e9', '', String(Math.floor(Date.now() / 1000) + 3600)]) {
+      localStorage.setItem(NEXT_START_KEY, junk)
+      expect(takeNextStart()).toBeNull()
+    }
   })
 
   it('ends the tape at now, says so, and tunes in again', async () => {

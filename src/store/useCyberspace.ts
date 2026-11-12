@@ -78,6 +78,7 @@ import {
   cellDelta,
   clampAxis,
   itemCentre,
+  cellCentre,
   placeCentre,
   rotateView,
   stepFor,
@@ -679,6 +680,27 @@ export interface CyberFocus {
    * the stop markers' policy.
    */
   item?: boolean
+  /**
+   * This look is the standard VIEW (arkinox, 2026-11-11: one VIEW mode):
+   * full VIEW controls, the Region button, RECALL home. Set by `viewAt` and
+   * the pad's VIEW; never by BUILD. `viewing` reads this, not the label, so
+   * a view keeps saying what it looks at (EARTH, a block, a place).
+   */
+  view?: boolean
+  /**
+   * Framed as a plain look frames the thing (a marker's true point; with
+   * `item`, the item's) while the cursor is still on it (`named`), so the
+   * thing sits at screen centre, not up to half a cell off at its cell's.
+   */
+  fit?: boolean
+}
+
+/** How `viewAt` frames and names a view. */
+export interface ViewHow {
+  /** The label names the place (CyberFocus.named); default true. */
+  named?: boolean
+  item?: boolean
+  fit?: boolean
 }
 
 /** Where a focus's name applies (CyberFocus.named). */
@@ -997,15 +1019,23 @@ export interface CyberspaceState {
    * and history left. BUILD mode entered from there starts its build cursor
    * on what you were looking at.
    */
-  driveHere: (label: string) => void
+  driveHere: (label: string, view?: boolean) => void
   /**
    * VIEW from the pad (arkinox, 2026-10-10): a free view from your own head,
    * so the pad moves the cursor to look around without planning a hop. The
-   * commit row keeps RECALL, which ends it; VIEW again ends it too.
+   * commit row keeps RECALL, which ends it; VIEW again ends it too. From a
+   * spectation or your history it is VIEW HERE: that spot becomes the view,
+   * the spectation ends and RECALL goes home (arkinox, 2026-11-11).
    */
   viewHere: () => void
-  /** Whether the pad's VIEW is on: a free view begun from the pad, as opposed to one begun from a pin, a star or BUILD. */
+  /** Whether the standard VIEW is up (CyberFocus.view), whatever began it. BUILD's view is not one. */
   viewing: () => boolean
+  /**
+   * The one way to VIEW a thing (arkinox, 2026-11-11): the standard VIEW, the
+   * cursor on `position`, every VIEW control, RECALL home. `scaleExp` is the
+   * zoom that fits the thing; left out, the zoom stays.
+   */
+  viewAt: (position: Position, plane: Plane, label: string, scaleExp?: number, how?: ViewHow) => void
   /** Look at a fixed coordinate (a deployed shard), optionally jumping the scale. */
   /**
    * Look at a place. With `drive` the cursor comes along: the free view,
@@ -1013,7 +1043,7 @@ export interface CyberspaceState {
    * this place, or the place a name was given for (CyberFocus.named, as a
    * hyperspace view hands a focus back).
    */
-  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean, named?: boolean | NamedPlace) => void
+  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean, named?: boolean | NamedPlace, extra?: Pick<CyberFocus, 'view' | 'item' | 'fit'>) => void
   /** Look at a hidden item: focusOn, framed on the item where it is drawn. */
   focusItem: (position: Position, plane: Plane, label: string, scaleExp?: number) => void
   /**
@@ -1235,7 +1265,7 @@ const CHAIN_KEY = 'onosendai:chain'
 function chainKeyFor(pubkey: string): string {
   return `${CHAIN_KEY}:${pubkey}`
 }
-/** The focus label of the pad's VIEW: what the focus bar says, and how `viewing` tells it from a pin's or a star's view. */
+/** The focus label of the pad's VIEW and of VIEW HERE. */
 export const VIEW_FOCUS_LABEL = 'VIEW'
 
 const LIVE_KEY = 'onosendai:live'
@@ -5260,9 +5290,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       set({ pendingTarget: null, proof: IDLE_PROOF })
       return
     }
-    // The pad's VIEW ends here too: the focus goes, and with it the cursor
-    // comes home and the zoom returns (clearFocus).
-    if (get().viewing()) { get().clearFocus(); return }
+    // A view ends here too, VIEW or what BUILD leaves: the focus goes, and
+    // with it the cursor comes home and the zoom returns (clearFocus). Only
+    // the cursor coming home left the view standing on a cursor at your head.
+    if (get().focus?.drive && get().exploreIndex === null) { get().clearFocus(); return }
     // Not computing: recall the cursor, plane included, to where you stand.
     // The view follows the lined-up plane, so at your own head it comes back too.
     const atHead = get().exploreIndex === null && get().focus === null && get().spectate === null
@@ -5923,14 +5954,24 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   reanchorView: (position) => rideView({ ...position }),
 
-  viewHere: () => { if (get().atHead()) get().driveHere(VIEW_FOCUS_LABEL) },
+  viewHere: () => {
+    const s = get()
+    if (!s.atHead() && s.spectate === null && s.exploreIndex === null) return
+    s.driveHere(VIEW_FOCUS_LABEL, true)
+    // Watching ends, the view, its cursor and its angle staying (endSpectate under a driven view).
+    if (s.spectate) get().endSpectate()
+  },
 
-  viewing: () => get().focus?.drive === true && get().focus?.label === VIEW_FOCUS_LABEL && get().exploreIndex === null,
+  viewing: () => get().focus?.view === true && get().exploreIndex === null,
 
-  driveHere: (label) => {
+  viewAt: (position, plane, label, scaleExp, how = {}) => {
+    get().focusOn(position, plane, label, scaleExp, true, how.named ?? true, { view: true, ...(how.item ? { item: true } : {}), ...(how.fit ? { fit: true } : {}) })
+  },
+
+  driveHere: (label, view = false) => {
     const { anchor, anchorPlane, focus, scaleExp, focusReturnScale } = get()
     set({
-      focus: { position: { ...anchor }, plane: anchorPlane, label, drive: true },
+      focus: { position: { ...anchor }, plane: anchorPlane, label, drive: true, ...(view ? { view } : {}) },
       cursor: { ...anchor },
       exploreIndex: null,
       focusReturnScale: focus === null ? scaleExp : focusReturnScale,
@@ -5955,13 +5996,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // something in it.
     // A pin dropped for a place found by name carries the name; one dropped
     // by a click on the globe or for typed numbers reads as a coordinate.
-    get().focusOn(pin.position, pin.plane, pin.label, pin.scaleExp, true, pin.named === true)
+    get().viewAt(pin.position, pin.plane, pin.label, pin.scaleExp, { named: pin.named === true })
   },
 
-  focusOn: (position, plane, label, scaleExp, drive = false, named = false) => {
+  focusOn: (position, plane, label, scaleExp, drive = false, named = false, extra = {}) => {
     const place: NamedPlace | null = named === true ? { position: { ...position }, plane } : named || null
     const next: Partial<CyberspaceState> = {
-      focus: { position: { ...position }, plane, label, drive, ...(place ? { named: place } : {}) },
+      focus: { position: { ...position }, plane, label, drive, ...(place ? { named: place } : {}), ...extra },
       // A free view brings the cursor along, so the pad moves it there and a
       // message or a shard placed from the view lands there, not at your head.
       ...(drive ? { cursor: { ...position } } : {}),
@@ -5976,11 +6017,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     set(next)
   },
 
-  focusItem: (position, plane, label, scaleExp) => {
-    get().focusOn(position, plane, label, scaleExp)
-    const focus = get().focus
-    if (focus) set({ focus: { ...focus, item: true } })
-  },
+  focusItem: (position, plane, label, scaleExp) => get().focusOn(position, plane, label, scaleExp, false, false, { item: true }),
 
   clearFocus: (keepScale = false) => {
     // Home is your position in the plane you have lined up, which is what
@@ -7086,8 +7123,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * screen centre, so zooming tracks the cursor instead of the avatar.
    */
   cursorOffset: (): [number, number, number] => {
-    const { anchor, cursor, scaleExp, view, focus } = get()
+    const { anchor, cursor, scaleExp, view, focus, anchorPlane } = get()
     const focusAxes = viewAxes(view)
+    // A fitted view frames the thing as a plain look does while the cursor is on it (CyberFocus.fit).
+    const fitted = focus !== null && focus.drive === true && (focus.fit === true || focus.item === true) && focus.named !== undefined &&
+      samePosition(cursor, focus.named.position) && anchorPlane === focus.named.plane
     // A focus is a continuous point (a stop, Earth's centre), and everything
     // drawn at it uses pointCentre. Framing [0,0,0], the aligned CORNER of
     // its cell, put the viewed block up-and-right of screen centre by the
@@ -7095,18 +7135,19 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // the point itself, with the same continuous math it is drawn with.
     // A driven focus (the free view) frames its cursor like your head does,
     // so the camera follows the pad; a plain focus frames the viewed point.
-    if (focus !== null && !focus.drive) {
+    if (focus !== null && (!focus.drive || fitted)) {
+      const at = fitted ? cursor : anchor
+      const focusOrigin = alignedOrigin(anchor, scaleExp)
       // A hidden item is drawn at its true place at every zoom, so that is
       // what is framed; on the stop markers' policy below, the camera framed
       // the item's cell centre at and below 2^33 while the item sat up to half
       // a cell away, wandering on screen as you zoomed (arkinox, 2026-10-01).
-      if (focus.item) return itemCentre(anchor, alignedOrigin(anchor, scaleExp), scaleExp, focusAxes)
+      if (focus.item) return itemCentre(at, focusOrigin, scaleExp, focusAxes)
       // Same policy as markerCentre: at occupancy zooms the marker snaps to
       // its cell, whose cube centre is the aligned origin itself.
-      if (scaleExp <= OCCUPANCY_SCALE_MAX) return [0, 0, 0]
-      const focusOrigin = alignedOrigin(anchor, scaleExp)
+      if (scaleExp <= OCCUPANCY_SCALE_MAX) return fitted ? cellCentre(at, focusOrigin, scaleExp, focusAxes) : [0, 0, 0]
       return [focusAxes.right, focusAxes.up, focusAxes.out].map(
-        (a) => (cellDelta(anchor[a.axis], focusOrigin[a.axis], scaleExp) - 0.5) * a.dir,
+        (a) => (cellDelta(at[a.axis], focusOrigin[a.axis], scaleExp) - 0.5) * a.dir,
       ) as [number, number, number]
     }
     const axes = viewAxes(view)

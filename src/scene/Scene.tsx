@@ -26,7 +26,7 @@ import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { BlendFunction, Effect, type BloomEffect, type EffectComposer as PostComposer } from 'postprocessing'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Quaternion, Vector3, type Fog, type PerspectiveCamera } from 'three'
+import { Quaternion, Spherical, Vector3, type Fog, type PerspectiveCamera } from 'three'
 import { applyLensShift, lensShift, stepShift, uncoveredBand, type Cover } from '../lib/coverBand'
 import { readCovers, setCoverWatch } from '../hooks/useCover'
 import { useBuilder } from '../store/useBuilder'
@@ -45,7 +45,7 @@ import { tickFall, useWalk, walkDown } from '../store/useWalk'
 import { orbitOffset } from '../workshop/benchAxes'
 import { WalkProbe } from './WalkProbe'
 import { commitAnchor, commitScale, committedAnchor } from '../lib/renderFrame'
-import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { alignedOrigin, samePosition, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
 import { useHyperspace } from '../store/useHyperspace'
@@ -70,12 +70,14 @@ import { StopCubes } from './StopCubes'
 import { StopBurst } from './StopBurst'
 import { TourLine } from './TourLine'
 import { useDemo } from '../store/useDemo'
+import { clearTutorialZoom, useTutorialCam } from '../store/useTutorialCam'
 import { TourCameraState } from '../demo/tourDistance'
 import { TransitAvatar } from './TransitAvatar'
 import { RidePath } from './RidePath'
 import { PathTrail } from './PathTrail'
 import { GameRegionBox } from './GameRegionBox'
 import { PrefixRegionBox } from './PrefixRegionBox'
+import { RegionSelectBox } from './RegionSelectBox'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
@@ -107,6 +109,7 @@ import { canvasPixels, composerSamples } from './composerBudget'
 import './radialFog'
 import { fogFarStep, FOG_FAR, FOG_NEAR, FOG_START_SHARE, VIEW_FOG_SCALE } from './fog'
 import { flyGesture, panGesture, sceneMouse, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
+import { takeSteer } from '../lib/viewFly'
 import { StartLock } from '../lib/viewCamera'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
@@ -170,7 +173,12 @@ function World(): JSX.Element {
   const win = useViewWindow()
   // The gibson K field is meaningless wallpaper while an Earth or hyperspace
   // view holds the camera, and its scans are real CPU: suspend both together.
-  const hyperView = useHyperspace((s) => s.viewOwned || s.scrubHeight !== null)
+  // A hyperspace VIEW counts only while its cursor is on the thing: driven
+  // off it, the VIEW is any VIEW and the field comes back.
+  const owned = useHyperspace((s) => s.viewOwned)
+  const scrubbing = useHyperspace((s) => s.scrubHeight !== null)
+  const offThing = useCyberspace((s) => s.focus?.view === true && !(s.focus.named !== undefined && samePosition(s.cursor, s.focus.named.position)))
+  const hyperView = (owned && !offThing) || scrubbing
   // The two layers the View panel can turn off (store/useLayers).
   // The dots switched off suspend exactly as a hyperspace view does: no scans,
   // no terrain runs queued, no per-frame uniforms. Only drawing changes.
@@ -230,6 +238,7 @@ function World(): JSX.Element {
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <GameRegionBox axes={axes} />
       <PrefixRegionBox axes={axes} />
+      <RegionSelectBox axes={axes} />
       <SpawnMarker pubkey={pubkey} axes={axes} />
       <TargetAvatars axes={axes} />
       <PresenceAvatars axes={axes} />
@@ -644,6 +653,9 @@ function Rig(): JSX.Element {
     check(useDemo.getState())
     return useDemo.subscribe(check)
   }, [tourCam])
+  // The first-arrival tutorial's idle orbit spin around the cursor (feedback
+  // item 14); off for everyone else, so the controls are untouched.
+  const tutorialSpin = useTutorialCam((s) => s.spin)
   // The rig re-framed on its own (a cut or a straight-on reframe): the step's
   // camera comes back only when the view has just arrived at the step's own
   // place. A block landing late reframed straight on, which put the camera on
@@ -853,10 +865,31 @@ function Rig(): JSX.Element {
   const pressed = (): number => panGesture.fingers + (sceneMouse.down ? 1 : 0)
   // The frame's target, with the offset added (viewRig.apply).
   const aimAt = useMemo(() => new Vector3(), [])
+  // Scratch for drag-to-steer's orbit (lib/viewFly.ts steerBy): nothing allocated per frame.
+  const steerVec = useMemo(() => new Vector3(), [])
+  const steerSph = useMemo(() => new Spherical(), [])
 
   useFrame((state, dt) => {
     const c = controls.current
     if (!c) return
+    // Drag-to-steer: a drag on a held Forward or Back fly button orbits the
+    // camera about its target by the drag (lib/viewFly.ts), the way a drag on
+    // open scene would. Applied before anything reads the orbit, so the frame
+    // keeps the new angle; OrbitControls.update at the end derives its spherical
+    // from the camera's position, so moving it here sticks. Breaks the lock,
+    // as any orbit does: once you have steered you are looking, not following.
+    const steer = takeSteer()
+    if (steer.dx !== 0 || steer.dy !== 0) {
+      steerVec.copy(c.object.position).sub(c.target)
+      steerSph.setFromVector3(steerVec)
+      const k = (2 * Math.PI) / Math.max(1, state.size.height)
+      steerSph.theta -= steer.dx * k
+      steerSph.phi = Math.max(0.02, Math.min(Math.PI - 0.02, steerSph.phi - steer.dy * k))
+      steerSph.makeSafe()
+      steerVec.setFromSpherical(steerSph)
+      c.object.position.copy(c.target).add(steerVec)
+      locked.current = false
+    }
     // GRAVITY's fall (store/useWalk.ts) takes its frame first: it can land,
     // which moves the cursor read below.
     tickFall()
@@ -1073,6 +1106,25 @@ function Rig(): JSX.Element {
       c.object.position.copy(c.target).addScaledVector(along.normalize(), Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, want.distance)))
       lastOffset.current.copy(c.object.position).sub(c.target)
     }
+    // The tutorial eases the orbit in to a close distance after a HOP onto the
+    // course (feedback item 6), only when idle and only while it asks for it.
+    // WALK ends the ask, and so does a finger or the mouse on the scene (the
+    // player taking the camera), not the step moving on, which comes before
+    // the ease is done.
+    const tutorialZoom = useTutorialCam.getState().zoom
+    if (tutorialZoom !== null && (s.walking || pressed() > 0)) clearTutorialZoom()
+    else if (want === null && !eye.current) {
+      if (tutorialZoom !== null) {
+        const off = walkDir.copy(c.object.position).sub(c.target)
+        const cur = off.length()
+        if (cur < 1e-4) off.set(0, 0, 1)
+        const target = Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, tutorialZoom))
+        const nd = cur < 1e-4 ? target : cur + (target - cur) * (1 - Math.exp(-dt / 0.4))
+        c.object.position.copy(c.target).addScaledVector(off.normalize(), nd)
+        lastOffset.current.copy(c.object.position).sub(c.target)
+        if (Math.abs(nd - target) < 0.05) clearTutorialZoom()
+      }
+    }
     c.update()
     if (s.walking) (walkLook.current ??= new Vector3()).copy(c.object.position).sub(c.target).normalize()
   })
@@ -1085,6 +1137,8 @@ function Rig(): JSX.Element {
       minDistance={ORBIT_MIN_DISTANCE}
       maxDistance={GRID_RADIUS * 4}
       dampingFactor={0.12}
+      autoRotate={tutorialSpin}
+      autoRotateSpeed={0.6}
       onStart={() => { if (startLock.start(pressed())) locked.current = false }}
     />
   )

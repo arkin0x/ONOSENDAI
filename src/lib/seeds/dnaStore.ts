@@ -83,7 +83,13 @@ function db(): Promise<IDBDatabase | null> {
 }
 
 /** IndexedDB, for the DNAs relays gave. Best effort: a failed read is a miss, a failed write is nothing. */
-export const idbDnaCache: Pick<DnaSources, 'load' | 'save'> = {
+export const idbDnaCache: Pick<DnaSources, 'load' | 'save'> & { all: () => Promise<NostrEvent[]> } = {
+  /** Every DNA kept: a few, one per DNA seen or signed here. */
+  all: async () => {
+    const d = await db()
+    if (!d) return []
+    try { return (await request(d.transaction(DNA_STORE, 'readonly').objectStore(DNA_STORE).getAll())) as NostrEvent[] } catch { return [] }
+  },
   load: async (id) => {
     const d = await db()
     if (!d) return undefined

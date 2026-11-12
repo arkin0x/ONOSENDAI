@@ -22,7 +22,11 @@
  *   cursor itself (what BUILD, DEPLOY and the coordinates read) move.
  * - PANNED: a two-finger drag (PanGesture), or a right or Shift drag of the
  *   mouse. It never moves the cursor and never lands.
- * - EASING: what is left of the other two once the cursor has moved, eased
+ * - KEPT: what a fly's own landing left over, the view's centre less the
+ *   cell the cursor landed in (keep). Held like a pan, so the camera stays
+ *   where the flight stopped; the next fly folds it back into FLOWN, so short
+ *   taps of a fly key add up rather than each sliding back.
+ * - EASING: what is left of the others once the cursor has moved, eased
  *   to nothing over EASE_BACK_MS, so the camera goes back to its orbit about
  *   the cursor smoothly rather than jumping.
  *
@@ -31,8 +35,7 @@
  * does not jump on the frame it moves (rebase). A new fly folds a pan into
  * EASING too: FAR and NEAR count as moving the cursor (the brief), so a fly
  * starts back on the line through the cursor. The fly's own landing is the
- * one move that does not ease: what is left over (the view's centre less the
- * cell the cursor lands in) is held as a pan is (keep), so the camera stays
+ * one move that does not ease: what is left over is KEPT, so the camera stays
  * exactly where the flight stopped.
  *
  * Plain numbers, no three.js, nothing allocated per frame; the scene feeds it
@@ -90,6 +93,8 @@ export class ViewOffset {
   fx = 0; fy = 0; fz = 0
   /** PANNED. */
   px = 0; py = 0; pz = 0
+  /** KEPT: the fly's landing's remainder, render cells (keep). */
+  kx = 0; ky = 0; kz = 0
   /** EASING: the offset left when the cursor moved, scaled down to nothing over EASE_BACK_MS. */
   rx = 0; ry = 0; rz = 0
   private easeMs = EASE_BACK_MS
@@ -110,14 +115,19 @@ export class ViewOffset {
     return Math.abs(this.fx) > OFFSET_EPS || Math.abs(this.fy) > OFFSET_EPS || Math.abs(this.fz) > OFFSET_EPS
   }
 
-  /** Whether a fly or a pan holds the camera off its orbit (not merely easing back). */
+  /** Whether a fly, a pan or a landing's remainder holds the camera off its orbit (not merely easing back). */
   get held(): boolean {
-    return this.flown || Math.abs(this.px) > OFFSET_EPS || Math.abs(this.py) > OFFSET_EPS || Math.abs(this.pz) > OFFSET_EPS
+    return this.flown || this.kept || Math.abs(this.px) > OFFSET_EPS || Math.abs(this.py) > OFFSET_EPS || Math.abs(this.pz) > OFFSET_EPS
+  }
+
+  /** Whether a fly's landing left a remainder held (KEPT). */
+  get kept(): boolean {
+    return Math.abs(this.kx) > OFFSET_EPS || Math.abs(this.ky) > OFFSET_EPS || Math.abs(this.kz) > OFFSET_EPS
   }
 
   /** Whether the camera is off its orbit at all, or still easing back onto it. */
   get active(): boolean {
-    if (this.flown) return true
+    if (this.flown || this.kept) return true
     if (Math.abs(this.px) > OFFSET_EPS || Math.abs(this.py) > OFFSET_EPS || Math.abs(this.pz) > OFFSET_EPS) return true
     return this.easeMs < EASE_BACK_MS && (Math.abs(this.rx) > OFFSET_EPS || Math.abs(this.ry) > OFFSET_EPS || Math.abs(this.rz) > OFFSET_EPS)
   }
@@ -154,6 +164,10 @@ export class ViewOffset {
       this.flying = true
       // FAR and NEAR count as moving the cursor: a pan eases out as the fly begins.
       this.foldPan()
+      // The last landing's remainder goes on as flown, the camera staying put:
+      // taps too short to leave the cursor's cell add up (review of #690, 1).
+      this.fx += this.kx; this.fy += this.ky; this.fz += this.kz
+      this.kx = this.ky = this.kz = 0
     }
     this.dirSign = sign
     if (ux !== 0 || uy !== 0 || uz !== 0) { this.ux = ux; this.uy = uy; this.uz = uz }
@@ -199,11 +213,12 @@ export class ViewOffset {
    */
   rebase(dx: number, dy: number, dz: number): void {
     const t = this.share()
-    this.rx = this.fx + this.px + this.rx * t - dx
-    this.ry = this.fy + this.py + this.ry * t - dy
-    this.rz = this.fz + this.pz + this.rz * t - dz
+    this.rx = this.fx + this.px + this.kx + this.rx * t - dx
+    this.ry = this.fy + this.py + this.ky + this.ry * t - dy
+    this.rz = this.fz + this.pz + this.kz + this.rz * t - dz
     this.fx = this.fy = this.fz = 0
     this.px = this.py = this.pz = 0
+    this.kx = this.ky = this.kz = 0
     this.easeMs = 0
     this.glideAt = 0
     this.glideTo = 0
@@ -218,20 +233,32 @@ export class ViewOffset {
 
   /**
    * The fly's own landing (arkinox, 2026-11-12): the camera stays exactly
-   * where the flight stopped. What is still flown becomes PANNED, held until
-   * the cursor next moves, not EASING: the rig takes the landing's move of
-   * the cursor off it (ViewFly.ts), leaving only the view's centre less the
-   * cell the cursor landed in, under a cell, held so neither the camera nor
-   * what it orbits drifts.
+   * where the flight stopped. What is still flown becomes KEPT, not EASING:
+   * the rig takes the landing's move of the cursor off it (keptMove), leaving
+   * the view's centre less the cell the cursor landed in, under a cell, held
+   * so neither the camera nor what it orbits drifts.
    */
   keep(): void {
-    this.bakeEasing()
-    this.px += this.fx
-    this.py += this.fy
-    this.pz += this.fz
+    this.kx += this.fx
+    this.ky += this.fy
+    this.kz += this.fz
     this.fx = this.fy = this.fz = 0
     this.glideAt = 0
     this.glideTo = 0
+    this.vel = 0
+    this.rampT = 0
+  }
+
+  /** The fly's landing moved the cursor by `(dx, dy, dz)` render cells: taken off KEPT, so nothing on screen moves. */
+  keptMove(dx: number, dy: number, dz: number): void {
+    this.kx -= dx
+    this.ky -= dy
+    this.kz -= dz
+  }
+
+  /** A fly let go and still coasting stops where it is (a press, a zoom or BUILD that will not wait for the tail; only asked with no fly key held). */
+  stopCoast(): void {
+    this.flying = false
     this.vel = 0
     this.rampT = 0
   }
@@ -240,6 +267,7 @@ export class ViewOffset {
   clear(): void {
     this.fx = this.fy = this.fz = 0
     this.px = this.py = this.pz = 0
+    this.kx = this.ky = this.kz = 0
     this.rx = this.ry = this.rz = 0
     this.easeMs = EASE_BACK_MS
     this.idleMs = 0
@@ -301,9 +329,9 @@ export class ViewOffset {
   /** The offset to frame now, written into `out`. */
   offset(out: Vec3Out): Vec3Out {
     const t = this.share()
-    out.x = this.fx + this.px + this.rx * t
-    out.y = this.fy + this.py + this.ry * t
-    out.z = this.fz + this.pz + this.rz * t
+    out.x = this.fx + this.px + this.kx + this.rx * t
+    out.y = this.fy + this.py + this.ky + this.ry * t
+    out.z = this.fz + this.pz + this.kz + this.rz * t
     return out
   }
 

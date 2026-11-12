@@ -274,30 +274,30 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
     expect(cs().cursor).not.toBe(from)
   })
 
-  it('a pad press before the landing steps from where the view has flown, so the camera is not pulled back', () => {
+  it('a pad press in the coast stops it: the view comes to rest just ahead of the camera and the press steps from there, so the camera is not pulled back', () => {
     cs().viewHere()
     h.frame()
-    const from = { ...cs().cursor }
-    const startTarget = h.cam.target.clone()
+    const startCam = h.cam.position.clone()
     useViewFly.getState().setButton(1)
     h.run(1000)
     useViewFly.getState().setButton(0)
     h.frame()
-    const flown = h.cam.target.clone()
-    // How many cells the eased fly covered, derived from the camera's travel.
-    const flownCells = Math.round(flown.distanceTo(startTarget))
+    // Still coasting: the press does not wait for the tail (review of #690, 3).
+    expect(viewOffset.moving).toBe(true)
+    const cam0 = h.cam.position.clone()
     // One cell up the screen.
     const up = cs().axes().up
     cs().moveCursor({ axis: up.axis, dir: up.dir as 1 | -1 })
-    const a = ahead()
-    const axis = (['x', 'y', 'z'] as const).find((k) => a[k] !== 0)!
-    expect(Math.abs(Number(cs().cursor[axis] - from[axis]))).toBe(flownCells)
     h.run(EASE_BACK_MS + 50)
-    // The camera went one cell up from where it had flown, not back to the
-    // start: its depth stays at the flown depth (within the ease-out coast's
-    // short tail), nowhere near the start it would be pulled back to.
-    expect(h.cam.target.y - flown.y).toBeCloseTo(1, 6)
-    expect(Math.abs(h.cam.target.z - flown.z)).toBeLessThan(FLY_CELLS_PER_SECOND * DT)
+    // The orbit is the near one, and the camera went one cell up from where
+    // it had flown, its depth within the cell the near point rounded to;
+    // nowhere near the start it would be pulled back to.
+    expect(h.orbit().length()).toBeCloseTo(ORBIT_MIN_DISTANCE, 6)
+    expect(Math.abs(h.cam.position.z - cam0.z)).toBeLessThanOrEqual(0.5 + 1e-9)
+    expect(Math.abs(h.cam.position.y - cam0.y - 1)).toBeLessThanOrEqual(0.5 + 1e-9)
+    expect(startCam.z - h.cam.position.z).toBeGreaterThan(10)
+    // The cursor is just ahead of the camera, not out at the old 10 cells.
+    expect(h.cursorAt().distanceTo(h.cam.position)).toBeLessThan(ORBIT_MIN_DISTANCE + Math.sqrt(3) / 2)
   })
 
   it('does nothing in BUILD or WALK, and BUILD lands an unlanded fly at once', () => {
@@ -319,24 +319,26 @@ describe('VIEW\'s fly moves the camera, not the cursor', () => {
     expect(cs().cursor).toBe(built)
   })
 
-  it('a zoom lands an unlanded fly where it was flown, and frames the new zoom on the cursor', () => {
+  it('a zoom in the coast lands the fly just ahead of the camera, and frames the new zoom on the cursor with the near orbit carried', () => {
     cs().viewHere()
     h.frame()
     const from = { ...cs().cursor }
-    const startTarget = h.cam.target.clone()
     useViewFly.getState().setButton(1)
-    h.run(500)
+    h.run(1000)
     useViewFly.getState().setButton(0)
     h.frame()
-    // The fly landed at the old zoom: the cursor steps by the cells it covered.
-    const flownCells = Math.round(h.cam.target.distanceTo(startTarget))
+    expect(viewOffset.moving).toBe(true)
+    // Where the near point is, at the old zoom: two cells ahead of the camera along -z.
+    const nearZ = h.cam.position.z - ORBIT_MIN_DISTANCE
     cs().adjustScale(1)
     h.frame()
     const a = ahead()
     const axis = (['x', 'y', 'z'] as const).find((k) => a[k] !== 0)!
-    expect(Math.abs(Number(cs().cursor[axis] - from[axis]))).toBe(flownCells)
+    // Landed at the old zoom's cell under the near point (review of #690, 3).
+    expect(Math.abs(Number(cs().cursor[axis] - from[axis]))).toBe(Math.round(-nearZ))
     expect(viewOffset.active).toBe(false)
     expect(h.cam.target.distanceTo(h.cursorAt())).toBeLessThan(1e-9)
+    expect(h.orbit().length()).toBeCloseTo(ORBIT_MIN_DISTANCE, 9)
   })
 
   it('a zoom after the landing works as ever: the orbit, now ORBIT_MIN_DISTANCE out, is carried, and the camera frames the cursor again', () => {

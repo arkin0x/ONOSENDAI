@@ -617,6 +617,9 @@ function Rig(): JSX.Element {
   const walkLook = useRef<Vector3 | null>(null)
   const eye = useRef<{ from: number; to: number; t0: number } | null>(null)
   const outTo = useRef(START_DISTANCE)
+  // The orbit distance a VIEW fly brought in, eased back out to on RECALL or
+  // VIEW's end (ViewFly.ts takeRestore), as the tutorial's zoom eases; null when none.
+  const orbitBack = useRef<number | null>(null)
 
   // Locked means the camera travels with the cursor, so an axis-aligned view
   // stays framed on it as you drive. Aligning with Shift+WASD re-locks; orbiting
@@ -1061,7 +1064,8 @@ function Rig(): JSX.Element {
     if (s.walking !== walkWas.current) {
       walkWas.current = s.walking
       const from = c.object.position.distanceTo(smooth.current)
-      if (s.walking) outTo.current = from >= 2 ? from : START_DISTANCE
+      // A stopped VIEW fly's orbit is ORBIT_MIN_DISTANCE to within rounding: a real orbit, not a collapsed one.
+      if (s.walking) outTo.current = from >= ORBIT_MIN_DISTANCE - 1e-6 ? from : START_DISTANCE
       eye.current = { from, to: s.walking ? WALK_EYE : outTo.current, t0: performance.now() }
       c.enableZoom = !s.walking
       c.enableRotate = !s.walking
@@ -1118,18 +1122,26 @@ function Rig(): JSX.Element {
     // WALK ends the ask, and so does a finger or the mouse on the scene (the
     // player taking the camera), not the step moving on, which comes before
     // the ease is done.
+    // A VIEW fly brought the orbit in, and RECALL or VIEW's end asks for it
+    // back (ViewFly.ts takeRestore; review of #690, 2): eased out below as the
+    // tutorial's zoom is; in WALK, it is where leaving WALK returns to. A
+    // finger or the mouse on the scene takes the camera, and ends it.
+    const back = viewRig.takeRestore()
+    if (back !== null) { if (s.walking) outTo.current = back; else orbitBack.current = back }
+    if (orbitBack.current !== null && (s.walking || pressed() > 0)) orbitBack.current = null
     const tutorialZoom = useTutorialCam.getState().zoom
     if (tutorialZoom !== null && (s.walking || pressed() > 0)) clearTutorialZoom()
     else if (want === null && !eye.current) {
-      if (tutorialZoom !== null) {
+      const zoomTo = tutorialZoom ?? orbitBack.current
+      if (zoomTo !== null) {
         const off = walkDir.copy(c.object.position).sub(c.target)
         const cur = off.length()
         if (cur < 1e-4) off.set(0, 0, 1)
-        const target = Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, tutorialZoom))
+        const target = Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, zoomTo))
         const nd = cur < 1e-4 ? target : cur + (target - cur) * (1 - Math.exp(-dt / 0.4))
         c.object.position.copy(c.target).addScaledVector(off.normalize(), nd)
         lastOffset.current.copy(c.object.position).sub(c.target)
-        if (Math.abs(nd - target) < 0.05) clearTutorialZoom()
+        if (Math.abs(nd - target) < 0.05) { if (tutorialZoom !== null) clearTutorialZoom(); else orbitBack.current = null }
       }
     }
     // The controls' own turn this frame (their damping), in place in flight too.

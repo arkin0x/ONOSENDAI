@@ -148,6 +148,8 @@ beforeEach(() => {
   controls.enableDamping = true
   controls.dampingFactor = 0.12
   controls.enablePan = false
+  // As Scene.tsx sets it: the near point sits exactly on this clamp.
+  controls.minDistance = ORBIT_MIN_DISTANCE
   rigCam = { position: camera.position, target: controls.target, quaternion: camera.quaternion, fov: 55, heightPx: HEIGHT }
   uninstall = installFlyTouches(el, doc, new EventTarget(), () => 0)
   useCyberspace.setState({ scaleExp: 0 })
@@ -504,6 +506,94 @@ describe('1c. the cursor lands just ahead of the camera (arkinox, 2026-11-12)', 
   })
 })
 
+describe('1d. review of #690', () => {
+  const cursorAt = (): Vector3 => { const [x, y, z] = cs().cursorOffset(); return new Vector3(x, y, z) }
+  const tap = (frames: number): void => {
+    useViewFly.getState().setButton(1)
+    for (let i = 0; i < frames; i++) frame()
+    useViewFly.getState().setButton(0)
+  }
+  const rest = (frames: number): void => { for (let i = 0; i < frames; i++) frame() }
+
+  it('1: short taps after a landing add up: the camera only ever goes forward, and the cursor follows it', () => {
+    tap(120)
+    rest(90)
+    const from = cs().cursor
+    const look = controls.target.clone().sub(camera.position).normalize()
+    let prev = camera.position.clone()
+    let back = 0
+    let travelled = 0
+    for (let t = 0; t < 8; t++) {
+      // A 100 ms tap, then long enough to land.
+      tap(6)
+      for (let i = 0; i < 60; i++) {
+        const f = frame()
+        const m = movedFrom(prev, f)
+        back = Math.min(back, m.dot(look))
+        travelled += m.dot(look)
+        prev = camera.position.clone()
+      }
+    }
+    // Never a step back along the line (before the fix every tap slid back by the last).
+    expect(back).toBeGreaterThan(-1e-9)
+    expect(travelled).toBeGreaterThan(1)
+    expect(cs().cursor).not.toBe(from)
+    expect(cursorAt().distanceTo(camera.position)).toBeLessThan(ORBIT_MIN_DISTANCE + Math.sqrt(3) / 2)
+  })
+
+  it('2: RECALL after a fly asks the orbit back out to its distance before the fly; so does VIEW ending', () => {
+    tap(120)
+    rest(90)
+    expect(camera.position.distanceTo(controls.target)).toBeCloseTo(ORBIT_MIN_DISTANCE, 6)
+    expect(viewRig.takeRestore()).toBeNull()
+    viewToAvatar()
+    frame()
+    expect(viewRig.takeRestore()).toBeCloseTo(26, 6)
+    expect(viewRig.takeRestore()).toBeNull()
+    // VIEW ending (RETURN) after another fly.
+    viewRig.reset()
+    cs().viewHere()
+    frame()
+    tap(120)
+    rest(90)
+    cs().clearFocus()
+    frame()
+    expect(viewRig.takeRestore()).toBeGreaterThan(ORBIT_MIN_DISTANCE + 1)
+  })
+
+  it('2: a hand dolly after the fly makes the distance its own: nothing is restored', () => {
+    tap(120)
+    rest(90)
+    // A pinch's worth: the camera out along its line.
+    const off = camera.position.clone().sub(controls.target).multiplyScalar(3)
+    camera.position.copy(controls.target).add(off)
+    rest(5)
+    viewToAvatar()
+    frame()
+    expect(viewRig.takeRestore()).toBeNull()
+  })
+
+  it('4: another fly started as the lamp\'s reach comes in does not step it', () => {
+    useViewFly.getState().setButton(1)
+    for (let i = 0; i < 120; i++) frame()
+    useViewFly.getState().setButton(0)
+    let n = 0
+    while (viewOffset.moving && n++ < 200) frame()
+    frame()
+    expect(viewRig.reachOwed).toBeGreaterThan(5)
+    let reach = camera.position.distanceTo(controls.target) + viewRig.reachOwed
+    let worst = 0
+    useViewFly.getState().setButton(1)
+    for (let i = 0; i < 40; i++) {
+      frame()
+      const r = camera.position.distanceTo(controls.target) + viewRig.reachOwed
+      worst = Math.max(worst, Math.abs(r - reach))
+      reach = r
+    }
+    expect(worst).toBeLessThan(24 * (1.5 * DT * 1000) / PIVOT_EASE_MS * 1.05)
+  })
+})
+
 describe('1a. the tutorial\'s auto-rotate is not a hand turn (review of #685, 3)', () => {
   it('a turn the pivot is told not to answer is left as an orbit, and only marked', () => {
     useViewFly.getState().setButton(1)
@@ -592,6 +682,7 @@ describe('2. a finger that landed on a HUD control never moves the camera', () =
     controls.enableDamping = true
     controls.dampingFactor = 0.12
     controls.enablePan = false
+    controls.minDistance = ORBIT_MIN_DISTANCE
     rigCam.target = controls.target
     viewRig.reset()
     prevOrigin = null

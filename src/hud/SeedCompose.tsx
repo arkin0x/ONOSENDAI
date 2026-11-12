@@ -64,7 +64,7 @@ const MAX_DNA_BYTES = 8192
  */
 const MAX_SCALE = 30
 
-/** The bloom a DNA grows at the cursor, at a day of the past month, grown in the worker. */
+/** The bloom a DNA grows at the cursor, at a day from 0 to the DNA's last day (plant.ts previewLastDay), grown in the worker. */
 function usePreview(text: string, ok: boolean, caps: Caps, coord: string, scale: number, day: number): ShardModel | null {
   const [shard, setShard] = useState<ShardModel | null>(null)
   const tip = useHyperspace((s) => s.tipHeight)
@@ -128,7 +128,11 @@ function useOwnerDna(id: string | null): { state: 'none' | 'fetching' | 'missing
     return () => { stale = true }
   }, [id])
   if (!id) return { state: 'none' }
-  if (!got || got.id !== id) return { state: 'fetching' }
+  if (!got || got.id !== id) {
+    // Known already (the owner's DNAs ship with the app; one asked for before): no FETCHING for a render.
+    const known = dnaResolver.verdict(id)
+    return known?.state === 'ok' ? { state: 'ok', caps: known.caps } : { state: 'fetching' }
+  }
   return got.caps ? { state: 'ok', caps: got.caps } : { state: 'missing' }
 }
 

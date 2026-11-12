@@ -1458,6 +1458,27 @@ kbd {
   border-color: var(--accent);
 }
 
+/* A native select's open list is drawn by the browser, not by this page: it
+   opened white with the pale text above, unreadable (owner, 2026-11-12, SEED's
+   DNA list). Dark, in the app's colors, for every select in the HUD (all of
+   them are .avatars__input); solid colors, since the open list draws no
+   transparency. */
+select.avatars__input {
+  color-scheme: dark;
+}
+select.avatars__input option,
+select.avatars__input optgroup {
+  background-color: var(--bg);
+  color: var(--fg);
+}
+select.avatars__input optgroup {
+  color: var(--accent);
+}
+select.avatars__input option:checked {
+  background-color: #0b3a47;
+  color: #ffffff;
+}
+
 .avatars__go,
 .avatars__spectate {
   font-family: inherit;

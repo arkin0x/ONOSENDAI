@@ -13,9 +13,9 @@
  *      held WELCOME_S.
  *
  * What it says comes in as an UpgradeAnnouncement: the words and a version,
- * nothing else, so whatever carries it later (a nostr event: its content and
- * a version tag) has the whole of it. How it arrives is not decided yet;
- * /tv?announce=test plays SAMPLE_ANNOUNCEMENT (store/useTvAnnounce).
+ * nothing else, so what carries it (a kind 33338 event signed by the
+ * announcer's key: its content, and its `d` for the version; lib/tv/announceFeed)
+ * has the whole of it. /tv?announce=test plays SAMPLE_ANNOUNCEMENT (store/useTvAnnounce).
  *
  * Everything here is pure: what it says, page by page, and when. The store
  * (store/useTvAnnounce) runs it; the tube's painter (scene/tvPainter) draws it.
@@ -23,6 +23,7 @@
 
 import { cleanText } from './text'
 import { COMMENT_BASE_S } from './director'
+import { SIMPLE_VERSION_RE } from '../version'
 
 /** What an announcement says: the words, and the version they announce. */
 export interface UpgradeAnnouncement {
@@ -230,12 +231,14 @@ export const SAMPLE_ANNOUNCEMENT: UpgradeAnnouncement = {
 }
 
 /**
- * The app's own version (src/lib/version.ts, set at build time), or null for
- * a build that has none ("unversioned build", and the tests).
+ * The app's simple version (2.1, 2.2, ...: src/lib/version.ts simpleVersion,
+ * from package.json, set at build time), or null for a build that has none.
+ * The build stamp (__ONOSENDAI_VERSION__, 2.YYYYMMDD.N.PR) is for debugging,
+ * not for the marquee.
  */
 export function appVersion(): string | null {
-  const v = typeof __ONOSENDAI_VERSION__ === 'string' ? __ONOSENDAI_VERSION__ : ''
-  return v && /\d/.test(v) && !/unversioned/i.test(v) ? v : null
+  const v = typeof __ONOSENDAI_APP_VERSION__ === 'string' ? __ONOSENDAI_APP_VERSION__ : ''
+  return SIMPLE_VERSION_RE.test(v) ? v : null
 }
 
 /**

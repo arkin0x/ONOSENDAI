@@ -19,7 +19,7 @@ import { queryEach } from '../lib/relay'
 import { AD_IN_MS, adById, adEveryMs, adLength, nextAd } from '../lib/tv/hosakaAd'
 import { EXPLAINER_AD_GAP_MS } from '../lib/tv/explainer'
 import { explainerBusy, explainerDue, explainerEndedAt, explainerTick, startExplainers, stopExplainers } from './useTvExplainer'
-import { announceBusy, announceTick, startAnnouncements, stopAnnouncements } from './useTvAnnounce'
+import { announceBusy, announceTick, listenForAnnouncements, startAnnouncements, stopAnnouncements, watchForSelfUpdate } from './useTvAnnounce'
 import {
   BEATS, STATS_FORCED_MS, STATS_GAP_MS, STATS_LOAD_DELAY_MS, STATS_RETRY_MS, asOfHour, breakMayStart, countStats, forcedBoard, isAgentProfile, keysToKnow,
   nextBoard, profilesSettled, readActions, statsEveryMs, statsFirstMs, statsLength, statsOn, type ActionStore, type BoardId, type StatsBoard, type StatsFilter, type StatsSnapshot,
@@ -1072,10 +1072,12 @@ function tick(id: number): void {
       // object, megabytes, read ahead of the tape's first questions on the
       // same sockets held TUNING for seconds. Again on a new tape if they
       // did not come. And the next tape's start, picked ahead: first, as
-      // it is one small question and the census is megabytes.
+      // it is one small question and the census is megabytes. And the
+      // UPGRADE ANNOUNCEMENTs of the week: once a run, after the picture too.
       if (censusTape !== t) {
         censusTape = t
         pickNextStart()
+        listenForAnnouncements()
         if (!useTv.getState().census) freshCensus(0).catch(() => {})
       }
       return
@@ -1263,6 +1265,8 @@ export const useTv = create<TvState>((set, get) => ({
     adEndedAt = -Infinity
     startExplainers(performance.now())
     startAnnouncements()
+    // The stream's reload for a new version waits for a song's end with nothing of TV's own on.
+    watchForSelfUpdate(() => { const st = get(); return st.on && st.ad === null && st.stats === null })
     forcedStats = forcedBoard(typeof window !== 'undefined' && window.location ? window.location.search : '')
     lastBoard = null
     statsEndedAt = -Infinity

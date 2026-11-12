@@ -19,6 +19,7 @@ import { queryEach } from '../lib/relay'
 import { AD_IN_MS, adById, adEveryMs, adLength, nextAd } from '../lib/tv/hosakaAd'
 import { EXPLAINER_AD_GAP_MS } from '../lib/tv/explainer'
 import { explainerBusy, explainerDue, explainerEndedAt, explainerTick, startExplainers, stopExplainers } from './useTvExplainer'
+import { announceBusy, announceTick, startAnnouncements, stopAnnouncements } from './useTvAnnounce'
 import {
   BEATS, STATS_FORCED_MS, STATS_GAP_MS, STATS_LOAD_DELAY_MS, STATS_RETRY_MS, asOfHour, breakMayStart, countStats, forcedBoard, isAgentProfile, keysToKnow,
   nextBoard, profilesSettled, readActions, statsEveryMs, statsFirstMs, statsLength, statsOn, type ActionStore, type BoardId, type StatsBoard, type StatsFilter, type StatsSnapshot,
@@ -620,11 +621,11 @@ async function readMore(id: number, t: number): Promise<void> {
 
 // Back from the background: the shot picks up where it was, not as far on
 // as the time away, and the reader may ask again at once.
-let hidden: { shot: Shot | null; elapsed: number } | null = null
+let hidden: { shot: Shot | null; elapsed: number; holds: number; announcing: boolean } | null = null
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      hidden = { shot: useTv.getState().shot, elapsed: performance.now() - shotBegan }
+      hidden = { shot: useTv.getState().shot, elapsed: performance.now() - shotBegan, holds, announcing: announceBusy() }
       return
     }
     const was = hidden
@@ -632,7 +633,11 @@ if (typeof document !== 'undefined') {
     if (!was || !useTv.getState().on) return
     // Only the shot that was on screen: one the throttled timer began while
     // away keeps its own start.
-    if (was.shot !== null && useTv.getState().shot === was.shot) shotBegan = performance.now() - was.elapsed
+    // Not across an UPGRADE ANNOUNCEMENT, on either side or over the whole
+    // time away: the shot stood still under it, and resumeTv puts it back
+    // for all of the hold; this would count the time away a second time.
+    const held = was.announcing || announceBusy() || was.holds !== holds
+    if (was.shot !== null && useTv.getState().shot === was.shot && !held) shotBegan = performance.now() - was.elapsed
     retryAt = 0
     // A play the browser held while away is asked for again.
     resumeMusic()
@@ -953,12 +958,49 @@ function statsBreak(now: number, s: TvState, id: number): boolean {
   return true
 }
 
+/** How many times TV has picked up after an announcement: a shot's place kept while hidden is not put back across one. */
+let holds = 0
+
+/**
+ * TV picks up after an UPGRADE ANNOUNCEMENT that held it `heldMs` (store/
+ * useTvAnnounce): every clock here moves on by that, so the shot on screen
+ * plays on from the beat and the framing it stopped at, a spot or a
+ * CYBERSPACE STATS board from its scene, LATER or MEANWHILE from where it
+ * was, and none of it counts toward a break being due, the gaps between
+ * them, or anyone's screen time (lib/tv/dwell).
+ */
+function resumeTv(heldMs: number, now: number): void {
+  if (!(heldMs > 0)) return
+  holds++
+  // Only what began before the hold: a retune under it (END OF TAPE's,
+  // the stream's NO SIGNAL) began its own clocks then, which held nothing.
+  const from = now - heldMs
+  const on = (t: number): number => (t < from ? t + heldMs : t)
+  shotBegan = on(shotBegan)
+  adDue += heldMs
+  adEndedAt += heldMs
+  statsDue += heldMs
+  statsEndedAt += heldMs
+  dwell.hold(heldMs)
+  const s = useTv.getState()
+  useTv.setState({
+    cutAt: on(s.cutAt),
+    ad: s.ad ? { ...s.ad, at: on(s.ad.at) } : null,
+    stats: s.stats ? { ...s.stats, at: on(s.stats.at) } : null,
+  })
+}
+
 function tick(id: number): void {
   if (id !== run) return
   const t = tape
   const now = performance.now()
   let s = useTv.getState()
   if (dwell.playable(queue, now) < QUEUE_LOW) void readMore(id, t)
+  // An UPGRADE ANNOUNCEMENT (store/useTvAnnounce) stops everything where it
+  // is, the explainer and the breaks too: nothing here moves until it is
+  // over, and then every clock moves on by the time it held (resumeTv).
+  if (announceTick(now, resumeTv)) return
+  s = useTv.getState()
   // An explainer (lib/tv/explainer) plays over whatever the tape is doing,
   // the live picture in its corner: its own clock, never over the spot.
   // A CYBERSPACE STATS break is a break like a spot, to an explainer.
@@ -1220,6 +1262,7 @@ export const useTv = create<TvState>((set, get) => ({
     adDue = performance.now() + adEveryMs(isBroadcast())
     adEndedAt = -Infinity
     startExplainers(performance.now())
+    startAnnouncements()
     forcedStats = forcedBoard(typeof window !== 'undefined' && window.location ? window.location.search : '')
     lastBoard = null
     statsEndedAt = -Infinity
@@ -1260,6 +1303,7 @@ export const useTv = create<TvState>((set, get) => ({
     looked = null
     prepared.clear()
     keptBags.clear()
+    stopAnnouncements()
     stopExplainers()
     stopMusic()
     stopWatching()

@@ -40,6 +40,7 @@ import { useShards, type MyDeployment } from '../../store/useShards'
 import { useWorkshop } from '../../store/useWorkshop'
 import { ChestCompose } from '../ChestCompose'
 import { TakenRow } from '../InventoryPanel'
+import { topEscape } from '../../hooks/useEscape'
 import type { HeldItem } from '../../lib/inventory'
 
 const sk = generateSecretKey()
@@ -131,6 +132,8 @@ describe('MOVE TO WORKSHOP', () => {
     const row = await mount(<TakenRow item={item} />)
     await row.press(/^ACTIONS$/)
     await row.press('MOVE TO WORKSHOP')
+    // MOVED INTO WORKSHOP leaves no hidden ACTIONS for Escape to close.
+    expect(topEscape()).toBeNull()
     const copy = useWorkshop.getState().shards[0]
     expect(Object.keys(copy.objects!)[0].startsWith(`33331:${ME}:`)).toBe(true)
     expect(carriesSealedParts(copy)).toBe(true)

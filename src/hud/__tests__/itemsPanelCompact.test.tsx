@@ -45,6 +45,7 @@ import { mount, textOf, type Host } from '../../test/elementRoot'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { useItemFeed } from '../../store/useItemFeed'
+import { escapeTop, topEscape } from '../../hooks/useEscape'
 import { useShards } from '../../store/useShards'
 import { heldCount, InventoryPanel, KEY_ITEMS_HEADING, OTHER_LOOT_HEADING } from '../InventoryPanel'
 
@@ -165,6 +166,21 @@ describe('key item buttons', () => {
     const taken = buttonsIn(rowsOf(m.all(), false)[0]).filter((b) => cls(b) !== 'held__clear')
     expect(taken.map(textOf)).toEqual(['ACTIONS', 'READ', 'DETAILS', 'ARCHIVE'])
     for (const b of taken) expect(cls(b).split(' ')).toContain('chest__act')
+    await m.unmount()
+    restore()
+  })
+
+  it('close with Escape, on the menu layer, leaving nothing on the Escape stack', async () => {
+    const restore = seed()
+    const m = await mount(createElement(InventoryPanel))
+    expect(topEscape()).toBeNull()
+    await m.press(/^ACTIONS$/)
+    expect(topEscape()?.layer).toBe('menu')
+    expect(m.all().filter((h) => cls(h) === 'held__menu')).toHaveLength(1)
+    expect(escapeTop()).toBe(true)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(m.all().filter((h) => cls(h) === 'held__menu')).toHaveLength(0)
+    expect(topEscape()).toBeNull()
     await m.unmount()
     restore()
   })

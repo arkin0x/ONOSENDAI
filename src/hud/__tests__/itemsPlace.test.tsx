@@ -57,21 +57,24 @@ describe('PLACE in ITEMS', () => {
       const ev = finalizeEvent(messageInnerTemplate(text, at, 0, 7), sk2) as NostrEvent
       return heldFromEntry(me, { event: ev, body: { type: 'message', text }, verified: true } as never, { chestId: 'c', chestName: 'Wind Chest' }, place, 3)
     }
-    const forged = heldFromForged(me, mineEv, mine, place, 1)
-    const own = note('my own words', sk)
-    const their = note('their words', them)
-    const coin = note(COIN, sk)
-    const items = [forged, found, own, their, coin]
-    // Closed, no row shows PLACE: it is behind ACTIONS.
-    expect(render(items, me, '').split('>PLACE<').length - 1).toBe(0)
-    // Open, PLACE on what you made and only in the row that is open.
-    expect(placesIn(items, me, forged, 'My Key')).toEqual({ row: 1, all: 1 })
-    expect(placesIn(items, me, found, 'Their Key')).toEqual({ row: 0, all: 0 })
-    expect(placesIn(items, me, own, 'my own words')).toEqual({ row: 1, all: 1 })
-    expect(placesIn(items, me, their, 'their words')).toEqual({ row: 0, all: 0 })
-    expect(placesIn(items, me, coin, 'Wind Chest').all).toBe(0)
-    useOpenActions.setState({ open: null })
-    Object.assign(useOpenActions.getInitialState(), { open: null })
-    useCyberspace.setState({ identity: was })
+    try {
+      const forged = heldFromForged(me, mineEv, mine, place, 1)
+      const own = note('my own words', sk)
+      const their = note('their words', them)
+      const coin = note(COIN, sk)
+      const items = [forged, found, own, their, coin]
+      // Closed, no row shows PLACE: it is behind ACTIONS.
+      expect(render(items, me, '').split('>PLACE<').length - 1).toBe(0)
+      // Open, PLACE on what you made and only in the row that is open.
+      expect(placesIn(items, me, forged, 'My Key')).toEqual({ row: 1, all: 1 })
+      expect(placesIn(items, me, found, 'Their Key')).toEqual({ row: 0, all: 0 })
+      expect(placesIn(items, me, own, 'my own words')).toEqual({ row: 1, all: 1 })
+      expect(placesIn(items, me, their, 'their words')).toEqual({ row: 0, all: 0 })
+      expect(placesIn(items, me, coin, 'Wind Chest').all).toBe(0)
+    } finally {
+      useOpenActions.setState({ open: null })
+      Object.assign(useOpenActions.getInitialState(), { open: null })
+      useCyberspace.setState({ identity: was })
+    }
   })
 })

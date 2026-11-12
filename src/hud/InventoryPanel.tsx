@@ -192,29 +192,35 @@ export const useOpenActions = create<{ open: string | null }>(() => ({ open: nul
 
 /**
  * A row's ACTIONS button and the labelled line of actions it opens under
- * the row. Closed again by its button, by Escape (before the menu it is in),
- * by a tap outside the row, never by a tap in a confirmation it opened, and
- * when the row leaves the list.
+ * the row. Closed again by its button, by Escape (before the menu it is in,
+ * focus going back to ACTIONS), by a tap outside the row (a click, so a
+ * scroll on a phone leaves it open), never by a tap in a confirmation it
+ * opened, and when the row leaves the list or stops being drawn (`shown`).
  */
-function useRowActions(id: string, name: string): { button: JSX.Element; group: (acts: ReactNode) => JSX.Element | null } {
-  const open = useOpenActions((s) => s.open === id)
+function useRowActions(id: string, name: string, shown = true): { button: JSX.Element; group: (acts: ReactNode) => JSX.Element | null; close: () => void } {
+  const open = useOpenActions((s) => s.open === id) && shown
   const close = useCallback((): void => { if (useOpenActions.getState().open === id) useOpenActions.setState({ open: null }) }, [id])
-  useEscape('menu', open, close)
+  const gid = `held-actions-${id}`
+  useEscape('menu', open, () => {
+    const focused = typeof document === 'undefined' ? null : document.activeElement
+    close()
+    if (focused?.closest?.(`#${gid}`)) document.getElementById(`${gid}-toggle`)?.focus()
+  })
   useEffect(() => {
     if (!open || typeof document === 'undefined') return
-    const down = (e: PointerEvent): void => {
+    const tap = (e: MouseEvent): void => {
       const t = e.target
       if (t instanceof Element && (t.closest(`[data-actions-row="${id}"]`) || t.closest('.modal'))) return
       close()
     }
-    document.addEventListener('pointerdown', down, true)
-    return () => document.removeEventListener('pointerdown', down, true)
+    document.addEventListener('click', tap, true)
+    return () => document.removeEventListener('click', tap, true)
   }, [open, id, close])
   useEffect(() => close, [close])
-  const gid = `held-actions-${id}`
   return {
-    button: <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => useOpenActions.setState({ open: open ? null : id })} aria-expanded={open} aria-controls={open ? gid : undefined} title={`What you can do with ${name}`}>ACTIONS</button>,
+    button: <button id={`${gid}-toggle`} className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => useOpenActions.setState({ open: open ? null : id })} aria-expanded={open} aria-controls={open ? gid : undefined} aria-label={`Actions for ${name}`} title={`What you can do with ${name}`}>ACTIONS</button>,
     group: (acts) => (open ? <span className="held__menu" id={gid} role="group" aria-label={`Actions for ${name}`}>{acts}</span> : null),
+    close,
   }
 }
 
@@ -365,8 +371,11 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const cashu = useCashu(raw ? item.text : null)
   const coin = raw !== null
   const label = coin ? (token ? cashuLabel(token) : 'cashu token') : item.name
+  // Never open behind MOVED INTO WORKSHOP, so Escape is not spent on it.
+  const actions = useRowActions(item.id, label, !moved)
   const moveToWorkshop = (): void => {
     if (!item.shard || moved) return
+    actions.close()
     // Its carried parts keyed under you, so your copy keeps them when you hide it (R15).
     useWorkshop.getState().importShard(takeIntoKeeping(item.shard, you()))
     setMoved(true)
@@ -374,7 +383,6 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
     window.setTimeout(() => useInventory.getState().clearTaken([item.id]), MOVED_NOTICE_MS)
   }
   const clearable = !coin || cashu.state === 'redeemed'
-  const actions = useRowActions(item.id, label)
   if (moved) {
     return (
       <li className="secrets__row held__row held__row--moved" role="status">

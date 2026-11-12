@@ -7,14 +7,14 @@
  * steps but took the camera with it. STEP separates the two while a deploy is
  * lined up: the camera stays at the zoom, and the build cursor steps, and the
  * placement snaps, by 2^STEP (useCyberspace `buildStep`, read through
- * lib/buildCursor.ts buildStepOf).
+ * lib/buildCursor.ts moveStepOf and buildStepOf).
  *
  * STEP only ever moves the build cursor: it does nothing unless BUILD mode is
  * on and its free view can be driven, never at your head, where the cursor is
  * the one a COMMIT hops to, and never while a hide is running, which keeps
  * the box and the ghost on the place being hidden. BUILD mode can end during
  * a hide (a tap on Earth, a stop, a deployment) with the bar still up; STEP
- * is then refused, and cleared below.
+ * is then refused, and cleared (useBuilder).
  *
  * Lowering STEP first brings the build cursor to where the placement is now,
  * the center of the current snap cell, so the small box that marks the snap
@@ -35,7 +35,7 @@
 import { samePosition, useCyberspace } from './useCyberspace'
 import { useShards } from './useShards'
 import { useBuilder } from './useBuilder'
-import { buildStepOf } from '../lib/buildCursor'
+import { moveStepOf } from '../lib/buildCursor'
 import { deployPoint } from '../lib/space'
 
 /** Whether STEP can be changed now: a deploy lined up, not hiding, in BUILD mode, with its free view's cursor to drive. */
@@ -49,20 +49,14 @@ export function stepOpen(): boolean {
 export function stepBuild(delta: 1 | -1): void {
   if (!stepOpen()) return
   const cs = useCyberspace.getState()
-  const from = buildStepOf(cs)
+  const from = moveStepOf(cs)
   const to = Math.max(0, Math.min(cs.scaleExp, from + delta))
   if (to === from) return
   const settle = cs.buildSettle
-  if (to < from && !(settle && samePosition(settle.at, cs.cursor))) {
+  // On the placement itself (`buildExact`), STEP changes only how far a move goes.
+  if (to < from && !cs.buildExact && !(settle && samePosition(settle.at, cs.cursor))) {
     const at = deployPoint(cs.cursor, from, useShards.getState().deployHeight)
     useCyberspace.setState({ cursor: at, buildSettle: { at, from: { ...cs.cursor } } })
   }
   useCyberspace.getState().setBuildStep(to)
 }
-
-// BUILD mode ending takes STEP with it, whatever is still lined up: a hide
-// running when the view moved away keeps its bar, and its STEP must not step
-// the cursor at your head.
-useBuilder.subscribe((s, prev) => {
-  if (prev.active && !s.active) useCyberspace.getState().setBuildStep(null)
-})

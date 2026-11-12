@@ -105,13 +105,14 @@ import { create } from 'zustand'
 import { samePosition, useCyberspace } from './useCyberspace'
 import { copyLinedUp, movable, movingId, placingCopy, positionOf, useShards, type DeployPending } from './useShards'
 import { useWorkshop } from './useWorkshop'
-import { placedStep } from '../lib/space'
+import { deployPoint, placedStep } from '../lib/space'
 import { useHyperspace } from './useHyperspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { depName, useStash } from '../hud/stash'
 import { registerEscape } from '../hooks/useEscape'
-import { buildPlane, placedCursor } from '../lib/buildCursor'
+import { buildPlane, buildStepOf, placedCursor } from '../lib/buildCursor'
 import { landFly } from '../lib/viewFly'
+import { positionHex } from '../lib/events'
 import { useRegion } from './useRegion'
 
 /** How a session of BUILD mode began: the BUILD control (or B), or a DEPLOY. */
@@ -577,4 +578,55 @@ export function addToRoom(eventId: string): void {
 // ADD's height lasts as long as the BUILD it started.
 useBuilder.subscribe((s, prev) => {
   if (prev.active && !s.active && useShards.getState().deployInto !== null) useShards.setState({ deployInto: null })
+})
+
+// BUILD mode ending takes STEP with it, whatever is still lined up: a hide
+// running when the view moved away keeps its bar, and its STEP must not step
+// the cursor at your head. Here, with the mode, so it holds wherever the mode
+// is loaded (it lived in store/buildStep.ts, loaded only with the deploy bar).
+useBuilder.subscribe((s, prev) => {
+  if (!prev.active || s.active) return
+  useCyberspace.setState({ buildExact: false })
+  useCyberspace.getState().setBuildStep(null)
+})
+
+// arkinox, 2026-11-11: "if I position a shard for placement in build, and
+// then I zoom out, when I zoom back in sometimes the shard has changed
+// position." The placement was the cursor's cell at a STEP that follows the
+// zoom (lib/space.ts deployPoint), so a zoom moved it: out, to the coarse
+// cell's center, and a center at one size is never a center at another.
+// The first zoom while anything is lined up puts the build cursor on the
+// placement as it stands, and from then on the placement is the cursor
+// itself (useCyberspace `buildExact`): no zoom moves it, each move steps it
+// one cell of the zoom you are at, and the camera and the cursor cube sit on
+// it. A zoom that came with a new cursor (a place gone to at its own zoom:
+// VIEW, a starred place, the pin) is aim, not zoom: the placement is held on
+// that cursor exactly (review of #676). On your avatar, putting the cursor
+// there is not a move of yours (`buildSettle`), as with lowering STEP, so it
+// still counts as being on your avatar; anywhere else nothing is kept to go
+// back to, or ending the deploy would throw the cursor back across the
+// magnified view (review of #676).
+useCyberspace.subscribe((s, prev) => {
+  if (s.scaleExp === prev.scaleExp || s.buildExact || !useBuilder.getState().active) return
+  const sh = useShards.getState()
+  if (sh.pending === null) return
+  const was = buildStepOf({ ...s, scaleExp: prev.scaleExp })
+  const at = s.cursor !== prev.cursor ? { ...s.cursor } : deployPoint(s.cursor, was, sh.deployHeight)
+  const onAvatar = samePosition(placedCursor(s), s.position)
+  useCyberspace.setState({ cursor: at, buildExact: true, buildSettle: onAvatar ? { at, from: { ...s.position } } : null })
+  // A seed's hide height was measured for the cursor and STEP it was composed
+  // at (plant.ts seedDraftHeight). Where that is the very point now held, the
+  // measure is kept for it, at the held point and 2^0, so the zoom does not
+  // send the seed to SEED_HIDE_MAX. After the hold above, never before it:
+  // useShards keeps the deploy only because the fit now matches the held
+  // cursor and 2^0 (its `measured`). A copy lined up again stays that copy
+  // (`placedLast`), or AGAIN and its same-spot refusal would be lost.
+  const p = sh.pending
+  const plane = buildPlane(s)
+  const fit = p.type === 'seed' ? p.seed.fit : undefined
+  if (p.type === 'seed' && fit && fit.step === was && fit.cursor === positionHex(s.cursor, plane) && samePosition(deployPoint(s.cursor, was, fit.height), at)) {
+    const next = { ...p, seed: { ...p.seed, fit: { ...fit, cursor: positionHex(at, plane), step: 0 } } }
+    const last = sh.placedLast
+    useShards.setState({ pending: next, ...(last?.pending === p ? { placedLast: { ...last, pending: next } } : {}) })
+  }
 })

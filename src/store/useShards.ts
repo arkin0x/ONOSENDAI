@@ -2241,6 +2241,9 @@ export function noteBagAt(lookupId: string, createdAt: number): void {
   bagClock.set(lookupId, Math.max(bagClock.get(lookupId) ?? 0, createdAt))
 }
 
+/** True while the deploy lined up is edited in place: still the same deploy, so its STEP stays (the subscription at the bottom). */
+let editingPending = false
+
 export const useShards = create<ShardsState>((set, get) => {
   const cyber = () => useCyberspace.getState()
 
@@ -2905,6 +2908,12 @@ export const useShards = create<ShardsState>((set, get) => {
   function lookStart(look: LookChoice): { deployUnit: number; deployConstrain: Constrain } {
     const model = lookModelOf(look)
     return { deployUnit: model?.unit ?? 0, deployConstrain: model ? authoredConstrainOf(model) : CONSTRAIN_DEFAULT }
+  }
+
+  /** Edit the deploy lined up in place: a new object, the same deploy (`editingPending`). */
+  const edit = (patch: Partial<ShardsState>): void => {
+    editingPending = true
+    try { set(patch) } finally { editingPending = false }
   }
 
   /** The same fresh-deploy state every start shares: no pose, no link, the bag settings at their defaults. */
@@ -3780,7 +3789,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (p?.type !== 'audio') return
       const { fade: _drop, ...rest } = p.audio
       void _drop
-      set({ pending: { ...p, audio: fade === undefined ? rest : { ...rest, fade } } })
+      edit({ pending: { ...p, audio: fade === undefined ? rest : { ...rest, fade } } })
     },
     startDeployAudio: (audio, opts) => set({ pending: { type: 'audio', audio, ...(opts?.reseal ? { reseal: true as const } : {}), ...(opts?.server ? { server: opts.server } : {}) }, ...freshDeploy }),
     // With shards aimed inside, the height starts at the fit that holds them
@@ -3805,26 +3814,26 @@ export const useShards = create<ShardsState>((set, get) => {
       get().syncRoomSnap()
       // Where it lands, fixed now: the deploy point of the build cursor at the bar's height (deploy, below).
       const { position, plane } = buildCursorOf(cyber())
-      set({ pending: { ...p, spot: { at: deployPoint(position, buildStepOf(cyber()), get().deployHeight), plane } }, deployError: null })
+      edit({ pending: { ...p, spot: { at: deployPoint(position, buildStepOf(cyber()), get().deployHeight), plane } }, deployError: null })
     },
     unplaceChest: (draft) => {
       const p = get().pending
       if (p?.type !== 'chest' || !p.spot || get().deployStatus === 'working') return
       const { spot: _was, ...rest } = p
       void _was
-      set({ pending: { ...rest, ...(draft ?? {}) }, deployError: null, deployAsk: null })
+      edit({ pending: { ...rest, ...(draft ?? {}) }, deployError: null, deployAsk: null })
     },
     keepChestDraft: (draft) => {
       const p = get().pending
       // Not while it is being sealed: the deploy knows what it is finishing by
       // this very object, and a new one would leave it working for good.
       if (p?.type !== 'chest' || !p.spot || p.move || get().deployStatus === 'working') return
-      set({ pending: { ...p, ...draft } })
+      edit({ pending: { ...p, ...draft } })
     },
     sealPlacedChest: async (draft) => {
       const p = get().pending
       if (p?.type !== 'chest' || !p.spot || get().deployStatus === 'working') return
-      set({ pending: { ...p, ...draft } })
+      edit({ pending: { ...p, ...draft } })
       await get().deploy()
     },
     startMoveChest: (eventId) => {
@@ -4270,7 +4279,7 @@ export const useShards = create<ShardsState>((set, get) => {
     setDeployLook: (look) => {
       const p = get().pending
       if (p?.type !== 'chest' || get().deployStatus === 'working') return
-      set({ pending: { ...p, look }, ...lookStart(look), deployTurn: [0, 0, 0], deployAsk: null, deployError: null })
+      edit({ pending: { ...p, look }, ...lookStart(look), deployTurn: [0, 0, 0], deployAsk: null, deployError: null })
     },
     startDeployIntoChest: (draft, contentIndex) => {
       const c = draft.contents[contentIndex]
@@ -5600,18 +5609,24 @@ export function closedRoomTest(state: Pick<ShardsState, 'mine' | 'discovered'>, 
 }
 
 // The build STEP belongs to one deploy: when it ends, hidden or canceled, or
-// another is lined up in its place, the step goes back to the zoom. A
-// placement lined up again (`placedLast`) keeps it, as it keeps every other
-// setting. So does a seed SEED measured at this very STEP and cursor: its
-// hide height was found for them (plant.ts seedDraftHeight), and taking the
-// step back to the zoom, and the cursor with it, would hide it at 12 at
-// another spot (found by the tutorial's review, 2026-11-11).
+// another is lined up in its place, the step goes back to the zoom, and the
+// placement held by a zoom (useCyberspace `buildExact`) is let go. A
+// placement lined up again (`placedLast`) keeps them, as it keeps every other
+// setting, and so does the same deploy edited in place (a fade, a look, a
+// chest's spot: `edit`), or a zoom's held placement would fall back to the
+// STEP's cell (review of #676). So does a seed SEED measured at this very
+// STEP and cursor: its hide height was found for them (plant.ts
+// seedDraftHeight), and taking the step back to the zoom, and the cursor
+// with it, would hide it at 12 at another spot (found by the tutorial's
+// review, 2026-11-11).
 useShards.subscribe((s, prev) => {
   const cs = useCyberspace.getState()
   const again = s.pending !== null && s.pending === s.placedLast?.pending
   const fit = s.pending?.type === 'seed' ? s.pending.seed.fit : undefined
   const measured = fit !== undefined && fit.step === buildStepOf(cs) && fit.cursor === positionHex(cs.cursor, buildPlane(cs))
-  if (s.pending !== prev.pending && !again && !measured && (cs.buildStep !== null || cs.buildSettle !== null)) cs.setBuildStep(null)
+  if (s.pending === prev.pending || again || editingPending || measured) return
+  if (cs.buildExact) useCyberspace.setState({ buildExact: false })
+  if (cs.buildStep !== null || cs.buildSettle !== null) cs.setBuildStep(null)
 })
 
 /**

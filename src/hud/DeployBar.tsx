@@ -85,7 +85,7 @@ import { BAG_SAFE_BYTES } from '../lib/bagSize'
 import { findCashuToken } from '../lib/cashu'
 import { AXIS_BITS, SECTOR_HEIGHT, SECTOR_HINT, isSectorHint, searchExponent } from '../lib/hint'
 import { deployPoint } from '../lib/space'
-import { buildPlane, buildStepOf } from '../lib/buildCursor'
+import { buildPlane, buildStepOf, moveStepOf } from '../lib/buildCursor'
 import { stepBuild } from '../store/buildStep'
 import { useBuilder } from '../store/useBuilder'
 import { Field, Switch } from './ui/Switch'
@@ -302,9 +302,12 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   const heightAuto = useShards((s) => s.deployHeightAuto)
   const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  // The build STEP: how far a move steps and the cell the placement snaps to
-  // (store/buildStep.ts), the zoom until it is lowered.
+  // The cell the placement snaps to (store/buildStep.ts): the zoom until STEP
+  // is lowered, 2^0 once a zoom holds the placement on the cursor itself.
   const step = useCyberspace(buildStepOf)
+  // How far a move goes, which the row shows: the STEP, even once a zoom has
+  // put the placement on the cursor itself and it snaps no more (buildExact).
+  const moveStep = useCyberspace(moveStepOf)
   // A door being placed or moved: its own rows.
   const door = useShards((s) => s.pending?.type === 'chest' && !!s.pending.door)
   // The door what is being placed seals to, at exactly its height (4.3): the
@@ -520,10 +523,10 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
       {/* STEP: finer placement than the zoom, with the camera left where it
           is (arkinox, 2026-10-08). The small white box in the cube is the
           cell it snaps to. Comma and period on a keyboard. */}
-      <DeployRow kind="step" label="STEP" hint={formatCellSize(step)}>
-        <button className="deploybar__btn" {...bind(() => stepBuild(-1))} disabled={!stepOpen || step <= 0} aria-label="Finer step (comma)" title="Finer step (,)">−</button>
-        <span className="deploybar__value">2^{step}</span>
-        <button className="deploybar__btn" {...bind(() => stepBuild(1))} disabled={!stepOpen || step >= scaleExp} aria-label="Coarser step (period)" title="Coarser step (.)">+</button>
+      <DeployRow kind="step" label="STEP" hint={formatCellSize(moveStep)}>
+        <button className="deploybar__btn" {...bind(() => stepBuild(-1))} disabled={!stepOpen || moveStep <= 0} aria-label="Finer step (comma)" title="Finer step (,)">−</button>
+        <span className="deploybar__value">2^{moveStep}</span>
+        <button className="deploybar__btn" {...bind(() => stepBuild(1))} disabled={!stepOpen || moveStep >= scaleExp} aria-label="Coarser step (period)" title="Coarser step (.)">+</button>
       </DeployRow>
 
       {/* How full the bag is with this shard in it, in the form it goes out in. */}

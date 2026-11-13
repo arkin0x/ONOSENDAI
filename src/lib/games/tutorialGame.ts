@@ -71,10 +71,14 @@ const KEY_AT = at(37, 26, 43)
 const GATE_AT = at(40, 16, 32)
 
 /**
- * THE ONE LINE: the tutorial dungeon's game key, 64 lowercase hex. The DEV
- * key until the owner's npub (as hex) goes here; nothing else changes.
+ * THE ONE LINE: the tutorial dungeon's game key, 64 lowercase hex. Set
+ * 2026-11-13 (owner: "you can generate a tutorial key with nak and keep it
+ * locally for the game key. lets get the tutorial live today"): the
+ * dungeon's world (15 objects and its bag) is published under it on
+ * wss://relay.onosendai.tech. Its secret is kept off-repo on the build
+ * machine, never in this code.
  */
-export const TUTORIAL_PUBKEY: string = TUTORIAL_DEV_PUBKEY
+export const TUTORIAL_PUBKEY: string = 'ee248d6a63557359a4afe95e7eed365499393a0c9d06cbb7ce7df658fdf06a5b'
 
 /** The relay the owner publishes the world to (DEPLOY.md), and every live entry's relay hint (DECK-0002 §2.1). */
 export const TUTORIAL_RELAY = 'wss://relay.onosendai.tech'

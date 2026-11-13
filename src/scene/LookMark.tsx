@@ -41,10 +41,14 @@ import { useBuildDimmed } from './BuildOccluders'
 const IDENTITY = new Matrix4()
 
 /**
- * How large a chest or a door may be, in gibsons, and still take a tap from
- * up close: from inside it, or right beside it (TapTarget `upClose`).
+ * How large a chest or a door may be drawn and still take a tap from up
+ * close: from inside it, or right beside it (TapTarget `upClose`). Its own
+ * true size plus UP_CLOSE_GIBSONS for what an opened chest lines up in front
+ * of it (ChestLoot, about 0.6 a thing), never more than UP_CLOSE_CAP_GIBSONS,
+ * so a huge custom look keeps a shard's rules. A HALL door is 5 by 7.
  */
-export const UP_CLOSE_GIBSONS = 4
+export const UP_CLOSE_GIBSONS = 6
+export const UP_CLOSE_CAP_GIBSONS = 16
 
 /** A look's bounds about its origin, in model units, render frame: what it is sized and labelled by. */
 export interface LookBounds {
@@ -140,7 +144,8 @@ export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop 
       minPx: bounds.longest > 0 ? (reach * minPx) / bounds.longest / CUBE_REACH : minPx,
     }
   }, [bounds, atTrue, minPx, clearTop])
-  const upClose = UP_CLOSE_GIBSONS * trueScale(0, scaleExp)
+  const gibson = trueScale(0, scaleExp)
+  const upClose = Math.min(bounds.longest * atTrue + UP_CLOSE_GIBSONS * gibson, UP_CLOSE_CAP_GIBSONS * gibson)
   const outer = useRef<Group>(null)
   const drawn = useRef<Group | null>(null)
   // Dimmed while it stands between the camera and the build cursor.

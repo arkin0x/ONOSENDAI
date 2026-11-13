@@ -51,7 +51,7 @@ import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 import { builtInLook } from '../../lib/looks'
 import { trueScale } from '../../lib/itemModel'
 import type { ViewAxes } from '../../lib/space'
-import { LookMark, UP_CLOSE_GIBSONS, lookBounds } from '../LookMark'
+import { LookMark, UP_CLOSE_CAP_GIBSONS, UP_CLOSE_GIBSONS, lookBounds } from '../LookMark'
 import { TapTarget } from '../TapTarget'
 
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
@@ -94,9 +94,11 @@ describe('a chest up close in WALK (LookMark)', () => {
   const look = builtInLook('treasure')
   const chest = (): Promise<void> => r.render(createElement(LookMark, { look, model: look.closed, at: AT, axes: AXES, minPx: 8, onTap }))
 
-  it('is a chest-sized thing, well inside the up-close limit', () => {
+  it('the up-close limit holds a chest with its loot out, and the largest built-in door, under the cap', () => {
     const b = lookBounds(look.closed)
-    expect(b.longest * trueScale(look.closed.unit, 0)).toBeLessThanOrEqual(UP_CLOSE_GIBSONS)
+    expect(b.longest * trueScale(look.closed.unit, 0)).toBeLessThan(1)
+    const hall = builtInLook('hall')
+    expect(lookBounds(hall.closed).longest * trueScale(hall.closed.unit, 0) + UP_CLOSE_GIBSONS).toBeLessThanOrEqual(UP_CLOSE_CAP_GIBSONS)
   })
 
   it('from far enough back, a tap on it opens it, as it always did', async () => {
@@ -110,6 +112,14 @@ describe('a chest up close in WALK (LookMark)', () => {
   it('standing in its cell (the eye at its centre, as WALK puts it), a tap on the chest around you opens it', async () => {
     await chest()
     eyeAt([0, 0, 0.001])
+    await r.frame()
+    await r.tap(SIZE / 2, SIZE / 2)
+    expect(onTap).toHaveBeenCalledTimes(1)
+  })
+
+  it('standing in its cell with the view tilted up (the eye a hair under its floor), a tap on it still opens it', async () => {
+    await chest()
+    eyeAt([0, -0.0005, 0.001], [0, Math.sin(0.05), -Math.cos(0.05)])
     await r.frame()
     await r.tap(SIZE / 2, SIZE / 2)
     expect(onTap).toHaveBeenCalledTimes(1)
@@ -163,17 +173,38 @@ describe('a large shard keeps the rules for what surrounds you', () => {
     expect(onTap).not.toHaveBeenCalled()
   })
 
-  it('standing in a hollow chest, a tap where no face of it is under the finger still opens it (WALK\'s eye sits on its floor, and rays graze its walls)', async () => {
-    // Only two corner posts drawn: its box holds the eye, but a ray straight ahead meets nothing it draws.
-    function Hollow(): JSX.Element {
-      const drawn = useRef<Group>(null)
-      const post = (x: number, y: number, z: number) => createElement('mesh', { position: [x, y, z] }, createElement('boxGeometry', { args: [0.05, 0.05, 0.05] }), createElement('meshBasicMaterial', { side: DoubleSide }))
-      return createElement('group', { position: AT },
-        createElement('group', { ref: drawn }, post(-0.45, 0, -0.45), post(0.45, 0.8, 0.45)),
-        createElement(TapTarget, { measure: drawn as RefObject<Group>, onTap, upClose: 4 }))
-    }
-    await r.render(createElement(Hollow))
-    eyeAt([0, 0.1, 0.001])
+  /**
+   * A chest as the treasure look is built where it matters here: four legs to
+   * the floor, its walls and lid above a gap, the world showing under it. The
+   * eye on its floor (WALK's), a shallow ray passes under the walls.
+   */
+  function Legged(): JSX.Element {
+    const drawn = useRef<Group>(null)
+    const panel = (pos: [number, number, number], rot: [number, number, number]) => createElement('mesh', { position: pos, rotation: rot }, createElement('planeGeometry', { args: [0.9, 0.8] }), createElement('meshBasicMaterial', { side: DoubleSide }))
+    const leg = (x: number, z: number) => createElement('mesh', { position: [x, 0.05, z] }, createElement('boxGeometry', { args: [0.04, 0.1, 0.04] }), createElement('meshBasicMaterial', { side: DoubleSide }))
+    return createElement('group', { position: AT },
+      createElement('group', { ref: drawn },
+        leg(-0.43, -0.43), leg(0.43, -0.43), leg(-0.43, 0.43), leg(0.43, 0.43),
+        panel([0, 0.5, -0.45], [0, 0, 0]), panel([0, 0.5, 0.45], [0, 0, 0]),
+        panel([-0.45, 0.5, 0], [0, Math.PI / 2, 0]), panel([0.45, 0.5, 0], [0, Math.PI / 2, 0]),
+        createElement('mesh', { position: [0, 0.9, 0], rotation: [Math.PI / 2, 0, 0] }, createElement('planeGeometry', { args: [0.9, 0.9] }), createElement('meshBasicMaterial', { side: DoubleSide }))),
+      createElement(TapTarget, { measure: drawn as RefObject<Group>, onTap, upClose: 4 }))
+  }
+
+  it('standing in a chest on legs, the eye on its floor, a tap on its wall opens it, and a tap down under its walls does not', async () => {
+    await r.render(createElement(Legged))
+    eyeAt([0, 0, 0.001])
+    await r.frame()
+    await r.tap(SIZE / 2, SIZE * 0.4)
+    expect(onTap).toHaveBeenCalledTimes(1)
+    onTap.mockClear()
+    await r.tap(SIZE / 2, SIZE * 0.98)
+    expect(onTap).not.toHaveBeenCalled()
+  })
+
+  it('standing in a chest on legs with the view tilted up, the eye a hair under its floor, a tap straight ahead opens it', async () => {
+    await r.render(createElement(Legged))
+    eyeAt([0, -0.0005, 0.001], [0, Math.sin(0.05), -Math.cos(0.05)])
     await r.frame()
     await r.tap(SIZE / 2, SIZE / 2)
     expect(onTap).toHaveBeenCalledTimes(1)

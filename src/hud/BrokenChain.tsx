@@ -28,7 +28,9 @@
  * proof in a form the rules reject, like the owner's version 1 sidestep of
  * 2026-09-04. The chip says CHAIN STOPS AT <day>, RelayStopNotice says where
  * and why in a few short lines, and RESPAWN is the same respawn. The avatar
- * is not frozen for it: it is still drawn at the head. A hop above the
+ * stands where the chain stops, as on a broken chain (store derive,
+ * lib/chainStop.ts relayFreezeOf), for you; the rows keep where each action
+ * went, so the chain panel and the tape show them as signed. A hop above the
  * relay's verify ceiling gets a quiet chip and no RESPAWN: the relay leaves
  * it unchecked, and a respawn would not help.
  */

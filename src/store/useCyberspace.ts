@@ -190,7 +190,7 @@ import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary }
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { addRecentView } from '../lib/viewAt'
 import { endOfChainLabel } from '../lib/chainBreak'
-import { chainStopOf, respawnPointOf } from '../lib/chainStop'
+import { chainStopOf, onV1HopList, relayFreezeOf, respawnPointOf } from '../lib/chainStop'
 import { moveStepOf } from '../lib/buildCursor'
 import { targetColor, type CyberTarget } from '../lib/targets'
 import { useSecrets } from './useSecrets'
@@ -3518,8 +3518,11 @@ function derive(saved: PersistedChain): {
   anchor: Position
   anchorPlane: Plane
 } {
-  const actions = buildChain(saved.events)
+  // The store's own memo (parsedChain): the chain actions() hands out, so
+  // lib/chainStop.ts keeps one answer for it and reads only what it grows by.
+  const actions = parsedChain(saved.events)
   const head = actions[actions.length - 1]
+  const { position, plane, positionHistory } = standingOf(actions)
   const published: Record<string, PublishStatus> = {}
   for (const e of saved.events) published[e.id] = saved.published.includes(e.id) ? 'ok' : 'queued'
   return {
@@ -3531,14 +3534,31 @@ function derive(saved: PersistedChain): {
     // Rides are counted from the events, so an adopted chain reads the same
     // as one ridden here; the local measurements stay what was saved.
     chain: { ...saved.stats, ...rideStatsOf(actions) },
-    position: head.position,
-    positionHistory: actions.map((a) => a.position),
-    plane: head.plane,
-    headPlane: head.plane,
+    position,
+    positionHistory,
+    plane,
+    headPlane: plane,
     exploreIndex: null,
-    anchor: head.position,
-    anchorPlane: head.plane,
+    anchor: position,
+    anchorPlane: plane,
   }
+}
+
+/**
+ * Where your chain stands: its head, or, when a proof the relay's rules
+ * reject stops it (lib/chainStop.ts relayFreezeOf), the last action that
+ * counts before it, every position from the stop on drawn there, as
+ * buildChain freezes a structural break's (owner, 2026-11-13: the avatar
+ * stands where the chain stops, not at its head). Nothing signed changes:
+ * the rows keep where each action went. While the 5.13 list loads the head
+ * stands, and the list's arrival stands you again (restandOnList).
+ */
+function standingOf(actions: ActionEvent[]): { position: Position; plane: Plane; positionHistory: Position[] } {
+  const head = actions[actions.length - 1]
+  const freeze = relayFreezeOf(actions)
+  if (!freeze) return { position: head.position, plane: head.plane, positionHistory: actions.map((a) => a.position) }
+  const { position, plane } = freeze.at
+  return { position, plane, positionHistory: actions.map((a, i) => (i < freeze.index ? a.position : position)) }
 }
 
 /**
@@ -5880,13 +5900,18 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // Nothing to walk: a spectated pubkey with no chain on the relay. The
     // anchor stays on its spawn coordinate.
     if (last < 0) { set({ exploreIndex: null }); return }
+    // Your own chain stands where a rejected proof stops it, from the stop
+    // on, as positionHistory draws it (standingOf); a spectated chain stands
+    // where its rows say.
+    const freeze = get().spectate === null ? relayFreezeOf(chain) : null
+    const placeOf = (i: number): { position: Position; plane: Plane } => (freeze && i >= freeze.index ? freeze.at : chain[i])
     if (index === null || index >= last) {
-      const a = chain[last]
+      const a = placeOf(last)
       set({ exploreIndex: null, anchor: a.position, anchorPlane: a.plane })
       return
     }
     const i = Math.max(0, Math.floor(index))
-    const a = chain[i]
+    const a = placeOf(i)
     set({ exploreIndex: i, anchor: a.position, anchorPlane: a.plane })
   },
 
@@ -7229,6 +7254,26 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
   // from the HUD, the same way __terrain and __screenAxes work.
   ;(window as unknown as { __store?: unknown }).__store = useCyberspace
 }
+
+/**
+ * The 5.13 list arrived (lib/chainStop.ts): a chain only it could judge may
+ * stop now, and you stand where it stops (standingOf), the view with you
+ * when it was on your head.
+ */
+onV1HopList(() => {
+  const s = useCyberspace.getState()
+  if (s.events.length === 0) return
+  const at = standingOf(s.actions())
+  if (samePosition(at.position, s.position) && at.plane === s.headPlane) return
+  const following = s.atHead()
+  useCyberspace.setState({
+    position: at.position,
+    plane: at.plane,
+    headPlane: at.plane,
+    positionHistory: at.positionHistory,
+    ...(following ? { anchor: at.position, anchorPlane: at.plane, ...(s.walking ? {} : { cursor: at.position }) } : {}),
+  })
+})
 
 /** The spawn coordinate of this identity: where every chain of its starts. */
 export { SPAWN }

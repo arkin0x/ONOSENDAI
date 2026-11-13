@@ -902,7 +902,7 @@ async function countBoards(id: number): Promise<void> {
     const listed = await loadV1HopList().catch(() => null)
     if (id !== run) return
     const actions = listed?.size ? dropUnlistedV1Hops(all, listed) : all
-    const snap = await countStats({ actions, bags: census.bagRecords, objects: census.objectRecords, deletions: census.deletions, arrivals: arrivalTimes(actions) }, hour)
+    const snap = await countStats({ actions, bags: census.bagRecords, objects: census.objectRecords, deletions: census.deletions, arrivals: arrivalTimes(actions), v1Hops: listed?.size ? listed : null }, hour)
     if (id !== run) return
     snapshot = snap
     profilesAskedAt = profilesAgainAt = performance.now()

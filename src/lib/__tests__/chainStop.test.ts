@@ -10,7 +10,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { buildChain, type ActionEvent, type NostrEvent } from '../events'
 import { loadV1HopList } from '../v1HopList'
-import { chainStopOf, needsRespawn, resetChainStops, respawnPointOf, setV1HopListForTests } from '../chainStop'
+import { chainStopOf, countsThrough, needsRespawn, relayFreezeOf, resetChainStops, respawnPointOf, setV1HopListForTests } from '../chainStop'
 import { relayStopWords, stopDay } from '../chainBreak'
 import { RELAY_MAX_HOP_HEIGHT } from '../relayPlacement'
 import owner from './vectors/owner-chain-e8ed3798-through-2026-09-04.json'
@@ -156,6 +156,49 @@ describe('chainStopOf', () => {
     expect(chainStopOf(mine)).toBeNull()
     expect(chainStopOf(theirs, 'spectate')?.source).toBe('relay')
     expect(chainStopOf(mine)).toBeNull()
+  })
+})
+
+describe('relayFreezeOf: where your chain stands (owner, 2026-11-13)', () => {
+  const spawn = move('f0', 'spawn', { position: at(0n) })
+
+  it("the owner's chain: at row 23, standing where event 22 left it", async () => {
+    setV1HopListForTests(await loadV1HopList())
+    const f = relayFreezeOf(ownerChain)
+    expect(f?.index).toBe(23)
+    expect(f?.at.id).toBe(EVENT_22)
+  })
+
+  it('never on a guess, never for a valid chain, a tall hop, or a structural break (buildChain freezes that one itself)', async () => {
+    expect(relayFreezeOf(ownerChain)).toBeNull() // the list still loading
+    setV1HopListForTests(await loadV1HopList())
+    expect(relayFreezeOf(ownerChain.slice(0, 23), 'cut')).toBeNull()
+    expect(relayFreezeOf([spawn, move('f1', 'hop', { ...V2, position: at(1n << 30n) })], 'tall')).toBeNull()
+    expect(relayFreezeOf([spawn, move('f2', 'hop', { ...V2, position: at(1n), breaks: 'starts elsewhere' })], 'rules')).toBeNull()
+    expect(relayFreezeOf([spawn, move('f3', 'hop', { ...V2, position: at(1n) }), move('f4', 'sidestep', { mn: '1'.repeat(16), position: at(2n) })], 'clean')).toBeNull()
+  })
+})
+
+describe('countsThrough: a chain read once (LONGEST CHAIN, other people)', () => {
+  const spawn = move('k0', 'spawn', { position: at(0n) })
+
+  it("the owner's chain counts 23 actions with the list; the same 23 when it did not load (its version 1 hops taken as they stand)", async () => {
+    expect(countsThrough(ownerChain, await loadV1HopList())).toMatchObject({ end: 23, stop: { index: 23, rule: 'v1-sidestep' } })
+    expect(countsThrough(ownerChain, null)).toMatchObject({ end: 23, stop: { rule: 'v1-sidestep' } })
+  })
+
+  it('a valid chain counts whole, past a tall hop too; a fork counts nothing; a structural break ends it', () => {
+    const clean = [spawn, move('k1', 'hop', { ...V2, position: at(1n << 30n) }), move('k2', 'sidestep', { mn: '1'.repeat(16), position: at((1n << 30n) + 1n) }), move('k3', 'hyperjump', { mn: '2'.repeat(16) })]
+    expect(countsThrough(clean, new Set())).toEqual({ end: 4, stop: null })
+    expect(countsThrough([{ ...spawn, fork: { ids: [] } } as unknown as ActionEvent, move('k4', 'hop', V2)], new Set()).end).toBe(0)
+    expect(countsThrough([spawn, move('k5', 'hop', V2), move('k6', 'hop', { ...V2, breaks: 'starts elsewhere' })], new Set())).toEqual({ end: 2, stop: null })
+  })
+
+  it('a rejected proof before the break ends it there; with no list, a version 1 hop never does', () => {
+    expect(countsThrough([spawn, move('k7', 'hop', V2), move('k8', 'hop', { mn: '0'.repeat(16) }), move('k9', 'hop', V2)], new Set())).toMatchObject({ end: 2, stop: { rule: 'partial-hop' } })
+    expect(countsThrough([spawn, move('k10', 'hop'), move('k11', 'hop', V2)], null)).toEqual({ end: 3, stop: null })
+    expect(countsThrough([spawn, move('k10', 'hop'), move('k11', 'hop', V2)], new Set())).toMatchObject({ end: 1, stop: { rule: 'v1-hop' } })
+    expect(countsThrough([spawn, move('k12', 'hop'), move('k13', 'sidestep')], null)).toMatchObject({ end: 2, stop: { rule: 'v1-sidestep' } })
   })
 })
 

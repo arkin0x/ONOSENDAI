@@ -11,7 +11,7 @@
  *
  * | Rule | Counts | Badge |
  * |---|---|---|
- * | chainLength | valid actions on the current chain, the spawn included | the LONGEST CHAIN board and the ticker (not a badge) |
+ * | chainLength | valid actions on the current chain, the spawn included; on the board, only up to where the relay's rules stop it (keyChains `relayList`) | the LONGEST CHAIN board and the ticker (not a badge) |
  * | bestChainLength | valid actions on the best (longest) of all the key's chains, the spawn included | CHAIN |
  * | respawnCount | spawns after the first whose chain went on to a valid hop | PHOENIX |
  * | activeKeys | keys with a valid action in a window | REGULAR's "valid action" |
@@ -37,6 +37,7 @@
 
 import { canonicalGeometryText } from 'sno-core/fingerprint'
 import { fromPayload } from 'sno-core/shards'
+import { countsThrough } from './chainStop'
 import { ACTION_KIND, buildChain, firstBreak, type ActionEvent, type NostrEvent } from './events'
 import { HIDDEN_KIND, OBJECT_KIND } from './hidden'
 
@@ -297,7 +298,11 @@ export function activeKeys(byAuthor: Map<string, NostrEvent[]>, from: number, to
  * goes through.
  */
 export interface KeyChains {
-  /** The CURRENT chain's valid actions (chainLength, the LONGEST CHAIN board); never the best chain (bestChainLength). */
+  /**
+   * The CURRENT chain's valid actions (chainLength, the LONGEST CHAIN board);
+   * never the best chain (bestChainLength). With `relayList` given, only
+   * those up to where the relay's rules stop the chain too (keyChains).
+   */
   chainLength: number
   /** Respawns whose chain went on to a valid hop (respawnCount). */
   respawns: number
@@ -305,7 +310,18 @@ export interface KeyChains {
   activeWeek: boolean
 }
 
-export function keyChains(events: NostrEvent[], pubkey: string, t: number = Infinity): KeyChains {
+/**
+ * `relayList`, when given (null included), counts the current chain the way
+ * ONOSENDAI's own chain checks do since 2026-11-12 (lib/chainStop.ts
+ * countsThrough, the owner's 2026-11-13 follow-up for LONGEST CHAIN): only
+ * up to its first structural break or proof the relay's rules reject (a hop
+ * with one of mn and mp, a version 1 sidestep or ride off its list, a
+ * version 1 hop off the 5.13 list, which is `relayList`; null when it could
+ * not load, and then such a hop is taken as it stands). One more pass over
+ * the current chain, none over the others. Respawns and the active week
+ * count as before.
+ */
+export function keyChains(events: NostrEvent[], pubkey: string, t: number = Infinity, relayList?: ReadonlySet<string> | null): KeyChains {
   const mine = asOf(events, t).filter((e) => e.pubkey === pubkey && isV2Action(e))
   const spawns = mine.filter(isV2Spawn).sort((a, b) => a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   // Each event under the spawn it names, once.
@@ -325,7 +341,7 @@ export function keyChains(events: NostrEvent[], pubkey: string, t: number = Infi
     const valid = validPrefixLength(chain)
     if (i > 0 && goesOnToHop(chain, valid)) respawns++
     // The newest spawn, in NIP-01's order (lib/events newestSpawn), is the last of the oldest-first list.
-    if (i === spawns.length - 1) current = valid
+    if (i === spawns.length - 1) current = relayList === undefined ? valid : countsThrough(chain, relayList).end
     if (!activeWeek) for (let k = 0; k < valid; k++) if (chain[k].createdAt > t - WEEK_S && chain[k].createdAt <= t) { activeWeek = true; break }
   })
   return { chainLength: current, respawns, activeWeek }

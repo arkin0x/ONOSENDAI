@@ -34,12 +34,14 @@
  *   one bad clock cannot stop every later read from seeing anything.
  * - One placement rule: a person stands where their chain puts the action
  *   they show, which is its own place on a valid stretch and the frozen
- *   place from the first break on (`stand`), and is off the neighborhood
- *   when that place is.
+ *   place from where it stops on (`stand`): its first break, or since
+ *   2026-11-13 a proof the relay's rules reject (lib/chainStop.ts
+ *   countsThrough), and is off the neighborhood when that place is.
  */
 
 import { fetchChainEvents, mergeEvents } from './chains'
-import { actionLink, buildChain, firstBreak, newestSpawn, type ActionEvent, type NostrEvent, type Placed } from './events'
+import { countsThrough, v1HopListNow, whenV1HopList } from './chainStop'
+import { actionLink, buildChain, newestSpawn, type ActionEvent, type NostrEvent, type Placed } from './events'
 
 export interface ChainVerdict {
   /** The newest action the chain was read at. */
@@ -48,7 +50,7 @@ export interface ChainVerdict {
   spawnId: string
   /** Where the chain puts that action: its own place on a valid stretch, the chain's last valid position from the first break on. */
   stand: Placed
-  /** The action is at or after the chain's first break, and `stand` is where it froze. */
+  /** The action is at or after where the chain stops (its first break, or a proof the relay's rules reject), and `stand` is where it froze. */
   frozen: boolean
 }
 
@@ -121,13 +123,19 @@ export async function readChain(pubkey: string, actionId: string): Promise<Chain
   const chain = buildChain(events, pubkey)
   const at = chain.findIndex((a) => a.id === actionId)
   if (at < 0) return null
-  const shown = chain[at]
-  const broken = firstBreak(chain)
+  // Where it stops by the relay's rules too (lib/chainStop.ts, owner
+  // 2026-11-13), as your own chain does. A hop missing mn or mp is judged by
+  // the 5.13 list, loaded for it; if it does not load, such a hop is taken
+  // as it stands, never frozen on a guess.
+  if (chain.some((a) => a.type === 'hop' && (a.mn === undefined || a.mp === undefined))) await whenV1HopList()
+  const { end, stop } = countsThrough(chain, v1HopListNow())
+  // buildChain already froze every row from a structural break on; a rejected proof freezes them here, at the last action that counts.
+  const shown = stop && at >= stop.index ? (stop.lastValid ?? chain[0]) : chain[at]
   const v: ChainVerdict = {
     actionId,
     spawnId: chain[0].id,
     stand: { coordHex: shown.coordHex, position: shown.position, plane: shown.plane, sector: shown.sector },
-    frozen: broken !== null && at >= broken.index,
+    frozen: at >= end,
   }
   keep(verdicts, pubkey, v)
   return v

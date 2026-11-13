@@ -2,7 +2,7 @@
  * TutorialToast.tsx: the tutorial toast (tutorial/toast.ts), in the
  * instrument stack's toast group: the words, START and LATER, on the
  * Builder's toast chip with two buttons as GOAL's chip has. On screen only
- * while its offer stands and START could start the tutorial here
+ * while its offer stands and START could resume or start the tutorial
  * (toastFits): it steps aside under the tutorial, TV, the tour, a ride or a
  * game, and comes back after. Each time it is on screen for an offer counts
  * one show (noteToastOnScreen), once.
@@ -25,7 +25,7 @@ export function TutorialToast(): JSX.Element | null {
   return offer !== null && offer === pubkey ? <OfferedToast pubkey={pubkey} /> : null
 }
 
-/** The chip for an offer standing for `pubkey`, while START could start the tutorial here. */
+/** The chip for an offer standing for `pubkey`, while START could resume or start the tutorial. */
 function OfferedToast({ pubkey }: { pubkey: string }): JSX.Element | null {
   // Each of these redraws the chip when what toastFits reads changes.
   useTutorialSwitch((s) => s.value)

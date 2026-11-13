@@ -28,15 +28,19 @@
  * Kept per pubkey on this device (TOAST_PREFIX), with a copy in memory so a
  * device that refuses storage still keeps the caps for the visit.
  *
- * START starts the tutorial as the menu's RESTART TUTORIAL does for a returning
- * player (useTutorial start({ restart: true })): from the first step, laid
- * out where they stand, the publishing switch untouched. The chip only
- * shows while that can start. LATER puts it away for this load.
+ * START picks up a run this identity left on the device (unfinished or
+ * skipped) as the menu's RESUME TUTORIAL does (useTutorial resumeTutorial):
+ * at the step it was on, laid out where it was, the publishing switch
+ * untouched. Only with no run to pick up does it start the tutorial as the
+ * menu's RESTART TUTORIAL does (start({ restart: true })): from the first
+ * step, laid out where they stand, publishing untouched. A RESTART here
+ * would have wiped the run RESUME could pick up (review of #724). The chip
+ * only shows while either can start. LATER puts it away for this load.
  */
 
 import { create } from 'zustand'
 import { readProgress, tutorialOn } from './gate'
-import { cannotStageHere, headUnsettled, identitySettled, isNewArrival, tutorialStarts, useTutorial } from '../store/useTutorial'
+import { cannotStageHere, headUnsettled, identitySettled, isNewArrival, resumeStepFor, resumeTutorial, tutorialStarts, useTutorial } from '../store/useTutorial'
 import { savedChainLoaded, useCyberspace } from '../store/useCyberspace'
 import { useDemo } from '../store/useDemo'
 import { useTv } from '../store/useTv'
@@ -148,12 +152,17 @@ export function dismissTutorialToast(): void {
 }
 
 /**
- * START: the tutorial from the first step, laid out where the player stands,
- * publishing untouched, as the menu's RESTART TUTORIAL. The toast goes once
- * the run is going; if it could not start, nothing changes.
+ * START: this identity's run picked up where it was, as the menu's RESUME
+ * TUTORIAL (resumeTutorial: its step, its kept anchor, publishing
+ * untouched); with no run to pick up, the tutorial from the first step,
+ * laid out where the player stands, publishing untouched, as the menu's
+ * RESTART TUTORIAL. A run to resume is never restarted, even when the
+ * resume is refused. The toast goes once the run is going; if it could not
+ * start, nothing changes.
  */
 export function startFromTutorialToast(): void {
-  useTutorial.getState().start({ restart: true })
+  if (resumeStepFor(useCyberspace.getState().identity.pubkey) !== null) resumeTutorial()
+  else useTutorial.getState().start({ restart: true })
   if (useTutorial.getState().active) dismissTutorialToast()
 }
 

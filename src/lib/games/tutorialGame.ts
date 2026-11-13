@@ -3,10 +3,11 @@
  * (first-arrival tutorial, Track C; DECK-0002 §9). Its design, map and the
  * owner's deploy steps: onosendai/games-dungeon/DESIGN.md and DEPLOY.md.
  *
- * The dungeon is real; its key is not yet. The owner rules (2026-11-10) that
- * the game is a new npub he creates and holds, and that he deploys the
- * pieces himself. THE ONE LINE is TUTORIAL_PUBKEY, below. While it is the
- * DEV key:
+ * The dungeon is live under its real key since 2026-11-13. The owner first
+ * ruled (2026-11-10) that he would create and hold the game's npub; on
+ * 2026-11-13 he had it generated and kept on the build machine instead, and
+ * the world was published under it. THE ONE LINE is TUTORIAL_PUBKEY, below.
+ * Back when it was the DEV key:
  *
  * - the DEV key was generated on the build machine. Its secret is not in
  *   this repository. Nothing it signed has been, or may be, sent to any relay.

@@ -139,7 +139,7 @@ async function stageFor(player: string, restart: boolean): Promise<void> {
   } catch (err) {
     if (mine !== run) return
     console.warn('[tutorial] staging failed:', err)
-    useTutorialStage.setState({ error: 'The chest could not be placed. Try RESTART TUTORIAL in Settings.' })
+    useTutorialStage.setState({ error: 'The chest could not be placed. Try RESTART TUTORIAL in the menu.' })
   }
 }
 

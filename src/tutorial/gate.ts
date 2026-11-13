@@ -11,7 +11,7 @@
  * sets "off" (applyTutorialFlag, before the first render in main.tsx), and
  * the flag is taken off the address so a
  * shared link does not carry it on. So a tester opens onosendai.tech/?tutorial=1
- * once, and the switch stays in Settings from then on.
+ * once, and the switch stays in the menu's Tutorial panel from then on.
  *
  * Progress is kept per player pubkey, so a reload resumes at the step it was
  * on and another identity on the same device has its own.
@@ -45,8 +45,8 @@ export function tutorialSwitch(): boolean | null {
  * get the tutorial live today", decision A: on for every new arrival, who
  * starts LOCAL as before). It still runs by itself only for a brand-new
  * identity on arrival (store/useTutorial.ts isNewArrival); everyone else sees
- * the menu's Tutorial panel and the Settings row. ?tutorial=0 or the Settings
- * switch turns it off for this device.
+ * the menu's Tutorial panel. ?tutorial=0 or that panel's switch turns it off
+ * for this device.
  */
 export const TUTORIAL_DEFAULT_ON = true
 
@@ -55,7 +55,7 @@ export function tutorialEnabled(): boolean {
   return tutorialSwitch() ?? TUTORIAL_DEFAULT_ON
 }
 
-/** The switch as the Settings row reads it, so a change from anywhere (the address, the row) shows at once. */
+/** The switch as the Tutorial panel reads it, so a change from anywhere (the address, the panel) shows at once. */
 export const useTutorialSwitch = create<{ value: boolean | null }>(() => ({ value: tutorialSwitch() ?? TUTORIAL_DEFAULT_ON }))
 
 export function setTutorialSwitch(on: boolean): void {

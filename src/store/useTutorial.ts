@@ -12,8 +12,9 @@
  * (tutorial/gate.ts), shown only to a brand-new identity on arrival
  * (isNewArrival) on an address that asked for no arrival mode (a ?mode= link
  * gets its mode instead: tutorialStarts), kept per player pubkey so a reload
- * resumes, and started again by RESTART TUTORIAL in Settings, START TUTORIAL
- * in the menu, or START on the tutorial toast (tutorial/toast.ts).
+ * resumes, started again by RESTART TUTORIAL in the menu's Tutorial panel or
+ * START on the tutorial toast (tutorial/toast.ts), and picked up where it was
+ * by RESUME TUTORIAL in that panel (resumeTutorial).
  *
  * The /tutorial address (owner, 2026-11-13) asks for a run on its load: a
  * brand-new identity gets the first arrival as above, and anyone else the
@@ -266,6 +267,13 @@ interface TutorialState {
   choicesVersion: number
   /** The route choices done this run, checked off on the choices card (feedback item 10). */
   doneChoices: string[]
+  /**
+   * This run is a finished one picked up again (the dungeon's EXIT GAME, or
+   * RESUME TUTORIAL): it stays finished whatever happens now, so a close, a
+   * pause or a reload never turns it skipped or unfinished, and what the first
+   * FINISH kept stays on screen (review of the fall-out PR).
+   */
+  finishedBefore: boolean
   /** The choice whose run is under way (its card waits), or null. */
   choosing: string | null
   /** Why the last choice did not go, in plain words, on the card until the next choice or step. */
@@ -367,8 +375,9 @@ export const useTutorial = create<TutorialState>((set, get) => {
 
   /** What is kept for a step: its id, the routes checked off so far (feedback item 10), and where the run is laid out. */
   const progress = (step: string, ended?: 'finished' | 'skipped'): TutorialProgress => {
-    const { doneChoices: choices, anchor } = get()
-    return { step, ...(ended ? { ended } : {}), ...(choices.length ? { choices } : {}), ...(anchor ? { anchor } : {}) }
+    const { doneChoices: choices, anchor, finishedBefore } = get()
+    const kept = finishedBefore ? 'finished' : ended
+    return { step, ...(kept ? { ended: kept } : {}), ...(choices.length ? { choices } : {}), ...(anchor ? { anchor } : {}) }
   }
 
   const stop = (how: 'finished' | 'skipped' | 'pause'): void => {
@@ -386,6 +395,7 @@ export const useTutorial = create<TutorialState>((set, get) => {
     explaining: false,
     choicesVersion: 0,
     doneChoices: [],
+    finishedBefore: false,
     choosing: null,
     choiceNote: null,
     stepNote: null,
@@ -423,7 +433,8 @@ export const useTutorial = create<TutorialState>((set, get) => {
       }
       // A resume keeps the routes already checked off (feedback item 10).
       const doneChoices = opts.at && !opts.restart ? readProgress(pubkey)?.choices ?? [] : []
-      set({ active: true, pubkey, anchor, minimized: false, doneChoices })
+      const finishedBefore = !!opts.at && !opts.restart && readProgress(pubkey)?.ended === 'finished'
+      set({ active: true, pubkey, anchor, minimized: false, doneChoices, finishedBefore })
       for (const l of lifecycles) { try { l.start?.(pubkey, opts.restart === true) } catch (err) { console.warn('[tutorial] start failed:', err) } }
       enter(at >= 0 ? at : 0)
     },
@@ -505,14 +516,17 @@ export const useTutorial = create<TutorialState>((set, get) => {
       const s = get()
       if (!s.active) return
       const step = s.script.steps[s.index]
-      if (s.pubkey) writeProgress(s.pubkey, progress(step?.id ?? s.script.steps[0].id, how))
-      stop(how)
+      // A finished run picked up again ends finished, whichever way it is closed.
+      const kept = s.finishedBefore ? 'finished' : how
+      if (s.pubkey) writeProgress(s.pubkey, progress(step?.id ?? s.script.steps[0].id, kept))
+      stop(kept)
       set({ active: false, minimized: false, explaining: false })
     },
 
     pause: () => {
       if (!get().active) return
-      stop('pause')
+      // A finished run picked up again keeps what its FINISH kept on screen.
+      stop(get().finishedBefore ? 'finished' : 'pause')
       set({ active: false, minimized: false, explaining: false })
     },
 
@@ -520,6 +534,39 @@ export const useTutorial = create<TutorialState>((set, get) => {
     setExplaining: (explaining) => set({ explaining }),
   }
 })
+
+/**
+ * Where RESUME TUTORIAL would pick `pubkey`'s run up, or null when it has none
+ * on this device: an unfinished or skipped run at the step it was on, a
+ * finished one on the "Where next?" card, so the routes after the basics stay
+ * in reach (owner, 2026-11-13).
+ */
+export function resumeStepFor(pubkey: string, steps: readonly TutorialStep[] = useTutorial.getState().script.steps): string | null {
+  const p = readProgress(pubkey)
+  if (!p) return null
+  if (p.ended !== 'finished') return p.step
+  return steps.find((st) => st.choices)?.id ?? p.step
+}
+
+/** Why RESUME and RESTART TUTORIAL cannot be pressed now: a run going, the tour or TV, the line, a game, a chain that cannot move. */
+export function tutorialButtonsBlocked(): boolean {
+  return useTutorial.getState().active || blocked() || cannotStageHere()
+}
+
+/**
+ * RESUME TUTORIAL (the menu's Tutorial panel): the identity on screen's run,
+ * where resumeStepFor says, laid out where it was (its kept anchor), the
+ * publishing switch left as it is. The menu shuts, as for RESTART, so the
+ * coach is not under it. Whether it resumed.
+ */
+export function resumeTutorial(): boolean {
+  if (tutorialButtonsBlocked()) return false
+  const at = resumeStepFor(useCyberspace.getState().identity.pubkey)
+  if (!at) return false
+  setMenuOpen(false)
+  useTutorial.getState().start({ at })
+  return useTutorial.getState().active
+}
 
 /** Whether the tutorial could run on this load at all, whoever the identity: the switch on, the bare address, no tour or TV. */
 export function tutorialMayRun(): boolean {

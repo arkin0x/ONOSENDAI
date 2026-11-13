@@ -35,7 +35,6 @@ import { HyperspacePanel } from './HyperspacePanel'
 import { useHyperspace } from '../store/useHyperspace'
 import { RelaysPanel } from './RelaysPanel'
 import { TutorialPanel } from './TutorialPanel'
-import { useTutorialSwitch } from '../tutorial/gate'
 import { TargetsPanel } from './TargetsPanel'
 import { ShardsPanel } from './ShardsPanel'
 import { Legend } from './Legend'
@@ -712,11 +711,9 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // drawn only for someone a bot profile named as operator, while TALK and
   // the follow rule were missing; both have shipped. It sits in its saved
   // place, which the hidden days kept.
-  // The TUTORIAL panel (feedback item 17) is drawn only where the tutorial
-  // switch is on (the default since 2026-11-13); switched off, it is filtered
-  // out so no empty slot shows for a panel that would render nothing.
-  const tutorialShown = useTutorialSwitch((s) => s.value) === true
-  const hidden = (id: PanelId): boolean => leads.includes(id) || (id === 'tutorial' && !tutorialShown)
+  // The TUTORIAL panel (feedback item 17) is drawn for everyone, switched off
+  // too: its switch lives in it (owner, 2026-11-13), so it can be turned back on.
+  const hidden = (id: PanelId): boolean => leads.includes(id)
   const left = [...leads, ...order.left.filter((id) => !hidden(id))]
   const right = order.right.filter((id) => !hidden(id))
 

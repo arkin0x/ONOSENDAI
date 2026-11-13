@@ -21,6 +21,12 @@ export interface GamePad {
   at: Position
   /** Where it sends the player: a game position inside the region. */
   to: Position
+  /**
+   * A column of light this many gibsons tall over the pad, drawn by the game
+   * view so the pad is found from afar: for a pad with no world shard to show
+   * it (the tutorial dungeon's way back for a player who fell out).
+   */
+  beacon?: number
 }
 
 /** A box of game positions, both corners included (game logic). */

@@ -7,6 +7,16 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 const handlers = vi.hoisted(() => {
+  // useCyberspace reaches useShards through its own imports, so useShards
+  // loads first and its followIdentity tries again on a timer until
+  // useCyberspace has loaded (about ten seconds of tries). Vitest loads
+  // modules asynchronously, so under load those tries could run out during
+  // the import, and no storage listener of useShards was there to hear the
+  // other tab (other modules add their own, so a count of listeners did not
+  // show it). With setTimeout held, no try runs during the import; beforeAll
+  // runs the waiting one once both have loaded, so it finds useCyberspace on
+  // its first go, whatever the load.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   const list: ((e: { key: string | null }) => void)[] = []
   const mem = new Map<string, string>()
   const g = globalThis as Record<string, unknown>
@@ -45,8 +55,10 @@ const row = (id: string, pubkey: string): MyDeployment => ({
 } as MyDeployment)
 const fire = (key: string | null): void => { for (const h of handlers) h({ key }) }
 
-beforeAll(async () => {
-  await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0))
+beforeAll(() => {
+  // Both modules are in: the try followIdentity left waiting (its first, at 0 ms) runs now and finds useCyberspace.
+  vi.advanceTimersByTime(0)
+  vi.useRealTimers()
 })
 
 describe('another tab', () => {

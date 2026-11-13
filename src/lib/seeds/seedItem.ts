@@ -112,6 +112,17 @@ export function seedsInPlane<T extends { type: string; plane: Plane }>(items: re
 }
 
 /**
+ * The zoom a VIEW of a found thing fits (useCyberspace viewAt's `scaleExp`):
+ * a shard's unit, a seed's scale (one bloom unit is 2^scale gibsons, §5.6),
+ * else 0. The card's GO TO and DISCOVERED NEARBY's VIEW frame alike.
+ */
+export function viewScaleOf(item: { type: string; shard?: { unit?: number }; event?: SeedEventLike }): number {
+  if (item.type === 'shard') return item.shard?.unit ?? 0
+  if (item.type === 'seed' && item.event) return seedItemOf(item.event)?.scale ?? 0
+  return 0
+}
+
+/**
  * Where a DNA found inside a bag goes (§8.2: the bag that holds a seed is
  * looked in first): the page's DNA resolver, once lib/seeds/seedSources.ts
  * is loaded. Kept as a sink so the bag reader (lib/hidden.ts) stays pure and

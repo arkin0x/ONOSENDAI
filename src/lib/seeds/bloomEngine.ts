@@ -61,8 +61,8 @@ export type BloomStatus =
 export interface BloomView {
   seedId: string
   status: BloomStatus
-  /** The DNA, once resolved and valid. */
-  dna?: { id: string; name: string; author: string; price: number }
+  /** The DNA, once resolved and valid; `generations` is its caps' days of growth, for a row's "day 12 of 41". */
+  dna?: { id: string; name: string; author: string; price: number; generations: number }
   /** Why the DNA was refused, or growth failed. */
   error?: string
   clock?: number
@@ -213,7 +213,7 @@ export class BloomEngine {
       this.set(id, { seedId: id, status, ...(error !== undefined ? { error } : {}) })
       return
     }
-    const dna = { id: verdict.id, name: verdict.name, author: verdict.author, price: verdict.price }
+    const dna = { id: verdict.id, name: verdict.name, author: verdict.author, price: verdict.price, generations: verdict.caps.generations }
     // §7: the committed target and the id's work, at the DNA's own price.
     if (!workOk({ id: seed.id, tags: seed.tags }, verdict.price)) {
       this.set(id, { seedId: id, status: 'underpaid', dna })

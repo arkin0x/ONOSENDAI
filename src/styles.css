@@ -8076,8 +8076,10 @@ select.avatars__input option:checked {
 .nearby__door { display: contents; }
 .nearby__acts .chest__act, .nearby__acts .nearby__view { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 26px; padding: 0 9px; border-radius: 3px; }
 
-/* DISCOVERED NEARBY's tabs: each kind with its count, an empty one dimmed and still there. */
-.nearby__tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; flex: none; }
+/* DISCOVERED NEARBY's tabs: each kind with its count, an empty one dimmed and
+   still there. Seven in a row; on a phone they wrap, four and three, the words
+   kept their size (SEEDS, arkinox, 2026-11-13). */
+.nearby__tabs { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; flex: none; }
 .nearby__tab {
   min-height: 44px;
   min-width: 0;
@@ -8099,7 +8101,7 @@ select.avatars__input option:checked {
 .nearby__tab.is-on { color: var(--accent); background: rgba(0, 229, 255, 0.1); border-color: rgba(0, 229, 255, 0.7); }
 .nearby__tab.is-empty { opacity: 0.45; }
 .nearby__count { font-size: 11px; }
-@media (max-width: 480px) { .nearby__tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .nearby__tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 /* Whether a chest or a door is open, as the world draws it. */
 .nearby__lock { letter-spacing: 0.1em; }
 .nearby__lock--locked { color: var(--dim); }
@@ -8116,6 +8118,9 @@ select.avatars__input option:checked {
 .chest__act.chest__act--danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, transparent); background: transparent; }
 .chest__act.chest__act--danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
 
+/* A seed row's DNA name: a tap opens the seed's card; it reads as the other rows' names. */
+.nearby__name { padding: 0; font-family: inherit; text-align: left; letter-spacing: inherit; background: none; border: 0; cursor: pointer; }
+.nearby__name:hover, .nearby__name:focus-visible { color: var(--accent); }
 /* The Nearby Loot row's second line: the plane and the height. */
 .nearby__where { font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
 .nearby__label { white-space: normal; overflow-wrap: anywhere; }

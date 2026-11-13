@@ -8,7 +8,10 @@
  * which says how many, and from NEARBY on the DISCOVERED panel. VIEW flies to
  * the thing the way the bag record's VIEW does. A key row has TAKE until it
  * is held; a chest row has its OPEN, and a door row its OPEN or CLOSE, beside
- * VIEW and the same size, VIEW on the right (arkinox, 2026-11-12).
+ * VIEW and the same size, VIEW on the right (arkinox, 2026-11-12). A seed's
+ * row names its DNA, how far it has grown and who planted it; its name opens
+ * its card (BloomCard) and its VIEW frames the bloom at the seed's scale
+ * (arkinox, 2026-11-13: "we need to add seeds to this modal").
  * Tabs sort the list by kind, ITEMS first (lib/nearbyTabs.ts); every opening
  * starts on the first tab, left to right, with anything in it (arkinox,
  * 2026-11-01), and RETURN from a VIEW comes back to the tab it left.
@@ -34,14 +37,37 @@ import { useEscape } from '../hooks/useEscape'
 import { NEARBY_TABS, byTab, firstFilledTab, type NearbyTab } from '../lib/nearbyTabs'
 import { lockWord, useOpenedChests } from '../store/useOpenedChests'
 import { GoArrow } from './ui/GoArrow'
+import { useBlooms, wantSeeds } from '../store/useBlooms'
+import { seedItemOf, viewScaleOf, type SeedItem } from '../lib/seeds/seedItem'
+import { bloomGrowthWords } from '../lib/seeds/bloomWords'
 
 /** Where a nearby item was found, for what is taken out of a chest here. */
 function placeOf(item: NearbyItem): HeldPlace {
   return { lookupId: item.lookupId ?? '', bagId: item.bagId ?? '', at: { x: item.at.x.toString(), y: item.at.y.toString(), z: item.at.z.toString() }, plane: item.plane, height: item.height }
 }
 
-/** The first line: the message itself, the shard named in quotes with its size, or the key's or chest's name. */
+/** A seed row's seed, read once per event (the list re-renders as blooms grow). */
+const seeds = new WeakMap<object, SeedItem | null>()
+function seedOf(item: NearbyItem): SeedItem | null {
+  if (item.type !== 'seed' || !item.event) return null
+  let s = seeds.get(item.event)
+  if (s === undefined) seeds.set(item.event, (s = seedItemOf(item.event)))
+  return s
+}
+
+/** A seed's name: its DNA's `dna` name once resolved (store/useBlooms). */
+function seedName(dna: { name: string } | undefined): string {
+  return dna?.name ?? 'unknown DNA'
+}
+
+/** How far away, as every row says it. */
+function distanceWords(d: bigint): string {
+  return d === 0n ? 'right here' : `${formatDistance(d)} away`
+}
+
+/** The first line: the message itself, the shard named in quotes with its size, the key's or chest's name, or a seed's DNA. */
 function labelOf(item: NearbyItem): string {
+  if (item.type === 'seed') { const seed = seedOf(item); return seedName(seed ? useBlooms.getState().views[seed.id]?.dna : undefined) }
   if (item.type === 'message') return findCashuToken(item.text) ? 'cashu token' : messagePreview(item.text ?? '', 160)
   if (item.type !== 'shard') return hiddenLabel({ ...item, key: item.keyItem })
   const shard = item.shard
@@ -81,11 +107,47 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
         <span className="nearby__meta">
           {author && <ProfilePic pubkey={author} size={14} />}
           <span>{name}</span>
-          <span>· {item.distance === 0n ? 'right here' : `${formatDistance(item.distance)} away`}</span>
+          <span>· {distanceWords(item.distance)}</span>
         </span>
       </div>
       <span className="nearby__acts">
         {chest && <span className="nearby__door" ref={setChestActs} />}
+        <button className="avatars__go nearby__view" onClick={() => onView(item)} title="Fly to it">VIEW<GoArrow /></button>
+      </span>
+    </li>
+  )
+}
+
+/**
+ * A seed's row: its DNA's name, which opens the seed's card (BloomCard, in
+ * the hidden-thing card) in place of this list; where it is and how far it
+ * has grown, on the clock the card reads; who planted it (the seed's signer)
+ * and how far; and VIEW. Its picture is the bloom as grown here, the seed's
+ * glyph until then.
+ */
+export function SeedRow({ item, me, onView }: { item: NearbyItem; me: string; onView: (item: NearbyItem) => void }): JSX.Element {
+  const seed = seedOf(item)
+  const view = useBlooms((s) => (seed ? s.views[seed.id] : undefined))
+  const planter = seed?.planter ?? item.author ?? ''
+  const profile = useProfile(planter || null)
+  const name = planter === me ? 'you' : profileLabel(profile, safeNpub(planter))
+  const card = (): void => {
+    useShards.getState().setNearbyOpen(false)
+    useShards.getState().selectSecret(item.key)
+  }
+  return (
+    <li className="secrets__row nearby__row">
+      {view?.shard ? <ShardThumb shard={view.shard} /> : <ItemIcon className="nearby__glyph" type="seed" size={14} />}
+      <div className="nearby__body">
+        <button className="nearby__label nearby__name" onClick={card} title="Open its card">{seedName(view?.dna)}</button>
+        <span className="nearby__where">{whereOf(item)} · {bloomGrowthWords(view)}</span>
+        <span className="nearby__meta">
+          {planter && <ProfilePic pubkey={planter} size={14} />}
+          <span>{name}</span>
+          <span>· {distanceWords(item.distance)}</span>
+        </span>
+      </div>
+      <span className="nearby__acts">
         <button className="avatars__go nearby__view" onClick={() => onView(item)} title="Fly to it">VIEW<GoArrow /></button>
       </span>
     </li>
@@ -126,18 +188,21 @@ export function NearbyList(): JSX.Element {
   // that chest, with its TAKE, and not again on its own (review of #519).
   const list = useMemo(() => listedOnce(items, (i) => i.key, chestOpen).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)), [items, chestOpen])
   const tabs = useMemo(() => byTab(list), [list])
-  const counts: Record<NearbyTab, number> = { items: tabs.items.length, shards: tabs.shards.length, sounds: tabs.sounds.length, chests: tabs.chests.length, doors: tabs.doors.length, messages: tabs.messages.length }
+  const counts: Record<NearbyTab, number> = { items: tabs.items.length, shards: tabs.shards.length, sounds: tabs.sounds.length, chests: tabs.chests.length, doors: tabs.doors.length, messages: tabs.messages.length, seeds: tabs.seeds.length }
   // The tab a VIEW left, or the first with anything in it.
   const [tab, setTab] = useState<NearbyTab>(() => viewedTab ?? firstFilledTab(counts))
   useEffect(() => { viewedTab = null }, [])
+  // The seeds listed grow for their rows, as one opened from a list grows for
+  // its card (BloomCard): most are already growing for the world.
+  const listedSeeds = useMemo(() => (tab === 'seeds' ? tabs.seeds.map(seedOf).filter((x): x is SeedItem => x !== null) : []), [tab, tabs])
+  useEffect(() => { wantSeeds(listedSeeds) }, [listedSeeds])
   const close = (): void => useShards.getState().setNearbyOpen(false)
   const view = (item: NearbyItem): void => {
     // Where to come back to, spectation and link included, before looking away.
     rememberNearbyReturn()
     viewedTab = tab
     close()
-    const unit = item.type === 'shard' ? item.shard?.unit ?? 0 : 0
-    useCyberspace.getState().viewAt(item.at, item.plane, labelOf(item).toUpperCase(), unit, { item: true })
+    useCyberspace.getState().viewAt(item.at, item.plane, labelOf(item).toUpperCase(), viewScaleOf(item), { item: true })
   }
   return (
     <div className="modal" role="dialog" aria-label="Discovered nearby" aria-modal="true" onPointerDown={close}>
@@ -154,7 +219,7 @@ export function NearbyList(): JSX.Element {
         <ul className="secrets__list" role="tabpanel">
           {list.length === 0 && <li className="secrets__empty">Nothing decrypted in this region. A rescan is triggered after every movement action.</li>}
           {list.length > 0 && tabs[tab].length === 0 && <li className="secrets__empty">None here.</li>}
-          {tabs[tab].map((item) => <Row key={item.key} item={item} me={me} onView={view} />)}
+          {tabs[tab].map((item) => item.type === 'seed' ? <SeedRow key={item.key} item={item} me={me} onView={view} /> : <Row key={item.key} item={item} me={me} onView={view} />)}
         </ul>
       </div>
     </div>

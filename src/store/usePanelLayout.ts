@@ -174,6 +174,15 @@ export function saveLayout(layout: PanelLayout): void {
 }
 
 interface PanelLayoutState extends PanelLayout {
+  /**
+   * A panel the first-arrival tutorial puts first in the menu for a while
+   * (the Earth route's HYPERSPACE, owner 2026-11-13), above every priority
+   * state, or null. Like those states it only rearranges what Hud.tsx draws:
+   * it is never written, so the saved order is the player's untouched, and
+   * clearing it (or a reload) puts the panel back where they keep it.
+   */
+  front: PanelId | null
+  setFront: (id: PanelId | null) => void
   /** Fold `id` to its title line, or unfold it. */
   toggle: (id: PanelId) => void
   /** Put `id` in `column` before `before` (null: last). A move that changes nothing writes nothing. */
@@ -182,6 +191,8 @@ interface PanelLayoutState extends PanelLayout {
 
 export const usePanelLayout = create<PanelLayoutState>((set, get) => ({
   ...loadLayout(),
+  front: null,
+  setFront: (id) => { if (get().front !== id) set({ front: id }) },
   toggle: (id) => {
     set({ collapsed: toggleCollapsed(get().collapsed, id) })
     saveLayout(get())

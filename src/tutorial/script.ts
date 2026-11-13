@@ -227,15 +227,59 @@ export const CHOICE: TutorialStep = {
   ],
 }
 
-/** HYPERSPACE: Earth through the free view first, then where BOARD is. */
+/**
+ * The hamburger while the menu is shut: a step that teaches a button in the
+ * menu glows it until the menu is open, then the button itself (the coach
+ * looks again whenever the page changes, and the menu mounts as it opens).
+ */
+export const MENU_SHUT = '.hamburger-menu[aria-expanded="false"]'
+
+/**
+ * HYPERSPACE, one thing per panel (owner, 2026-11-13: "way more hand-holdy").
+ * Earth first, the whole planet in view (the 'view-earth' effect frames it);
+ * then a stop picked, BOARD, and RIDE. Looking is free; only a ride costs.
+ */
 export const EARTH: TutorialStep = {
   id: 'earth',
   title: 'Earth',
-  caption: 'That is Earth. Bitcoin blocks land all over it. Looking is free.',
-  hint: 'To go: menu, HYPERSPACE, pick a block, BOARD, then RIDE.',
-  explain: 'A hyperspace ride follows the chain of Bitcoin blocks. It costs work for every block you pass, done on this device, or sats if HOSAKA does the work for you. Nothing is spent until you RIDE.',
-  scene: { target: 'keep', highlight: '.hamburger-menu' },
+  caption: "This is Earth! Hyperspace is a train line with stops all over the planet. Let's ride it somewhere.",
   effect: 'view-earth',
+  branch: true,
+  then: 'earth-pick',
+}
+
+/** A tap on a stop picks it as the ride's destination (tutorial/earthRoute.ts 'pick-stop'). */
+export const EARTH_PICK: TutorialStep = {
+  id: 'earth-pick',
+  title: 'Pick a stop',
+  caption: "Each glowing dot is a stop. Tap one you'd like to visit.",
+  effect: 'pick-stop',
+  wait: 'pick-stop',
+  branch: true,
+  then: 'earth-board',
+}
+
+/** The HYPERSPACE panel is first in the menu while the trip is taught, and BOARD glows. */
+export const EARTH_BOARD: TutorialStep = {
+  id: 'earth-board',
+  title: 'Board',
+  caption: 'Open the menu. Your trip is at the top. Tap BOARD.',
+  scene: { target: 'keep', highlight: `${MENU_SHUT}, [data-panel-id="hyperspace"] .hyper__btn--board` },
+  effect: 'hyperspace-first',
+  wait: 'board',
+  branch: true,
+  then: 'earth-ride',
+}
+
+/** RIDE glows (RIDE HERE when HOSAKA offers too); the step is done once the ride starts, not when it lands. */
+export const EARTH_RIDE: TutorialStep = {
+  id: 'earth-ride',
+  title: 'Ride',
+  caption: 'Tap RIDE to go!',
+  explain: 'Every stop you pass takes work, done on this device, or sats if HOSAKA does it for you. Nothing is spent until you RIDE.',
+  scene: { target: 'keep', highlight: `${MENU_SHUT}, [data-panel-id="hyperspace"] .hyper__actions .hyper__btn--ride, [data-panel-id="hyperspace"] .hyper__choicebtn--here` },
+  effect: 'hyperspace-first',
+  wait: 'ride',
   branch: true,
 }
 
@@ -286,5 +330,5 @@ export const FAREWELL: TutorialStep = {
 }
 
 export const TUTORIAL_SCRIPT: TutorialScript = {
-  steps: [WELCOME, BOX, OPEN, TAKE, TO_PLOT, PLANT, BUD, INVENTORY, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, EARTH, AGENTS, FRIEND, BUILD_PLACE, FAREWELL],
+  steps: [WELCOME, BOX, OPEN, TAKE, TO_PLOT, PLANT, BUD, INVENTORY, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, EARTH, EARTH_PICK, EARTH_BOARD, EARTH_RIDE, AGENTS, FRIEND, BUILD_PLACE, FAREWELL],
 }

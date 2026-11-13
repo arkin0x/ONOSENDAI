@@ -61,7 +61,7 @@
 
 import type { Plane } from 'cyberspace-core'
 import type { Position } from '../space'
-import { csMetresToLatLon, originCsMetres } from '../earthSurface'
+import { csMetresToLatLon, earthRadiusCells, originCsMetres } from '../earthSurface'
 import { drawnSet } from './sample'
 
 /** The finest zoom at which the whole globe is still drawn is 2^50; the sphere takes over below it. */
@@ -146,6 +146,26 @@ export function sphereDotScale(scaleExp: number): number {
  */
 export function sphereFrameDistance(fovDeg: number, margin = 1.12): number {
   return (SPHERE_RADIUS_CELLS / Math.tan((fovDeg * Math.PI) / 360)) * margin
+}
+
+/**
+ * How far the camera must sit from Earth's centre, in cells, for the whole
+ * planet to be in shot at `scaleExp` (EARTH's zoom by default) on a screen
+ * of `aspect` (width over height) under a vertical field of view of `fovDeg`,
+ * with `margin` to spare (the first-arrival tutorial's Earth, owner
+ * 2026-11-13: it started too close). `cover` is the share of the screen's
+ * height a card over its top hides (the tutorial's coach): the planet, framed
+ * at the centre, must clear it, so only the half-height below it counts.
+ *
+ * A sphere of radius r seen from distance d spans the half-angle asin(r / d),
+ * so it fits when that is no wider than the narrower half of the frame. On a
+ * phone held upright the narrow half is the width: tan(fov / 2) * aspect.
+ */
+export function earthFrameDistance(fovDeg: number, aspect: number, cover = 0, scaleExp = EARTH_SCALE_EXP, margin = 1.15): number {
+  const tall = Math.tan((fovDeg * Math.PI) / 360)
+  const free = Math.max(0.1, 1 - 2 * Math.min(0.45, Math.max(0, cover)))
+  const half = Math.atan(Math.min(tall * free, tall * (aspect > 0 ? aspect : 1)))
+  return (earthRadiusCells(scaleExp) / Math.sin(half)) * margin
 }
 
 /**

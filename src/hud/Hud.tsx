@@ -698,11 +698,15 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   const leftRef = useCover('left', !menuOpen)
   const rightRef = useCover('right', !menuOpen)
 
-  const leads: PanelId[] = []
-  if (building || freeView) leads.push('viewat')
-  if (proofLeads) leads.push('proof')
-  if (cloudLeads) leads.push('cloud')
-  if (rideSet) leads.push('hyperspace')
+  // The tutorial's front panel (usePanelLayout front) outranks them all while
+  // it asks: the Earth route's HYPERSPACE, BOARD and RIDE at the very top.
+  const front = usePanelLayout((s) => s.front)
+  const leads: PanelId[] = front ? [front] : []
+  const lead = (id: PanelId): void => { if (!leads.includes(id)) leads.push(id) }
+  if (building || freeView) lead('viewat')
+  if (proofLeads) lead('proof')
+  if (cloudLeads) lead('cloud')
+  if (rideSet) lead('hyperspace')
   // AGENTS is drawn for everyone, as a BETA (arkinox, 2026-10-13: "ship it
   // so that we can make the agent panel public"). From 2026-10-10 it was
   // drawn only for someone a bot profile named as operator, while TALK and

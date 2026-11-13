@@ -122,7 +122,11 @@ export class AnnounceBook {
     return best
   }
 
-  /** Those still fresh that this set has not played, lowest version first: what plays now. */
+  /**
+   * Those still fresh that this set has not played, lowest version first:
+   * what may play now (of those published before TV came on only the newest
+   * plays, the rest kept as played: store/useTvAnnounce refresh).
+   */
   due(nowS: number, played: (version: string) => boolean): HeardAnnouncement[] {
     return this.week(nowS)
       .filter((a) => a.at > nowS - ANNOUNCE_FRESH_S && !played(a.version))

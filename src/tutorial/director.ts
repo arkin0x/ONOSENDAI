@@ -19,7 +19,8 @@
  *   - 'see-finish' and 'take-finish': the finish chest found (the scan does
  *     it as they land on the deck), and something from it taken;
  *   - 'workshop': the workshop opened and closed again;
- *   - 'at-plot' and 'plant': at the dirt plot, and a seed of their own planted.
+ *   - 'at-plot' and 'plant': at the dirt plot, and the tutorial tree, a seed
+ *     of their own, hidden in the tutorial's region.
  * Nothing here opens or takes anything (owner, 2026-10-26).
  */
 
@@ -33,7 +34,7 @@ import { useOpenedChests, openedKey } from '../store/useOpenedChests'
 import { useInventory } from '../store/useInventory'
 import { useWalk } from '../store/useWalk'
 import { useWorkshop } from '../store/useWorkshop'
-import { useBuilder } from '../store/useBuilder'
+import { BUILD_FOCUS_LABEL, useBuilder } from '../store/useBuilder'
 import { seedItemOf } from '../lib/seeds/seedItem'
 import { dnaResolver } from '../lib/seeds/seedSources'
 import { TUTORIAL_DNA, TUTORIAL_DNA_EVENT, tutorialDnaId, tutorialSeedDraft } from './dna'
@@ -42,8 +43,9 @@ import { bloomReachAt } from '../lib/seeds/bloomReach'
 import { positionHex, type NostrEvent } from '../lib/events'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { viewHyperspace } from '../store/useHyperspace'
-import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
-import { PLOT_STAND, START_STAND, atStart, courseToWorld, onDeck, onPlot, plantCell } from './course'
+import { EARTH_SCALE_EXP, earthFrameDistance } from '../lib/hyperspace/interest'
+import { FOV } from '../scene/camera'
+import { PLOT_STAND, START_STAND, atStart, courseToWorld, inPlot, onDeck, onPlot, plantCell } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { deployPoint, type Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
@@ -536,20 +538,42 @@ registerTutorialEffect('workshop-step', () => {
  */
 registerTutorialEffect('view-earth', () => {
   viewHyperspace({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', EARTH_SCALE_EXP, null)
+  // Out far enough for the whole planet, on a phone held upright too: the
+  // orbit was left where the course or the workshop had it (owner, 2026-11-13).
+  setTutorialZoom(earthFrameDistance(FOV, screenAspect(), COACH_COVER))
 })
+
+/** About how much of the screen's height the coach's card covers at its top (a fifth on a desktop, a quarter on a phone). */
+const COACH_COVER = 0.2
+
+/** The window's width over its height; 1 where there is no window. */
+function screenAspect(): number {
+  if (typeof window === 'undefined' || !(window.innerHeight > 0)) return 1
+  return window.innerWidth / window.innerHeight
+}
 
 /** At the dirt plot (A5): standing on it, as the chain's head says. */
 registerTutorialWatcher('at-plot', (onDone) => watchArrival((at, layout) => onPlot(layout.frame, at), onDone))
 
 /**
- * The tutorial tree planted (A5): a seed of the player's own on the dirt,
- * growing the tutorial DNA (the owner's published event, TUTORIAL_DNA_ID, or
- * a copy of its text the player's SEED signed), and out (published)
- * unless they are LOCAL. Planting is theirs: PLANT THE SEED lines it up in
- * BUILD, and HIDE runs the deploy that mines its work (the Seeds client,
- * store/useShards), whose row appears only once the seed is mined and its
- * bag written. A state, not "since the step came up": a reload after
+ * The tutorial tree planted (A5): a seed of the player's own in the
+ * tutorial's region, growing the tutorial DNA (the owner's published event,
+ * TUTORIAL_DNA_ID, or a copy of its text the player's SEED signed), and out
+ * (published) unless they are LOCAL. Planting is theirs: PLANT THE SEED lines
+ * it up in BUILD, and HIDE runs the deploy that mines its work (the Seeds
+ * client, store/useShards), whose row appears only once the seed is mined and
+ * its bag written. A state, not "since the step came up": a reload after
  * planting finds it planted.
+ *
+ * Where it was hidden counts anywhere inside the tutorial's covering region
+ * (layout.cover, the aligned cube that holds the spawn, the box, the dirt and
+ * the course), in the layout's plane. It used to count only on the plot's
+ * standing cells (onPlot: the 5 by 5 cells one or two above the dirt), so a
+ * player who moved the build cursor before HIDE was stuck on this step for
+ * good (owner, 2026-11-13: "the tutorial window still says plant the seed, so
+ * im stuck / oh im stuck because i moved the build cursor"; he had moved it
+ * down into the dirt, where it belonged). What it is still has to be the
+ * tutorial tree: any other seed, wherever it is, never counts.
  */
 export function tutorialTreePlanted(onUnknown?: () => void, ownerId: string | null = tutorialDnaId()): boolean {
   const layout = useTutorialStage.getState().layout
@@ -557,7 +581,7 @@ export function tutorialTreePlanted(onUnknown?: () => void, ownerId: string | nu
   const live = useCyberspace.getState().live
   return useShards.getState().mine.some((d) => {
     if (d.type !== 'seed' || !d.inner || (live && !d.published)) return false
-    if (d.plane !== layout.plane || !onPlot(layout.frame, positionOf(d))) return false
+    if (d.plane !== layout.plane || !inRegion(positionOf(d), layout.cover.base, layout.cover.height)) return false
     const seed = seedItemOf(d.inner)
     if (!seed) return false
     if (ownerId !== null && seed.dnaId === ownerId) return true
@@ -588,15 +612,19 @@ registerTutorialWatcher('plant', (onDone) => {
  * step is still up, asked again after the measure's wait.
  */
 export async function lineUpTutorialSeed(id: string | null = tutorialDnaId(), reachAt?: (p: Position) => Promise<number | undefined>, stillHere: () => boolean = () => true): Promise<string | null> {
-  // What is lined up already: the tree itself (a second tap while it waits or
-  // mines does nothing), a copy AGAIN left lined up (stood down), or
-  // anything else, which is the player's to finish or cancel first.
+  // What is lined up already: a copy AGAIN left lined up (stood down first),
+  // the tree itself (a second tap while it waits or mines does nothing), or
+  // anything else, which is the player's to finish or cancel first. The copy
+  // goes before the tree is looked for: after a HIDE the copy is the tree's
+  // own clone (useShards againOf), and taken for the tree a tap after a seed
+  // hidden outside the tutorial's region did nothing at all, the player stuck
+  // again (review of the owner's 2026-11-13 report).
   const lined = (): string | null => {
+    const was = useShards.getState()
+    if (was.deployStatus !== 'working' && copyLinedUp(was)) was.cancelDeploy()
     const sh = useShards.getState()
     if (sh.pending?.type === 'seed' && sh.pending.seed.text === TUTORIAL_DNA.text) return ''
-    if (sh.deployStatus !== 'working' && copyLinedUp(sh)) sh.cancelDeploy()
-    const now = useShards.getState()
-    return now.pending || now.deployStatus === 'working' ? 'Finish or cancel what is lined up first.' : null
+    return sh.pending || sh.deployStatus === 'working' ? 'Finish or cancel what is lined up first.' : null
   }
   const first = lined()
   if (first !== null) return first || null
@@ -618,10 +646,11 @@ export async function lineUpTutorialSeed(id: string | null = tutorialDnaId(), re
     const again = lined()
     if (again !== null) return again || null
   }
-  // On the dirt, at zoom 2^0, with the build cursor on the dirt beside your
-  // avatar (course.ts plantCell; feedback 2026-11-12, item 6): the seed then
-  // lands exactly there (space.ts deployPoint at step 0), never on a cursor
-  // moved elsewhere or a view's cell.
+  // On the dirt, at zoom 2^0, with the build cursor in the dirt beside your
+  // avatar (course.ts plantCell; feedback 2026-11-12, item 6; one gibson
+  // below where you stand, owner 2026-11-13): the seed then lands exactly
+  // there (space.ts deployPoint at step 0), never on a cursor moved elsewhere
+  // or a view's cell.
   const layout = useTutorialStage.getState().layout
   const cs = useCyberspace.getState()
   if (!layout) return 'The dirt is not placed yet.'
@@ -641,7 +670,7 @@ export async function lineUpTutorialSeed(id: string | null = tutorialDnaId(), re
   useCyberspace.getState().setPlane(here.headPlane)
   const s = useCyberspace.getState()
   const point = deployPoint(s.cursor, buildStepOf(s), SEED_HIDE_MAX)
-  if (!useBuilder.getState().active || buildPlane(s) !== layout.plane || !onPlot(layout.frame, point)) {
+  if (!useBuilder.getState().active || buildPlane(s) !== layout.plane || !inPlot(layout.frame, point)) {
     if (useBuilder.getState().active) useBuilder.getState().exit()
     return 'Stand on the dirt first.'
   }
@@ -694,9 +723,46 @@ registerTutorialEffect('plant-tutorial-seed', () => {
   }).finally(() => { planting = false })
 })
 
-/** The bud: out of BUILD (planting leaves a copy of the seed lined up), so the next step's COMMIT is there to tap. */
+/**
+ * The bud: the player backed out of planting for them, so the next step's
+ * COMMIT is there to tap (owner, 2026-11-13: "after I hid the seed, I
+ * shouldnt have to exit the hide overlay, exit build, return to avatar").
+ * Three things stood after HIDE, each its own state:
+ *   - the hide bar: HIDE leaves a copy of the seed lined up again (useShards
+ *     placedLast), so the deploy bar stays up;
+ *   - BUILD: on since PLANT THE SEED; leaving it stands that copy down
+ *     (useBuilder exit), which closes the bar;
+ *   - the build view: BUILD's driven view on the cursor, which PLANT THE SEED
+ *     put in the dirt beside the avatar, not on it, so leaving BUILD keeps it
+ *     (useBuilder settleView) and the bar beneath reads RETURN TO AVATAR. It
+ *     ends here as that button ends it (useCyberspace clearFocus), keeping
+ *     the zoom, so the view and the cursor are back on the avatar.
+ * A hide still running as the bud comes up is waited for first (BUILD will
+ * not leave under a deploy that is working), then the same. Something of the
+ * player's own lined up (not the copy) is never dropped: BUILD stays for it,
+ * as EXIT would. A view of BUILD's left behind by a player who left BUILD by
+ * hand goes too; any other view (a look of their own) is theirs and stays.
+ */
+export function leavePlanting(): void {
+  const b = useBuilder.getState()
+  if (b.active) b.exit()
+  if (useBuilder.getState().active) return
+  const cs = useCyberspace.getState()
+  if (cs.spectate === null && cs.focus?.drive && cs.focus.label === BUILD_FOCUS_LABEL) cs.clearFocus(true)
+}
+
 registerTutorialEffect('leave-build', () => {
-  if (useBuilder.getState().active) useBuilder.getState().exit()
+  if (useShards.getState().deployStatus !== 'working') { leavePlanting(); return }
+  // Out of the store's listener before leaving: leaving stands the copy down,
+  // another write to the store whose listeners are still being called. Only
+  // while the bud is still up (`live`, cleared as the step goes).
+  let live = true
+  const off = useShards.subscribe((s) => {
+    if (s.deployStatus === 'working') return
+    off()
+    queueMicrotask(() => { if (live) leavePlanting() })
+  })
+  return () => { live = false; off() }
 })
 
 /** The plot step lines the cursor up on the dirt, so one COMMIT moves you there. */

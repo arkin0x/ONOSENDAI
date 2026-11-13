@@ -137,13 +137,15 @@ async function fill(lookupId: string, key: Uint8Array, at: Position, height: num
   const rumors: Rumor[] = []
   const message = (chars: number): Rumor => rumorOf({ kind: MESSAGE_KIND, created_at: now - 100 + rumors.length, content: `${rumors.length} ${'m'.repeat(chars)}`, tags: [C_TAG, ['-']] }, me())
   const add = (r: Rumor): void => { rumors.push(r); entries.push(r) }
-  while (bagBytes(entries, lookupId, height, settings) < target - 14_000) add(message(9_000))
-  // The last one sized to land just under the target: shrunk until it does.
-  let chars = Math.max(0, Math.floor((target - bagBytes(entries, lookupId, height, settings)) * 0.75) - 150)
-  while (chars > 0 && bagBytes([...entries, message(chars)], lookupId, height, settings) > target - 80) chars -= Math.max(1, Math.floor((bagBytes([...entries, message(chars)], lookupId, height, settings) - target + 80) * 0.75))
-  if (chars > 0) add(message(chars))
   const like = S().mine.find((d) => d.lookupId === lookupId)
   const plane = like?.plane ?? 0
+  // The place, for the sector hint a new bag carries by default (owner ruling 2026-11-13).
+  const bytes = (es: readonly BagEntry[]): number => bagBytes(es, lookupId, height, settings, { at, plane })
+  while (bytes(entries) < target - 14_000) add(message(9_000))
+  // The last one sized to land just under the target: shrunk until it does.
+  let chars = Math.max(0, Math.floor((target - bytes(entries)) * 0.75) - 150)
+  while (chars > 0 && bytes([...entries, message(chars)]) > target - 80) chars -= Math.max(1, Math.floor((bytes([...entries, message(chars)]) - target + 80) * 0.75))
+  if (chars > 0) add(message(chars))
   const bag = await C().signEvent(await bagTemplate(entries, key, lookupId, height, (standing?.created_at ?? now) + 5, HIDDEN_KIND, settings, { at, plane }))
   relay.events.push(bag as Ev)
   const rows: MyDeployment[] = rumors.map((r) => ({ eventId: r.id, inner: r, bagId: bag.id, bagAt: bag.created_at, type: 'message', text: r.content, at: like?.at ?? { x: at.x.toString(), y: at.y.toString(), z: at.z.toString() }, plane, height, lookupId, keyHex: bytesToHex(key), relays: ['wss://relay.test'], createdAt: r.created_at, published: true, bag: settings, ...(room ? { room } : {}) }))

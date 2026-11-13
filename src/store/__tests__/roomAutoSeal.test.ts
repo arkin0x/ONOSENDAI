@@ -399,7 +399,7 @@ describe('SEAL into a room (review of #633)', () => {
     expect(a.lookupId).toBe(b.lookupId)
     // Another device rewrote the bag without it.
     const newer = Math.max(...relay.events.filter((e) => dOf(e) === a.lookupId).map((e) => e.created_at)) + 5
-    const template = await bagTemplate([a.inner], hexToBytes(a.keyHex), a.lookupId, a.height, newer, HIDDEN_KIND, { ...a.bag!, heightTag: true })
+    const template = await bagTemplate([a.inner], hexToBytes(a.keyHex), a.lookupId, a.height, newer, HIDDEN_KIND, { ...a.bag!, heightTag: true }, { at: positionOf(a), plane: a.plane })
     relay.events.push(await useCyberspace.getState().signEvent(template) as never)
     const door = await sealDoor('Room', ROOM)
     const why = await S().sealIntoRoom(door.eventId, [a.eventId, b.eventId])

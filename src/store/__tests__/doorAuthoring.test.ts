@@ -194,6 +194,9 @@ describe('what is placed in its room (R1, height-specific)', () => {
     expect(inside.bag).toEqual(ROOM_BAG_SETTINGS)
     const room = relay.events.filter((e) => e.kind === HIDDEN_KIND && e.tags.some((t) => t[0] === 'd' && t[1] === inside.lookupId)).at(-1)!
     expect(room.tags.some(isHintTag)).toBe(false)
+    // The next placement is lined up as a new bag's, naming no bag, so the bar seeds it from yours under the cursor.
+    expect(S().pending).not.toBeNull()
+    expect({ hint: S().deployBag.hint, from: S().deployBagFrom }).toEqual({ hint: SECTOR_HINT, from: null })
   })
 
   it('at any other height, in its cube: it joins the room anyway, at the room\u2019s height (arkinox, 2026-11-09)', async () => {

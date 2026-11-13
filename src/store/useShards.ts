@@ -1491,7 +1491,7 @@ interface ShardsState {
   /**
    * The hint a height too large for it took off the bag (heightPatch), put
    * back when the height fits it again: a new bag's sector hint, off above
-   * height 30, is on again at 30 or lower. Null once you set the hint
+   * height 30, is on again at 30 or lower. Cleared whenever you set the hint
    * yourself (setDeployBag), so an OFF you chose stays off.
    */
   deployHintHeld: HintHeights | null
@@ -2925,6 +2925,8 @@ export const useShards = create<ShardsState>((set, get) => {
     try { set(patch) } finally { editingPending = false }
   }
 
+  /** Whether the snap is offered for what is lined up: a seed in dataspace at any height (orientation.ts seedSnapOffered), anything else at 27 and up. */
+  const snapHere = (height: number): boolean => (get().pending?.type === 'seed' ? seedSnapOffered(buildPlane(cyber())) : snapOffered(buildPlane(cyber()), height))
   /**
    * What a new height changes on the hide bar. Below the snap's height there
    * is no snap: the control goes away, and so does what it was set to, rather
@@ -2932,10 +2934,8 @@ export const useShards = create<ShardsState>((set, get) => {
    * §7.7): the sector hint goes off above height 30 the way the snap goes off
    * below its own height. Unlike the snap it is held (`deployHintHeld`) and
    * comes back on at 30 or lower, because it is on by default (owner ruling
-   * 2026-11-13); a hint you turned off yourself is not held.
+   * 2026-11-13). Only an OFF you chose stays off: it is never held.
    */
-  /** Whether the snap is offered for what is lined up: a seed in dataspace at any height (orientation.ts seedSnapOffered), anything else at 27 and up. */
-  const snapHere = (height: number): boolean => (get().pending?.type === 'seed' ? seedSnapOffered(buildPlane(cyber())) : snapOffered(buildPlane(cyber()), height))
   const heightPatch = (height: number): Partial<ShardsState> => {
     const offered = snapHere(height)
     const { deployBag: bag, deployHintHeld: held } = get()
@@ -5064,7 +5064,8 @@ export const useShards = create<ShardsState>((set, get) => {
             }
             : s.placedLast
           // A room's settings are the room's: left out of it, the next placement starts as any other.
-          const bag = again ? { ...(into ? freshBag(deployHeight) : { deployBag: settings, deployHintHeld: null }), deployBagFrom: ownBagIn(s.mine, regionOf(at, plane, deployHeight)) } : {}
+          // Fresh controls name no bag, so the bar seeds them from your bag under the cursor, if any (seedDeployBag).
+          const bag = again ? (into ? { ...freshBag(deployHeight), deployBagFrom: null } : { deployBag: settings, deployHintHeld: null, deployBagFrom: ownBagIn(s.mine, regionOf(at, plane, deployHeight)) }) : {}
           set({ deployStatus: 'done', pending: again, deployNote: null, deployAsk: null, placedLast, ...bag })
         }
         // A moved door keeps its room: its secret, and what stands behind it, follow its new id.

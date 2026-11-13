@@ -48,6 +48,7 @@ import { deployPoint } from '../../lib/space'
 import { hexToBytes, type NostrEvent } from '../../lib/events'
 
 const HEIGHT = 6
+const CEILING = useShards.getState().deployCeiling
 const lastBag = () => [...sent].reverse().find((e) => e.kind === HIDDEN_KIND) as unknown as NostrEvent
 const tagNames = (ev: NostrEvent): string[] => ev.tags.map((t) => t[0])
 
@@ -70,7 +71,7 @@ beforeEach(() => {
   relayBags = []
   canonTrouble = null
   localStorage.clear()
-  useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, deployHeight: 0, deployStatus: 'idle', deployError: null })
+  useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, deployHeight: 0, deployStatus: 'idle', deployError: null, deployCeiling: CEILING, deployHintHeld: null, deployBagFrom: null, deployRoomSnap: null })
   useCyberspace.setState({ live: true })
 })
 
@@ -257,10 +258,13 @@ describe('the sector hint is ON by default for every new bag (owner ruling 2026-
 
   it('a move keeps its bag\'s own choice, off or on', async () => {
     await hide('kept off', { hint: null })
+    relayBags = [lastBag()]
     S().startMoveItem(S().mine[0].eventId)
     expect(S().deployBag.hint).toBeNull()
-    S().setDeployHeight(HEIGHT)
-    expect(S().deployBag.hint).toBeNull()
+    sent.length = 0
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    expect(lastBag().tags.some(isHintTag)).toBe(false)
     S().cancelDeploy()
     relayBags = [lastBag()]
     await hide('on', { hint: SECTOR_HINT })

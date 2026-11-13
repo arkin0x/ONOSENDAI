@@ -10,8 +10,8 @@
  *
  * Three bags:
  *   - the covering bag (tutorial/layout.ts cover): the blue box, the
- *     bounce course (tutorial/course.ts), the dirt plot and the hop target
- *     over the course's start, seen from the spawn;
+ *     bounce course (tutorial/course.ts) and the dirt plot, seen from the
+ *     spawn;
  *   - the box bag (the blue box's own height-3 region): the treasure chest,
  *     locked to that region (DECK-0004 §3.8, the region's lock), so whoever
  *     stands in the box carries the key that opens it (store/useKeyring). In
@@ -44,7 +44,7 @@ import { sealEntries } from '../lib/chests'
 import { lockOf } from '../lib/locks'
 import type { Position } from '../lib/space'
 import { BOX_HEIGHT, chestCell, regionBase, toWorld, type TutorialLayout } from './layout'
-import { BACK_STEP, CATCH_FLOOR, COURSE, FINISH_CHEST, PLOT, PLOT_AT, courseToWorld, targetAt, targetPayload, type CoursePart } from './course'
+import { BACK_STEP, CATCH_FLOOR, COURSE, FINISH_CHEST, PLOT, PLOT_AT, courseToWorld, type CoursePart } from './course'
 import trophyPayload from './pieces/trophy.json'
 import platSquare6 from './pieces/plat-square-6.json'
 import platSquare4 from './pieces/plat-square-4.json'
@@ -80,7 +80,7 @@ const REGION_REQUIRES = 'the key of a place'
  * without it still plays the same, and a bump would hand a player a new,
  * unopened chest.
  */
-export const STAGE_VERSION = 8
+export const STAGE_VERSION = 7
 
 /** One player's stage, by pubkey. */
 export const STAGE_PREFIX = 'onosendai:tutorial:stage:'
@@ -104,8 +104,6 @@ export interface StageIds {
   finishLookup: string
   /** The dirt plot shard. */
   plot: string
-  /** The hop target over the course's start (owner, 2026-11-13). */
-  target: string
 }
 
 export interface Stage {
@@ -251,11 +249,8 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
   // its signer; a seed names that event (TUTORIAL_DNA_ID).
   const plot = await sign(shardInnerTemplate(pieceModel(PLOT, 'tutorial-plot'), toWorld(frame, PLOT_AT.f, PLOT_AT.r, PLOT_AT.u), plane, createdAt))
 
-  // The hop target over the course's start (course.ts TARGET; owner, 2026-11-13).
-  const target = await sign(shardInnerTemplate(pieceModel(targetPayload(), 'tutorial-target'), targetAt(frame), plane, createdAt))
-
   const bags = await Promise.all([
-    sealBag(sign, [blueBox, ...course, plot, target], coverKey.key, coverKey.lookupId, cover.height, createdAt, cover.base, plane),
+    sealBag(sign, [blueBox, ...course, plot], coverKey.key, coverKey.lookupId, cover.height, createdAt, cover.base, plane),
     sealBag(sign, [chest], boxKey.key, boxKey.lookupId, BOX_HEIGHT, createdAt, b, plane),
     sealBag(sign, [finishChest], finishKey.key, finishKey.lookupId, BOX_HEIGHT, createdAt, finishBase, plane),
   ])
@@ -275,7 +270,6 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
       finishContents: finishContents.map(entryId),
       finishLookup: finishKey.lookupId,
       plot: plot.id,
-      target: target.id,
     },
   }
 }

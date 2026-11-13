@@ -125,46 +125,6 @@ export function onTarget(frame: Frame, at: Position): boolean {
   return at.x === t.x && at.y === t.y && at.z === t.z
 }
 
-/**
- * The hop target's look: a glowing beacon in the tutorial's cyan (palette
- * 226, the coach's own accent), drawn around the target's gibson. Two
- * upright rings at right angles, so it reads as a ball from any side, and a
- * wider white ring level round its middle. Radius 1 and 1.5 gibsons: from the
- * start square below, its lowest point is a gibson over the walker's head.
- * LINES with no faces and constrain OFF: it glows under the bloom as lines
- * do, and nothing a walker or a hop bumps into. One line through its points,
- * as LINES without faces draws (stage.ts boxModel), retracing a quarter ring
- * to get from one ring to the next. Positions are whole units plus ticks
- * (120 to a unit), from the gibson's centre.
- */
-export function targetPayload(): Record<string, unknown> {
-  const N = 24
-  const pts: Array<{ p: [number, number, number]; c: number }> = []
-  const at = (x: number, y: number, z: number, c: number): void => { pts.push({ p: [x, y, z], c }) }
-  const R = 1, H = 1.5, CYAN = 226, WHITE = 225
-  // The ring facing Z, from the top round to the top again.
-  for (let i = 0; i <= N; i++) { const a = (2 * Math.PI * i) / N; at(R * Math.sin(a), R * Math.cos(a), 0, CYAN) }
-  // The ring facing X, from the top round to the top again.
-  for (let i = 1; i <= N; i++) { const a = (2 * Math.PI * i) / N; at(0, R * Math.cos(a), R * Math.sin(a), CYAN) }
-  // Down the first ring a quarter to its side, out to the white ring, and round it.
-  for (let i = 1; i <= N / 4; i++) { const a = (2 * Math.PI * i) / N; at(R * Math.sin(a), R * Math.cos(a), 0, CYAN) }
-  for (let i = 0; i <= N; i++) { const a = (2 * Math.PI * i) / N; at(H * Math.cos(a), 0, H * Math.sin(a), WHITE) }
-  const whole = (v: number): number => Math.floor(Math.round(v * 120) / 120)
-  const tick = (v: number): number => Math.round(v * 120) - whole(v) * 120
-  return {
-    v: 2,
-    name: 'Target',
-    unit: 0,
-    extent: 8,
-    mode: 'lines',
-    vertices: pts.map(({ p }) => p.map(whole)),
-    ticks: pts.map(({ p }) => p.map(tick)),
-    colors: pts.map(({ c }) => c),
-    faces: [],
-    constrain: 'off',
-  }
-}
-
 /** Whether a world point is on the finish deck (DECK_ZONE). */
 export function onDeck(frame: Frame, at: Position): boolean {
   return inZone(frame, DECK_ZONE, at)

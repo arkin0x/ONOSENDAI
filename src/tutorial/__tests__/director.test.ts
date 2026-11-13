@@ -44,14 +44,15 @@ import { usePanelLayout } from '../../store/usePanelLayout'
 import { useShards } from '../../store/useShards'
 import { useOpenedChests, openedKey } from '../../store/useOpenedChests'
 import { useInventory } from '../../store/useInventory'
-import { FINER_KEY, cursorOnTarget, useTutorialStage } from '../director'
-import { guideBagsFor, passesTaps } from '../guideBags'
+import { FINER_KEY, courseFrame, cursorOnTarget, useTutorialStage } from '../director'
+import { guideBagsFor } from '../guideBags'
 import { GUIDE_KEY } from '../guide'
 import { COMMIT, PAD_ARROWS, TUTORIAL_SCRIPT } from '../script'
 import { PLOT_STAND, START_STAND, TARGET, courseToWorld, targetAt } from '../course'
 import { arrivalCell, chestCell, toWorld } from '../layout'
 import { TUTORIAL_DNA_EVENT } from '../dna'
 import { useWalk } from '../../store/useWalk'
+import { useTutorialCam } from '../../store/useTutorialCam'
 
 const pubkey = (): string => useCyberspace.getState().identity.pubkey
 /** Until the stage is in (staging computes two region keys and signs a few events). */
@@ -87,10 +88,6 @@ describe('the director', () => {
     useTutorial.getState().start({ restart: true })
     await staged()
     const stage = useTutorialStage.getState().stage!
-    // Taps pass through the green box and the hop target (review, 2026-11-13).
-    expect(passesTaps(stage.ids.blueBox)).toBe(true)
-    expect(passesTaps(stage.ids.target)).toBe(true)
-    expect(passesTaps(stage.ids.chest)).toBe(false)
     expect(stage.player).toBe(pubkey())
     expect(stage.guide).not.toBe(pubkey())
     expect(localStorage.getItem(GUIDE_KEY)).toMatch(/^[0-9a-f]{64}$/)
@@ -276,6 +273,13 @@ describe('the director', () => {
     expect(useCyberspace.getState().cursor).not.toEqual(courseToWorld(layout.frame, START_STAND))
     expect(useCyberspace.getState().scaleExp).toBe(0)
     expect(cursorOnTarget()).toBe(false)
+    // The camera frames the player and the target together, so the target is on screen whichever way the layout faces:
+    // the hop from them to it, reached a little past each end along its line.
+    const shot = useTutorialCam.getState().frame!
+    expect(shot).toEqual(courseFrame(at, target))
+    const along = (p: { x: bigint; y: bigint; z: bigint }): number => Number(p.x - at.x) * Number(target.x - at.x) + Number(p.y - at.y) * Number(target.y - at.y) + Number(p.z - at.z) * Number(target.z - at.z)
+    expect(along(shot.from)).toBeLessThan(0)
+    expect(along(shot.to)).toBeGreaterThan(along(target))
     // The arrows glow (the step's own highlight), not COMMIT.
     expect(t().stepHighlight).toBe(null)
     expect(t().script.steps[t().index].scene?.highlight).toBe(PAD_ARROWS)
@@ -301,13 +305,37 @@ describe('the director', () => {
     useCyberspace.setState({ cursor: { ...target, z: target.z + 2n } })
     expect(t().stepHighlight).toBe(null)
     useCyberspace.setState({ cursor: { ...target } })
-    // Landed on it: done, and the next step points where its own scene says.
+    // Landed on it: done, the frame lets go and the camera eases in close; the next step points where its own scene says.
     useCyberspace.setState({ position: { ...target } })
     expect(t().done).toBe(true)
+    expect(useTutorialCam.getState().frame).toBe(null)
+    expect(useTutorialCam.getState().zoom).not.toBe(null)
     t().next()
     expect(t().script.steps[t().index].id).toBe('walk')
     expect(t().stepHighlight).toBe(null)
     expect(TARGET[1]).toBe(START_STAND[1] + 2)
+    useCyberspace.setState({ events: [] })
+  })
+
+  it('the course step\'s frame lets go when the step goes, and is not asked again once the player took the camera', async () => {
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    const layout = useTutorialStage.getState().layout!
+    const at = toWorld(layout.frame, PLOT_STAND.f, PLOT_STAND.r, PLOT_STAND.u)
+    useCyberspace.setState({ events: [{ id: 'e', tags: [] } as never], position: at, cursor: { ...at }, headPlane: layout.plane, plane: layout.plane, walking: false })
+    useTutorial.getState().start({ at: 'to-course' })
+    await staged()
+    expect(useTutorialCam.getState().frame).not.toBe(null)
+    // The player grabs the camera (the rig stands the shot down): moving the cursor never brings it back.
+    useTutorialCam.setState({ frame: null })
+    useCyberspace.setState({ cursor: { ...at, x: at.x + 1n } })
+    expect(useTutorialCam.getState().frame).toBe(null)
+    // Framed again on a fresh entry, and let go when the step goes.
+    useTutorial.getState().start({ at: 'to-course' })
+    await staged()
+    expect(useTutorialCam.getState().frame).not.toBe(null)
+    useTutorial.getState().next()
+    expect(useTutorialCam.getState().frame).toBe(null)
     useCyberspace.setState({ events: [] })
   })
 
@@ -348,8 +376,6 @@ describe('the director', () => {
       b: { author: stage.guide, type: 'shard', shard: platform } as never,
       c: { author: stage.guide, type: 'shard', shard: platform } as never,
       d: { author: 'f'.repeat(64), type: 'shard', shard: { ...platform, name: 'Not ours' } } as never,
-      // The hop target, found from the spawn: a marker, never copied (review, 2026-11-13).
-      [stage.ids.target]: { eventId: stage.ids.target, author: stage.guide, type: 'shard', shard: { ...platform, name: 'Target' } } as never,
     } })
     useInventory.setState({ items: { w: { id: 'w', type: 'shard', shard: trophy, from: { chestId: stage.ids.chest, chestName: 'x' } } as never } })
     // Nothing is copied until the workshop step asks: OPEN WORKSHOP copies them, and opens on the trampoline with the MENU asked for.

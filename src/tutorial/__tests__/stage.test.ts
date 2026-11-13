@@ -26,9 +26,9 @@ import { BAG_SAFE_BYTES } from '../../lib/bagSize'
 import { CLIENT_TAG } from '../../lib/client'
 import { BOX_HEIGHT, COVER_MAX, FOOTPRINT, arrivalCell, chestCell, inRegion, regionBase, toFrame, toWorld, tutorialLayout } from '../layout'
 import { TUTORIAL_DNA_EVENT } from '../dna'
-import { STAGE_TEXT, WELCOME_ITEM, boxModel, buildStage, pieceModel, readStage, stageKey, writeStage, type KeyAt } from '../stage'
+import { STAGE_TEXT, WELCOME_ITEM, boxModel, buildStage, readStage, stageKey, writeStage, type KeyAt } from '../stage'
 import { guideBagsFor, isGuideAuthor, isGuideBag, onGuideBags, passesTaps, setGuideBags } from '../guideBags'
-import { COURSE, FINISH_CHEST, PLOT_AT, PLOT_STAND, START_STAND, TARGET, atStart, courseToFrame, courseToWorld, inPlot, onPlot, onTarget, plantCell, targetAt, targetPayload } from '../course'
+import { COURSE, FINISH_CHEST, PLOT_AT, PLOT_STAND, START_STAND, TARGET, atStart, courseToFrame, courseToWorld, inPlot, onPlot, onTarget, plantCell, targetAt } from '../course'
 import type { Position } from '../../lib/space'
 
 const MAX_COMPUTE = 20
@@ -109,22 +109,6 @@ describe('the course', () => {
     }
   })
 
-  it('draws the hop target as glowing cyan lines nothing bumps into, small enough to stay over a walker\'s head', () => {
-    const m = pieceModel(targetPayload(), 'tutorial-target')
-    expect(m.mode).toBe('lines')
-    expect(m.faces).toEqual([])
-    expect(m.opacity ?? 100).toBe(100)
-    // Every point within 1.5 gibsons of the target's centre, and none lower than 1 under it:
-    // from the start square, 2 below, its lowest point is a gibson over the walker.
-    for (const v of m.vertices) {
-      const y = v.p[1] + (v.t?.[1] ?? 0) / 120
-      expect(y).toBeGreaterThanOrEqual(-1 - 1e-9)
-      const r = Math.hypot(v.p[0] + (v.t?.[0] ?? 0) / 120, y, v.p[2] + (v.t?.[2] ?? 0) / 120)
-      expect(r).toBeLessThanOrEqual(1.5 + 1e-2)
-    }
-    expect((targetPayload() as { constrain: string }).constrain).toBe('off')
-  })
-
   it('counts a walker on the start square as at the start, and nowhere else', () => {
     const frame = tutorialLayout(MID, 0).frame
     expect(atStart(frame, courseToWorld(frame, START_STAND))).toBe(true)
@@ -155,16 +139,10 @@ describe('the stage', () => {
     const coverItems = await open(coverBag, MID, l.cover.height)
     expect(coverItems[0].eventId).toBe(stage.ids.blueBox)
     // The blue box and the whole course, every piece where the course puts it, all in the cover (§7.6).
-    // ... and the dirt plot (A5), and the hop target (owner, 2026-11-13). No DNA here: the tree's DNA is in the welcome chest (item 8).
-    expect(coverItems).toHaveLength(1 + COURSE.length + 2)
-    expect(coverItems[coverItems.length - 2].eventId).toBe(stage.ids.plot)
-    const target = coverItems[coverItems.length - 1]
-    expect(target.eventId).toBe(stage.ids.target)
-    expect(target.type).toBe('shard')
-    expect(target.author).toBe(stage.guide)
-    expect(target.shard?.name).toBe('Target')
-    expect(target.at).toEqual(targetAt(l.frame))
-    expect(inRegion(target.at, l.cover.base, l.cover.height)).toBe(true)
+    // ... and the dirt plot (A5). No DNA here: the tree's DNA is in the welcome chest (item 8).
+    // No hop target either: that is a scene mark (scene/TutorialTarget.tsx), never sealed.
+    expect(coverItems).toHaveLength(1 + COURSE.length + 1)
+    expect(coverItems[coverItems.length - 1].eventId).toBe(stage.ids.plot)
     const json = await decryptForRegion(regionKeyAt(l.cover.base, l.cover.height, MAX_COMPUTE).key, coverBag.tags.find((t) => t[0] === 'encrypted')![2])
     expect((JSON.parse(json ?? '[]') as NostrEvent[]).some((e) => e.kind === DNA_KIND)).toBe(false)
     COURSE.forEach((part, i) => {

@@ -44,7 +44,7 @@ import { positionHex, type NostrEvent } from '../lib/events'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { viewHyperspace } from '../store/useHyperspace'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
-import { PLOT_STAND, atStart, inPlot, onDeck, onPlot, onTarget, plantCell } from './course'
+import { PLOT_STAND, atStart, inPlot, onDeck, onPlot, onTarget, plantCell, targetAt } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { deployPoint, type Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
@@ -117,7 +117,7 @@ async function stageFor(player: string, restart: boolean): Promise<void> {
     }
     if (!current()) return
     // The blue box lets taps through to the chest inside it.
-    setGuideBags(stage.bags, { passTaps: guideTapsPass(stage) })
+    setGuideBags(stage.bags, { passTaps: [stage.ids.blueBox] })
     useTutorialStage.setState({ stage, layout })
   } catch (err) {
     if (mine !== run) return
@@ -138,19 +138,10 @@ async function restoreKept(player: string): Promise<void> {
     const { st, layout, guide } = await setupFor(player)
     const stage = st.readStage(player, guide.pubkey, st.stageKey(layout))
     if (!stage || mine !== run || useTutorial.getState().active || useCyberspace.getState().identity.pubkey !== player) return
-    setGuideBags(stage.bags, { passTaps: guideTapsPass(stage) })
+    setGuideBags(stage.bags, { passTaps: [stage.ids.blueBox] })
   } catch (err) {
     console.warn('[tutorial] could not put the kept stage back:', err)
   }
-}
-
-/**
- * The guide's things a tap passes through: the green box, to the chest inside
- * it, and the hop target, so a newcomer tapping it on a phone while told to
- * move the cursor onto it gets no card (review, 2026-11-13).
- */
-function guideTapsPass(stage: Stage): string[] {
-  return [stage.ids.blueBox, stage.ids.target].filter((id): id is string => typeof id === 'string')
 }
 
 /** The tutorial went away: its bags, and everything they gave, go with it. */
@@ -398,6 +389,25 @@ export function cursorOnTarget(): boolean {
   return !!layout && cs.atHead() && !cs.walking && cs.scaleExp === 0 && cs.plane === layout.plane && onTarget(layout.frame, cs.cursor)
 }
 
+/** Gibsons the course step's shot reaches past each end of the hop, so the target's rings clear the screen's edge. */
+const COURSE_FRAME_PAD = 3
+
+/**
+ * The course step's shot: the hop from `from` to the target `to`, reached
+ * COURSE_FRAME_PAD gibsons past each end along its line, so the camera
+ * (which fits the hop's ends on screen, lib/hopFraming.ts) stands back far
+ * enough that the player and the whole target show, clear of the edges.
+ */
+export function courseFrame(from: Position, to: Position): HopFrame {
+  const d = [Number(to.x - from.x), Number(to.y - from.y), Number(to.z - from.z)]
+  const len = Math.hypot(...d)
+  const pad = d.map((v) => BigInt(Math.round(len > 0 ? (v / len) * COURSE_FRAME_PAD : 0)))
+  return {
+    from: { x: from.x - pad[0], y: from.y - pad[1], z: from.z - pad[2] },
+    to: { x: to.x + pad[0], y: to.y + pad[1], z: to.z + pad[2] },
+  }
+}
+
 /**
  * The course step (owner, 2026-11-13): the player moves the cursor onto the
  * target over the start square with the Controls pad themselves; nothing
@@ -407,8 +417,13 @@ export function cursorOnTarget(): boolean {
  * stepHighlight), and the finer-scale key while the pad is at a coarser
  * scale than 2^0, the way back to one gibson a press. The step waits for the
  * HOP to land there ('at-target').
- * Once they land, the orbit camera eases in close, so the platform is not
- * looked at from far away (feedback item 6).
+ * As it comes up, the camera frames the player and the target together, from
+ * the side, as the first hop is framed (useTutorialCam frame): whichever way
+ * the layout faces, the target is on screen, and the hop is framed as it
+ * goes. Only from the player's own head inside the cover; a grab of the
+ * camera ends the shot and it is not asked again. Once they land, the frame
+ * lets go and the orbit camera eases in close, so the platform is not looked
+ * at from far away (feedback item 6).
  */
 registerTutorialEffect('to-course', () => {
   const index = useTutorial.getState().index
@@ -420,14 +435,23 @@ registerTutorialEffect('to-course', () => {
     useTutorial.getState().highlightStep(index, coarse ? FINER_KEY : cursorOnTarget() ? COMMIT : null)
   }
   let zoomed = false
+  let framed: HopFrame | null = null
+  const letGo = (): void => { if (framed && useTutorialCam.getState().frame === framed) setTutorialFrame(null) }
   const check = (): void => {
     point()
     if (zoomed) return
     const { layout } = useTutorialStage.getState()
     const now = useCyberspace.getState()
-    if (layout && now.events.length > 0 && now.headPlane === layout.plane && atStart(layout.frame, now.position)) {
+    if (!layout) return
+    if (now.events.length > 0 && now.headPlane === layout.plane && atStart(layout.frame, now.position)) {
       zoomed = true
+      letGo()
       setTutorialZoom(COURSE_ZOOM)
+      return
+    }
+    if (!framed && now.atHead() && !now.walking && now.headPlane === layout.plane && inRegion(now.position, layout.cover.base, layout.cover.height)) {
+      framed = courseFrame(now.position, targetAt(layout.frame))
+      setTutorialFrame(framed)
     }
   }
   const offs = [
@@ -439,7 +463,7 @@ registerTutorialEffect('to-course', () => {
   check()
   // The zoom outlives the step, which moves on before the ease ends; WALK or
   // a grab of the camera ends it (scene/Scene.tsx), as does the run's end.
-  return () => { for (const off of offs.splice(0)) off() }
+  return () => { for (const off of offs.splice(0)) off(); letGo() }
 })
 
 /** The inventory step opens the menu and lifts ITEMS to the top of it (feedback item 2). */
@@ -493,8 +517,7 @@ export function copyTutorialShards(): string | null {
   if (!stage) return null
   const found = new Map<string, ShardModel>()
   for (const h of Object.values(useShards.getState().discovered)) {
-    // Not the hop target: a marker for the course step, nothing to build with.
-    if (h.author === stage.guide && h.type === 'shard' && h.shard && h.eventId !== stage.ids.target && !found.has(h.shard.name)) found.set(h.shard.name, h.shard)
+    if (h.author === stage.guide && h.type === 'shard' && h.shard && !found.has(h.shard.name)) found.set(h.shard.name, h.shard)
   }
   const chests = new Set([stage.ids.chest, stage.ids.finishChest])
   for (const it of Object.values(useInventory.getState().items)) {

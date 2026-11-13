@@ -30,7 +30,7 @@
  */
 
 import { create } from 'zustand'
-import { useCyberspace, type CyberspaceState } from './useCyberspace'
+import { gameEventRefusal, useCyberspace, whyNoMove, type CyberspaceState } from './useCyberspace'
 import { useWalk } from './useWalk'
 import { openBracket, positionHex, type ActionEvent } from '../lib/events'
 import { teleportTemplate } from '../lib/games/bracket'
@@ -43,6 +43,7 @@ import { inRegion, padUnder, stepIn, type WorldShard } from '../lib/games/play'
 import { jump as jumpBody, move as moveBody, tick as tickBody, type Arc, type Body } from '../lib/games/gravity'
 import { openDoor, reachExit, startProgress, takeKey, worldNow, type Progress } from '../lib/games/progress'
 import { loadWorld } from '../lib/games/world'
+import { noteFoundGame } from '../lib/games/discovered'
 import type { GameDef } from '../lib/games/types'
 import type { AxisName, Position } from '../lib/space'
 
@@ -239,6 +240,8 @@ export const useGame = create<GameState>((set, get) => {
       saveProgress(entryId, progress)
       const session: GameSession = { game, entryId, at: null, resumeAt: null, world: null, worldError: null, snapshot, arc: null, doubled: false, progress }
       set({ session, busy: null })
+      // Found, for the GAMES panel (lib/games/discovered.ts): kept past a respawn, which forgets the chain.
+      noteFoundGame(useCyberspace.getState().identity.pubkey, game.pubkey)
       readWorld(session)
       return null
     },
@@ -253,6 +256,7 @@ export const useGame = create<GameState>((set, get) => {
       const progress = loadProgress(open.id) ?? startProgress(open.createdAt * 1000)
       const session: GameSession = { game, entryId: open.id, at: null, resumeAt: recordedPosition(chain, open, game), world: null, worldError: null, snapshot: null, arc: null, doubled: false, progress }
       set({ session, message: null })
+      noteFoundGame(useCyberspace.getState().identity.pubkey, game.pubkey)
       readWorld(session)
       return true
     },
@@ -344,6 +348,22 @@ export const useGame = create<GameState>((set, get) => {
     clearMessage: () => set({ message: null }),
   }
 })
+
+/**
+ * Why no game can be entered right now, whatever the game, or null: the
+ * refusals of enter and of the chain (useCyberspace gameEventRefusal,
+ * whyNoMove: away from your head, riding hyperspace, a move landing, a chain
+ * that cannot move, already in a game), asked without signing anything. The
+ * GAMES panel greys ENTER out by it (and by the tour, which it reads itself).
+ */
+export function enterBlocked(): string | null {
+  const g = useGame.getState()
+  if (g.session || g.busy) return GAME_ALREADY_MESSAGE
+  if (walkBusy()) return WALK_BUSY_MESSAGE
+  if (useWorkshop.getState().open || tvIsOn()) return COVERED_MESSAGE
+  const cs = useCyberspace.getState()
+  return gameEventRefusal(cs) ?? whyNoMove(cs.actions())
+}
 
 /**
  * THE ENTRY POINT for the first-arrival tutorial (Track A, step 10, DUNGEON):

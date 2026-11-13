@@ -27,7 +27,9 @@
  */
 
 import { enterTutorialDungeon, loadProgress, tutorialDungeonEnabled, useGame } from '../store/useGame'
-import { registerTutorialChoice, useTutorial } from '../store/useTutorial'
+import { choiceOffered, registerTutorialChoice, useTutorial } from '../store/useTutorial'
+import { noteFoundGame } from '../lib/games/discovered'
+import { TUTORIAL_GAME } from '../lib/games/tutorialGame'
 import { useCyberspace } from '../store/useCyberspace'
 import { readProgress, tutorialOn, writeProgress } from './gate'
 
@@ -134,6 +136,13 @@ useGame.subscribe((s, prev) => {
   const cleared = progress?.clearedMs != null
   forget(note.pubkey)
   queueMicrotask(() => backToTheCard(note.pubkey, cleared))
+})
+
+// The card offering DUNGEON is how a player finds the dungeon: from then on
+// it is in the GAMES panel for them (lib/games/discovered.ts).
+useTutorial.subscribe((s, prev) => {
+  if (!s.active || !s.pubkey || (s.active === prev.active && s.index === prev.index && s.pubkey === prev.pubkey && s.choicesVersion === prev.choicesVersion)) return
+  if (s.script.steps[s.index]?.choices?.some((c) => c.when === DUNGEON_CHOICE && choiceOffered(c))) noteFoundGame(s.pubkey, TUTORIAL_GAME.pubkey)
 })
 
 registerDungeonChoice()

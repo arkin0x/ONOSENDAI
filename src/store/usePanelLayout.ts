@@ -44,9 +44,15 @@ export const COLUMNS: readonly Column[] = ['left', 'right']
  * `tutorial` (feedback 2026-11-11, item 17) is the last panel of all: the
  * foot of the right column, which a phone stacks under the left one, so it
  * is the bottom of the menu either way.
+ *
+ * `games` (owner, 2026-11-13: "a game panel in the menu UI") sits right
+ * under ITEMS. A saved order from before has no `games`, so mergeOrder puts
+ * it right after ITEMS wherever the player keeps ITEMS in the left column
+ * (after the nearest panel above ITEMS there, when ITEMS was dragged away);
+ * every other saved place is kept.
  */
 export const DEFAULT_ORDER = {
-  left: ['identity', 'agents', 'avatars', 'items', 'create', 'hidden', 'discovered', 'targets', 'links'],
+  left: ['identity', 'agents', 'avatars', 'items', 'games', 'create', 'hidden', 'discovered', 'targets', 'links'],
   right: ['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'],
 } as const satisfies Record<Column, readonly string[]>
 

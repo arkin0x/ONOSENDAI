@@ -35,3 +35,8 @@ export function gameFor(pubkey: string | undefined): GameDef | null {
   const game = GAMES.find((g) => g.pubkey === pubkey)
   return game && gameEnabled(game) ? game : null
 }
+
+/** Every game this client implements that is on here (flag.ts gameEnabled), in the registry's order: never a placeholder on the production host. */
+export function implementedGames(): GameDef[] {
+  return GAMES.filter((g) => gameEnabled(g))
+}

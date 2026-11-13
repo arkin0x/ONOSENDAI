@@ -3701,6 +3701,22 @@ let firstMoveInFlight = false
 
 
 /**
+ * Why no game event can be signed right now, whatever the game, or null:
+ * away from your head, riding hyperspace, before the first move, while a move
+ * lands, or while a choice between two chains waits. signGameEvent asks it
+ * first; the GAMES panel asks it to grey ENTER out (hud/GamesPanel.tsx).
+ */
+export function gameEventRefusal(s: Pick<CyberspaceState, 'exploreIndex' | 'spectate' | 'transit' | 'events' | 'genesisId' | 'prevEventId' | 'proof' | 'plan' | 'cloud' | 'chainConflict'>): string | null {
+  if (s.exploreIndex !== null || s.spectate !== null) return GAME_AT_HEAD_MESSAGE
+  if (s.transit !== null) return GAME_IN_TRANSIT_MESSAGE
+  if (s.events.length === 0 || !s.genesisId || !s.prevEventId) return GAME_NEEDS_CHAIN_MESSAGE
+  if (s.proof.status === 'computing' || s.plan?.status === 'running' || s.cloud.status !== 'idle') return GAME_BUSY_MESSAGE
+  // A choice between two versions of the chain comes first, as for a hop (finishProof).
+  if (s.chainConflict) return GAME_CHOOSE_FIRST_MESSAGE
+  return null
+}
+
+/**
  * Sign one of a game's events onto your own chain at its head (DECK-0002 §2,
  * §4, §7): from your head only, never mid-move, after the first move, and
  * only once the head is confirmed (confirmHead), as for any action. `check`
@@ -3715,12 +3731,8 @@ async function signGameEvent(
   build: (links: Links, chain: ActionEvent[]) => EventTemplate,
 ): Promise<GameSigned> {
   const before = get()
-  if (before.exploreIndex !== null || before.spectate !== null) return { refused: GAME_AT_HEAD_MESSAGE }
-  if (before.transit !== null) return { refused: GAME_IN_TRANSIT_MESSAGE }
-  if (before.events.length === 0 || !before.genesisId || !before.prevEventId) return { refused: GAME_NEEDS_CHAIN_MESSAGE }
-  if (before.proof.status === 'computing' || before.plan?.status === 'running' || before.cloud.status !== 'idle') return { refused: GAME_BUSY_MESSAGE }
-  // A choice between two versions of the chain comes first, as for a hop (finishProof).
-  if (before.chainConflict) return { refused: GAME_CHOOSE_FIRST_MESSAGE }
+  const now = gameEventRefusal(before)
+  if (now) return { refused: now }
   const early = check(parsedChain(before.events))
   if (early) return { refused: early }
   const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))

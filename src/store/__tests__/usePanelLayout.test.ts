@@ -44,11 +44,12 @@ function saved(order: PanelOrder, collapsed: Partial<Record<PanelId, boolean>> =
 
 describe('the default order', () => {
   it('leads with identity, agents, avatars, items, create (arkinox, 2026-11-11), every panel once, in one column', () => {
-    expect(DEFAULT_ORDER.left).toEqual(['identity', 'agents', 'avatars', 'items', 'create', 'hidden', 'discovered', 'targets', 'links'])
+    // GAMES right under ITEMS (owner, 2026-11-13).
+    expect(DEFAULT_ORDER.left).toEqual(['identity', 'agents', 'avatars', 'items', 'games', 'create', 'hidden', 'discovered', 'targets', 'links'])
     // TUTORIAL last of all: the foot of the right column, which a phone stacks under the left (item 17).
     expect(DEFAULT_ORDER.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'])
     expect(new Set(PANEL_IDS).size).toBe(PANEL_IDS.length)
-    expect(PANEL_IDS).toHaveLength(22)
+    expect(PANEL_IDS).toHaveLength(23)
   })
 
   it('comes as a fresh copy each time', () => {
@@ -108,7 +109,7 @@ describe('moveBefore', () => {
 
 describe('mergeOrder: a saved order against the defaults', () => {
   it('keeps a complete saved order as it is', () => {
-    const o: PanelOrder = { left: ['links', 'identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'scale'], right: ['position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'] }
+    const o: PanelOrder = { left: ['links', 'identity', 'agents', 'hidden', 'discovered', 'items', 'games', 'create', 'avatars', 'targets', 'scale'], right: ['position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'] }
     expect(mergeOrder(o)).toEqual(o)
   })
 
@@ -186,7 +187,8 @@ describe('a layout saved before the View panel (viewat)', () => {
   it('gets the View panel right under Position, and Settings (view) where it was', () => {
     const merged = mergeOrder(before())
     expect(merged.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'])
-    expect(merged.left).toEqual(before().left)
+    // GAMES came later still (a layout saved before it: below).
+    expect(merged.left.filter((id) => id !== 'games')).toEqual(before().left)
   })
 
   it('follows Position wherever it was dragged in the right column, and keeps every other saved place', () => {
@@ -203,7 +205,7 @@ describe('a layout saved before the View panel (viewat)', () => {
     o.right = o.right.filter((id) => id !== 'position')
     o.left.push('position')
     const merged = mergeOrder(o)
-    expect(merged.left).toEqual(o.left)
+    expect(merged.left.filter((id) => id !== 'games')).toEqual(o.left)
     expect(merged.right.slice(0, 2)).toEqual(['scale', 'viewat'])
   })
 
@@ -386,5 +388,35 @@ describe('a layout saved before the TUTORIAL panel (item 17)', () => {
     o.right = o.right.filter((id) => id !== 'tutorial')
     expect(mergeOrder(o).right.at(-1)).toBe('tutorial')
     expect(mergeOrder(o).left).not.toContain('tutorial')
+  })
+})
+
+describe('a layout saved before the GAMES panel (owner, 2026-11-13)', () => {
+  const before = (): PanelOrder => {
+    const o = defaultOrder()
+    o.left = o.left.filter((id) => id !== 'games')
+    return o
+  }
+
+  it('gets GAMES right under ITEMS, every other saved place kept', () => {
+    const merged = mergeOrder(before())
+    expect(merged).toEqual(defaultOrder())
+    expect(merged.left.slice(3, 5)).toEqual(['items', 'games'])
+  })
+
+  it('follows ITEMS wherever it was dragged in the left column', () => {
+    const o = before()
+    o.left = ['links', 'items', 'identity', 'agents', 'avatars', 'create', 'hidden', 'discovered', 'targets']
+    expect(mergeOrder(o).left).toEqual(['links', 'items', 'games', 'identity', 'agents', 'avatars', 'create', 'hidden', 'discovered', 'targets'])
+    expect(mergeOrder(o).right).toEqual(o.right)
+  })
+
+  it('with ITEMS dragged to the right column, stays in the left under the nearest panel above ITEMS there', () => {
+    const o = before()
+    o.left = o.left.filter((id) => id !== 'items')
+    o.right.push('items')
+    const merged = mergeOrder(o)
+    expect(merged.left.slice(0, 4)).toEqual(['identity', 'agents', 'avatars', 'games'])
+    expect(merged.right).toEqual(o.right)
   })
 })

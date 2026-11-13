@@ -56,11 +56,13 @@ export function setTutorialSwitch(on: boolean): void {
 }
 
 /**
- * Whether the tutorial may run on this device: the stored switch, or this
- * visit's when storage refused it.
+ * Whether the tutorial may run on this device: this visit's switch when one is
+ * set (it holds even when storage refused to keep it, so turning it off
+ * sticks: review of #716), else the stored switch or the default.
  */
 export function tutorialOn(): boolean {
-  return useTutorialSwitch.getState().value === true || tutorialEnabled()
+  const v = useTutorialSwitch.getState().value
+  return v !== null ? v : tutorialEnabled()
 }
 
 /**

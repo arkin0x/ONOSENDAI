@@ -2,12 +2,12 @@
  * tutorial.test.ts - the first-arrival tutorial's switch and engine
  * (first-arrival tutorial design, 2026-11-10, T1 and T3):
  *
- * - off unless this device's switch is on, and ?tutorial=1 / =0 set it;
+ * - on by default (2026-11-13); ?tutorial=1 / =0 and Settings set this device's switch;
  * - shown only to a brand-new identity on the bare address, after its relay
  *   check has an answer;
  * - progress kept per player pubkey: a reload resumes, an ended run stays
  *   ended, RESTART begins again;
- * - the publishing switch is never touched (the player's moves are real);
+ * - a first arrival starts LOCAL; a resume or RESTART leaves the publishing switch as it was;
  * - a step's own wait counts, and the next step comes up by itself.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -34,7 +34,7 @@ vi.mock('../useCyberspace', async (orig) => {
 import { MINTED_KEY, useCyberspace } from '../useCyberspace'
 import { ADVANCE_MS, CHOICE_FAILED_MESSAGE, choiceOffered, isNewArrival, onTutorialLifecycle, registerTutorialChoice, registerTutorialEffect, registerTutorialWatcher, runTutorialEffect, useTutorial, watchFirstArrival } from '../useTutorial'
 import { useDemo } from '../useDemo'
-import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialFlag, noteLanding, readProgress, setTutorialSwitch, tutorialEnabled, tutorialSwitch, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
+import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialFlag, noteLanding, readProgress, setTutorialSwitch, tutorialEnabled, tutorialOn, tutorialSwitch, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
 import { useTv } from '../useTv'
 import { PAD_ARROWS, TUTORIAL_SCRIPT } from '../../tutorial/script'
 import type { TutorialScript } from '../../tutorial/types'
@@ -673,5 +673,30 @@ describe('the engine', () => {
     expect(progressOf(steps, 0)).toBeCloseTo(1 / 3)
     expect(progressOf(steps, 3)).toBe(1)
     expect(progressOf(steps, 2)).toBe(1)
+  })
+})
+
+describe('review of #716 (tutorial on by default)', () => {
+  it('never auto-starts for a key made with USE NEW KEY, and leaves publishing alone', async () => {
+    const { CHOSEN_KEY } = await import('../useCyberspace')
+    const pubkey = useCyberspace.getState().identity.pubkey
+    localStorage.setItem(CHOSEN_KEY, pubkey)
+    try {
+      expect(isNewArrival()).toBe(false)
+      const stop = watchFirstArrival()
+      await flush()
+      expect(useTutorial.getState().active).toBe(false)
+      stop()
+    } finally {
+      localStorage.removeItem(CHOSEN_KEY)
+    }
+  })
+
+  it('turning it off sticks for the visit even when storage refuses to keep it', () => {
+    useTutorialSwitch.setState({ value: false })
+    localStorage.removeItem(TUTORIAL_SWITCH_KEY)
+    expect(tutorialOn()).toBe(false)
+    useTutorialSwitch.setState({ value: null })
+    expect(tutorialOn()).toBe(true)
   })
 })

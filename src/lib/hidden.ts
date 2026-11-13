@@ -63,7 +63,7 @@ import { keepOwnTable } from './carried'
 import { signalRescan } from './rescanSignal'
 import { creditTags, type Credit } from 'sno-core/feed'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
-import { hintFits, hintTags, parseHint, type HintHeights } from './hint'
+import { SECTOR_HINT, hintFits, hintTags, parseHint, type HintHeights } from './hint'
 import { imetaTag, pictureOf, type PictureDim } from './itemPicture'
 import { animationOf, modelOf, modelTags, type ItemAnimation, type ItemModelRef } from './itemModel'
 import type { Position } from './space'
@@ -842,6 +842,19 @@ export interface BagSettings {
 
 /** A bag as this client always wrote one before the choices existed: its height, no hint, no riddle, nothing said of its contents. */
 export const DEFAULT_BAG_SETTINGS: BagSettings = { heightTag: true, hint: null, riddle: '', contents: false, money: false }
+
+/**
+ * Where the deploy bar's controls start for a NEW bag (owner ruling
+ * 2026-11-13: "by default sector hints should be ON for all bags"): the
+ * defaults with the sector hint on, where a sector can contain a region of
+ * `height`. A hint must be at least the bag's height (spec §7.7) and a sector
+ * is 30 on every axis, so above height 30 it starts off. DEFAULT_BAG_SETTINGS
+ * stays what a bag that names no settings means, so a bag already out, a
+ * room's bag (lib/doors.ts ROOM_BAG_SETTINGS) and a chat envelope keep theirs.
+ */
+export function newBagSettings(height: number): BagSettings {
+  return { ...DEFAULT_BAG_SETTINGS, hint: hintFits(SECTOR_HINT, height) ? SECTOR_HINT : null }
+}
 
 /**
  * What a bag holds, by kind: shards (in the bag or by reference), messages,

@@ -124,9 +124,10 @@ async function fill(lookupId: string, key: Uint8Array, at: Position, height: num
   const now = Math.floor(Date.now() / 1000)
   const rumors: Rumor[] = []
   const message = (chars: number): Rumor => rumorOf({ kind: MESSAGE_KIND, created_at: now - 100 + rumors.length, content: `${rumors.length} ${'m'.repeat(chars)}`, tags: [C_TAG, ['-']] }, me())
-  while (bagBytes(entries, lookupId, height, settings) < target - 9_500) { const r = message(9_000); rumors.push(r); entries.push(r) }
   const like = S().mine.find((d) => d.lookupId === lookupId)
   const plane = like?.plane ?? 0
+  // The place, for the sector hint a new bag carries by default (owner ruling 2026-11-13).
+  while (bagBytes(entries, lookupId, height, settings, { at, plane }) < target - 9_500) { const r = message(9_000); rumors.push(r); entries.push(r) }
   const bag = await C().signEvent(await bagTemplate(entries, key, lookupId, height, (standing?.created_at ?? now) + 5, HIDDEN_KIND, settings, { at, plane }))
   relay.events.push(bag as Ev)
   const rows: MyDeployment[] = rumors.map((r) => ({ eventId: r.id, inner: r, bagId: bag.id, bagAt: bag.created_at, type: 'message', text: r.content, at: like?.at ?? { x: at.x.toString(), y: at.y.toString(), z: at.z.toString() }, plane, height, lookupId, keyHex: bytesToHex(key), relays: ['wss://relay.test'], createdAt: r.created_at, published: true, bag: settings, ...(room ? { room } : {}) }))

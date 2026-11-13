@@ -3,23 +3,33 @@
  * arkinox 2026-10-01): its optional `h` (spec §8.6), a sector hint with its
  * sector tags (§7.7, §10), and a riddle in `content` (§7.7). Every combination
  * writes exactly its tags, reads back as itself, and a bag without `h` still
- * opens at its true height when the reader knows the key's height.
+ * opens at its true height when the reader knows the key's height. A new
+ * bag starts with the sector hint on (owner ruling 2026-11-13), and what has
+ * no place to say stays without one: a room's bag, a chat envelope, a shard
+ * hidden by reference.
  */
 
 import { describe, expect, it } from 'vitest'
-import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { newShard } from 'sno-core/shards'
+import { ROOM_BAG_SETTINGS } from '../doors'
 import { regionKeyAt } from '../shardCrypto'
 import {
+  CHAT_BAG_KIND,
   DEFAULT_BAG_SETTINGS,
   MAX_RIDDLE_LENGTH,
   bagSettingsOf,
   bagTemplate,
+  chatInnerTemplate,
+  chatRumor,
   messageInnerTemplate,
+  newBagSettings,
+  objectTemplate,
   resolveBagSettings,
   unbag,
   type BagSettings,
 } from '../hidden'
-import { SECTOR_HINT, hintTags } from '../hint'
+import { SECTOR_HINT, hintTags, isHintTag } from '../hint'
 
 const sk = generateSecretKey()
 const at = { x: 90_000n + (7n << 40n), y: 4_000n + (3n << 50n), z: 71n }
@@ -116,5 +126,39 @@ describe('resolveBagSettings: what you changed wins, what you left takes the bag
 
   it('drops a hint that cannot contain the region', () => {
     expect(resolveBagSettings({ ...DEFAULT_BAG_SETTINGS, hint: SECTOR_HINT }, DEFAULT_BAG_SETTINGS, null, 31).hint).toBeNull()
+  })
+})
+
+describe('a new bag starts with the sector hint on (owner ruling 2026-11-13)', () => {
+  it('at every height a sector can contain, and off above 30, where none can (spec §7.7)', () => {
+    for (const h of [0, 6, 29, 30]) expect(newBagSettings(h)).toEqual({ ...DEFAULT_BAG_SETTINGS, hint: SECTOR_HINT })
+    for (const h of [31, 40, 85]) expect(newBagSettings(h)).toEqual(DEFAULT_BAG_SETTINGS)
+  })
+
+  it('and goes out with its sector tags', async () => {
+    expect(names((await bagWith(newBagSettings(HEIGHT))).tags)).toEqual(['d', 'encrypted', 'version', 'H', 'hint', 'X', 'Y', 'Z', 'S'])
+  })
+
+  it('a bag that names no settings still means no hint: one already out keeps its choice', () => {
+    expect(DEFAULT_BAG_SETTINGS.hint).toBeNull()
+  })
+
+  it('left untouched, defers to a bag already in the region; turned off, stays off', () => {
+    const seed = newBagSettings(HEIGHT)
+    expect(resolveBagSettings(seed, seed, DEFAULT_BAG_SETTINGS, HEIGHT).hint).toBeNull()
+    expect(resolveBagSettings(seed, seed, null, HEIGHT).hint).toEqual(SECTOR_HINT)
+    expect(resolveBagSettings({ ...seed, hint: null }, seed, null, HEIGHT).hint).toBeNull()
+  })
+
+  it('a room\'s bag, a chat envelope and a shard by reference carry no hint or sector tag', async () => {
+    expect(ROOM_BAG_SETTINGS.hint).toBeNull()
+    const room = await bagWith(ROOM_BAG_SETTINGS)
+    expect(room.tags.some(isHintTag)).toBe(false)
+    const line = chatRumor(chatInnerTemplate('hello', at, 0, 1, rk.lookupId), getPublicKey(sk))
+    const chat = await bagTemplate([line], rk.key, rk.lookupId, HEIGHT, 100, CHAT_BAG_KIND)
+    expect(chat.tags.some(isHintTag)).toBe(false)
+    const shard = { ...newShard('tube'), mode: 'points' as const, vertices: [{ p: [0, 0, 0] as [number, number, number], c: [1, 0, 0] as [number, number, number] }], faces: [] }
+    const object = await objectTemplate(shard, rk.key, 'ab'.repeat(16), 100)
+    expect(object.tags.some(isHintTag)).toBe(false)
   })
 })

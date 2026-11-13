@@ -58,7 +58,7 @@ import { useBuilder } from '../useBuilder'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { resetOpenedChests } from '../useOpenedChests'
-import { useShards, type MyDeployment } from '../useShards'
+import { positionOf, useShards, type MyDeployment } from '../useShards'
 
 const S = () => useShards.getState()
 const C = () => useCyberspace.getState()
@@ -164,7 +164,7 @@ describe('every bag write keeps under the cap (review of #633)', () => {
     // Another device's newer bag without it: the read marks it gone from its bag.
     const was = newestBag(lookupId)
     const keep = rows.slice(1).map((r) => r.inner)
-    const template = await bagTemplate(keep, hexToBytes(gone.keyHex), lookupId, gone.height, was.created_at + 5, HIDDEN_KIND, { ...gone.bag!, heightTag: true })
+    const template = await bagTemplate(keep, hexToBytes(gone.keyHex), lookupId, gone.height, was.created_at + 5, HIDDEN_KIND, { ...gone.bag!, heightTag: true }, { at: positionOf(gone), plane: gone.plane })
     relay.events.push(await C().signEvent(template) as never)
     expect(await hide('one more, to read the bag')).toBeNull()
     expect(S().mine.find((d) => d.eventId === gone.eventId)?.goneFrom).toBeDefined()

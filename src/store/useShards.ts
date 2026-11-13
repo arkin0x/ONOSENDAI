@@ -57,6 +57,7 @@ import {
   HIDDEN_KIND,
   bagEntries,
   bagSettingsOf,
+  newBagSettings,
   resolveBagSettings,
   type BagSettings,
   bagInners,
@@ -129,7 +130,7 @@ import { deployPoint, type Position } from '../lib/space'
 import { buildCursorOf, buildPlane, buildStepOf } from '../lib/buildCursor'
 import type { NearbyReturn } from '../lib/nearbyReturn'
 import { turnShard, type Turns } from '../lib/turn'
-import { alignedBase, hintFits } from '../lib/hint'
+import { SECTOR_HINT, alignedBase, hintFits, type HintHeights } from '../lib/hint'
 import { hidesThing, type Muted } from '../lib/muteList'
 import { useMutes } from './useMutes'
 import { CONSTRAIN_DEFAULT, authoredConstrain, authoredConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
@@ -1483,9 +1484,17 @@ interface ShardsState {
    * The bag settings the deploy bar shows and the deploy writes: `H`, the
    * hint, the riddle (lib/hidden.ts BagSettings). They are the bag's, so they
    * start at your existing bag's settings when the cursor's region holds one
-   * (seedDeployBag) and at the defaults when it does not.
+   * (seedDeployBag) and, when it does not, at a new bag's (lib/hidden.ts
+   * newBagSettings: the sector hint on, owner ruling 2026-11-13).
    */
   deployBag: BagSettings
+  /**
+   * The hint a height too large for it took off the bag (heightPatch), put
+   * back when the height fits it again: a new bag's sector hint, off above
+   * height 30, is on again at 30 or lower. Cleared whenever you set the hint
+   * yourself (setDeployBag), so an OFF you chose stays off.
+   */
+  deployHintHeld: HintHeights | null
   /**
    * The bag the controls were seeded from: its region and the settings it had
    * then, or null when they start from the defaults. deploy() compares what
@@ -2916,21 +2925,24 @@ export const useShards = create<ShardsState>((set, get) => {
     try { set(patch) } finally { editingPending = false }
   }
 
-  /** The same fresh-deploy state every start shares: no pose, no link, the bag settings at their defaults. */
+  /** Whether the snap is offered for what is lined up: a seed in dataspace at any height (orientation.ts seedSnapOffered), anything else at 27 and up. */
+  const snapHere = (height: number): boolean => (get().pending?.type === 'seed' ? seedSnapOffered(buildPlane(cyber())) : snapOffered(buildPlane(cyber()), height))
   /**
    * What a new height changes on the hide bar. Below the snap's height there
    * is no snap: the control goes away, and so does what it was set to, rather
    * than lying in wait. A hint smaller than the region cannot contain it (spec
    * §7.7): the sector hint goes off above height 30 the way the snap goes off
-   * below its own height.
+   * below its own height. Unlike the snap it is held (`deployHintHeld`) and
+   * comes back on at 30 or lower, because it is on by default (owner ruling
+   * 2026-11-13). Only an OFF you chose stays off: it is never held.
    */
-  /** Whether the snap is offered for what is lined up: a seed in dataspace at any height (orientation.ts seedSnapOffered), anything else at 27 and up. */
-  const snapHere = (height: number): boolean => (get().pending?.type === 'seed' ? seedSnapOffered(buildPlane(cyber())) : snapOffered(buildPlane(cyber()), height))
   const heightPatch = (height: number): Partial<ShardsState> => {
     const offered = snapHere(height)
-    const bag = get().deployBag
+    const { deployBag: bag, deployHintHeld: held } = get()
     const hintGone = bag.hint !== null && !hintFits(bag.hint, height)
-    return { deployHeight: height, deployAsk: null, ...(offered ? {} : { deployUp: false, deployFollow: false }), ...(hintGone ? { deployBag: { ...bag, hint: null } } : {}) }
+    const hintBack = bag.hint === null && held !== null && hintFits(held, height)
+    const hint = hintGone ? { deployBag: { ...bag, hint: null }, deployHintHeld: bag.hint } : hintBack ? { deployBag: { ...bag, hint: held }, deployHintHeld: null } : {}
+    return { deployHeight: height, deployAsk: null, ...(offered ? {} : { deployUp: false, deployFollow: false }), ...hint }
   }
 
   /** Out of a room: the height chosen, and the pose and hint a room's height had dropped, where that height offers them again. */
@@ -2939,16 +2951,27 @@ export const useShards = create<ShardsState>((set, get) => {
     const s = get()
     if (snap.kept.up && !s.deployUp && snapHere(snap.chosen)) Object.assign(patch, { deployUp: true, deployFollow: snap.kept.follow })
     const bag = patch.deployBag ?? s.deployBag
-    if (snap.kept.hint && !bag.hint && hintFits(snap.kept.hint, snap.chosen)) patch.deployBag = { ...bag, hint: snap.kept.hint }
+    if (snap.kept.hint && !bag.hint && hintFits(snap.kept.hint, snap.chosen)) Object.assign(patch, { deployBag: { ...bag, hint: snap.kept.hint }, deployHintHeld: null })
     return patch
   }
 
-  const freshDeploy = {
+  /**
+   * A new bag's controls at `height` (newBagSettings): the sector hint on
+   * where it fits, and held, to come back on, where it does not (owner
+   * ruling 2026-11-13: sector hints ON by default for every bag).
+   */
+  const freshBag = (height: number): Pick<ShardsState, 'deployBag' | 'deployHintHeld'> => {
+    const deployBag = newBagSettings(height)
+    return { deployBag, deployHintHeld: deployBag.hint ? null : SECTOR_HINT }
+  }
+
+  /** The same fresh-deploy state every start shares, at the height the bar stands at. */
+  const freshDeploy = (): Partial<ShardsState> => ({
     deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0] as Turns, deployFollow: false, deployConstrain: CONSTRAIN_DEFAULT,
-    deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle' as const, deployError: null,
+    ...freshBag(get().deployHeight), deployBagFrom: null, deployStatus: 'idle' as const, deployError: null,
     // A seed still mining for the deploy this replaces stops itself (plantSeed `current`); nothing of it stays on this bar.
     deployNote: null, deployMining: false,
-  }
+  })
 
   /**
    * A chest's contents, signed one by one by this identity and sealed to the
@@ -3669,7 +3692,8 @@ export const useShards = create<ShardsState>((set, get) => {
     deployFollow: false,
     deployConstrain: CONSTRAIN_DEFAULT,
     deployLink: false,
-    deployBag: DEFAULT_BAG_SETTINGS,
+    deployBag: newBagSettings(0),
+    deployHintHeld: null,
     deployBagFrom: null,
     deployStatus: 'idle',
     placedLast: null,
@@ -3679,7 +3703,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!last || s.pending || s.deployStatus === 'working' || againName(s) === null) return false
       // The bag controls start at the defaults and are seeded from the bag
       // under the cursor, as for any new deploy: they are that bag's.
-      set({ pending: last.pending, ...last.settings, deployTurn: [...last.settings.deployTurn] as Turns, deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null })
+      set({ pending: last.pending, ...last.settings, deployTurn: [...last.settings.deployTurn] as Turns, ...freshBag(last.settings.deployHeight), deployBagFrom: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null })
       cyber().setBuildStep(last.step)
       return true
     },
@@ -3730,7 +3754,7 @@ export const useShards = create<ShardsState>((set, get) => {
       deployFollow: false,
       // The bag settings start fresh too; the deploy bar seeds them from your
       // bag in the region under the cursor, if there is one.
-      deployBag: DEFAULT_BAG_SETTINGS,
+      ...freshBag(get().deployHeight),
       deployBagFrom: null,
       deployStatus: 'idle',
       deployError: null,
@@ -3755,6 +3779,7 @@ export const useShards = create<ShardsState>((set, get) => {
         deployTurn: [0, 0, 0],
         deployFollow: false,
         deployBag: { ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) },
+        deployHintHeld: null,
         deployBagFrom: ownBagIn(get().mine, regionOf(positionOf(d), d.plane, d.height)),
         deployStatus: 'idle',
         deployError: null,
@@ -3775,15 +3800,15 @@ export const useShards = create<ShardsState>((set, get) => {
       deploySpin: object.shard.spin ?? 0,
       deployTurn: [0, 0, 0],
       deployFollow: false,
-      deployBag: DEFAULT_BAG_SETTINGS,
+      ...freshBag(get().deployHeight),
       deployBagFrom: null,
       deployStatus: 'idle',
       deployError: null,
     }),
-    startDeployMessage: (text) => set({ pending: { type: 'message', text }, ...freshDeploy }),
-    startDeployKey: (key) => set({ pending: { type: 'key', key }, ...freshDeploy }),
+    startDeployMessage: (text) => set({ pending: { type: 'message', text }, ...freshDeploy() }),
+    startDeployKey: (key) => set({ pending: { type: 'key', key }, ...freshDeploy() }),
     // Its height fits the largest bloom its scale allows (DeployBar seedReach), until + or - is pressed.
-    startDeploySeed: (seed) => set({ pending: { type: 'seed', seed }, ...freshDeploy, deployHeightAuto: true }),
+    startDeploySeed: (seed) => set({ pending: { type: 'seed', seed }, ...freshDeploy(), deployHeightAuto: true }),
     setDeployFade: (fade) => {
       const p = get().pending
       if (p?.type !== 'audio') return
@@ -3791,21 +3816,21 @@ export const useShards = create<ShardsState>((set, get) => {
       void _drop
       edit({ pending: { ...p, audio: fade === undefined ? rest : { ...rest, fade } } })
     },
-    startDeployAudio: (audio, opts) => set({ pending: { type: 'audio', audio, ...(opts?.reseal ? { reseal: true as const } : {}), ...(opts?.server ? { server: opts.server } : {}) }, ...freshDeploy }),
+    startDeployAudio: (audio, opts) => set({ pending: { type: 'audio', audio, ...(opts?.reseal ? { reseal: true as const } : {}), ...(opts?.server ? { server: opts.server } : {}) }, ...freshDeploy() }),
     // With shards aimed inside, the height starts at the fit that holds them
     // all (DeployBar, lib/deployFit.ts fitHeightAll) and follows the cursor
     // until + or - is pressed, as a shard's own height does.
     // A chest wears TREASURE until the model row picks another, at the
     // model's own size and WALK setting, as a shard starts.
-    startDeployChest: (draft) => set({ pending: { type: 'chest', ...draft, look: DEFAULT_CHEST_LOOK }, ...freshDeploy, ...lookStart(DEFAULT_CHEST_LOOK), deployHeightAuto: true }),
+    startDeployChest: (draft) => set({ pending: { type: 'chest', ...draft, look: DEFAULT_CHEST_LOOK }, ...freshDeploy(), ...lookStart(DEFAULT_CHEST_LOOK), deployHeightAuto: true }),
     startPlaceChest: (draft) => {
       if (get().deployStatus === 'working') return
       const d: ChestDraft = draft ?? { name: '', lock: null, requires: '', contents: [] }
-      set({ pending: { type: 'chest', name: d.name, lock: d.lock, requires: d.requires, contents: d.contents, look: DEFAULT_CHEST_LOOK }, ...freshDeploy, ...lookStart(DEFAULT_CHEST_LOOK), deployHeightAuto: true, deployNote: null, deployAsk: null })
+      set({ pending: { type: 'chest', name: d.name, lock: d.lock, requires: d.requires, contents: d.contents, look: DEFAULT_CHEST_LOOK }, ...freshDeploy(), ...lookStart(DEFAULT_CHEST_LOOK), deployHeightAuto: true, deployNote: null, deployAsk: null })
     },
     startPlaceDoor: () => {
       if (get().deployStatus === 'working') return
-      set({ pending: { type: 'chest', door: true, name: '', lock: null, requires: '', contents: [], look: DEFAULT_DOOR_LOOK }, ...freshDeploy, ...lookStart(DEFAULT_DOOR_LOOK), deployHeightAuto: true, deployDoorHeight: null, deployNote: null, deployAsk: null })
+      set({ pending: { type: 'chest', door: true, name: '', lock: null, requires: '', contents: [], look: DEFAULT_DOOR_LOOK }, ...freshDeploy(), ...lookStart(DEFAULT_DOOR_LOOK), deployHeightAuto: true, deployDoorHeight: null, deployNote: null, deployAsk: null })
     },
     placeChest: () => {
       const p = get().pending
@@ -3850,7 +3875,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const model = lookModelOf(look)
       set({
         pending: { type: 'chest', name: d.chest.name, lock: { pubkey: d.chest.lockPubkey, label: d.chest.requires || 'its lock' }, requires: d.chest.requires, contents: [], look, move: { eventId }, ...(door ? { door: true as const } : {}) },
-        ...freshDeploy,
+        ...freshDeploy(),
         deployHeight: d.height,
         // Its own height, chosen: a room it lands in stands in for it until it leaves.
         deployRoomSnap: null,
@@ -3858,6 +3883,7 @@ export const useShards = create<ShardsState>((set, get) => {
         deployUnit: model?.unit ?? 0,
         deployConstrain: model ? authoredConstrainOf(model) : CONSTRAIN_DEFAULT,
         deployBag: { ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) },
+        deployHintHeld: null,
         deployBagFrom: ownBagIn(get().mine, regionOf(positionOf(d), d.plane, d.height)),
         deployNote: null,
         deployAsk: null,
@@ -3874,11 +3900,12 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!pending) return
       set({
         pending,
-        ...freshDeploy,
+        ...freshDeploy(),
         deployHeight: d.height,
         // Its own height, chosen: a room it lands in stands in for it until it leaves.
         deployRoomSnap: null,
         deployBag: { ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) },
+        deployHintHeld: null,
         deployBagFrom: ownBagIn(get().mine, regionOf(positionOf(d), d.plane, d.height)),
         deployNote: null,
         deployAsk: null,
@@ -3891,7 +3918,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (typeof pending === 'string') return pending
       if (copyLinedUp(get())) get().cancelDeploy()
       if (get().pending || get().deployStatus === 'working') return 'Finish or cancel what is lined up first.'
-      set({ pending, ...freshDeploy, deployNote: null, deployAsk: null })
+      set({ pending, ...freshDeploy(), deployNote: null, deployAsk: null })
       return null
     },
     hideAgain: async (eventId) => {
@@ -4295,19 +4322,20 @@ export const useShards = create<ShardsState>((set, get) => {
         deploySpin: 0,
         deployTurn: [0, 0, 0],
         deployFollow: false,
-        deployBag: DEFAULT_BAG_SETTINGS,
+        ...freshBag(get().deployHeight),
         deployBagFrom: null,
         deployStatus: 'idle',
         deployError: null,
       })
     },
-    setDeployBag: (patch) => set({ deployBag: { ...get().deployBag, ...patch } }),
+    // Setting the hint yourself is the choice: nothing held comes back over it.
+    setDeployBag: (patch) => set({ deployBag: { ...get().deployBag, ...patch }, ...('hint' in patch ? { deployHintHeld: null } : {}) }),
     seedDeployBag: (bag) => {
       const from = get().deployBagFrom
       if ((bag?.region ?? null) === (from?.region ?? null)) return
       // Leaving your bag's region for one with no bag: back to the defaults,
       // so that bag's riddle never follows the cursor into a new bag.
-      set({ deployBag: bag ? bag.settings : DEFAULT_BAG_SETTINGS, deployBagFrom: bag })
+      set({ ...(bag ? { deployBag: bag.settings, deployHintHeld: null } : freshBag(get().deployHeight)), deployBagFrom: bag })
     },
     // Buryable up to the compute ceiling (past that the region derivation
     // throws); discovery only auto-scans to SCAN_MAX_HEIGHT, which the DeployBar
@@ -4740,7 +4768,7 @@ export const useShards = create<ShardsState>((set, get) => {
         // bar showed (resolveBagSettings). The controls were seeded from
         // this region's bag only if `deployBagFrom` names this region.
         const region = regionOf(at, plane, deployHeight)
-        const seeded = deployBagFrom?.region === region ? deployBagFrom.settings : DEFAULT_BAG_SETTINGS
+        const seeded = deployBagFrom?.region === region ? deployBagFrom.settings : newBagSettings(deployHeight)
         const settingsOf = (current: BagSettings | null): BagSettings => (into ? ROOM_BAG_SETTINGS : resolveBagSettings(deployBag, seeded, current, deployHeight))
         let settings: BagSettings = settingsOf(existing.settings)
         // A large shard is hidden by reference (spec §7.6, DECK-0003 §3.2): it
@@ -5036,7 +5064,8 @@ export const useShards = create<ShardsState>((set, get) => {
             }
             : s.placedLast
           // A room's settings are the room's: left out of it, the next placement starts as any other.
-          const bag = again ? { deployBag: into ? DEFAULT_BAG_SETTINGS : settings, deployBagFrom: ownBagIn(s.mine, regionOf(at, plane, deployHeight)) } : {}
+          // Fresh controls name no bag, so the bar seeds them from your bag under the cursor, if any (seedDeployBag).
+          const bag = again ? (into ? { ...freshBag(deployHeight), deployBagFrom: null } : { deployBag: settings, deployHintHeld: null, deployBagFrom: ownBagIn(s.mine, regionOf(at, plane, deployHeight)) }) : {}
           set({ deployStatus: 'done', pending: again, deployNote: null, deployAsk: null, placedLast, ...bag })
         }
         // A moved door keeps its room: its secret, and what stands behind it, follow its new id.

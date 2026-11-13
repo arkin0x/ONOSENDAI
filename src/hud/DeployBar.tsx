@@ -39,7 +39,16 @@
  *   - PUBLISH HEIGHT HINT: whether the bag carries its `H` tag (spec §8.6, optional).
  *   - PUBLISH SECTOR HINT: a hint naming the bag's sector, heights of 30 on
  *     every axis, with its X, Y, Z and S sector tags (spec §7.7, §10). A hint
- *     must be at least the bag's height, so it is off above height 30.
+ *     must be at least the bag's height, so it is off above height 30. ON by
+ *     default for every new bag (owner ruling 2026-11-13: "by default sector
+ *     hints should be ON for all bags"; lib/hidden.ts newBagSettings): shards,
+ *     messages, keys, items, chests, doors, audio and seeds alike, each a
+ *     switch the hider can turn off for that bag. A new bag above height 30
+ *     starts with it off, and it comes back on at 30 or lower unless turned
+ *     off by hand (useShards `deployHintHeld`). An edit or move keeps its bag's
+ *     own choice; one that lands in a region with no bag of yours starts a new
+ *     bag, so ON. A room's bag behind a door carries no hint at all
+ *     (lib/doors.ts ROOM_BAG_SETTINGS), and this bar shows no bag rows for it.
  *   - HINT MESSAGE: a riddle in the bag's plaintext `content` (spec §7.7).
  * When the cursor's region already holds your bag, they start at that bag's
  * settings and the bar says they apply to everything you hid there.
@@ -735,6 +744,8 @@ function Pow({ e }: { e: number }): JSX.Element {
  */
 function BagControls({ height, bag, existing, cashu }: { height: number; bag: ReturnType<typeof useShards.getState>['deployBag']; existing: number; cashu: boolean }): JSX.Element {
   const set = (patch: Partial<typeof bag>): void => useShards.getState().setDeployBag(patch)
+  // A new bag's sector hint this height took off, to come back on lower down.
+  const held = useShards((s) => s.deployHintHeld !== null)
   // A hint must be at least the bag's height (spec §7.7); a sector is 2^30.
   const sectorFits = height <= SECTOR_HEIGHT
   // A finer box another client wrote is kept as it is while the switch stays on.
@@ -763,7 +774,7 @@ function BagControls({ height, bag, existing, cashu }: { height: number; bag: Re
           ? <>This bag already carries a hint box of heights {otherBox.join(', ')}, written by another client. On keeps it as it is; off removes it.</>
           : sectorFits
             ? <>Tells seekers which sector this is hidden in: one cube <Pow e={SECTOR_HEIGHT} /> gibsons on a side, instead of all of cyberspace at <Pow e={AXIS_BITS} /> on a side. That cuts their search from <Pow e={searchExponent(height, AXIS_BITS)} /> regions of this size to <Pow e={searchExponent(height, SECTOR_HEIGHT)} />.</>
-            : <>Not available at height {height}: a sector is <Pow e={SECTOR_HEIGHT} /> gibsons on a side, smaller than this region, so no sector can contain it.</>}
+            : <>Not available at height {height}: a sector is <Pow e={SECTOR_HEIGHT} /> gibsons on a side, smaller than this region, so no sector can contain it.{held ? ` It turns back on at height ${SECTOR_HEIGHT} or lower.` : ''}</>}
       >
         <Switch
           id="deploy-sector-hint"

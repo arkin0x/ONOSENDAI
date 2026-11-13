@@ -28,7 +28,7 @@
  * Kept per pubkey on this device (TOAST_PREFIX), with a copy in memory so a
  * device that refuses storage still keeps the caps for the visit.
  *
- * START starts the tutorial as the menu's START TUTORIAL does for a returning
+ * START starts the tutorial as the menu's RESTART TUTORIAL does for a returning
  * player (useTutorial start({ restart: true })): from the first step, laid
  * out where they stand, the publishing switch untouched. The chip only
  * shows while that can start. LATER puts it away for this load.
@@ -149,7 +149,7 @@ export function dismissTutorialToast(): void {
 
 /**
  * START: the tutorial from the first step, laid out where the player stands,
- * publishing untouched, as the menu's START TUTORIAL. The toast goes once
+ * publishing untouched, as the menu's RESTART TUTORIAL. The toast goes once
  * the run is going; if it could not start, nothing changes.
  */
 export function startFromTutorialToast(): void {
@@ -198,7 +198,7 @@ export function watchTutorialToast(): () => void {
   }
 
   const offCs = useCyberspace.subscribe(check)
-  // A run started any other way (the menu, Settings, /tutorial) takes the toast away for the rest of this load.
+  // A run started any other way (the menu, /tutorial) takes the toast away for the rest of this load.
   const offTutorial = useTutorial.subscribe((t) => {
     if (!t.active) return
     clear()

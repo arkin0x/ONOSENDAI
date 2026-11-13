@@ -14,7 +14,7 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 import { loadWorld } from '../world'
-import { TUTORIAL_ENTRY, TUTORIAL_GAME } from '../tutorialGame'
+import { FALLOUT_PAD, TUTORIAL_ENTRY, TUTORIAL_GAME } from '../tutorialGame'
 import { padUnder, type WorldShard } from '../play'
 import { jump, move, standing, tick, type Body } from '../gravity'
 import { offerAt, openDoor, reachExit, startProgress, takeKey, worldNow, type Progress } from '../progress'
@@ -179,5 +179,97 @@ describe('the tutorial dungeon', () => {
       for (let i = 0; i < 12; i++) p.press(axis, Number((axis === 'x' ? p.body.at.x - B.x : p.body.at.z - B.z)) < target ? 1 : -1)
       expect(Number(p.body.at.y - B.y)).toBe(17)
     }
+  })
+})
+
+/**
+ * The way back in for a player who fell out (owner, 2026-11-13): the
+ * rotunda's oculus is open, a double jump from the key platform goes up
+ * through it onto the dome, and off the dome a player falls to the region's
+ * lower edge. A pad on that floor, directly under the oculus, sends them back
+ * to the arrival.
+ */
+describe('falling out of the tutorial dungeon', () => {
+  /** The key taken, then up through the oculus onto the dome: the owner's way out. */
+  function outOnTheDome(): Player {
+    const p = new Player(world, at(39, 27, 41))
+    p.wait(100)
+    expect(p.at).toBe('39,27,41')
+    p.progress = takeKey(G, p.progress, p.body.at)!
+    expect(p.progress.keyHeld).toBe(true)
+    p.walkTo('z', 40)
+    // JUMP, a gibson into the oculus while rising, the double jump up through it, and a gibson over onto the dome.
+    p.jump('x', 1, [100, 450], 300)
+    expect(p.at).toBe('41,32,40')
+    return p
+  }
+
+  it('the open oculus lets a player climb out onto the dome', () => {
+    outOnTheDome()
+  })
+
+  it('off the dome, the region\'s floor holds the faller, right by the pad under the oculus', () => {
+    const p = outOnTheDome()
+    p.walkTo('x', 47)
+    for (let i = 0; i < 6 && p.body.at.y - B.y > 0n; i++) { p.press('x', 1); p.wait(3000) }
+    // The region's lower edge is the floor (gravity.ts standing): nothing else stops the fall.
+    expect(Number(p.body.at.y - B.y)).toBe(0)
+    expect(standing(G, p.body.at, p.solid)).toBe(true)
+    // The pad stands one under that floor, directly under the oculus, holding whoever stands on it.
+    expect(FALLOUT_PAD.at).toEqual(at(40, -1, 40))
+    expect(padUnder(G, at(40, 0, 40))).toBe(FALLOUT_PAD)
+    expect(G.pads).toContain(FALLOUT_PAD)
+    expect(Math.abs(Number(p.body.at.x - B.x) - 40) + Math.abs(Number(p.body.at.z - B.z) - 40)).toBeLessThanOrEqual(12)
+  })
+
+  it('the pad sends the faller back to the arrival, the key still in hand, the clock still running', () => {
+    const p = outOnTheDome()
+    p.walkTo('x', 47)
+    for (let i = 0; i < 6 && p.body.at.y - B.y > 0n; i++) { p.press('x', 1); p.wait(3000) }
+    const started = p.progress.startedAt
+    // Back toward the oculus along the floor: the first press onto the pad sends you on.
+    expect(Number(p.body.at.z - B.z)).toBe(40)
+    for (let i = 0; i < 20 && p.body.at.y === B.y; i++) p.press('x', -1)
+    expect(p.body.at).toEqual(TUTORIAL_ENTRY)
+    expect(p.body.at).toEqual(entry)
+    // Standing there, on the arrival hall's floor.
+    p.wait(200)
+    expect(p.at).toBe('8,17,45')
+    expect(p.progress.keyHeld).toBe(true)
+    expect(p.progress.startedAt).toBe(started)
+    expect(p.progress.clearedMs).toBeNull()
+  })
+
+  it('a fall off the hall roof lands on the same floor, and walks to the pad', () => {
+    const p = outOnTheDome()
+    // South off the dome onto the hall's roof, then off its side.
+    p.walkTo('z', 36)
+    for (let i = 0; i < 12 && Number(p.body.at.z - B.z) > 20; i++) { p.press('z', -1); p.wait(1500) }
+    expect(Number(p.body.at.y - B.y)).toBeGreaterThan(17)
+    for (let i = 0; i < 8 && p.body.at.y - B.y > 0n; i++) { p.press('x', 1); p.wait(3000) }
+    expect(Number(p.body.at.y - B.y)).toBe(0)
+    p.walkTo('x', 40)
+    for (let i = 0; i < 30 && p.body.at.y === B.y; i++) p.press('z', 1)
+    expect(p.at).toBe('8,17,45')
+  })
+
+  it('every gibson of the region\'s floor is one open floor: the pad is reached on foot from anywhere', () => {
+    // Walked from the pad's own cell, a press at a time: nothing stands on the floor, nothing below the rooms.
+    const key = (x: number, z: number): number => x * 64 + z
+    const seen = new Set<number>([key(40, 40)])
+    const queue: Array<[number, number]> = [[40, 40]]
+    const solid = worldNow(G, world, startProgress(0)).solid
+    while (queue.length) {
+      const [x, z] = queue.shift()!
+      for (const [axis, dir] of [['x', 1], ['x', -1], ['z', 1], ['z', -1]] as const) {
+        const nx = axis === 'x' ? x + dir : x, nz = axis === 'z' ? z + dir : z
+        if (nx < 0 || nx > 63 || nz < 0 || nz > 63 || seen.has(key(nx, nz))) continue
+        const b = move(G, { at: at(x, 0, z), arc: null, doubled: false }, axis, dir, 0, solid)
+        if (b.arc || b.at.y !== B.y || Number(b.at[axis] - (axis === 'x' ? B.x : B.z)) !== (axis === 'x' ? nx : nz)) continue
+        seen.add(key(nx, nz))
+        queue.push([nx, nz])
+      }
+    }
+    expect(seen.size).toBe(64 * 64)
   })
 })

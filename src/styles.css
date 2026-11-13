@@ -10759,12 +10759,12 @@ html.tv-broadcast body { overflow: hidden; }
 .seedc__row .seedc__label--wide { flex: 0 0 auto; margin-right: 4px; }
 
 /* The first-arrival tutorial (hud/TutorialCoach.tsx): the /demo coach's look,
-   a centered card for the welcome, and RESTART TUTORIAL in Settings. */
+   a centered card for the welcome, and RESUME and RESTART TUTORIAL in its menu panel. */
 .modal__card.tutorial-card { max-width: 380px; border-color: rgba(0, 229, 255, 0.55); display: flex; flex-direction: column; gap: 10px; font-family: var(--mono); }
 .tutorial-card .modal__title { margin: 0; }
 .tutorial-card__go { flex: 0 0 auto; align-self: stretch; justify-content: center; min-height: 40px; }
 .tutorial__explain { color: var(--dim); font-size: 12px; }
-.tutorial-restart { margin: 4px 0 8px; }
+.tutorial-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
 /* Each route: its icon in a fixed column on the left, centred against its words to the right (arkinox, 2026-11-13). */
 .tutorial-choice { flex: 0 0 auto; flex-direction: row; align-items: center; justify-content: flex-start; gap: 12px; padding: 8px 12px 8px 8px; min-height: 0; height: auto; text-align: left; }
 .tutorial-choice__icon { flex: 0 0 36px; display: flex; align-items: center; justify-content: center; color: var(--accent); }

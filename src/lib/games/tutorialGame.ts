@@ -32,12 +32,14 @@
  * teleport pad; the pad sends you to the CLIMB, a domed rotunda with four
  * platforms rising in jumps of 3 to the key; the GATE, a hall gate the key
  * opens, leads down a hall to the EXIT shrine, whose finish tile stops the
- * clock. Gravity is on throughout.
+ * clock. Gravity is on throughout. A player who climbs out through the
+ * rotunda's open oculus and falls finds a pad on the region's floor that sends
+ * them back to the arrival (FALLOUT_PAD).
  *
  * Regenerating the fixture: src/lib/games/__tests__/tutorialDungeon.gen.test.ts.
  */
 
-import type { GameDef, GameWorldSource } from './types'
+import type { GameDef, GamePad, GameWorldSource } from './types'
 
 /**
  * The region: a cube of height 6 (64 gibsons a side, a key a phone computes
@@ -72,6 +74,28 @@ const KEY_AT = at(37, 26, 43)
 const GATE_AT = at(40, 16, 32)
 
 /**
+ * The way back in for a player who fell out of the dungeon (owner, 2026-11-13:
+ * "make a teleport that brings you back to the main room that is on the
+ * game's region boundary floor"). The rotunda's oculus is open (it keeps the
+ * piece under the inline size limit, DESIGN.md), and a double jump from the key
+ * platform's edge goes up through it onto the dome; off the dome, or the hall
+ * roof it joins, a player falls past every room to the region's lower edge,
+ * the one floor that is not a face (lib/games/gravity.ts standing). Nothing
+ * stands on that floor, and nothing stands below the rooms' floors, so all of
+ * it is one open floor, walked to anywhere.
+ *
+ * So one pad is enough, on that floor directly under the oculus: a fall off
+ * the dome lands within a few gibsons of it, and its column of light (`beacon`)
+ * is seen from anywhere on the floor. It sends the player to the arrival, the
+ * main room, on the entry point, where the run began. The world is not
+ * changed (it is published under the game key): this pad is game logic only,
+ * drawn by the game view (game/GameView.tsx PadMark), with no world shard.
+ * Its own coordinate is one under the floor, outside the region, because a
+ * pad holds whoever stands one gibson above it (lib/games/play.ts padUnder).
+ */
+export const FALLOUT_PAD: GamePad = { at: at(40, -1, 40), to: TUTORIAL_ENTRY, beacon: 15 }
+
+/**
  * THE ONE LINE: the tutorial dungeon's game key, 64 lowercase hex. Set
  * 2026-11-13 (owner: "you can generate a tutorial key with nak and keep it
  * locally for the game key. lets get the tutorial live today"): the
@@ -102,6 +126,8 @@ export function tutorialGameFor(pubkey: string): GameDef {
     pads: [
       // The arrival shrine's pad: to the climb, which nothing joins to the arrival.
       { at: at(8, 17, 24), to: at(40, 17, 45) },
+      // The way back for anyone who fell out (owner, 2026-11-13). See FALLOUT_PAD.
+      FALLOUT_PAD,
     ],
     world: dev ? TUTORIAL_FIXTURE_WORLD : { kind: 'relays' },
     gravity: true,

@@ -58,6 +58,10 @@ import { GAMES_OFF_MESSAGE, GAME_ALREADY_MESSAGE, enterTutorialDungeon, loadProg
 import { TUTORIAL_ENTRY, TUTORIAL_GAME } from '../../lib/games/tutorialGame'
 import { teleportTemplate } from '../../lib/games/bracket'
 import { positionHex } from '../../lib/events'
+import { onTutorialLifecycle, resumeTutorial, tutorialButtonsBlocked, useTutorial } from '../useTutorial'
+import { CHOICE } from '../../tutorial/script'
+import { FROM_TUTORIAL_PREFIX, registerDungeonChoice } from '../../tutorial/dungeon'
+import { readProgress, setTutorialSwitch, writeProgress, type TutorialAnchor } from '../../tutorial/gate'
 
 const S = () => useCyberspace.getState()
 const G = () => useGame.getState()
@@ -396,6 +400,27 @@ describe('the tutorial dungeon: gravity, the key door and the clock (useGame)', 
     expect(localStorage.getItem(`onosendai:game:${entryId}`)).toBeNull()
   })
 
+  it('fallen out onto the region\'s floor, the pad there sends you back to the arrival and signs it; the key and the clock stay', async () => {
+    await enterTutorialDungeon()
+    await worldLoaded()
+    const s = G().session!
+    useGame.setState({ session: { ...s, progress: { ...s.progress, keyHeld: true } } })
+    // On the floor, two gibsons from the pad under the oculus (lib/games/tutorialGame.ts FALLOUT_PAD).
+    put(at(42, 0, 40))
+    G().tick()
+    expect(G().session!.arc).toBeNull()
+    const count = S().events.length
+    G().step('x', -1)
+    expect(G().busy).toBe('teleporting')
+    await idle()
+    expect(G().session!.at).toEqual(TUTORIAL_ENTRY)
+    expect(S().events.length).toBe(count + 1)
+    expect(tagOf(last(), 'A')?.[1]).toBe('teleport')
+    expect(tagOf(last(), 'C')?.[1]).toBe(positionHex(TUTORIAL_ENTRY, 1))
+    expect(firstBreak(S().actions())).toBeNull()
+    expect(G().session!.progress).toMatchObject({ keyHeld: true, clearedMs: null, startedAt: s.progress.startedAt })
+  })
+
   it('resume on a device that never saw the entry starts the clock from the entry itself', async () => {
     await enterTutorialDungeon()
     const entryId = G().session!.entryId
@@ -458,5 +483,156 @@ describe('what the review of #660 found untested', () => {
     expect(await G().exit()).toBeNull()
     expect(tagOf(last(), 'A')?.[1]).toBe('exit-virtual')
     expect(firstBreak(S().actions())).toBeNull()
+  })
+})
+
+/**
+ * The dungeon entered from the tutorial's "Where next?" card (owner,
+ * 2026-11-13: "if you quit the game early, you don't go back to the tutorial
+ * menu"): EXIT GAME puts the card up again, DUNGEON checked off only when it
+ * was cleared. Entered any other way, leaving is as before.
+ */
+describe('leaving a dungeon entered from the tutorial', () => {
+  const B = TUTORIAL_GAME.region.base
+  const at = (x: number, y: number, z: number) => ({ x: B.x + BigInt(x), y: B.y + BigInt(y), z: B.z + BigInt(z) })
+  const T = () => useTutorial.getState()
+  const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
+
+  beforeEach(() => {
+    if (T().active) T().pause()
+    writeProgress(S().identity.pubkey, null)
+    localStorage.removeItem(FROM_TUTORIAL_PREFIX + S().identity.pubkey)
+    setTutorialSwitch(true)
+    useTutorial.setState({ script: { steps: [CHOICE] } })
+    expect(registerDungeonChoice()).toBe(true)
+  })
+
+  /** RESTART laid out where the player stands, then PLAY THE DUNGEON on the card. */
+  async function playFromTheCard(): Promise<TutorialAnchor> {
+    T().start({ restart: true })
+    const anchor = T().anchor!
+    expect(anchor).not.toBeNull()
+    T().choose('dungeon')
+    while (T().choosing) await flush()
+    await worldLoaded()
+    expect(T().active).toBe(false)
+    expect(G().session).not.toBeNull()
+    return anchor
+  }
+
+  it('EXIT GAME before clearing brings the card back, DUNGEON unchecked, laid out where it was', async () => {
+    const anchor = await playFromTheCard()
+    expect(await G().exit()).toBeNull()
+    await flush()
+    expect(T().active).toBe(true)
+    expect(T().script.steps[T().index].id).toBe('choice')
+    expect(T().doneChoices).not.toContain('dungeon')
+    expect(T().anchor).toEqual(anchor)
+    // Still finished (picking the dungeon finished the run): a reload does not reopen the card by itself.
+    expect(readProgress(S().identity.pubkey)).toMatchObject({ step: 'choice', anchor, ended: 'finished' })
+  })
+
+  it('the card come back and closed with X stays finished, keeping what the run kept on screen (review)', async () => {
+    const stops: string[] = []
+    const off = onTutorialLifecycle({ stop: (how) => { stops.push(how) } })
+    try {
+      await playFromTheCard()
+      expect(await G().exit()).toBeNull()
+      await flush()
+      expect(T().active).toBe(true)
+      stops.length = 0
+      T().end('skipped')
+      expect(stops).toEqual(['finished'])
+      expect(readProgress(S().identity.pubkey)?.ended).toBe('finished')
+      // A pause (another identity, the switch off) keeps it too.
+      expect(resumeTutorial()).toBe(true)
+      stops.length = 0
+      T().pause()
+      expect(stops).toEqual(['finished'])
+      expect(readProgress(S().identity.pubkey)?.ended).toBe('finished')
+    } finally {
+      off()
+    }
+  })
+
+  it('a card closed while the dungeon was opening does not come back on leaving', async () => {
+    T().start({ restart: true })
+    T().choose('dungeon')
+    T().end('skipped')
+    while (!G().session) await flush()
+    await worldLoaded()
+    expect(await G().exit()).toBeNull()
+    await flush()
+    expect(T().active).toBe(false)
+  })
+
+  it('cleared, EXIT GAME brings the card back with DUNGEON checked off', async () => {
+    await playFromTheCard()
+    const s = G().session!
+    useGame.setState({ session: { ...s, at: at(40, 17, 11), progress: { ...s.progress, doorOpen: true } } })
+    G().step('z', -1)
+    expect(G().session!.progress.clearedMs).not.toBeNull()
+    expect(await G().exit()).toBeNull()
+    await flush()
+    expect(T().active).toBe(true)
+    expect(T().script.steps[T().index].id).toBe('choice')
+    expect(T().doneChoices).toContain('dungeon')
+    expect(readProgress(S().identity.pubkey)?.choices).toContain('dungeon')
+  })
+
+  it('after a reload in the game, leaving straight from the chain still brings the card back', async () => {
+    await playFromTheCard()
+    useGame.setState({ session: null })
+    expect(await G().exit()).toBeNull()
+    await flush()
+    expect(T().active).toBe(true)
+    expect(T().doneChoices).not.toContain('dungeon')
+  })
+
+  it('a refused exit leaves the card down, and the next exit that goes brings it back', async () => {
+    await playFromTheCard()
+    const real = S().exitGame
+    useCyberspace.setState({ exitGame: async () => ({ refused: 'no' }) })
+    try {
+      expect(await G().exit()).toBe('no')
+    } finally {
+      useCyberspace.setState({ exitGame: real })
+    }
+    await flush()
+    expect(T().active).toBe(false)
+    expect(await G().exit()).toBeNull()
+    await flush()
+    expect(T().active).toBe(true)
+  })
+
+  it('entered any other way, leaving does not bring the tutorial up', async () => {
+    T().start({ restart: true })
+    T().end('finished')
+    expect(await enterTutorialDungeon()).toBeNull()
+    expect(await G().exit()).toBeNull()
+    await flush()
+    expect(T().active).toBe(false)
+  })
+
+  it('RESUME TUTORIAL is refused inside the game, and goes once it is left', async () => {
+    await playFromTheCard()
+    expect(tutorialButtonsBlocked()).toBe(true)
+    expect(resumeTutorial()).toBe(false)
+    expect(T().active).toBe(false)
+    expect(await G().exit()).toBeNull()
+    await flush()
+    // The card came back; put away, RESUME picks the run up on it again.
+    T().pause()
+    expect(tutorialButtonsBlocked()).toBe(false)
+    expect(resumeTutorial()).toBe(true)
+    expect(T().script.steps[T().index].id).toBe('choice')
+  })
+
+  it('with the tutorial switched off meanwhile, leaving does not bring it up', async () => {
+    await playFromTheCard()
+    setTutorialSwitch(false)
+    expect(await G().exit()).toBeNull()
+    await flush()
+    expect(T().active).toBe(false)
   })
 })

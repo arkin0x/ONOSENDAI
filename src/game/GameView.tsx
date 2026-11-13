@@ -85,8 +85,13 @@ function Player({ at }: { at: [number, number, number] }): JSX.Element {
   )
 }
 
-/** A pad's mark: a ring breathing over it, so the one thing cyberspace does not have is seen. */
-function PadMark({ at }: { at: [number, number, number] }): JSX.Element {
+/**
+ * A pad's mark: a ring breathing over it, so the one thing cyberspace does not
+ * have is seen. A pad with a `beacon` also gets a column of light that tall,
+ * rising from where you stand on it, drawn through the fog so it is seen from
+ * anywhere (the tutorial dungeon's way back for a player who fell out).
+ */
+function PadMark({ at, beacon }: { at: [number, number, number]; beacon?: number }): JSX.Element {
   const ring = useRef<Group>(null)
   useFrame(({ clock }) => {
     if (!ring.current) return
@@ -99,6 +104,12 @@ function PadMark({ at }: { at: [number, number, number] }): JSX.Element {
       <group ref={ring}>
         <mesh rotation={[Math.PI / 2, 0, 0]}><torusGeometry args={[0.9, 0.05, 8, 40]} /><meshBasicMaterial color={GAME} /></mesh>
       </group>
+      {beacon !== undefined && beacon > 0 && (
+        <mesh position={[0, 0.5 + beacon / 2, 0]}>
+          <cylinderGeometry args={[0.3, 0.3, beacon, 16, 1, true]} />
+          <meshBasicMaterial color={GAME} transparent opacity={0.45} fog={false} depthWrite={false} />
+        </mesh>
+      )}
     </group>
   )
 }
@@ -145,7 +156,7 @@ function KeyMark({ at }: { at: [number, number, number] }): JSX.Element {
 
 function GameCanvas({ game, world, at, look, progress }: { game: GameDef; world: WorldShard[] | null; at: Position; look: React.MutableRefObject<Look>; progress: Progress }): JSX.Element {
   const me = centreOf(game, at)
-  const pads = useMemo(() => game.pads.map((p) => centreOf(game, p.at)), [game])
+  const pads = useMemo(() => game.pads.map((p) => ({ at: centreOf(game, p.at), beacon: p.beacon })), [game])
   const taken = keyTaken(progress)
   // The key gone once taken, the door's closed or open look (lib/games/progress.ts).
   const drawn = useMemo(() => (world ? worldNow(game, world, progress).drawn : null), [game, world, taken, progress.doorOpen])
@@ -157,7 +168,7 @@ function GameCanvas({ game, world, at, look, progress }: { game: GameDef; world:
       <pointLight position={me} intensity={6} distance={12} decay={1.6} color="#ffe2f4" />
       <Rig target={me} look={look} />
       {drawn && <Shards game={game} world={drawn} />}
-      {pads.map((p, i) => <PadMark key={i} at={p} />)}
+      {pads.map((p, i) => <PadMark key={i} at={p.at} beacon={p.beacon} />)}
       {game.key && !taken && <KeyMark at={centreOf(game, game.key.at)} />}
       <Player at={me} />
     </Canvas>

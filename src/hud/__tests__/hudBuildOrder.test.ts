@@ -224,6 +224,18 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
     expect(right).toEqual(['ScalePanel', 'PositionPanel', 'ViewAtPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'Controls', 'DerezzPanel', 'TutorialPanel', 'HiddenPanel'])
   })
 
+  it('TUTORIAL is drawn with the tutorial switched off too: its switch lives in it (owner, 2026-11-13)', async () => {
+    const { useTutorialSwitch } = await import('../../tutorial/gate')
+    try {
+      for (const value of [false, true, null]) {
+        useTutorialSwitch.setState({ value })
+        expect(columns().right).toContain('TutorialPanel')
+      }
+    } finally {
+      useTutorialSwitch.setState({ value: null })
+    }
+  })
+
   it('AGENTS is drawn for everyone, with no agent, in its saved place (arkinox, 2026-10-13)', () => {
     useMyAgentsAnswer.setState({ me: useCyberspace.getState().identity.pubkey, agents: [], status: 'ready' })
     try {

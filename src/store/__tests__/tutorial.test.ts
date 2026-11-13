@@ -32,7 +32,7 @@ vi.mock('../useCyberspace', async (orig) => {
 })
 
 import { MINTED_KEY, useCyberspace } from '../useCyberspace'
-import { ADVANCE_MS, CHOICE_FAILED_MESSAGE, choiceOffered, isNewArrival, onTutorialLifecycle, registerTutorialChoice, registerTutorialEffect, registerTutorialWatcher, runTutorialEffect, useTutorial, watchFirstArrival } from '../useTutorial'
+import { ADVANCE_MS, CHOICE_FAILED_MESSAGE, choiceOffered, isNewArrival, onTutorialLifecycle, registerTutorialChoice, registerTutorialEffect, registerTutorialWatcher, resumeStepFor, resumeTutorial, runTutorialEffect, tutorialButtonsBlocked, useTutorial, watchFirstArrival } from '../useTutorial'
 import { useDemo } from '../useDemo'
 import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialFlag, applyTutorialRoute, isTutorialPath, noteLanding, readProgress, setTutorialSwitch, takeTutorialAsk, tutorialAsked, tutorialEnabled, tutorialOn, tutorialSwitch, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
 import { spawnPlace } from '../useDemo'
@@ -997,5 +997,91 @@ describe('review of #716 (tutorial on by default)', () => {
     expect(tutorialOn()).toBe(false)
     useTutorialSwitch.setState({ value: null })
     expect(tutorialOn()).toBe(true)
+  })
+})
+
+/**
+ * RESUME TUTORIAL (owner, 2026-11-13: "a resume tutorial button ... next to
+ * the restart tutorial button", in the menu's Tutorial panel): the identity's
+ * run where it was, an unfinished or skipped one at its step, a finished one
+ * on the "Where next?" card; laid out where it was; publishing untouched.
+ */
+describe('RESUME TUTORIAL', () => {
+  const steps = TUTORIAL_SCRIPT.steps
+  /** A plain step of the basics: not the first, not a route's, needing no WALK. */
+  const mid = steps.find((st, i) => i > 1 && !st.branch && !st.needsWalk && !st.choices)!
+  const card = steps.find((st) => st.choices)!
+  const anchor = { x: 123456789n, y: 987654321n, z: 55555n, plane: 1 as const }
+  const T = () => useTutorial.getState()
+
+  it('has nothing to resume for an identity with no run on this device', () => {
+    expect(resumeStepFor(pubkey())).toBeNull()
+    expect(resumeTutorial()).toBe(false)
+    expect(T().active).toBe(false)
+  })
+
+  it('resumes an unfinished run at the step it was on, laid out where it was, publishing as it was', () => {
+    writeProgress(pubkey(), { step: mid.id, anchor })
+    useCyberspace.getState().setLive(true)
+    expect(resumeStepFor(pubkey())).toBe(mid.id)
+    expect(resumeTutorial()).toBe(true)
+    expect(T().script.steps[T().index].id).toBe(mid.id)
+    expect(T().anchor).toEqual(anchor)
+    expect(readProgress(pubkey())?.anchor).toEqual(anchor)
+    expect(useCyberspace.getState().live).toBe(true)
+    useCyberspace.getState().setLive(false)
+  })
+
+  it('resumes a skipped run at the step it was skipped on', () => {
+    writeProgress(pubkey(), { step: mid.id, ended: 'skipped', anchor })
+    expect(resumeTutorial()).toBe(true)
+    expect(T().script.steps[T().index].id).toBe(mid.id)
+    expect(readProgress(pubkey())?.ended).toBeUndefined()
+    expect(T().anchor).toEqual(anchor)
+  })
+
+  it('resumes a finished run on the "Where next?" card, its routes still checked off', () => {
+    writeProgress(pubkey(), { step: mid.id, ended: 'finished', choices: ['agents'], anchor })
+    expect(resumeStepFor(pubkey())).toBe(card.id)
+    expect(resumeTutorial()).toBe(true)
+    expect(T().script.steps[T().index].id).toBe(card.id)
+    expect(T().doneChoices).toEqual(['agents'])
+    expect(T().anchor).toEqual(anchor)
+  })
+
+  it('a finished run picked up again stays finished however it is closed: X, a pause', () => {
+    writeProgress(pubkey(), { step: mid.id, ended: 'finished', anchor })
+    expect(resumeTutorial()).toBe(true)
+    expect(readProgress(pubkey())?.ended).toBe('finished')
+    T().end('skipped')
+    expect(readProgress(pubkey())).toMatchObject({ ended: 'finished', step: card.id, anchor })
+    expect(resumeTutorial()).toBe(true)
+    T().pause()
+    expect(readProgress(pubkey())?.ended).toBe('finished')
+    // A RESTART is a new run: skipped means skipped again.
+    T().start({ restart: true })
+    T().end('skipped')
+    expect(readProgress(pubkey())?.ended).toBe('skipped')
+  })
+
+  it('is refused while a run goes, over the tour or TV, and on the line', () => {
+    writeProgress(pubkey(), { step: mid.id, ended: 'skipped', anchor })
+    T().start({ restart: true })
+    const index = T().index
+    expect(tutorialButtonsBlocked()).toBe(true)
+    expect(resumeTutorial()).toBe(false)
+    expect(T().index).toBe(index)
+    T().pause()
+    writeProgress(pubkey(), { step: mid.id, ended: 'skipped', anchor })
+    useTv.setState({ on: true })
+    expect(resumeTutorial()).toBe(false)
+    useTv.setState({ on: false })
+    useCyberspace.setState({ transit: {} as never })
+    expect(tutorialButtonsBlocked()).toBe(true)
+    expect(resumeTutorial()).toBe(false)
+    useCyberspace.setState({ transit: null })
+    expect(T().active).toBe(false)
+    expect(readProgress(pubkey())).toMatchObject({ step: mid.id, ended: 'skipped' })
+    expect(resumeTutorial()).toBe(true)
   })
 })

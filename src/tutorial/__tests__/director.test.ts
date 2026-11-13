@@ -330,6 +330,21 @@ describe('the director', () => {
     useTutorialCam.setState({ frame: null })
     useCyberspace.setState({ cursor: { ...at, x: at.x + 1n } })
     expect(useTutorialCam.getState().frame).toBe(null)
+    // Framed again on a fresh entry; a hop that missed the target lands elsewhere and is framed again from there.
+    useTutorial.getState().start({ at: 'to-course' })
+    await staged()
+    const first = useTutorialCam.getState().frame!
+    const missed = { ...at, x: at.x + 2n }
+    useCyberspace.setState({ position: missed, cursor: { ...missed } })
+    const again = useTutorialCam.getState().frame!
+    expect(again).not.toBe(first)
+    expect(again).toEqual(courseFrame(missed, targetAt(layout.frame)))
+    // Off 2^0 the shot lets go and is not asked again this step: the rig follows the cursor.
+    useCyberspace.getState().adjustScale(1)
+    expect(useTutorialCam.getState().frame).toBe(null)
+    useCyberspace.getState().adjustScale(-1)
+    useCyberspace.setState({ position: at, cursor: { ...at } })
+    expect(useTutorialCam.getState().frame).toBe(null)
     // Framed again on a fresh entry, and let go when the step goes.
     useTutorial.getState().start({ at: 'to-course' })
     await staged()

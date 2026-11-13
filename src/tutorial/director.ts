@@ -27,7 +27,7 @@
 import { create } from 'zustand'
 import type { Plane } from 'cyberspace-core'
 import { onTutorialLifecycle, registerTutorialEffect, registerTutorialWatcher, useTutorial } from '../store/useTutorial'
-import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
+import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from '../store/useCyberspace'
 import { spawnPlace } from '../store/useDemo'
 import { copyLinedUp, positionOf, useShards } from '../store/useShards'
 import { useOpenedChests, openedKey } from '../store/useOpenedChests'
@@ -436,6 +436,9 @@ registerTutorialEffect('to-course', () => {
   }
   let zoomed = false
   let framed: HopFrame | null = null
+  // Where the shot was framed from, and whether it is over for this step (the player took the camera, or left 2^0).
+  let framedFrom: Position | null = null
+  let shotOver = false
   const letGo = (): void => { if (framed && useTutorialCam.getState().frame === framed) setTutorialFrame(null) }
   const check = (): void => {
     point()
@@ -449,7 +452,15 @@ registerTutorialEffect('to-course', () => {
       setTutorialZoom(COURSE_ZOOM)
       return
     }
-    if (!framed && now.atHead() && !now.walking && now.headPlane === layout.plane && inRegion(now.position, layout.cover.base, layout.cover.height)) {
+    if (shotOver) return
+    // The rig stood the shot down (a grab of the camera, WALK): theirs now, not asked again this step.
+    if (framed && useTutorialCam.getState().frame !== framed) { shotOver = true; return }
+    // Off 2^0 each press moves further than the shot holds, and the rig follows the cursor again only once the shot lets go.
+    if (framed && now.scaleExp !== 0) { letGo(); shotOver = true; return }
+    // Framed first as the player stands at their head in the cover, and again from wherever a hop that missed the target landed.
+    const moved = framedFrom !== null && !samePosition(framedFrom, now.position)
+    if ((!framed || moved) && now.atHead() && !now.walking && now.headPlane === layout.plane && inRegion(now.position, layout.cover.base, layout.cover.height)) {
+      framedFrom = { ...now.position }
       framed = courseFrame(now.position, targetAt(layout.frame))
       setTutorialFrame(framed)
     }

@@ -15,7 +15,7 @@ import { itemCentre, type ViewAxes } from '../../lib/space'
 import { alignedOrigin } from '../../store/useCyberspace'
 import { tutorialLayout } from '../../tutorial/layout'
 import { targetAt } from '../../tutorial/course'
-import { targetGuiding, targetMark } from '../TutorialTarget'
+import { targetMark, targetPhase } from '../TutorialTarget'
 
 const SPAWN = { x: (1n << 40n) + 1000n, y: (1n << 40n) + 2050n, z: (1n << 40n) + 1500n }
 const UPRIGHT: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } }
@@ -46,17 +46,21 @@ describe('the hop target mark', () => {
     }
   })
 
-  it('guides (the beam and the ping) only while the course step waits', () => {
-    const script = { steps: [{ id: 'inventory' }, { id: 'to-course' }, { id: 'walk' }] }
-    expect(targetGuiding({ active: true, done: false, index: 1, script })).toBe(true)
-    expect(targetGuiding({ active: true, done: true, index: 1, script })).toBe(false)
-    expect(targetGuiding({ active: true, done: false, index: 2, script })).toBe(false)
-    expect(targetGuiding({ active: false, done: false, index: 1, script })).toBe(false)
+  it('shows nothing before the course step, all of it while the course step waits, the ring alone after (so the avatar shows inside it)', () => {
+    const script = { steps: [{ id: 'inventory' }, { id: 'to-course' }, { id: 'walk' }, { id: 'run' }] }
+    expect(targetPhase({ active: true, done: false, index: 0, script })).toBe('off')
+    expect(targetPhase({ active: true, done: false, index: 1, script })).toBe('guiding')
+    // Landed: the step is done at once, before it moves on.
+    expect(targetPhase({ active: true, done: true, index: 1, script })).toBe('after')
+    expect(targetPhase({ active: true, done: false, index: 2, script })).toBe('after')
+    expect(targetPhase({ active: true, done: false, index: 3, script })).toBe('after')
+    expect(targetPhase({ active: false, done: false, index: 1, script })).toBe('off')
+    expect(targetPhase({ active: true, done: false, index: 0, script: { steps: [{ id: 'welcome' }] } })).toBe('off')
   })
 
   it('can never be tapped: every mesh has its raycast off', () => {
     const src = readFileSync(new URL('../TutorialTarget.tsx', import.meta.url), 'utf8')
-    const meshes = src.match(/<mesh\b[^>]*>/g) ?? []
+    const meshes = src.match(/<mesh\b[\s\S]*?>/g) ?? []
     expect(meshes.length).toBeGreaterThanOrEqual(4)
     for (const m of meshes) expect(m).toContain('raycast={noRaycast}')
   })

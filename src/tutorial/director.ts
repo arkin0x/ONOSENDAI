@@ -528,8 +528,11 @@ registerTutorialEffect('view-earth', () => {
   viewHyperspace({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', EARTH_SCALE_EXP, null)
   // Out far enough for the whole planet, on a phone held upright too: the
   // orbit was left where the course or the workshop had it (owner, 2026-11-13).
-  setTutorialZoom(earthFrameDistance(FOV, screenAspect()))
+  setTutorialZoom(earthFrameDistance(FOV, screenAspect(), COACH_COVER))
 })
+
+/** About how much of the screen's height the coach's card covers at its top (a fifth on a desktop, a quarter on a phone). */
+const COACH_COVER = 0.2
 
 /** The window's width over its height; 1 where there is no window. */
 function screenAspect(): number {

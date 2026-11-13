@@ -345,23 +345,26 @@ describe('HYPERSPACE first, for a while', () => {
 })
 
 describe('the whole Earth in view as the route starts', () => {
-  /** Whether a sphere of radius r at distance d fits a frame of `aspect` under the scene's FOV. */
-  const fits = (d: number, aspect: number): boolean => {
+  /** Whether Earth at distance d fits a frame of `aspect` under the scene's FOV, clear of a card over the top `cover` of it. */
+  const fits = (d: number, aspect: number, cover = 0): boolean => {
     const tall = Math.tan((FOV * Math.PI) / 360)
-    const half = Math.min(Math.atan(tall), Math.atan(tall * aspect))
+    const half = Math.min(Math.atan(tall * (1 - 2 * cover)), Math.atan(tall * aspect))
     return Math.asin(earthRadiusCells(EARTH_SCALE_EXP) / d) < half
   }
 
-  it('fits the planet with room to spare on a 375x812 phone and a 1440x900 desktop, inside the orbit\'s reach', () => {
+  it('fits the planet with room to spare on a 375x812 phone and a 1440x900 desktop, clear of the coach, inside the orbit\'s reach', () => {
     for (const [w, h] of [[375, 812], [1440, 900]]) {
-      const d = earthFrameDistance(FOV, w / h)
-      expect(fits(d, w / h), `${w}x${h}`).toBe(true)
-      // Not so far that the planet is a speck: under 1.5 times the tightest fit.
-      expect(fits(d / 1.5, w / h), `${w}x${h}`).toBe(false)
+      const d = earthFrameDistance(FOV, w / h, 0.2)
+      expect(fits(d, w / h, 0.2), `${w}x${h}`).toBe(true)
+      // Not so far that the planet is a speck: under 1.3 times the tightest fit.
+      expect(fits(d / 1.3, w / h, 0.2), `${w}x${h}`).toBe(false)
       expect(d).toBeLessThanOrEqual(24 * 4)
     }
-    // The old start (26 cells) did not fit a phone.
+    // The old start (26 cells) did not fit a phone, nor a desktop clear of the coach.
     expect(fits(26, 375 / 812)).toBe(false)
+    expect(fits(26, 1440 / 900, 0.2)).toBe(false)
+    // With nothing over the top, the height alone counts.
+    expect(earthFrameDistance(FOV, 1440 / 900)).toBeLessThan(earthFrameDistance(FOV, 1440 / 900, 0.2))
   })
 
   it('view-earth asks the camera out to that distance for this screen', () => {
@@ -370,7 +373,7 @@ describe('the whole Earth in view as the route starts', () => {
     g.window = { innerWidth: 375, innerHeight: 812 }
     try {
       runTutorialEffect('view-earth')
-      expect(useTutorialCam.getState().zoom).toBeCloseTo(earthFrameDistance(FOV, 375 / 812), 6)
+      expect(useTutorialCam.getState().zoom).toBeCloseTo(earthFrameDistance(FOV, 375 / 812, 0.2), 6)
       expect(useCyberspace.getState().focus?.label).toBe('EARTH')
     } finally {
       g.window = had

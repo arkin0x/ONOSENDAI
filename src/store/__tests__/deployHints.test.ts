@@ -5,6 +5,9 @@
  * keeps the first bag's settings; a riddle written from another device is
  * carried forward; rewrites by broadcast and delete keep them; the sector hint
  * goes off above height 30; and a bag without `h` is still read at its height.
+ * The sector hint is ON by default for every new bag (owner ruling
+ * 2026-11-13), off by hand per bag, off where the height is too large for it
+ * and back on below, and an edit keeps its bag's own choice.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -39,8 +42,8 @@ vi.mock('../../lib/relay', () => ({
 
 import { useCyberspace } from '../useCyberspace'
 import { ownBagIn, regionOf, useShards } from '../useShards'
-import { DEFAULT_BAG_SETTINGS, HIDDEN_KIND, bagTemplate, type BagSettings } from '../../lib/hidden'
-import { SECTOR_HINT, hintTags } from '../../lib/hint'
+import { HIDDEN_KIND, bagTemplate, newBagSettings, type BagSettings } from '../../lib/hidden'
+import { SECTOR_HINT, hintTags, isHintTag } from '../../lib/hint'
 import { deployPoint } from '../../lib/space'
 import { hexToBytes, type NostrEvent } from '../../lib/events'
 
@@ -72,10 +75,10 @@ beforeEach(() => {
 })
 
 describe('the deploy writes the bag settings', () => {
-  it('defaults: H, no hint, no riddle, as every bag before', async () => {
+  it('defaults: H and the sector hint (owner ruling 2026-11-13), no riddle', async () => {
     await hide('one')
     const bag = lastBag()
-    expect(tagNames(bag)).toEqual(['d', 'encrypted', 'version', 'H', 'client'])
+    expect(tagNames(bag)).toEqual(['d', 'encrypted', 'version', 'H', 'hint', 'X', 'Y', 'Z', 'S', 'client'])
     expect(bag.tags).toContainEqual(['H', String(HEIGHT)])
     expect(bag.tags.some((t) => t[0] === 'h')).toBe(false)
     expect(bag.content).toBe('')
@@ -148,7 +151,7 @@ describe('rewrites that are not deploys keep the settings', () => {
 
   it('broadcast from LOCAL publishes the settings it was hidden with', async () => {
     useCyberspace.setState({ live: false })
-    await hide('quiet', { heightTag: false, riddle: 'later', contents: false, money: false })
+    await hide('quiet', { heightTag: false, hint: null, riddle: 'later', contents: false, money: false })
     expect(sent).toHaveLength(0)
     const dep = useShards.getState().mine[0]
     expect(await useShards.getState().broadcast(dep.lookupId)).toBe(true)
@@ -177,7 +180,93 @@ describe('the sector hint and the height', () => {
     s.seedDeployBag({ region: 'r1', settings: { heightTag: false, hint: null, riddle: 'bag riddle', contents: false, money: false }, count: 2, cashu: false })
     expect(useShards.getState().deployBag.riddle).toBe('bag riddle')
     s.seedDeployBag(null)
-    expect(useShards.getState().deployBag).toEqual(DEFAULT_BAG_SETTINGS)
+    expect(useShards.getState().deployBag).toEqual(newBagSettings(0))
+  })
+})
+
+describe('the sector hint is ON by default for every new bag (owner ruling 2026-11-13)', () => {
+  const S = () => useShards.getState()
+  const starts: [string, () => void][] = [
+    ['a shard', () => S().startDeployShard('some-shard')],
+    ['a copy of a public shard', () => S().startDeployObject({ address: '33331:aa:bb', shard: { unit: 0 } } as never)],
+    ['a message', () => S().startDeployMessage('x')],
+    ['a key', () => S().startDeployKey({ name: 'k' } as never)],
+    ['audio', () => S().startDeployAudio({ title: 'a' } as never)],
+    ['a seed', () => S().startDeploySeed({ text: '' } as never)],
+    ['a chest', () => S().startDeployChest({ name: 'c', lock: null, requires: '', contents: [] } as never)],
+    ['a door', () => S().startPlaceDoor()],
+  ]
+  it.each(starts)('%s starts with it on, whatever the last deploy chose', (_, start) => {
+    S().setDeployBag({ hint: null })
+    start()
+    expect(S().deployBag.hint).toEqual(SECTOR_HINT)
+    expect(S().deployBagFrom).toBeNull()
+  })
+
+  it('turned off, the bag goes out with no hint or sector tag; the next new bag starts on again', async () => {
+    await hide('off', { hint: null })
+    expect(lastBag().tags.some(isHintTag)).toBe(false)
+    expect(useShards.getState().mine[0].bag?.hint).toBeNull()
+    S().startDeployMessage('next')
+    expect(S().deployBag.hint).toEqual(SECTOR_HINT)
+    // Into the same region, the controls are that bag's: off, as it was chosen.
+    const cs = useCyberspace.getState()
+    S().seedDeployBag(ownBagIn(S().mine, regionOf(deployPoint(cs.cursor, cs.scaleExp, HEIGHT), cs.plane, HEIGHT)))
+    expect(S().deployBag.hint).toBeNull()
+  })
+
+  it('left untouched, never puts a hint on a bag already out without one', async () => {
+    await hide('first', { hint: null })
+    const first = lastBag()
+    // Another device's bag: this one does not know it, so the controls start as a new bag's.
+    useShards.setState({ mine: [] })
+    relayBags = [first]
+    await hide('second')
+    expect(lastBag().tags.some(isHintTag)).toBe(false)
+  })
+
+  it('a new bag above height 30 starts off, and it comes back on at 30 or lower', () => {
+    useShards.setState({ deployCeiling: () => 40, deployHeight: 35 })
+    S().startDeployMessage('high')
+    expect(S().deployBag.hint).toBeNull()
+    S().setDeployHeight(30)
+    expect(S().deployBag.hint).toEqual(SECTOR_HINT)
+    S().setDeployHeight(31)
+    expect(S().deployBag.hint).toBeNull()
+    S().setDeployHeight(12)
+    expect(S().deployBag.hint).toEqual(SECTOR_HINT)
+  })
+
+  it('one turned off by hand stays off down the heights', () => {
+    useShards.setState({ deployCeiling: () => 40 })
+    S().startDeployMessage('x')
+    S().setDeployHeight(20)
+    S().setDeployBag({ hint: null })
+    S().setDeployHeight(35)
+    S().setDeployHeight(20)
+    expect(S().deployBag.hint).toBeNull()
+  })
+
+  it('leaving your bag\'s region for an empty one above height 30: off and held, never a hint too small', () => {
+    useShards.setState({ deployCeiling: () => 40, deployHeight: 35 })
+    S().seedDeployBag({ region: 'r', settings: { heightTag: true, hint: null, riddle: '', contents: false, money: false }, count: 1, cashu: false })
+    S().seedDeployBag(null)
+    expect(S().deployBag.hint).toBeNull()
+    expect(S().deployHintHeld).toEqual(SECTOR_HINT)
+  })
+
+  it('a move keeps its bag\'s own choice, off or on', async () => {
+    await hide('kept off', { hint: null })
+    S().startMoveItem(S().mine[0].eventId)
+    expect(S().deployBag.hint).toBeNull()
+    S().setDeployHeight(HEIGHT)
+    expect(S().deployBag.hint).toBeNull()
+    S().cancelDeploy()
+    relayBags = [lastBag()]
+    await hide('on', { hint: SECTOR_HINT })
+    const on = S().mine.find((d) => d.text === 'on')!
+    S().startMoveItem(on.eventId)
+    expect(S().deployBag.hint).toEqual(SECTOR_HINT)
   })
 })
 

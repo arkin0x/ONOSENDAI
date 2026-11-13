@@ -49,6 +49,7 @@ import { decryptForRegion } from '../../lib/shardCrypto'
 import type { NostrEvent } from '../../lib/events'
 import { useWorkshop } from '../useWorkshop'
 import { doorSecretWithKey, roomKey, roomLookupId, ROOM_BAG_SETTINGS } from '../../lib/doors'
+import { SECTOR_HINT, isHintTag } from '../../lib/hint'
 import { keptInChest, lookTagsOf } from '../../lib/looks'
 import { regionKeyOffThread } from '../../lib/regionKeyOffThread'
 import { deployPoint, type Position } from '../../lib/space'
@@ -177,6 +178,22 @@ describe('what is placed in its room (R1, height-specific)', () => {
     expect(bag.tags.map((t) => t[0]).filter((t) => !['d', 'encrypted', 'version', 'client'].includes(t))).toEqual([])
     expect(bag.content).toBe('')
     expect(await finderReads(d, secret)).toEqual({ found: true, texts: ['behind it'] })
+  })
+
+  it('the sector hint, ON by default (owner ruling 2026-11-13), is on the door\u2019s bag and never on its room\u2019s', async () => {
+    const d = await sealDoor()
+    expect(d.bag?.hint).toEqual(SECTOR_HINT)
+    expect(relay.events.filter((e) => e.kind === HIDDEN_KIND && e.tags.some((t) => t[0] === 'd' && t[1] === d.lookupId)).at(-1)!.tags.some(isHintTag)).toBe(true)
+    S().startDeployMessage('behind it')
+    S().setDeployHeight(HEIGHT)
+    expect(S().deployBag.hint).toEqual(SECTOR_HINT)
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    const inside = S().mine.find((m) => m.text === 'behind it')!
+    expect(inside.room).toEqual({ doorId: d.eventId })
+    expect(inside.bag).toEqual(ROOM_BAG_SETTINGS)
+    const room = relay.events.filter((e) => e.kind === HIDDEN_KIND && e.tags.some((t) => t[0] === 'd' && t[1] === inside.lookupId)).at(-1)!
+    expect(room.tags.some(isHintTag)).toBe(false)
   })
 
   it('at any other height, in its cube: it joins the room anyway, at the room\u2019s height (arkinox, 2026-11-09)', async () => {

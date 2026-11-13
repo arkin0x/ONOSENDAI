@@ -38,6 +38,7 @@
 
 import type { WebGLProgramParametersWithUniforms } from 'three'
 import { GRID_RADIUS } from '../lib/space'
+import { lineFade, patchNearFade } from './nearFade'
 
 /** The share of its colour a face keeps edge on to the view: never black. */
 export const FACE_FLOOR = 0.4
@@ -156,8 +157,12 @@ export const HEADLAMP_FACES = {
   customProgramCacheKey: () => 'headlamp-faces-1',
 } as const
 
-/** The same for a line material: distance only. */
+/**
+ * The same for a line material: distance only. A world line also fades out
+ * as the camera comes right up to it (scene/nearFade.ts), the tutorial's box
+ * among them: same hook, same one program.
+ */
 export const HEADLAMP_LINES = {
-  onBeforeCompile: (shader: WebGLProgramParametersWithUniforms) => { patchHeadlamp(shader, false) },
-  customProgramCacheKey: () => 'headlamp-lines-1',
+  onBeforeCompile: (shader: WebGLProgramParametersWithUniforms) => { patchHeadlamp(shader, false); patchNearFade(shader, lineFade.range, lineFade.on) },
+  customProgramCacheKey: () => 'headlamp-lines-2',
 } as const

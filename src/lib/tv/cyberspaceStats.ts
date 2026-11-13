@@ -14,7 +14,7 @@
  *
  * | Board | Rule |
  * |---|---|
- * | LONGEST CHAIN | chainLength: valid actions on the current chain, the spawn included (ruling 2026-10-31: the current chain; the CHAIN badge's best chain is bestChainLength, not shown here) |
+ * | LONGEST CHAIN | chainLength: valid actions on the current chain, the spawn included (ruling 2026-10-31: the current chain; the CHAIN badge's best chain is bestChainLength, not shown here), counted only up to where the relay's rules stop it (owner, 2026-11-13: lib/chainStop.ts countsThrough) |
  * | MOST BAGS HIDDEN | bagsHidden: live sealed bags, distinct d, at most 5 a UTC day |
  * | MOST RESPAWNS | respawnCount: spawns after the first whose chain went on to a valid hop |
  * | MOST OBJECTS PUBLISHED | objectsPublished: live public objects, each a new shape, 8+ vertices, at most 10 a UTC day |
@@ -179,6 +179,12 @@ export interface StatsInput {
   objects: ObjectRecord[]
   deletions: Deletion[]
   arrivals: Map<string, number>
+  /**
+   * The 5.13 list, for LONGEST CHAIN's relay check (keyChains `relayList`);
+   * null or left out when it did not load, and then a hop only it can judge
+   * is taken as it stands.
+   */
+  v1Hops?: ReadonlySet<string> | null
 }
 
 /** The hour `nowS` is in, unix s: what a board is counted to and stamped with. */
@@ -201,7 +207,7 @@ export async function countStats(input: StatsInput, asOf: number, yieldEvery = 4
   const active: string[] = []
   let n = 0
   for (const [pk, evs] of by) {
-    const k = keyChains(evs, pk, asOf)
+    const k = keyChains(evs, pk, asOf, input.v1Hops ?? null)
     if (k.chainLength > 0) chain.set(pk, k.chainLength)
     if (k.respawns > 0) respawns.set(pk, k.respawns)
     if (k.activeWeek) active.push(pk)

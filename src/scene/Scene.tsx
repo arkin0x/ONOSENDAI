@@ -106,6 +106,7 @@ import { TvScreenEffect } from './TvScreenEffect'
 import { useTv } from '../store/useTv'
 import { CAMERA_NEAR, FOV, ORBIT_MIN_DISTANCE } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
+import { lineFade } from './nearFade'
 import { canvasPixels, composerSamples } from './composerBudget'
 import './radialFog'
 import { fogFarStep, FOG_FAR, FOG_NEAR, FOG_START_SHARE, VIEW_FOG_SCALE } from './fog'
@@ -422,6 +423,8 @@ function HeadlampRig(): null {
   useLayoutEffect(() => { headlampUniforms.uHeadlamp.value = on ? 1 : 0 }, [on])
   const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
   useFrame((state) => {
+    // Lines fade out right at the eye, except in WALK, where the eye is on the avatar and that is how far anything is (scene/nearFade.ts).
+    lineFade.on.value = useCyberspace.getState().walking ? 0 : 1
     if (!controls) return
     // A stopped VIEW fly brings the target in close; the reach fades in after it rather than stepping (ViewFly.ts reachOwed).
     headlampUniforms.uHeadlampReach.value = headlampReach(state.camera.position.distanceTo(controls.target) + viewRig.reachOwed)

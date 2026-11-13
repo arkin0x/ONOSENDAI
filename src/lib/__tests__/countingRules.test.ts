@@ -211,6 +211,20 @@ describe('keyChains: each chain built once, the same answers', () => {
   })
 })
 
+describe('keyChains with the relay check (LONGEST CHAIN, owner 2026-11-13)', () => {
+  it('a hop carrying only mn stops the current chain there; a valid chain counts whole; respawns and the week are as before', () => {
+    const pk = key()
+    const evs = walk(pk, T, 4)
+    const partial = { ...evs[3], tags: evs[3].tags.filter((t) => t[0] !== 'mp') }
+    const stopped = [evs[0], evs[1], evs[2], partial, evs[4]]
+    expect(keyChains(stopped, pk).chainLength).toBe(5)
+    expect(keyChains(stopped, pk, Infinity, new Set()).chainLength).toBe(3)
+    expect(keyChains(stopped, pk, Infinity, null).chainLength).toBe(5) // no list: a hop missing a tag is taken as it stands
+    expect(keyChains(evs, pk, Infinity, new Set()).chainLength).toBe(5)
+    expect(keyChains(stopped, pk, T + 20, new Set()).activeWeek).toBe(keyChains(stopped, pk, T + 20).activeWeek)
+  })
+})
+
 describe('MOST BAGS HIDDEN (bagsHidden, STASH)', () => {
   const pk = 'a'.repeat(64)
   const bag = (d: string, t: number, sealed = true, who = pk): BagRecord => bagRecord({ id: nextId(), pubkey: who, created_at: t, kind: 33330, tags: [['d', d], ...(sealed ? [['encrypted', 'x']] : [])], content: '', sig: '' })!

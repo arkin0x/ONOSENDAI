@@ -10,7 +10,7 @@
  * | Stop | Found by | What ONOSENDAI does |
  * |---|---|---|
  * | a structural break (links, sectors, brackets, rides, forks) | buildChain, `breaks` on the row (events.ts firstBreak) | as since 2026-10-07: frozen at the last valid position, every move refused, RESPAWN |
- * | a proof in a form the rules reject: a version 1 hop off the 5.13 list, a hop with one of mn and mp, a sidestep or a ride with no mn off its list | lib/relayPlacement.ts scanFormStops | every move refused (RELAY_STOPPED_MESSAGE), RESPAWN; the avatar is still drawn at the head |
+ * | a proof in a form the rules reject: a version 1 hop off the 5.13 list, a hop with one of mn and mp, a sidestep or a ride with no mn off its list | lib/relayPlacement.ts scanFormStops | every move refused (RELAY_STOPPED_MESSAGE), RESPAWN; you stand at the last action that counts, as on a structural break (relayFreezeOf, store derive) |
  * | a hop above the relay's verify ceiling (h24) | the same | said, nothing refused: the relay leaves it unchecked, not rejected, and a respawn would not help |
  *
  * The 5.13 list is 97 KB gzipped and loads lazily (lib/v1HopList): until it
@@ -161,6 +161,44 @@ export function chainStopOf(chain: Chain, slot = 'own'): ChainStop | null | unde
   if (stop) return { source: 'relay', stop }
   if (broken) return { source: 'rules', broken }
   return tall ? { source: 'relay', stop: tall } : null
+}
+
+/**
+ * Where your chain stands when a rejected proof stops it: the stop's index
+ * and the last action that counts before it, or null when no form stop
+ * refuses moves (a structural break is buildChain's to freeze, which it
+ * already does on the rows; a tall hop stops nothing). Read through
+ * chainStopOf, so kept as the chain grows, and undefined-safe: while the
+ * 5.13 list loads this says null, and the head stands, as before.
+ */
+export function relayFreezeOf(chain: Chain, slot = 'own'): { index: number; at: ActionEvent } | null {
+  const stop = chainStopOf(chain, slot)
+  if (!stop || stop.source !== 'relay' || stop.stop.kind !== 'broken') return null
+  return { index: stop.stop.index, at: stop.stop.lastValid ?? chain[0] }
+}
+
+/**
+ * How many of `chain`'s actions count, by the rules chainStopOf reads, for a
+ * chain read once rather than kept (TV's LONGEST CHAIN, another person's
+ * frozen flag): up to its first structural break or rejected proof,
+ * whichever comes first, and past any tall hop, which stops nothing (as
+ * chainStopOf). `list` is the 5.13 list; null when it could not load, and
+ * then a hop only it can judge is taken as it stands, never cut on a guess.
+ * A fork counts nothing. `stop` is the rejected proof when that is where it
+ * ends. Pure and linear: the break's scan and the form scan before it.
+ */
+export function countsThrough(chain: Chain, list: ReadonlySet<string> | null): { end: number; stop: RelayStop | null } {
+  if (chain.length === 0 || chain[0].fork) return { end: 0, stop: null }
+  const broken = firstBreak(chain)
+  const end = broken ? broken.index : chain.length
+  let from = 1
+  let tall: RelayStop | null = null
+  for (;;) {
+    const s = scanOn(chain, list, from, end, tall)
+    // Only with no list: the hop it waited at is taken as it stands, and the scan goes on after it.
+    if (s.unknown) { from = s.scanned + 1; tall = s.tall; continue }
+    return s.stop ? { end: s.stop.index, stop: s.stop } : { end, stop: null }
+  }
 }
 
 /** Whether a stop refuses moves until a respawn: every structural break, and every form stop but a tall hop. */

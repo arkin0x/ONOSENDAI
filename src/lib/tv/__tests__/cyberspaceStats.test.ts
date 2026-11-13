@@ -22,7 +22,9 @@ import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { positionHex, spawnTemplate, type NostrEvent } from '../../events'
 import { hopEvent, nextId } from '../../__tests__/chainFixtures'
-import { DAY_S, WEEK_S, arrivalTimes, type BagRecord } from '../../countingRules'
+import { DAY_S, WEEK_S, arrivalTimes, keyChains, type BagRecord } from '../../countingRules'
+import { loadV1HopList } from '../../v1HopList'
+import ownerChain from '../../__tests__/vectors/owner-chain-e8ed3798-through-2026-09-04.json'
 import { READ_OVERLAP_S, READ_WHOLE_S, bagsHiddenAt, chainLengthAt, loadCensus } from '../stats'
 import { V2_EPOCH } from '../tape'
 import {
@@ -396,5 +398,25 @@ describe('reading only what is new (review of #537)', () => {
     expect(c2.bags).toHaveLength(2)
     expect(c2.firstSpawn.get(pk)).toBe(AS_OF - DAY_S)
     expect(bagsHiddenAt(c2, pk, AS_OF + 3600)).toBe(2)
+  })
+})
+
+describe('LONGEST CHAIN counts only up to where the relay stops a chain (owner, 2026-11-13)', () => {
+  const OWNER = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
+  const input = (v1Hops?: ReadonlySet<string> | null): Parameters<typeof countStats>[0] => {
+    const actions = ownerChain as NostrEvent[]
+    return { actions, bags: [], objects: [], deletions: [], arrivals: arrivalTimes(actions), v1Hops }
+  }
+
+  it("the owner's chain counts 23, its spawn through event 22: none of the moves after the version 1 sidestep of 2026-09-04", async () => {
+    const all = (ownerChain as NostrEvent[]).length
+    expect(all).toBe(26)
+    expect((await countStats(input(await loadV1HopList()), Infinity, 0)).chain.get(OWNER)).toBe(23)
+    // The 5.13 list not loaded: its listed version 1 hops are taken as they stand, and the sidestep still stops it.
+    expect((await countStats(input(null), Infinity, 0)).chain.get(OWNER)).toBe(23)
+  })
+
+  it('counted by structure alone (before), it was the whole chain', () => {
+    expect(keyChains(ownerChain as NostrEvent[], OWNER).chainLength).toBe(26)
   })
 })

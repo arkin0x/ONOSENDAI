@@ -6,10 +6,11 @@
     <!-- Same-origin requests (the analytics collector among them) carry only the origin, never /C/<hex> or the query (src/lib/analytics.ts). -->
     <meta name="referrer" content="strict-origin" />
     
-    <!-- Prevent caching: always fetch fresh build -->
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-    <meta http-equiv="Pragma" content="no-cache" />
-    <meta http-equiv="Expires" content="0" />
+    <!-- No cache-busting meta tags here: Vercel already serves this page with
+         Cache-Control: max-age=0, must-revalidate (and the build's assets are
+         hashed), so a new build always loads. The old no-store / Expires 0 tags
+         are the one thing this page had that cards X does show (fanfares.io)
+         do not, while X showed no card for any onosendai.tech link (2026-11-13). -->
     
     <title>ONOSENDAI V2 — Cyberspace Explorer</title>
     <meta name="description" content="Cyberspace is the digital fabric of reality. Encrypt data to a location, build your digital world, find hidden treasures and visit real places on Earth." />

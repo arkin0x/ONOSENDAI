@@ -12,8 +12,10 @@ import { chainReadyToDraw } from './store/useCyberspace'
 import { hydrateHidden } from './store/hiddenStorage'
 import { wireLocalObjects } from './store/localObjects'
 import { diagWanted } from './lib/diagGate'
-import { applyTutorialFlag, applyTutorialRoute, noteLanding } from './tutorial/gate'
+import { applyTutorialFlag, applyTutorialRoute, landedPath, noteLanding } from './tutorial/gate'
 import { takeArrivalMode } from './store/arrivalMode'
+import { inject } from '@vercel/analytics'
+import { startAnalytics } from './lib/analytics'
 
 // A tap on a modal's backdrop only closes it (lib/tapGuard.ts).
 installTapGuard(window)
@@ -28,6 +30,8 @@ applyTutorialRoute()
 takeArrivalMode()
 // /tv?broadcast=1, the 24/7 stream: no pointer on the page (lib/tv/broadcast.ts).
 markBroadcastPage()
+// Vercel Web Analytics: page views as coarse routes only, never on the stream (lib/analytics.ts).
+startAnalytics({ prod: import.meta.env.PROD, broadcast: isBroadcast, landed: landedPath(), inject })
 // Your own objects placed by reference are drawn from your workshop first (store/localObjects.ts).
 wireLocalObjects()
 

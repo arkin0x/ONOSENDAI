@@ -193,7 +193,7 @@ async function sealBag(sign: Sign, inners: BagEntry[], key: Uint8Array, lookupId
   return sign(await bagTemplate(inners, key, lookupId, height, createdAt, HIDDEN_KIND, DEFAULT_BAG_SETTINGS, { at, plane }))
 }
 
-/** Stage the tutorial for a player, signed by the guide key `secret`, for the layout from their spawn. */
+/** Stage the tutorial for a player, signed by the guide key `secret`, for the layout from the run's anchor (their spawn, or where they stood). */
 export async function buildStage(secret: Uint8Array, player: string, layout: TutorialLayout, keyAt: KeyAt, createdAt = Math.floor(Date.now() / 1000)): Promise<Stage> {
   const sign = signer(secret)
   const guide = getPublicKey(secret)

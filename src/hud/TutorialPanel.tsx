@@ -9,7 +9,8 @@
  * slot shows), until the owner turns the tutorial on for new identities.
  */
 
-import { useTutorial } from '../store/useTutorial'
+import { cannotStageHere, useTutorial } from '../store/useTutorial'
+import { useCyberspace } from '../store/useCyberspace'
 import { useTutorialSwitch } from '../tutorial/gate'
 import { useDemo } from '../store/useDemo'
 import { useTv } from '../store/useTv'
@@ -18,11 +19,13 @@ import { Explanation } from './Explanation'
 export function TutorialPanel(): JSX.Element | null {
   const on = useTutorialSwitch((s) => s.value)
   const running = useTutorial((s) => s.active)
-  // Cannot start over the tour or TV, which would put it away again at once.
+  // Cannot start over the tour or TV, which would put it away again at once,
+  // nor where it cannot be laid out (the line, a game: store/useTutorial.ts cannotStageHere).
   const touring = useDemo((s) => s.active)
   const tvOn = useTv((s) => s.on)
+  const away = useCyberspace(() => cannotStageHere())
   if (on !== true) return null
-  const blocked = touring || tvOn
+  const blocked = touring || tvOn || away
   return (
     <section className="panel panel--tutorial">
       <header className="panel__head"><h2>Tutorial</h2></header>

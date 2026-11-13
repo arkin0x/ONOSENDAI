@@ -3,7 +3,9 @@
  * (first-arrival tutorial design, 2026-11-10, Track A2).
  *
  * As the tutorial comes up for a player (store/useTutorial.ts lifecycle), the
- * director lays it out from their spawn (tutorial/layout.ts), stages it under
+ * director lays it out from the run's anchor (tutorial/layout.ts): their spawn
+ * for a first arrival, or where they stood when /tutorial or RESTART started
+ * it (useTutorial anchor, kept with the progress), and stages it under
  * this device's guide key (tutorial/stage.ts, loaded only now, so its pieces
  * stay out of the page everyone loads), and hands the guide's bags to
  * discovery (tutorial/guideBags.ts). As it goes away, the bags go with it.
@@ -49,6 +51,7 @@ import { PLOT_STAND, atStart, inPlot, onDeck, onPlot, onTarget, plantCell, targe
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { deployPoint, type Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
+import { readProgress, type TutorialAnchor } from './gate'
 import { COMMIT, OWNER_PUBKEY } from './script'
 import { arrivalCell, chestCell, inRegion, toWorld, type TutorialLayout } from './layout'
 import type { Stage } from './stage'
@@ -92,19 +95,32 @@ export const useTutorialStage = create<StageState>(() => ({ stage: null, layout:
 /** Which staging is current: a newer start (or a stop) makes an older one's answer moot. */
 let run = 0
 
-/** The stager, the layout from `player`'s spawn and the guide key, loaded only when the tutorial needs them. */
-async function setupFor(player: string): Promise<{ st: typeof import('./stage'); layout: TutorialLayout; guide: { pubkey: string; secret: Uint8Array } }> {
+/**
+ * Where `player`'s run is laid out: the running run's anchor, else the one
+ * kept with their progress (a FINISHed run put back on a load), else null,
+ * the spawn.
+ */
+function anchorFor(player: string): TutorialAnchor | null {
+  const t = useTutorial.getState()
+  if (t.active && t.pubkey === player) return t.anchor
+  return readProgress(player)?.anchor ?? null
+}
+
+/** The stager, the layout from `anchor` (or `player`'s spawn) and the guide key, loaded only when the tutorial needs them. */
+async function setupFor(player: string, anchor: TutorialAnchor | null): Promise<{ st: typeof import('./stage'); layout: TutorialLayout; guide: { pubkey: string; secret: Uint8Array } }> {
   const [{ tutorialLayout }, st, { guideKey }] = await Promise.all([import('./layout'), import('./stage'), import('./guide')])
-  const spawn = spawnPlace(player)
-  return { st, layout: tutorialLayout({ x: spawn.x, y: spawn.y, z: spawn.z }, spawn.plane as Plane), guide: guideKey() }
+  const at = anchor ?? spawnPlace(player)
+  return { st, layout: tutorialLayout({ x: at.x, y: at.y, z: at.z }, at.plane as Plane), guide: guideKey() }
 }
 
 /** Stage the tutorial for `player` and hand its bags to discovery; a restart stages anew. */
 async function stageFor(player: string, restart: boolean): Promise<void> {
   const mine = ++run
+  // Read now, as the run starts: a later start's anchor is that start's.
+  const anchor = anchorFor(player)
   useTutorialStage.setState({ stage: null, layout: null, error: null })
   try {
-    const { st, layout, guide } = await setupFor(player)
+    const { st, layout, guide } = await setupFor(player, anchor)
     // A RESTART after a FINISH that kept its finds local (stop keeps them):
     // drop the old run's before staging a new chest, so none are orphaned.
     if (restart) dropGuideFinds(guide.pubkey)
@@ -136,7 +152,7 @@ async function stageFor(player: string, restart: boolean): Promise<void> {
 async function restoreKept(player: string): Promise<void> {
   const mine = ++run
   try {
-    const { st, layout, guide } = await setupFor(player)
+    const { st, layout, guide } = await setupFor(player, anchorFor(player))
     const stage = st.readStage(player, guide.pubkey, st.stageKey(layout))
     if (!stage || mine !== run || useTutorial.getState().active || useCyberspace.getState().identity.pubkey !== player) return
     setGuideBags(stage.bags, { passTaps: [stage.ids.blueBox] })
@@ -261,8 +277,9 @@ onTutorialLifecycle({
 /**
  * The box step lines the cursor up level with the chest, two gibsons in front
  * of it with one empty gibson between (tutorial feedback 2026-11-12, item 1):
- * the chest stands in line with the spawn (layout.ts chestCell), so one
- * COMMIT from there runs straight at it at its own height, and the avatar,
+ * the chest stands in line with the run's anchor (layout.ts chestCell; the
+ * spawn, or where /tutorial or RESTART found the player), so one COMMIT from
+ * there runs straight at it at its own height, and the avatar,
  * which turns to face the way it moved (lib/facing.ts), ends looking at it;
  * from anywhere else, the chest's side nearest the player. While the step is
  * up the camera idles a slow spin around the cursor (feedback item 14); it

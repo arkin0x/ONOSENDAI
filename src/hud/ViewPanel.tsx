@@ -27,7 +27,7 @@ import type { ReactNode } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
 import { useWalk } from '../store/useWalk'
-import { useTutorial } from '../store/useTutorial'
+import { cannotStageHere, useTutorial } from '../store/useTutorial'
 import { useDemo } from '../store/useDemo'
 import { useTv } from '../store/useTv'
 import { setTutorialSwitch, useTutorialSwitch } from '../tutorial/gate'
@@ -184,10 +184,13 @@ export function ViewPanel(): JSX.Element {
 function TutorialRow(): JSX.Element | null {
   const on = useTutorialSwitch((st) => st.value)
   const running = useTutorial((st) => st.active)
-  // RESTART cannot start over the tour or TV, which would put it away again at once.
+  // RESTART cannot start over the tour or TV, which would put it away again at
+  // once, nor on the hyperspace line or inside a game, since it is laid out
+  // where you stand (store/useTutorial.ts cannotStageHere).
   const touring = useDemo((st) => st.active)
   const tvOn = useTv((st) => st.on)
-  const blocked = touring || tvOn
+  const away = useCyberspace(() => cannotStageHere())
+  const blocked = touring || tvOn || away
   if (on === null) return null
   const set = (v: boolean): void => {
     setTutorialSwitch(v)

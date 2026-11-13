@@ -12,15 +12,18 @@ import { chainReadyToDraw } from './store/useCyberspace'
 import { hydrateHidden } from './store/hiddenStorage'
 import { wireLocalObjects } from './store/localObjects'
 import { diagWanted } from './lib/diagGate'
-import { applyTutorialFlag, noteLanding } from './tutorial/gate'
+import { applyTutorialFlag, applyTutorialRoute, noteLanding } from './tutorial/gate'
 import { takeArrivalMode } from './store/arrivalMode'
 
 // A tap on a modal's backdrop only closes it (lib/tapGuard.ts).
 installTapGuard(window)
-// The first-arrival tutorial (tutorial/gate.ts): where the page landed, and
-// ?tutorial=1 or =0 setting this device's switch, before anything draws.
+// The first-arrival tutorial (tutorial/gate.ts): where the page landed,
+// ?tutorial=1 or =0 setting this device's switch, and /tutorial turning it on
+// and asking for a run (the address goes back to /), before anything draws.
+// /tutorial wins over a ?tutorial=0 on the same address: visiting it means on.
 noteLanding(location.pathname)
 applyTutorialFlag()
+applyTutorialRoute()
 // ?mode=view or ?mode=region: taken off the address now, applied once the app can (store/arrivalMode.ts).
 takeArrivalMode()
 // /tv?broadcast=1, the 24/7 stream: no pointer on the page (lib/tv/broadcast.ts).

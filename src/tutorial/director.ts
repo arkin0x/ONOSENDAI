@@ -361,12 +361,23 @@ registerTutorialWatcher('gravity', (onDone) => watchUntil(
  * The finish (T7): standing on the deck, and the finish chest found. Both:
  * a boosted bounce can fly through the deck's region and come down past it,
  * which reveals the chest to a player who did not finish.
+ *
+ * Standing, too: the walk has landed, stopped, and has nothing left to
+ * prove. A jump's hops are made when it comes down (store/useWalk.ts), so a
+ * bounce that overshoots the deck lands first and its head then passes
+ * through the deck on the way to where it came down, on the floor below or
+ * past it; and a walker still running lands on the deck's edge and runs on
+ * off it. "You made it" came up there, with the chest twelve gibsons
+ * overhead and behind the coach (arkinox, 2026-11-13: "having a lot of
+ * trouble tapping on the chest").
  */
 registerTutorialWatcher('see-finish', (onDone) => watchUntil(() => {
   const { stage, layout } = useTutorialStage.getState()
   const cs = useCyberspace.getState()
-  return !!stage && !!layout && !!useShards.getState().discovered[stage.ids.finishChest] && cs.events.length > 0 && cs.headPlane === layout.plane && onDeck(layout.frame, cs.position)
-}, onDone, [onStage, (l) => useShards.subscribe((s, prev) => { if (s.discovered !== prev.discovered) l() }), (l) => useCyberspace.subscribe((s, prev) => { if (s.position !== prev.position || s.headPlane !== prev.headPlane) l() })]))
+  const walk = useWalk.getState()
+  const landed = !walk.falling && walk.behind === 0 && walk.running === null && walk.open === null
+  return !!stage && !!layout && landed && !!useShards.getState().discovered[stage.ids.finishChest] && cs.events.length > 0 && cs.headPlane === layout.plane && onDeck(layout.frame, cs.position)
+}, onDone, [onStage, (l) => useShards.subscribe((s, prev) => { if (s.discovered !== prev.discovered) l() }), (l) => useCyberspace.subscribe((s, prev) => { if (s.position !== prev.position || s.headPlane !== prev.headPlane) l() }), (l) => useWalk.subscribe((s, prev) => { if (s.falling !== prev.falling || s.behind !== prev.behind || s.running !== prev.running || s.open !== prev.open) l() })]))
 
 registerTutorialWatcher('take-finish', (onDone) => watchUntil(() => {
   const ids = useTutorialStage.getState().stage?.ids.finishContents ?? []

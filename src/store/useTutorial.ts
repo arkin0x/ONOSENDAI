@@ -13,6 +13,13 @@
  * (isNewArrival), kept per player pubkey so a reload resumes, and started
  * again by RESTART TUTORIAL in Settings.
  *
+ * The /tutorial address (owner, 2026-11-13) asks for a run on its load: a
+ * brand-new identity gets the first arrival as above, and anyone else the
+ * tutorial from the first step, laid out where they stand now, as RESTART
+ * lays it out (watchFirstArrival). A first arrival is laid out at the spawn;
+ * a RESTART at where the player stands, kept with the progress (the anchor)
+ * so a reload stages the same place.
+ *
  * A step that waits counts as done when its action happens, and the tutorial
  * goes on by itself a moment later (ADVANCE_MS): less reading, more doing.
  * NEXT is there on every step and reads SKIP while a step waits; SKIP
@@ -23,9 +30,9 @@ import { create } from 'zustand'
 import { TUTORIAL_SCRIPT } from '../tutorial/script'
 import type { TutorialScript, TutorialStep, TutorialWait } from '../tutorial/types'
 import type { DemoAction } from '../demo/types'
-import { landedPath, readProgress, tutorialOn, writeProgress, type TutorialProgress } from '../tutorial/gate'
+import { applyTutorialRoute, isTutorialPath, landedPath, readProgress, takeTutorialAsk, tutorialAsked, tutorialOn, writeProgress, type TutorialAnchor, type TutorialProgress } from '../tutorial/gate'
 import { aimCursor, applyScene, useDemo, watchAction } from './useDemo'
-import { appMinted, chosenNewKey, keyMintedOnLoad, savedChainLoaded, useCyberspace } from './useCyberspace'
+import { appMinted, chosenNewKey, keyMintedOnLoad, savedChainLoaded, useCyberspace, whyNoMove } from './useCyberspace'
 import { useTv } from './useTv'
 import { setMenuOpen } from '../hooks/useMenuOpen'
 
@@ -188,9 +195,13 @@ export function identitySettled(): boolean {
   return cs.selfCheck.pubkey === pubkey && (cs.selfCheck.status === 'none' || cs.selfCheck.status === 'found')
 }
 
-/** Whether the page landed on the bare app, not /demo, /tv, /C/, /workshop or any other route (tutorial/gate.ts noteLanding). */
+/**
+ * Whether the page landed on the bare app or on /tutorial, not /demo, /tv,
+ * /C/, /workshop or any other route (tutorial/gate.ts noteLanding).
+ */
 function plainAddress(): boolean {
-  return landedPath() === '/'
+  const at = landedPath()
+  return at === '/' || isTutorialPath(at)
 }
 
 /** Why the tutorial cannot start now: the /demo tour or Cyberspace TV is on. */
@@ -198,10 +209,49 @@ function blocked(): boolean {
   return useDemo.getState().active || useTv.getState().on
 }
 
+/**
+ * Why a run cannot be laid out where the player stands now (a RESTART, or
+ * /tutorial for a returning player): they are riding the hyperspace line
+ * (boarded on this page, until the ride lands), or their chain cannot move
+ * from here (useCyberspace whyNoMove: inside a game, where every move belongs
+ * to the game; a broken or stopped chain, which needs a respawn; this version
+ * blocked from moving), so the box step's move could never be made. Not part
+ * of `blocked`: a run already going (the dungeon's coach step follows the
+ * player into the game) resumes there.
+ */
+export function cannotStageHere(): boolean {
+  const cs = useCyberspace.getState()
+  return cs.transit !== null || whyNoMove(cs.actions()) !== null
+}
+
+/**
+ * Whether where a returning player stands is still to be confirmed: the relay
+ * check of their chain has not answered, or a choice between two versions of
+ * it waits. A saved chain settles the identity at once (identitySettled), but
+ * the relays may hold a newer head (another device), and a run laid out at
+ * the old one would be out of reach once that head is adopted.
+ */
+function headUnsettled(pubkey: string): boolean {
+  const cs = useCyberspace.getState()
+  return cs.selfCheck.pubkey !== pubkey || cs.selfCheck.status === 'checking' || cs.chainConflict !== null
+}
+
+/** Where the player stands now, their chain's head, in its plane: a RESTART's anchor. */
+function hereAnchor(): TutorialAnchor {
+  const cs = useCyberspace.getState()
+  return { x: cs.position.x, y: cs.position.y, z: cs.position.z, plane: cs.headPlane }
+}
+
 interface TutorialState {
   active: boolean
   /** The player this run belongs to. */
   pubkey: string | null
+  /**
+   * Where this run is laid out (tutorial/layout.ts), or null for the spawn: a
+   * RESTART's (and /tutorial's, for a returning player) is where they stood
+   * when it started. Kept with the progress, so a reload stages the same place.
+   */
+  anchor: TutorialAnchor | null
   /** The step on screen, an index into the script. */
   index: number
   /** Whether the current step's `wait` has happened (true for a step with none). */
@@ -232,7 +282,12 @@ interface TutorialState {
   /** Set the step highlight, only while the step at `index` is still the one on screen. */
   highlightStep: (index: number, selector: string | null) => void
   script: TutorialScript
-  /** Start (or resume) for the identity on screen; `at` names a step, `restart` begins again from the first. */
+  /**
+   * Start (or resume) for the identity on screen; `at` names a step and
+   * resumes where the run was laid out, `restart` begins again from the first
+   * laid out where the player stands now. Neither is a first arrival: at the
+   * spawn, LOCAL.
+   */
   start: (opts?: { at?: string; restart?: boolean }) => void
   /** NEXT (or SKIP on a step still waiting); on the last step, FINISH. */
   next: () => void
@@ -308,10 +363,10 @@ export const useTutorial = create<TutorialState>((set, get) => {
     }
   }
 
-  /** What is kept for a step: its id, and the routes checked off so far (feedback item 10). */
+  /** What is kept for a step: its id, the routes checked off so far (feedback item 10), and where the run is laid out. */
   const progress = (step: string, ended?: 'finished' | 'skipped'): TutorialProgress => {
-    const choices = get().doneChoices
-    return { step, ...(ended ? { ended } : {}), ...(choices.length ? { choices } : {}) }
+    const { doneChoices: choices, anchor } = get()
+    return { step, ...(ended ? { ended } : {}), ...(choices.length ? { choices } : {}), ...(anchor ? { anchor } : {}) }
   }
 
   const stop = (how: 'finished' | 'skipped' | 'pause'): void => {
@@ -322,6 +377,7 @@ export const useTutorial = create<TutorialState>((set, get) => {
   return {
     active: false,
     pubkey: null,
+    anchor: null,
     index: 0,
     done: true,
     minimized: false,
@@ -339,9 +395,15 @@ export const useTutorial = create<TutorialState>((set, get) => {
     start: (opts = {}) => {
       // Never over the tour or TV, which would put it away again at once.
       if (blocked()) return
+      // A RESTART is laid out where the player stands: never on the line or inside a game.
+      if (opts.restart && cannotStageHere()) return
       // Started again while running (RESTART): what the run had going stops first.
       if (get().active) stop('skipped')
       const pubkey = useCyberspace.getState().identity.pubkey
+      // Where it is laid out: a RESTART where the player stands now (owner,
+      // 2026-11-13: "right where they are"), a resume where it was, a first
+      // arrival at the spawn (null).
+      const anchor = opts.restart ? hereAnchor() : opts.at ? readProgress(pubkey)?.anchor ?? null : null
       if (opts.restart) writeProgress(pubkey, null)
       const steps = get().script.steps
       // A route resumes at its first step: what a later one stood on (the
@@ -359,7 +421,7 @@ export const useTutorial = create<TutorialState>((set, get) => {
       }
       // A resume keeps the routes already checked off (feedback item 10).
       const doneChoices = opts.at && !opts.restart ? readProgress(pubkey)?.choices ?? [] : []
-      set({ active: true, pubkey, minimized: false, doneChoices })
+      set({ active: true, pubkey, anchor, minimized: false, doneChoices })
       for (const l of lifecycles) { try { l.start?.(pubkey, opts.restart === true) } catch (err) { console.warn('[tutorial] start failed:', err) } }
       enter(at >= 0 ? at : 0)
     },
@@ -466,32 +528,77 @@ export function tutorialMayRun(): boolean {
  * Whether the tutorial starts, or resumes, for `pubkey` on this load, once
  * its identity can be judged (identitySettled) and its saved chain is in:
  * the switch on, the bare address, no tour or TV, and either a run left
- * unfinished or a brand-new identity. What watchFirstArrival acts on, and
+ * unfinished, a brand-new identity, or a run asked for by /tutorial. What watchFirstArrival acts on, and
  * what an arrival ?mode= asks so it never starts over the tutorial
  * (store/arrivalMode.ts).
  */
 export function tutorialStarts(pubkey: string): boolean {
   if (!tutorialMayRun()) return false
+  // Asked for by /tutorial: it starts for anyone (answerAsk).
+  if (tutorialAsked()) return true
   const p = readProgress(pubkey)
   return p ? !p.ended : isNewArrival()
+}
+
+/**
+ * What the /tutorial address asked for (tutorial/gate.ts applyTutorialRoute),
+ * once the identity on screen can be judged and its saved chain is in: a run
+ * already going is kept; a brand-new identity gets the first arrival (or
+ * resumes the one it left unfinished, as a reload would); anyone else gets
+ * the tutorial from the first step, laid out where they stand now, their
+ * publishing switch as they left it (a RESTART), once the relays have said
+ * where that is (headUnsettled). Over the tour or TV, riding the line, inside
+ * a game or on a chain that cannot move, it waits and starts once they are
+ * free. Whether it acted (the ask is then taken).
+ */
+function answerAsk(pubkey: string): boolean {
+  if (!tutorialAsked()) return false
+  const t = useTutorial.getState()
+  if (t.active && t.pubkey === pubkey) return takeTutorialAsk()
+  if (!tutorialOn()) return takeTutorialAsk()
+  if (blocked()) return false
+  if (isNewArrival()) {
+    takeTutorialAsk()
+    const p = readProgress(pubkey)
+    if (p && !p.ended) t.start({ at: p.step })
+    else t.start()
+    return true
+  }
+  if (cannotStageHere() || headUnsettled(pubkey)) return false
+  takeTutorialAsk()
+  t.start({ restart: true })
+  return true
 }
 
 /**
  * Start the tutorial for a first arrival, or resume one a player left
  * unfinished, once the identity on screen can be judged; and put it away if
  * the identity changes or the /demo tour starts. Only with the device switch
- * on, only on the bare address, never over the tour or TV. Returns what stops
- * the watching.
+ * on, only on the bare address (or /tutorial), never over the tour or TV.
+ * Also answers the /tutorial address (answerAsk), on its load and on Back or
+ * Forward onto it. Returns what stops the watching.
  */
 export function watchFirstArrival(): () => void {
   let decidedFor: string | null = null
+  // The identity whose saved chain is in hand: what an ask waits for.
+  let chainIn: string | null = null
   let stopped = false
+  /** An ask still waiting: answered once the identity is judged, its chain in, and nothing in the way. */
+  const ask = (): void => {
+    if (stopped || !tutorialAsked()) return
+    const pubkey = useCyberspace.getState().identity.pubkey
+    if (chainIn !== pubkey || !identitySettled()) return
+    answerAsk(pubkey)
+  }
   // Once the saved chain is in hand (a chain read from its rows can land
   // after the relays have answered "none"), and only for the identity still
   // on screen.
   const decide = (pubkey: string): void => {
     if (stopped || useCyberspace.getState().identity.pubkey !== pubkey) return
     if (!identitySettled()) { decidedFor = null; return }
+    chainIn = pubkey
+    // /tutorial decides for itself: it never resumes a run it is to start again.
+    if (tutorialAsked()) { ask(); return }
     if (!tutorialOn() || useTutorial.getState().active || blocked() || !plainAddress()) return
     const p = readProgress(pubkey)
     if (p?.ended === 'finished') for (const l of lifecycles) { try { l.restore?.(pubkey) } catch (err) { console.warn('[tutorial] restore failed:', err) } }
@@ -510,14 +617,21 @@ export function watchFirstArrival(): () => void {
       if (t.script.steps[t.index]?.branch) t.end('finished')
       else t.pause()
     }
+    // Another identity: its saved chain is read afresh before an ask is answered for it.
+    if (chainIn !== null && chainIn !== pubkey) chainIn = null
     if (decidedFor === pubkey || !identitySettled()) return
     decidedFor = pubkey
     void savedChainLoaded().then(() => decide(pubkey), () => decide(pubkey))
   }
   check()
-  const offCs = useCyberspace.subscribe(check)
-  // The tour and the tutorial never run together: the tour wins, the tutorial waits for the next load.
-  const offDemo = useDemo.subscribe((d) => { if (d.active) useTutorial.getState().pause() })
-  const offTv = useTv.subscribe((v) => { if (v.on) useTutorial.getState().pause() })
-  return () => { stopped = true; offCs(); offDemo(); offTv() }
+  const offCs = useCyberspace.subscribe(() => { check(); ask() })
+  // The tour and the tutorial never run together: the tour wins, the tutorial waits for the next load
+  // (or, asked for by /tutorial, until the tour or TV is over).
+  const offDemo = useDemo.subscribe((d) => { if (d.active) useTutorial.getState().pause(); else ask() })
+  const offTv = useTv.subscribe((v) => { if (v.on) useTutorial.getState().pause(); else ask() })
+  // Back or Forward onto /tutorial asks again, as loading it would.
+  const onPop = (): void => { if (applyTutorialRoute()) ask() }
+  const events = typeof window !== 'undefined' && typeof window.addEventListener === 'function' ? window : null
+  events?.addEventListener('popstate', onPop)
+  return () => { stopped = true; offCs(); offDemo(); offTv(); events?.removeEventListener('popstate', onPop) }
 }

@@ -34,7 +34,9 @@ vi.mock('../useCyberspace', async (orig) => {
 import { MINTED_KEY, useCyberspace } from '../useCyberspace'
 import { ADVANCE_MS, CHOICE_FAILED_MESSAGE, choiceOffered, isNewArrival, onTutorialLifecycle, registerTutorialChoice, registerTutorialEffect, registerTutorialWatcher, runTutorialEffect, useTutorial, watchFirstArrival } from '../useTutorial'
 import { useDemo } from '../useDemo'
-import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialFlag, noteLanding, readProgress, setTutorialSwitch, tutorialEnabled, tutorialOn, tutorialSwitch, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
+import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialFlag, applyTutorialRoute, isTutorialPath, noteLanding, readProgress, setTutorialSwitch, takeTutorialAsk, tutorialAsked, tutorialEnabled, tutorialOn, tutorialSwitch, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
+import { spawnPlace } from '../useDemo'
+import { readFileSync } from 'node:fs'
 import { useTv } from '../useTv'
 import { PAD_ARROWS, TUTORIAL_SCRIPT } from '../../tutorial/script'
 import type { TutorialScript } from '../../tutorial/types'
@@ -55,6 +57,7 @@ const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
 beforeEach(() => {
   hadWindow = g.window
+  takeTutorialAsk()
   atAddress('/')
   minted.onLoad = false
   if (useTutorial.getState().active) useTutorial.getState().pause()
@@ -303,14 +306,16 @@ describe('the engine', () => {
     expect(readProgress(pubkey())?.ended).toBe('finished')
   })
 
-  it('RESTART begins again from the first step for any identity, and pause keeps the step', () => {
+  it('RESTART begins again from the first step for any identity, laid out where it stands, and pause keeps the step', () => {
     writeProgress(pubkey(), { step: 'welcome', ended: 'finished' })
     useTutorial.getState().start({ restart: true })
     expect(useTutorial.getState().active).toBe(true)
-    expect(readProgress(pubkey())).toEqual({ step: 'welcome' })
+    const { position, headPlane } = useCyberspace.getState()
+    const here = { x: position.x, y: position.y, z: position.z, plane: headPlane }
+    expect(readProgress(pubkey())).toEqual({ step: 'welcome', anchor: here })
     useTutorial.getState().pause()
     expect(useTutorial.getState().active).toBe(false)
-    expect(readProgress(pubkey())).toEqual({ step: 'welcome' })
+    expect(readProgress(pubkey())).toEqual({ step: 'welcome', anchor: here })
   })
 
   it('a step\'s own wait counts, and the next step comes up by itself; SKIP goes on without it; a gate holds', () => {
@@ -673,6 +678,300 @@ describe('the engine', () => {
     expect(progressOf(steps, 0)).toBeCloseTo(1 / 3)
     expect(progressOf(steps, 3)).toBe(1)
     expect(progressOf(steps, 2)).toBe(1)
+  })
+})
+
+/**
+ * onosendai.tech/tutorial (owner, 2026-11-13): "a /tutorial link I can send
+ * or post ... if they are a first time user they get the tutorial anyway, but
+ * if theyve used cyberspace before and gave up, this will trigger a tutorial
+ * right where they are".
+ */
+describe('the /tutorial address', () => {
+  /** The page loads on `pathname`, as main.tsx sees it: the landing noted, then the route applied. Returns the addresses put in its place and the popstate listeners. */
+  function loadAt(pathname: string, search = '', hash = ''): { replaced: string[]; pop: () => void } {
+    const replaced: string[] = []
+    const listeners: Array<() => void> = []
+    const loc = { pathname, search, hash }
+    const history = {
+      state: null,
+      replaceState: (_s: unknown, _t: string, url?: string | URL | null) => {
+        replaced.push(String(url))
+        const u = new URL(String(url), 'https://onosendai.tech')
+        loc.pathname = u.pathname; loc.search = u.search; loc.hash = u.hash
+      },
+    }
+    g.window = {
+      location: loc,
+      history,
+      addEventListener: (type: string, l: () => void) => { if (type === 'popstate') listeners.push(l) },
+      removeEventListener: (type: string, l: () => void) => { const i = listeners.indexOf(l); if (type === 'popstate' && i >= 0) listeners.splice(i, 1) },
+    }
+    noteLanding(pathname)
+    applyTutorialRoute(loc, history)
+    return { replaced, pop: () => { for (const l of [...listeners]) l() } }
+  }
+  /** Somewhere that is not this identity's spawn, in the other plane: where a returning player stands. */
+  function standAway(): { x: bigint; y: bigint; z: bigint; plane: 0 | 1 } {
+    const spawn = spawnPlace(pubkey())
+    const at = { x: spawn.x + 5000n, y: spawn.y + 300n, z: spawn.z + 70000n, plane: (spawn.plane === 0 ? 1 : 0) as 0 | 1 }
+    useCyberspace.setState({ position: { x: at.x, y: at.y, z: at.z }, headPlane: at.plane })
+    return at
+  }
+  /** Someone who used cyberspace before: the relays found their chain. */
+  const returning = (): void => { useCyberspace.setState({ selfCheck: { pubkey: pubkey(), status: 'found' } }) }
+  let spawnWas: { position: { x: bigint; y: bigint; z: bigint }; headPlane: 0 | 1 }
+  beforeEach(() => {
+    const s = spawnPlace(pubkey())
+    spawnWas = { position: { x: s.x, y: s.y, z: s.z }, headPlane: s.plane as 0 | 1 }
+    useCyberspace.setState({ ...spawnWas, transit: null })
+  })
+  afterEach(() => { useCyberspace.setState({ ...spawnWas, transit: null }) })
+
+  it('turns the switch on, asks for a run, and puts the root in the address with the query and fragment kept', () => {
+    expect(tutorialSwitch()).toBe(null)
+    const { replaced } = loadAt('/tutorial', '?x=1', '#h')
+    expect(tutorialEnabled()).toBe(true)
+    expect(useTutorialSwitch.getState().value).toBe(true)
+    expect(tutorialAsked()).toBe(true)
+    expect(replaced).toEqual(['/?x=1#h'])
+    // Any case, a trailing slash; nothing else.
+    for (const p of ['/tutorial', '/tutorial/', '/TUTORIAL', '/Tutorial']) expect(isTutorialPath(p)).toBe(true)
+    for (const p of ['/', '/tutorials', '/tutorial/x', '/demo', '/C/tutorial']) expect(isTutorialPath(p)).toBe(false)
+    takeTutorialAsk()
+    expect(applyTutorialRoute({ pathname: '/', search: '', hash: '' }, { state: null, replaceState: () => { throw new Error('not here') } })).toBe(false)
+    expect(tutorialAsked()).toBe(false)
+  })
+
+  it('still turns on a device whose switch was turned OFF, and runs there', async () => {
+    setTutorialSwitch(false)
+    expect(tutorialOn()).toBe(false)
+    loadAt('/tutorial')
+    expect(tutorialSwitch()).toBe(true)
+    expect(tutorialOn()).toBe(true)
+    const stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().active).toBe(true)
+    stop()
+  })
+
+  it('is served the app on a hard load (vercel.json)', () => {
+    const { rewrites } = JSON.parse(readFileSync(new URL('../../../vercel.json', import.meta.url), 'utf8')) as { rewrites: Array<{ source: string; destination: string }> }
+    for (const source of ['/tutorial', '/tutorial/', '/TUTORIAL', '/Tutorial']) expect(rewrites.find((r) => r.source === source)?.destination).toBe('/index.html')
+  })
+
+  it('a brand-new identity gets the first arrival: the welcome, at its spawn, LOCAL, though the switch was never set', async () => {
+    useCyberspace.getState().setLive(true)
+    loadAt('/tutorial')
+    const stop = watchFirstArrival()
+    await flush()
+    const t = useTutorial.getState()
+    expect(t.active).toBe(true)
+    expect(t.script.steps[t.index].id).toBe('welcome')
+    expect(t.anchor).toBe(null)
+    expect(useCyberspace.getState().live).toBe(false)
+    expect(readProgress(pubkey())).toEqual({ step: 'welcome' })
+    expect(tutorialAsked()).toBe(false)
+    stop()
+  })
+
+  it('a brand-new identity that left its run unfinished resumes it, as a reload would', async () => {
+    writeProgress(pubkey(), { step: 'open' })
+    loadAt('/tutorial')
+    const stop = watchFirstArrival()
+    await flush()
+    const t = useTutorial.getState()
+    expect(t.script.steps[t.index].id).toBe('open')
+    stop()
+  })
+
+  it('a returning identity, finished, skipped, paused or never started, gets the first step laid out where it stands now, its publishing switch untouched', async () => {
+    returning()
+    for (const before of [{ step: 'plant', ended: 'finished' as const }, { step: 'box', ended: 'skipped' as const }, { step: 'take' }, null]) {
+      for (const live of [true, false]) {
+        writeProgress(pubkey(), before)
+        useCyberspace.getState().setLive(live)
+        const at = standAway()
+        loadAt('/tutorial')
+        const stop = watchFirstArrival()
+        await flush()
+        const t = useTutorial.getState()
+        expect(t.active).toBe(true)
+        expect(t.script.steps[t.index].id).toBe('welcome')
+        expect(t.anchor).toEqual(at)
+        expect(at.x).not.toBe(spawnPlace(pubkey()).x)
+        expect(readProgress(pubkey())).toEqual({ step: 'welcome', anchor: at })
+        expect(useCyberspace.getState().live).toBe(live)
+        stop()
+        useTutorial.getState().pause()
+      }
+    }
+  })
+
+  it('a reload mid-run keeps the same place, wherever the player has moved since', async () => {
+    returning()
+    const at = standAway()
+    loadAt('/tutorial')
+    let stop = watchFirstArrival()
+    await flush()
+    useTutorial.getState().next()
+    const step = useTutorial.getState().script.steps[useTutorial.getState().index].id
+    stop()
+    useTutorial.getState().pause()
+    // They moved on, then reloaded: the address is the root now.
+    useCyberspace.setState({ position: { x: at.x + 9n, y: at.y, z: at.z - 40n } })
+    atAddress('/')
+    switchOn()
+    stop = watchFirstArrival()
+    await flush()
+    const t = useTutorial.getState()
+    expect(t.active).toBe(true)
+    expect(t.script.steps[t.index].id).toBe(step)
+    expect(t.anchor).toEqual(at)
+    expect(readProgress(pubkey())?.anchor).toEqual(at)
+    stop()
+  })
+
+  it('RESTART TUTORIAL in Settings is laid out where the player stands now, too', () => {
+    returning()
+    const first = standAway()
+    useTutorial.getState().start({ restart: true })
+    expect(useTutorial.getState().anchor).toEqual(first)
+    useTutorial.getState().pause()
+    useCyberspace.setState({ position: { x: first.x + 100n, y: first.y, z: first.z } })
+    useTutorial.getState().start({ restart: true })
+    expect(useTutorial.getState().anchor).toEqual({ ...first, x: first.x + 100n })
+    expect(readProgress(pubkey())?.anchor).toEqual({ ...first, x: first.x + 100n })
+  })
+
+  it('keeps a run already going on this page: Back or Forward onto /tutorial restarts nothing', async () => {
+    returning()
+    standAway()
+    const { pop } = loadAt('/')
+    switchOn()
+    const stop = watchFirstArrival()
+    await flush()
+    useTutorial.getState().start({ restart: true })
+    useTutorial.getState().next()
+    const index = useTutorial.getState().index
+    expect(index).toBeGreaterThan(0)
+    ;(g.window as { location: { pathname: string } }).location.pathname = '/tutorial'
+    pop()
+    expect(useTutorial.getState().index).toBe(index)
+    expect(tutorialAsked()).toBe(false)
+    expect((g.window as { location: { pathname: string } }).location.pathname).toBe('/')
+    stop()
+  })
+
+  it('Back or Forward onto /tutorial with no run going starts one, as loading it would', async () => {
+    returning()
+    const at = standAway()
+    writeProgress(pubkey(), { step: 'box', ended: 'skipped' })
+    const { pop } = loadAt('/')
+    switchOn()
+    const stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().active).toBe(false)
+    ;(g.window as { location: { pathname: string } }).location.pathname = '/tutorial'
+    pop()
+    expect(useTutorial.getState().active).toBe(true)
+    expect(useTutorial.getState().anchor).toEqual(at)
+    stop()
+  })
+
+  it('waits over TV and the tour, riding the line or inside a game, and starts once the player is free', async () => {
+    returning()
+    const at = standAway()
+    // TV on: nothing yet, then it starts as TV goes off.
+    useTv.setState({ on: true })
+    loadAt('/tutorial')
+    let stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().active).toBe(false)
+    expect(tutorialAsked()).toBe(true)
+    useTv.setState({ on: false })
+    expect(useTutorial.getState().active).toBe(true)
+    expect(useTutorial.getState().anchor).toEqual(at)
+    stop()
+    useTutorial.getState().pause()
+    // Riding the hyperspace line (boarded until the ride lands): the same, and RESTART is refused meanwhile.
+    useCyberspace.setState({ transit: { stage: 'boarded', enterEventId: 'e'.repeat(64), enterCoordHex: '0'.repeat(64) } })
+    useTutorial.getState().start({ restart: true })
+    expect(useTutorial.getState().active).toBe(false)
+    loadAt('/tutorial')
+    stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().active).toBe(false)
+    useCyberspace.setState({ transit: null })
+    expect(useTutorial.getState().active).toBe(true)
+    stop()
+    useTutorial.getState().pause()
+    // The tour: the same.
+    loadAt('/tutorial')
+    useDemo.getState().start()
+    stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().active).toBe(false)
+    useDemo.getState().exit()
+    expect(useTutorial.getState().active).toBe(true)
+    stop()
+  })
+
+  it('waits for the relays to say where a returning player stands (a newer head from another device), and for a choice between two chains', async () => {
+    const at = standAway()
+    // A saved chain settles the identity at once, but the relay check has not answered.
+    const saved = [{ id: 'e'.repeat(64), kind: 3333, tags: [], pubkey: pubkey(), created_at: 1, content: '', sig: '' } as never]
+    useCyberspace.setState({ events: saved, selfCheck: { pubkey: pubkey(), status: 'checking' } })
+    loadAt('/tutorial')
+    const stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().active).toBe(false)
+    expect(tutorialAsked()).toBe(true)
+    // A choice between two versions waits too.
+    useCyberspace.setState({ selfCheck: { pubkey: pubkey(), status: 'found' }, chainConflict: { kind: 'held' } as never })
+    expect(useTutorial.getState().active).toBe(false)
+    // The relays had a newer head: it is where the run is laid out.
+    const newer = { x: at.x + 64n, y: at.y, z: at.z }
+    useCyberspace.setState({ chainConflict: null, position: newer })
+    expect(useTutorial.getState().active).toBe(true)
+    expect(useTutorial.getState().anchor).toEqual({ ...newer, plane: at.plane })
+    stop()
+    useCyberspace.setState({ events: [] })
+  })
+
+  it('answers the ask once across a remount (StrictMode starts the app twice in development)', async () => {
+    returning()
+    const at = standAway()
+    loadAt('/tutorial')
+    const first = watchFirstArrival()
+    first()
+    const starts: string[] = []
+    const off = onTutorialLifecycle({ start: (pk) => { starts.push(pk) } })
+    const second = watchFirstArrival()
+    await flush()
+    expect(starts).toEqual([pubkey()])
+    expect(useTutorial.getState().anchor).toEqual(at)
+    off()
+    second()
+  })
+
+  it('a stored anchor that is not whole is dropped, never the progress', () => {
+    localStorage.setItem(PROGRESS_PREFIX + pubkey(), JSON.stringify({ step: 'box', anchor: { x: '1', y: 'two', z: '3', plane: 0 } }))
+    expect(readProgress(pubkey())).toEqual({ step: 'box' })
+    localStorage.setItem(PROGRESS_PREFIX + pubkey(), JSON.stringify({ step: 'box', anchor: { x: '1', y: '2', z: '3', plane: 2 } }))
+    expect(readProgress(pubkey())).toEqual({ step: 'box' })
+    writeProgress(pubkey(), { step: 'box', anchor: { x: 1n, y: 2n, z: 3n, plane: 1 } })
+    expect(readProgress(pubkey())).toEqual({ step: 'box', anchor: { x: 1n, y: 2n, z: 3n, plane: 1 } })
+  })
+
+  it('leaves the default alone: without /tutorial, a returning identity on the bare address gets nothing', async () => {
+    returning()
+    standAway()
+    switchOn()
+    const stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().active).toBe(false)
+    stop()
   })
 })
 

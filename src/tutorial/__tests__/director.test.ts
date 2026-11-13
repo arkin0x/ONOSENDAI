@@ -39,17 +39,19 @@ vi.mock('../../hooks/useMenuOpen', async (orig) => {
 })
 
 import { useCyberspace } from '../../store/useCyberspace'
-import { runTutorialEffect, useTutorial } from '../../store/useTutorial'
+import { runTutorialEffect, useTutorial, watchFirstArrival } from '../../store/useTutorial'
+import { spawnPlace } from '../../store/useDemo'
+import { noteLanding, setTutorialSwitch } from '../gate'
 import { usePanelLayout } from '../../store/usePanelLayout'
 import { useShards } from '../../store/useShards'
 import { useOpenedChests, openedKey } from '../../store/useOpenedChests'
 import { useInventory } from '../../store/useInventory'
 import { FINER_KEY, courseFrame, cursorOnTarget, useTutorialStage } from '../director'
-import { guideBagsFor } from '../guideBags'
+import { guideBagsFor, setGuideBags } from '../guideBags'
 import { GUIDE_KEY } from '../guide'
 import { COMMIT, PAD_ARROWS, TUTORIAL_SCRIPT } from '../script'
 import { PLOT_STAND, START_STAND, TARGET, courseToWorld, targetAt } from '../course'
-import { arrivalCell, chestCell, toWorld } from '../layout'
+import { arrivalCell, chestCell, inRegion, regionBase, toWorld } from '../layout'
 import { TUTORIAL_DNA_EVENT } from '../dna'
 import { useWalk } from '../../store/useWalk'
 import { useTutorialCam } from '../../store/useTutorialCam'
@@ -867,6 +869,58 @@ describe('the director', () => {
     await vi.waitFor(() => { expect(useTutorial.getState().stepNote).toMatch(/Stand on the dirt/) })
     expect(director.tutorialSeedMeasuring()).toBe(false)
     useCyberspace.setState({ events: [] })
+  })
+})
+
+describe('a run laid out where the player stands (/tutorial and RESTART, owner 2026-11-13)', () => {
+  it('stages the box ahead of where a returning player stands, not at their spawn; lines up the first move there; a reload and a FINISHed load stage the same place', async () => {
+    const spawn = spawnPlace(pubkey())
+    const was = { position: useCyberspace.getState().position, headPlane: useCyberspace.getState().headPlane, events: useCyberspace.getState().events }
+    // Far from the spawn, in the other plane: a returning player's head.
+    const plane = (spawn.plane === 0 ? 1 : 0) as 0 | 1
+    const here = { x: spawn.x + 123_457n, y: spawn.y + 33n, z: spawn.z + 9_001n }
+    useCyberspace.setState({ events: [{ id: 'e', tags: [] } as never], position: here, cursor: { ...here }, headPlane: plane, plane, walking: false, spectate: null, exploreIndex: null, focus: null })
+    try {
+      useTutorial.getState().start({ restart: true })
+      await staged()
+      const layout = useTutorialStage.getState().layout!
+      expect(layout.spawn).toEqual(here)
+      expect(layout.plane).toBe(plane)
+      expect(layout.spawn).not.toEqual({ x: spawn.x, y: spawn.y, z: spawn.z })
+      // The box is the next 8-gibson cube along the forward axis from where they stand, and the tutorial's region holds them.
+      const own = regionBase(here, 3)
+      expect(layout.frame.boxBase.x).toBe(own.x)
+      expect(layout.frame.boxBase.z - own.z).toBe(BigInt(layout.frame.fwd) * 8n)
+      expect(inRegion(here, layout.cover.base, layout.cover.height)).toBe(true)
+      // The box step lines the first move up there, as at a spawn.
+      const firstChest = useTutorialStage.getState().stage!.ids.chest
+      useTutorial.getState().start({ at: 'box' })
+      await staged()
+      expect(useTutorialStage.getState().layout).toEqual(layout)
+      expect(useTutorialStage.getState().stage!.ids.chest).toBe(firstChest)
+      const a = arrivalCell(layout, here)
+      expect(useCyberspace.getState().cursor).toEqual(toWorld(layout.frame, a.f, a.r, a.u))
+      // A reload after moving on stages the same place, the same chest.
+      useTutorial.getState().pause()
+      useCyberspace.setState({ position: { ...here, z: here.z + 500n } })
+      useTutorial.getState().start({ at: 'open' })
+      await staged()
+      expect(useTutorialStage.getState().layout).toEqual(layout)
+      expect(useTutorialStage.getState().stage!.ids.chest).toBe(firstChest)
+      // FINISH, then a load: the kept stage at that place goes back to discovery.
+      useTutorial.getState().end('finished')
+      const lookups = useTutorialStage.getState().stage!.bags.map((b) => b.tags.find((t) => t[0] === 'd')![1])
+      setGuideBags(null)
+      expect(guideBagsFor(lookups)).toEqual([])
+      noteLanding('/')
+      setTutorialSwitch(true)
+      const stop = watchFirstArrival()
+      await vi.waitFor(() => { expect(guideBagsFor(lookups)).toHaveLength(3) })
+      stop()
+      setGuideBags(null)
+    } finally {
+      useCyberspace.setState(was)
+    }
   })
 })
 

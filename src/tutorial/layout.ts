@@ -1,9 +1,12 @@
 /**
  * layout.ts: where the first-arrival tutorial puts its things, from the
- * player's spawn (first-arrival tutorial design, 2026-11-10, T11).
+ * run's anchor (first-arrival tutorial design, 2026-11-10, T11): the player's
+ * spawn for a first arrival, or where they stood when /tutorial or RESTART
+ * TUTORIAL started the run (owner, 2026-11-13: "right where they are"). Below,
+ * "the spawn" is that anchor, whichever it is.
  *
- * Pure: the same spawn always gives the same layout, so a reload and a
- * RESTART stage the same places.
+ * Pure: the same anchor always gives the same layout, so a reload stages the
+ * same places (the anchor is kept with the progress, tutorial/gate.ts).
  *
  * The blue box is the nearest height-3 region (an aligned 8x8x8-gibson cube)
  * ahead of the spawn: the next one along +Z, into the screen from the
@@ -53,6 +56,7 @@ export interface Frame {
 
 export interface TutorialLayout {
   plane: Plane
+  /** The run's anchor: the spawn for a first arrival, or where the player stood when /tutorial or RESTART started it. */
   spawn: Position
   frame: Frame
   /** The covering region: height and aligned base. */
@@ -102,7 +106,7 @@ export function chestCell(layout: Pick<TutorialLayout, 'frame' | 'spawn'>): { f:
  * front of it, toward the spawn, for a player at the spawn: the move runs
  * straight at the chest at its height, and the avatar, which turns to face
  * the way it moved (lib/facing.ts), ends looking at it. For a player
- * elsewhere (`from`, a RESTART from the course, say), the side of the chest
+ * elsewhere (`from`, one who wandered off before a reload, say), the side of the chest
  * nearest them, so the move still ends facing the chest as nearly as one
  * axis allows.
  */
@@ -146,7 +150,7 @@ export function regionBase(p: Position, h: number): Position {
 /** Whole cubes up or down the box may move, nearest first, for a spawn near a boundary above or below. */
 const LIFTS = [0, 1, -1, 2, -2] as const
 
-/** Where the tutorial goes for a player spawning at `spawn` in `plane`. */
+/** Where the tutorial goes for a run anchored at `spawn` (the spawn, or where the player stood) in `plane`. */
 export function tutorialLayout(spawn: Position, plane: Plane): TutorialLayout {
   const own = regionBase(spawn, BOX_HEIGHT)
   const cube = 1n << BigInt(BOX_HEIGHT)

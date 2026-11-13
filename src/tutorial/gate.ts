@@ -15,9 +15,17 @@
  *
  * Progress is kept per player pubkey, so a reload resumes at the step it was
  * on and another identity on the same device has its own.
+ *
+ * onosendai.tech/tutorial (owner, 2026-11-13: "a /tutorial link I can send or
+ * post") turns the switch on as `?tutorial=1` does and asks for a run on this
+ * load (applyTutorialRoute): a brand-new identity gets the first arrival as
+ * usual, a returning one gets the tutorial from the first step, laid out
+ * where it stands (store/useTutorial.ts watchFirstArrival). The address is
+ * then put back to the root, so a reload does not ask again.
  */
 
 import { create } from 'zustand'
+import type { Plane } from 'cyberspace-core'
 
 /** The device switch: "on", "off" or absent. */
 export const TUTORIAL_SWITCH_KEY = 'onosendai:tutorial'
@@ -81,6 +89,40 @@ export function landedPath(): string {
   try { return window.location.pathname } catch { return '' }
 }
 
+/** Whether an address is the tutorial's own: /tutorial or /tutorial/, in any case. */
+export function isTutorialPath(pathname: string): boolean {
+  return /^\/tutorial\/?$/i.test(pathname)
+}
+
+/** A run asked for by the /tutorial address, not yet acted on (store/useTutorial.ts watchFirstArrival takes it). */
+let asked = false
+/** Whether the /tutorial address asked for a run that has not been acted on yet. */
+export function tutorialAsked(): boolean {
+  return asked
+}
+/** Act on the ask: it is taken once. Returns whether there was one. */
+export function takeTutorialAsk(): boolean {
+  const was = asked
+  asked = false
+  return was
+}
+
+/**
+ * The /tutorial address (owner, 2026-11-13): turn this device's switch on, as
+ * `?tutorial=1` does, ask for a run on this load (tutorialAsked), and put the
+ * root in the address (replaceState, no new entry) with whatever query and
+ * fragment the link carried, so a reload or a copied address does not ask
+ * again. Run before the first render (main.tsx) and on Back or Forward onto
+ * the address (watchFirstArrival). Returns whether the address was it.
+ */
+export function applyTutorialRoute(loc: Pick<Location, 'pathname' | 'search' | 'hash'> = window.location, history: Pick<History, 'replaceState' | 'state'> = window.history): boolean {
+  if (!isTutorialPath(loc.pathname)) return false
+  setTutorialSwitch(true)
+  asked = true
+  try { history.replaceState(history.state, '', `/${loc.search}${loc.hash}`) } catch { /* no history here */ }
+  return true
+}
+
 /**
  * Read `?tutorial=1` or `?tutorial=0` off the address, set the switch to it,
  * and take the flag off the address (replaceState, no new entry). Returns the
@@ -102,14 +144,39 @@ export function applyTutorialFlag(loc: Pick<Location, 'pathname' | 'search' | 'h
 }
 
 /**
+ * Where a run is laid out (tutorial/layout.ts): the place the player stood
+ * when /tutorial or RESTART TUTORIAL started it, in its plane. A first
+ * arrival keeps none: it is laid out at the spawn, where it stands anyway.
+ */
+export interface TutorialAnchor {
+  x: bigint
+  y: bigint
+  z: bigint
+  plane: Plane
+}
+
+/**
  * What a player's progress says: the step it was on, whether it ended (and
- * how), and the routes after the basics already done, so a reload on the
- * choices card keeps them checked off (tutorial feedback 2026-11-11, item 10).
+ * how), the routes after the basics already done, so a reload on the
+ * choices card keeps them checked off (tutorial feedback 2026-11-11, item 10),
+ * and where the run is laid out when that is not the spawn, so a reload
+ * stages the same place.
  */
 export interface TutorialProgress {
   step: string
   ended?: 'finished' | 'skipped'
   choices?: string[]
+  anchor?: TutorialAnchor
+}
+
+/** A stored anchor, its numbers kept as decimal strings (JSON has no bigint), or null when it is not whole. */
+function anchorOf(v: unknown): TutorialAnchor | null {
+  if (!v || typeof v !== 'object') return null
+  const a = v as Record<string, unknown>
+  const n = (k: string): bigint | null => (typeof a[k] === 'string' && /^\d{1,40}$/.test(a[k] as string) ? BigInt(a[k] as string) : null)
+  const x = n('x'), y = n('y'), z = n('z')
+  if (x === null || y === null || z === null || (a.plane !== 0 && a.plane !== 1)) return null
+  return { x, y, z, plane: a.plane }
 }
 
 export function readProgress(pubkey: string): TutorialProgress | null {
@@ -120,13 +187,19 @@ export function readProgress(pubkey: string): TutorialProgress | null {
     if (typeof v.step !== 'string') return null
     if (v.ended !== undefined && v.ended !== 'finished' && v.ended !== 'skipped') return null
     const choices = Array.isArray(v.choices) ? v.choices.filter((c): c is string => typeof c === 'string') : []
-    return { step: v.step, ...(v.ended ? { ended: v.ended } : {}), ...(choices.length ? { choices } : {}) }
+    // An anchor that is not whole is dropped, never the progress: the run is then laid out at the spawn.
+    const anchor = anchorOf(v.anchor)
+    return { step: v.step, ...(v.ended ? { ended: v.ended } : {}), ...(choices.length ? { choices } : {}), ...(anchor ? { anchor } : {}) }
   } catch { return null }
 }
 
 export function writeProgress(pubkey: string, p: TutorialProgress | null): void {
   try {
     if (p === null) localStorage.removeItem(PROGRESS_PREFIX + pubkey)
-    else localStorage.setItem(PROGRESS_PREFIX + pubkey, JSON.stringify(p))
+    else {
+      const { anchor, ...rest } = p
+      const kept = anchor ? { ...rest, anchor: { x: anchor.x.toString(), y: anchor.y.toString(), z: anchor.z.toString(), plane: anchor.plane } } : rest
+      localStorage.setItem(PROGRESS_PREFIX + pubkey, JSON.stringify(kept))
+    }
   } catch { /* private mode: this visit only */ }
 }

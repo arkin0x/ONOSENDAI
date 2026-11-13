@@ -30,6 +30,8 @@ import { useTutorial, watchFirstArrival } from './store/useTutorial'
 import { watchArrivalMode } from './store/arrivalMode'
 // The tutorial's staged things and the waits on them (registered on load; stages only while it runs).
 import './tutorial/director'
+// The Earth route's waits: a stop picked, BOARD, RIDE.
+import './tutorial/earthRoute'
 // The final card's DUNGEON, when games are on for this device.
 import './tutorial/dungeon'
 import { GameView } from './game/GameView'
@@ -501,6 +503,7 @@ export default function App(): JSX.Element {
         onContextMenu={(e) => e.preventDefault()}
         onClick={() => setPanelsOpen((open) => !open)}
         disabled={spectating}
+        aria-expanded={showPanels}
         aria-label={spectating ? 'Panels locked while spectating' : panelsOpen ? 'Hide panels' : 'Show panels'}
       >
         <span className={`hamburger-icon ${panelsOpen ? 'hamburger-icon--open' : ''}`}>

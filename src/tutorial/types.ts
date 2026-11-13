@@ -30,7 +30,13 @@ export type TutorialWait = Exclude<DemoAction, 'spawn'> | TutorialAction
  * course's start reached, gravity on in WALK, the finish chest found and
  * something in it taken; the workshop opened and closed again.
  */
-export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-start' | 'gravity' | 'see-finish' | 'take-finish' | 'workshop' | 'at-plot' | 'plant'
+export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-start' | 'gravity' | 'see-finish' | 'take-finish' | 'workshop' | 'at-plot' | 'plant' | EarthRouteAction
+
+/**
+ * The Earth route's waits (tutorial/earthRoute.ts): a stop picked as the
+ * ride's destination, boarded, and a ride started.
+ */
+export type EarthRouteAction = 'pick-stop' | 'board' | 'ride'
 
 export interface TutorialStep {
   /** Unique across the script; also what a player's saved progress names. */
@@ -97,6 +103,14 @@ export interface TutorialStep {
    * way through the script passes over it, and its own NEXT is FINISH.
    */
   branch?: boolean
+  /**
+   * On a branch step: the next step of the same route, by id. A route can be
+   * several steps long (the Earth route, owner 2026-11-13: one thing per
+   * panel); NEXT goes on to this one, BACK comes back, and only the route's
+   * last step (no `then`) has FINISH, which returns to the choices with the
+   * route checked off.
+   */
+  then?: string
   /**
    * A modal step's choices, one button each, above its own button (which
    * ends the run). A choice runs what was registered for it, if anything

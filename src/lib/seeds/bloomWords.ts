@@ -5,6 +5,7 @@
 
 import { BLOCKS_PER_GENERATION } from 'sno-core/seeds'
 import type { BloomView } from './bloomEngine'
+import { previewLastDay } from './plant'
 
 /** The one line the card shows under the bloom for a state, or null when the bloom is simply growing. */
 export function bloomStateLine(v: BloomView | undefined): string | null {
@@ -31,4 +32,21 @@ export function bloomStateLine(v: BloomView | undefined): string | null {
 export function bloomDays(v: BloomView | undefined): number | null {
   if (!v || v.planted === undefined || v.clock === undefined) return null
   return Math.max(0, Math.floor((v.clock - v.planted) / BLOCKS_PER_GENERATION))
+}
+
+/**
+ * A seed's growth in a row (DISCOVERED NEARBY's SEEDS): "day 12 of 41" on the
+ * same clock the card's AGE reads (NTH's newest anchor), "fully grown" from
+ * the DNA's last day on (plant.ts previewLastDay, the day SEED's slider ends
+ * on), while it is grown or growing; in any other state the card's line for
+ * it, without its full stop: a seed too heavy to grow here, or one that did
+ * not grow, keeps its planted height and clock, and is not at its age.
+ */
+export function bloomGrowthWords(v: BloomView | undefined): string {
+  const days = bloomDays(v)
+  if (v && (v.status === 'grown' || v.status === 'growing') && days !== null && v.dna) {
+    const last = previewLastDay(v.dna)
+    return days >= last ? 'fully grown' : `day ${days} of ${last}`
+  }
+  return (bloomStateLine(v) ?? 'Growing.').replace(/\.$/, '')
 }

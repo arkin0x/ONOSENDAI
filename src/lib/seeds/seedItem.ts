@@ -102,6 +102,14 @@ export function seedItemOf(ev: SeedEventLike): SeedItem | null {
   return { ...read.seed, id: ev.id, planter: ev.pubkey, createdAt: ev.created_at, tags, stand }
 }
 
+/** Seeds read once per event: the scene reads them every frame and a list every render, and the tags do not change. */
+const readOnce = new WeakMap<object, SeedItem | null>()
+export function seedOfEvent(ev: SeedEventLike): SeedItem | null {
+  let s = readOnce.get(ev)
+  if (s === undefined) readOnce.set(ev, (s = seedItemOf(ev)))
+  return s
+}
+
 /**
  * The seeds a view in `plane` shows: those whose `C` names that plane. One bag
  * holds a region and its twin in the other plane (spec §7.6 Planes), and a
@@ -109,6 +117,17 @@ export function seedItemOf(ev: SeedEventLike): SeedItem | null {
  */
 export function seedsInPlane<T extends { type: string; plane: Plane }>(items: readonly T[], plane: Plane): T[] {
   return items.filter((w) => w.type === 'seed' && w.plane === plane)
+}
+
+/**
+ * The zoom a VIEW of a found thing fits (useCyberspace viewAt's `scaleExp`):
+ * a shard's unit, a seed's scale (one bloom unit is 2^scale gibsons, §5.6),
+ * else 0. The card's GO TO and DISCOVERED NEARBY's VIEW frame alike.
+ */
+export function viewScaleOf(item: { type: string; shard?: { unit?: number }; event?: SeedEventLike }): number {
+  if (item.type === 'shard') return item.shard?.unit ?? 0
+  if (item.type === 'seed' && item.event) return seedItemOf(item.event)?.scale ?? 0
+  return 0
 }
 
 /**

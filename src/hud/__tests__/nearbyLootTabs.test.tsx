@@ -83,16 +83,16 @@ describe('the tabs of DISCOVERED NEARBY', () => {
     expect(html).toMatch(/aria-selected="true"[^>]*><span>ITEMS<\/span>/)
   })
 
-  it('draws the tabs in his order: ITEMS, CHESTS, DOORS, MESSAGES, SOUNDS, SHARDS', () => {
-    const html = renderToStaticMarkup(<NearbyTabs tab="items" counts={{ items: 0, shards: 0, sounds: 0, chests: 0, doors: 0, messages: 0 }} onTab={() => undefined} />)
-    expect([...html.matchAll(/<span>([A-Z]+)<\/span><span class="nearby__count">/g)].map((m) => m[1])).toEqual(['ITEMS', 'CHESTS', 'DOORS', 'MESSAGES', 'SOUNDS', 'SHARDS'])
+  it('draws the tabs in his order: ITEMS, CHESTS, DOORS, MESSAGES, SOUNDS, SHARDS, SEEDS', () => {
+    const html = renderToStaticMarkup(<NearbyTabs tab="items" counts={{ items: 0, shards: 0, sounds: 0, chests: 0, doors: 0, messages: 0, seeds: 0 }} onTab={() => undefined} />)
+    expect([...html.matchAll(/<span>([A-Z]+)<\/span><span class="nearby__count">/g)].map((m) => m[1])).toEqual(['ITEMS', 'CHESTS', 'DOORS', 'MESSAGES', 'SOUNDS', 'SHARDS', 'SEEDS'])
   })
 
   it('keeps a tab with nothing, dimmed', () => {
-    const html = renderToStaticMarkup(<NearbyTabs tab="items" counts={{ items: 1, shards: 0, sounds: 0, chests: 0, doors: 0, messages: 0 }} onTab={() => undefined} />)
+    const html = renderToStaticMarkup(<NearbyTabs tab="items" counts={{ items: 1, shards: 0, sounds: 0, chests: 0, doors: 0, messages: 0, seeds: 0 }} onTab={() => undefined} />)
     expect(html).toMatch(/is-empty"[^>]*><span>SOUNDS/)
     expect(html).not.toMatch(/is-empty"[^>]*><span>ITEMS/)
-    expect(html.match(/role="tab"/g)).toHaveLength(6)
+    expect(html.match(/role="tab"/g)).toHaveLength(7)
   })
 })
 

@@ -20,7 +20,7 @@ import { HeaderBook } from '../seeds/headerBook'
 import { growInWorker, resetInlineGrowth } from '../seeds/growClient'
 import { PHONE_BUDGET, DESKTOP_BUDGET, SLICE_STEPS, tooHeavy } from '../seeds/bloomBudget'
 import { seedItemOf } from '../seeds/seedItem'
-import { bloomStateLine } from '../seeds/bloomWords'
+import { bloomGrowthWords, bloomStateLine } from '../seeds/bloomWords'
 import type { NostrEvent } from '../events'
 import { clampTimes, crystalDna, dnaOf, mineSeedEvent, vectorBlocks, vectors } from './seedsFixture'
 
@@ -154,6 +154,9 @@ describe('the engine, from a seed to a drawn bloom', () => {
     expect(v.dna?.name).toBe('crystal')
     expect(v.growth?.generation).toBe(3)
     expect(bloomStateLine(v)).toBeNull()
+    // DISCOVERED NEARBY's row: the free caps' 32 days, fully grown on day 33 (plant.ts previewLastDay).
+    expect(v.dna?.generations).toBe(32)
+    expect(bloomGrowthWords(v)).toBe('day 3 of 33')
     const bloom = growBloom(parseDna(crystal.content), { coord: seed.coord, planted: 970524, scale: 0 }, v.clock!, synthetic)
     expect({ ...v.shard!, id: 'x' }).toEqual(modelOfPayload(bloom.sno, 'x'))
     for (const k of [1, 2, 3]) expect(fetched).toContain(970524 + k * 144)
@@ -226,6 +229,8 @@ describe('the engine, from a seed to a drawn bloom', () => {
     await settle(engine, seed.id)
     expect(views.get(seed.id)).toMatchObject({ status: 'heavy', growth: { generation: 0 } })
     expect(bloomStateLine(views.get(seed.id))).toBe('Too heavy to grow here.')
+    // Drawn as its axiom, so its row says why, not its age.
+    expect(bloomGrowthWords(views.get(seed.id))).toBe('Too heavy to grow here')
     engine.growAnyway(seed.id)
     await settle(engine, seed.id)
     expect(views.get(seed.id)).toMatchObject({ status: 'grown', growth: { generation: 3 } })

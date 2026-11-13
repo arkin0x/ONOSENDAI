@@ -73,10 +73,10 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('the device switch (off in production)', () => {
-  it('is off and unshown until set', () => {
+describe('the device switch (on by default since 2026-11-13)', () => {
+  it('is on until set, with nothing stored', () => {
     expect(tutorialSwitch()).toBe(null)
-    expect(tutorialEnabled()).toBe(false)
+    expect(tutorialEnabled()).toBe(true)
   })
 
   it('?tutorial=1 turns it on and ?tutorial=0 off, and the flag leaves the address', () => {
@@ -100,7 +100,18 @@ describe('the device switch (off in production)', () => {
 })
 
 describe('first arrival', () => {
+  it('starts at the welcome for a brand-new identity with no switch set: on by default (owner, 2026-11-13)', async () => {
+    expect(isNewArrival()).toBe(true)
+    const stop = watchFirstArrival()
+    await flush()
+    const t = useTutorial.getState()
+    expect(t.active).toBe(true)
+    expect(t.script.steps[t.index].id).toBe('welcome')
+    stop()
+  })
+
   it('starts nothing with the switch off, even for a brand-new identity', async () => {
+    setTutorialSwitch(false)
     expect(isNewArrival()).toBe(true)
     const stop = watchFirstArrival()
     await flush()

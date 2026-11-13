@@ -98,10 +98,12 @@ const ROWS: Array<[string, string, string]> = [
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
   ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
   ['view-audio-spheres', 'Sound spheres', 'Blue rings where a hidden sound plays at full volume.'],
+  // The tutorial's row, for everyone since it went on by default (2026-11-13).
+  ['view-tutorial', 'Tutorial', 'Guide a new identity on arrival.'],
 ]
 
 describe('the Settings panel', () => {
-  it('is a panel titled Settings with nine switches, one to a row, each a title and a gray subtitle, in order', () => {
+  it('is a panel titled Settings with ten switches, one to a row, each a title and a gray subtitle, in order', () => {
     const html = view()
     expect(html).toMatch(/^<section class="panel panel--view">/)
     expect(html).toContain('<h2>Settings</h2>')
@@ -276,13 +278,12 @@ describe('the switches have one home: their old controls are gone', () => {
   })
 })
 
-describe('the Tutorial row (first-arrival tutorial, off in production)', () => {
-  it('is not there until ?tutorial=1 or =0 was opened on this device', async () => {
+describe('the Tutorial row (first-arrival tutorial, on by default since 2026-11-13)', () => {
+  it('is there for everyone with no switch set, on, with RESTART', async () => {
     const { useTutorialSwitch } = await import('../../tutorial/gate')
     useTutorialSwitch.setState({ value: null })
-    expect(view()).not.toContain('view-tutorial')
-    expect(view()).not.toContain('RESTART TUTORIAL')
-    expect(view()).not.toContain('Tutorial walks')
+    expect(switchTag(view(), 'view-tutorial')).toContain('aria-checked="true"')
+    expect(view()).toContain('RESTART TUTORIAL')
   })
 
   it('shows its switch either way once offered, and RESTART only while on, off while the tutorial runs', async () => {

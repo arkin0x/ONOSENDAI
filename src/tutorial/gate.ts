@@ -3,10 +3,10 @@
  * where each player's progress is kept (first-arrival tutorial design,
  * 2026-11-10, T3).
  *
- * OFF in production until the owner turns it on for new identities. One
- * device switch, stored here:
- *   - absent: off, and the Settings row is not shown (every visitor today);
- *   - "on" / "off": the Settings row is shown with that state.
+ * ON for everyone since 2026-11-13 (TUTORIAL_DEFAULT_ON). One device switch,
+ * stored here:
+ *   - absent: the default, on;
+ *   - "on" / "off": as set.
  * The address turns it on or off: `?tutorial=1` sets "on", `?tutorial=0`
  * sets "off" (applyTutorialFlag, before the first render in main.tsx), and
  * the flag is taken off the address so a
@@ -32,13 +32,23 @@ export function tutorialSwitch(): boolean | null {
   } catch { return null }
 }
 
-/** Whether the tutorial may run on this device. */
+/**
+ * The tutorial with no switch set on this device: ON (owner, 2026-11-13, "lets
+ * get the tutorial live today", decision A: on for every new arrival, who
+ * starts LOCAL as before). It still runs by itself only for a brand-new
+ * identity on arrival (store/useTutorial.ts isNewArrival); everyone else sees
+ * the menu's Tutorial panel and the Settings row. ?tutorial=0 or the Settings
+ * switch turns it off for this device.
+ */
+export const TUTORIAL_DEFAULT_ON = true
+
+/** Whether the tutorial may run on this device: the stored switch, else the default. */
 export function tutorialEnabled(): boolean {
-  return tutorialSwitch() === true
+  return tutorialSwitch() ?? TUTORIAL_DEFAULT_ON
 }
 
 /** The switch as the Settings row reads it, so a change from anywhere (the address, the row) shows at once. */
-export const useTutorialSwitch = create<{ value: boolean | null }>(() => ({ value: tutorialSwitch() }))
+export const useTutorialSwitch = create<{ value: boolean | null }>(() => ({ value: tutorialSwitch() ?? TUTORIAL_DEFAULT_ON }))
 
 export function setTutorialSwitch(on: boolean): void {
   try { localStorage.setItem(TUTORIAL_SWITCH_KEY, on ? 'on' : 'off') } catch { /* private mode: this visit only */ }

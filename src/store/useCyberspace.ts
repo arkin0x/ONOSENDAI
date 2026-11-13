@@ -1394,6 +1394,28 @@ function markMinted(pubkey: string): void {
   try { localStorage.setItem(MINTED_KEY, pubkey) } catch { /* private mode */ }
 }
 
+/**
+ * The key a player made on purpose with USE NEW KEY (Identity panel), as
+ * opposed to the one the app made on a first visit. Such a key is never a
+ * "new arrival" for the tutorial (store/useTutorial.ts isNewArrival): it is
+ * a returning player trying a fresh identity, and auto-starting the tutorial
+ * would also switch their device's publishing off (review of #716, 2026-11-13).
+ * Kept in storage and, when storage refuses, for this visit.
+ */
+export const CHOSEN_KEY = 'onosendai:keyByChoice'
+const chosenThisVisit = new Set<string>()
+
+function markChosen(pubkey: string): void {
+  chosenThisVisit.add(pubkey)
+  try { localStorage.setItem(CHOSEN_KEY, pubkey) } catch { /* private mode: this visit only */ }
+}
+
+/** Whether `pubkey` was made with USE NEW KEY on this device. */
+export function chosenNewKey(pubkey: string): boolean {
+  if (chosenThisVisit.has(pubkey)) return true
+  try { return localStorage.getItem(CHOSEN_KEY) === pubkey } catch { return false }
+}
+
 /** Whether `pubkey` is the key this app last generated on this device; null when no marker exists. */
 export function appMinted(pubkey: string): boolean | null {
   try {
@@ -6514,6 +6536,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   useNewKey: async () => {
     const signer = randomSigner()
     markMinted(signer.pubkey)
+    markChosen(signer.pubkey)
     await switchTo(signer)
   },
   exportKey: (password, again) => exportNcryptsec(currentSigner.secretKey, password, again),

@@ -154,8 +154,8 @@ export default function App(): JSX.Element {
     return () => window.removeEventListener('popstate', onPop)
   }, [])
   // The first-arrival tutorial (store/useTutorial.ts): with this device's
-  // switch on (tutorial/gate.ts, off in production until the owner turns it
-  // on), a brand-new identity gets the tutorial and a player who left one
+  // switch on (tutorial/gate.ts, on by default since 2026-11-13), a
+  // brand-new identity gets the tutorial and a player who left one
   // unfinished resumes it.
   useEffect(() => watchFirstArrival(), [])
   // ?mode=view or ?mode=region on arrival, never over the tutorial (store/arrivalMode.ts).

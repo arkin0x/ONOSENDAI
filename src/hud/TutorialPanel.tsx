@@ -4,9 +4,8 @@
  * arrival (item 16) and ends by pointing here (item 10), so this panel is how
  * a player opens it again.
  *
- * Off in production like the rest of the tutorial: it is drawn only on a
- * device where the switch is on (Hud.tsx filters it out otherwise, so no empty
- * slot shows), until the owner turns the tutorial on for new identities.
+ * Drawn wherever the tutorial switch is on, the default since 2026-11-13
+ * (Hud.tsx filters it out when switched off, so no empty slot shows).
  */
 
 import { cannotStageHere, useTutorial } from '../store/useTutorial'

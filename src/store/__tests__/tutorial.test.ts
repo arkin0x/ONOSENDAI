@@ -2,12 +2,12 @@
  * tutorial.test.ts - the first-arrival tutorial's switch and engine
  * (first-arrival tutorial design, 2026-11-10, T1 and T3):
  *
- * - off unless this device's switch is on, and ?tutorial=1 / =0 set it;
+ * - on by default (2026-11-13); ?tutorial=1 / =0 and Settings set this device's switch;
  * - shown only to a brand-new identity on the bare address, after its relay
  *   check has an answer;
  * - progress kept per player pubkey: a reload resumes, an ended run stays
  *   ended, RESTART begins again;
- * - the publishing switch is never touched (the player's moves are real);
+ * - a first arrival starts LOCAL; a resume or RESTART leaves the publishing switch as it was;
  * - a step's own wait counts, and the next step comes up by itself.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -34,7 +34,7 @@ vi.mock('../useCyberspace', async (orig) => {
 import { MINTED_KEY, useCyberspace } from '../useCyberspace'
 import { ADVANCE_MS, CHOICE_FAILED_MESSAGE, choiceOffered, isNewArrival, onTutorialLifecycle, registerTutorialChoice, registerTutorialEffect, registerTutorialWatcher, runTutorialEffect, useTutorial, watchFirstArrival } from '../useTutorial'
 import { useDemo } from '../useDemo'
-import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialFlag, applyTutorialRoute, isTutorialPath, noteLanding, readProgress, setTutorialSwitch, takeTutorialAsk, tutorialAsked, tutorialEnabled, tutorialSwitch, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
+import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialFlag, applyTutorialRoute, isTutorialPath, noteLanding, readProgress, setTutorialSwitch, takeTutorialAsk, tutorialAsked, tutorialEnabled, tutorialOn, tutorialSwitch, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
 import { spawnPlace } from '../useDemo'
 import { readFileSync } from 'node:fs'
 import { useTv } from '../useTv'
@@ -76,10 +76,10 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('the device switch (off in production)', () => {
-  it('is off and unshown until set', () => {
+describe('the device switch (on by default since 2026-11-13)', () => {
+  it('is on until set, with nothing stored', () => {
     expect(tutorialSwitch()).toBe(null)
-    expect(tutorialEnabled()).toBe(false)
+    expect(tutorialEnabled()).toBe(true)
   })
 
   it('?tutorial=1 turns it on and ?tutorial=0 off, and the flag leaves the address', () => {
@@ -103,7 +103,18 @@ describe('the device switch (off in production)', () => {
 })
 
 describe('first arrival', () => {
+  it('starts at the welcome for a brand-new identity with no switch set: on by default (owner, 2026-11-13)', async () => {
+    expect(isNewArrival()).toBe(true)
+    const stop = watchFirstArrival()
+    await flush()
+    const t = useTutorial.getState()
+    expect(t.active).toBe(true)
+    expect(t.script.steps[t.index].id).toBe('welcome')
+    stop()
+  })
+
   it('starts nothing with the switch off, even for a brand-new identity', async () => {
+    setTutorialSwitch(false)
     expect(isNewArrival()).toBe(true)
     const stop = watchFirstArrival()
     await flush()
@@ -732,6 +743,18 @@ describe('the /tutorial address', () => {
     expect(tutorialAsked()).toBe(false)
   })
 
+  it('still turns on a device whose switch was turned OFF, and runs there', async () => {
+    setTutorialSwitch(false)
+    expect(tutorialOn()).toBe(false)
+    loadAt('/tutorial')
+    expect(tutorialSwitch()).toBe(true)
+    expect(tutorialOn()).toBe(true)
+    const stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().active).toBe(true)
+    stop()
+  })
+
   it('is served the app on a hard load (vercel.json)', () => {
     const { rewrites } = JSON.parse(readFileSync(new URL('../../../vercel.json', import.meta.url), 'utf8')) as { rewrites: Array<{ source: string; destination: string }> }
     for (const source of ['/tutorial', '/tutorial/', '/TUTORIAL', '/Tutorial']) expect(rewrites.find((r) => r.source === source)?.destination).toBe('/index.html')
@@ -949,5 +972,30 @@ describe('the /tutorial address', () => {
     await flush()
     expect(useTutorial.getState().active).toBe(false)
     stop()
+  })
+})
+
+describe('review of #716 (tutorial on by default)', () => {
+  it('never auto-starts for a key made with USE NEW KEY, and leaves publishing alone', async () => {
+    const { CHOSEN_KEY } = await import('../useCyberspace')
+    const pubkey = useCyberspace.getState().identity.pubkey
+    localStorage.setItem(CHOSEN_KEY, pubkey)
+    try {
+      expect(isNewArrival()).toBe(false)
+      const stop = watchFirstArrival()
+      await flush()
+      expect(useTutorial.getState().active).toBe(false)
+      stop()
+    } finally {
+      localStorage.removeItem(CHOSEN_KEY)
+    }
+  })
+
+  it('turning it off sticks for the visit even when storage refuses to keep it', () => {
+    useTutorialSwitch.setState({ value: false })
+    localStorage.removeItem(TUTORIAL_SWITCH_KEY)
+    expect(tutorialOn()).toBe(false)
+    useTutorialSwitch.setState({ value: null })
+    expect(tutorialOn()).toBe(true)
   })
 })

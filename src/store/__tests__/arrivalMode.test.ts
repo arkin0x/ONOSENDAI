@@ -75,8 +75,10 @@ beforeEach(() => {
   useCyberspace.setState({ scaleExp: 4, plane: 0, anchorPlane: 0, events: [], signerKind: 'local', selfCheck: { pubkey: pubkey(), status: 'none' } })
   useCoordRoute.setState({ region: null, label: null })
   if (useTutorial.getState().active) useTutorial.getState().pause()
-  localStorage.removeItem(TUTORIAL_SWITCH_KEY)
-  useTutorialSwitch.setState({ value: null })
+  // Off unless a test turns it on (setTutorialSwitch(true)): these are about
+  // the mode. The default since 2026-11-13 is on, covered below.
+  localStorage.setItem(TUTORIAL_SWITCH_KEY, 'off')
+  useTutorialSwitch.setState({ value: false })
   localStorage.removeItem(PROGRESS_PREFIX + pubkey())
   localStorage.setItem(MINTED_KEY, pubkey())
   useTv.setState({ on: false })
@@ -115,6 +117,19 @@ describe('the flag on the address', () => {
 })
 
 describe('a brand-new visitor on the bare address', () => {
+  it('with no tutorial switch set (on by default, 2026-11-13), the tutorial wins and the mode is dropped', async () => {
+    localStorage.removeItem(TUTORIAL_SWITCH_KEY)
+    useTutorialSwitch.setState({ value: null })
+    land('/', '?mode=view')
+    const stopTutorial = watchFirstArrival()
+    const stop = watchArrivalMode()
+    await flush()
+    expect(useTutorial.getState().active).toBe(true)
+    expect(cs().viewing()).toBe(false)
+    stop()
+    stopTutorial()
+  })
+
   it('?mode=view opens VIEW at their avatar, as the mode button does', async () => {
     land('/', '?mode=view')
     const stop = watchArrivalMode()

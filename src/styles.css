@@ -10759,7 +10759,10 @@ html.tv-broadcast body { overflow: hidden; }
 .tutorial-card__go { flex: 0 0 auto; align-self: stretch; justify-content: center; min-height: 40px; }
 .tutorial__explain { color: var(--dim); font-size: 12px; }
 .tutorial-restart { margin: 4px 0 8px; }
-.tutorial-choice { flex: 0 0 auto; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; min-height: 0; height: auto; text-align: left; }
+/* Each route: its icon in a fixed column on the left, centred against its words to the right (arkinox, 2026-11-13). */
+.tutorial-choice { flex: 0 0 auto; flex-direction: row; align-items: center; justify-content: flex-start; gap: 12px; padding: 8px 12px 8px 8px; min-height: 0; height: auto; text-align: left; }
+.tutorial-choice__icon { flex: 0 0 36px; display: flex; align-items: center; justify-content: center; color: var(--accent); }
+.tutorial-choice__text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .tutorial-choice__label { color: var(--accent); font-weight: 600; letter-spacing: 0.08em; }
 .tutorial-choice__about { color: var(--dim); font-size: 11px; letter-spacing: 0; text-transform: none; }
 /* A transparent picture: no band behind it, a square at most 160 across, centered. */
@@ -10775,6 +10778,7 @@ html.tv-broadcast body { overflow: hidden; }
 /* A route already done this run, checked off (feedback item 10). */
 .tutorial-choice.is-done .tutorial-choice__label { color: var(--ok); }
 .tutorial-choice__check { color: var(--ok); margin-right: 4px; vertical-align: -2px; }
+.tutorial-choice.is-done .tutorial-choice__icon { color: var(--ok); opacity: 0.6; }
 /* BACK is sized to its text and outlined; the primary action (NEXT, or the
    card's go button) fills the row (feedback item 8). */
 .tutorial-card__foot { display: flex; gap: 6px; }

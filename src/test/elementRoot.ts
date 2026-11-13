@@ -31,8 +31,10 @@ const renderer = Reconciler({
   supportsHydration: false,
   isPrimaryRenderer: false,
   noTimeout: -1,
-  // An element as react-dom's createPortal checks one (nodeType 1), so a portal into a host works here too; not enumerable, so no test reads it.
-  createInstance: (type: string, props: Record<string, unknown>): Host => Object.defineProperty({ type, props, children: [] }, 'nodeType', { value: 1 }),
+  // An element as react-dom's createPortal checks one (nodeType 1), so a portal into a host works here too,
+  // and with a focus() that does nothing, for a component that focuses a ref on mount (writable, so a test can put its own spy there);
+  // not enumerable, so neither shows among a host's props or children.
+  createInstance: (type: string, props: Record<string, unknown>): Host => Object.defineProperties({ type, props, children: [] }, { nodeType: { value: 1 }, focus: { value: noop, writable: true } }),
   createTextInstance: text,
   appendInitialChild: add,
   appendChild: add,

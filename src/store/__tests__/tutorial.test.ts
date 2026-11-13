@@ -229,10 +229,14 @@ describe('the script', () => {
   })
 
   it('glows COMMIT alone, never the mode button beside it, and opens CONTROLS for it (items 5 and 14)', () => {
-    for (const id of ['box', 'to-course']) {
+    for (const id of ['box', 'to-plot', 'to-course']) {
       const step = TUTORIAL_SCRIPT.steps.find((s) => s.id === id)!
-      expect(step.scene?.highlight).toBe('.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build)')
-      expect(step.scene?.pad).toBe(true)
+      expect(step.scene?.highlight, id).toBe('.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build)')
+      expect(step.scene?.pad, id).toBe(true)
+    }
+    // Every step that says to tap COMMIT glows it (owner, 2026-11-13: the planting step's did not).
+    for (const s of TUTORIAL_SCRIPT.steps) {
+      if ([s.caption, s.hint].some((t) => t && /Tap COMMIT/.test(t))) expect(s.scene?.highlight, s.id).toBe('.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build)')
     }
   })
 

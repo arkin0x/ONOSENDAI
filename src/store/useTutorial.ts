@@ -98,6 +98,39 @@ export function choiceOffered(c: { when?: string }): boolean {
   return !c.when || TUTORIAL_CHOICES.has(c.when)
 }
 
+/**
+ * The step ids of the route a choice starts at `first`, in order: that step,
+ * then each branch step's `then` (TutorialStep), stopping at a step that is
+ * not a branch, an id the script lacks, or a step already passed.
+ */
+export function routeOf(steps: readonly TutorialStep[], first: string): string[] {
+  const out: string[] = []
+  let id: string | undefined = first
+  while (id !== undefined && !out.includes(id)) {
+    const step = steps.find((st) => st.id === id)
+    if (!step) break
+    out.push(id)
+    if (!step.branch) break
+    id = step.then
+  }
+  return out
+}
+
+/**
+ * The first step of the route `id` is on (the branch step whose `then` chain
+ * reaches it), or `id` itself when it is a route's first or no branch step.
+ */
+export function routeHead(steps: readonly TutorialStep[], id: string): string {
+  const seen = new Set<string>([id])
+  let at = id
+  for (;;) {
+    const before = steps.find((st) => st.branch === true && st.then === at)
+    if (!before || seen.has(before.id)) return at
+    seen.add(before.id)
+    at = before.id
+  }
+}
+
 /** Watch for a step's wait: a tutorial watcher when one is registered under its name, else the /demo engine's. */
 function watchWait(wait: TutorialWait, onDone: () => void): () => void {
   const own = TUTORIAL_WATCHERS.get(wait)
@@ -298,7 +331,10 @@ export const useTutorial = create<TutorialState>((set, get) => {
       const pubkey = useCyberspace.getState().identity.pubkey
       if (opts.restart) writeProgress(pubkey, null)
       const steps = get().script.steps
-      const at = opts.at ? steps.findIndex((s) => s.id === opts.at) : 0
+      // A route resumes at its first step: what a later one stood on (the
+      // stop picked, the Earth view) is not kept across a reload.
+      const resumeAt = opts.at ? routeHead(steps, opts.at) : undefined
+      const at = resumeAt ? steps.findIndex((s) => s.id === resumeAt) : 0
       // A first arrival starts clutter-free and local: the menu shut (feedback
       // item 16), publishing off (feedback item 15). A RESTART shuts the menu
       // too (it is started from the menu) but leaves the publishing switch as
@@ -320,12 +356,17 @@ export const useTutorial = create<TutorialState>((set, get) => {
       if (!s.active) return
       const step = s.script.steps[s.index]
       if (step?.gate && !s.done) return
-      // A branch's NEXT returns to the choices with this one checked off, so
-      // the player can try the rest (feedback item 10).
+      // A branch's NEXT goes on to the route's next step, if it has one; the
+      // route's last returns to the choices with it checked off, so the
+      // player can try the rest (feedback item 10).
       if (step?.branch) {
+        const then = step.then ? s.script.steps.findIndex((st) => st.id === step.then) : -1
+        if (then >= 0) { enter(then, s.index); return }
         const ci = s.script.steps.findIndex((st) => st.choices)
-        const choice = ci >= 0 ? s.script.steps[ci].choices?.find((c) => c.step === step.id) : undefined
-        if (choice && !s.doneChoices.includes(choice.id)) set({ doneChoices: [...s.doneChoices, choice.id] })
+        const choice = ci >= 0 ? s.script.steps[ci].choices?.find((c) => c.step !== undefined && routeOf(s.script.steps, c.step).includes(step.id)) : undefined
+        // SKIP on a last step still waiting goes back without the check: the route was not done.
+        const finished = !step.wait || s.done
+        if (choice && finished && !s.doneChoices.includes(choice.id)) set({ doneChoices: [...s.doneChoices, choice.id] })
         if (ci >= 0) { enter(ci, s.index); return }
         get().end('finished')
         return
@@ -341,9 +382,13 @@ export const useTutorial = create<TutorialState>((set, get) => {
     back: () => {
       const s = get()
       if (!s.active) return
-      // On a branch, BACK is the way back to the choices, but it checks
-      // nothing off: only NEXT (FINISH) there says the route was done.
-      if (s.script.steps[s.index]?.branch) {
+      // On a branch, BACK is the route's step before, or from its first the
+      // way back to the choices, but it checks nothing off: only FINISH on
+      // the route's last step says the route was done.
+      const here = s.script.steps[s.index]
+      if (here?.branch) {
+        const before = s.script.steps.findIndex((st) => st.branch === true && st.then === here.id)
+        if (before >= 0) { enter(before, s.index, true); return }
         const ci = s.script.steps.findIndex((st) => st.choices)
         if (ci >= 0) enter(ci, s.index, true)
         return

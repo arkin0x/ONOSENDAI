@@ -641,7 +641,7 @@ export function HyperspacePanel(): JSX.Element {
               demand one. */}
           {!onLine && (
             <button
-              className="hyper__btn"
+              className="hyper__btn hyper__btn--board"
               disabled={inGame || !ownChain || !ready || destination === null}
               onClick={() => void boardFromAnywhere()}
             >BOARD</button>
@@ -674,7 +674,7 @@ export function HyperspacePanel(): JSX.Element {
       {offer !== null && progress === null && !hosakaRiding && (
         <div className="hyper__choice">
           <button
-            className={`hyper__btn hyper__choicebtn ${best === 'local' ? 'hyper__btn--ride' : ''}`}
+            className={`hyper__btn hyper__choicebtn hyper__choicebtn--here ${best === 'local' ? 'hyper__btn--ride' : ''}`}
             title="Compute the ride's proof on this device. Free; it resumes if interrupted"
             disabled={rideDisabled}
             onClick={() => void startRide()}
@@ -744,6 +744,18 @@ export function HyperspacePanel(): JSX.Element {
 }
 
 
+const stopTapListeners = new Set<(height: number) => void>()
+
+/**
+ * Hear each tap on a stop in the scene (selectStopInScene), by height, before
+ * it is viewed: the first-arrival tutorial's pick step makes it the ride's
+ * destination (tutorial/earthRoute.ts). Returns what stops the hearing.
+ */
+export function onSceneStopTap(listener: (height: number) => void): () => void {
+  stopTapListeners.add(listener)
+  return () => { stopTapListeners.delete(listener) }
+}
+
 /**
  * Click a stop in the scene: VIEW it, nothing more (arkinox, 2026-11-11: a
  * view only views; the destination is set on purpose, with SET DESTINATION
@@ -751,6 +763,7 @@ export function HyperspacePanel(): JSX.Element {
  * the scrubber so its readout follows the click.
  */
 export function selectStopInScene(height: number): void {
+  for (const l of [...stopTapListeners]) { try { l(height) } catch (err) { console.warn('[hyperspace] stop tap listener failed:', err) } }
   const hs = useHyperspace.getState()
   // With the scrubber open the height goes through it (its effect flies and
   // marks); a click on the very block it is parked on falls through to the

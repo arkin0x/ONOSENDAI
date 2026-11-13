@@ -158,7 +158,7 @@ export function TutorialCoach(): JSX.Element | null {
           <span className="demo__bartitle">{step.title}</span>
           <ChevronDown size={14} aria-hidden />
         </button>
-        <button className="demo__icon" onClick={t.next} disabled={held} aria-label={(last || step.branch) ? 'Finish' : waiting ? 'Skip this step' : 'Next'}><ChevronRight size={14} /></button>
+        <button className="demo__icon" onClick={t.next} disabled={held} aria-label={(last || (step.branch && !step.then)) ? 'Finish' : waiting ? 'Skip this step' : 'Next'}><ChevronRight size={14} /></button>
       </div>
     )
   }
@@ -206,7 +206,7 @@ export function TutorialCoach(): JSX.Element | null {
         {/* BACK is sized to its text and outlined; NEXT fills the rest and is the filled action (feedback item 8). */}
         {canBack && <button className="demo__btn tutorial__back" onClick={t.back} aria-label="Back"><ChevronLeft size={14} aria-hidden /> BACK</button>}
         <button className={`demo__btn demo__btn--next tutorial__next ${waiting && !held ? 'is-skip' : ''}`} onClick={t.next} disabled={held} title={held ? step.hint : undefined}>
-          {(last || step.branch) && !waiting ? 'FINISH' : waiting && !held ? 'SKIP' : 'NEXT'} <ChevronRight size={14} aria-hidden />
+          {(last || (step.branch && !step.then)) && !waiting ? 'FINISH' : waiting && !held ? 'SKIP' : 'NEXT'} <ChevronRight size={14} aria-hidden />
         </button>
       </div>
     </div>

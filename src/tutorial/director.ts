@@ -42,7 +42,8 @@ import { bloomReachAt } from '../lib/seeds/bloomReach'
 import { positionHex, type NostrEvent } from '../lib/events'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { viewHyperspace } from '../store/useHyperspace'
-import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
+import { EARTH_SCALE_EXP, earthFrameDistance } from '../lib/hyperspace/interest'
+import { FOV } from '../scene/camera'
 import { PLOT_STAND, START_STAND, atStart, courseToWorld, onDeck, onPlot, plantCell } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { deployPoint, type Position } from '../lib/space'
@@ -525,7 +526,16 @@ registerTutorialEffect('workshop-step', () => {
  */
 registerTutorialEffect('view-earth', () => {
   viewHyperspace({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', EARTH_SCALE_EXP, null)
+  // Out far enough for the whole planet, on a phone held upright too: the
+  // orbit was left where the course or the workshop had it (owner, 2026-11-13).
+  setTutorialZoom(earthFrameDistance(FOV, screenAspect()))
 })
+
+/** The window's width over its height; 1 where there is no window. */
+function screenAspect(): number {
+  if (typeof window === 'undefined' || !(window.innerHeight > 0)) return 1
+  return window.innerWidth / window.innerHeight
+}
 
 /** At the dirt plot (A5): standing on it, as the chain's head says. */
 registerTutorialWatcher('at-plot', (onDone) => watchArrival((at, layout) => onPlot(layout.frame, at), onDone))

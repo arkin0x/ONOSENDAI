@@ -9,8 +9,10 @@
  *   broadcast, a hyperspace ride or a game: it waits, and steps aside;
  * - at most once a day and three times in all per identity, counting shows,
  *   kept on the device and, without storage, for the visit;
- * - START starts the tutorial from the first step where the player stands,
- *   the publishing switch untouched; LATER puts it away;
+ * - START resumes a run left on the device (unfinished or skipped) at its
+ *   step, laid out where it was, as RESUME TUTORIAL; with no run it starts
+ *   from the first step where the player stands; the publishing switch
+ *   untouched either way; LATER puts it away;
  * - the words, verbatim. Pressed through the chip's real onClick. No network.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -56,7 +58,8 @@ import { useGame, type GameSession } from '../../store/useGame'
 import { spawnPlace } from '../../store/useDemo'
 import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, noteLanding, readProgress, setTutorialSwitch, takeTutorialAsk, useTutorialSwitch, writeProgress } from '../gate'
 import { takeArrivalMode } from '../../store/arrivalMode'
-import { TOAST_GAP_MS, TOAST_IDLE_MS, TOAST_MAX_SHOWS, TOAST_PREFIX, TOAST_RETRY_MS, TUTORIAL_TOAST_TEXT, capsAllow, dismissTutorialToast, forgetTutorialToast, noteToastOnScreen, readToastRecord, useTutorialToast, watchTutorialToast } from '../toast'
+import { TUTORIAL_SCRIPT } from '../script'
+import { TOAST_GAP_MS, TOAST_IDLE_MS, TOAST_MAX_SHOWS, TOAST_PREFIX, TOAST_RETRY_MS, TUTORIAL_TOAST_TEXT, capsAllow, dismissTutorialToast, forgetTutorialToast, noteToastOnScreen, readToastRecord, startFromTutorialToast, useTutorialToast, watchTutorialToast } from '../toast'
 import { mount, textOf } from '../../test/elementRoot'
 import { TutorialToast } from '../../hud/TutorialToast'
 
@@ -340,9 +343,9 @@ describe('the chip', () => {
     await chip.unmount()
   })
 
-  it('START starts the tutorial from the first step, where the player stands, publishing untouched', async () => {
+  it('START with no run on this device starts from the first step, where the player stands, publishing untouched', async () => {
     for (const live of [true, false]) {
-      writeProgress(pubkey(), { step: 'box', ended: 'skipped' })
+      localStorage.removeItem(PROGRESS_PREFIX + pubkey())
       cs().setLive(live)
       const at = standAway()
       useTutorialToast.setState({ offer: pubkey() })
@@ -359,6 +362,53 @@ describe('the chip', () => {
       await chip.unmount()
       useTutorial.getState().pause()
     }
+  })
+
+  // START picks a kept run up as the menu's RESUME TUTORIAL does (review of
+  // #724): it once restarted from the welcome, wiping the run.
+  const mid = TUTORIAL_SCRIPT.steps.find((st, i) => i > 1 && !st.branch && !st.needsWalk && !st.choices)!
+  const kept = { x: 123456789n, y: 987654321n, z: 55555n, plane: 1 as const }
+  for (const ended of [undefined, 'skipped'] as const) {
+    it(`START with ${ended ? 'a skipped' : 'an unfinished'} run resumes it at its step, laid out where it was, publishing untouched`, async () => {
+      for (const live of [true, false]) {
+        writeProgress(pubkey(), { step: mid.id, ...(ended ? { ended } : {}), choices: ['agents'], anchor: kept })
+        cs().setLive(live)
+        // Standing elsewhere: a resume is laid out where the run was, not here.
+        standAway()
+        useTutorialToast.setState({ offer: pubkey() })
+        const chip = await mount(<TutorialToast />)
+        await chip.press('START')
+        const t = useTutorial.getState()
+        expect(t.active).toBe(true)
+        expect(t.script.steps[t.index].id).toBe(mid.id)
+        expect(t.anchor).toEqual(kept)
+        expect(t.doneChoices).toEqual(['agents'])
+        expect(readProgress(pubkey())).toEqual({ step: mid.id, choices: ['agents'], anchor: kept })
+        expect(cs().live).toBe(live)
+        expect(offer()).toBe(null)
+        expect(chip.says(TUTORIAL_TOAST_TEXT)).toBe(false)
+        await chip.unmount()
+        useTutorial.getState().pause()
+      }
+    })
+  }
+
+  it('START never restarts a run it is to resume, even when the resume is refused', () => {
+    // A run going refuses RESUME (tutorialButtonsBlocked) but not a RESTART,
+    // which would stop it and begin again from the welcome. The chip is not
+    // on screen then (toastFits); pressed anyway, nothing changes.
+    writeProgress(pubkey(), { step: mid.id, anchor: kept })
+    useTutorial.getState().start({ at: mid.id })
+    const t = useTutorial.getState()
+    expect(t.script.steps[t.index].id).toBe(mid.id)
+    useTutorialToast.setState({ offer: pubkey() })
+    startFromTutorialToast()
+    const after = useTutorial.getState()
+    expect(after.active).toBe(true)
+    expect(after.script.steps[after.index].id).toBe(mid.id)
+    expect(after.anchor).toEqual(kept)
+    expect(readProgress(pubkey())).toEqual({ step: mid.id, anchor: kept })
+    useTutorial.getState().pause()
   })
 
   it('LATER puts it away, and the tutorial is left as it was', async () => {

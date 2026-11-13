@@ -3551,7 +3551,7 @@ function derive(saved: PersistedChain): {
  * buildChain freezes a structural break's (owner, 2026-11-13: the avatar
  * stands where the chain stops, not at its head). Nothing signed changes:
  * the rows keep where each action went. While the 5.13 list loads the head
- * stands, and the list's arrival stands you again (restandOnList).
+ * stands, and the list's arrival stands you again (the onV1HopList listener below the store).
  */
 function standingOf(actions: ActionEvent[]): { position: Position; plane: Plane; positionHistory: Position[] } {
   const head = actions[actions.length - 1]
@@ -7127,7 +7127,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // Where the chain puts you, which is not always the last event's own C:
     // after an action this client does not recognize, or inside a game, it
     // is the position carried or held (events.ts buildChain).
-    const head = chainHead(parsedChain(events))
+    // And where a proof the relay's rules reject stops it, the last action
+    // that counts, as buildChain freezes a structural break's (standingOf),
+    // so the panel, LINK and an agent's brief name where you stand.
+    const actions = parsedChain(events)
+    const head = relayFreezeOf(actions)?.at ?? chainHead(actions)
     // Provisional identity: no head event yet, so read the spawn coordinate.
     return head ? head.coordHex : positionHex(position, plane)
   },
@@ -7262,8 +7266,9 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
  */
 onV1HopList(() => {
   const s = useCyberspace.getState()
-  if (s.events.length === 0) return
-  const at = standingOf(s.actions())
+  const actions = s.actions()
+  if (actions.length === 0) return
+  const at = standingOf(actions)
   if (samePosition(at.position, s.position) && at.plane === s.headPlane) return
   const following = s.atHead()
   useCyberspace.setState({

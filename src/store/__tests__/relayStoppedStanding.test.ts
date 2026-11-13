@@ -5,8 +5,9 @@
  * version 1 sidestep (row 23), so you stand where row 22 left you, and so do
  * the view, the trail and RECALL to your head. While the 5.13 list loads the
  * head stands, and the list's arrival stands you where it stops. A chain
- * nothing stops (the same chain up to row 22, or one with a hop above the
- * relay's ceiling) stands at its head.
+ * nothing stops (the same chain up to row 22) stands at its head; a hop above
+ * the relay's ceiling stops nothing (lib/__tests__/chainStop.test.ts). The
+ * COORDINATE the panel shows, and LINK, name where you stand.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -63,6 +64,7 @@ describe("the owner's chain, stopped at 2026-09-04", () => {
     expect(S().headPlane).toBe(at22.plane)
     expect(S().anchor).toEqual(at22.position)
     expect(S().cursor).toEqual(at22.position)
+    expect(S().coordHex()).toBe(at22.coordHex)
   })
 
   it('the trail stops there too: every position from the stop on is where it stops', () => {

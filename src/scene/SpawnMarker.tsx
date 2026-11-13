@@ -26,7 +26,7 @@ import { Vector2, Vector3, type Group, type Material, type Mesh, type MeshStanda
 import { GRID_RADIUS, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { WorldLabel } from './WorldLabel'
-import { MARKER_FADE_FROM_RADII, MARKER_FADE_TO_RADII, patchNearFade, type NearFadeRange } from './nearFade'
+import { MARKER_FADE_FROM_RADII, MARKER_FADE_TO_RADII, lineFade, patchNearFade, type NearFadeRange } from './nearFade'
 
 const MODEL = '/spawn.glb'
 
@@ -122,7 +122,8 @@ function Model({ pubkey, axes }: Props): JSX.Element | null {
       const copy = m.clone()
       copy.toneMapped = false
       copy.emissiveIntensity = 1.6
-      copy.onBeforeCompile = (shader) => { patchNearFade(shader, fade) }
+      // Off in WALK, as the lines' is: a newcomer walking at their spawn stands inside the rings.
+      copy.onBeforeCompile = (shader) => { patchNearFade(shader, fade, lineFade.on) }
       copy.customProgramCacheKey = () => 'spawn-marker-near-fade-1'
       out[name] = copy
     }
@@ -143,7 +144,7 @@ function Model({ pubkey, axes }: Props): JSX.Element | null {
     if (!g) return
     g.getWorldPosition(centre)
     // Its shells reach about two ring radii from the centre (the triads stand out past the rings).
-    const near = camera.position.distanceTo(centre) < MARKER_FADE_TO_RADII * scale + 2 * scale
+    const near = lineFade.on.value > 0.5 && camera.position.distanceTo(centre) < MARKER_FADE_TO_RADII * scale + 2 * scale
     for (const m of Object.values(materials)) if (m.transparent !== near) m.transparent = near
   })
 

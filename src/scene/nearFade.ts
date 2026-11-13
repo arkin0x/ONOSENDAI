@@ -15,20 +15,35 @@
  * | Wears it | From, to | Why there |
  * |---|---|---|
  * | the spawn marker | one and three of its ring radii (3 and 9 cells at 2^0, scaled with it) | the bars, at 2.4 to 5 cells in the re-shot |
- * | the world's shard lines (the tutorial's lime box among them) and the rooms' outlines | 1 and 3 cells | the edges a close camera crosses; off in WALK, where the eye is on the avatar and 1 to 3 cells is how far anything is |
+ * | the world's shard lines (the tutorial's lime box among them) and the rooms' outlines | half a cell and 2 (the closest orbit) | the edges a close camera crosses |
+ *
+ * Both are off in WALK, where the eye is on the avatar and a few cells is how
+ * far anything is: one shared gate (`lineFade.on`).
  *
  * Cost: a varying and a few lines of fragment math on materials that already
  * compile their own program. No pass, draw call or per-vertex work on the CPU.
  * The ranges are uniforms, one shared object per kind, so a zoom changes a
- * number, never a program; the line gate is one shared uniform that
+ * number, never a program; the WALK gate is one shared uniform that
  * scene/Scene.tsx HeadlampRig writes once a frame.
+ *
+ * The alpha is scaled after three's `opaque_fragment`, which sets alpha to 1
+ * for a material compiled opaque. Three does not recompile when `transparent`
+ * flips (the spawn marker flips it as the camera comes near), so the scale
+ * must stay after that include, or a marker first compiled opaque would
+ * never fade.
  */
 
 import { Vector2, type WebGLProgramParametersWithUniforms } from 'three'
+import { ORBIT_MIN_DISTANCE } from './camera'
 
-/** The lines' ramp, in render cells: invisible within LINE_FADE_FROM, whole from LINE_FADE_TO. */
-export const LINE_FADE_FROM = 1
-export const LINE_FADE_TO = 3
+/**
+ * The lines' ramp, in render cells: invisible within LINE_FADE_FROM, whole
+ * from LINE_FADE_TO. Whole by the closest orbit (and a stopped VIEW's
+ * centre, the same 2 cells ahead), so what the camera looks at is never
+ * faded, only what passes between it and the lens (review of #704).
+ */
+export const LINE_FADE_FROM = 0.5
+export const LINE_FADE_TO = ORBIT_MIN_DISTANCE
 
 /** The spawn marker's ramp, in its own ring radii (a model unit). */
 export const MARKER_FADE_FROM_RADII = 1
@@ -37,13 +52,13 @@ export const MARKER_FADE_TO_RADII = 3
 /** One range a material reads: `value.x` from, `value.y` to, render cells. */
 export type NearFadeRange = { value: Vector2 }
 
-/** The lines' range and gate, shared by every line that wears it. `uNearFadeOn` is 0 in WALK. */
+/** The lines' range, and the WALK gate every near fade reads (`on` is 0 in WALK). */
 export const lineFade = {
   range: { value: new Vector2(LINE_FADE_FROM, LINE_FADE_TO) } as NearFadeRange,
   on: { value: 1 },
 }
 
-/** Always on: what the spawn marker reads as its gate. */
+/** Always on: the gate of a fade that never stands down. */
 const ALWAYS = { value: 1 }
 
 /** The share of its alpha a fragment `d` cells from the eye keeps. Mirrors the shader (GLSL smoothstep). */

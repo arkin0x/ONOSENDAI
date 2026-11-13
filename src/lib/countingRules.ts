@@ -317,8 +317,8 @@ export interface KeyChains {
  * up to its first structural break or proof the relay's rules reject (a hop
  * with one of mn and mp, a version 1 sidestep or ride off its list, a
  * version 1 hop off the 5.13 list, which is `relayList`; null when it could
- * not load, and then such a hop is taken as it stands). One more pass over
- * the current chain, none over the others. Respawns and the active week
+ * not load, and then such a hop is taken as it stands). A linear scan more
+ * over the current chain, none over the others. Respawns and the active week
  * count as before.
  */
 export function keyChains(events: NostrEvent[], pubkey: string, t: number = Infinity, relayList?: ReadonlySet<string> | null): KeyChains {

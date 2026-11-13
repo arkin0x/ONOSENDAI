@@ -8,24 +8,25 @@
 import { describe, expect, it } from 'vitest'
 import { ShaderLib } from 'three'
 import { HEADLAMP_LINES } from '../headlamp'
+import { ORBIT_MIN_DISTANCE } from '../camera'
 import { LINE_FADE_FROM, LINE_FADE_TO, MARKER_FADE_FROM_RADII, MARKER_FADE_TO_RADII, NEAR_FADE_LINES, lineFade, nearFadeShare, patchNearFade } from '../nearFade'
 
 const shaderOf = (lib: 'basic' | 'standard') => ({ vertexShader: ShaderLib[lib].vertexShader, fragmentShader: ShaderLib[lib].fragmentShader, uniforms: {} as Record<string, { value: unknown }> })
 
 describe('the ramp', () => {
-  it('lines: nothing within a cell, whole from three, smooth and rising between', () => {
-    expect(LINE_FADE_FROM).toBe(1)
-    expect(LINE_FADE_TO).toBe(3)
-    expect(nearFadeShare(0.2, 1, 3)).toBe(0)
-    expect(nearFadeShare(1, 1, 3)).toBe(0)
-    expect(nearFadeShare(2, 1, 3)).toBeCloseTo(0.5, 6)
-    expect(nearFadeShare(3, 1, 3)).toBe(1)
+  it('lines: nothing within half a cell, whole from the closest orbit (2 cells), smooth and rising between', () => {
+    expect(LINE_FADE_FROM).toBe(0.5)
+    expect(LINE_FADE_TO).toBe(ORBIT_MIN_DISTANCE)
+    expect(nearFadeShare(0.2, LINE_FADE_FROM, LINE_FADE_TO)).toBe(0)
+    expect(nearFadeShare(0.5, LINE_FADE_FROM, LINE_FADE_TO)).toBe(0)
+    expect(nearFadeShare(1.25, LINE_FADE_FROM, LINE_FADE_TO)).toBeCloseTo(0.5, 6)
+    expect(nearFadeShare(2, LINE_FADE_FROM, LINE_FADE_TO)).toBe(1)
     let last = 0
-    for (let d = 1; d <= 3; d += 0.1) { const f = nearFadeShare(d, 1, 3); expect(f).toBeGreaterThanOrEqual(last); last = f }
+    for (let d = 0.5; d <= 2; d += 0.05) { const f = nearFadeShare(d, LINE_FADE_FROM, LINE_FADE_TO); expect(f).toBeGreaterThanOrEqual(last); last = f }
   })
 
-  it('normal distances are untouched: the orbit (8 cells and out) and the over-the-shoulder close-up (about 6)', () => {
-    for (const d of [3, 6, 8, 26, 1000]) expect(nearFadeShare(d, LINE_FADE_FROM, LINE_FADE_TO)).toBe(1)
+  it('normal distances are untouched: the closest orbit and a stopped VIEW (2 cells), the close-up (about 6), the orbit and out', () => {
+    for (const d of [ORBIT_MIN_DISTANCE, 3, 6, 8, 26, 1000]) expect(nearFadeShare(d, LINE_FADE_FROM, LINE_FADE_TO)).toBe(1)
   })
 
   it('the spawn marker at 2^0 (ring radius 3 cells): gone within 3 cells, faint at the 4 cells the bars stood at, whole from 9', () => {

@@ -185,7 +185,7 @@ export function relayFreezeOf(chain: Chain, slot = 'own'): { index: number; at: 
  * chainStopOf). `list` is the 5.13 list; null when it could not load, and
  * then a hop only it can judge is taken as it stands, never cut on a guess.
  * A fork counts nothing. `stop` is the rejected proof when that is where it
- * ends. Pure, and one pass over the chain.
+ * ends. Pure and linear: the break's scan and the form scan before it.
  */
 export function countsThrough(chain: Chain, list: ReadonlySet<string> | null): { end: number; stop: RelayStop | null } {
   if (chain.length === 0 || chain[0].fork) return { end: 0, stop: null }

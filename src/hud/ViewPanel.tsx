@@ -30,7 +30,7 @@ import { useWalk } from '../store/useWalk'
 import { useTutorial } from '../store/useTutorial'
 import { useDemo } from '../store/useDemo'
 import { useTv } from '../store/useTv'
-import { setTutorialSwitch, useTutorialSwitch } from '../tutorial/gate'
+import { TUTORIAL_DEFAULT_ON, setTutorialSwitch, useTutorialSwitch } from '../tutorial/gate'
 import { Field, Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
 
@@ -177,18 +177,16 @@ export function ViewPanel(): JSX.Element {
 
 /**
  * The first-arrival tutorial's switch and RESTART TUTORIAL (store/useTutorial.ts,
- * tutorial/gate.ts). Off in production: the row shows only on a device where
- * ?tutorial=1 or ?tutorial=0 was opened, until the owner turns the tutorial on
- * for new identities.
+ * tutorial/gate.ts). On by default since 2026-11-13, so the row shows for
+ * everyone.
  */
 function TutorialRow(): JSX.Element | null {
-  const on = useTutorialSwitch((st) => st.value)
+  const on = useTutorialSwitch((st) => st.value) ?? TUTORIAL_DEFAULT_ON
   const running = useTutorial((st) => st.active)
   // RESTART cannot start over the tour or TV, which would put it away again at once.
   const touring = useDemo((st) => st.active)
   const tvOn = useTv((st) => st.on)
   const blocked = touring || tvOn
-  if (on === null) return null
   const set = (v: boolean): void => {
     setTutorialSwitch(v)
     if (!v) useTutorial.getState().pause()

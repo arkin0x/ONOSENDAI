@@ -220,7 +220,8 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
     usePanelLayout.setState({ order: moveBefore(moveBefore(defaultOrder(), 'relays', 'identity', 'left'), 'hidden', null, 'right') })
     const { left, right } = columns()
     expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'AgentsPanel', 'AvatarsPanel', 'InventoryPanel', 'ShardsPanel', 'DiscoveredPanel', 'TargetsPanel', 'LinksPanel'])
-    expect(right).toEqual(['ScalePanel', 'PositionPanel', 'ViewAtPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'Controls', 'DerezzPanel', 'HiddenPanel'])
+    // TUTORIAL is drawn for everyone since the tutorial went on by default (2026-11-13).
+    expect(right).toEqual(['ScalePanel', 'PositionPanel', 'ViewAtPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'Controls', 'DerezzPanel', 'TutorialPanel', 'HiddenPanel'])
   })
 
   it('AGENTS is drawn for everyone, with no agent, in its saved place (arkinox, 2026-10-13)', () => {
@@ -245,7 +246,8 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
     useBuilder.getState().exit()
     useCyberspace.getState().clearFocus()
     const { right } = columns()
-    expect(right.slice(-2)).toEqual(['ViewAtPanel', 'RelaysPanel'])
+    // TUTORIAL stays the last panel of all (usePanelLayout), drawn for everyone since 2026-11-13.
+    expect(right.slice(-3)).toEqual(['ViewAtPanel', 'RelaysPanel', 'TutorialPanel'])
     expect(usePanelLayout.getState().order).toBe(order)
   })
 

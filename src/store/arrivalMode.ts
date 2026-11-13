@@ -14,7 +14,7 @@
  * it also waits, as the tutorial does, for the identity to be judged
  * (useTutorial identitySettled), so the two never both start; a brand-new
  * visitor's key is made on this load, so for them that is at once. Where
- * it cannot (the switch off, as in production, or another address), it
+ * it cannot (the switch turned off on this device, or another address), it
  * does not wait on the relays at all.
  *
  * A mode that arrives after you have started doing something (a hop lined

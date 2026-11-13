@@ -4,8 +4,7 @@
  * can read them (tutorial feedback 2026-11-11, items 6 and 14; owner,
  * 2026-11-12, the first hop).
  *
- * All are off in production, since nothing sets them unless the tutorial
- * runs, so the rig's behaviour is unchanged for everyone else.
+ * Nothing sets them unless the tutorial runs, so the rig's behaviour is unchanged for everyone else.
  *   - `spin`: a gentle idle orbit of the camera around the cursor on the Y
  *     axis, while the first move step is up, so a newcomer sees the box they
  *     are about to move into turn in space.

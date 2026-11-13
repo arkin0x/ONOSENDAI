@@ -8,7 +8,7 @@
  * still signs the spawn and what they plant stays, but nothing is published
  * until they flip the publishing switch themselves, so a newcomer sandboxes
  * safely. A resume or a RESTART leaves the switch where they left it. It is gated by a
- * device switch that is off in production
+ * device switch, on by default since 2026-11-13
  * (tutorial/gate.ts), shown only to a brand-new identity on arrival
  * (isNewArrival), kept per player pubkey so a reload resumes, and started
  * again by RESTART TUTORIAL in Settings.
@@ -25,7 +25,7 @@ import type { TutorialScript, TutorialStep, TutorialWait } from '../tutorial/typ
 import type { DemoAction } from '../demo/types'
 import { landedPath, readProgress, tutorialOn, writeProgress, type TutorialProgress } from '../tutorial/gate'
 import { aimCursor, applyScene, useDemo, watchAction } from './useDemo'
-import { appMinted, keyMintedOnLoad, savedChainLoaded, useCyberspace } from './useCyberspace'
+import { appMinted, chosenNewKey, keyMintedOnLoad, savedChainLoaded, useCyberspace } from './useCyberspace'
 import { useTv } from './useTv'
 import { setMenuOpen } from '../hooks/useMenuOpen'
 
@@ -169,6 +169,8 @@ export function isNewArrival(): boolean {
   const cs = useCyberspace.getState()
   if (cs.signerKind !== 'local' || cs.events.length > 0) return false
   const pubkey = cs.identity.pubkey
+  // A key made with USE NEW KEY is a returning player's, never a first arrival (review of #716).
+  if (chosenNewKey(pubkey)) return false
   if (keyMintedOnLoad() === pubkey) return true
   return appMinted(pubkey) === true && cs.selfCheck.pubkey === pubkey && cs.selfCheck.status === 'none'
 }

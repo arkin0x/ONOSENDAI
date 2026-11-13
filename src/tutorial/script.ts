@@ -83,7 +83,7 @@ export const TO_PLOT: TutorialStep = {
   title: 'Planting seeds',
   caption: "Let's plant code that grows into something beautiful. Go stand on that platform.",
   hint: 'Tap COMMIT to move there.',
-  // COMMIT glows, as on the box and course steps (owner, 2026-11-13).
+  // COMMIT glows, as on the box step (owner, 2026-11-13); the course step glows it once the cursor is on its target.
   scene: { target: 'self', highlight: COMMIT, pad: true },
   wait: 'at-plot',
   effect: 'aim-plot',

@@ -28,7 +28,7 @@ import { BOX_HEIGHT, COVER_MAX, FOOTPRINT, arrivalCell, chestCell, inRegion, reg
 import { TUTORIAL_DNA_EVENT } from '../dna'
 import { STAGE_TEXT, WELCOME_ITEM, boxModel, buildStage, pieceModel, readStage, stageKey, writeStage, type KeyAt } from '../stage'
 import { guideBagsFor, isGuideAuthor, isGuideBag, onGuideBags, passesTaps, setGuideBags } from '../guideBags'
-import { COURSE, FINISH_CHEST, PLOT_STAND, START_STAND, TARGET, atStart, courseToFrame, courseToWorld, onPlot, onTarget, plantCell, targetAt, targetPayload } from '../course'
+import { COURSE, FINISH_CHEST, PLOT_AT, PLOT_STAND, START_STAND, TARGET, atStart, courseToFrame, courseToWorld, inPlot, onPlot, onTarget, plantCell, targetAt, targetPayload } from '../course'
 import type { Position } from '../../lib/space'
 
 const MAX_COMPUTE = 20
@@ -344,18 +344,40 @@ describe('the first move lands level with the chest, two gibsons in front of it,
 
 describe('the plant cursor goes on the dirt beside the player (feedback 2026-11-12, item 6)', () => {
   const frames = [{ fwd: 1, side: 1 }, { fwd: -1, side: -1 }] as const
-  it('to one side, the other at the plot\'s edge, at the standing height, never on the player; none off the plot', () => {
+  it('to one side, the other at the plot\'s edge, in the dirt, never on the player; none off the plot', () => {
     for (const f of frames) {
       const frame = { ...f, boxBase: { x: 800n, y: 800n, z: 800n } }
       const u = PLOT_STAND.u
-      expect(plantCell(frame, toWorld(frame, 14, 4, u))).toEqual(toWorld(frame, 14, 5, u))
+      // In the dirt: the dirt's own height, one gibson below where the player
+      // stands (owner, 2026-11-13: "the cursor needs to be 1g lower so the
+      // seed is in the dirt").
+      const d = PLOT_AT.u
+      expect(d).toBe(u - 1)
+      expect(plantCell(frame, toWorld(frame, 14, 4, u))).toEqual(toWorld(frame, 14, 5, d))
       // At the side edge (r 6), the other side.
-      expect(plantCell(frame, toWorld(frame, 14, 6, u))).toEqual(toWorld(frame, 14, 5, u))
-      // Standing a gibson up, still on the dirt's surface.
+      expect(plantCell(frame, toWorld(frame, 14, 6, u))).toEqual(toWorld(frame, 14, 5, d))
+      // Standing a gibson up, still in the dirt.
       const up = plantCell(frame, toWorld(frame, 13, 3, u + 1))!
-      expect(onPlot(frame, up)).toBe(true)
-      expect(up).toEqual(toWorld(frame, 13, 4, u))
+      expect(inPlot(frame, up)).toBe(true)
+      expect(up).toEqual(toWorld(frame, 13, 4, d))
       expect(plantCell(frame, toWorld(frame, 30, 4, u))).toBe(null)
+    }
+  })
+
+  it('the plot is the dirt and the two cells above it; standing on it is still only those two', () => {
+    for (const f of frames) {
+      const frame = { ...f, boxBase: { x: 800n, y: 800n, z: 800n } }
+      for (const [ff, r] of [[12, 2], [16, 6], [14, 4]] as const) {
+        expect(inPlot(frame, toWorld(frame, ff, r, PLOT_AT.u))).toBe(true)
+        expect(inPlot(frame, toWorld(frame, ff, r, PLOT_AT.u + 2))).toBe(true)
+        expect(inPlot(frame, toWorld(frame, ff, r, PLOT_AT.u - 1))).toBe(false)
+        expect(inPlot(frame, toWorld(frame, ff, r, PLOT_AT.u + 3))).toBe(false)
+        // Standing (the at-plot wait) is unchanged: one or two above the dirt, never in it.
+        expect(onPlot(frame, toWorld(frame, ff, r, PLOT_AT.u))).toBe(false)
+        expect(onPlot(frame, toWorld(frame, ff, r, PLOT_STAND.u))).toBe(true)
+      }
+      expect(inPlot(frame, toWorld(frame, 11, 4, PLOT_AT.u))).toBe(false)
+      expect(inPlot(frame, toWorld(frame, 14, 7, PLOT_AT.u))).toBe(false)
     }
   })
 })

@@ -204,14 +204,25 @@ export function slabPayload(name: string, hx: number, hz: number, color: number)
  * counting as cells too, the same whichever way the layout faces).
  */
 export const PLOT_AT = { f: 14, r: 4, u: 0 } as const
-/** Where a player stands on the plot, and where a seed planted there sits. */
+/** Where a player stands on the plot: one cell above the dirt's own. */
 export const PLOT_STAND = { f: 14, r: 4, u: 1 } as const
 export const PLOT = slabPayload('Dirt', 2, 2, 121)
+/**
+ * Where a seed planted on the plot sits: in the dirt, at the dirt's own
+ * height, one gibson below where the player stands (owner, 2026-11-13: "the
+ * cursor needs to be 1g lower so the seed is in the dirt"). The dirt is a
+ * slab whose top is at its origin's y (slabPayload), and a seed's bloom grows
+ * up from the seed's own point, drawn through the same placement as any shard
+ * (scene/WorldSeeds, WorldShards placeShard): at the dirt's height the bloom
+ * stands on the dirt's top, the bead it shows before it blooms half in the
+ * dirt. A cell up, where the player stands, it stood a whole gibson above it.
+ */
+export const PLOT_SEED_U = PLOT_AT.u
 
-/** Whether a world point is on the plot, standing or planted (one cell above its top, or two). */
-export function onPlot(frame: Frame, at: Position): boolean {
-  const a = toWorld(frame, PLOT_AT.f - 2, PLOT_AT.r - 2, 1)
-  const b = toWorld(frame, PLOT_AT.f + 2, PLOT_AT.r + 2, 2)
+/** Whether a world point lies over the plot's 5 by 5 cells, from `u0` to `u1` in the box's frame (inclusive). */
+function overPlot(frame: Frame, at: Position, u0: number, u1: number): boolean {
+  const a = toWorld(frame, PLOT_AT.f - 2, PLOT_AT.r - 2, u0)
+  const b = toWorld(frame, PLOT_AT.f + 2, PLOT_AT.r + 2, u1)
   for (const k of ['x', 'y', 'z'] as const) {
     const lo = a[k] < b[k] ? a[k] : b[k]
     const hi = a[k] > b[k] ? a[k] : b[k]
@@ -220,22 +231,39 @@ export function onPlot(frame: Frame, at: Position): boolean {
   return true
 }
 
+/** Whether a world point is standing on the plot: one cell above its top, or two (the at-plot wait). */
+export function onPlot(frame: Frame, at: Position): boolean {
+  return overPlot(frame, at, PLOT_STAND.u, PLOT_STAND.u + 1)
+}
+
+/**
+ * Whether a world point is on the plot as a seed may be: in the dirt
+ * (PLOT_SEED_U), where PLANT THE SEED puts it, or one or two cells above it,
+ * where a player standing there might nudge it. What PLANT THE SEED accepts
+ * for the cursor it lines up; the plant wait itself is wider (director.ts
+ * tutorialTreePlanted: anywhere in the tutorial's region).
+ */
+export function inPlot(frame: Frame, at: Position): boolean {
+  return overPlot(frame, at, PLOT_SEED_U, PLOT_STAND.u + 1)
+}
+
 /**
  * Where the plant step puts the build cursor (tutorial feedback 2026-11-12,
- * item 6): on the dirt, beside the player rather than on or under them. The
+ * item 6): in the dirt, beside the player rather than on or under them. The
  * cell to one side of where they stand, else to the other, else ahead or
- * behind: the first of those on the plot, at the plot's standing height,
- * where a seed sits on the dirt. A side first, because the view looks along
- * the forward axis (the layout's forward is the starting view's +Z), and a
- * cell ahead would sit right behind the avatar on screen. Null when the
- * player is not on the plot.
+ * behind: the first of those over the plot, at the dirt's own height
+ * (PLOT_SEED_U, one gibson below where they stand; owner, 2026-11-13: "the
+ * cursor needs to be 1g lower so the seed is in the dirt"). A side first,
+ * because the view looks along the forward axis (the layout's forward is the
+ * starting view's +Z), and a cell ahead would sit right behind the avatar on
+ * screen. Null when the player is not on the plot.
  */
 export function plantCell(frame: Frame, at: Position): Position | null {
   if (!onPlot(frame, at)) return null
   const p = toFrame(frame, at)
   for (const [df, dr] of [[0, 1], [0, -1], [1, 0], [-1, 0]] as const) {
-    const cell = toWorld(frame, p.f + df, p.r + dr, PLOT_STAND.u)
-    if (onPlot(frame, cell)) return cell
+    const cell = toWorld(frame, p.f + df, p.r + dr, PLOT_SEED_U)
+    if (inPlot(frame, cell)) return cell
   }
   return null
 }

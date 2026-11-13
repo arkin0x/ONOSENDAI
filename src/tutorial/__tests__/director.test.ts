@@ -431,11 +431,13 @@ describe('the director', () => {
     useTutorial.getState().start({ at: 'plant' })
     expect(useTutorial.getState().done).toBe(false)
     useCyberspace.getState().setLive(true)
-    // Another tree on the dirt; the tree far off; the tree on the dirt but no relay took it (LIVE): none count.
+    // Past the tutorial's covering region, along X: the far side of it from the dirt.
+    const out = { ...stand, x: layout!.cover.base.x + (1n << BigInt(layout!.cover.height)) + 4n }
+    // Another tree on the dirt; the tree outside the tutorial's region; the tree on the dirt but no relay took it (LIVE): none count.
     useShards.setState({ mine: [seedRow(fern.id, stand)] })
     await new Promise((r) => setTimeout(r, 20))
     expect(useTutorial.getState().done).toBe(false)
-    useShards.setState({ mine: [seedRow(tree.id, { ...stand, x: stand.x + 40n })] })
+    useShards.setState({ mine: [seedRow(tree.id, out)] })
     expect(useTutorial.getState().done).toBe(false)
     useShards.setState({ mine: [seedRow(tree.id, stand, false)] })
     expect(useTutorial.getState().done).toBe(false)
@@ -445,13 +447,13 @@ describe('the director', () => {
     // A reload after planting finds it planted.
     useTutorial.getState().start({ at: 'plant' })
     await vi.waitFor(() => { expect(useTutorial.getState().done).toBe(true) })
-    // A seed naming the owner's event counts at once, on the dirt; off it, not.
+    // A seed naming the owner's event counts at once, in the tutorial's region; outside it, not.
     const { tutorialTreePlanted } = await import('../director')
     const ownerId = 'c'.repeat(64)
     useShards.setState({ mine: [seedRow(ownerId, stand)] })
     expect(tutorialTreePlanted(undefined, ownerId)).toBe(true)
     expect(tutorialTreePlanted(undefined, null)).toBe(false)
-    useShards.setState({ mine: [seedRow(ownerId, { ...stand, x: stand.x + 40n })] })
+    useShards.setState({ mine: [seedRow(ownerId, out)] })
     expect(tutorialTreePlanted(undefined, ownerId)).toBe(false)
     // The bud leaves BUILD, so the course step can line its COMMIT up.
     const { useBuilder } = await import('../../store/useBuilder')
@@ -461,6 +463,161 @@ describe('the director', () => {
     useShards.setState({ mine: [] })
     useCyberspace.setState({ events: [] })
   }, 60_000)
+
+  /**
+   * The owner, 2026-11-13: "after I hid the seed, I shouldnt have to exit the
+   * hide overlay, exit build, return to avatar, and then... the tutorial
+   * window still says plant the seed, so im stuck / oh im stuck because i
+   * moved the build cursor". The tutorial seed counts wherever in the
+   * tutorial's region it is hidden, and then the tutorial backs out for them.
+   */
+  describe('the plant step after HIDE (owner, 2026-11-13)', () => {
+    async function onThePlot() {
+      const { finalizeEvent, generateSecretKey, getPublicKey } = await import('nostr-tools/pure')
+      const { minePow } = await import('nostr-tools/nip13')
+      const { seedTemplate, dnaTemplate } = await import('../../lib/seeds/plant')
+      const { dnaResolver } = await import('../../lib/seeds/seedSources')
+      const { ORIGINAL_DNAS } = await import('../../lib/seeds/originalDnas')
+      const { plantCell } = await import('../course')
+      useTutorial.getState().start({ restart: true })
+      await staged()
+      const { layout } = useTutorialStage.getState()
+      const stand = toWorld(layout!.frame, PLOT_STAND.f, PLOT_STAND.r, PLOT_STAND.u)
+      const aimed = plantCell(layout!.frame, stand)!
+      const me = generateSecretKey()
+      const fern = finalizeEvent(dnaTemplate(ORIGINAL_DNAS[0].text, ORIGINAL_DNAS[0].caps, 1_800_000_000), me)
+      dnaResolver.note(fern as never)
+      const seedRow = (dnaId: string, at: { x: bigint; y: bigint; z: bigint }, plane = layout!.plane) => {
+        const t = seedTemplate({ dnaId, relayHint: '', planted: 900_000, scale: 0, at, plane, title: '', createdAt: 1_800_000_000 })
+        const inner = finalizeEvent(minePow({ ...t, pubkey: getPublicKey(me) }, 16), me)
+        return { eventId: inner.id, type: 'seed', inner, at: { x: String(at.x), y: String(at.y), z: String(at.z) }, plane, published: false } as never
+      }
+      useCyberspace.getState().setLive(false)
+      useCyberspace.setState({ events: [{ id: 'e', tags: [] } as never], position: stand, cursor: stand, headPlane: layout!.plane })
+      if (useCyberspace.getState().scaleExp !== 0) useCyberspace.getState().adjustScale(-useCyberspace.getState().scaleExp)
+      return { layout: layout!, stand, aimed, fern, seedRow }
+    }
+
+    it('counts the tutorial seed hidden off the aimed cell (a cell or two over, a gibson down or up, anywhere in the tutorial\'s region); never another DNA, the other plane or outside the region', async () => {
+      const { tutorialTreePlanted } = await import('../director')
+      const { layout, stand, aimed, fern, seedRow } = await onThePlot()
+      const { fwd, side } = layout.frame
+      const tree = TUTORIAL_DNA_EVENT.id
+      // Cells off the aimed one in the box's frame: across the dirt, down into it, up off it, to its corner.
+      const off = (df: number, dr: number, du: number) => ({ x: aimed.x + BigInt(dr * side), y: aimed.y + BigInt(du), z: aimed.z + BigInt(df * fwd) })
+      const counted = [aimed, off(0, 1, 0), off(2, 0, 0), off(-2, -1, 0), off(0, 0, -1), off(0, 0, 1), off(0, 0, 2), off(2, 1, 1),
+        // Off the dirt, but still in the tutorial's region: beside the plot, at the course's start, back by the green box.
+        off(0, 0, 5), courseToWorld(layout.frame, START_STAND), toWorld(layout.frame, 2, 2, 2)]
+      for (const at of counted) {
+        useShards.setState({ mine: [seedRow(tree, at)] })
+        expect(tutorialTreePlanted(), `tree at ${at.x},${at.y},${at.z}`).toBe(true)
+        useShards.setState({ mine: [seedRow(fern.id, at)] })
+        expect(tutorialTreePlanted(), `fern at ${at.x},${at.y},${at.z}`).toBe(false)
+      }
+      // The other plane, and outside the region (each axis): not the tutorial's.
+      useShards.setState({ mine: [seedRow(tree, aimed, (1 - layout.plane) as 0 | 1)] })
+      expect(tutorialTreePlanted()).toBe(false)
+      const size = 1n << BigInt(layout.cover.height)
+      for (const k of ['x', 'y', 'z'] as const) {
+        useShards.setState({ mine: [seedRow(tree, { ...stand, [k]: layout.cover.base[k] + size })] })
+        expect(tutorialTreePlanted(), `past the region along ${k}`).toBe(false)
+        useShards.setState({ mine: [seedRow(tree, { ...stand, [k]: layout.cover.base[k] - 1n })] })
+        expect(tutorialTreePlanted(), `before the region along ${k}`).toBe(false)
+      }
+      // Through the engine: a tree hidden one gibson under the aimed cell (the owner's move) completes the plant wait.
+      useShards.setState({ mine: [] })
+      useTutorial.getState().start({ at: 'plant' })
+      await staged()
+      expect(useTutorial.getState().done).toBe(false)
+      useShards.setState({ mine: [seedRow(tree, off(0, 0, -1))] })
+      expect(useTutorial.getState().done).toBe(true)
+      useShards.setState({ mine: [] })
+      useCyberspace.setState({ events: [] })
+    }, 60_000)
+
+    it('PLANT THE SEED again after a HIDE that did not count (outside the tutorial\'s region) lines a fresh seed up, never taking the copy HIDE left for the tree', async () => {
+      const { lineUpTutorialSeed } = await import('../director')
+      const { useBuilder } = await import('../../store/useBuilder')
+      const { TUTORIAL_DNA } = await import('../dna')
+      const { stand, aimed } = await onThePlot()
+      holdDna()
+      useBuilder.setState({ active: false } as never)
+      // As HIDE leaves the tree: its clone lined up again (useShards againOf), BUILD on.
+      useBuilder.getState().enter('build')
+      const copy = { type: 'seed', seed: { text: TUTORIAL_DNA.text, caps: TUTORIAL_DNA.caps, scale: 0 } } as never
+      useShards.setState({ pending: copy, placedLast: { pending: copy } as never, deployStatus: 'done' } as never)
+      useCyberspace.setState({ position: stand })
+      expect(await lineUpTutorialSeed(null, async () => 3)).toBe(null)
+      const now = useShards.getState().pending
+      expect(now).not.toBe(copy)
+      expect(now).toMatchObject({ type: 'seed', seed: { text: TUTORIAL_DNA.text } })
+      expect(useCyberspace.getState().cursor).toEqual(aimed)
+      useShards.setState({ pending: null, placedLast: null, deployStatus: 'idle' } as never)
+      useBuilder.getState().exit()
+      useCyberspace.setState({ events: [] })
+    }, 60_000)
+
+    it('once the plant counts, the tutorial goes on by itself and closes the hide bar, BUILD and the build view: the player is back on their avatar', async () => {
+      const { useBuilder, BUILD_FOCUS_LABEL } = await import('../../store/useBuilder')
+      const { ADVANCE_MS } = await import('../../store/useTutorial')
+      const { stand, aimed, seedRow } = await onThePlot()
+      // As HIDE leaves it: BUILD on, its view driven to the cursor in the dirt
+      // beside the avatar, and a copy of the seed lined up again (useShards
+      // placedLast), which is the hide bar still up.
+      useBuilder.getState().enter('build')
+      useCyberspace.setState({ cursor: { ...aimed } })
+      const copy = { type: 'seed', seed: { text: 'x' } } as never
+      useTutorial.getState().start({ at: 'plant' })
+      await staged()
+      // In the deploy's own order (useShards): the seed's row first, while the
+      // hide is still working with the seed itself lined up, which counts;
+      // then, done, the copy lined up again.
+      const seed = { type: 'seed', seed: { text: 'x' } } as never
+      useShards.setState({ pending: seed, placedLast: null, deployStatus: 'working' } as never)
+      useShards.setState({ mine: [seedRow(TUTORIAL_DNA_EVENT.id, aimed)] })
+      expect(useTutorial.getState().done).toBe(true)
+      useShards.setState({ pending: copy, placedLast: { pending: copy } as never, deployStatus: 'done' } as never)
+      expect(useBuilder.getState().active).toBe(true)
+      await vi.waitFor(() => { expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('bud') }, { timeout: ADVANCE_MS + 2_000 })
+      expect(useShards.getState().pending).toBe(null)
+      expect(useBuilder.getState().active).toBe(false)
+      expect(useCyberspace.getState().focus).toBe(null)
+      expect(useCyberspace.getState().cursor).toEqual(stand)
+      expect(useCyberspace.getState().scaleExp).toBe(0)
+
+      // Still hiding as the bud comes up: it waits for the hide to end, then backs out the same.
+      useBuilder.getState().enter('build')
+      useCyberspace.setState({ cursor: { ...aimed } })
+      const hiding = { type: 'seed', seed: { text: 'y' } } as never
+      useShards.setState({ pending: hiding, placedLast: null, deployStatus: 'working' } as never)
+      useTutorial.getState().start({ at: 'bud' })
+      expect(useBuilder.getState().active).toBe(true)
+      expect(useCyberspace.getState().focus?.label).toBe(BUILD_FOCUS_LABEL)
+      useShards.setState({ pending: copy, placedLast: { pending: copy } as never, deployStatus: 'done' } as never)
+      await Promise.resolve()
+      expect(useShards.getState().pending).toBe(null)
+      expect(useBuilder.getState().active).toBe(false)
+      expect(useCyberspace.getState().focus).toBe(null)
+
+      // BUILD left by hand before the bud: the view it left behind still goes.
+      useBuilder.getState().enter('build')
+      useCyberspace.setState({ cursor: { ...aimed } })
+      useBuilder.getState().exit()
+      expect(useCyberspace.getState().focus?.label).toBe(BUILD_FOCUS_LABEL)
+      useTutorial.getState().start({ at: 'bud' })
+      expect(useCyberspace.getState().focus).toBe(null)
+
+      // Something of the player's own lined up is never dropped: BUILD stays for it.
+      useBuilder.getState().enter('build')
+      useShards.setState({ pending: { type: 'message', text: 'hi' } as never, placedLast: null, deployStatus: 'idle' } as never)
+      useTutorial.getState().start({ at: 'bud' })
+      expect(useShards.getState().pending).toMatchObject({ type: 'message' })
+      expect(useBuilder.getState().active).toBe(true)
+      useShards.setState({ pending: null, mine: [] } as never)
+      useBuilder.getState().exit()
+      useCyberspace.setState({ events: [] })
+    }, 60_000)
+  })
 
   it('waits on a workshop already open, and on a shard DEPLOY lined up to place, before the next card comes', async () => {
     const { useWorkshop } = await import('../../store/useWorkshop')
@@ -491,7 +648,7 @@ describe('the director', () => {
     const { TUTORIAL_DNA } = await import('../dna')
     const { useBuilder } = await import('../../store/useBuilder')
     const { dnaResolver } = await import('../../lib/seeds/seedSources')
-    const { onPlot } = await import('../course')
+    const { inPlot } = await import('../course')
     const { finalizeEvent, generateSecretKey } = await import('nostr-tools/pure')
     const template = (await import('../moon-blossom-v2-event.json')).default
     useTutorial.getState().start({ restart: true })
@@ -511,11 +668,13 @@ describe('the director', () => {
     expect(r0).toBe(null)
     expect(useBuilder.getState().active).toBe(true)
     expect(useCyberspace.getState().scaleExp).toBe(0)
-    expect(onPlot(layout!.frame, useCyberspace.getState().cursor)).toBe(true)
-    // On the dirt beside the avatar, at its height, never on it (feedback 2026-11-12, item 6).
+    expect(inPlot(layout!.frame, useCyberspace.getState().cursor)).toBe(true)
+    // In the dirt beside the avatar, never on it (feedback 2026-11-12, item 6): one gibson below
+    // where the avatar stands, so the seed sits in the dirt (owner, 2026-11-13: "the cursor needs to
+    // be 1g lower so the seed is in the dirt").
     const planted = useCyberspace.getState().cursor
     expect(planted).not.toEqual(stand)
-    expect(planted.y).toBe(stand.y)
+    expect(planted.y).toBe(stand.y - 1n)
     // To one side (the world's X here), so it is not right behind the avatar down the view's forward axis.
     expect(planted.z).toBe(stand.z)
     expect(planted.x - stand.x === 1n || planted.x - stand.x === -1n).toBe(true)

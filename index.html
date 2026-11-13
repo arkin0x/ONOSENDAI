@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Same-origin requests (the analytics collector among them) carry only the origin, never /C/<hex> or the query (src/lib/analytics.ts). -->
+    <meta name="referrer" content="strict-origin" />
     
     <!-- Prevent caching: always fetch fresh build -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />

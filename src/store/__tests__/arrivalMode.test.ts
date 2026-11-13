@@ -5,9 +5,11 @@
  * - the flag is read once and taken off the address; an unknown value is
  *   ignored and stays;
  * - a brand-new visitor lands in VIEW at their avatar, or in region mode;
- * - it waits for the identity to be judged, as the tutorial does;
+ * - it waits for the identity to be judged only when /tutorial also asked;
  * - on a /C/ prefix link, region mode starts on that link's region;
- * - the first-arrival tutorial wins: when it starts, the mode is dropped;
+ * - the mode wins over the first-arrival tutorial (owner, 2026-11-13): the
+ *   tutorial neither starts nor resumes on that load, and its progress is
+ *   left as it was; a run already going, or /tutorial, still wins;
  * - applied once per load, and never under TV.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -42,9 +44,9 @@ import { MINTED_KEY, samePosition, useCyberspace } from '../useCyberspace'
 import { applyArrivalMode, takeArrivalMode, watchArrivalMode } from '../arrivalMode'
 import { startCoordRoute, useCoordRoute } from '../useCoordRoute'
 import { useRegion } from '../useRegion'
-import { useTutorial, watchFirstArrival } from '../useTutorial'
+import { isNewArrival, useTutorial, watchFirstArrival } from '../useTutorial'
 import { useTv } from '../useTv'
-import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, noteLanding, setTutorialSwitch, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
+import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialRoute, arrivalModeAsked, noteLanding, readProgress, setTutorialSwitch, takeTutorialAsk, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
 import { coveringRegion, prefixRegion } from '../../lib/coordRoute'
 
 const cs = () => useCyberspace.getState()
@@ -69,6 +71,7 @@ function land(pathname: string, search: string): string[] {
 
 beforeEach(() => {
   takeArrivalMode({ pathname: '/', search: '', hash: '' }, history().h)
+  takeTutorialAsk()
   minted.onLoad = true
   region().exit()
   cs().clearFocus()
@@ -117,17 +120,56 @@ describe('the flag on the address', () => {
 })
 
 describe('a brand-new visitor on the bare address', () => {
-  it('with no tutorial switch set (on by default, 2026-11-13), the tutorial wins and the mode is dropped', async () => {
+  it('with no tutorial switch set (on by default, 2026-11-13), the mode wins: region mode, no tutorial, its progress untouched (owner, 2026-11-13)', async () => {
     localStorage.removeItem(TUTORIAL_SWITCH_KEY)
     useTutorialSwitch.setState({ value: null })
+    expect(isNewArrival()).toBe(true)
+    land('/', '?mode=region')
+    expect(arrivalModeAsked()).toBe(true)
+    const stopTutorial = watchFirstArrival()
+    const stop = watchArrivalMode()
+    await flush()
+    expect(useTutorial.getState().active).toBe(false)
+    expect(cs().viewing()).toBe(true)
+    expect(region().active).toBe(true)
+    // Nothing marked skipped or ended: no progress at all.
+    expect(readProgress(pubkey())).toBe(null)
+    stop()
+    stopTutorial()
+  })
+
+  it('a later plain load still starts the tutorial for a visitor who is still new', async () => {
+    localStorage.removeItem(TUTORIAL_SWITCH_KEY)
+    useTutorialSwitch.setState({ value: null })
+    land('/', '?mode=view')
+    let stopTutorial = watchFirstArrival()
+    let stop = watchArrivalMode()
+    await flush()
+    expect(useTutorial.getState().active).toBe(false)
+    stop(); stopTutorial()
+    // A reload on the bare address, with no mode.
+    region().exit()
+    cs().clearFocus()
+    land('/', '')
+    expect(arrivalModeAsked()).toBe(false)
+    stopTutorial = watchFirstArrival()
+    stop = watchArrivalMode()
+    await flush()
+    expect(useTutorial.getState().active).toBe(true)
+    stop(); stopTutorial()
+  })
+
+  it('a run left unfinished does not resume over the mode, and stays as it was for the next load', async () => {
+    setTutorialSwitch(true)
+    writeProgress(pubkey(), { step: 'box' })
     land('/', '?mode=view')
     const stopTutorial = watchFirstArrival()
     const stop = watchArrivalMode()
     await flush()
-    expect(useTutorial.getState().active).toBe(true)
-    expect(cs().viewing()).toBe(false)
-    stop()
-    stopTutorial()
+    expect(useTutorial.getState().active).toBe(false)
+    expect(cs().viewing()).toBe(true)
+    expect(readProgress(pubkey())).toEqual({ step: 'box' })
+    stop(); stopTutorial()
   })
 
   it('?mode=view opens VIEW at their avatar, as the mode button does', async () => {
@@ -150,16 +192,13 @@ describe('a brand-new visitor on the bare address', () => {
     stop()
   })
 
-  it('where the tutorial could run, waits until the identity can be judged, then applies', async () => {
+  it('with the tutorial on, does not wait on the relays: the tutorial will not start by itself on this load', async () => {
     setTutorialSwitch(true)
     writeProgress(pubkey(), { step: 'welcome', ended: 'skipped' })
     minted.onLoad = false
     useCyberspace.setState({ selfCheck: { pubkey: pubkey(), status: 'checking' } })
     land('/', '?mode=view')
     const stop = watchArrivalMode()
-    await flush()
-    expect(cs().viewing()).toBe(false)
-    useCyberspace.setState({ selfCheck: { pubkey: pubkey(), status: 'none' } })
     await flush()
     expect(cs().viewing()).toBe(true)
     stop()
@@ -305,16 +344,17 @@ describe('on a /C/ link', () => {
   })
 })
 
-describe('the first-arrival tutorial wins', () => {
-  it('drops the mode when the tutorial starts on this load, whichever watch decides first', async () => {
+describe('the mode and the tutorial (owner, 2026-11-13: the mode wins over a first arrival)', () => {
+  it('a brand-new visitor on /?mode=region gets region mode and no tutorial, whichever watch decides first', async () => {
     setTutorialSwitch(true)
     land('/', '?mode=region')
     const stopMode = watchArrivalMode()
     const stopTutorial = watchFirstArrival()
     await flush()
-    expect(useTutorial.getState().active).toBe(true)
-    expect(cs().viewing()).toBe(false)
-    expect(region().active).toBe(false)
+    expect(useTutorial.getState().active).toBe(false)
+    expect(cs().viewing()).toBe(true)
+    expect(region().active).toBe(true)
+    expect(readProgress(pubkey())).toBe(null)
     stopMode(); stopTutorial()
   })
 
@@ -324,20 +364,39 @@ describe('the first-arrival tutorial wins', () => {
     const stopTutorial = watchFirstArrival()
     const stopMode = watchArrivalMode()
     await flush()
-    expect(useTutorial.getState().active).toBe(true)
-    expect(cs().viewing()).toBe(false)
+    expect(useTutorial.getState().active).toBe(false)
+    expect(cs().viewing()).toBe(true)
     stopMode(); stopTutorial()
   })
 
-  it('drops it when the tutorial is already running', async () => {
+  it('a run already going still wins: the mode is dropped, never applied after', async () => {
     setTutorialSwitch(true)
     land('/', '?mode=view')
-    const stopTutorial = watchFirstArrival()
-    await flush()
+    useTutorial.getState().start()
     expect(useTutorial.getState().active).toBe(true)
     const stopMode = watchArrivalMode()
     await flush()
+    expect(useTutorial.getState().active).toBe(true)
     expect(cs().viewing()).toBe(false)
+    stopMode()
+  })
+
+  it('/tutorial wins over a mode on the same address: once the identity is judged the run starts and the mode is dropped', async () => {
+    minted.onLoad = false
+    useCyberspace.setState({ selfCheck: { pubkey: pubkey(), status: 'checking' } })
+    noteLanding('/tutorial')
+    applyTutorialRoute({ pathname: '/tutorial', search: '?mode=region', hash: '' }, history().h)
+    const { h } = history()
+    takeArrivalMode({ pathname: '/', search: '?mode=region', hash: '' }, h)
+    const stopMode = watchArrivalMode()
+    const stopTutorial = watchFirstArrival()
+    await flush()
+    expect(cs().viewing()).toBe(false)
+    useCyberspace.setState({ selfCheck: { pubkey: pubkey(), status: 'none' } })
+    await flush()
+    expect(useTutorial.getState().active).toBe(true)
+    expect(cs().viewing()).toBe(false)
+    expect(region().active).toBe(false)
     stopMode(); stopTutorial()
   })
 

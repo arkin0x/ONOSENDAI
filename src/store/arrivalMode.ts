@@ -10,12 +10,13 @@
  * off the address there (replaceState, no new entry), so a reload or a link
  * copied from the address bar does not do it again. Applied once, when the
  * app can show it (watchArrivalMode): the saved chain is in, so VIEW starts
- * at the avatar's place (savedChainLoaded). Where the tutorial could run,
- * it also waits, as the tutorial does, for the identity to be judged
- * (useTutorial identitySettled), so the two never both start; a brand-new
- * visitor's key is made on this load, so for them that is at once. Where
- * it cannot (the switch turned off on this device, or another address), it
- * does not wait on the relays at all.
+ * at the avatar's place (savedChainLoaded). Only when the /tutorial address
+ * also asked for a run on this load does it wait, as the tutorial does, for
+ * the identity to be judged (useTutorial identitySettled), so the two never
+ * both start; otherwise it does not wait on the relays at all, since the
+ * tutorial does not start by itself on a load that asked for a mode. So a
+ * returning player on a new device (no saved chain yet) gets the mode at
+ * once, at the place known then, as it always did with the switch off.
  *
  * A mode that arrives after you have started doing something (a hop lined
  * up, the cursor moved off your avatar, a view of something else opened) is
@@ -28,10 +29,16 @@
  *   region round its cell, as the Region button would). A full coordinate
  *   that turns out to be a Bitcoin block's renames its view to the block
  *   once found, which ends region mode as any other view change does.
- * - The first-arrival tutorial wins: when it starts or resumes on this load,
- *   or is already running, the mode is dropped, never applied after. Its
- *   steps move the camera and the modes themselves, and a mode switched on
- *   under a step would fight it.
+ * - The mode wins over the first-arrival tutorial (owner, 2026-11-13): a
+ *   brand-new visitor on /?mode=region (the speakeasy page's "Pick a region
+ *   in ONOSENDAI" link) gets region mode, and the tutorial does not start or
+ *   resume by itself on that load (useTutorial tutorialStarts reads
+ *   tutorial/gate.ts arrivalModeAsked). Nothing is marked skipped or ended:
+ *   a later plain load still starts it for a visitor who is still new, and
+ *   the tutorial toast (tutorial/toast.ts) can offer it.
+ * - A run already going still wins, and so does /tutorial: the mode is then
+ *   dropped, never applied after. The tutorial's steps move the camera and
+ *   the modes themselves, and a mode switched on under a step would fight it.
  * - Nothing under the /demo tour or Cyberspace TV, which own the view.
  */
 
@@ -40,6 +47,7 @@ import { samePosition, savedChainLoaded, useCyberspace } from './useCyberspace'
 import { useCoordRoute } from './useCoordRoute'
 import { useRegion } from './useRegion'
 import { identitySettled, tutorialMayRun, tutorialStarts, useTutorial } from './useTutorial'
+import { noteArrivalModeAsked, tutorialAsked } from '../tutorial/gate'
 import { useDemo } from './useDemo'
 import { useTv } from './useTv'
 
@@ -55,11 +63,14 @@ let pending: ArrivalMode | null = null
  */
 export function takeArrivalMode(loc: Pick<Location, 'pathname' | 'search' | 'hash'> = window.location, history: Pick<History, 'replaceState' | 'state'> = window.history): ArrivalMode | null {
   pending = null
+  noteArrivalModeAsked(false)
   let params: URLSearchParams
   try { params = new URLSearchParams(loc.search) } catch { return null }
   const raw = (params.get('mode') ?? '').trim().toLowerCase()
   if (raw !== 'view' && raw !== 'region') return null
   pending = raw
+  // The tutorial stands aside for this load (useTutorial tutorialStarts).
+  noteArrivalModeAsked(true)
   params.delete('mode')
   const search = params.toString()
   try { history.replaceState(history.state, '', `${loc.pathname}${search ? `?${search}` : ''}${loc.hash}`) } catch { /* no history here */ }
@@ -94,7 +105,8 @@ function untouched(): boolean {
 
 /**
  * Apply the address's mode once the app can (see the header), or drop it for
- * the tutorial, the tour or TV. Returns what stops the watching.
+ * a tutorial run already going or asked for by /tutorial, the tour or TV.
+ * Returns what stops the watching.
  */
 export function watchArrivalMode(): () => void {
   if (pending === null) return () => {}
@@ -102,7 +114,8 @@ export function watchArrivalMode(): () => void {
   let waiting = false
   const check = (): void => {
     if (stopped || waiting || pending === null) return
-    if (tutorialMayRun() && !identitySettled()) return
+    // Only /tutorial can start a run on a load that asked for a mode: wait for its answer.
+    if (tutorialAsked() && tutorialMayRun() && !identitySettled()) return
     const pubkey = useCyberspace.getState().identity.pubkey
     waiting = true
     const go = (): void => {

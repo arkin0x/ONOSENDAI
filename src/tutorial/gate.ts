@@ -89,6 +89,24 @@ export function landedPath(): string {
   try { return window.location.pathname } catch { return '' }
 }
 
+/**
+ * Whether this load's address asked for an arrival mode (`?mode=view` or
+ * `?mode=region`, store/arrivalMode.ts takeArrivalMode notes it before the
+ * first render). Such a load gets the mode, not the first-arrival tutorial
+ * (owner, 2026-11-13): store/useTutorial.ts tutorialStarts reads this. Kept
+ * for the whole load, whether the mode was applied or dropped since, so the
+ * tutorial never starts later on the same load. Kept here, not in
+ * arrivalMode.ts, so the tutorial's engine reads it without importing that.
+ */
+let modeOnLoad = false
+export function noteArrivalModeAsked(asked: boolean): void {
+  modeOnLoad = asked
+}
+/** Whether this load arrived with ?mode=view or ?mode=region. */
+export function arrivalModeAsked(): boolean {
+  return modeOnLoad
+}
+
 /** Whether an address is the tutorial's own: /tutorial or /tutorial/, in any case. */
 export function isTutorialPath(pathname: string): boolean {
   return /^\/tutorial\/?$/i.test(pathname)

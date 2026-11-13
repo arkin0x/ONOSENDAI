@@ -10,8 +10,10 @@
  * safely. A resume or a RESTART leaves the switch where they left it. It is gated by a
  * device switch, on by default since 2026-11-13
  * (tutorial/gate.ts), shown only to a brand-new identity on arrival
- * (isNewArrival), kept per player pubkey so a reload resumes, and started
- * again by RESTART TUTORIAL in Settings.
+ * (isNewArrival) on an address that asked for no arrival mode (a ?mode= link
+ * gets its mode instead: tutorialStarts), kept per player pubkey so a reload
+ * resumes, and started again by RESTART TUTORIAL in Settings, START TUTORIAL
+ * in the menu, or START on the tutorial toast (tutorial/toast.ts).
  *
  * The /tutorial address (owner, 2026-11-13) asks for a run on its load: a
  * brand-new identity gets the first arrival as above, and anyone else the
@@ -30,7 +32,7 @@ import { create } from 'zustand'
 import { TUTORIAL_SCRIPT } from '../tutorial/script'
 import type { TutorialScript, TutorialStep, TutorialWait } from '../tutorial/types'
 import type { DemoAction } from '../demo/types'
-import { applyTutorialRoute, isTutorialPath, landedPath, readProgress, takeTutorialAsk, tutorialAsked, tutorialOn, writeProgress, type TutorialAnchor, type TutorialProgress } from '../tutorial/gate'
+import { applyTutorialRoute, arrivalModeAsked, isTutorialPath, landedPath, readProgress, takeTutorialAsk, tutorialAsked, tutorialOn, writeProgress, type TutorialAnchor, type TutorialProgress } from '../tutorial/gate'
 import { aimCursor, applyScene, useDemo, watchAction } from './useDemo'
 import { appMinted, chosenNewKey, keyMintedOnLoad, savedChainLoaded, useCyberspace, whyNoMove } from './useCyberspace'
 import { useTv } from './useTv'
@@ -231,7 +233,7 @@ export function cannotStageHere(): boolean {
  * the relays may hold a newer head (another device), and a run laid out at
  * the old one would be out of reach once that head is adopted.
  */
-function headUnsettled(pubkey: string): boolean {
+export function headUnsettled(pubkey: string): boolean {
   const cs = useCyberspace.getState()
   return cs.selfCheck.pubkey !== pubkey || cs.selfCheck.status === 'checking' || cs.chainConflict !== null
 }
@@ -527,15 +529,25 @@ export function tutorialMayRun(): boolean {
 /**
  * Whether the tutorial starts, or resumes, for `pubkey` on this load, once
  * its identity can be judged (identitySettled) and its saved chain is in:
- * the switch on, the bare address, no tour or TV, and either a run left
- * unfinished, a brand-new identity, or a run asked for by /tutorial. What watchFirstArrival acts on, and
+ * the switch on, the bare address, no tour or TV, and either a run asked for
+ * by /tutorial, or (on a load that asked for no arrival mode) a run left
+ * unfinished or a brand-new identity. What watchFirstArrival acts on, and
  * what an arrival ?mode= asks so it never starts over the tutorial
  * (store/arrivalMode.ts).
+ *
+ * A load that asked for ?mode=view or ?mode=region (the speakeasy page's
+ * "Pick a region in ONOSENDAI" link) gets the mode, not the tutorial (owner,
+ * 2026-11-13): nothing starts or resumes by itself on that load, and nothing
+ * is marked ended or skipped, so a later plain load still starts it for a
+ * player who is still new, and the tutorial toast (tutorial/toast.ts) can
+ * offer it. /tutorial still wins over a mode.
  */
 export function tutorialStarts(pubkey: string): boolean {
   if (!tutorialMayRun()) return false
-  // Asked for by /tutorial: it starts for anyone (answerAsk).
+  // Asked for by /tutorial: it starts for anyone (answerAsk), whatever mode the address also asked for.
   if (tutorialAsked()) return true
+  // An arrival mode wins over the first arrival and a resume, for this load only.
+  if (arrivalModeAsked()) return false
   const p = readProgress(pubkey)
   return p ? !p.ended : isNewArrival()
 }

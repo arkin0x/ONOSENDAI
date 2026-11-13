@@ -43,6 +43,8 @@ import { parseDemoRoute } from './lib/demoRoute'
 import { startWorkshopRoute } from './lib/workshopRoute'
 import { restoreAfterUnfinishedTour, useDemo } from './store/useDemo'
 import { ToastChip } from './hud/ToastChip'
+import { TutorialToast } from './hud/TutorialToast'
+import { watchTutorialToast } from './tutorial/toast'
 import { StarNickname } from './hud/StarNickname'
 import { StarredPlaceCard } from './hud/StarredPlaceCard'
 import { LootDetail } from './hud/LootDetail'
@@ -158,8 +160,11 @@ export default function App(): JSX.Element {
   // brand-new identity gets the tutorial and a player who left one
   // unfinished resumes it.
   useEffect(() => watchFirstArrival(), [])
-  // ?mode=view or ?mode=region on arrival, never over the tutorial (store/arrivalMode.ts).
+  // ?mode=view or ?mode=region on arrival: the mode wins over the first
+  // arrival on that load, never over a run already going (store/arrivalMode.ts).
   useEffect(() => watchArrivalMode(), [])
+  // The tutorial toast for a returning player who has not finished it (tutorial/toast.ts).
+  useEffect(() => watchTutorialToast(), [])
   // onosendai.tech/tv: Cyberspace TV (store/useTv.ts). Back off /tv turns
   // it off, Forward onto /tv turns it on, as loading that address would.
   useEffect(() => {
@@ -414,7 +419,11 @@ export default function App(): JSX.Element {
               <SoundChip />
               <NowPlayingChip />
             </>,
-            toast: <ToastChip />,
+            toast: <>
+              <ToastChip />
+              {/* Haven't finished the tutorial yet? START or LATER (tutorial/toast.ts). */}
+              <TutorialToast />
+            </>,
           }} />
         </div>
       )}

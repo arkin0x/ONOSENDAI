@@ -44,8 +44,8 @@ import { usePanelLayout } from '../../store/usePanelLayout'
 import { useShards } from '../../store/useShards'
 import { useOpenedChests, openedKey } from '../../store/useOpenedChests'
 import { useInventory } from '../../store/useInventory'
-import { cursorOnTarget, useTutorialStage } from '../director'
-import { guideBagsFor } from '../guideBags'
+import { FINER_KEY, cursorOnTarget, useTutorialStage } from '../director'
+import { guideBagsFor, passesTaps } from '../guideBags'
 import { GUIDE_KEY } from '../guide'
 import { COMMIT, PAD_ARROWS, TUTORIAL_SCRIPT } from '../script'
 import { PLOT_STAND, START_STAND, TARGET, courseToWorld, targetAt } from '../course'
@@ -87,6 +87,10 @@ describe('the director', () => {
     useTutorial.getState().start({ restart: true })
     await staged()
     const stage = useTutorialStage.getState().stage!
+    // Taps pass through the green box and the hop target (review, 2026-11-13).
+    expect(passesTaps(stage.ids.blueBox)).toBe(true)
+    expect(passesTaps(stage.ids.target)).toBe(true)
+    expect(passesTaps(stage.ids.chest)).toBe(false)
     expect(stage.player).toBe(pubkey())
     expect(stage.guide).not.toBe(pubkey())
     expect(localStorage.getItem(GUIDE_KEY)).toMatch(/^[0-9a-f]{64}$/)
@@ -286,10 +290,10 @@ describe('the director', () => {
     expect(cursorOnTarget()).toBe(true)
     expect(t().stepHighlight).toBe(COMMIT)
     expect(t().done).toBe(false)
-    // On it at a coarser zoom does not count (a COMMIT there is not a hop to the gibson).
+    // At a coarser scale the arrows move 2 or more a press: the finer-scale key glows, the way back to 2^0.
     useCyberspace.getState().adjustScale(1)
     expect(cursorOnTarget()).toBe(false)
-    expect(t().stepHighlight).toBe(null)
+    expect(t().stepHighlight).toBe(FINER_KEY)
     useCyberspace.getState().adjustScale(-1)
     useCyberspace.setState({ cursor: { ...target } })
     expect(t().stepHighlight).toBe(COMMIT)
@@ -344,6 +348,8 @@ describe('the director', () => {
       b: { author: stage.guide, type: 'shard', shard: platform } as never,
       c: { author: stage.guide, type: 'shard', shard: platform } as never,
       d: { author: 'f'.repeat(64), type: 'shard', shard: { ...platform, name: 'Not ours' } } as never,
+      // The hop target, found from the spawn: a marker, never copied (review, 2026-11-13).
+      [stage.ids.target]: { eventId: stage.ids.target, author: stage.guide, type: 'shard', shard: { ...platform, name: 'Target' } } as never,
     } })
     useInventory.setState({ items: { w: { id: 'w', type: 'shard', shard: trophy, from: { chestId: stage.ids.chest, chestName: 'x' } } as never } })
     // Nothing is copied until the workshop step asks: OPEN WORKSHOP copies them, and opens on the trampoline with the MENU asked for.

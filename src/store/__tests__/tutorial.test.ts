@@ -245,9 +245,11 @@ describe('the script', () => {
     for (const cell of ['away', 'up', 'toward', 'left', 'right', 'down']) expect(PAD_ARROWS.split(', ')).toContain(`.touchpad__key--${cell}`)
     expect(course.caption).toMatch(/CONTROLS[\s\S]*target/)
     expect(course.hint).toMatch(/arrows[\s\S]*COMMIT/)
-    // Every step that says to tap COMMIT glows it (owner, 2026-11-13: the planting step's did not).
+    // Every step that says to tap COMMIT glows it (owner, 2026-11-13: the planting step's did not),
+    // in any case; the course step glows it once the cursor is on the target (above).
     for (const s of TUTORIAL_SCRIPT.steps) {
-      if ([s.caption, s.hint].some((t) => t && /Tap COMMIT/.test(t))) expect(s.scene?.highlight, s.id).toBe('.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build)')
+      if (s.id === 'to-course') continue
+      if ([s.caption, s.hint].some((t) => t && /tap COMMIT/i.test(t))) expect(s.scene?.highlight, s.id).toBe('.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build)')
     }
   })
 

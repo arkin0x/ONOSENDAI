@@ -116,7 +116,7 @@ async function stageFor(player: string, restart: boolean): Promise<void> {
     }
     if (!current()) return
     // The blue box lets taps through to the chest inside it.
-    setGuideBags(stage.bags, { passTaps: [stage.ids.blueBox] })
+    setGuideBags(stage.bags, { passTaps: guideTapsPass(stage) })
     useTutorialStage.setState({ stage, layout })
   } catch (err) {
     if (mine !== run) return
@@ -137,10 +137,19 @@ async function restoreKept(player: string): Promise<void> {
     const { st, layout, guide } = await setupFor(player)
     const stage = st.readStage(player, guide.pubkey, st.stageKey(layout))
     if (!stage || mine !== run || useTutorial.getState().active || useCyberspace.getState().identity.pubkey !== player) return
-    setGuideBags(stage.bags, { passTaps: [stage.ids.blueBox] })
+    setGuideBags(stage.bags, { passTaps: guideTapsPass(stage) })
   } catch (err) {
     console.warn('[tutorial] could not put the kept stage back:', err)
   }
+}
+
+/**
+ * The guide's things a tap passes through: the green box, to the chest inside
+ * it, and the hop target, so a newcomer tapping it on a phone while told to
+ * move the cursor onto it gets no card (review, 2026-11-13).
+ */
+function guideTapsPass(stage: Stage): string[] {
+  return [stage.ids.blueBox, stage.ids.target].filter((id): id is string => typeof id === 'string')
 }
 
 /** The tutorial went away: its bags, and everything they gave, go with it. */
@@ -374,6 +383,9 @@ registerTutorialWatcher('take-finish', (onDone) => watchUntil(() => {
   return ids.some((id) => { const it = items[id]; return !!it && !it.cleared })
 }, onDone, [onStage, (l) => useInventory.subscribe((s, prev) => { if (s.items !== prev.items) l() })]))
 
+/** The pad's finer-scale key (hud/TouchControls.tsx zoomin): back down to 2^0. */
+export const FINER_KEY = '.touchpad__key--zoomin'
+
 /**
  * Whether the cursor is on the hop target (course.ts TARGET), lined up for a
  * HOP there from the player's own head: in the layout's plane, at 2^0, not in
@@ -391,7 +403,9 @@ export function cursorOnTarget(): boolean {
  * aims it. The step comes up at 2^0 (each arrow press one gibson), with the
  * cursor home (its scene's target 'self'). The pad's arrows glow while the
  * cursor is off the target, COMMIT while it is on it (useTutorial
- * stepHighlight), and the step waits for the HOP to land there ('at-target').
+ * stepHighlight), and the finer-scale key while the pad is at a coarser
+ * scale than 2^0, the way back to one gibson a press. The step waits for the
+ * HOP to land there ('at-target').
  * Once they land, the orbit camera eases in close, so the platform is not
  * looked at from far away (feedback item 6).
  */
@@ -399,7 +413,11 @@ registerTutorialEffect('to-course', () => {
   const index = useTutorial.getState().index
   const cs = useCyberspace.getState()
   if (cs.atHead() && !cs.walking && cs.proof.status !== 'computing' && cs.scaleExp !== 0) cs.adjustScale(-cs.scaleExp)
-  const point = (): void => { useTutorial.getState().highlightStep(index, cursorOnTarget() ? COMMIT : null) }
+  const point = (): void => {
+    const now = useCyberspace.getState()
+    const coarse = now.atHead() && !now.walking && now.scaleExp !== 0
+    useTutorial.getState().highlightStep(index, coarse ? FINER_KEY : cursorOnTarget() ? COMMIT : null)
+  }
   let zoomed = false
   const check = (): void => {
     point()
@@ -474,7 +492,8 @@ export function copyTutorialShards(): string | null {
   if (!stage) return null
   const found = new Map<string, ShardModel>()
   for (const h of Object.values(useShards.getState().discovered)) {
-    if (h.author === stage.guide && h.type === 'shard' && h.shard && !found.has(h.shard.name)) found.set(h.shard.name, h.shard)
+    // Not the hop target: a marker for the course step, nothing to build with.
+    if (h.author === stage.guide && h.type === 'shard' && h.shard && h.eventId !== stage.ids.target && !found.has(h.shard.name)) found.set(h.shard.name, h.shard)
   }
   const chests = new Set([stage.ids.chest, stage.ids.finishChest])
   for (const it of Object.values(useInventory.getState().items)) {

@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X } from 'lucide-react'
+import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Earth, Gamepad2, Target, Wrench, X, type LucideIcon } from 'lucide-react'
 import { choiceOffered, runTutorialEffect, useTutorial } from '../store/useTutorial'
 import { useWorkshop } from '../store/useWorkshop'
 import { useDemo } from '../store/useDemo'
@@ -27,6 +27,21 @@ export function progressOf(steps: ReadonlyArray<{ branch?: boolean }>, index: nu
   const through = steps.filter((s) => !s.branch).length
   const before = steps.slice(0, index + 1).filter((s) => !s.branch).length
   return through === 0 ? 1 : before / through
+}
+
+/**
+ * Each "Where next?" route's picture, in a column to the left of its words
+ * (arkinox, 2026-11-13): the icon the rest of the app already draws for that
+ * thing. EARTH in the view menu, a game's chip, an AGENT badge, the TARGET
+ * buttons (the friend route adds a TARGET), and BUILD's wrench. Decorative:
+ * the button's words stay its name. A route with none keeps the empty column.
+ */
+export const CHOICE_ICONS: Readonly<Record<string, LucideIcon>> = {
+  hyperspace: Earth,
+  dungeon: Gamepad2,
+  agents: Bot,
+  friend: Target,
+  build: Wrench,
 }
 
 export function TutorialCoach(): JSX.Element | null {
@@ -112,10 +127,14 @@ export function TutorialCoach(): JSX.Element | null {
           <p className="demo__caption"><CaptionText caption={caption} /></p>
           {step.choices?.filter(choiceOffered).map((c, i) => {
             const choiceDone = doneChoices.includes(c.id)
+            const Icon = CHOICE_ICONS[c.id]
             return (
               <button key={c.id} ref={i === 0 ? firstChoice : undefined} className={`demo__btn tutorial-choice ${choiceDone ? 'is-done' : ''}`} onClick={() => t.choose(c.id)} aria-disabled={choosing !== null}>
-                <span className="tutorial-choice__label">{choiceDone && <Check size={13} aria-hidden className="tutorial-choice__check" />}{c.label}</span>
-                <span className="tutorial-choice__about">{choosing === c.id ? 'One moment.' : choiceDone ? 'Done. Try another.' : c.about}</span>
+                <span className="tutorial-choice__icon" aria-hidden>{Icon && <Icon size={28} strokeWidth={1.75} aria-hidden />}</span>
+                <span className="tutorial-choice__text">
+                  <span className="tutorial-choice__label">{choiceDone && <Check size={13} aria-hidden className="tutorial-choice__check" />}{c.label}</span>
+                  <span className="tutorial-choice__about">{choosing === c.id ? 'One moment.' : choiceDone ? 'Done. Try another.' : c.about}</span>
+                </span>
               </button>
             )
           })}

@@ -18,13 +18,15 @@
  * at anyone's spawn once other avatars are drawn.
  */
 
-import { Suspense, useMemo } from 'react'
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useGLTF } from '@react-three/drei'
+import { useFrame } from '@react-three/fiber'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
-import type { Material, Mesh, MeshStandardMaterial } from 'three'
+import { Vector2, Vector3, type Group, type Material, type Mesh, type MeshStandardMaterial } from 'three'
 import { GRID_RADIUS, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { WorldLabel } from './WorldLabel'
+import { MARKER_FADE_FROM_RADII, MARKER_FADE_TO_RADII, patchNearFade, type NearFadeRange } from './nearFade'
 
 const MODEL = '/spawn.glb'
 
@@ -106,6 +108,12 @@ function Model({ pubkey, axes }: Props): JSX.Element | null {
   // The GLB's materials are black with an emissive color, which is what lets
   // them glow under bloom. The scene's tone mapping would dull that, so it is
   // switched off here the way every other lit line in the scene switches it off.
+  // Each also fades out as the camera comes within three of its ring radii
+  // (scene/nearFade.ts): after the tutorial's first hop the camera sits just
+  // over the avatar's shoulder, a few cells from its spawn, and the shells
+  // crossed the frame as bars of light (owner, 2026-11-13). One range for
+  // all ten, in render cells, set with the mark's scale below.
+  const fade = useMemo<NearFadeRange>(() => ({ value: new Vector2(MARKER_FADE_FROM_RADII * SCALE, MARKER_FADE_TO_RADII * SCALE) }), [])
   const materials = useMemo(() => {
     const out: Record<string, Material> = {}
     for (const [, name] of PARTS) {
@@ -114,16 +122,36 @@ function Model({ pubkey, axes }: Props): JSX.Element | null {
       const copy = m.clone()
       copy.toneMapped = false
       copy.emissiveIntensity = 1.6
+      copy.onBeforeCompile = (shader) => { patchNearFade(shader, fade) }
+      copy.customProgramCacheKey = () => 'spawn-marker-near-fade-1'
       out[name] = copy
     }
     return out
-  }, [gltf])
+  }, [gltf, fade])
+  useEffect(() => () => { for (const m of Object.values(materials)) m.dispose() }, [materials])
+
+  // A model unit, the rings' radius, is at.scale render cells. Set in the
+  // commit, so no frame draws the old zoom's range (an empty one is undefined in GLSL).
+  const scale = at?.scale ?? SCALE
+  useLayoutEffect(() => { fade.value.set(MARKER_FADE_FROM_RADII * scale, MARKER_FADE_TO_RADII * scale) }, [fade, scale])
+  // See-through only while the camera is near enough for the fade to show,
+  // so from anywhere else it is drawn exactly as before, opaque, in its turn.
+  const group = useRef<Group>(null)
+  const centre = useMemo(() => new Vector3(), [])
+  useFrame(({ camera }) => {
+    const g = group.current
+    if (!g) return
+    g.getWorldPosition(centre)
+    // Its shells reach about two ring radii from the centre (the triads stand out past the rings).
+    const near = camera.position.distanceTo(centre) < MARKER_FADE_TO_RADII * scale + 2 * scale
+    for (const m of Object.values(materials)) if (m.transparent !== near) m.transparent = near
+  })
 
   if (!at) return null
 
   return (
     <>
-      <group name="spawn-marker" position={at.centre} scale={at.scale} dispose={null}>
+      <group ref={group} name="spawn-marker" position={at.centre} scale={at.scale} dispose={null}>
         {PARTS.map(([node, material]) => {
           const mesh = gltf.nodes[node]
           if (!mesh) return null

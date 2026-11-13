@@ -23,6 +23,17 @@
  * whose box holds the camera, or whose box is more than MAX_SCREENS screens
  * across, takes no taps; it is still drawn, so its faces stand around you.
  *
+ * Neither limit is for a chest or a door (LookMark `upClose`; arkinox,
+ * 2026-11-13: "having a lot of trouble tapping on the chest again ... im in
+ * walk mode"). In WALK the eye is the walker's own cell centre, so standing
+ * in a chest's cell (a bounce onto the finish deck can land you there) puts
+ * the eye inside its box, and standing beside it puts its box behind the
+ * eye; the chest fills the view and every tap on it did nothing. A target no
+ * larger than its `upClose` takes taps from inside its box, with its box
+ * behind the eye, and at any size on screen. Beside it, where it draws is
+ * still the test (a ray from the eye must hit it), so a tap past it misses as
+ * before; inside it, the view is all chest, and any tap takes it.
+ *
  * A shard or avatar dimmed in build mode, because it stands between the
  * camera and the build cursor, takes no taps either (`occluder`; arkinox,
  * 2026-11-09): the tap passes through to what is behind it, as it would
@@ -36,7 +47,7 @@
 
 import { useLayoutEffect, useMemo, useRef, type RefObject } from 'react'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
-import { Box3, Mesh, PerspectiveCamera, Raycaster, Vector3, type Camera, type Intersection, type Object3D } from 'three'
+import { BackSide, Box3, FrontSide, Mesh, PerspectiveCamera, Raycaster, Vector3, type Camera, type Intersection, type Material, type Object3D } from 'three'
 import { MAX_EXTENT } from 'sno-core/shards'
 import { CAMERA_NEAR, FOV } from './camera'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
@@ -151,6 +162,13 @@ interface Props {
    * rays, and a tap reaches what is behind it.
    */
   occluder?: string
+  /**
+   * The largest its drawn box may be, in render units, and still take taps
+   * from up close: from inside the box, with the box reaching behind the
+   * eye, or wider than MAX_SCREENS screens. A chest or a door (LookMark);
+   * absent, a shard's rules (what surrounds you is not a thing to tap).
+   */
+  upClose?: number
 }
 
 /**
@@ -176,6 +194,8 @@ export interface TapSpec {
   at?: [number, number, number]
   /** Its key among what may block the build cursor: dimmed, it takes no rays. */
   occluder?: string
+  /** Up to this size (render units) it takes taps up close (Props `upClose`). */
+  upClose?: number
 }
 
 /**
@@ -186,6 +206,13 @@ export interface TapSpec {
 export interface TapMeasure {
   across: number
   perPxWorld: number
+  /**
+   * The eye is inside its box (a chest you stand in, `upClose`): the view is
+   * all of it, so a tap that reaches it takes it without landing on a face.
+   * WALK's eye is the walker's cell centre, which is a chest's floor, so a ray
+   * from it grazes the walls and passes out under them.
+   */
+  around?: boolean
 }
 
 /**
@@ -212,7 +239,7 @@ export function tapRaycast(view: () => TapView, spec: { current: TapSpec }, out:
   /** Places and sizes the target `m`; false when it takes no taps. */
   const place = (m: Mesh): boolean => {
     if (!m.parent) return false
-    const { measure, px, at, occluder } = spec.current
+    const { measure, px, at, occluder, upClose } = spec.current
     // Dimmed in build mode: see-through, and so tapped through. Left out of
     // the ray's hits altogether, so nothing else under the tap (a yielding
     // avatar, a large shard's exact test) counts it either.
@@ -243,25 +270,33 @@ export function tapRaycast(view: () => TapView, spec: { current: TapSpec }, out:
     // one cached bounding box per child geometry.
     box.setFromObject(drawn)
     if (box.isEmpty()) return false
-    // Inside the shard: it surrounds the view, so it is not a thing to tap.
-    if (box.containsPoint(cam.position)) return false
     box.getCenter(centre)
     box.getSize(size)
+    // A chest or a door up close is still a thing to tap (`upClose`); a shard is not.
+    const near = upClose !== undefined && Math.max(size.x, size.y, size.z) <= upClose
+    // Inside the shard: it surrounds the view, so it is not a thing to tap.
+    const inside = box.containsPoint(cam.position)
+    if (inside && !near) return false
     // How wide the box really is on screen, from its eight corners: the
     // distance to its centre understates a large box, whose near face is
     // much closer than its middle. A corner behind the camera means the box
     // reaches round the view, which is too big to tap.
     const wide = screenAcross(box, cam, screen.width, screen.height)
-    if (wide === null) return false
+    if (wide === null && !near) return false
+    // Up close it is as wide as the view or wider: a tap must land where it draws (PRECISE_ABOVE_PX).
+    const across = wide ?? Infinity
     const viewport = Math.max(screen.width, screen.height)
     const perWorld = pxPerUnit(fov, screen.height, cam.position.distanceTo(centre))
-    out.across = wide
+    out.across = across
     out.perPxWorld = 1 / perWorld
+    out.around = inside
     // targetSpan's rule, worked in place: it once ran per shard per frame,
     // and the arrays targetSpan returns were a steady stream of garbage
     // (2026-10-14); it now runs for every target at every tap.
     const largest = Math.max(size.x, size.y, size.z) * perWorld
-    if (wide > MAX_SCREENS * viewport || !(largest >= MIN_VISIBLE_PX)) return false
+    if ((across > MAX_SCREENS * viewport && !near) || !(largest >= MIN_VISIBLE_PX)) return false
+    // From inside its box a ray meets only the box's back faces.
+    ;(m.material as Material).side = inside ? BackSide : FrontSide
     const floor = MIN_TARGET_PX / perWorld
     // The box is measured in world space; the target lives in its parent's.
     m.position.copy(m.parent.worldToLocal(scratch.copy(centre)))
@@ -276,18 +311,19 @@ export function tapRaycast(view: () => TapView, spec: { current: TapSpec }, out:
   }
 }
 
-export function TapTarget({ onTap, measure, px, at, yields = false, occluder }: Props): JSX.Element {
+export function TapTarget({ onTap, measure, px, at, yields = false, occluder, upClose }: Props): JSX.Element {
   const hit = useRef<Mesh>(null)
   const get = useThree((s) => s.get)
   const precise = useRef(new Raycaster())
   // What the measurement reads, kept to the committed props: the raycast
   // below is made once, and a render React throws away must not move it.
-  const spec = useRef<TapSpec>({ measure, px, at, occluder })
+  const spec = useRef<TapSpec>({ measure, px, at, occluder, upClose })
   useLayoutEffect(() => {
     spec.current.measure = measure
     spec.current.px = px
     spec.current.at = at
     spec.current.occluder = occluder
+    spec.current.upClose = upClose
   })
   const measured = useRef<TapMeasure>({ across: 0, perPxWorld: 0 })
   const raycast = useMemo(() => tapRaycast(get as () => TapView, spec, measured.current), [get])
@@ -304,7 +340,7 @@ export function TapTarget({ onTap, measure, px, at, yields = false, occluder }: 
       // A large shard is hit only where it draws, so the air inside its box
       // lets the tap through to whatever is behind.
       const drawn = measure.current
-      if (drawn && measured.current.across > PRECISE_ABOVE_PX) {
+      if (drawn && !measured.current.around && measured.current.across > PRECISE_ABOVE_PX) {
         const ray = precise.current
         ray.set(e.ray.origin, e.ray.direction)
         const slop = PRECISE_SLOP_PX * measured.current.perPxWorld

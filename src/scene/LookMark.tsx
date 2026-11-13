@@ -40,6 +40,12 @@ import { useBuildDimmed } from './BuildOccluders'
 
 const IDENTITY = new Matrix4()
 
+/**
+ * How large a chest or a door may be, in gibsons, and still take a tap from
+ * up close: from inside it, or right beside it (TapTarget `upClose`).
+ */
+export const UP_CLOSE_GIBSONS = 4
+
 /** A look's bounds about its origin, in model units, render frame: what it is sized and labelled by. */
 export interface LookBounds {
   min: [number, number, number]
@@ -134,6 +140,7 @@ export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop 
       minPx: bounds.longest > 0 ? (reach * minPx) / bounds.longest / CUBE_REACH : minPx,
     }
   }, [bounds, atTrue, minPx, clearTop])
+  const upClose = UP_CLOSE_GIBSONS * trueScale(0, scaleExp)
   const outer = useRef<Group>(null)
   const drawn = useRef<Group | null>(null)
   // Dimmed while it stands between the camera and the build cursor.
@@ -157,7 +164,7 @@ export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop 
         </group>
       </group>
       {/* Outside the scaled group: a target and a label size themselves from the camera. */}
-      {onTap && <group position={at}><TapTarget measure={drawn} occluder={occluder} onTap={onTap} /></group>}
+      {onTap && <group position={at}><TapTarget measure={drawn} occluder={occluder} onTap={onTap} upClose={upClose} /></group>}
       {label && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} clear={clear} recede="name" />}
     </>
   )

@@ -48,9 +48,10 @@ import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { deployPoint, type Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
 import { OWNER_PUBKEY } from './script'
-import { arrivalCell, inRegion, toWorld, type TutorialLayout } from './layout'
+import { arrivalCell, chestCell, inRegion, toWorld, type TutorialLayout } from './layout'
 import type { Stage } from './stage'
-import { setTutorialSpin, setTutorialZoom } from '../store/useTutorialCam'
+import { HOP_FRAME_MS, setTutorialFrame, setTutorialSpin, setTutorialZoom, useTutorialCam, type HopFrame } from '../store/useTutorialCam'
+import { afterHop, holdGlide } from '../lib/hopStage'
 import { setMenuOpen } from '../hooks/useMenuOpen'
 import { usePanelLayout } from '../store/usePanelLayout'
 import { assignToFolder, createFolderPath } from '../store/useShardFolders'
@@ -62,6 +63,12 @@ import type { ShardModel } from 'sno-core/shards'
  * (feedback item 6). START_DISTANCE is 26; this is closer.
  */
 const COURSE_ZOOM = 12
+
+/**
+ * How close the camera comes after the first hop, in render cells: over the
+ * avatar's shoulder, the chest just past it in view (owner, 2026-11-12).
+ */
+const SHOULDER_ZOOM = 6
 
 /** Lift the ITEMS panel to the top of the left menu column (feedback items 2 and 11b). */
 function itemsToTop(): void {
@@ -243,6 +250,7 @@ onTutorialLifecycle({
   stop: (how) => {
     setTutorialSpin(false)
     setTutorialZoom(null)
+    setTutorialFrame(null)
     if (how !== 'finished') unstage()
   },
   restore: (player) => { void restoreKept(player) },
@@ -261,8 +269,72 @@ onTutorialLifecycle({
 registerTutorialEffect('aim-box', () => {
   setTutorialSpin(true)
   const off = aimOnce((layout) => { const a = arrivalCell(layout, useCyberspace.getState().position); return toWorld(layout.frame, a.f, a.r, a.u) })()
-  return () => { setTutorialSpin(false); if (off) off() }
+  // COMMIT frames the hop; the landing eases in over the shoulder toward the chest where the stage put it.
+  const offHop = showFirstHop((layout) => { const c = chestCell(layout); return toWorld(layout.frame, c.f, c.r, c.u) })
+  return () => { setTutorialSpin(false); if (off) off(); offHop() }
 })
+
+/**
+ * The first hop, shown so a newcomer sees it (owner, 2026-11-12: "when they
+ * hit commit we pre-position the camera ... so that the user can tell oh I
+ * just moved and this red ball is me"). The first COMMIT while the box step
+ * is up (the cursor is lined up for it) stops the spin and frames that hop,
+ * start and end from the side, while the proof is made; the avatar waits
+ * where it is until the camera is there (HOP_FRAME_MS), then glides. Once it
+ * has arrived (lib/hopStage.ts afterHop), the camera eases in close over its
+ * shoulder, from behind it as seen from the chest (`chest`, the layout's),
+ * so the chest is just past it; discovery, which reveals the chest, runs
+ * then too. A hop that does not land puts the spin back. A player who takes
+ * the camera meanwhile (a press, a pinch, the wheel: scene/Scene.tsx ends the
+ * framing) keeps it: no shot follows. Returns the stop.
+ */
+export function showFirstHop(chest: (layout: TutorialLayout) => Position): () => void {
+  let live = true
+  let to: Position | null = null
+  let framed: HopFrame | null = null
+  const offStore = useCyberspace.subscribe((s, prev) => {
+    if (to === null) {
+      // COMMIT: a hop's proof has started, from where you stand to its target.
+      if (!s.pendingTarget || prev.pendingTarget || s.walking) return
+      to = { ...s.pendingTarget }
+      framed = { from: { ...s.position }, to }
+      setTutorialSpin(false)
+      setTutorialFrame(framed)
+      holdGlide(performance.now() + HOP_FRAME_MS)
+      return
+    }
+    if (s.position !== prev.position && s.position.x === to.x && s.position.y === to.y && s.position.z === to.z) {
+      // Landed: the shot over the shoulder, once the avatar has arrived, and
+      // only while the hop is still framed (nobody took the camera).
+      const landed = { ...s.position }
+      const mine = framed
+      to = null
+      offStore()
+      afterHop(() => {
+        if (!live || useTutorialCam.getState().frame !== mine) return
+        setTutorialFrame(null)
+        const layout = useTutorialStage.getState().layout
+        if (!layout) return
+        const c = chest(layout)
+        const from = { x: Number(landed.x - c.x), y: Number(landed.y - c.y), z: Number(landed.z - c.z) }
+        if (from.x !== 0 || from.y !== 0 || from.z !== 0) setTutorialZoom(SHOULDER_ZOOM, from)
+      })
+      return
+    }
+    if (!s.pendingTarget) {
+      // The hop did not land (refused, cancelled, or the chain replaced under
+      // it): the box step as it was, and the avatar is not held for it.
+      to = null
+      holdGlide(0)
+      if (useTutorialCam.getState().frame === framed) {
+        setTutorialFrame(null)
+        setTutorialSpin(true)
+      }
+      framed = null
+    }
+  })
+  return () => { live = false; offStore(); if (useTutorialCam.getState().frame === framed) setTutorialFrame(null) }
+}
 
 /**
  * Arrival (T7): `inside` is true of where the player stands, their chain's

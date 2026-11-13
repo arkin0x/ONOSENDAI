@@ -37,6 +37,19 @@ export const AVATAR_LERP_MS = 600
  */
 export const AVATAR_SNAP_CELLS = 400
 
+/**
+ * The most of a glide one drawn frame may cover, in milliseconds, for a lerp
+ * made with `catchUp` (your own avatar's, scene/Travel.tsx): a sixth of it,
+ * so that glide is always drawn in at least six frames. It runs on the clock,
+ * so at ten frames a second or more it takes AVATAR_LERP_MS; but a frame that
+ * comes late (a shader compiling, a bag opening, the tab hidden) no longer
+ * spends the whole glide unseen. Everyone else's glides stay on the clock
+ * alone, so Cyberspace TV's avatars keep tape time. The owner's first hop drew no glide frame at
+ * all: the frames around the landing took 280 to 1,050 ms (owner, 2026-11-12:
+ * "I never see the animation it seems to just freeze for a second").
+ */
+export const MAX_GLIDE_STEP_MS = 100
+
 export type Vec3 = [number, number, number]
 
 /**
@@ -55,19 +68,45 @@ export function lerpRemaining(t: number): number {
 export class AvatarLerp {
   private from: Vec3 = [0, 0, 0]
   private startedAt: number | null = null
+  /** When the glide was last looked at (a frame drew it), to tell a late frame (MAX_GLIDE_STEP_MS). */
+  private lastAt: number | null = null
+  /** Whether a late frame holds the glide back (MAX_GLIDE_STEP_MS) rather than skipping it. */
+  private readonly catchUp: boolean
+
+  /** `catchUp`: a late frame never covers more than MAX_GLIDE_STEP_MS of the glide (your own avatar's). */
+  constructor(opts: { catchUp?: boolean } = {}) {
+    this.catchUp = opts.catchUp === true
+  }
 
   /**
    * The avatar just moved. `was` is where it was drawn before, as an offset
    * from where it now truly stands (old place minus new place, in render
    * cells). A move that lands mid-glide starts from wherever the avatar is
-   * drawn right now, so a quick run of moves never jumps.
+   * drawn right now, so a quick run of moves never jumps. `startAt`, when
+   * later than `now`, holds the avatar where it was until then (the camera is
+   * still easing into place for it: lib/hopStage.ts holdGlide).
    */
-  move(was: Vec3, now: number): void {
+  move(was: Vec3, now: number, startAt: number = now): void {
     const cur = this.offset(now)
     const x = cur[0] + was[0], y = cur[1] + was[1], z = cur[2] + was[2]
     if ((x === 0 && y === 0 && z === 0) || Math.hypot(x, y, z) > AVATAR_SNAP_CELLS) { this.clear(); return }
     this.from = [x, y, z]
-    this.startedAt = now
+    this.startedAt = Math.max(now, startAt)
+    this.lastAt = now
+  }
+
+  /**
+   * Note a look at the glide at `now`. Of the time since the last look, only
+   * MAX_GLIDE_STEP_MS counts toward the glide: the rest of a late frame's
+   * wait is held back, so the glide picks up where it was last drawn.
+   */
+  private advance(now: number): void {
+    if (!this.catchUp || this.startedAt === null) return
+    if (this.lastAt !== null && now > this.lastAt) {
+      const glided = now - Math.max(this.lastAt, this.startedAt)
+      if (glided > MAX_GLIDE_STEP_MS) this.startedAt += glided - MAX_GLIDE_STEP_MS
+    }
+    if (this.lastAt === null || now > this.lastAt) this.lastAt = now
   }
 
   /**
@@ -84,10 +123,12 @@ export class AvatarLerp {
   clear(): void {
     this.from = [0, 0, 0]
     this.startedAt = null
+    this.lastAt = null
   }
 
-  /** Whether a glide is under way at `now`. */
+  /** Whether a glide is under way, or held to start, at `now`. */
   moving(now: number): boolean {
+    this.advance(now)
     return this.startedAt !== null && now - this.startedAt < AVATAR_LERP_MS
   }
 
@@ -97,6 +138,7 @@ export class AvatarLerp {
    */
   offset(now: number, out: Vec3 = [0, 0, 0]): Vec3 {
     if (this.startedAt === null) { out[0] = 0; out[1] = 0; out[2] = 0; return out }
+    this.advance(now)
     const k = lerpRemaining((now - this.startedAt) / AVATAR_LERP_MS)
     if (k === 0) this.clear()
     out[0] = this.from[0] * k + 0

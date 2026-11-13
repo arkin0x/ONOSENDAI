@@ -11,7 +11,7 @@
 import { chromium } from 'playwright'
 import { generateSecretKey, getPublicKey, nip19, matchFilter } from 'nostr-tools'
 
-export async function launch({ phone, url, sk = generateSecretKey(), seed = [] }) {
+export async function launch({ phone, url, sk = generateSecretKey(), seed = [], video = null, mint = false }) {
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
   // Layout is in CSS pixels, so the device pixel ratio changes only how many
   // pixels the software renderer (SwiftShader) has to fill: at the real
@@ -19,9 +19,14 @@ export async function launch({ phone, url, sk = generateSecretKey(), seed = [] }
   // for frames. SMOKE_DPR=1 (the default) keeps the run usable; set it to
   // 2.625 / 1.25 for true-resolution screenshots.
   const dpr = Number(process.env.SMOKE_DPR ?? 1)
-  const ctx = await browser.newContext(phone
-    ? { viewport: { width: 412, height: 915 }, deviceScaleFactor: process.env.SMOKE_DPR ? dpr : 1, isMobile: true, hasTouch: true }
-    : { viewport: { width: 1920, height: 1080 }, deviceScaleFactor: process.env.SMOKE_DPR ? dpr : 1 })
+  const size = phone ? { width: 412, height: 915 } : { width: 1920, height: 1080 }
+  const ctx = await browser.newContext({
+    ...(phone
+      ? { viewport: size, deviceScaleFactor: process.env.SMOKE_DPR ? dpr : 1, isMobile: true, hasTouch: true }
+      : { viewport: size, deviceScaleFactor: process.env.SMOKE_DPR ? dpr : 1 }),
+    // A webm of the page (scripts/hop-probe.mjs VIDEO=1), written into `video`.
+    ...(video ? { recordVideo: { dir: video, size } } : {}),
+  })
   const stats = { sockets: 0, events: 0, auths: 0, nonGetAborted: 0, leaked: 0, kinds: {} }
   const store = [...seed]
   const subs = new Set()
@@ -57,9 +62,10 @@ export async function launch({ phone, url, sk = generateSecretKey(), seed = [] }
   await page.addInitScript(([pk, ns]) => {
     try {
       localStorage.setItem('onosendai:live', '0')
-      localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns }))
+      // `mint`: no key given, so the app makes its own on load, as a first arrival's (the tutorial starts only for one).
+      if (ns) localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns }))
     } catch {}
-  }, [pk, nip19.nsecEncode(sk)])
+  }, [pk, mint ? null : nip19.nsecEncode(sk)])
   const errors = []
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
   page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text().slice(0, 300)}`) })

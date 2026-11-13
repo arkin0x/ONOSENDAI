@@ -679,7 +679,7 @@ describe('1d. review of #690', () => {
     }
   })
 
-  it('round 2, 3: anything else holding the camera (the tutorial\'s zoom, a /demo step) ends a pending restore; Scene.tsx says so', () => {
+  it('round 2, 3: anything else holding the camera (the tutorial\'s zoom or framed hop, a /demo step) ends a pending restore; Scene.tsx says so', () => {
     tap(120)
     rest(90)
     viewToAvatar()
@@ -687,7 +687,7 @@ describe('1d. review of #690', () => {
     expect(viewRig.restoreOrbit(camera.position, controls.target, DT, true)).toBe(false)
     expect(viewRig.restoreTo).toBeNull()
     const src = readFileSync('src/scene/Scene.tsx', 'utf8')
-    expect(src).toMatch(/viewRig\.restoreOrbit\(c\.object\.position, c\.target, dt, s\.walking \|\| pressed\(\) > 0 \|\| tutorialZoom !== null \|\| want !== null \|\| eye\.current !== null\)/)
+    expect(src).toMatch(/viewRig\.restoreOrbit\(c\.object\.position, c\.target, dt, s\.walking \|\| pressed\(\) > 0 \|\| tutorialZoom !== null \|\| frame !== null \|\| want !== null \|\| eye\.current !== null\)/)
   })
 
   it('round 2, 4: RETURN whose re-frame cuts (resetting the rig) still asks the orbit back out', () => {

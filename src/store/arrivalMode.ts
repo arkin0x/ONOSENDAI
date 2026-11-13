@@ -9,16 +9,25 @@
  * Read once, before the first render (main.tsx takeArrivalMode), and taken
  * off the address there (replaceState, no new entry), so a reload or a link
  * copied from the address bar does not do it again. Applied once, when the
- * app can show it (watchArrivalMode): the identity on screen can be judged
- * and its saved chain is in, the same wait the first-arrival tutorial makes
- * (useTutorial identitySettled, savedChainLoaded), so VIEW starts at the
- * avatar's real place. A brand-new visitor's key is made on this load, so
- * for them that is at once.
+ * app can show it (watchArrivalMode): the saved chain is in, so VIEW starts
+ * at the avatar's place (savedChainLoaded). Where the tutorial could run,
+ * it also waits, as the tutorial does, for the identity to be judged
+ * (useTutorial identitySettled), so the two never both start; a brand-new
+ * visitor's key is made on this load, so for them that is at once. Where
+ * it cannot (the switch off, as in production, or another address), it
+ * does not wait on the relays at all.
+ *
+ * A mode that arrives after you have started doing something (a hop lined
+ * up, the cursor moved off your avatar, a view of something else opened) is
+ * dropped: it only ever turns an untouched arrival into VIEW, never undoes
+ * what you did meanwhile.
  *
  * - On a /C/ link: its view is already a VIEW, so ?mode=view adds nothing,
  *   and ?mode=region turns region mode on over the link's own region (a
  *   prefix link's region is the seed; a full coordinate's place gets the
- *   region round its cell, as the Region button would).
+ *   region round its cell, as the Region button would). A full coordinate
+ *   that turns out to be a Bitcoin block's renames its view to the block
+ *   once found, which ends region mode as any other view change does.
  * - The first-arrival tutorial wins: when it starts or resumes on this load,
  *   or is already running, the mode is dropped, never applied after. Its
  *   steps move the camera and the modes themselves, and a mode switched on
@@ -27,10 +36,10 @@
  */
 
 import { cycleMode, currentPadMode } from './padMode'
-import { savedChainLoaded, useCyberspace } from './useCyberspace'
+import { samePosition, savedChainLoaded, useCyberspace } from './useCyberspace'
 import { useCoordRoute } from './useCoordRoute'
 import { useRegion } from './useRegion'
-import { identitySettled, tutorialStarts, useTutorial } from './useTutorial'
+import { identitySettled, tutorialMayRun, tutorialStarts, useTutorial } from './useTutorial'
 import { useDemo } from './useDemo'
 import { useTv } from './useTv'
 
@@ -74,6 +83,16 @@ export function applyArrivalMode(mode: ArrivalMode): boolean {
 }
 
 /**
+ * Nothing done yet on arrival: HOP at your avatar with nothing lined up or
+ * under way, or a view the address opened (a /C/ link's) still up.
+ */
+function untouched(): boolean {
+  const cs = useCyberspace.getState()
+  if (cs.viewing()) return true
+  return currentPadMode() === 'hop' && cs.atHead() && cs.plan === null && cs.proof.status !== 'computing' && samePosition(cs.cursor, cs.position)
+}
+
+/**
  * Apply the address's mode once the app can (see the header), or drop it for
  * the tutorial, the tour or TV. Returns what stops the watching.
  */
@@ -82,7 +101,8 @@ export function watchArrivalMode(): () => void {
   let stopped = false
   let waiting = false
   const check = (): void => {
-    if (stopped || waiting || pending === null || !identitySettled()) return
+    if (stopped || waiting || pending === null) return
+    if (tutorialMayRun() && !identitySettled()) return
     const pubkey = useCyberspace.getState().identity.pubkey
     waiting = true
     const go = (): void => {
@@ -94,7 +114,7 @@ export function watchArrivalMode(): () => void {
       pending = null
       off()
       if (useTutorial.getState().active || tutorialStarts(pubkey)) return
-      if (useDemo.getState().active || useTv.getState().on) return
+      if (useDemo.getState().active || useTv.getState().on || !untouched()) return
       applyArrivalMode(mode)
     }
     void savedChainLoaded().then(go, go)

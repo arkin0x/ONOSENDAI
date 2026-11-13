@@ -399,6 +399,11 @@ export const useTutorial = create<TutorialState>((set, get) => {
   }
 })
 
+/** Whether the tutorial could run on this load at all, whoever the identity: the switch on, the bare address, no tour or TV. */
+export function tutorialMayRun(): boolean {
+  return tutorialOn() && !blocked() && plainAddress()
+}
+
 /**
  * Whether the tutorial starts, or resumes, for `pubkey` on this load, once
  * its identity can be judged (identitySettled) and its saved chain is in:
@@ -408,7 +413,7 @@ export const useTutorial = create<TutorialState>((set, get) => {
  * (store/arrivalMode.ts).
  */
 export function tutorialStarts(pubkey: string): boolean {
-  if (!tutorialOn() || blocked() || !plainAddress()) return false
+  if (!tutorialMayRun()) return false
   const p = readProgress(pubkey)
   return p ? !p.ended : isNewArrival()
 }

@@ -135,7 +135,9 @@ describe('a brand-new visitor on the bare address', () => {
     stop()
   })
 
-  it('waits until the identity can be judged, then applies', async () => {
+  it('where the tutorial could run, waits until the identity can be judged, then applies', async () => {
+    setTutorialSwitch(true)
+    writeProgress(pubkey(), { step: 'welcome', ended: 'skipped' })
     minted.onLoad = false
     useCyberspace.setState({ selfCheck: { pubkey: pubkey(), status: 'checking' } })
     land('/', '?mode=view')
@@ -146,6 +148,33 @@ describe('a brand-new visitor on the bare address', () => {
     await flush()
     expect(cs().viewing()).toBe(true)
     stop()
+  })
+
+  it('with the tutorial switch off, never waits on the relays (a key from an earlier load, offline)', async () => {
+    minted.onLoad = false
+    useCyberspace.setState({ selfCheck: { pubkey: pubkey(), status: 'unknown', cause: { kind: 'offline' } } })
+    land('/', '?mode=view')
+    const stop = watchArrivalMode()
+    await flush()
+    expect(cs().viewing()).toBe(true)
+    stop()
+  })
+
+  it('is dropped when the visitor has already moved the cursor off their avatar', async () => {
+    land('/', '?mode=view')
+    const stop = watchArrivalMode()
+    const right = cs().axes().right
+    cs().moveCursor({ axis: right.axis, dir: right.dir as 1 | -1 })
+    const aimed = { ...cs().cursor }
+    await flush()
+    expect(cs().viewing()).toBe(false)
+    expect(samePosition(cs().cursor, aimed)).toBe(true)
+    // Dropped, not postponed.
+    cs().cancel()
+    const again = watchArrivalMode()
+    await flush()
+    expect(cs().viewing()).toBe(false)
+    stop(); again()
   })
 
   it('applies once per load: a later watch (a remount) does nothing', async () => {
@@ -199,8 +228,46 @@ describe('on a /C/ link', () => {
     // X: back to the link's region.
     region().collapseToEntry()
     expect(region().prefix).toBe(MIDWEST)
+    // Zoom out: coarser cells, a coarser region; back in, the link's again; RESET too.
+    const scale = cs().scaleExp
+    useCyberspace.setState({ scaleExp: scale + 12 })
+    expect(region().prefix!.length).toBeLessThan(MIDWEST.length)
+    expect(MIDWEST.startsWith(region().prefix!)).toBe(true)
+    useCyberspace.setState({ scaleExp: scale })
+    expect(region().prefix).toBe(MIDWEST)
+    useCyberspace.setState({ scaleExp: scale + 12 })
+    region().resetSize()
+    expect(region().prefix).toBe(MIDWEST)
     stop()
     route()
+  })
+
+  it('?mode=region on a full coordinate link: region mode round that place\'s cell', async () => {
+    const FULL = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9f'
+    land(`/C/${FULL}`, '?mode=region')
+    const route = startCoordRoute({ pathname: `/C/${FULL}`, search: '', hash: '' }, { replaceState: vi.fn() })
+    const label = cs().focus?.label
+    const stop = watchArrivalMode()
+    await flush()
+    expect(region().active).toBe(true)
+    expect(cs().focus?.label).toBe(label)
+    expect(region().prefix).toBe(coveringRegion([cs().cursor], cs().scaleExp, cs().anchorPlane)!.prefix)
+    stop()
+    route()
+  })
+
+  it('?mode=region on a link that is not a coordinate: VIEW and region mode at the avatar', async () => {
+    land('/C/nothex', '?mode=region')
+    const replaceState = vi.fn()
+    startCoordRoute({ pathname: '/C/nothex', search: '', hash: '' }, { replaceState })
+    expect(replaceState).toHaveBeenCalled()
+    expect(cs().viewing()).toBe(false)
+    const stop = watchArrivalMode()
+    await flush()
+    expect(cs().viewing()).toBe(true)
+    expect(region().active).toBe(true)
+    expect(samePosition(cs().cursor, cs().position)).toBe(true)
+    stop()
   })
 
   it('?mode=view keeps the link\'s view, which is already a VIEW', async () => {
@@ -233,6 +300,17 @@ describe('the first-arrival tutorial wins', () => {
     expect(useTutorial.getState().active).toBe(true)
     expect(cs().viewing()).toBe(false)
     expect(region().active).toBe(false)
+    stopMode(); stopTutorial()
+  })
+
+  it('the same with the tutorial\'s watch made first', async () => {
+    setTutorialSwitch(true)
+    land('/', '?mode=view')
+    const stopTutorial = watchFirstArrival()
+    const stopMode = watchArrivalMode()
+    await flush()
+    expect(useTutorial.getState().active).toBe(true)
+    expect(cs().viewing()).toBe(false)
     stopMode(); stopTutorial()
   })
 

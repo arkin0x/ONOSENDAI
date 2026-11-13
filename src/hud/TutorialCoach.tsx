@@ -54,6 +54,8 @@ export function TutorialCoach(): JSX.Element | null {
   // The guide's things could not be staged: said where the instruction goes.
   const stageError = useTutorialStage((s) => s.error)
   const stepNote = useTutorial((s) => s.stepNote)
+  // What the step points at now, when it changes as the player goes (the course step: the arrows, then COMMIT).
+  const stepHighlight = useTutorial((s) => s.stepHighlight)
   // Never over the /demo tour (useTutorial pauses for it; this is the frame between),
   // nor over the workshop, which has the screen while it is open.
   const touring = useDemo((s) => s.active)
@@ -85,7 +87,7 @@ export function TutorialCoach(): JSX.Element | null {
   // The control a step points at wears the /demo tour's pulsing ring
   // (styles.css .demo-pulse) while the step waits; nothing is clicked.
   // A step with no wait points for as long as it is up; one that waits, until it is done.
-  const highlight = shown && (!done || !step?.wait) ? step?.scene?.highlight : undefined
+  const highlight = shown && (!done || !step?.wait) ? stepHighlight ?? step?.scene?.highlight : undefined
   useEffect(() => {
     if (!highlight) return
     let marked: Element[] = []

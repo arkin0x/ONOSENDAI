@@ -73,6 +73,14 @@ export const COURSE: CoursePart[] = [
 export const START_STAND: [number, number, number] = [0, 1, 0]
 /** The start square, where a walker counts as at the start: cells and standing heights. */
 export const START_ZONE = { x: [-3, 3], y: [1, 4], z: [-3, 3] } as const
+/**
+ * The hop target (owner, 2026-11-13): over the middle of the start square,
+ * 2 above where a walker stands on it. The course step has the player move
+ * the cursor here with CONTROLS and HOP to it; once GRAVITY is on they fall
+ * the 2 onto the start square, and the target is then over their head, out
+ * of a forward view. Inside START_ZONE, so landing on it is at the start.
+ */
+export const TARGET: [number, number, number] = [START_STAND[0], START_STAND[1] + 2, START_STAND[2]]
 /** The finish deck, where a walker counts as finished: cells and standing heights. */
 export const DECK_ZONE = { x: [-3, 3], y: [10, 13], z: [28, 34] } as const
 /** The finish chest: on the deck, near its far edge. */
@@ -104,6 +112,57 @@ function inZone(frame: Frame, zone: { x: readonly [number, number]; y: readonly 
 /** Whether a world point is on the start square (START_ZONE). */
 export function atStart(frame: Frame, at: Position): boolean {
   return inZone(frame, START_ZONE, at)
+}
+
+/** Where the hop target is in the world (TARGET). */
+export function targetAt(frame: Frame): Position {
+  return courseToWorld(frame, TARGET)
+}
+
+/** Whether a world point is the hop target's cell. */
+export function onTarget(frame: Frame, at: Position): boolean {
+  const t = targetAt(frame)
+  return at.x === t.x && at.y === t.y && at.z === t.z
+}
+
+/**
+ * The hop target's look: a glowing beacon in the tutorial's cyan (palette
+ * 226, the coach's own accent), drawn around the target's gibson. Two
+ * upright rings at right angles, so it reads as a ball from any side, and a
+ * wider white ring level round its middle. Radius 1 and 1.5 gibsons: from the
+ * start square below, its lowest point is a gibson over the walker's head.
+ * LINES with no faces and constrain OFF: it glows under the bloom as lines
+ * do, and nothing a walker or a hop bumps into. One line through its points,
+ * as LINES without faces draws (stage.ts boxModel), retracing a quarter ring
+ * to get from one ring to the next. Positions are whole units plus ticks
+ * (120 to a unit), from the gibson's centre.
+ */
+export function targetPayload(): Record<string, unknown> {
+  const N = 24
+  const pts: Array<{ p: [number, number, number]; c: number }> = []
+  const at = (x: number, y: number, z: number, c: number): void => { pts.push({ p: [x, y, z], c }) }
+  const R = 1, H = 1.5, CYAN = 226, WHITE = 225
+  // The ring facing Z, from the top round to the top again.
+  for (let i = 0; i <= N; i++) { const a = (2 * Math.PI * i) / N; at(R * Math.sin(a), R * Math.cos(a), 0, CYAN) }
+  // The ring facing X, from the top round to the top again.
+  for (let i = 1; i <= N; i++) { const a = (2 * Math.PI * i) / N; at(0, R * Math.cos(a), R * Math.sin(a), CYAN) }
+  // Down the first ring a quarter to its side, out to the white ring, and round it.
+  for (let i = 1; i <= N / 4; i++) { const a = (2 * Math.PI * i) / N; at(R * Math.sin(a), R * Math.cos(a), 0, CYAN) }
+  for (let i = 0; i <= N; i++) { const a = (2 * Math.PI * i) / N; at(H * Math.cos(a), 0, H * Math.sin(a), WHITE) }
+  const whole = (v: number): number => Math.floor(Math.round(v * 120) / 120)
+  const tick = (v: number): number => Math.round(v * 120) - whole(v) * 120
+  return {
+    v: 2,
+    name: 'Target',
+    unit: 0,
+    extent: 8,
+    mode: 'lines',
+    vertices: pts.map(({ p }) => p.map(whole)),
+    ticks: pts.map(({ p }) => p.map(tick)),
+    colors: pts.map(({ c }) => c),
+    faces: [],
+    constrain: 'off',
+  }
 }
 
 /** Whether a world point is on the finish deck (DECK_ZONE). */

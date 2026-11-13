@@ -3,10 +3,11 @@
  * (first-arrival tutorial, Track C; DECK-0002 §9). Its design, map and the
  * owner's deploy steps: onosendai/games-dungeon/DESIGN.md and DEPLOY.md.
  *
- * The dungeon is real; its key is not yet. The owner rules (2026-11-10) that
- * the game is a new npub he creates and holds, and that he deploys the
- * pieces himself. THE ONE LINE is TUTORIAL_PUBKEY, below. While it is the
- * DEV key:
+ * The dungeon is live under its real key since 2026-11-13. The owner first
+ * ruled (2026-11-10) that he would create and hold the game's npub; on
+ * 2026-11-13 he had it generated and kept on the build machine instead, and
+ * the world was published under it. THE ONE LINE is TUTORIAL_PUBKEY, below.
+ * Back when it was the DEV key:
  *
  * - the DEV key was generated on the build machine. Its secret is not in
  *   this repository. Nothing it signed has been, or may be, sent to any relay.
@@ -71,10 +72,14 @@ const KEY_AT = at(37, 26, 43)
 const GATE_AT = at(40, 16, 32)
 
 /**
- * THE ONE LINE: the tutorial dungeon's game key, 64 lowercase hex. The DEV
- * key until the owner's npub (as hex) goes here; nothing else changes.
+ * THE ONE LINE: the tutorial dungeon's game key, 64 lowercase hex. Set
+ * 2026-11-13 (owner: "you can generate a tutorial key with nak and keep it
+ * locally for the game key. lets get the tutorial live today"): the
+ * dungeon's world (15 objects and its bag) is published under it on
+ * wss://relay.onosendai.tech. Its secret is kept off-repo on the build
+ * machine, never in this code.
  */
-export const TUTORIAL_PUBKEY: string = TUTORIAL_DEV_PUBKEY
+export const TUTORIAL_PUBKEY: string = 'ee248d6a63557359a4afe95e7eed365499393a0c9d06cbb7ce7df658fdf06a5b'
 
 /** The relay the owner publishes the world to (DEPLOY.md), and every live entry's relay hint (DECK-0002 §2.1). */
 export const TUTORIAL_RELAY = 'wss://relay.onosendai.tech'

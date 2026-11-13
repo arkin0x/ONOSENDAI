@@ -40,10 +40,14 @@ export function lookRadPerPx(widthPx: number): number {
  * affordance"). Set per ball width, not per screen width as the scene's
  * drag is, because the ball is the same size on every screen: a gain per
  * screen pixel turned a drag across it 336 degrees on a 360px phone and 111
- * on a phone on its side (review of #588). 300 is about what a 412px phone
- * had. The drag can carry on past the ball for more.
+ * on a phone on its side (review of #588). 300 was about what a 412px phone
+ * had, and it was too touchy (arkinox, 2026-11-13: "needs its sensitivity
+ * reduced by about 50% ... hopefully its still higher than the default"), so
+ * 150: on the 112px ball about 1.3 degrees a pixel, still more than a drag on
+ * the scene on any screen 360px wide or more (1 degree a pixel there, less on
+ * anything wider). The drag can carry on past the ball for more.
  */
-export const WALK_LOOK_SPHERE_DEG_PER_BALL = 300
+export const WALK_LOOK_SPHERE_DEG_PER_BALL = 150
 
 /** Radians of turn per CSS pixel of drag on a LOOK ball `ballPx` wide. */
 export function sphereRadPerPx(ballPx: number): number {

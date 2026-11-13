@@ -35,6 +35,7 @@ import { HyperspacePanel } from './HyperspacePanel'
 import { useHyperspace } from '../store/useHyperspace'
 import { RelaysPanel } from './RelaysPanel'
 import { TutorialPanel } from './TutorialPanel'
+import { GamesPanel } from './GamesPanel'
 import { TargetsPanel } from './TargetsPanel'
 import { ShardsPanel } from './ShardsPanel'
 import { Legend } from './Legend'
@@ -615,6 +616,7 @@ const PANELS: Record<PanelId, () => JSX.Element | null> = {
   hidden: HiddenPanel,
   discovered: DiscoveredPanel,
   items: InventoryPanel,
+  games: GamesPanel,
   create: ShardsPanel,
   avatars: AvatarsPanel,
   targets: TargetsPanel,

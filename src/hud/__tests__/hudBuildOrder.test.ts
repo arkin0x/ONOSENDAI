@@ -219,9 +219,17 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
   it('lays the columns out in the saved order, with the brand, the license and the build where they were', () => {
     usePanelLayout.setState({ order: moveBefore(moveBefore(defaultOrder(), 'relays', 'identity', 'left'), 'hidden', null, 'right') })
     const { left, right } = columns()
-    expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'AgentsPanel', 'AvatarsPanel', 'InventoryPanel', 'ShardsPanel', 'DiscoveredPanel', 'TargetsPanel', 'LinksPanel'])
+    expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'AgentsPanel', 'AvatarsPanel', 'InventoryPanel', 'GamesPanel', 'ShardsPanel', 'DiscoveredPanel', 'TargetsPanel', 'LinksPanel'])
     // TUTORIAL is drawn for everyone since the tutorial went on by default (2026-11-13).
     expect(right).toEqual(['ScalePanel', 'PositionPanel', 'ViewAtPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'Controls', 'DerezzPanel', 'TutorialPanel', 'HiddenPanel'])
+  })
+
+  it('GAMES is drawn for everyone, right under ITEMS, found games or not (owner, 2026-11-13)', () => {
+    const { left } = columns()
+    expect(left.slice(left.indexOf('InventoryPanel'), left.indexOf('InventoryPanel') + 2)).toEqual(['InventoryPanel', 'GamesPanel'])
+    usePanelLayout.setState({ order: moveBefore(defaultOrder(), 'games', null, 'right') })
+    expect(columns().left).not.toContain('GamesPanel')
+    expect(columns().right.at(-1)).toBe('GamesPanel')
   })
 
   it('TUTORIAL is drawn with the tutorial switched off too: its switch lives in it (owner, 2026-11-13)', async () => {

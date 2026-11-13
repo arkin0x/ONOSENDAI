@@ -10997,3 +10997,7 @@ html.tv-broadcast body { overflow: hidden; }
 
 .hyperbar--game { font-family: inherit; text-align: left; cursor: pointer; border-color: rgba(255, 122, 217, 0.6); }
 .hyperbar--game .hyperbar__label { color: var(--game); }
+
+/* GAMES (hud/GamesPanel.tsx): a game's name, its ENTER; under it, when the game says where it is entered from, those words. */
+.games__row { grid-template-columns: 1fr auto; }
+.games__where { grid-column: 1 / -1; font-size: 8px; letter-spacing: 0.08em; color: var(--dim); }

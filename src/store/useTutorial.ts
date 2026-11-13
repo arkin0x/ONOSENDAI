@@ -220,6 +220,15 @@ interface TutorialState {
   stepNote: string | null
   /** Set the step note, only while the step at `index` is still the one on screen. */
   noteStep: (index: number, note: string | null) => void
+  /**
+   * What the step on screen points at instead of its scene's `highlight`, a
+   * CSS selector, or null for the scene's own; cleared on every step change.
+   * The course step points at the pad's arrows, then at COMMIT once the
+   * cursor is on its target (tutorial/director.ts to-course; owner, 2026-11-13).
+   */
+  stepHighlight: string | null
+  /** Set the step highlight, only while the step at `index` is still the one on screen. */
+  highlightStep: (index: number, selector: string | null) => void
   script: TutorialScript
   /** Start (or resume) for the identity on screen; `at` names a step, `restart` begins again from the first. */
   start: (opts?: { at?: string; restart?: boolean }) => void
@@ -268,7 +277,7 @@ export const useTutorial = create<TutorialState>((set, get) => {
       get().end('skipped')
       return
     }
-    set({ index, done: !step.wait, explaining: false, choosing: null, choiceNote: null, stepNote: null })
+    set({ index, done: !step.wait, explaining: false, choosing: null, choiceNote: null, stepNote: null, stepHighlight: null })
     writeProgress(pubkey, progress(step.id))
     if (step.scene) applyScene(step.scene, step.wait === 'walk', (c) => { stepCleanups.push(c) })
     // Leaving WALK while such a step is up goes back to the step that asks for it.
@@ -321,6 +330,8 @@ export const useTutorial = create<TutorialState>((set, get) => {
     choiceNote: null,
     stepNote: null,
     noteStep: (index, note) => { if (get().active && get().index === index) set({ stepNote: note }) },
+    stepHighlight: null,
+    highlightStep: (index, selector) => { if (get().active && get().index === index && get().stepHighlight !== selector) set({ stepHighlight: selector }) },
     script: TUTORIAL_SCRIPT,
 
     start: (opts = {}) => {

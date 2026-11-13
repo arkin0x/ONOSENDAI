@@ -83,7 +83,7 @@ export const TO_PLOT: TutorialStep = {
   title: 'Planting seeds',
   caption: "Let's plant code that grows into something beautiful. Go stand on that platform.",
   hint: 'Tap COMMIT to move there.',
-  // COMMIT glows, as on the box and course steps (owner, 2026-11-13).
+  // COMMIT glows, as on the box step (owner, 2026-11-13); the course step glows it once the cursor is on its target.
   scene: { target: 'self', highlight: COMMIT, pad: true },
   wait: 'at-plot',
   effect: 'aim-plot',
@@ -127,14 +127,26 @@ export const INVENTORY: TutorialStep = {
   onNext: 'close-menu',
 }
 
-/** To the start of the course: one COMMIT, the cursor already on the start square. */
+/**
+ * The Controls pad's arrow keys, the six that move the cursor (hud/TouchControls.tsx
+ * cells away, up, toward, left, right, down): the course step points at them
+ * until the cursor is on the target.
+ */
+export const PAD_ARROWS = ['away', 'up', 'toward', 'left', 'right', 'down'].map((c) => `.touchpad__key--${c}`).join(', ')
+
+/**
+ * To the course (owner, 2026-11-13): the player moves the cursor onto the
+ * target over the start square themselves, with the Controls pad, and HOPs
+ * there. Nothing aims it for them. The arrows glow until the cursor is on the
+ * target, then COMMIT does (tutorial/director.ts to-course).
+ */
 export const TO_COURSE: TutorialStep = {
   id: 'to-course',
   title: 'The course',
-  caption: 'HOPs are the basic way to move through cyberspace, but running and jumping is a bit more fun! See the platform course? Let\'s HOP over it and try it. Tap COMMIT in CONTROLS to HOP there.',
-  hint: 'Tap COMMIT to HOP to the start.',
-  scene: { target: 'self', highlight: COMMIT, pad: true },
-  wait: 'at-start',
+  caption: 'HOPs are the basic way to move through cyberspace, but running and jumping is a bit more fun! See the platform course? Use CONTROLS to move your cursor onto the target above it.',
+  hint: "The arrows move your cursor. When it's on the target, tap COMMIT.",
+  scene: { target: 'self', highlight: PAD_ARROWS, pad: true },
+  wait: 'at-target',
   effect: 'to-course',
 }
 

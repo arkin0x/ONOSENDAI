@@ -40,7 +40,7 @@ import { walkStep } from '../../store/walkStep'
 import { clearWalls, type WallItem } from '../../store/walkWalls'
 import { regionBase, type TutorialLayout } from '../layout'
 import { buildStage, type KeyAt } from '../stage'
-import { PLOT_AT, PLOT_STAND, courseToWorld, onPlot } from '../course'
+import { PLOT_AT, PLOT_STAND, START_STAND, atStart, courseToWorld, onPlot, targetAt } from '../course'
 import { toWorld } from '../layout'
 
 const keyAt: KeyAt = async (at, h) => { const rk = regionKeyAt(at, h, 20); return { key: rk.key, lookupId: rk.lookupId } }
@@ -128,6 +128,16 @@ describe.each([[1, 1], [1, -1], [-1, 1], [-1, -1]] as const)('the course, facing
       expect(standAt0(layout, items, f, r)).not.toBe(PLOT_STAND.u)
     }
     void PLOT_AT
+
+    // GRAVITY on at the hop target (owner, 2026-11-13): the walker falls the 2 onto the start square;
+    // the target itself holds nobody up.
+    const t = targetAt(layout.frame)
+    const drop = fallLimit(t, items, () => true)
+    expect(drop.lands).toBe(true)
+    expect(drop.drop).toBe(2n)
+    const landed = { ...t, y: t.y - drop.drop }
+    expect(landed).toEqual(courseToWorld(layout.frame, START_STAND))
+    expect(atStart(layout.frame, landed)).toBe(true)
 
     // Back up: from the floor behind the start, walking forward climbs the step and onto the start square.
     let at = courseToWorld(layout.frame, [0, -2, -10])

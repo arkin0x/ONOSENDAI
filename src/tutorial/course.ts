@@ -73,6 +73,14 @@ export const COURSE: CoursePart[] = [
 export const START_STAND: [number, number, number] = [0, 1, 0]
 /** The start square, where a walker counts as at the start: cells and standing heights. */
 export const START_ZONE = { x: [-3, 3], y: [1, 4], z: [-3, 3] } as const
+/**
+ * The hop target (owner, 2026-11-13): over the middle of the start square,
+ * 2 above where a walker stands on it. The course step has the player move
+ * the cursor here with CONTROLS and HOP to it; once GRAVITY is on they fall
+ * the 2 onto the start square, and the target is then over their head, out
+ * of a forward view. Inside START_ZONE, so landing on it is at the start.
+ */
+export const TARGET: [number, number, number] = [START_STAND[0], START_STAND[1] + 2, START_STAND[2]]
 /** The finish deck, where a walker counts as finished: cells and standing heights. */
 export const DECK_ZONE = { x: [-3, 3], y: [10, 13], z: [28, 34] } as const
 /** The finish chest: on the deck, near its far edge. */
@@ -104,6 +112,17 @@ function inZone(frame: Frame, zone: { x: readonly [number, number]; y: readonly 
 /** Whether a world point is on the start square (START_ZONE). */
 export function atStart(frame: Frame, at: Position): boolean {
   return inZone(frame, START_ZONE, at)
+}
+
+/** Where the hop target is in the world (TARGET). */
+export function targetAt(frame: Frame): Position {
+  return courseToWorld(frame, TARGET)
+}
+
+/** Whether a world point is the hop target's cell. */
+export function onTarget(frame: Frame, at: Position): boolean {
+  const t = targetAt(frame)
+  return at.x === t.x && at.y === t.y && at.z === t.z
 }
 
 /** Whether a world point is on the finish deck (DECK_ZONE). */

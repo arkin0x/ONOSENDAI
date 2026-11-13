@@ -7404,6 +7404,12 @@ select.avatars__input option:checked {
 .goalbar { gap: 8px; }
 .goalbar .hyperbar__meta { white-space: normal; }
 .goalbar__clear { display: inline-flex; align-items: center; }
+/* The tutorial toast (hud/TutorialToast.tsx): its sentence reads as the
+ * chip's words, not a dim aside; LATER is the quieter of its two buttons. */
+.tutorialtoast { gap: 8px; }
+.tutorialtoast .hyperbar__meta { color: var(--fg); line-height: 1.5; }
+.tutorialtoast__later { background: transparent; color: #f7931a; }
+.tutorialtoast__later:hover { background: rgba(247, 147, 26, 0.16); }
 
 .chip.starchip,
 .chip.starchip[aria-pressed='false'] {

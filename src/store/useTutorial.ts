@@ -146,7 +146,7 @@ export function isNewArrival(): boolean {
  * could not say (offline, unreachable) is asked again by the self-sync, and
  * the tutorial waits for that answer rather than deciding on none.
  */
-function settled(): boolean {
+export function identitySettled(): boolean {
   const cs = useCyberspace.getState()
   const pubkey = cs.identity.pubkey
   if (keyMintedOnLoad() === pubkey || cs.events.length > 0) return true
@@ -400,6 +400,20 @@ export const useTutorial = create<TutorialState>((set, get) => {
 })
 
 /**
+ * Whether the tutorial starts, or resumes, for `pubkey` on this load, once
+ * its identity can be judged (identitySettled) and its saved chain is in:
+ * the switch on, the bare address, no tour or TV, and either a run left
+ * unfinished or a brand-new identity. What watchFirstArrival acts on, and
+ * what an arrival ?mode= asks so it never starts over the tutorial
+ * (store/arrivalMode.ts).
+ */
+export function tutorialStarts(pubkey: string): boolean {
+  if (!tutorialOn() || blocked() || !plainAddress()) return false
+  const p = readProgress(pubkey)
+  return p ? !p.ended : isNewArrival()
+}
+
+/**
  * Start the tutorial for a first arrival, or resume one a player left
  * unfinished, once the identity on screen can be judged; and put it away if
  * the identity changes or the /demo tour starts. Only with the device switch
@@ -414,15 +428,13 @@ export function watchFirstArrival(): () => void {
   // on screen.
   const decide = (pubkey: string): void => {
     if (stopped || useCyberspace.getState().identity.pubkey !== pubkey) return
-    if (!settled()) { decidedFor = null; return }
+    if (!identitySettled()) { decidedFor = null; return }
     if (!tutorialOn() || useTutorial.getState().active || blocked() || !plainAddress()) return
     const p = readProgress(pubkey)
-    if (p?.ended) {
-      if (p.ended === 'finished') for (const l of lifecycles) { try { l.restore?.(pubkey) } catch (err) { console.warn('[tutorial] restore failed:', err) } }
-      return
-    }
+    if (p?.ended === 'finished') for (const l of lifecycles) { try { l.restore?.(pubkey) } catch (err) { console.warn('[tutorial] restore failed:', err) } }
+    if (!tutorialStarts(pubkey)) return
     if (p) useTutorial.getState().start({ at: p.step })
-    else if (isNewArrival()) useTutorial.getState().start()
+    else useTutorial.getState().start()
   }
   const check = (): void => {
     const cs = useCyberspace.getState()
@@ -435,7 +447,7 @@ export function watchFirstArrival(): () => void {
       if (t.script.steps[t.index]?.branch) t.end('finished')
       else t.pause()
     }
-    if (decidedFor === pubkey || !settled()) return
+    if (decidedFor === pubkey || !identitySettled()) return
     decidedFor = pubkey
     void savedChainLoaded().then(() => decide(pubkey), () => decide(pubkey))
   }

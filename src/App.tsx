@@ -27,6 +27,7 @@ import { startCoordRoute, watchCoordRouteHistory } from './store/useCoordRoute'
 import { DemoCoach } from './hud/DemoCoach'
 import { TutorialCoach } from './hud/TutorialCoach'
 import { useTutorial, watchFirstArrival } from './store/useTutorial'
+import { watchArrivalMode } from './store/arrivalMode'
 // The tutorial's staged things and the waits on them (registered on load; stages only while it runs).
 import './tutorial/director'
 // The final card's DUNGEON, when games are on for this device.
@@ -155,6 +156,8 @@ export default function App(): JSX.Element {
   // on), a brand-new identity gets the tutorial and a player who left one
   // unfinished resumes it.
   useEffect(() => watchFirstArrival(), [])
+  // ?mode=view or ?mode=region on arrival, never over the tutorial (store/arrivalMode.ts).
+  useEffect(() => watchArrivalMode(), [])
   // onosendai.tech/tv: Cyberspace TV (store/useTv.ts). Back off /tv turns
   // it off, Forward onto /tv turns it on, as loading that address would.
   useEffect(() => {

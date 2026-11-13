@@ -3,8 +3,8 @@
  *
  * A game is on in one of two ways:
  *
- * - It is LIVE (gameLive): its key is a real one its owner holds, not a
- *   placeholder whose secret sits on a build machine, and its world is read
+ * - It is LIVE (gameLive): its key is a real game key (not a placeholder on
+ *   PLACEHOLDER_KEYS, whose events must never reach production), and its world is read
  *   from the relays, not a bundled fixture. A live game is on everywhere,
  *   the production host included, with no switch to turn.
  * - This device asked for games, off the production host: ?games=1 turns

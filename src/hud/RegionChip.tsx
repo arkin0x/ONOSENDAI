@@ -10,10 +10,13 @@ import { useState } from 'react'
 import { Copy, Scan } from 'lucide-react'
 import { useRegion } from '../store/useRegion'
 
-// The relay's region path is the bare hex, not the app's /C/ form: the
-// speakeasy vectors give the owner's own example as relay.onosendai.tech/<hex>
-// naming the same region as www.onosendai.tech/C/<hex> (regionPrefixVectors).
-const RELAY = 'https://relay.onosendai.tech/'
+// The relay's speakeasy landing page, its create tool prefilled with the
+// region (arkinox, 2026-11-13; relay PR #34). The region is the bare hex,
+// not the app's /C/ form: the speakeasy vectors name relay.onosendai.tech/<hex>
+// and www.onosendai.tech/C/<hex> as the same region (regionPrefixVectors).
+export function reserveUrl(prefix: string): string {
+  return `https://relay.onosendai.tech/speakeasy?region=${encodeURIComponent(prefix)}`
+}
 
 export function RegionChip(): JSX.Element | null {
   const active = useRegion((s) => s.active)
@@ -42,7 +45,7 @@ export function RegionChip(): JSX.Element | null {
             <Copy size={12} strokeWidth={2.25} aria-hidden />
           </button>
           <span className="regionchip__note">{copied ? 'Copied' : `${prefix.length} hex`}</span>
-          <a className="regionchip__reserve" href={`${RELAY}${prefix}`} target="_blank" rel="noreferrer">
+          <a className="regionchip__reserve" href={reserveUrl(prefix)} target="_blank" rel="noreferrer">
             Reserve this region for a private speakeasy
           </a>
         </>

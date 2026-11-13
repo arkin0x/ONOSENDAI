@@ -13,6 +13,7 @@ import { hydrateHidden } from './store/hiddenStorage'
 import { wireLocalObjects } from './store/localObjects'
 import { diagWanted } from './lib/diagGate'
 import { applyTutorialFlag, noteLanding } from './tutorial/gate'
+import { takeArrivalMode } from './store/arrivalMode'
 
 // A tap on a modal's backdrop only closes it (lib/tapGuard.ts).
 installTapGuard(window)
@@ -20,6 +21,8 @@ installTapGuard(window)
 // ?tutorial=1 or =0 setting this device's switch, before anything draws.
 noteLanding(location.pathname)
 applyTutorialFlag()
+// ?mode=view or ?mode=region: taken off the address now, applied once the app can (store/arrivalMode.ts).
+takeArrivalMode()
 // /tv?broadcast=1, the 24/7 stream: no pointer on the page (lib/tv/broadcast.ts).
 markBroadcastPage()
 // Your own objects placed by reference are drawn from your workshop first (store/localObjects.ts).

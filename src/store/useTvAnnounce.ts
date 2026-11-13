@@ -41,11 +41,24 @@
  * listenForAnnouncements: once TV's first shot is up (store/useTv, as the
  * ticker's numbers wait), one live subscription to the announcer's events of
  * the last week, on the relays TV reads. What is stored is gathered until
- * the relays have sent it (or ANNOUNCE_GATHER_MS), then each fresh version
- * this set has not played plays, lowest first; one that arrives later, while
- * TV runs, plays as it comes. Each plays once a set (lib/tv/announceFeed
- * rememberPlayed, kept on the device). The week is counted again every
- * ANNOUNCE_RECOUNT_MS, as it moves on.
+ * the relays have sent it (or ANNOUNCE_GATHER_MS), then only the newest fresh
+ * version published before TV came on plays, and only when this set has not
+ * played it; the older fresh ones this set has not played are kept as played
+ * without playing, so they never play here (owner, 2026-11-13: a set that had
+ * not had TV on since three versions came played all three back to back; the
+ * stream did the same after a browser restart lost what it kept). One the
+ * relays send late, after the gather, is still one published before TV came
+ * on, and is held to the same rule: those that come in a burst are counted
+ * together, ANNOUNCE_SETTLE_MS after the last of them. One published while TV
+ * runs plays as it comes; several that arrive while one plays wait their
+ * turn, as above.
+ *
+ * Each plays once a set (lib/tv/announceFeed rememberPlayed, kept on the
+ * device), and is kept as played the moment it is handed to the screen, not
+ * when it comes on: one still waiting when TV goes off or the page reloads,
+ * or pushed out of the queue, never plays again either (owner, 2026-11-13:
+ * a reload after a new build played the old ones over again). The week is
+ * counted again every ANNOUNCE_RECOUNT_MS, as it moves on.
  */
 
 import { create } from 'zustand'
@@ -106,9 +119,7 @@ export function playUpgradeAnnouncement(a: UpgradeAnnouncement, now: number = pe
   if (!plan) return false
   asked.set(plan, a)
   if (useTvAnnounce.getState().showing) {
-    const all = [...waiting, plan]
-    waiting = all.slice(-QUEUE_MAX)
-    for (const out of all.slice(0, -QUEUE_MAX)) dropped(out)
+    waiting = [...waiting, plan].slice(-QUEUE_MAX)
     return true
   }
   begin(plan, now)
@@ -153,7 +164,6 @@ export function announceCutAt(now: number): number {
 }
 
 function begin(plan: AnnouncePlan, now: number): void {
-  shown(plan)
   if (heldAt === null) {
     heldAt = now
     holdExplainer(now)
@@ -178,7 +188,6 @@ export function announceTick(now: number, resumeTv: (heldMs: number, now: number
   if (done) played.push(done)
   const next = waiting.shift()
   if (next) {
-    shown(next)
     useTvAnnounce.setState({ showing: { at: now, plan: next } })
     return true
   }
@@ -235,6 +244,8 @@ export function stopAnnouncements(): void {
 
 /** How long what the relays hold is gathered before any of it plays, ms, when they have not all said they are done. */
 export const ANNOUNCE_GATHER_MS = 5_000
+/** How long after the last of a burst of late ones, published before TV came on, they are counted together, ms. */
+export const ANNOUNCE_SETTLE_MS = 1_000
 /** How often the week is counted again, ms: an announcement leaves the count a week after it came. */
 export const ANNOUNCE_RECOUNT_MS = 10 * 60_000
 
@@ -249,8 +260,10 @@ interface Feed {
   book: AnnounceBook
   /** Whether what the relays held has been gathered: from then on, what is heard plays at once. */
   gathered: boolean
-  /** Versions handed to playUpgradeAnnouncement that have not come on screen yet: not handed again meanwhile. */
-  queued: Set<string>
+  /** When TV came on (the feed began), unix s: one published before it is stored news, and only the newest of those plays. */
+  since: number
+  /** The count after a burst of late stored ones (ANNOUNCE_SETTLE_MS), or null. */
+  settleTimer: ReturnType<typeof setTimeout> | null
   unsubscribe: () => void
   gatherTimer: ReturnType<typeof setTimeout>
   recountTimer: ReturnType<typeof setInterval>
@@ -269,7 +282,7 @@ export function listenForAnnouncements(search: string = typeof window !== 'undef
     refresh(f)
   }
   const f: Feed = {
-    book: new AnnounceBook(), gathered: false, queued: new Set(), unsubscribe: () => {},
+    book: new AnnounceBook(), gathered: false, since: nowSeconds(), settleTimer: null, unsubscribe: () => {},
     gatherTimer: setTimeout(gathered, ANNOUNCE_GATHER_MS),
     recountTimer: setInterval(() => { if (feed === f && f.gathered) refresh(f) }, ANNOUNCE_RECOUNT_MS),
   }
@@ -277,39 +290,32 @@ export function listenForAnnouncements(search: string = typeof window !== 'undef
   f.unsubscribe = (subscribeFeed ?? subscribe)(announceFilter(nowSeconds(), announcer), (ev) => {
     if (feed !== f) return
     const a = readAnnouncement(ev, announcer)
-    if (a && f.book.add(a) && f.gathered) refresh(f)
+    if (!a || !f.book.add(a) || !f.gathered) return
+    if (a.at >= f.since) { refresh(f); return }
+    if (f.settleTimer !== null) clearTimeout(f.settleTimer)
+    f.settleTimer = setTimeout(() => { f.settleTimer = null; if (feed === f) refresh(f) }, ANNOUNCE_SETTLE_MS)
   }, gathered)
 }
 
-/** The week counted, its highest version told to the marquee, and what is due played. */
+/**
+ * The week counted, its highest version told to the marquee, and what is due
+ * played. Of the fresh ones published before TV came on, only the newest may
+ * play (when this set has not played it); the older are kept as played
+ * without playing. Those published since play, lowest first. Each handed to
+ * the screen is kept as played at once (above).
+ */
 function refresh(f: Feed): void {
   const now = nowSeconds()
   setUpdatesThisWeek(f.book.count(now))
   const newest = f.book.newest(now)
   if (useTvAnnounce.getState().announcedVersion !== newest) useTvAnnounce.setState({ announcedVersion: newest })
-  for (const a of f.book.due(now, (v) => wasPlayed(v, now))) {
-    if (f.queued.has(a.version)) continue
-    f.queued.add(a.version)
-    if (!playUpgradeAnnouncement({ version: a.version, text: a.text })) f.queued.delete(a.version)
+  const fresh = f.book.due(now, () => false)
+  const stored = fresh.filter((a) => a.at < f.since)
+  for (const a of stored.slice(0, -1)) if (!wasPlayed(a.version, now)) rememberPlayed(a.version, now)
+  for (const a of [...stored.slice(-1), ...fresh.filter((a) => a.at >= f.since)]) {
+    if (wasPlayed(a.version, now)) continue
+    if (playUpgradeAnnouncement({ version: a.version, text: a.text })) rememberPlayed(a.version, now)
   }
-}
-
-/**
- * One goes on screen: a version the feed handed over is played on this set
- * from now (lib/tv/announceFeed rememberPlayed), and not before: one pushed
- * out of the queue, or still waiting when TV goes off, plays another time.
- */
-function shown(plan: AnnouncePlan): void {
-  const a = asked.get(plan)
-  const f = feed
-  if (!a || !f || !f.queued.delete(a.version)) return
-  rememberPlayed(a.version, nowSeconds())
-}
-
-/** One pushed out of the queue (QUEUE_MAX): the feed may hand it over again at its next count. */
-function dropped(plan: AnnouncePlan): void {
-  const a = asked.get(plan)
-  if (a) feed?.queued.delete(a.version)
 }
 
 /** TV's own word on whether it is quiet (no HOSAKA spot, no CYBERSPACE STATS board): store/useTv's, which this cannot import. */
@@ -331,8 +337,9 @@ export function watchForSelfUpdate(quiet: () => boolean): void {
 /**
  * A song has ended: reload the broadcast now when a newer version has been
  * announced, the day's one reload is not spent, and nothing is on. True when
- * it reloads. Every announcement heard plays first: none playing or
- * waiting, and none due that this set has not played.
+ * it reloads. Every announcement that is to play plays first: none playing
+ * or waiting, and none due that this set has not played (those passed over
+ * for a newer one are kept as played, and do not hold it back).
  */
 export function maybeSelfUpdate(): boolean {
   const f = feed
@@ -360,6 +367,7 @@ function stopFeed(): void {
   feed = null
   f.unsubscribe()
   clearTimeout(f.gatherTimer)
+  if (f.settleTimer !== null) clearTimeout(f.settleTimer)
   clearInterval(f.recountTimer)
 }
 

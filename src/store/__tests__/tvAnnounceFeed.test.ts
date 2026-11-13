@@ -2,10 +2,12 @@
  * tvAnnounceFeed.test.ts: what carries the UPGRADE ANNOUNCEMENT (owner
  * rulings, 2026-11-12). Only the pinned announcer's signed kind 33338 events
  * play (a forged one never reaches the screen); each version plays once a
- * set, kept on the device across a reload; only within 24 h of publishing,
+ * set, kept on the device from the moment it is handed to the screen, across
+ * TV going off, a reload and a new build; only within 24 h of publishing,
  * while the week counts for N UPDATES THIS WEEK and lifts the marquee's
- * version; stored ones gather and play lowest first, live ones as they come;
- * nothing listens before TV's first shot; and nothing reloads the page after.
+ * version; of the stored ones gathered at start only the newest plays, the
+ * older kept as played (owner, 2026-11-13), live ones as they come; nothing
+ * listens before TV's first shot; and nothing reloads the page after.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -60,7 +62,7 @@ import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { V2_EPOCH } from '../../lib/tv/tape'
 import { setTvAsk, useTv } from '../useTv'
-import { announceBusy, announceWaitingForTest, listenForAnnouncements, maybeSelfUpdate, playUpgradeAnnouncement, setAnnounceFeedForTest, useTvAnnounce, ANNOUNCE_GATHER_MS, ANNOUNCE_RECOUNT_MS } from '../useTvAnnounce'
+import { announceBusy, announceWaitingForTest, listenForAnnouncements, maybeSelfUpdate, playUpgradeAnnouncement, setAnnounceFeedForTest, useTvAnnounce, ANNOUNCE_GATHER_MS, ANNOUNCE_RECOUNT_MS, ANNOUNCE_SETTLE_MS } from '../useTvAnnounce'
 import { useTvExplainer } from '../useTvExplainer'
 import { HOSAKA_1 } from '../../lib/tv/hosakaAd'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
@@ -264,7 +266,7 @@ describe('the feed on TV', () => {
     expect(subs[0].closed).toBe(true)
   })
 
-  it('plays what is stored once the relay is done, lowest version first; a forged one never plays nor counts', async () => {
+  it('plays the newest of what is stored once the relay is done, the older kept as played; a forged one never plays nor counts', async () => {
     useTv.getState().start()
     await run(2500)
     const s = subs[0]
@@ -275,14 +277,14 @@ describe('the feed on TV', () => {
     expect(announceBusy()).toBe(false)
     expect(useTvAnnounce.getState().updatesThisWeek).toBeNull()
     s.eose()
-    expect(showingVersion()).toBe('2.2')
-    expect(announceWaitingForTest()).toBe(1)
+    expect(showingVersion()).toBe('2.3')
+    expect(announceWaitingForTest()).toBe(0)
     expect(useTvAnnounce.getState().updatesThisWeek).toBe(3)
     expect(useTvAnnounce.getState().announcedVersion).toBe('2.3')
+    expect(wasPlayed('2.2', NOW)).toBe(true)
     expect(wasPlayed('2.1', NOW)).toBe(false)
     expect(wasPlayed('9.9', NOW)).toBe(false)
-    const both = announceMs(announcePlan({ version: '2.2', text: 'Second.' })!) + announceMs(announcePlan({ version: '2.3', text: 'Third.' })!)
-    await run(both + 500)
+    await run(announceMs(announcePlan({ version: '2.3', text: 'Third.' })!) + 500)
     expect(announceBusy()).toBe(false)
   })
 
@@ -301,14 +303,15 @@ describe('the feed on TV', () => {
     subs[0].eose()
     expect(useTvAnnounce.getState().updatesThisWeek).toBe(0)
     expect(announceBusy()).toBe(false)
-    const ev = announcement('2.4', 'Fresh off the press.', NOW - 60)
+    clock = NOW + 120
+    const ev = announcement('2.4', 'Fresh off the press.', NOW + 60)
     subs[0].event(ev)
     expect(showingVersion()).toBe('2.4')
     expect(useTvAnnounce.getState().updatesThisWeek).toBe(1)
     await run(announceMs(announcePlan({ version: '2.4', text: ev.content })!) + 500)
     expect(announceBusy()).toBe(false)
     subs[0].event(ev)
-    subs[0].event(announcement('2.4', 'Edited words.', NOW - 60, { created: NOW - 30 }))
+    subs[0].event(announcement('2.4', 'Edited words.', NOW + 60, { created: NOW + 90 }))
     expect(announceBusy()).toBe(false)
     expect(useTvAnnounce.getState().updatesThisWeek).toBe(1)
   })
@@ -347,30 +350,151 @@ describe('the feed on TV', () => {
     expect(reloads).toEqual([])
   })
 
-  it('marks a version played only once it is on screen: one pushed out of the queue, or waiting when TV goes off, plays later', async () => {
+  it('keeps a version played the moment it is handed to the screen: one waiting when TV goes off, or pushed out of the queue, never plays again', async () => {
     useTv.getState().start()
     await run(2500)
-    for (const v of ['2.2', '2.3', '2.4', '2.5', '2.6']) subs[0].event(announcement(v, `Version ${v}.`, NOW - H))
     subs[0].eose()
-    // 2.2 on screen, three wait (QUEUE_MAX), 2.3 pushed out.
+    clock = NOW + 120
+    for (const v of ['2.2', '2.3', '2.4', '2.5', '2.6']) subs[0].event(announcement(v, `Version ${v}.`, NOW + 60))
+    // Live, one after another: 2.2 on screen, three wait (QUEUE_MAX), 2.3 pushed out.
     expect(showingVersion()).toBe('2.2')
     expect(announceWaitingForTest()).toBe(3)
-    expect(wasPlayed('2.2', NOW)).toBe(true)
-    for (const v of ['2.3', '2.4', '2.5', '2.6']) expect(wasPlayed(v, NOW)).toBe(false)
-    // TV off with three waiting: none of them was played.
+    for (const v of ['2.2', '2.3', '2.4', '2.5', '2.6']) expect(wasPlayed(v, NOW)).toBe(true)
+    // TV off with three waiting, and back on: none of them plays again, nor the one pushed out.
     useTv.getState().stop()
-    for (const v of ['2.3', '2.4', '2.5', '2.6']) expect(wasPlayed(v, NOW)).toBe(false)
-    // Back on: the four not played come again; 2.2 does not.
     useTv.getState().start()
     await run(2500)
     for (const v of ['2.2', '2.3', '2.4', '2.5', '2.6']) subs[1].event(announcement(v, `Version ${v}.`, NOW - H))
     subs[1].eose()
-    expect(showingVersion()).toBe('2.3')
-    expect(announceWaitingForTest()).toBe(3)
-    const each = announceMs(announcePlan({ version: '2.3', text: 'Version 2.3.' })!)
-    await run(4 * each + 2000)
     expect(announceBusy()).toBe(false)
-    for (const v of ['2.2', '2.3', '2.4', '2.5', '2.6']) expect(wasPlayed(v, NOW)).toBe(true)
+    await run(ANNOUNCE_RECOUNT_MS + 500)
+    expect(announceBusy()).toBe(false)
+  })
+
+  it('plays nothing already handed over after a reload mid-queue, nor after a new build', async () => {
+    useTv.getState().start()
+    await run(2500)
+    for (const v of ['2.4', '2.5']) subs[0].event(announcement(v, `Version ${v}.`, NOW - 2 * H))
+    subs[0].eose()
+    expect(showingVersion()).toBe('2.5')
+    clock = NOW + 120
+    subs[0].event(announcement('2.6', 'Version 2.6.', NOW + 60))
+    subs[0].event(announcement('2.7', 'Version 2.7.', NOW + 60))
+    expect(announceWaitingForTest()).toBe(2)
+    // The page reloads mid-queue, onto a new build: the page's memory gone, the device's kept.
+    const kept = localStorage.getItem(PLAYED_KEY)
+    useTv.getState().stop()
+    const newBuild = bumped(5)
+    vi.resetModules()
+    vi.doMock('../../lib/tv/upgradeAnnounce', async (importOriginal) => ({ ...await importOriginal<typeof import('../../lib/tv/upgradeAnnounce')>(), appVersion: () => newBuild }))
+    const tv = await import('../useTv')
+    const announce = await import('../useTvAnnounce')
+    try {
+      const announceFeed = await import('../../lib/tv/announceFeed')
+      const upgrade = await import('../../lib/tv/upgradeAnnounce')
+      expect(upgrade.appVersion()).toBe(newBuild)
+      expect(localStorage.getItem(PLAYED_KEY)).toBe(kept)
+      for (const v of ['2.4', '2.5', '2.6', '2.7']) expect(announceFeed.wasPlayed(v, NOW)).toBe(true)
+      tv.setTvAsk(ask)
+      announce.setAnnounceFeedForTest(fakeSubscribe, () => clock, PK)
+      const before = subs.length
+      tv.useTv.getState().start()
+      await run(2500)
+      expect(subs.length).toBe(before + 1)
+      const s = subs[before]
+      for (const v of ['2.4', '2.5', '2.6', '2.7']) s.event(announcement(v, `Version ${v}.`, NOW - H))
+      s.eose()
+      expect(announce.announceBusy()).toBe(false)
+      expect(announce.useTvAnnounce.getState().updatesThisWeek).toBe(4)
+      await run(ANNOUNCE_RECOUNT_MS + 500)
+      expect(announce.announceBusy()).toBe(false)
+    } finally {
+      tv.useTv.getState().stop()
+      announce.setAnnounceFeedForTest(null)
+      vi.doUnmock('../../lib/tv/upgradeAnnounce')
+    }
+  })
+
+  it('on a set that has never had TV on, plays only the newest fresh one at start; the older ones are kept as played and never play', async () => {
+    useTv.getState().start()
+    await run(2500)
+    subs[0].event(announcement('2.4', 'Fourth.', NOW - 20 * H))
+    subs[0].event(announcement('2.6', 'Sixth.', NOW - H))
+    subs[0].event(announcement('2.5', 'Fifth.', NOW - 10 * H))
+    subs[0].eose()
+    expect(showingVersion()).toBe('2.6')
+    expect(announceWaitingForTest()).toBe(0)
+    for (const v of ['2.4', '2.5', '2.6']) expect(wasPlayed(v, NOW)).toBe(true)
+    // The week and the marquee are as before.
+    expect(useTvAnnounce.getState().updatesThisWeek).toBe(3)
+    expect(useTvAnnounce.getState().announcedVersion).toBe('2.6')
+    await run(announceMs(announcePlan({ version: '2.6', text: 'Sixth.' })!) + 500)
+    expect(announceBusy()).toBe(false)
+    // The next count plays none of the older ones.
+    await run(ANNOUNCE_RECOUNT_MS + 500)
+    expect(announceBusy()).toBe(false)
+    // Nor does TV coming back on.
+    useTv.getState().stop()
+    useTv.getState().start()
+    await run(2500)
+    for (const v of ['2.4', '2.5', '2.6']) subs[1].event(announcement(v, `Version ${v}.`, NOW - H))
+    subs[1].eose()
+    expect(announceBusy()).toBe(false)
+  })
+
+  it('still plays one that arrives after the gather, as it comes, and queues several that arrive while one plays', async () => {
+    useTv.getState().start()
+    await run(2500)
+    subs[0].event(announcement('2.4', 'Fourth.', NOW - 3 * H))
+    subs[0].event(announcement('2.5', 'Fifth.', NOW - 2 * H))
+    subs[0].eose()
+    expect(showingVersion()).toBe('2.5')
+    await run(announceMs(announcePlan({ version: '2.5', text: 'Fifth.' })!) + 500)
+    expect(announceBusy()).toBe(false)
+    clock = NOW + 120
+    subs[0].event(announcement('2.6', 'Sixth.', NOW + 60))
+    expect(showingVersion()).toBe('2.6')
+    subs[0].event(announcement('2.7', 'Seventh.', NOW + 90))
+    subs[0].event(announcement('2.8', 'Eighth.', NOW + 110))
+    expect(showingVersion()).toBe('2.6')
+    expect(announceWaitingForTest()).toBe(2)
+    const each = announceMs(announcePlan({ version: '2.6', text: 'Sixth.' })!)
+    await run(3 * each + 1000)
+    expect(announceBusy()).toBe(false)
+    for (const v of ['2.6', '2.7', '2.8']) expect(wasPlayed(v, NOW)).toBe(true)
+  })
+
+  it('holds stored ones a slow relay sends after the gather to the same rule: only the newest plays, oldest first or not', async () => {
+    useTv.getState().start()
+    await run(2500)
+    // The relay says nothing within ANNOUNCE_GATHER_MS: the gather ends on an empty week.
+    await run(ANNOUNCE_GATHER_MS + 200)
+    expect(useTvAnnounce.getState().updatesThisWeek).toBe(0)
+    for (const [v, ago] of [['2.4', 20], ['2.5', 10], ['2.6', 2]] as const) subs[0].event(announcement(v, `Version ${v}.`, NOW - ago * H))
+    expect(announceBusy()).toBe(false)
+    await run(ANNOUNCE_SETTLE_MS + 200)
+    expect(showingVersion()).toBe('2.6')
+    expect(announceWaitingForTest()).toBe(0)
+    for (const v of ['2.4', '2.5', '2.6']) expect(wasPlayed(v, NOW)).toBe(true)
+    await run(announceMs(announcePlan({ version: '2.6', text: 'Version 2.6.' })!) + 500)
+    // An older one later still never plays.
+    subs[0].event(announcement('2.3', 'Version 2.3.', NOW - 22 * H))
+    await run(ANNOUNCE_SETTLE_MS + ANNOUNCE_RECOUNT_MS + 500)
+    expect(announceBusy()).toBe(false)
+    expect(wasPlayed('2.3', NOW)).toBe(true)
+  })
+
+  it('plays nothing at start when this set has already played the newest fresh one, and keeps the older ones as played', async () => {
+    rememberPlayed('2.6', NOW - H)
+    useTv.getState().start()
+    await run(2500)
+    for (const [v, ago] of [['2.4', 20], ['2.5', 10], ['2.6', 2]] as const) subs[0].event(announcement(v, `Version ${v}.`, NOW - ago * H))
+    subs[0].eose()
+    expect(announceBusy()).toBe(false)
+    expect(useTvAnnounce.getState().updatesThisWeek).toBe(3)
+    for (const v of ['2.4', '2.5']) expect(wasPlayed(v, NOW)).toBe(true)
+    await run(ANNOUNCE_RECOUNT_MS + 500)
+    expect(announceBusy()).toBe(false)
   })
 
   it('leaves the feed alone for /tv?announce=test, which plays the sample', async () => {
@@ -478,20 +602,20 @@ describe('the stream\'s gentle self-update (owner, 2026-11-12)', () => {
     expect(reloads).toEqual(['reload'])
   })
 
-  it('waits for an announcement pushed out of the queue to play before it reloads', async () => {
+  it('waits for those queued to play before it reloads; one pushed out of the queue does not hold it back', async () => {
     const s = await onTheStream()
-    const versions = [1, 2, 3, 4, 5].map((k) => bumped(k))
-    for (const v of versions) s.event(announcement(v, `Version ${v}.`, NOW - H))
     s.eose()
+    clock = NOW + 120
+    const versions = [1, 2, 3, 4, 5].map((k) => bumped(k))
+    for (const v of versions) s.event(announcement(v, `Version ${v}.`, NOW + 60))
     const each = announceMs(announcePlan({ version: versions[0], text: `Version ${versions[0]}.` })!)
-    // Four play through; the one pushed out is still due, not played.
-    await run(4 * each + 2000)
-    expect(announceBusy()).toBe(false)
-    expect(wasPlayed(versions[1], NOW)).toBe(false)
+    // Not while one plays or three wait.
+    endSong()
+    await run(each + 500)
     endSong()
     expect(reloads).toEqual([])
-    // The next count hands it over again; once it has played, a song's end reloads.
-    await run(ANNOUNCE_RECOUNT_MS + each + 1000)
+    // Four play through; the one pushed out is kept as played, not due.
+    await run(3 * each + 2000)
     expect(announceBusy()).toBe(false)
     expect(wasPlayed(versions[1], NOW)).toBe(true)
     endSong()

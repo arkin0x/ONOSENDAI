@@ -85,10 +85,20 @@ function getEngine(): BloomEngine {
   return made
 }
 
-/** Grow these seeds' blooms, as far as each can go. */
-export function wantSeeds(seeds: readonly SeedItem[]): void {
+/**
+ * Grow these seeds' blooms, as far as each can go. `room: true` asks only for
+ * as many new seeds as fit under BLOOMS_KEPT and forgets none: a list asking
+ * for its rows never pushes out a bloom the world is drawing (review of #701).
+ */
+export function wantSeeds(seeds: readonly SeedItem[], o: { room?: boolean } = {}): void {
   if (seeds.length === 0) return
   const e = getEngine()
+  if (o.room) {
+    const have = new Set(e.wanted())
+    const fresh = seeds.filter((s) => !have.has(s.id)).slice(0, Math.max(0, BLOOMS_KEPT - have.size))
+    if (fresh.length > 0) e.want(fresh)
+    return
+  }
   e.want(seeds)
   const all = e.wanted()
   if (all.length > BLOOMS_KEPT) {

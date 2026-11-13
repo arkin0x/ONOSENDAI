@@ -27,7 +27,7 @@ if (typeof localStorage === 'undefined') {
 const list = vi.hoisted(() => ({ items: [] as unknown[] }))
 vi.mock('../../hooks/useNearbyLoot', () => ({ useNearbyLoot: () => list.items }))
 vi.mock('../ShardThumb', () => ({ ShardThumb: () => null }))
-const blooms = vi.hoisted(() => ({ wanted: [] as string[][] }))
+const blooms = vi.hoisted(() => ({ wanted: [] as string[][], room: [] as boolean[] }))
 vi.mock('../../store/useBlooms', () => {
   // The store's shape, read where it is drawn: a test sets the views before it renders.
   let state = { views: {} as Record<string, unknown> }
@@ -37,7 +37,7 @@ vi.mock('../../store/useBlooms', () => {
   })
   return {
     useBlooms,
-    wantSeeds: (seeds: Array<{ id: string }>) => { if (seeds.length > 0) blooms.wanted.push(seeds.map((s) => s.id)) },
+    wantSeeds: (seeds: Array<{ id: string }>, o: { room?: boolean } = {}) => { if (seeds.length > 0) { blooms.wanted.push(seeds.map((s) => s.id)); blooms.room.push(o.room === true) } },
     growAnyway: () => undefined,
   }
 })
@@ -50,6 +50,7 @@ import { useCyberspace } from '../../store/useCyberspace'
 import { useShards } from '../../store/useShards'
 import { seedItemOf } from '../../lib/seeds/seedItem'
 import { bloomGrowthWords } from '../../lib/seeds/bloomWords'
+import { safeNpub } from '../../lib/npub'
 import type { BloomView } from '../../lib/seeds/bloomEngine'
 import type { NearbyItem } from '../../hooks/useNearbyLoot'
 import { crystalDna, mineSeedEvent, planter } from '../../lib/__tests__/seedsFixture'
@@ -80,6 +81,7 @@ const row = (item: NearbyItem, me = ME): string => renderToStaticMarkup(<ul><See
 beforeEach(() => {
   list.items = []
   blooms.wanted = []
+  blooms.room = []
   useBlooms.setState({ views: {} })
   useShards.setState({ mine: [], discovered: {}, nearbyOpen: true, selectedSecret: null })
 })
@@ -112,12 +114,24 @@ describe('a seed row', () => {
     expect(bloomGrowthWords(useBlooms.getState().views[big.id])).toBe('fully grown')
   })
 
+  it('says it did not grow, not its day, when growing failed (its planted height and clock kept)', () => {
+    useBlooms.setState({ views: { [big.id]: { ...grownView(big.id, 975300, 12), status: 'error', error: 'Worker gone.' } } })
+    const html = row(bigItem)
+    expect(html).toContain('It did not grow. Worker gone')
+    expect(html).not.toContain('day 12')
+  })
+
   it('names the planter, the seed\'s signer, not the bag\'s hider', () => {
     const html = row(bigItem, ME)
     expect(html).not.toMatch(/<span>you<\/span>/)
-    expect(planter).not.toBe(HIDER)
-    // Its picture and name are the planter's (ProfilePic draws by pubkey).
-    expect(html).not.toContain(HIDER.slice(0, 12))
+    // With no profile, a name is its npub's start (profileLabel): the planter's, never the hider's.
+    expect(html).toContain(safeNpub(planter).slice(0, 12))
+    expect(html).not.toContain(safeNpub(HIDER).slice(0, 12))
+  })
+
+  it('is one tap for the card: its words are the button', () => {
+    const html = row(bigItem)
+    expect(html).toMatch(/<button class="nearby__body nearby__name"[^>]*>.*nearby__label.*nearby__where.*nearby__meta.*<\/button><span class="nearby__acts">/)
   })
 })
 
@@ -150,6 +164,8 @@ describe('SEEDS in the list', () => {
       expect(blooms.wanted).toEqual([])
       await r.press(/^SEEDS/)
       expect(blooms.wanted).toEqual([[big.id]])
+      // Only into room: the list never pushes out a bloom the world is drawing.
+      expect(blooms.room).toEqual([true])
       expect(r.says('day 12 of 41')).toBe(true)
       await r.press(/^VIEW/)
       expect(viewAt).toHaveBeenCalledWith(bigItem.at, 0, 'FIDDLEHEAD', 4, { item: true })

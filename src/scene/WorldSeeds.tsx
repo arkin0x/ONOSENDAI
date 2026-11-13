@@ -23,11 +23,10 @@ import { useCeremony } from '../store/useCeremony'
 import { useShards, type WorldItem } from '../store/useShards'
 import { useMutes } from '../store/useMutes'
 import { useBlooms, wantSeeds } from '../store/useBlooms'
-import { seedItemOf, seedsInPlane, type SeedItem } from '../lib/seeds/seedItem'
+import { seedOfEvent, seedsInPlane, type SeedItem } from '../lib/seeds/seedItem'
 import { bloomShard } from '../lib/seeds/bloomShard'
 import { standBloom } from '../lib/seeds/orientation'
 import type { ShardModel } from 'sno-core/shards'
-import type { NostrEvent } from '../lib/events'
 import { PlacedShard, placeShard, useSteadied, type PlacedShardDraw } from './WorldShards'
 import type { Box } from '../lib/clip'
 
@@ -50,14 +49,6 @@ function seedMark(unit: number): ShardModel {
   const faces = new Uint32Array([0, 2, 4, 2, 1, 4, 1, 3, 4, 3, 0, 4, 2, 0, 5, 1, 2, 5, 3, 1, 5, 0, 3, 5])
   return bloomShard({ positions, colors, faces }, 'seed', unit, `seed-mark:${unit}`)
 }
-/** Seeds read once per event: the view moves every frame, and the tags do not. */
-const read = new WeakMap<object, SeedItem | null>()
-function seedOfEvent(ev: NostrEvent): SeedItem | null {
-  let s = read.get(ev)
-  if (s === undefined) read.set(ev, (s = seedItemOf(ev)))
-  return s
-}
-
 const marks = new Map<number, ShardModel>()
 function markFor(unit: number): ShardModel {
   let m = marks.get(unit)

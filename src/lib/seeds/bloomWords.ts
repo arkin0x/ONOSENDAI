@@ -38,12 +38,13 @@ export function bloomDays(v: BloomView | undefined): number | null {
  * A seed's growth in a row (DISCOVERED NEARBY's SEEDS): "day 12 of 41" on the
  * same clock the card's AGE reads (NTH's newest anchor), "fully grown" from
  * the DNA's last day on (plant.ts previewLastDay, the day SEED's slider ends
- * on), else the card's line for where it stands, without its full stop. A
- * seed too heavy to grow here says so: it is drawn as its axiom, not its age.
+ * on), while it is grown or growing; in any other state the card's line for
+ * it, without its full stop: a seed too heavy to grow here, or one that did
+ * not grow, keeps its planted height and clock, and is not at its age.
  */
 export function bloomGrowthWords(v: BloomView | undefined): string {
   const days = bloomDays(v)
-  if (v && v.status !== 'heavy' && days !== null && v.dna) {
+  if (v && (v.status === 'grown' || v.status === 'growing') && days !== null && v.dna) {
     const last = previewLastDay(v.dna)
     return days >= last ? 'fully grown' : `day ${days} of ${last}`
   }

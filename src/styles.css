@@ -8118,9 +8118,9 @@ select.avatars__input option:checked {
 .chest__act.chest__act--danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, transparent); background: transparent; }
 .chest__act.chest__act--danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
 
-/* A seed row's DNA name: a tap opens the seed's card; it reads as the other rows' names. */
-.nearby__name { padding: 0; font-family: inherit; text-align: left; letter-spacing: inherit; background: none; border: 0; cursor: pointer; }
-.nearby__name:hover, .nearby__name:focus-visible { color: var(--accent); }
+/* A seed row's words: one tap opens the seed's card; they read as the other rows' words. */
+.nearby__name { align-items: flex-start; padding: 0; font: inherit; color: inherit; text-align: left; letter-spacing: inherit; background: none; border: 0; cursor: pointer; }
+.nearby__name:hover .nearby__label, .nearby__name:focus-visible .nearby__label { color: var(--accent); }
 /* The Nearby Loot row's second line: the plane and the height. */
 .nearby__where { font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
 .nearby__label { white-space: normal; overflow-wrap: anywhere; }

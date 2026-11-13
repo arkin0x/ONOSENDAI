@@ -13,8 +13,8 @@
  *     which it does by itself as the player enters the blue box);
  *   - 'open-chest': the player opened it, by hand (useOpenedChests);
  *   - 'take': the tutorial tree's DNA from it is in their ITEMS;
- *   - 'at-start': the player stands on the course's start square
- *     (useArrival: where they stand, as their chain's head says);
+ *   - 'at-target': the player stands on the hop target over the course's
+ *     start square (where they stand, as their chain's head says);
  *   - 'gravity': WALK with GRAVITY on;
  *   - 'see-finish' and 'take-finish': the finish chest found (the scan does
  *     it as they land on the deck), and something from it taken;
@@ -27,7 +27,7 @@
 import { create } from 'zustand'
 import type { Plane } from 'cyberspace-core'
 import { onTutorialLifecycle, registerTutorialEffect, registerTutorialWatcher, useTutorial } from '../store/useTutorial'
-import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
+import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from '../store/useCyberspace'
 import { spawnPlace } from '../store/useDemo'
 import { copyLinedUp, positionOf, useShards } from '../store/useShards'
 import { useOpenedChests, openedKey } from '../store/useOpenedChests'
@@ -45,11 +45,11 @@ import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { viewHyperspace } from '../store/useHyperspace'
 import { EARTH_SCALE_EXP, earthFrameDistance } from '../lib/hyperspace/interest'
 import { FOV } from '../scene/camera'
-import { PLOT_STAND, START_STAND, atStart, courseToWorld, inPlot, onDeck, onPlot, plantCell } from './course'
+import { PLOT_STAND, atStart, inPlot, onDeck, onPlot, onTarget, plantCell, targetAt } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { deployPoint, type Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
-import { OWNER_PUBKEY } from './script'
+import { COMMIT, OWNER_PUBKEY } from './script'
 import { arrivalCell, chestCell, inRegion, toWorld, type TutorialLayout } from './layout'
 import type { Stage } from './stage'
 import { HOP_FRAME_MS, setTutorialFrame, setTutorialSpin, setTutorialZoom, useTutorialCam, type HopFrame } from '../store/useTutorialCam'
@@ -351,7 +351,7 @@ function watchArrival(inside: (at: Position, layout: TutorialLayout) => boolean,
   }, onDone, [onStage, (l) => useCyberspace.subscribe((s, prev) => { if (s.position !== prev.position || s.headPlane !== prev.headPlane) l() })])
 }
 
-registerTutorialWatcher('at-start', (onDone) => watchArrival((at, layout) => atStart(layout.frame, at), onDone))
+registerTutorialWatcher('at-target', (onDone) => watchArrival((at, layout) => onTarget(layout.frame, at), onDone))
 
 registerTutorialWatcher('gravity', (onDone) => watchUntil(
   () => useCyberspace.getState().walking && useWalk.getState().gravity,
@@ -387,29 +387,106 @@ registerTutorialWatcher('take-finish', (onDone) => watchUntil(() => {
   return ids.some((id) => { const it = items[id]; return !!it && !it.cleared })
 }, onDone, [onStage, (l) => useInventory.subscribe((s, prev) => { if (s.items !== prev.items) l() })]))
 
+/** The pad's finer-scale key (hud/TouchControls.tsx zoomin): back down to 2^0. */
+export const FINER_KEY = '.touchpad__key--zoomin'
+
 /**
- * The course step lines the cursor up on the start square, so one COMMIT HOPs
- * you there, and eases the orbit camera in close once you land, so the
- * platform is not looked at from far away (feedback item 6).
+ * Whether the cursor is on the hop target (course.ts TARGET), lined up for a
+ * HOP there from the player's own head: in the layout's plane, at 2^0, not in
+ * WALK. One COMMIT from here lands on it.
+ */
+export function cursorOnTarget(): boolean {
+  const layout = useTutorialStage.getState().layout
+  const cs = useCyberspace.getState()
+  return !!layout && cs.atHead() && !cs.walking && cs.scaleExp === 0 && cs.plane === layout.plane && onTarget(layout.frame, cs.cursor)
+}
+
+/** Gibsons the course step's shot reaches past each end of the hop, so the target's rings clear the screen's edge. */
+const COURSE_FRAME_PAD = 3
+
+/**
+ * The course step's shot: the hop from `from` to the target `to`, reached
+ * COURSE_FRAME_PAD gibsons past each end along its line, so the camera
+ * (which fits the hop's ends on screen, lib/hopFraming.ts) stands back far
+ * enough that the player and the whole target show, clear of the edges.
+ */
+export function courseFrame(from: Position, to: Position): HopFrame {
+  const d = [Number(to.x - from.x), Number(to.y - from.y), Number(to.z - from.z)]
+  const len = Math.hypot(...d)
+  const pad = d.map((v) => BigInt(Math.round(len > 0 ? (v / len) * COURSE_FRAME_PAD : 0)))
+  return {
+    from: { x: from.x - pad[0], y: from.y - pad[1], z: from.z - pad[2] },
+    to: { x: to.x + pad[0], y: to.y + pad[1], z: to.z + pad[2] },
+  }
+}
+
+/**
+ * The course step (owner, 2026-11-13): the player moves the cursor onto the
+ * target over the start square with the Controls pad themselves; nothing
+ * aims it. The step comes up at 2^0 (each arrow press one gibson), with the
+ * cursor home (its scene's target 'self'). The pad's arrows glow while the
+ * cursor is off the target, COMMIT while it is on it (useTutorial
+ * stepHighlight), and the finer-scale key while the pad is at a coarser
+ * scale than 2^0, the way back to one gibson a press. The step waits for the
+ * HOP to land there ('at-target').
+ * As it comes up, the camera frames the player and the target together, from
+ * the side, as the first hop is framed (useTutorialCam frame): whichever way
+ * the layout faces, the target is on screen, and the hop is framed as it
+ * goes. Only from the player's own head inside the cover; a grab of the
+ * camera ends the shot and it is not asked again. Once they land, the frame
+ * lets go and the orbit camera eases in close, so the platform is not looked
+ * at from far away (feedback item 6).
  */
 registerTutorialEffect('to-course', () => {
-  const offAim = aimOnce((layout) => courseToWorld(layout.frame, START_STAND))()
+  const index = useTutorial.getState().index
+  const cs = useCyberspace.getState()
+  if (cs.atHead() && !cs.walking && cs.proof.status !== 'computing' && cs.scaleExp !== 0) cs.adjustScale(-cs.scaleExp)
+  const point = (): void => {
+    const now = useCyberspace.getState()
+    const coarse = now.atHead() && !now.walking && now.scaleExp !== 0
+    useTutorial.getState().highlightStep(index, coarse ? FINER_KEY : cursorOnTarget() ? COMMIT : null)
+  }
   let zoomed = false
+  let framed: HopFrame | null = null
+  // Where the shot was framed from, and whether it is over for this step (the player took the camera, or left 2^0).
+  let framedFrom: Position | null = null
+  let shotOver = false
+  const letGo = (): void => { if (framed && useTutorialCam.getState().frame === framed) setTutorialFrame(null) }
   const check = (): void => {
+    point()
     if (zoomed) return
     const { layout } = useTutorialStage.getState()
-    const cs = useCyberspace.getState()
-    if (layout && cs.events.length > 0 && cs.headPlane === layout.plane && atStart(layout.frame, cs.position)) {
+    const now = useCyberspace.getState()
+    if (!layout) return
+    if (now.events.length > 0 && now.headPlane === layout.plane && atStart(layout.frame, now.position)) {
       zoomed = true
+      letGo()
       setTutorialZoom(COURSE_ZOOM)
-      offPos()
+      return
+    }
+    if (shotOver) return
+    // The rig stood the shot down (a grab of the camera, WALK): theirs now, not asked again this step.
+    if (framed && useTutorialCam.getState().frame !== framed) { shotOver = true; return }
+    // Off 2^0 each press moves further than the shot holds, and the rig follows the cursor again only once the shot lets go.
+    if (framed && now.scaleExp !== 0) { letGo(); shotOver = true; return }
+    // Framed first as the player stands at their head in the cover, and again from wherever a hop that missed the target landed.
+    const moved = framedFrom !== null && !samePosition(framedFrom, now.position)
+    if ((!framed || moved) && now.atHead() && !now.walking && now.headPlane === layout.plane && inRegion(now.position, layout.cover.base, layout.cover.height)) {
+      framedFrom = { ...now.position }
+      framed = courseFrame(now.position, targetAt(layout.frame))
+      setTutorialFrame(framed)
     }
   }
-  const offPos = useCyberspace.subscribe((s, prev) => { if (s.position !== prev.position || s.headPlane !== prev.headPlane) check() })
+  const offs = [
+    onStage(check),
+    useCyberspace.subscribe((s, prev) => {
+      if (s.cursor !== prev.cursor || s.position !== prev.position || s.headPlane !== prev.headPlane || s.plane !== prev.plane || s.scaleExp !== prev.scaleExp || s.walking !== prev.walking || s.exploreIndex !== prev.exploreIndex || s.spectate !== prev.spectate || s.focus !== prev.focus || s.transit !== prev.transit) check()
+    }),
+  ]
   check()
   // The zoom outlives the step, which moves on before the ease ends; WALK or
   // a grab of the camera ends it (scene/Scene.tsx), as does the run's end.
-  return () => { if (offAim) offAim(); offPos() }
+  return () => { for (const off of offs.splice(0)) off(); letGo() }
 })
 
 /** The inventory step opens the menu and lifts ITEMS to the top of it (feedback item 2). */

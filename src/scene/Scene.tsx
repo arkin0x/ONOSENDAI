@@ -84,6 +84,7 @@ import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
 import { SecretRegions } from './SecretRegions'
 import { SpawnMarker } from './SpawnMarker'
+import { TutorialTarget } from './TutorialTarget'
 import { TargetAvatars } from './TargetAvatars'
 import { PresenceAvatars } from './PresenceAvatars'
 import { WorldShards } from './WorldShards'
@@ -248,6 +249,8 @@ function World(): JSX.Element {
       <PrefixRegionBox axes={axes} />
       <RegionSelectBox axes={axes} />
       <SpawnMarker pubkey={pubkey} axes={axes} />
+      {/* The tutorial's hop target over the course's start, while the tutorial runs (owner, 2026-11-13). */}
+      <TutorialTarget axes={axes} />
       <TargetAvatars axes={axes} />
       <PresenceAvatars axes={axes} />
       <WorldShards axes={axes} />

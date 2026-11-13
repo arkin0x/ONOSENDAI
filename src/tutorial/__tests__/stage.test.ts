@@ -28,7 +28,7 @@ import { BOX_HEIGHT, COVER_MAX, FOOTPRINT, arrivalCell, chestCell, inRegion, reg
 import { TUTORIAL_DNA_EVENT } from '../dna'
 import { STAGE_TEXT, WELCOME_ITEM, boxModel, buildStage, readStage, stageKey, writeStage, type KeyAt } from '../stage'
 import { guideBagsFor, isGuideAuthor, isGuideBag, onGuideBags, passesTaps, setGuideBags } from '../guideBags'
-import { COURSE, FINISH_CHEST, PLOT_AT, PLOT_STAND, START_STAND, atStart, courseToWorld, inPlot, onPlot, plantCell } from '../course'
+import { COURSE, FINISH_CHEST, PLOT_AT, PLOT_STAND, START_STAND, TARGET, atStart, courseToFrame, courseToWorld, inPlot, onPlot, onTarget, plantCell, targetAt } from '../course'
 import type { Position } from '../../lib/space'
 
 const MAX_COMPUTE = 20
@@ -64,6 +64,11 @@ describe('the layout', () => {
     }
     // Near the far face of a big cube the footprint turns round.
     expect(flipped).toBeGreaterThan(0)
+    // The hop target is inside the footprint, so inside every cover (owner, 2026-11-13).
+    const t = courseToFrame(TARGET)
+    expect(t.f).toBeGreaterThanOrEqual(FOOTPRINT.f[0]); expect(t.f).toBeLessThan(FOOTPRINT.f[1])
+    expect(t.r).toBeGreaterThanOrEqual(FOOTPRINT.r[0]); expect(t.r).toBeLessThan(FOOTPRINT.r[1])
+    expect(t.u).toBeGreaterThanOrEqual(FOOTPRINT.u[0]); expect(t.u).toBeLessThan(FOOTPRINT.u[1])
   })
 
   it('is the same for the same spawn', () => {
@@ -86,6 +91,21 @@ describe('the course', () => {
       for (let x = -3; x <= 3; x++) for (let z = 28; z <= 34; z++) for (const y of [10, 11, 14]) {
         expect(inRegion(courseToWorld(frame, [x, y, z]), region, BOX_HEIGHT), `${fwd},${side} ${x},${y},${z}`).toBe(true)
       }
+    }
+  })
+
+  it('floats the hop target 2 gibsons over the middle of the start square, in the cover, at the start (owner, 2026-11-13)', () => {
+    for (const spawn of [MID, { x: (1n << 50n) + 4095n, y: (1n << 50n) + 4095n, z: (1n << 50n) + 4000n }]) {
+      const l = tutorialLayout(spawn, 0)
+      const t = targetAt(l.frame)
+      const stand = courseToWorld(l.frame, START_STAND)
+      expect(t).toEqual({ ...stand, y: stand.y + 2n })
+      expect(inRegion(t, l.cover.base, l.cover.height)).toBe(true)
+      expect(atStart(l.frame, t)).toBe(true)
+      expect(onTarget(l.frame, t)).toBe(true)
+      expect(onTarget(l.frame, stand)).toBe(false)
+      // Pure: the same spawn, the same target.
+      expect(targetAt(tutorialLayout(spawn, 0).frame)).toEqual(t)
     }
   })
 
@@ -120,6 +140,7 @@ describe('the stage', () => {
     expect(coverItems[0].eventId).toBe(stage.ids.blueBox)
     // The blue box and the whole course, every piece where the course puts it, all in the cover (§7.6).
     // ... and the dirt plot (A5). No DNA here: the tree's DNA is in the welcome chest (item 8).
+    // No hop target either: that is a scene mark (scene/TutorialTarget.tsx), never sealed.
     expect(coverItems).toHaveLength(1 + COURSE.length + 1)
     expect(coverItems[coverItems.length - 1].eventId).toBe(stage.ids.plot)
     const json = await decryptForRegion(regionKeyAt(l.cover.base, l.cover.height, MAX_COMPUTE).key, coverBag.tags.find((t) => t[0] === 'encrypted')![2])

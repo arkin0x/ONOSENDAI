@@ -27,10 +27,10 @@ export type TutorialWait = Exclude<DemoAction, 'spawn'> | TutorialAction
 /**
  * The tutorial's own waits, one per staged thing (tutorial/director.ts):
  * the treasure chest found, opened by hand, and something in it taken; the
- * course's start reached, gravity on in WALK, the finish chest found and
+ * hop target over the course's start reached, gravity on in WALK, the finish chest found and
  * something in it taken; the workshop opened and closed again.
  */
-export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-start' | 'gravity' | 'see-finish' | 'take-finish' | 'workshop' | 'at-plot' | 'plant' | EarthRouteAction
+export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-target' | 'gravity' | 'see-finish' | 'take-finish' | 'workshop' | 'at-plot' | 'plant' | EarthRouteAction
 
 /**
  * The Earth route's waits (tutorial/earthRoute.ts): a stop picked as the

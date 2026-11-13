@@ -36,7 +36,7 @@ import { ADVANCE_MS, CHOICE_FAILED_MESSAGE, choiceOffered, isNewArrival, onTutor
 import { useDemo } from '../useDemo'
 import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialFlag, noteLanding, readProgress, setTutorialSwitch, tutorialEnabled, tutorialSwitch, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
 import { useTv } from '../useTv'
-import { TUTORIAL_SCRIPT } from '../../tutorial/script'
+import { PAD_ARROWS, TUTORIAL_SCRIPT } from '../../tutorial/script'
 import type { TutorialScript } from '../../tutorial/types'
 
 const pubkey = (): string => useCyberspace.getState().identity.pubkey
@@ -229,14 +229,27 @@ describe('the script', () => {
   })
 
   it('glows COMMIT alone, never the mode button beside it, and opens CONTROLS for it (items 5 and 14)', () => {
-    for (const id of ['box', 'to-plot', 'to-course']) {
+    for (const id of ['box', 'to-plot']) {
       const step = TUTORIAL_SCRIPT.steps.find((s) => s.id === id)!
       expect(step.scene?.highlight, id).toBe('.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build)')
       expect(step.scene?.pad, id).toBe(true)
     }
-    // Every step that says to tap COMMIT glows it (owner, 2026-11-13: the planting step's did not).
+    // The course step opens CONTROLS and points at its arrows first: the
+    // player moves the cursor onto the target themselves, never aimed for them;
+    // COMMIT glows once the cursor is on it (tutorial/__tests__/director.test.ts; owner, 2026-11-13).
+    const course = TUTORIAL_SCRIPT.steps.find((s) => s.id === 'to-course')!
+    expect(course.scene?.pad).toBe(true)
+    expect(course.scene?.highlight).toBe(PAD_ARROWS)
+    expect(course.aim).toBeUndefined()
+    expect(course.wait).toBe('at-target')
+    for (const cell of ['away', 'up', 'toward', 'left', 'right', 'down']) expect(PAD_ARROWS.split(', ')).toContain(`.touchpad__key--${cell}`)
+    expect(course.caption).toMatch(/CONTROLS[\s\S]*target/)
+    expect(course.hint).toMatch(/arrows[\s\S]*COMMIT/)
+    // Every step that says to tap COMMIT glows it (owner, 2026-11-13: the planting step's did not),
+    // in any case; the course step glows it once the cursor is on the target (above).
     for (const s of TUTORIAL_SCRIPT.steps) {
-      if ([s.caption, s.hint].some((t) => t && /Tap COMMIT/.test(t))) expect(s.scene?.highlight, s.id).toBe('.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build)')
+      if (s.id === 'to-course') continue
+      if ([s.caption, s.hint].some((t) => t && /tap COMMIT/i.test(t))) expect(s.scene?.highlight, s.id).toBe('.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build)')
     }
   })
 

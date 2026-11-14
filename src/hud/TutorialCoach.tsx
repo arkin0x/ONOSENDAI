@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Earth, Gamepad2, Target, Wrench, X, type LucideIcon } from 'lucide-react'
+import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Coffee, Earth, Gamepad2, Target, Wrench, X, type LucideIcon } from 'lucide-react'
 import { choiceOffered, runTutorialEffect, useTutorial } from '../store/useTutorial'
 import { useWorkshop } from '../store/useWorkshop'
 import { useDemo } from '../store/useDemo'
@@ -20,6 +20,7 @@ import { useEscape } from '../hooks/useEscape'
 import { CaptionText, useCoachOffsets } from './DemoCoach'
 import { useTutorialStage } from '../tutorial/director'
 import { ProfilePic } from './ProfileBadge'
+import { StraylightIdentity } from './StraylightIdentity'
 
 /** How far along a step is, 0 to 1, along the steps that are not branches; a branch is the end. */
 export function progressOf(steps: ReadonlyArray<{ branch?: boolean }>, index: number): number {
@@ -33,10 +34,12 @@ export function progressOf(steps: ReadonlyArray<{ branch?: boolean }>, index: nu
  * Each "Where next?" route's picture, in a column to the left of its words
  * (arkinox, 2026-11-13): the icon the rest of the app already draws for that
  * thing. EARTH in the view menu, a game's chip, an AGENT badge, the TARGET
- * buttons (the friend route adds a TARGET), and BUILD's wrench. Decorative:
+ * buttons (the friend route adds a TARGET), and BUILD's wrench; the
+ * community, a steaming cup for Straylight Cafe (owner, 2026-11-14). Decorative:
  * the button's words stay its name. A route with none keeps the empty column.
  */
 export const CHOICE_ICONS: Readonly<Record<string, LucideIcon>> = {
+  straylight: Coffee,
   hyperspace: Earth,
   dungeon: Gamepad2,
   agents: Bot,
@@ -187,6 +190,7 @@ export function TutorialCoach(): JSX.Element | null {
             </div>
           )
           : <p className="demo__caption"><CaptionText caption={caption} /></p>}
+        {step.panel === 'straylight-identity' && <StraylightIdentity />}
         {step.image && <img className="tutorial__image" src={step.image.src} alt={step.image.alt} width={160} height={160} onError={(e) => { e.currentTarget.style.display = 'none' }} />}
         {step.explain && explaining && <p className="demo__caption tutorial__explain">{step.explain}</p>}
       </div>

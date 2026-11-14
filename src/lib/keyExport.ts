@@ -20,6 +20,7 @@
  */
 
 import * as nip49 from 'nostr-tools/nip49'
+import { nip19 } from 'nostr-tools'
 
 /** The shortest password this will encrypt with. */
 export const MIN_PASSWORD = 8
@@ -74,4 +75,21 @@ export function exportNcryptsec(secretKey: Uint8Array | null | undefined, passwo
 export function backupFileName(npub: string): string {
   const tail = npub.replace(/[^a-z0-9]/gi, '').slice(-8).toLowerCase()
   return `nostr-key-${tail || 'backup'}.ncryptsec.txt`
+}
+
+/**
+ * The key itself, as a bare `nsec1…`, for the one place that shows it: the
+ * Straylight route's SHOW MY KEY (hud/StraylightIdentity.tsx), which a player
+ * on a local key taps to sign in to Armada as themselves, because Armada takes
+ * an nsec and not an ncryptsec (owner ruling, 2026-11-14).
+ *
+ * Everything else here exists to keep the key from leaving bare, so this is
+ * the exception and is kept narrow: this string is computed only when asked,
+ * kept by its caller only while shown (the signer's own copy is where it
+ * always was), never put in a URL, never sent and never logged, and it throws
+ * rather than returning something that is not a key.
+ */
+export function exportNsec(secretKey: Uint8Array | null | undefined): string {
+  if (!secretKey || secretKey.length !== 32) throw new Error(explainProblem('no-key'))
+  return nip19.nsecEncode(secretKey)
 }

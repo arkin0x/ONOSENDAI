@@ -32,7 +32,7 @@ import { Quaternion } from 'three'
 import { generateSecretKey, getEventHash, verifiedSymbol, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
 import { withNoBroadcast } from '../lib/noBroadcast'
 import { nip19 } from 'nostr-tools'
-import { exportNcryptsec } from '../lib/keyExport'
+import { exportNcryptsec, exportNsec } from '../lib/keyExport'
 import {
   deferredReconnect,
   loginCredentialKind,
@@ -1164,6 +1164,13 @@ export interface CyberspaceState {
    * markup, so no caller can offer an unprotected export by forgetting a check.
    */
   exportKey: (password: string, again: string) => string
+  /**
+   * This device's own key as a bare `nsec1…`, or a thrown error when the
+   * signer is not local. Only for the Straylight route's explicit SHOW MY KEY
+   * (hud/StraylightIdentity.tsx); nothing calls it untapped, and the result is
+   * never stored, sent or logged (lib/keyExport exportNsec).
+   */
+  revealKey: () => string
   /**
    * Open a NIP-44 payload sealed to this identity by `senderPubkey`: a chest
    * sealed to a person (lib/chests.ts), a private message (lib/dm.ts).
@@ -6588,6 +6595,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     await switchTo(signer)
   },
   exportKey: (password, again) => exportNcryptsec(currentSigner.secretKey, password, again),
+  revealKey: () => exportNsec(currentSigner.kind === 'local' ? currentSigner.secretKey : null),
   decryptSealed: async (senderPubkey, payload) => {
     const signer = currentSigner
     const open = signer.nip44Decrypt

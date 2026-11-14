@@ -11408,3 +11408,16 @@ html.tv-broadcast body { overflow: hidden; }
 /* GAMES (hud/GamesPanel.tsx): a game's name, its ENTER; under it, when the game says where it is entered from, those words. */
 .games__row { grid-template-columns: 1fr auto; }
 .games__where { grid-column: 1 / -1; font-size: 8px; letter-spacing: 0.08em; color: var(--dim); }
+
+/* The Straylight route's identity panel (hud/StraylightIdentity.tsx): the warning in the warn colour, the key in the backup's box. */
+.straylight-id { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.straylight-id .demo__caption { margin: 0; }
+.straylight-id__warn { color: var(--warn); }
+.straylight-id__row { display: flex; gap: 6px; flex-wrap: wrap; }
+.straylight-id__row .demo__btn { flex: 1 1 auto; justify-content: center; }
+.straylight-id__tip { color: var(--dim); font-size: 12px; }
+/* 16px on a phone, so iOS does not zoom the page when the key box takes the focus. */
+@media (max-width: 600px) { .straylight-id__key { font-size: 16px; } }
+/* The identity step has the key's warning, the key and its buttons, and nothing in the scene to look at:
+   its coach may take a little over half the screen, so SHOW MY KEY and COPY KEY are not below the fold on a phone. */
+.demo.tutorial:has(.straylight-id) { max-height: 56vh; max-height: 56dvh; }

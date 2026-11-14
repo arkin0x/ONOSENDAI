@@ -4313,8 +4313,12 @@ select.avatars__input option:checked {
     border-radius: 14px;
   }
   .ws__sheet-grab { display: none; }
+  /* The palette in the column: eight to a row, as upright, not the wide window's sixteen. */
+  .palettes.ws__sheet .palettes__grid { grid-template-columns: repeat(8, 1fr); }
 }
 @media (min-width: 900px) and (min-height: 521px) and (hover: hover) {
+  /* A two-step key's dot gives the top right to the printed key. */
+  .ws__heldbtn--two::after { right: auto; left: 8px; }
   .ws__key { display: block; position: absolute; top: 3px; right: 6px; padding: 0; font-family: inherit; font-size: 9.5px; line-height: 1; letter-spacing: 0.04em; color: var(--dim); background: none; border: 0; box-shadow: none; pointer-events: none; }
   .ws__dockbtn.is-on .ws__key { color: var(--ws-ink); }
 }
@@ -4331,7 +4335,7 @@ select.avatars__input option:checked {
     --ws-bar: 44px;
     --ws-strip: 0px;
     --ws-dock: calc(56px + var(--ws-safe-b));
-    --ws-col: min(360px, 44vw);
+    --ws-col: min(360px, max(300px, 44vw));
   }
   .ws__topbar { left: max(var(--ws-gutter), var(--ws-safe-l)); right: auto; }
   .ws__topbtn { flex: none; width: 60px; }
@@ -4341,11 +4345,18 @@ select.avatars__input option:checked {
   .ws__view { right: max(var(--ws-gutter), var(--ws-safe-r)); }
   .workshop:has(.ws__sheet) .ws__view { right: calc(var(--ws-col) + 2 * var(--ws-gutter) + var(--ws-safe-r)); }
   .ws__bottom { flex-direction: row; padding: 0 var(--ws-safe-r) 0 var(--ws-safe-l); background: rgba(4, 9, 15, 0.97); border-top: 1px solid var(--border); }
-  /* Half each, whatever either holds. The dock paints over a question's
-     full-screen catcher, as it does upright: a flex item's order sets its
-     painting order too, and the strip comes after it here. */
-  .ws__dock { order: 0; flex: 0 0 50%; min-width: 0; border-top: 0; z-index: 2; }
-  .ws__strip { order: 1; flex: 0 0 50%; min-width: 0; height: var(--ws-dock); padding-bottom: var(--ws-safe-b); border-top: 0; border-left: 1px solid var(--border); }
+  /* The dock as wide as its tools need, from 44px a slot; the strip the
+     rest, at least the held bar's eight slots. The dock paints over a
+     question's full-screen catcher, as it does upright: a flex item's order
+     sets its painting order too, and the strip comes after it here. */
+  .ws__dock { order: 0; flex: 0 1 auto; min-width: 0; padding-left: 4px; padding-right: 4px; border-top: 0; z-index: 2; }
+  .ws__dock .ws__dockbtn { flex: 0 1 56px; min-width: 44px; }
+  .ws__dock .ws__dockbtn.ws__dockbtn--more { flex: 0 1 88px; }
+  .ws__dock .ws__colorchip { flex: 0 0 44px; }
+  .ws__strip { order: 1; flex: 1 0 360px; min-width: 360px; height: var(--ws-dock); padding-bottom: var(--ws-safe-b); border-top: 0; border-left: 1px solid var(--border); }
+  .ws__strip.ws__strip--held { padding: 0 4px; }
+  /* The guide's card keeps clear of the rail. */
+  .ws__guide { left: calc(max(var(--ws-gutter), var(--ws-safe-l)) + 104px); }
   .ws__sheet,
   .ws__sheet.ws__sheet--tall,
   .ws__sheet[aria-label='Menu'] {
@@ -4361,6 +4372,7 @@ select.avatars__input option:checked {
     border-radius: 14px;
   }
   .ws__sheet-grab { display: none; }
+  .palettes.ws__sheet .palettes__grid { grid-template-columns: repeat(8, 1fr); }
 }
 
 /* The orbit ball (arkinox, 2026-10-10): the pad's size, right of it. A drag

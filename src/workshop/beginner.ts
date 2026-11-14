@@ -76,7 +76,7 @@ export const useBeginner = create<Beginner>((set, get) => ({
   setStep: (step) => set({ step }),
   done: read(GUIDE_KEY) !== null,
   paused: false,
-  pause: () => set({ step: null, paused: true, glow: null }),
+  pause: () => set({ paused: true, glow: null }),
   resume: () => set({ paused: false }),
   finish: () => { write(GUIDE_KEY, '1'); set({ step: null, done: true }) },
   glow: null,

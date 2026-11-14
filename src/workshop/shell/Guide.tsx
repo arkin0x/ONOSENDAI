@@ -52,7 +52,9 @@ export function Guide(): JSX.Element | null {
   const tool = useWorkshop((s) => s.tool)
   const tutorial = useTutorial((s) => s.active)
   const b = useBeginner.getState
-  const running = step !== null && !tutorial
+  // Put away with Esc for this opening (phase 5): hidden, its step kept for the next.
+  const paused = useBeginner((s) => s.paused)
+  const running = step !== null && !tutorial && !paused
   const glowTimer = useRef<number | null>(null)
   useEffect(() => () => { if (glowTimer.current !== null) window.clearTimeout(glowTimer.current) }, [])
 

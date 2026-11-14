@@ -88,8 +88,10 @@ function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind 
       // A sheet is a sheet over the bottom, or (landscape phone, desktop:
       // phase 5) a column at the right, which covers the side and not the
       // bottom: told apart by its shape and where it stands.
-      const sheetBox = el.querySelector('.ws__sheet')?.getBoundingClientRect()
-      const side = !!sheetBox && sheetBox.width < box.width * 0.7 && sheetBox.left > box.left + box.width * 0.3
+      const sheetEl = el.querySelector('.ws__sheet')
+      const sheetBox = sheetEl?.getBoundingClientRect()
+      // The column is the sheet the CSS fixes to the side (styles.css, phase 5).
+      const side = !!sheetEl && getComputedStyle(sheetEl).position === 'fixed'
       const guide = el.querySelector('.ws__guide')?.getBoundingClientRect().top
       const edge = (!side && sheetBox ? sheetBox.top : guide) ?? strip
       const right = side && sheetBox ? Math.max(0, Math.round(box.right - sheetBox.left)) : 0
@@ -184,7 +186,7 @@ export function Workshop(): JSX.Element | null {
   const closeSheet = useCallback(() => setSheet(null), [])
   const root = useRef<HTMLDivElement>(null)
   // The guide's card stands over the strip too, and the shard is framed above it.
-  const guiding = useBeginner((s) => s.step !== null) && !tutorialActive
+  const guiding = useBeginner((s) => s.step !== null && !s.paused) && !tutorialActive
   useBenchInsets(root, sheet, open, guiding)
   // Every hook above this line, none below it: the early return that follows
   // changes which hooks run, and React counts them. One sat after the
@@ -202,7 +204,7 @@ export function Workshop(): JSX.Element | null {
     else if (viewOpen) setViewOpen(false)
     // The first-visit guide, up: Esc puts it away for this opening only (it
     // comes back next time, unless SKIP was tapped), and the workshop stays.
-    else if (useBeginner.getState().step !== null && !tutorialActive) useBeginner.getState().pause()
+    else if (useBeginner.getState().step !== null && !useBeginner.getState().paused && !tutorialActive) useBeginner.getState().pause()
     else if (ws.selection.length || ws.partSel.length || ws.selectedFaces.length > 0 || ws.facePick.length) { ws.selectVertex(null); ws.clearFacePick() }
     else ws.closeWorkshop()
   })

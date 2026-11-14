@@ -183,10 +183,14 @@ export function frameZoom(height: number, fullHeight: number, insets: BenchInset
   const rest = Math.min(insets.rest ?? insets.bottom, insets.bottom)
   const restBand = height - insets.top - rest
   const band = height - insets.top - insets.bottom
-  const fitY = restBand > 0 && band > 0 ? band / restBand : 1
-  const right = insets.right ?? 0
-  const fitX = width > 0 && right > 0 && right < width ? (width - right) / width : 1
-  return (height / fullHeight) * Math.min(1, fitY, fitX)
+  const right = Math.max(0, insets.right ?? 0)
+  // A shard is fitted to the smaller side of what it has (benchReach
+  // fitDistance), so the shrink is the smaller side left over that before.
+  const w = width > 0 ? width : Infinity
+  const was = Math.min(w, restBand)
+  const now = Math.min(w - right, band)
+  const fit = was > 0 && now > 0 ? Math.min(1, now / was) : 1
+  return (height / fullHeight) * fit
 }
 
 /** The old orbit ball's diameter in CSS pixels, kept as the drag's scale: the view ball turns the view as the ball did. */

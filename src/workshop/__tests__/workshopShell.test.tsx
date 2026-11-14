@@ -950,9 +950,13 @@ describe('phone sideways and desktop (phase 5)', () => {
     expect(o.fullWidth).toBe(1440 + 404)
     // The middle of the uncovered width, (1440 - 404) / 2, is where the virtual middle lands.
     expect(o.fullWidth / 2 - o.x).toBe((1440 - 404) / 2)
-    // Pixels stay square: the scale is the height's; the column shrinks it by its share of the width.
+    // Pixels stay square: the scale is the height's. A wide window fits a shard by its height, so a column beside it shrinks nothing.
     const z = frameZoom(900, o.fullHeight, { top: 60, bottom: 130, rest: 130, right: 404 }, 1440)
-    expect((900 / o.fullHeight) / z).toBeCloseTo(1440 / (1440 - 404), 10)
+    expect((900 / o.fullHeight) / z).toBeCloseTo(1, 10)
+    // Where the width was the smaller side, the column shrinks the shard by what it takes of it.
+    const n = frameOffset(600, 900, { top: 60, bottom: 130, rest: 130, right: 300 })!
+    const zn = frameZoom(900, n.fullHeight, { top: 60, bottom: 130, rest: 130, right: 300 }, 600)
+    expect((900 / n.fullHeight) / zn).toBeCloseTo(2, 10)
   })
 
   it('docks the open area as a column on the right on a desktop, DEPLOY above it, the bottom group beside it', () => {
@@ -985,6 +989,24 @@ describe('phone sideways and desktop (phase 5)', () => {
     useWorkshop.getState().setSelection([0])
     await new Promise((r) => setTimeout(r, 5))
     expect(keys('ws__heldbtn').filter(Boolean)).toEqual(['Q', 'E', '^C', '^V', 'B', 'DEL'])
+    await m.unmount()
+  })
+
+  it('keeps the guide\'s step when Esc puts it away, and makes no new shard on the way back', async () => {
+    localStorage.removeItem('onosendai:workshop-intro')
+    useBeginner.setState({ tools: 'four', step: 'turn', done: false, paused: false })
+    const m = await mount(<Workshop />)
+    const before = useWorkshop.getState().shards.length
+    escapeTop()
+    await new Promise((r) => setTimeout(r, 5))
+    expect(byClass(m.all(), 'ws__guide').length).toBe(0)
+    useWorkshop.setState({ open: false })
+    await new Promise((r) => setTimeout(r, 5))
+    useWorkshop.setState({ open: true })
+    await new Promise((r) => setTimeout(r, 5))
+    expect(useBeginner.getState().step).toBe('turn')
+    expect(useWorkshop.getState().shards.length).toBe(before)
+    expect(textOf(byClass(m.all(), 'ws__guide')[0])).toContain('Drag one finger')
     await m.unmount()
   })
 

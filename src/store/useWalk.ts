@@ -120,8 +120,12 @@ import { launchHeight } from '../lib/walkBounce'
 import { walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
 import { heldNow, holdReleaseAll } from './walkHold'
 
-/** What the LOSING SYNC warning waits for: this many moves not yet proven. */
-export const SYNC_WARN_AT = 3
+/**
+ * What the LOSING SYNC warning waits for: this many moves not yet proven.
+ * 10 (arkinox, 2026-11-14: "only appear when the 10th event hits the
+ * queue"); it was 3, which warned during ordinary quick walking.
+ */
+export const SYNC_WARN_AT = 10
 
 /** Still this long, in ms, and the open segment closes and goes to be proved. */
 export const WALK_SETTLE_MS = 600

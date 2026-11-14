@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { shallow } from 'zustand/shallow'
 import { useWorkshop, type Tool } from '../../store/useWorkshop'
 import { HINT_USES, useBeginner, useViewTurned } from '../beginner'
 
@@ -25,30 +26,38 @@ export function hintFor(s: Pick<ReturnType<typeof useWorkshop.getState>, 'tool' 
   }
 }
 
+/**
+ * The hint, while the tool in hand still has one: past its last use this
+ * holds no subscription to the workshop at all.
+ */
 export function ToolHint({ hidden }: { hidden: boolean }): JSX.Element | null {
-  const s = useWorkshop()
-  const uses = useBeginner((b) => b.uses)
+  const tool = useWorkshop((s) => s.tool)
+  const left = useBeginner((b) => (b.uses[tool] ?? 0) < HINT_USES)
   const guiding = useBeginner((b) => b.step !== null)
-  const tool: Tool = s.tool
-  const left = (uses[tool] ?? 0) < HINT_USES
-  // A use: the shard changed under this tool, or what it picked did.
+  if (!left) return null
+  return <LiveHint tool={tool} hidden={hidden || guiding} />
+}
+
+function LiveHint({ tool, hidden }: { tool: Tool; hidden: boolean }): JSX.Element | null {
+  const s = useWorkshop((w) => ({ tool: w.tool, stampMode: w.stampMode, stampKind: w.stampKind, selectKind: w.selectKind, boxSelect: w.boxSelect, paintMode: w.paintMode, facePick: w.facePick, holding: w.selection.length > 0 || w.partSel.length > 0 || w.selectedFaces.length > 0 }), shallow)
+  // A use: an edit made with this tool to the shard on the bench (not an
+  // UNDO, which grows the future), or a change to what it picked.
   useEffect(() => {
-    if (!left) return
     let last = 0
     return useWorkshop.subscribe((n, p) => {
       if (n.tool !== tool || n.currentId !== p.currentId) return
-      // `current()` reads the store as it is now, so the shard list itself is what is compared.
-      const used = n.shards !== p.shards || n.selection !== p.selection || n.selectedFaces !== p.selectedFaces || n.partSel !== p.partSel || n.facePick !== p.facePick
+      // `current()` reads the store as it is now, so each state's own list is searched.
+      const edited = n.future.length <= p.future.length && n.shards.find((x) => x.id === n.currentId) !== p.shards.find((x) => x.id === p.currentId)
+      const used = edited || n.selection !== p.selection || n.selectedFaces !== p.selectedFaces || n.partSel !== p.partSel || n.facePick !== p.facePick
       // One use per action, however many writes it made.
       if (!used || Date.now() - last < 400) return
       last = Date.now()
       useBeginner.getState().bump(tool)
     })
-  }, [tool, left])
+  }, [tool])
   // LOOK's use is a turn of the view; it re-arms after each.
   const [turns, setTurns] = useState(0)
-  useViewTurned(tool === 'view' && left, () => { useBeginner.getState().bump('view'); setTurns((n) => n + 1) }, 0.45, turns)
-  const holding = s.selection.length > 0 || s.partSel.length > 0 || s.selectedFaces.length > 0
-  if (hidden || guiding || holding || !left) return null
+  useViewTurned(tool === 'view', () => { useBeginner.getState().bump('view'); setTurns((n) => n + 1) }, 0.45, turns)
+  if (hidden || s.holding) return null
   return <div className="ws__toolhint" role="status">{hintFor(s)}</div>
 }

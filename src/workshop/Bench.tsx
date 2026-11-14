@@ -34,7 +34,7 @@ import { ACCENT, BG, WARN } from '../lib/palette'
 import { glowTexture } from '../lib/glow'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from 'sno-core/shards'
 import { BenchGrid } from './benchGrid'
-import { VIEW_DIRS, benchAxes, benchPose, frameOffset, frameZoom, nudgeFor, reportHandles, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
+import { VIEW_DIRS, benchAxes, notePose, frameOffset, frameZoom, nudgeFor, reportHandles, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
 import { AnimClock, movingOn, reducedMotionNow } from '../scene/animMotion'
@@ -857,7 +857,7 @@ function ViewDriver({ sphere }: { sphere: { current: Sphere | null } }): null {
   const size = useThree((s) => s.size)
   const controls = useThree((s) => s.controls) as unknown as { target: Vector3; update: () => void } | null
   const request = useBenchView((s) => s.request)
-  useFrame(() => { benchPose.copy(camera.quaternion) })
+  useFrame(() => { notePose(camera.quaternion) })
   useEffect(() => {
     if (!request || !controls) return
     const cam = camera as PerspectiveCamera

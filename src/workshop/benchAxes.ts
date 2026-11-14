@@ -87,6 +87,11 @@ export const DEFAULT_AXES: BenchAxes = { right: { axis: 0, dir: 1 }, up: { axis:
 
 /** The bench camera's orientation, for the compass in its own canvas. Mutable, per frame, never store state. */
 export const benchPose = new Quaternion()
+let poseFrames = 0
+/** How many frames have written benchPose: a count taken now and seen to grow means the pose is fresh. */
+export const benchPoseFrames = (): number => poseFrames
+/** The bench writes its camera's pose (Bench ViewDriver), every frame it draws. */
+export function notePose(q: Quaternion): void { benchPose.copy(q); poseFrames++ }
 
 /**
  * What the view ball's menu asks of the camera: HOME (the opening view),

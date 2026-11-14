@@ -14,12 +14,19 @@ import { create } from 'zustand'
 import { Quaternion } from 'three'
 import type { ShardModel } from 'sno-core/shards'
 import type { Tool } from '../store/useWorkshop'
-import { benchPose } from './benchAxes'
+import { benchPose, benchPoseFrames } from './benchAxes'
 
 const TOOLS_KEY = 'onosendai:workshop-tools'
 const HINTS_KEY = 'onosendai:workshop-hints'
 /** The first-run card's flag, kept: whoever dismissed the old card has had their first visit. */
 export const GUIDE_KEY = 'onosendai:workshop-intro'
+
+/**
+ * The ids the tutorial gives the shards it copies into the workshop
+ * (tutorial/director.ts TUTORIAL_SHARD_ID, kept in step by a test): found,
+ * not made, so they say nothing about whether someone has built before.
+ */
+export const TUTORIAL_SHARD_PREFIX = 'tutorial-'
 
 /** How many uses of a tool before its hint stops showing. */
 export const HINT_USES = 3
@@ -44,7 +51,8 @@ interface Beginner {
   /** The guide's step while it runs, else null. */
   step: GuideStep | null
   setStep: (s: GuideStep | null) => void
-  /** The guide done or skipped: it never comes back. */
+  /** The guide done or skipped: it never comes back, this session even where storage refuses the flag. */
+  done: boolean
   finish: () => void
   /** What glows: the real button the guide points at. */
   glow: Tool | 'deploy' | null
@@ -59,7 +67,8 @@ export const useBeginner = create<Beginner>((set, get) => ({
   setTools: (tools) => { write(TOOLS_KEY, tools); set({ tools }) },
   step: null,
   setStep: (step) => set({ step }),
-  finish: () => { write(GUIDE_KEY, '1'); set({ step: null }) },
+  done: read(GUIDE_KEY) !== null,
+  finish: () => { write(GUIDE_KEY, '1'); set({ step: null, done: true }) },
   glow: null,
   setGlow: (glow) => set({ glow }),
   uses: readUses(),
@@ -73,14 +82,19 @@ export const useBeginner = create<Beginner>((set, get) => ({
 }))
 
 /** Whether this device's first visit to the workshop is done (or the old card was dismissed). */
-export const guideDone = (): boolean => read(GUIDE_KEY) !== null
+export const guideDone = (): boolean => useBeginner.getState().done || read(GUIDE_KEY) !== null
 
 /**
  * The dock a newcomer gets: four tools for someone who has never been here and
  * made nothing, all six for anyone else (decision 4). Pure.
  */
-export function startingTools(visited: boolean, shards: readonly Pick<ShardModel, 'vertices' | 'parts'>[]): DockTools {
-  return visited || shards.some((s) => s.vertices.length > 0 || (s.parts?.length ?? 0) > 0) ? 'all' : 'four'
+export function startingTools(visited: boolean, shards: readonly Pick<ShardModel, 'id' | 'vertices' | 'parts'>[]): DockTools {
+  return visited || shards.some((s) => !s.id.startsWith(TUTORIAL_SHARD_PREFIX) && (s.vertices.length > 0 || (s.parts?.length ?? 0) > 0)) ? 'all' : 'four'
+}
+
+/** The dock's tools now: the choice made, or, before it is made, what it would be. */
+export function dockTools(tools: DockTools | null, shards: readonly Pick<ShardModel, 'id' | 'vertices' | 'parts'>[]): DockTools {
+  return tools ?? startingTools(guideDone(), shards)
 }
 
 /** The tools on the dock for a choice, in the dock's order: ADD and FACE only with all six. */
@@ -90,6 +104,8 @@ export const shownTools = (tools: DockTools | null): ReadonlySet<Tool> => new Se
  * Calls `onTurn` once the bench view has turned past `rad` radians from where
  * it was when `active` became true (the guide's TURN THE VIEW, LOOK's hint).
  * Read from the bench pose every quarter second: no store, no frames asked.
+ * It measures from the first pose the bench draws after it is armed, never
+ * from one left over from before (a workshop opened again starts at HOME).
  * A new `epoch` arms it again from where the view is then.
  */
 export function useViewTurned(active: boolean, onTurn: () => void, rad = 0.45, epoch = 0): void {
@@ -97,8 +113,10 @@ export function useViewTurned(active: boolean, onTurn: () => void, rad = 0.45, e
   cb.current = onTurn
   useEffect(() => {
     if (!active) return
-    const from = new Quaternion().copy(benchPose)
+    const armed = benchPoseFrames()
+    let from: Quaternion | null = null
     const t = window.setInterval(() => {
+      if (from === null) { if (benchPoseFrames() > armed) from = new Quaternion().copy(benchPose); return }
       if (from.angleTo(benchPose) > rad) { window.clearInterval(t); cb.current() }
     }, 250)
     return () => window.clearInterval(t)

@@ -3998,8 +3998,9 @@ select.avatars__input option:checked {
   border: 1px solid var(--border);
   pointer-events: none;
 }
-/* The ?'s answer, a question being asked, or tiles open: the hint steps aside. */
-.ws__bottom:has(.ws__hint, .ws__tiles, .ws__ask) .ws__toolhint { display: none; }
+/* The ?'s answer, a question being asked, or tiles open: the hint and the guide step aside. */
+.ws__bottom:has(.ws__hint, .ws__tiles, .ws__ask) .ws__toolhint,
+.ws__bottom:has(.ws__hint, .ws__tiles, .ws__ask) .ws__guide { display: none; }
 /* A phone: the strip's tool label keeps its icon and ?, the chips their
    picture and name, so every tool's options and MORE fit without scrolling,
    up to a 430px phone. The dock still says which tool is lit. */

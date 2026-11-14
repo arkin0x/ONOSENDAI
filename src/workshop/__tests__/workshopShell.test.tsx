@@ -44,7 +44,9 @@ const { useWorkshop } = await import('../../store/useWorkshop')
 const { escapeTop } = await import('../../hooks/useEscape')
 const { frameOffset, frameZoom, useBenchView } = await import('../benchAxes')
 const { newShard, ticksOf } = await import('sno-core/shards')
-const { useBeginner, startingTools, HINT_USES } = await import('../beginner')
+const { useBeginner, startingTools, HINT_USES, TUTORIAL_SHARD_PREFIX, useViewTurned } = await import('../beginner')
+const { useTutorial } = await import('../../store/useTutorial')
+const { notePose } = await import('../benchAxes')
 const { hintFor } = await import('../shell/ToolHint')
 const { benchPose } = await import('../benchAxes')
 
@@ -96,7 +98,8 @@ beforeEach(() => {
   useWorkshop.setState({ open: true, shards: [s], currentId: s.id, tool: 'view', selection: [], partSel: [], selectedFaces: [], facePick: [], clip: null, past: [], future: [], openPanel: null, notice: null })
   localStorage.setItem('onosendai:workshop-intro', '1')
   // The tests before phase 4 see all six tools and no hints; phase 4's own set them as they need.
-  useBeginner.setState({ tools: 'all', step: null, glow: null, uses: { view: 3, stamp: 3, select: 3, paint: 3, add: 3, face: 3 } })
+  useBeginner.setState({ tools: 'all', step: null, glow: null, done: true, uses: { view: 3, stamp: 3, select: 3, paint: 3, add: 3, face: 3 } })
+  useTutorial.setState({ active: false })
 })
 afterEach(() => {
   useWorkshop.setState({ open: false })
@@ -773,9 +776,12 @@ describe('the beginner path (phase 4)', () => {
 
   it('starts someone new on four tools, and anyone who has made something on six', () => {
     expect(startingTools(false, [])).toBe('four')
-    expect(startingTools(false, [{ vertices: [], parts: [] }])).toBe('four')
+    expect(startingTools(false, [{ id: 'a', vertices: [], parts: [] }])).toBe('four')
     expect(startingTools(true, [])).toBe('all')
-    expect(startingTools(false, [{ vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }] }])).toBe('all')
+    expect(startingTools(false, [{ id: 'a', vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }] }])).toBe('all')
+    // What the tutorial copied in was found, not made: still someone new.
+    expect(startingTools(false, [{ id: `${TUTORIAL_SHARD_PREFIX}trampoline`, vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }] }])).toBe('four')
+    expect(readFileSync(join(__dirname, '..', '..', 'tutorial', 'director.ts'), 'utf8')).toContain(`export const TUTORIAL_SHARD_ID = '${TUTORIAL_SHARD_PREFIX}'`)
   })
 
   it('shows LOOK, STAMP, SELECT, PAINT and MORE TOOLS, which adds ADD and FACE to the right, the four unmoved', async () => {
@@ -806,7 +812,9 @@ describe('the beginner path (phase 4)', () => {
 
   it('guides a first visit on the real buttons: stamp a block, turn the view, paint a face, then DEPLOY lights up', async () => {
     localStorage.removeItem('onosendai:workshop-intro')
-    useBeginner.setState({ tools: 'four', step: null })
+    useBeginner.setState({ tools: 'four', step: null, done: false })
+    useWorkshop.setState({ shards: [newShard('Empty')], currentId: null as never })
+    useWorkshop.setState({ currentId: useWorkshop.getState().shards[0].id })
     const m = await mount(<Workshop />)
     const guide = (): string => textOf(byClass(m.all(), 'ws__guide')[0] ?? { type: 'x', props: {}, children: [] })
     expect(guide()).toContain('Tap STAMP, then tap the grid')
@@ -820,7 +828,9 @@ describe('the beginner path (phase 4)', () => {
     await tick()
     expect(useWorkshop.getState().current()!.vertices.length).toBeGreaterThan(n0)
     expect(guide()).toContain('Drag one finger')
-    // A turn of the view, past the threshold.
+    // The bench draws (no canvas here: its pose is written by hand), then the view turns past the threshold.
+    notePose(benchPose.clone().identity())
+    await tick(300)
     benchPose.setFromAxisAngle({ x: 0, y: 1, z: 0 } as never, 1)
     await tick(350)
     expect(guide()).toContain('Tap PAINT')
@@ -835,11 +845,49 @@ describe('the beginner path (phase 4)', () => {
     await m.unmount()
   })
 
-  it('never shows the guide again once skipped, nor during the tutorial', async () => {
+  it('waits while the tutorial runs, without counting as done, then starts on a new empty shard', async () => {
     localStorage.removeItem('onosendai:workshop-intro')
-    useBeginner.setState({ step: null })
+    useBeginner.setState({ tools: null, step: null, done: false })
+    useTutorial.setState({ active: true })
+    const m = await mount(<Workshop />)
+    expect(byClass(m.all(), 'ws__guide').length).toBe(0)
+    expect(useBeginner.getState().step).toBeNull()
+    expect(useBeginner.getState().tools).toBeNull() // not decided while the tutorial has the workshop
+    const shardsBefore = useWorkshop.getState().shards.length
+    useTutorial.setState({ active: false })
+    await tick()
+    expect(useBeginner.getState().step).toBe('stamp')
+    // The cube had points in it: the guide got a new, empty shard.
+    expect(useWorkshop.getState().shards.length).toBe(shardsBefore + 1)
+    expect(useWorkshop.getState().current()!.vertices.length).toBe(0)
+    expect(byClass(m.all(), 'ws__guide').length).toBe(1)
+    await m.unmount()
+  })
+
+  it('measures a turn from the first pose the bench draws, never one left from before', async () => {
+    benchPose.setFromAxisAngle({ x: 0, y: 1, z: 0 } as never, 2)
+    let turned = 0
+    const { mount: mountHook } = await import('../../test/elementRoot')
+    function Probe(): null { useViewTurned(true, () => { turned++ }); return null }
+    const m = await mountHook(<Probe />)
+    // A reopened bench draws HOME: a pose far from the stale one, but no turn.
+    benchPose.identity()
+    notePose(benchPose.clone())
+    await tick(600)
+    expect(turned).toBe(0)
+    benchPose.setFromAxisAngle({ x: 0, y: 1, z: 0 } as never, 1)
+    await tick(350)
+    expect(turned).toBe(1)
+    benchPose.identity()
+    await m.unmount()
+  })
+
+  it('never shows the guide again once skipped', async () => {
+    localStorage.removeItem('onosendai:workshop-intro')
+    useBeginner.setState({ step: null, done: false })
     const m = await mount(<Workshop />)
     await m.press('SKIP')
+    expect(useBeginner.getState().done).toBe(true)
     expect(byClass(m.all(), 'ws__guide').length).toBe(0)
     expect(localStorage.getItem('onosendai:workshop-intro')).toBe('1')
     await m.unmount()

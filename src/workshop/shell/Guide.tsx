@@ -11,7 +11,9 @@
  * item 11b).
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
+import { hexToRgb, rgbToHex } from 'sno-core/shards'
+import { BUILT_IN, hexAt } from 'sno-core/snoPalette'
 import { FLOOR } from 'sno-core/stamps'
 import { useTutorial } from '../../store/useTutorial'
 import { useWorkshop } from '../../store/useWorkshop'
@@ -26,7 +28,7 @@ export const GUIDE_TEXT: Record<GuideStep, string> = {
 
 /** What is still to come after each step, for the line under it. */
 const NEXT: Record<GuideStep, string> = {
-  stamp: 'NEXT: TURN THE VIEW, PAINT IT',
+  stamp: 'NEXT: TURN IT',
   turn: 'NEXT: PAINT IT',
   paint: 'THEN DEPLOY',
 }
@@ -34,12 +36,24 @@ const NEXT: Record<GuideStep, string> = {
 /** How long DEPLOY glows once the guide is done. */
 const DEPLOY_GLOW_MS = 6000
 
+/**
+ * A color for the paint step that the block is not already: the block was
+ * stamped in the color in hand, and painting it that color would change
+ * nothing to see. The built-in's warm, bright tones first. Pure.
+ */
+export function paintStepColor(block: string): string {
+  for (const i of [21, 5, 13, 45, 37, 29]) { const hex = hexAt(BUILT_IN, i); if (hex !== block) return hex }
+  return hexAt(BUILT_IN, 21)
+}
+
 export function Guide(): JSX.Element | null {
   const step = useBeginner((s) => s.step)
   const tool = useWorkshop((s) => s.tool)
   const tutorial = useTutorial((s) => s.active)
   const b = useBeginner.getState
   const running = step !== null && !tutorial
+  const glowTimer = useRef<number | null>(null)
+  useEffect(() => () => { if (glowTimer.current !== null) window.clearTimeout(glowTimer.current) }, [])
 
   // The button this step needs glows until it is in hand; DEPLOY glows once the last step is done.
   useEffect(() => {
@@ -55,19 +69,29 @@ export function Guide(): JSX.Element | null {
     if (!w.aim && w.plane === FLOOR) w.setAim([0, w.level, 0])
   }, [running, step, tool])
 
-  // A block stamped, or a face painted: the shard itself changed under that tool.
+  // The paint step: a color in hand the block is not, so the tap shows.
+  useEffect(() => {
+    if (!running || step !== 'paint') return
+    const w = useWorkshop.getState()
+    const hand = rgbToHex(w.color)
+    if (w.current()?.vertices.some((v) => rgbToHex(v.c) === hand)) useWorkshop.setState({ color: hexToRgb(paintStepColor(hand)) })
+  }, [running, step])
+
+  // A block stamped, or a face painted: the shard on the bench changed by an
+  // edit made with that tool (not an UNDO, which grows the future).
   useEffect(() => {
     if (!running || step === 'turn') return
     const want = step === 'stamp' ? 'stamp' : 'paint'
     return useWorkshop.subscribe((s, prev) => {
-      // `current()` reads the store as it is now, so the shard list itself is what is compared.
-      if (s.tool !== want || s.currentId !== prev.currentId || s.shards === prev.shards) return
+      if (s.tool !== want || s.currentId !== prev.currentId || s.future.length > prev.future.length) return
+      // `current()` reads the store as it is now, so each state's own list is searched.
+      if (s.shards.find((x) => x.id === s.currentId) === prev.shards.find((x) => x.id === prev.currentId)) return
       if (step === 'stamp') b().setStep('turn')
       else {
         b().finish()
         b().setGlow('deploy')
         useWorkshop.setState({ notice: 'That is a shard. DEPLOY puts it in the world.' })
-        window.setTimeout(() => { if (useBeginner.getState().glow === 'deploy') useBeginner.getState().setGlow(null) }, DEPLOY_GLOW_MS)
+        glowTimer.current = window.setTimeout(() => { if (useBeginner.getState().glow === 'deploy') useBeginner.getState().setGlow(null) }, DEPLOY_GLOW_MS)
       }
     })
   }, [running, step, b])

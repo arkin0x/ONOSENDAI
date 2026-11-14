@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   contiguousEnds, EPOCH_BETA, EPOCH_END_TIME, EPOCH_ENDS, EPOCH_PREV_END_TIME, lastClosedWindow, pacedHeight, pacedKnown,
-  pacedSecondsPerBlock, paceOf, skewFrom, SWITCH_DELAY_S, TIP_FRESH_S, windowEndHeight, wrapHalf, easeSeconds,
+  pacedSecondsPerBlock, paceOf, skewFrom, earliestBlockAt, SWITCH_DELAY_S, TIP_FRESH_S, windowEndHeight, wrapHalf, easeSeconds,
 } from '../pacedClock'
 import { phaseAt } from '../anim'
 
@@ -73,10 +73,24 @@ describe('when β is known', () => {
     expect(pacedKnown(T, EPOCH_ENDS, { height: windowEndHeight(484), time: T })).toBe(false)
     expect(pacedKnown(T, WITH_484, { height: windowEndHeight(484), time: T })).toBe(true)
   })
-  it('not once the tip is too old to vouch the next window has not switched', () => {
-    expect(pacedKnown(tip.time + TIP_FRESH_S - 1, EPOCH_ENDS, tip)).toBe(true)
-    expect(pacedKnown(tip.time + TIP_FRESH_S, EPOCH_ENDS, tip)).toBe(false)
+  it('a publisher quiet for 3 hours mid-window: still known (the window cannot have ended yet)', () => {
+    // 976,480 is about 1,279 blocks before window 484 ends at 977,759.
+    expect(pacedKnown(tip.time + 3 * 3600, EPOCH_ENDS, tip)).toBe(true)
+    expect(pacedKnown(tip.time + 12 * 3600, EPOCH_ENDS, tip)).toBe(true)
   })
+  it('past the earliest moment the window\'s last block could have been mined: holds', () => {
+    const earliest = earliestBlockAt(tip, windowEndHeight(484))
+    // Two hours off the tip's header time, six blocks free, then one a minute.
+    expect(earliest).toBe(tip.time - 7200 + (977_759 - 976_480 - 6) * 60)
+    expect(pacedKnown(earliest - 1, EPOCH_ENDS, tip)).toBe(true)
+    expect(pacedKnown(earliest, EPOCH_ENDS, tip)).toBe(false)
+  })
+  it('near a window\'s end a quiet tip vouches only while fresh', () => {
+    const late = { height: windowEndHeight(484) - 3, time: T }
+    expect(pacedKnown(T + TIP_FRESH_S - 1, EPOCH_ENDS, late)).toBe(true)
+    expect(pacedKnown(T + TIP_FRESH_S, EPOCH_ENDS, late)).toBe(false)
+  })
+
   it('a run of ends stops at the first gap', () => {
     const times = new Map([[484, A484], [486, A484 + 2_000_000]])
     expect(contiguousEnds((k) => times.get(k), 486)).toEqual(WITH_484)

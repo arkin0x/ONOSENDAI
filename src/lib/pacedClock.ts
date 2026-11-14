@@ -20,13 +20,19 @@
  * comes before the one before it, so β is defined, rising and continuous for
  * any header times. Pure: the window ends come from lib/pacedSource.ts.
  *
- * KNOWING β (the owner's rule for this build: hold still, never guess). β at
- * t is EXACT when every window end whose switch is at or before t is known.
- * The ends are known contiguously from the epoch up to window K; the switch
- * of window K + 1 is certainly still ahead when NTH's trusted tip is below
- * that window's end and the tip's header time is recent enough that the end
- * could not have been mined and switched since (TIP_FRESH_S). Otherwise the
- * clock is not known, and every object holds still at phase 0.
+ * KNOWING β (owner rulings 2026-11-14: never guess, and stay known while the
+ * window cannot have ended). β at t is EXACT when every window end whose
+ * switch is at or before t is known. The ends are known contiguously from
+ * the epoch up to window K. The window after them, K + 1, cannot have
+ * switched yet when NTH's trusted tip is below its end and either
+ *   - the tip's header time is under TIP_FRESH_S old, so even an end mined
+ *     at once and stamped low switches later than now; or
+ *   - its end block cannot have been mined yet at all (earliestWindowEnd),
+ *     however quiet the publisher has been.
+ * Otherwise the clock is not known, and every object holds at its shape as
+ * written. DECK-0003 §1.14 lets a reader run on at the last pace it knows
+ * instead; ONOSENDAI only runs on while that pace is certainly still the one
+ * in force, and holds still past that.
  */
 
 /** Blocks a difficulty window spans. */
@@ -53,6 +59,31 @@ export const EPOCH_BETA = 975_744
  * not guaranteed: a tip stamped up to two hours fast narrows the margin.
  */
 export const TIP_FRESH_S = 7_200
+
+/**
+ * The earliest real moment a later block can have been mined, from a tip
+ * (height and header time), for earliestWindowEnd:
+ *   - HEADER_AHEAD_S: a node rejects a header stamped more than two hours
+ *     ahead of its clock, so the tip was mined no earlier than two hours
+ *     before its header time.
+ *   - MIN_BLOCK_S and BURST_BLOCKS: blocks then come no faster than one a
+ *     minute, after a free burst of six. One a minute is ten times the
+ *     target, and over two and a half times faster than four times today's
+ *     hashrate (the most Bitcoin's own retarget clamp contemplates in one
+ *     window) would give on average. At four times the hashrate (150 s a
+ *     block on average) the chance of n + 6 blocks within 60 n seconds is
+ *     at most about 10^-5 (near n = 5) and vanishes as n grows (Poisson
+ *     tail); at today's hashrate (600 s) it is under 10^-10. The two hours
+ *     taken off the tip's header time add margin on top.
+ */
+export const HEADER_AHEAD_S = 7_200
+export const MIN_BLOCK_S = 60
+export const BURST_BLOCKS = 6
+
+/** The earliest Unix moment block `height` can have been mined, given the trusted tip. */
+export function earliestBlockAt(tip: TrustedTip, height: number): number {
+  return tip.time - HEADER_AHEAD_S + Math.max(0, height - tip.height - BURST_BLOCKS) * MIN_BLOCK_S
+}
 
 /** The height of window k's last block. */
 export function windowEndHeight(k: number): number {
@@ -136,15 +167,18 @@ export interface TrustedTip { height: number; time: number }
 /**
  * Whether β at t is exact (see the header): the ends are known through the
  * last window the tip has closed, and the window after them cannot have
- * switched yet. Null tip: not known.
+ * switched yet. No tip (none verified yet): not known.
  */
 export function pacedKnown(t: number, ends: WindowEnds, tip: TrustedTip | null): boolean {
   if (!tip || ends.length < 2) return false
   const K = windowOfEnd(ends.length - 1)
+  const end = windowEndHeight(K + 1)
   // The tip has closed a window whose end we do not have.
-  if (tip.height >= windowEndHeight(K + 1)) return false
-  // The next end is not mined as far as the tip knows; that holds only while the tip is fresh.
-  return t < tip.time + TIP_FRESH_S
+  if (tip.height >= end) return false
+  // A fresh tip: an end mined since switches four hours after a time no more than two hours behind the tip's.
+  if (t < tip.time + TIP_FRESH_S) return true
+  // A quiet publisher: still known while the window's last block cannot have been mined yet.
+  return t < earliestBlockAt(tip, end)
 }
 
 // ---- skew ------------------------------------------------------------------

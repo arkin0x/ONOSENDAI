@@ -52,11 +52,14 @@
  * same day). Each key is its own hold: JUMP pressed with FORWARD held is a
  * running jump, and FORWARD walks on.
  *
- * JUMP and DOWN stand on the left (arkinox, 2026-11-10: "move jump/down to
- * the left side above the menu button and below the LOOK sphere"), at the
- * height they had in the pad's bottom row, so a jump is the left thumb's
- * and the walk the right's. The right keeps a compact cluster: GRAVITY,
- * FORWARD, and the sides with BACK.
+ * JUMP and DOWN stand apart from the pad (arkinox, 2026-11-10), at the
+ * height they had in the pad's bottom row, under the LOOK ball. Since the
+ * owner's swap (2026-11-14: "Movement should be on the left, and look/jump
+ * should be on the right") the walk pad, a compact cluster of GRAVITY,
+ * FORWARD, and the sides with BACK, stands on the left over the menu
+ * button, and JUMP, DOWN and the LOOK ball on the right over the commit
+ * block: the walk is the left thumb's, the look and the jump the right's.
+ * Only WALK's pad moves (styles.css "WALK's controls, mirrored").
  */
 
 import { useEffect, useState, type ReactNode } from 'react'
@@ -117,8 +120,8 @@ export interface PadKey {
   keyHint?: string
   /** WALK: the direction this key holds while pressed (store/walkHold.ts). */
   hold?: HeldDir
-  /** WALK's JUMP and DOWN: drawn on the left of the screen, over the menu button, not in the pad. */
-  left?: boolean
+  /** WALK's JUMP and DOWN: drawn in their own row (.walkside) on the right, over the commit block, not in the pad. */
+  side?: boolean
   /** The aria-label, when it says more than the title. */
   label?: string
 }
@@ -141,7 +144,8 @@ export interface PadKey {
  * so it stays on: on a phone it is the only way to absorb one (review of
  * #649). JUMP pressed again in the air is a double jump (store/useWalk.ts
  * (F)). With gravity off, JUMP and DOWN are one cell up and down. Both
- * stand on the left of the screen (`left`), the rest in the pad.
+ * stand in their own row on the right of the screen (`side`), the rest in
+ * the pad, which WALK draws on the left.
  * The forward and reverse arrows are the pair VIEW's fly keys wear too
  * (hud/ui/FlyArrows.tsx).
  *
@@ -154,8 +158,8 @@ export function walkPad(gravity: boolean, move: (name: MoveName) => () => void):
     { cell: 'left', glyph: '◀', title: 'Left (A)', keyHint: 'A', ...key('left') },
     { cell: 'backward', glyph: <ReverseArrow3D size={20} />, sub: 'BACK', title: 'Backward (S)', keyHint: 'S', ...key('toward') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', keyHint: 'D', ...key('right') },
-    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R). Press again in the air to double jump.' : 'Jump: up one cell (Space or R)', keyHint: 'SPACE', ...key('up'), left: true },
-    { cell: 'down', glyph: '▼', title: gravity ? 'Down: hold to absorb a bounce (C or F)' : 'Down one cell (C or F)', keyHint: 'C', ...key('down'), left: true },
+    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R). Press again in the air to double jump.' : 'Jump: up one cell (Space or R)', keyHint: 'SPACE', ...key('up'), side: true },
+    { cell: 'down', glyph: '▼', title: gravity ? 'Down: hold to absorb a bounce (C or F)' : 'Down one cell (C or F)', keyHint: 'C', ...key('down'), side: true },
   ]
 }
 
@@ -374,10 +378,10 @@ export function TouchControls(): JSX.Element {
     )
   }
 
-  // WALK's JUMP and DOWN, on the left over the menu button (walkPad `left`).
-  // Not while placing, when the deploy bar docks in that corner, nor off
-  // your head, where the pad stands its direction keys down.
-  const leftKeys = deploying || !atHead ? [] : pad.filter((b) => b.left)
+  // WALK's JUMP and DOWN, on the right over the commit block (walkPad `side`).
+  // Not while placing, nor off your head, where the pad stands its
+  // direction keys down.
+  const sideKeys = deploying || !atHead ? [] : pad.filter((b) => b.side)
 
   return (
     <>
@@ -437,7 +441,7 @@ export function TouchControls(): JSX.Element {
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().setGravity(!gravity) }}
           >GRAVITY</button>
         )}
-        {pad.filter((b) => !b.left).map(padKey)}
+        {pad.filter((b) => !b.side).map(padKey)}
         {/* The hub doubles as the scale readout and its reset: a tap returns
             to 2^0, the finest scale. Hiding the pad lives on the canvas tap,
             where it always also lived, so nothing is lost to the reset.
@@ -455,9 +459,9 @@ export function TouchControls(): JSX.Element {
         >2^{scaleExp}</button>}
       </div>
 
-      {leftKeys.length > 0 && (
+      {sideKeys.length > 0 && (
         <div className="walkside" role="group" aria-label="Jump and down">
-          {leftKeys.map(padKey)}
+          {sideKeys.map(padKey)}
         </div>
       )}
 

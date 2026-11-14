@@ -80,12 +80,12 @@ export function ViewPanel(): JSX.Element {
       on: walkAvatarHidden,
       set: (v) => useLayers.getState().setLayer('walkAvatarHidden', v),
     },
-    // The ball above the menu button that WALK looks around with
+    // The ball in the bottom right that WALK looks around with
     // (hud/WalkLookSphere.tsx). On by default; a drag on the scene still looks.
     {
       id: 'view-walk-look',
       title: 'Look sphere in WALK',
-      hint: 'A ball above the menu button to drag and look around.',
+      hint: 'A ball in the bottom right to drag and look around.',
       on: walkLookSphere,
       set: (v) => useLayers.getState().setLayer('walkLookSphere', v),
     },
@@ -157,7 +157,7 @@ export function ViewPanel(): JSX.Element {
         (h3, h4, h5 and up); a move that crosses a higher one costs more work.
         Hide avatar in WALK takes your own avatar out of the way while you walk in
         first person, where the camera sits inside it. Look sphere in WALK puts a
-        ball above the menu button while you walk: drag it to look around, as a
+        ball in the bottom right while you walk: drag it to look around, as a
         drag on the scene does. Chain trail draws your
         movement history as a red line. Region keys draws a green cage around
         each region you hold the key for. Headlamp lights shards from your view,

@@ -8,7 +8,7 @@
  * always had. A third, walkAvatarHidden, hides your own avatar while WALK
  * puts the camera inside it (arkinox, 2026-10-13); it defaults off, so a
  * walk shows what sticks out of you until you say otherwise. A fourth,
- * walkLookSphere, is the ball in the bottom left that WALK looks around with
+ * walkLookSphere, is the ball in the bottom right that WALK looks around with
  * (hud/WalkLookSphere.tsx; arkinox, 2026-10-23); it defaults on. A fifth,
  * headlamp, shades the world's shards as if lit from the camera
  * (scene/headlamp.ts; arkinox, 2026-10-23); it defaults on, and off draws

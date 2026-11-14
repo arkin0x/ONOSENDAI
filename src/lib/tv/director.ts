@@ -21,6 +21,10 @@
  * - A cross-space jump (a hyperjump, or any step further than JUMP_CELLS at
  *   the shot's zoom) starts a new shot: there is no fly-over across the
  *   universe, only a cut.
+ * - So does the first move after a stretch its publisher asked not to be
+ *   broadcast (spec §8.13: a tutorial's moves, which the tape leaves out and
+ *   marks the next move after, Beat `afterHidden`). TV jumps over the
+ *   stretch with a cut, never a fly-over of a path it did not show.
  * - A shot that opens with a hyperjump plays the ride first, JUMP_S of it
  *   before its first beat: the rainbow tunnel, then the line from block A to
  *   block B with only those two blocks drawn (arkinox, 2026-10-18: "we
@@ -71,6 +75,12 @@ export interface Beat {
   action: ActionEvent
   /** Where the avatar stood before it: the `c` tag's place, or this action's own for a spawn. */
   from: { position: Position; plane: number }
+  /**
+   * The avatar's moves just before this one were left off the tape, asked
+   * not to be broadcast (spec §8.13; tape.ts TapeReader): this move starts a
+   * shot of its own, from where that stretch left the avatar.
+   */
+  afterHidden?: true
 }
 
 /**
@@ -191,7 +201,7 @@ export class Director {
     const run = this.open.get(b.pubkey)
     if (run) {
       const last = run[run.length - 1]
-      if (b.at - last.at > TRIP_GAP_S || b.at - run[0].at > MAX_SHOT_S || isJump(b)) {
+      if (b.at - last.at > TRIP_GAP_S || b.at - run[0].at > MAX_SHOT_S || isJump(b) || b.afterHidden) {
         this.closed.push(shotOf(run))
         this.open.set(b.pubkey, [b])
         return

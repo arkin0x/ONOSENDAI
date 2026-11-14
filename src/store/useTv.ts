@@ -51,6 +51,7 @@ import { TvScanner, scanHeights, type OpenedBag, type ScanDeps, type ScanPlace }
 import { regionKeyWorker, type RegionKeyWorker } from '../lib/regionKeyOffThread'
 import { hiddenLabel, type Hidden } from '../lib/hidden'
 import { rememberBag, unbagRecording } from '../lib/foundCache'
+import { noBroadcast } from '../lib/noBroadcast'
 import { resolveReference } from '../lib/references'
 import { hexToBytes, type NostrEvent } from '../lib/events'
 import { RESCAN_BATCH, askAll, askRelays, type Ask as RescanAsk } from '../lib/secrets/rescan'
@@ -489,7 +490,9 @@ async function askBags(ids: string[]): Promise<NostrEvent[]> {
   }
   const got = await askAll(ids, ask)
   if (!answered) throw new Error('No relay answered.')
-  return got.events
+  // A bag its publisher asked not to be broadcast (spec §8.13: a tutorial's
+  // seed) is never opened on TV, wherever an avatar stands.
+  return got.events.filter((e) => !noBroadcast(e))
 }
 
 /** Where a shot puts an avatar on screen: where it opens (where a ride boards), then every action's place. */

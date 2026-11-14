@@ -17,7 +17,7 @@
  * | activeKeys | keys with a valid action in a window | REGULAR's "valid action" |
  * | bagsHidden | live sealed bags, distinct d, at most 5 a UTC day | STASH |
  * | objectsPublished | live public objects, distinct shape, 8+ vertices, at most 10 a UTC day | BUILDER |
- * | arrivalTimes | each key's first v2 spawn | the ticker's AVATARS, NEW ARRIVALS |
+ * | arrivalTimes | each key's first v2 spawn, or for a tagged spawn its chain's first untagged action | the ticker's AVATARS, NEW ARRIVALS |
  *
  * Two owner rulings (arkinox, 2026-10-31), both raised in the review of
  * #537: the LONGEST CHAIN board counts the current chain (chainLength), and
@@ -33,6 +33,21 @@
  * What these rules never read or return: a place. No coordinate, sector,
  * height, hint or lookup id is part of any answer here, only keys and counts
  * (design 3.3 L1, L2; the standing rule never to infer bag locations).
+ *
+ * What these rules never count: an event its publisher asked not to be
+ * broadcast (spec §8.13, lib/noBroadcast: a tutorial's events; owner,
+ * 2026-11-14: TV "will simply not broadcast any event carrying that tag").
+ * The tag never changes validity, so a chain is built and judged with every
+ * event, tagged or not, and only the counting leaves the tagged ones out: a
+ * chain's length is its untagged valid actions, a tagged spawn is no respawn
+ * and a tagged hop no hop for PHOENIX, a tagged action makes no key active,
+ * a tagged bag or object is not counted, and a key whose spawn is tagged
+ * arrives with its first untagged action on that chain (arrivalTimes).
+ * Cyberspace TV is the only caller today. The badges are not built yet:
+ * whether a badge, the player's own record, counts tutorial actions is a
+ * question for when they are (spec §8.13 lets a reader that is not a
+ * broadcaster count them), and such a caller would need these rules to take
+ * the tagged events as an option.
  */
 
 import { canonicalGeometryText } from 'sno-core/fingerprint'
@@ -40,6 +55,7 @@ import { fromPayload } from 'sno-core/shards'
 import { countsThrough } from './chainStop'
 import { ACTION_KIND, buildChain, firstBreak, type ActionEvent, type NostrEvent } from './events'
 import { HIDDEN_KIND, OBJECT_KIND } from './hidden'
+import { noBroadcast } from './noBroadcast'
 
 /** One UTC day, seconds. */
 export const DAY_S = 24 * 60 * 60
@@ -122,6 +138,21 @@ export function validPrefixLength(chain: ActionEvent[]): number {
   return broken ? broken.index : chain.length
 }
 
+/** The ids of the events that carry the no-broadcast tag (spec §8.13): never counted, though their chains stand. */
+export function taggedIds(events: Iterable<NostrEvent>): Set<string> {
+  const out = new Set<string>()
+  for (const e of events) if (noBroadcast(e)) out.add(e.id)
+  return out
+}
+
+/** How many of a chain's first `upTo` entries count: those not tagged no-broadcast. */
+export function shownCount(chain: ActionEvent[], upTo: number, tagged: ReadonlySet<string>): number {
+  if (tagged.size === 0) return Math.min(upTo, chain.length)
+  let n = 0
+  for (let i = 0; i < upTo && i < chain.length; i++) if (!tagged.has(chain[i].id)) n++
+  return n
+}
+
 /** The events signed at or before `t`. */
 function asOf(events: NostrEvent[], t: number): NostrEvent[] {
   return t === Infinity ? events : events.filter((e) => e.created_at <= t)
@@ -135,9 +166,14 @@ function asOf(events: NostrEvent[], t: number): NostrEvent[] {
  * every event whose genesis names it, whatever its `A` (spec 8.7.3,
  * lib/events buildChain). The ticker's CHAIN OF n ACTIONS and the board are
  * this one function. A respawn starts it again from 1.
+ *
+ * Only untagged actions count (spec §8.13): a tutorial's moves stay on the
+ * chain and keep it valid, and the board counts what came after.
  */
 export function chainLength(events: NostrEvent[], pubkey: string, t: number = Infinity): number {
-  return validPrefixLength(buildChain(asOf(events, t).filter(isV2Action), pubkey))
+  const own = asOf(events, t).filter(isV2Action)
+  const chain = buildChain(own, pubkey)
+  return shownCount(chain, validPrefixLength(chain), taggedIds(own))
 }
 
 /** A key's v2 spawns as of `t`, oldest first (ties by id, the larger later, as NIP-01 orders them newest first). */
@@ -172,8 +208,12 @@ export function chainFrom(events: NostrEvent[], spawn: NostrEvent, t: number = I
  * it, only its valid prefix counts.
  */
 export function bestChainLength(events: NostrEvent[], pubkey: string, t: number = Infinity): number {
+  const tagged = taggedIds(events)
   let best = 0
-  for (const s of spawnsOf(events, pubkey, t)) best = Math.max(best, validPrefixLength(chainFrom(events, s, t)))
+  for (const s of spawnsOf(events, pubkey, t)) {
+    const chain = chainFrom(events, s, t)
+    best = Math.max(best, shownCount(chain, validPrefixLength(chain), tagged))
+  }
   return best
 }
 
@@ -183,8 +223,10 @@ export function bestChainLength(events: NostrEvent[], pubkey: string, t: number 
  * the valid prefix a hop is always a base action (a hop inside a bracket
  * breaks the chain), so a hop there is a valid hop.
  */
-export function goesOnToHop(chain: ActionEvent[], valid: number): boolean {
-  for (let i = 1; i < valid; i++) if (chain[i].type === 'hop' && chain[i].role === 'base') return true
+export function goesOnToHop(chain: ActionEvent[], valid: number, tagged: ReadonlySet<string> = new Set()): boolean {
+  // A tagged spawn is no respawn to count, and a tagged hop no hop (spec §8.13).
+  if (chain.length > 0 && tagged.has(chain[0].id)) return false
+  for (let i = 1; i < valid; i++) if (chain[i].type === 'hop' && chain[i].role === 'base' && !tagged.has(chain[i].id)) return true
   return false
 }
 
@@ -198,10 +240,11 @@ export function goesOnToHop(chain: ActionEvent[], valid: number): boolean {
  */
 export function respawnCount(events: NostrEvent[], pubkey: string, t: number = Infinity): number {
   const spawns = spawnsOf(events, pubkey, t)
+  const tagged = taggedIds(events)
   let n = 0
   for (const s of spawns.slice(1)) {
     const chain = chainFrom(events, s, t)
-    if (goesOnToHop(chain, validPrefixLength(chain))) n++
+    if (goesOnToHop(chain, validPrefixLength(chain), tagged)) n++
   }
   return n
 }
@@ -212,11 +255,13 @@ export function respawnCount(events: NostrEvent[], pubkey: string, t: number = I
  * stood at `to`. A spawn is an action; a broken one is not valid.
  */
 export function activeIn(events: NostrEvent[], pubkey: string, from: number, to: number): boolean {
+  const tagged = taggedIds(events)
   for (const s of spawnsOf(events, pubkey, to)) {
     // A chain whose events all predate the window cannot be active in it.
     const chain = chainFrom(events, s, to)
     const valid = validPrefixLength(chain)
-    for (let i = 0; i < valid; i++) if (chain[i].createdAt > from && chain[i].createdAt <= to) return true
+    // A tagged action (spec §8.13) makes no one active.
+    for (let i = 0; i < valid; i++) if (chain[i].createdAt > from && chain[i].createdAt <= to && !tagged.has(chain[i].id)) return true
   }
   return false
 }
@@ -230,12 +275,17 @@ export function activeIn(events: NostrEvent[], pubkey: string, from: number, to:
  */
 export interface ChainIndex {
   pubkey: string
-  spawns: Array<{ id: string; at: number; reach: number[]; valid: number; forked: boolean }>
+  /**
+   * `shown[i]`: how many of the walk's first `i` entries count, those not
+   * tagged no-broadcast (spec §8.13); `reach.length + 1` of them.
+   */
+  spawns: Array<{ id: string; at: number; reach: number[]; valid: number; forked: boolean; shown: number[] }>
 }
 
 /** Index a key's chains (chainLengthIndexed). Every spawn's chain built once, as of every event in hand. */
 export function chainIndex(events: NostrEvent[], pubkey: string): ChainIndex {
   const mine = events.filter((e) => e.pubkey === pubkey && isV2Action(e))
+  const tagged = taggedIds(mine)
   const spawns = mine.filter(isV2Spawn).sort((a, b) => a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   const under = new Map<string, NostrEvent[]>()
   for (const e of mine) {
@@ -251,8 +301,10 @@ export function chainIndex(events: NostrEvent[], pubkey: string): ChainIndex {
       const chain = buildChain([s, ...(under.get(s.id) ?? [])], pubkey)
       let latest = -Infinity
       const reach = chain.map((a) => (latest = Math.max(latest, a.createdAt)))
+      const shown = [0]
+      for (const a of chain) shown.push(shown[shown.length - 1] + (tagged.has(a.id) ? 0 : 1))
       // A fork's other branch is not on the walk: as of a moment before both branches were signed, the chain went on through one; so it is answered the long way.
-      return { id: s.id, at: s.created_at, reach, valid: chain[0]?.fork ? 0 : validPrefixLength(chain), forked: chain[0]?.fork !== undefined }
+      return { id: s.id, at: s.created_at, reach, valid: chain[0]?.fork ? 0 : validPrefixLength(chain), forked: chain[0]?.fork !== undefined, shown }
     }),
   }
 }
@@ -276,7 +328,9 @@ export function chainLengthIndexed(index: ChainIndex, events: NostrEvent[], t: n
     if (spawn.reach[mid] <= t) lo = mid + 1
     else hi = mid
   }
-  return Math.min(lo, spawn.valid)
+  // Of those, the untagged ones (spec §8.13). An index made before `shown` (none kept across loads) counts them all.
+  const upTo = Math.min(lo, spawn.valid)
+  return spawn.shown?.[upTo] ?? upTo
 }
 
 /** Every key with a valid action in the window (`from`, `to`] (activeIn), from every v2 action by author. */
@@ -323,6 +377,7 @@ export interface KeyChains {
  */
 export function keyChains(events: NostrEvent[], pubkey: string, t: number = Infinity, relayList?: ReadonlySet<string> | null): KeyChains {
   const mine = asOf(events, t).filter((e) => e.pubkey === pubkey && isV2Action(e))
+  const tagged = taggedIds(mine)
   const spawns = mine.filter(isV2Spawn).sort((a, b) => a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   // Each event under the spawn it names, once.
   const under = new Map<string, NostrEvent[]>()
@@ -339,19 +394,44 @@ export function keyChains(events: NostrEvent[], pubkey: string, t: number = Infi
   spawns.forEach((s, i) => {
     const chain = buildChain([s, ...(under.get(s.id) ?? [])], pubkey)
     const valid = validPrefixLength(chain)
-    if (i > 0 && goesOnToHop(chain, valid)) respawns++
+    if (i > 0 && goesOnToHop(chain, valid, tagged)) respawns++
     // The newest spawn, in NIP-01's order (lib/events newestSpawn), is the last of the oldest-first list.
-    if (i === spawns.length - 1) current = relayList === undefined ? valid : countsThrough(chain, relayList).end
-    if (!activeWeek) for (let k = 0; k < valid; k++) if (chain[k].createdAt > t - WEEK_S && chain[k].createdAt <= t) { activeWeek = true; break }
+    // Its untagged actions only (spec §8.13): the chain is judged whole, then counted.
+    if (i === spawns.length - 1) current = shownCount(chain, relayList === undefined ? valid : countsThrough(chain, relayList).end, tagged)
+    if (!activeWeek) for (let k = 0; k < valid; k++) if (chain[k].createdAt > t - WEEK_S && chain[k].createdAt <= t && !tagged.has(chain[k].id)) { activeWeek = true; break }
   })
   return { chainLength: current, respawns, activeWeek }
 }
 
-/** Each key's first v2 spawn time (the ticker's AVATARS IN CYBERSPACE and NEW ARRIVAL). */
-export function arrivalTimes(events: Iterable<NostrEvent>): Map<string, number> {
+/**
+ * Each key's first v2 spawn time (the ticker's AVATARS IN CYBERSPACE and NEW
+ * ARRIVAL). A spawn tagged no-broadcast (spec §8.13: a first arrival's
+ * tutorial) is not an arrival to show; such a key arrives with its first
+ * untagged action on that spawn's chain, any v2 action naming the spawn as
+ * its genesis, so a new player is counted once the tutorial is behind them.
+ * Only what `events` holds can say so: a key with nothing untagged in hand
+ * has not arrived.
+ */
+export function arrivalTimes(events: Iterable<NostrEvent>, alsoHeld?: ReadonlyMap<string, string>): Map<string, number> {
+  const list = [...events]
+  // `alsoHeld`: tagged spawns already known (by id, with their keys) that `events` may not hold, only their chains' actions (lib/tv/stats loadCensus).
+  const held = new Map([...(alsoHeld ?? []), ...taggedSpawns(list)])
   const first = new Map<string, number>()
-  for (const e of events) if (isV2Spawn(e)) first.set(e.pubkey, Math.min(first.get(e.pubkey) ?? Infinity, e.created_at))
+  const arrive = (e: NostrEvent): void => { first.set(e.pubkey, Math.min(first.get(e.pubkey) ?? Infinity, e.created_at)) }
+  for (const e of list) {
+    if (!isV2Action(e) || noBroadcast(e)) continue
+    if (isV2Spawn(e)) { arrive(e); continue }
+    const g = genesisOf(e)
+    if (g !== undefined && held.get(g) === e.pubkey) arrive(e)
+  }
   return first
+}
+
+/** The tagged v2 spawns among `events` (spec §8.13), by id, with their keys: the ones arrivalTimes cannot count from themselves. */
+export function taggedSpawns(events: Iterable<NostrEvent>): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const e of events) if (isV2Spawn(e) && noBroadcast(e)) out.set(e.id, e.pubkey)
+  return out
 }
 
 /** How many keys first spawned in the window (`from`, `to`]. */
@@ -389,6 +469,8 @@ export interface Addressed {
   pubkey: string
   d: string
   createdAt: number
+  /** It carries the no-broadcast tag (spec §8.13): it stands as the newest of its address, and is never counted. */
+  noBroadcast?: boolean
 }
 
 /**
@@ -431,7 +513,7 @@ export interface BagRecord extends Addressed {
 /** A kind 33330 as a BagRecord, or null. */
 export function bagRecord(e: NostrEvent): BagRecord | null {
   if (e.kind !== HIDDEN_KIND) return null
-  return { id: e.id, kind: e.kind, pubkey: e.pubkey, d: tagOf(e, 'd') ?? '', createdAt: e.created_at, sealed: hasTag(e, 'encrypted') }
+  return { id: e.id, kind: e.kind, pubkey: e.pubkey, d: tagOf(e, 'd') ?? '', createdAt: e.created_at, sealed: hasTag(e, 'encrypted'), ...(noBroadcast(e) ? { noBroadcast: true } : {}) }
 }
 
 /**
@@ -442,7 +524,7 @@ export function bagRecord(e: NostrEvent): BagRecord | null {
 export function bagsHidden(bags: Iterable<BagRecord>, deletions: Deletion[], t: number = Infinity): Map<string, number> {
   const times = new Map<string, number[]>()
   for (const b of newestPerAddress(bags, t)) {
-    if (!b.sealed || deleted(b, deletions, t)) continue
+    if (!b.sealed || b.noBroadcast || deleted(b, deletions, t)) continue
     times.set(b.pubkey, [...(times.get(b.pubkey) ?? []), b.createdAt])
   }
   return new Map([...times].map(([pk, ts]) => [pk, cappedPerDay(ts, BAGS_PER_DAY)]))
@@ -476,7 +558,7 @@ export function shapeHash(text: string): string {
 export function objectRecord(e: NostrEvent): ObjectRecord | null {
   if (e.kind !== OBJECT_KIND) return null
   const d = tagOf(e, 'd') ?? ''
-  const base = { id: e.id, kind: e.kind, pubkey: e.pubkey, d, createdAt: e.created_at, open: !hasTag(e, 'encrypted') }
+  const base = { id: e.id, kind: e.kind, pubkey: e.pubkey, d, createdAt: e.created_at, open: !hasTag(e, 'encrypted'), ...(noBroadcast(e) ? { noBroadcast: true } : {}) }
   if (!base.open) return { ...base, vertices: 0, shape: null }
   try {
     const model = fromPayload(JSON.parse(e.content), `${e.pubkey}:${d}`)
@@ -496,7 +578,7 @@ export function objectRecord(e: NostrEvent): ObjectRecord | null {
  */
 export function objectsPublished(objects: Iterable<ObjectRecord>, deletions: Deletion[], t: number = Infinity): Map<string, number> {
   const kept = newestPerAddress(objects, t)
-    .filter((o) => o.open && o.d !== 'avatar' && o.shape !== null && o.vertices >= OBJECT_MIN_VERTICES && !deleted(o, deletions, t))
+    .filter((o) => o.open && !o.noBroadcast && o.d !== 'avatar' && o.shape !== null && o.vertices >= OBJECT_MIN_VERTICES && !deleted(o, deletions, t))
     .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1))
   const shapes = new Map<string, Set<string>>()
   const times = new Map<string, number[]>()

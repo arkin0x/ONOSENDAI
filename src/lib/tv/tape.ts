@@ -27,6 +27,7 @@ import { AVATAR_KIND, avatarFromEvent } from '../avatar'
 import { REACTION_KIND, parseReaction } from '../social'
 import type { Beat, TapeItem } from './director'
 import { cleanText } from './text'
+import { noBroadcast } from '../noBroadcast'
 
 /**
  * The first second of Cyberspace v2 on the relays: the earliest v2 spawn on
@@ -83,9 +84,17 @@ export async function askAll(ask: Ask, filter: Filter): Promise<NostrEvent[]> {
   return [...byId.values()]
 }
 
-/** A movement event as a beat, or null for anything that is not one. */
+/**
+ * A movement event as a beat, or null for anything that is not one, and for
+ * one its publisher asked not to be broadcast (spec §8.13, lib/noBroadcast):
+ * a tutorial's moves. Its chain is the same chain; TV jumps over the tagged
+ * stretch, and the next untagged move starts a shot of its own from where
+ * that stretch left the avatar (TapeReader marks it, Beat `afterHidden`;
+ * director.ts Director.add).
+ */
 export function beatOf(ev: NostrEvent): Beat | null {
   if (ev.kind !== ACTION_KIND) return null
+  if (noBroadcast(ev)) return null
   // v1 is another tape: its own actions, its own space.
   if (ev.tags.some((t) => t[0] === 'version')) return null
   const action = parseAction(ev)
@@ -118,8 +127,14 @@ export const COMMENTED_KINDS = [String(ACTION_KIND), String(HIDDEN_KIND)]
  */
 export const REACTED_KINDS = ['3330', String(ACTION_KIND)]
 
-/** A bag, a public object, a cyberspace comment, a new avatar or a reaction to a shard or a move as a tape item; null for anything else. */
+/**
+ * A bag, a public object, a cyberspace comment, a new avatar or a reaction to
+ * a shard or a move as a tape item; null for anything else, and for any of
+ * them its publisher asked not to be broadcast (spec §8.13). A comment or a
+ * reaction ON a tagged event is not tagged itself, and plays.
+ */
 export function itemOf(ev: NostrEvent): TapeItem | null {
+  if (noBroadcast(ev)) return null
   const base = { id: ev.id, pubkey: ev.pubkey, at: ev.created_at }
   if (ev.kind === HIDDEN_KIND) {
     const h = heightHint(ev)
@@ -185,6 +200,8 @@ export class TapeReader {
   private span = FIRST_WINDOW_S
 
   private kinds: number[]
+  /** The moves left off the tape so far, asked not to be broadcast (spec §8.13): a move shown whose previous is one of them is marked `afterHidden`. */
+  private hiddenIds = new Set<string>()
 
   /** `withItems` false reads moves only. */
   constructor(from: number, private ask: Ask, private now: () => number = () => Math.floor(Date.now() / 1000), private withItems = true) {
@@ -230,10 +247,18 @@ export class TapeReader {
       if (events.length < CAP_SUSPECT / 4) this.span = Math.min(MAX_WINDOW_S, this.span * 2)
       const beats: Beat[] = []
       const items: TapeItem[] = []
-      // Windows never overlap, so no event comes back twice.
+      // Windows never overlap, so no event comes back twice. The tagged moves
+      // first, so the move after a tagged stretch is known by its previous
+      // link, whatever order the two were signed in within a second.
+      for (const ev of events) if (ev.kind === ACTION_KIND && noBroadcast(ev)) this.hiddenIds.add(ev.id)
       for (const ev of events) {
+        if (ev.kind === ACTION_KIND && noBroadcast(ev)) continue
         const beat = beatOf(ev)
-        if (beat) { beats.push(beat); continue }
+        if (beat) {
+          if (beat.action.previousId !== null && this.hiddenIds.has(beat.action.previousId)) beat.afterHidden = true
+          beats.push(beat)
+          continue
+        }
         const item = this.withItems ? itemOf(ev) : null
         if (item) items.push(item)
       }

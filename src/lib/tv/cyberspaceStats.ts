@@ -21,6 +21,12 @@
  * | NEW ARRIVALS | keys whose first spawn is in the week to AS OF, and the week before |
  * | ACTIVE USERS | keys with a valid action in the week to AS OF, HUMANS and AGENTS apart, and the week before |
  *
+ * No board counts an event tagged no-broadcast (spec §8.13: a tutorial's
+ * events; lib/countingRules): LONGEST CHAIN counts the current chain's
+ * untagged valid actions, the chain judged whole with its tagged ones; a
+ * tagged bag, object, respawn or action counts for nothing; a key whose
+ * spawn is tagged arrives with its first untagged action on that chain.
+ *
  * Everyone with qualifying public activity can be on a board (ruling D4: no
  * opt-out), arkinox included, ranked like anyone, with no row of his own
  * ("I'm not the house... put me in the normal leaderboards and give people

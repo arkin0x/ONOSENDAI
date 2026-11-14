@@ -43,7 +43,8 @@ export function tutorialSwitch(): boolean | null {
 /**
  * The tutorial with no switch set on this device: ON (owner, 2026-11-13, "lets
  * get the tutorial live today", decision A: on for every new arrival, who
- * starts LOCAL as before). It still runs by itself only for a brand-new
+ * starts LIVE since 2026-11-14, the run's events tagged no-broadcast, spec
+ * §8.13). It still runs by itself only for a brand-new
  * identity on arrival (store/useTutorial.ts isNewArrival); everyone else sees
  * the menu's Tutorial panel. ?tutorial=0 or that panel's switch turns it off
  * for this device.

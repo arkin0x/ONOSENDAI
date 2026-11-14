@@ -4,10 +4,16 @@
  *
  * The script (src/tutorial/script.ts) is data; this walks it, with the /demo
  * tour's own pieces (store/useDemo.ts applyScene, watchAction, aimCursor).
- * A first arrival starts LOCAL (feedback 2026-11-11, item 15): the first move
- * still signs the spawn and what they plant stays, but nothing is published
- * until they flip the publishing switch themselves, so a newcomer sandboxes
- * safely. A resume or a RESTART leaves the switch where they left it. It is gated by a
+ * A first arrival starts LIVE (owner, 2026-11-14), so Cyberspace TV and the
+ * numbers that say whether new players stay can see them: while a run is
+ * going, every public event the player signs carries the no-broadcast tag
+ * (spec §8.13, lib/noBroadcast.ts), and TV skips it. The tag stops with the
+ * run (a finish, a skip, a pause, another identity); events already signed
+ * keep it. Until 2026-11-14 a first arrival started LOCAL (feedback
+ * 2026-11-11, item 15), so the tutorial's moves would not crowd TV; the tag
+ * does that now. The publishing switch is never touched here: a first
+ * arrival has the device's (LIVE unless someone turned it off), and a resume
+ * or a RESTART leaves it where the player left it. It is gated by a
  * device switch, on by default since 2026-11-13
  * (tutorial/gate.ts), shown only to a brand-new identity on arrival
  * (isNewArrival) on an address that asked for no arrival mode (a ?mode= link
@@ -38,6 +44,7 @@ import { aimCursor, applyScene, useDemo, watchAction } from './useDemo'
 import { appMinted, chosenNewKey, keyMintedOnLoad, savedChainLoaded, useCyberspace, whyNoMove } from './useCyberspace'
 import { useTv } from './useTv'
 import { setMenuOpen } from '../hooks/useMenuOpen'
+import { holdBroadcastWhile } from '../lib/noBroadcast'
 
 /** How long a done step stays on screen, its ✓ showing, before the next comes up. */
 export const ADVANCE_MS = 900
@@ -296,7 +303,7 @@ interface TutorialState {
    * Start (or resume) for the identity on screen; `at` names a step and
    * resumes where the run was laid out, `restart` begins again from the first
    * laid out where the player stands now. Neither is a first arrival: at the
-   * spawn, LOCAL.
+   * spawn, the publishing switch as it is (LIVE by default).
    */
   start: (opts?: { at?: string; restart?: boolean }) => void
   /** NEXT (or SKIP on a step still waiting); on the last step, FINISH. */
@@ -422,15 +429,13 @@ export const useTutorial = create<TutorialState>((set, get) => {
       // stop picked, the Earth view) is not kept across a reload.
       const resumeAt = opts.at ? routeHead(steps, opts.at) : undefined
       const at = resumeAt ? steps.findIndex((s) => s.id === resumeAt) : 0
-      // A first arrival starts clutter-free and local: the menu shut (feedback
-      // item 16), publishing off (feedback item 15). A RESTART shuts the menu
-      // too (it is started from the menu) but leaves the publishing switch as
-      // the player set it; a resume leaves both. The inventory step opens the
-      // menu itself.
+      // A first arrival starts clutter-free: the menu shut (feedback item
+      // 16). A RESTART shuts the menu too (it is started from the menu); a
+      // resume leaves it. No start touches the publishing switch: a first
+      // arrival publishes (owner, 2026-11-14), its run's events tagged
+      // no-broadcast (holdBroadcastWhile, below). The inventory step opens
+      // the menu itself.
       if (!opts.at || opts.restart) setMenuOpen(false)
-      if (!opts.at && !opts.restart) {
-        try { useCyberspace.getState().setLive(false) } catch { /* no switch here */ }
-      }
       // A resume keeps the routes already checked off (feedback item 10).
       const doneChoices = opts.at && !opts.restart ? readProgress(pubkey)?.choices ?? [] : []
       const finishedBefore = !!opts.at && !opts.restart && readProgress(pubkey)?.ended === 'finished'
@@ -533,6 +538,22 @@ export const useTutorial = create<TutorialState>((set, get) => {
     setMinimized: (minimized) => set({ minimized }),
     setExplaining: (explaining) => set({ explaining }),
   }
+})
+
+/**
+ * While a run is going for the identity on screen, every public Cyberspace
+ * event this client signs carries the no-broadcast tag (spec §8.13;
+ * lib/noBroadcast.ts, added in the store's signEvent). `active` is false
+ * once the run is finished, skipped or paused, and a run belongs to its
+ * player only (another identity pauses it, watchFirstArrival; and only an
+ * event signed by the run's own key is tagged), so the tag stops with the
+ * run. A minimized run is still a run, and so is one resumed on a later
+ * load: its events stay tagged until it is finished or skipped.
+ */
+holdBroadcastWhile((signer) => {
+  const t = useTutorial.getState()
+  const who = signer ?? useCyberspace.getState().identity.pubkey
+  return t.active && t.pubkey !== null && t.pubkey === who
 })
 
 /**

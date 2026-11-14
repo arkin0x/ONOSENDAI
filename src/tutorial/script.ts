@@ -271,7 +271,13 @@ export const EARTH_BOARD: TutorialStep = {
   then: 'earth-ride',
 }
 
-/** RIDE glows (RIDE HERE when HOSAKA offers too); the step is done once the ride starts, not when it lands. */
+/**
+ * RIDE glows (RIDE HERE when HOSAKA offers too). The step is done, and the
+ * route checked off, once the ride starts, not when it lands; the choices
+ * come back only once the ride arrives at the stop, or is cancelled or fails
+ * (owner, 2026-11-14: they used to come back a moment after the start, over
+ * the ride).
+ */
 export const EARTH_RIDE: TutorialStep = {
   id: 'earth-ride',
   title: 'Ride',
@@ -280,6 +286,7 @@ export const EARTH_RIDE: TutorialStep = {
   scene: { target: 'keep', highlight: `${MENU_SHUT}, [data-panel-id="hyperspace"] .hyper__actions .hyper__btn--ride, [data-panel-id="hyperspace"] .hyper__choicebtn--here` },
   effect: 'hyperspace-first',
   wait: 'ride',
+  advanceOn: 'ride-over',
   branch: true,
 }
 

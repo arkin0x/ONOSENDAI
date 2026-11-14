@@ -364,13 +364,26 @@ export const useTutorial = create<TutorialState>((set, get) => {
       }))
     }
     if (step.wait) {
+      /** On by itself, a moment after the ✓ (or after `advanceOn`): the next thing to do comes up. */
+      const advance = (): void => {
+        if (advanceTimer !== null) return
+        advanceTimer = setTimeout(() => { advanceTimer = null; if (get().active && get().index === index) get().next() }, ADVANCE_MS)
+      }
       stepCleanups.push(watchWait(step.wait, () => {
         // Once: a watcher that calls twice must not start a second timer.
         if (get().index !== index || !get().active || get().done) return
         set({ done: true })
+        // A route's last step done is its route done, checked off now and
+        // kept, even while the step stays up (advanceOn) or a reload comes first.
+        if (checkOff(step)) writeProgress(pubkey, progress(step.id))
         if (viaBack) return
-        // On by itself, a moment after the ✓: the next thing to do comes up.
-        advanceTimer = setTimeout(() => { advanceTimer = null; if (get().active && get().index === index) get().next() }, ADVANCE_MS)
+        // Done, but on only once its second wait has happened too: the Earth
+        // route's RIDE waits for the ride to arrive, or to stop short.
+        if (step.advanceOn) {
+          stepCleanups.push(watchWait(step.advanceOn, () => { if (get().index === index && get().active) advance() }))
+          return
+        }
+        advance()
       }))
     }
     if (step.aim && !get().done) aimCursor(step.aim)
@@ -378,6 +391,20 @@ export const useTutorial = create<TutorialState>((set, get) => {
     if (effect) {
       try { const undo = effect(); if (undo) stepCleanups.push(undo) } catch (err) { console.warn('[tutorial] step effect failed:', err) }
     }
+  }
+
+  /**
+   * Check off the route whose last step `step` is (a branch step with no
+   * `then`), once; true when it was not checked off before.
+   */
+  const checkOff = (step: TutorialStep): boolean => {
+    if (!step.branch || step.then) return false
+    const s = get()
+    const ci = s.script.steps.findIndex((st) => st.choices)
+    const choice = ci >= 0 ? s.script.steps[ci].choices?.find((c) => c.step !== undefined && routeOf(s.script.steps, c.step).includes(step.id)) : undefined
+    if (!choice || s.doneChoices.includes(choice.id)) return false
+    set({ doneChoices: [...s.doneChoices, choice.id] })
+    return true
   }
 
   /** What is kept for a step: its id, the routes checked off so far (feedback item 10), and where the run is laid out. */
@@ -456,10 +483,8 @@ export const useTutorial = create<TutorialState>((set, get) => {
         const then = step.then ? s.script.steps.findIndex((st) => st.id === step.then) : -1
         if (then >= 0) { enter(then, s.index); return }
         const ci = s.script.steps.findIndex((st) => st.choices)
-        const choice = ci >= 0 ? s.script.steps[ci].choices?.find((c) => c.step !== undefined && routeOf(s.script.steps, c.step).includes(step.id)) : undefined
         // SKIP on a last step still waiting goes back without the check: the route was not done.
-        const finished = !step.wait || s.done
-        if (choice && finished && !s.doneChoices.includes(choice.id)) set({ doneChoices: [...s.doneChoices, choice.id] })
+        if (!step.wait || s.done) checkOff(step)
         if (ci >= 0) { enter(ci, s.index); return }
         get().end('finished')
         return
@@ -476,8 +501,8 @@ export const useTutorial = create<TutorialState>((set, get) => {
       const s = get()
       if (!s.active) return
       // On a branch, BACK is the route's step before, or from its first the
-      // way back to the choices, but it checks nothing off: only FINISH on
-      // the route's last step says the route was done.
+      // way back to the choices, but it checks nothing off: only the route's
+      // last step done (its wait, or FINISH on it) says the route was done.
       const here = s.script.steps[s.index]
       if (here?.branch) {
         const before = s.script.steps.findIndex((st) => st.branch === true && st.then === here.id)

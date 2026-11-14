@@ -44,7 +44,7 @@ import { sealEntries } from '../lib/chests'
 import { lockOf } from '../lib/locks'
 import type { Position } from '../lib/space'
 import { BOX_HEIGHT, chestCell, regionBase, toWorld, type TutorialLayout } from './layout'
-import { BACK_STEP, CATCH_FLOOR, COURSE, FINISH_CHEST, PLOT, PLOT_AT, courseToWorld, type CoursePart } from './course'
+import { BACK_STEP, CATCH_FLOOR, COURSE, FINISH_CHEST, PLOT, PLOT_AT, WALL_FAR, WALL_SIDE, courseToWorld, type CoursePart } from './course'
 import trophyPayload from './pieces/trophy.json'
 import platSquare6 from './pieces/plat-square-6.json'
 import platSquare4 from './pieces/plat-square-4.json'
@@ -65,7 +65,12 @@ const PIECES: Record<CoursePart['piece'], unknown> = {
   'flag-checkered': flagCheckered,
   'catch-floor': CATCH_FLOOR,
   'back-step': BACK_STEP,
+  'wall-far': WALL_FAR,
+  'wall-side': WALL_SIDE,
 }
+
+/** The pieces that take no taps: the deck's wall stands behind the finish chest, which is tapped through it. */
+const PASS_TAPS: ReadonlySet<CoursePart['piece']> = new Set(['wall-far', 'wall-side'])
 
 /** What the finish chest holds: pieces to build a course of your own. */
 const FINISH_KIT: Array<[unknown, string]> = [[platSquare4, 'platform'], [padBounce, 'bounce-pad'], [trampoline, 'trampoline'], [lineStart, 'start-line'], [lineFinish, 'finish-line']]
@@ -80,7 +85,7 @@ const REGION_REQUIRES = 'the key of a place'
  * without it still plays the same, and a bump would hand a player a new,
  * unopened chest.
  */
-export const STAGE_VERSION = 7
+export const STAGE_VERSION = 8
 
 /** One player's stage, by pubkey. */
 export const STAGE_PREFIX = 'onosendai:tutorial:stage:'
@@ -104,6 +109,8 @@ export interface StageIds {
   finishLookup: string
   /** The dirt plot shard. */
   plot: string
+  /** The finish deck's wall pieces, which let taps through to the chest (course.ts WALL). */
+  walls: string[]
 }
 
 export interface Stage {
@@ -270,6 +277,7 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
       finishContents: finishContents.map(entryId),
       finishLookup: finishKey.lookupId,
       plot: plot.id,
+      walls: course.filter((_, i) => PASS_TAPS.has(COURSE[i].piece)).map((e) => e.id),
     },
   }
 }

@@ -40,8 +40,8 @@ export type CarriedKey =
     height: number
     /** How you carry it: a held key (useSecrets keys), a cube you stand in now, or a place you stood on. */
     from: 'held' | 'here' | 'stood'
-    /** A held key's own source (useSecrets HeldKey): a hop of yours, a scan that opened something, or HOSAKA. */
-    source?: 'hop' | 'scan' | 'cloud'
+    /** A held key's own source (useSecrets HeldKey): a hop of yours, a scan that opened something, SCAN mode, or HOSAKA. */
+    source?: 'hop' | 'scan' | 'scanmode' | 'cloud'
     /** When it was first held, seconds since the epoch, for a held key. */
     at?: number
     /** The region's aligned corner, for "how far away" under OPEN. */

@@ -43,7 +43,6 @@ import { ConfirmModal } from './ConfirmModal'
 import { useRoomKeys } from '../store/useKeyring'
 import { Explanation } from './Explanation'
 import { useEscape } from '../hooks/useEscape'
-import { regionKeyQuote } from '../lib/deployPlan'
 
 const SORTS: Array<[SecretsSort, string]> = [['recent', 'MOST RECENT'], ['volume', 'LARGEST']]
 
@@ -95,20 +94,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   }
   const places = usePlacePages(placesVersion, storage.mode)
 
-  const anchor = useCyberspace((s) => s.anchor)
-  const anchorPlane = useCyberspace((s) => s.anchorPlane)
-  const limits = useCyberspace((s) => s.cloud.limits)
-  const provider = useCyberspace((s) => s.cloud.provider)
   const cloudOff = useCyberspace((s) => s.cloudPrefs.mode === 'off')
-  const buying = useSecrets((s) => s.buying)
-  const buyError = useSecrets((s) => s.buyError)
-
-  // Above what this machine sweeps for itself, up to what HOSAKA computes.
-  const lowest = SCAN_MAX_HEIGHT + 1
-  const highest = limits?.max_hop_height ?? lowest
-  const canBuy = !cloudOff && highest >= lowest
-  const [buyHeight, setBuyHeight] = useState(Math.min(highest, lowest + 4))
-  const price = useMemo(() => regionKeyQuote(buyHeight, provider)?.sats ?? null, [provider, buyHeight])
 
   const sort = useSecrets((s) => s.sort)
   const list = useMemo(() => heldList(keys, sort), [keys, sort])
@@ -212,27 +198,11 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
         <div className="secrets__body">
           <StorageNote storage={storage} />
 
-          {/* The heights this machine cannot reach for itself. A cube of side
-              2^12 it computes as you walk; 2^20 is a million pairings an axis. */}
-          {canBuy && (
-            <div className="secrets__buy">
-              <span className="login__label">Buy a key where you stand</span>
-              <div className="secrets__buy-row">
-                <button className="secrets__step" disabled={!!buying || buyHeight <= lowest} onClick={() => setBuyHeight((h) => Math.max(lowest, h - 1))} aria-label="Smaller region">−</button>
-                <span className="secrets__buy-size">2^{buyHeight} · {formatCellSize(buyHeight)}</span>
-                <button className="secrets__step" disabled={!!buying || buyHeight >= highest} onClick={() => setBuyHeight((h) => Math.min(highest, h + 1))} aria-label="Larger region">+</button>
-                <button
-                  className="avatars__go secrets__buy-go"
-                  disabled={!!buying}
-                  onClick={() => { void useSecrets.getState().buy(anchor, anchorPlane, buyHeight) }}
-                >{buying ? (buying.status === 'submitting' ? 'ASKING' : 'COMPUTING') : `BUY${price !== null ? ` · ${price} SATS` : ''}`}</button>
-              </div>
-              {buying
-                ? <span className="cloud__profile-note">HOSAKA is computing the 2^{buying.height} cube around you. It lands in this list when it is done.</span>
-                : <Explanation>Three axis trees at 2^{buyHeight}. Paid from your HOSAKA balance.</Explanation>}
-              {buyError && <span className="secrets__error">{buyError}</span>}
-            </div>
-          )}
+          {/* Buying a key went to SCAN mode (arkinox, 2026-11-14: "With this
+              new mode, I don't even think we need the Buy a key button in the
+              keyring modal anymore"): free up to this device's limit, HOSAKA
+              above it (store/useScan.ts). */}
+          <span className="secrets__scanmode">To scan a bigger cube, use SCAN mode.</span>
 
           <div className="secrets__rescan">
             <div className="secrets__section-head">
@@ -282,7 +252,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
             </div>
             <Explanation>
               The keys this device holds: ones that opened something where a scan ran, the regions
-              your hops crossed, and keys bought from HOSAKA. They are drawn in the scene and kept
+              your hops crossed, cubes SCAN mode scanned, and keys bought from HOSAKA. They are drawn in the scene and kept
               until you forget them. If storage passes its budget, opened and crossed keys go,
               oldest first, only after every scanned place has gone; bought keys never do. Every
               bought key is also copied to a small backstop in localStorage, so a key you paid for
@@ -320,7 +290,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                           number could only ever be one of its edges. */}
                       <span className="secrets__dims">{physicalSize(k)}</span>
                       <span className="secrets__meta">
-                        {k.plane === 1 ? 'ideaspace' : 'dataspace'} · {k.source === 'cloud' ? 'bought' : k.source === 'hop' ? 'crossed' : 'opened'} · {formatAgo(k.at, now)}
+                        {k.plane === 1 ? 'ideaspace' : 'dataspace'} · {k.source === 'cloud' ? 'bought' : k.source === 'hop' ? 'crossed' : k.source === 'scanmode' ? 'scanned' : 'opened'} · {formatAgo(k.at, now)}
                         {found > 0 && <span className="secrets__found"> · {found} found</span>}
                       </span>
                       <span className="secrets__id">{k.lookupId.slice(0, 16)}…</span>

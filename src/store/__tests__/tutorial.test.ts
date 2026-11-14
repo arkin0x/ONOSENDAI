@@ -246,7 +246,7 @@ describe('the script', () => {
   it('glows COMMIT alone, never the mode button beside it, and opens CONTROLS for it (items 5 and 14)', () => {
     for (const id of ['box', 'to-plot']) {
       const step = TUTORIAL_SCRIPT.steps.find((s) => s.id === id)!
-      expect(step.scene?.highlight, id).toBe('.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build)')
+      expect(step.scene?.highlight, id).toBe('.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build):not(.is-scan)')
       expect(step.scene?.pad, id).toBe(true)
     }
     // The course step opens CONTROLS and points at its arrows first: the
@@ -264,7 +264,7 @@ describe('the script', () => {
     // in any case; the course step glows it once the cursor is on the target (above).
     for (const s of TUTORIAL_SCRIPT.steps) {
       if (s.id === 'to-course') continue
-      if ([s.caption, s.hint].some((t) => t && /tap COMMIT/i.test(t))) expect(s.scene?.highlight, s.id).toBe('.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build)')
+      if ([s.caption, s.hint].some((t) => t && /tap COMMIT/i.test(t))) expect(s.scene?.highlight, s.id).toBe('.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build):not(.is-scan)')
     }
   })
 

@@ -1,6 +1,7 @@
 /**
- * padModeCycle.test.ts - the mode button's ring, HOP, VIEW, BUILD and back
- * to HOP (arkinox, 2026-11-11; BUILD joined on 2026-11-02), with WALK out of
+ * padModeCycle.test.ts - the mode button's ring, HOP, VIEW, BUILD, SCAN and
+ * back to HOP (arkinox, 2026-11-11; BUILD joined on 2026-11-02, SCAN between
+ * BUILD and HOP on 2026-11-14), with WALK out of
  * it: a toggle that remembers the mode it was entered from and goes back to
  * it, and RECALL that stays in VIEW and BUILD (arkinox, 2026-11-12). Every
  * other way in and out of BUILD still works beside it: B, Esc, EXIT, a
@@ -53,6 +54,7 @@ import { useWalk } from '../useWalk'
 import { useToast } from '../useToast'
 import { useRegion } from '../useRegion'
 import { buildHeld, buildToHop, currentPadMode, cycleMode, enterWalk, leaveWalk, padMode, recall } from '../padMode'
+import { useScan } from '../useScan'
 import { walkCancel } from '../../hooks/useKeyboard'
 import { escapeTop } from '../../hooks/useEscape'
 import { spectate, stopSpectating } from '../../lib/spectator'
@@ -66,6 +68,7 @@ beforeEach(async () => {
   useShards.setState({ pending: null, placedLast: null, deployStatus: 'idle', deployError: null })
   useWalk.getState().exit()
   B().exit()
+  useScan.getState().exit()
   S().clearFocus()
   useToast.getState().dismiss()
   await placeSpawn()
@@ -75,7 +78,7 @@ beforeEach(async () => {
 })
 
 describe('the mode button', () => {
-  it('goes HOP, VIEW, BUILD and back to HOP, one press each', () => {
+  it('goes HOP, VIEW, BUILD, SCAN and back to HOP, one press each', () => {
     const home = { ...S().position }
     cycleMode()
     expect(currentPadMode()).toBe('view')
@@ -90,10 +93,20 @@ describe('the mode button', () => {
     expect(B().active).toBe(true)
     expect(B().via).toBe('build')
     expect(S().cursor).toEqual(looked)
+    // BUILD's cursor moved on: SCAN starts there.
+    S().moveCursor({ axis: 'y', dir: 1 })
+    const built = { ...S().cursor }
+
+    cycleMode()
+    expect(currentPadMode()).toBe('scan')
+    expect(B().active).toBe(false)
+    expect(useScan.getState().active).toBe(true)
+    expect(S().viewing()).toBe(true)
+    expect(S().cursor).toEqual(built)
 
     cycleMode()
     expect(currentPadMode()).toBe('hop')
-    expect(B().active).toBe(false)
+    expect(useScan.getState().active).toBe(false)
     expect(S().focus).toBeNull()
     expect(S().atHead()).toBe(true)
     expect(S().cursor).toEqual(home)
@@ -110,14 +123,14 @@ describe('the mode button', () => {
 
   it('keeps the zoom all the way round', () => {
     useCyberspace.setState({ scaleExp: 5 })
-    for (const mode of ['view', 'build', 'hop'] as const) {
+    for (const mode of ['view', 'build', 'scan', 'hop'] as const) {
       cycleMode()
       expect(currentPadMode()).toBe(mode)
       expect(S().scaleExp).toBe(5)
     }
   })
 
-  it('from BUILD goes home to HOP even with the build cursor moved away, where EXIT leaves the view', () => {
+  it('from BUILD goes to SCAN at the build cursor, then home to HOP, where EXIT leaves the view', () => {
     const home = { ...S().position }
     B().enter('build')
     S().moveCursor({ axis: 'x', dir: 1 })
@@ -132,6 +145,8 @@ describe('the mode button', () => {
     S().moveCursor({ axis: 'x', dir: 1 })
     cycleMode()
     expect(B().active).toBe(false)
+    expect(currentPadMode()).toBe('scan')
+    cycleMode()
     expect(S().focus).toBeNull()
     expect(S().cursor).toEqual(home)
     expect(currentPadMode()).toBe('hop')
@@ -154,16 +169,25 @@ describe('the mode button', () => {
     cycleMode()
     expect(B().active).toBe(false)
     expect(useShards.getState().pending).toBeNull()
-    expect(currentPadMode()).toBe('hop')
+    expect(currentPadMode()).toBe('scan')
   })
 
-  it('while spectating, leaves BUILD back to watching them: there is no HOP to go to', async () => {
+  it('while spectating, BUILD goes to SCAN at the build cursor, as VIEW HERE ends the spectation', async () => {
     const pk = getPublicKey(generateSecretKey())
     B().enter('build')
     await spectate(pk)
     expect(B().active).toBe(true)
+    const aimed = { ...S().cursor }
     cycleMode()
     expect(B().active).toBe(false)
+    expect(currentPadMode()).toBe('scan')
+    expect(S().spectate).toBeNull()
+    expect(S().cursor).toEqual(aimed)
+    // B and EXIT still leave BUILD back to watching them.
+    cycleMode()
+    B().enter('build')
+    await spectate(pk)
+    B().exit()
     expect(S().spectate?.pubkey).toBe(pk)
     expect(S().focus).toBeNull()
   })
@@ -207,15 +231,21 @@ describe('the other ways in and out still work', () => {
     expect(padMode(false, true, true)).toBe('build')
     expect(padMode(false, false, true)).toBe('view')
     expect(padMode(false, false, false)).toBe('hop')
+    // SCAN only while its view is up, and never over WALK or BUILD.
+    expect(padMode(false, false, true, true)).toBe('scan')
+    expect(padMode(false, false, false, true)).toBe('hop')
+    expect(padMode(false, true, true, true)).toBe('build')
+    expect(padMode(true, false, true, true)).toBe('walk')
   })
 })
 
 describe('WALK, a toggle that remembers the mode (arkinox, 2026-11-12)', () => {
   it('from HOP, VIEW and BUILD, and back to each, VIEW and BUILD at your avatar', () => {
     const home = { ...S().position }
-    for (const from of ['hop', 'view', 'build'] as const) {
+    for (const from of ['hop', 'view', 'build', 'scan'] as const) {
       if (from === 'view') S().viewHere()
       if (from === 'build') B().enter('build')
+      if (from === 'scan') useScan.getState().enter()
       expect(currentPadMode()).toBe(from)
       enterWalk()
       expect(currentPadMode()).toBe('walk')
@@ -226,6 +256,7 @@ describe('WALK, a toggle that remembers the mode (arkinox, 2026-11-12)', () => {
       expect(S().cursor).toEqual(home)
       if (from === 'view') S().clearFocus()
       if (from === 'build') buildToHop()
+      if (from === 'scan') cycleMode()
     }
   })
 

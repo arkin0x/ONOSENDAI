@@ -21,10 +21,10 @@ const TREE = TUTORIAL_DNA.name.toUpperCase()
 
 /**
  * The COMMIT button alone (feedback items 5 and 14): the mode button beside it
- * shares the class, wearing is-hop, is-view or is-build (is-walk, from before
- * WALK left the commit slot, is still passed over).
+ * shares the class, wearing is-hop, is-view, is-build or is-scan (is-walk,
+ * from before WALK left the commit slot, is still passed over).
  */
-export const COMMIT = '.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build)'
+export const COMMIT = '.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk):not(.is-build):not(.is-scan)'
 
 export const WELCOME: TutorialStep = {
   id: 'welcome',

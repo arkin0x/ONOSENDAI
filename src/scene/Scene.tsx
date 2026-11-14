@@ -97,6 +97,7 @@ import { AudioSpheres } from './AudioSpheres'
 import { StarredMarks } from './StarredMarks'
 import { ShardGhost } from './ShardGhost'
 import { DeployRegionBox } from './DeployRegionBox'
+import { ScanRegionBox } from './ScanRegionBox'
 import { DoorRooms } from './DoorRooms'
 import { StepBox } from './StepBox'
 import { ChatRoomBox } from './ChatRoomBox'
@@ -265,6 +266,8 @@ function World(): JSX.Element {
       <StarredMarks axes={axes} />
       <ShardGhost axes={axes} />
       <DeployRegionBox axes={axes} />
+      {/* SCAN mode's purple cube at the cursor (store/useScan.ts). */}
+      <ScanRegionBox axes={axes} />
       <DoorRooms axes={axes} />
       <StepBox axes={axes} />
       <ChatRoomBox axes={axes} />

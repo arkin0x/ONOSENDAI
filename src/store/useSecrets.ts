@@ -78,9 +78,11 @@ export interface HeldKey {
   plane: Plane
   /**
    * How it was come by: a hop of your own, which grants the region it crossed;
-   * a scan that opened something where you stood; or a purchase from HOSAKA.
+   * a scan that opened something where you stood; a cube SCAN mode computed
+   * on this device (store/useScan.ts); or a purchase from HOSAKA, SCAN's
+   * above this device's ceiling included.
    */
-  source: 'hop' | 'scan' | 'cloud'
+  source: 'hop' | 'scan' | 'scanmode' | 'cloud'
   /** The action that bought it, for the chain overlay's key marker. */
   eventId?: string
   /** First held, in seconds since the epoch. */

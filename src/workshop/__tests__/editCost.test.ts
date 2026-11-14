@@ -11,6 +11,9 @@ import { describe, expect, it } from 'vitest'
 import { sameNumbers, sharedBufferDeps } from '../../scene/ShardMesh'
 
 const workshop = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
+const shardSheet = readFileSync(join(__dirname, '..', 'sheets', 'ShardSheet.tsx'), 'utf8')
+const avatarSheet = readFileSync(join(__dirname, '..', 'sheets', 'AvatarSheet.tsx'), 'utf8')
+const menuSheet = readFileSync(join(__dirname, '..', 'sheets', 'MenuSheet.tsx'), 'utf8')
 const mesh = readFileSync(join(__dirname, '..', '..', 'scene', 'ShardMesh.tsx'), 'utf8')
 
 describe('sameNumbers, which decides whether a geometry stands', () => {
@@ -72,19 +75,22 @@ describe('a paint on the bench', () => {
 })
 
 describe('the workshop shell, on every tap and paint', () => {
-  it('writes the object out for its size and fingerprint only while SHARD shows them', () => {
-    expect(workshop).toMatch(/const seen = panel === 'shard' \? shard : null/)
-    expect(workshop).toMatch(/shardFingerprint\(seen\)/)
-    expect(workshop).toMatch(/JSON\.stringify\(toPayload\(withAuthoredConstrain\(seen\)\)\)/)
+  it('writes the object out for its size and fingerprint only while SHARD shows them: in its sheet, mounted only while open', () => {
+    expect(shardSheet).toMatch(/shardFingerprint\(shard\)/)
+    expect(shardSheet).toMatch(/JSON\.stringify\(toPayload\(withAuthoredConstrain\(shard\)\)\)/)
+    expect(workshop).not.toMatch(/shardFingerprint|withAuthoredConstrain/)
+    expect(workshop).toMatch(/\{area && Body && shard && \(/)
   })
-  it('prices the avatar only while AVATAR shows it', () => {
-    expect(workshop).toMatch(/if \(!pricing \|\| !shard \|\| !buildable\)/)
+  it('prices the avatar only while AVATAR shows it: in its sheet, mounted only while open', () => {
+    expect(avatarSheet).toMatch(/if \(!shard \|\| !buildable\)/)
+    expect(workshop).not.toMatch(/avatarWork|avatarReach/)
   })
   it('keeps the shard list out of its own render: memoized, reading the shards itself', () => {
-    expect(workshop).toMatch(/const ShardList = memo\(function ShardList\(\{ currentId, onOpen \}: \{ currentId: string; onOpen: \(\) => void \}\)/)
-    expect(workshop).toMatch(/<ShardList currentId=\{shard\.id\} onOpen=\{closeMenu\} \/>/)
+    expect(menuSheet).toMatch(/const ShardList = memo\(function ShardList\(\{ currentId, onOpen \}: \{ currentId: string; onOpen: \(\) => void \}\)/)
+    expect(menuSheet).toMatch(/<ShardList currentId=\{currentId\} onOpen=\{onOpen\} \/>/)
+    expect(workshop).toMatch(/<MenuBody currentId=\{shard\.id\} onOpen=\{closeSheet\}/)
     // The close it is handed is stable, or the memo would draw it on every render.
-    expect(workshop).toMatch(/const closeMenu = useCallback\(\(\) => setPanel\(null\), \[\]\)/)
+    expect(workshop).toMatch(/const closeSheet = useCallback\(\(\) => setSheet\(null\), \[\]\)/)
     const shell = workshop.slice(workshop.indexOf('export function Workshop('))
     expect(shell).not.toMatch(/useWorkshop\(\(s\) => s\.shards\)/)
     expect(shell).not.toMatch(/useNewestFirst\(/)

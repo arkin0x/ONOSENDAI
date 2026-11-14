@@ -26,9 +26,13 @@
  * `square` makes the whole square around the ball the thing you press
  * (arkinox, 2026-11-02: "the touch area is a full square containing the
  * sphere"); a round button's corners are not part of it.
+ *
+ * `children` replace the globe: the workshop's view ball is the same drag and
+ * tap round the axes compass (workshop/shell/ViewBall.tsx), drawn by its own
+ * class rather than the globe's.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { noCallout } from '../../hooks/useRepeatable'
 
 interface OrbitSphereProps {
@@ -44,18 +48,29 @@ interface OrbitSphereProps {
   className?: string
   /** Press anywhere in the square around the ball, not only on the ball. */
   square?: boolean
+  /** Drawn inside instead of the globe; the button then wears `className` alone. */
+  children?: ReactNode
+  /** Extra attributes for the button (aria-expanded and the like). */
+  aria?: Record<`aria-${string}`, string | boolean>
 }
+
+/**
+ * How far a press may wander, in CSS pixels, and still be a tap when it
+ * lifts: a thumb never lifts where it landed. What it wandered still turns
+ * the view; it only does not cancel the tap.
+ */
+const TAP_SLOP = 6
 
 /** The document events a drag is followed through, in the capture phase. */
 const FOLLOWED = ['pointermove', 'pointerup', 'pointercancel'] as const
 
-export function OrbitSphere({ onTurn, onTap, label, title, ariaLabel, className, square = false }: OrbitSphereProps): JSX.Element {
+export function OrbitSphere({ onTurn, onTap, label, title, ariaLabel, className, square = false, children, aria }: OrbitSphereProps): JSX.Element {
   // The newest callbacks, read when an event arrives rather than when the drag began.
   const turn = useRef(onTurn)
   turn.current = onTurn
   const tap = useRef(onTap)
   tap.current = onTap
-  const drag = useRef<{ id: number; x: number; y: number; size: number; moved: boolean; off: () => void } | null>(null)
+  const drag = useRef<{ id: number; x: number; y: number; size: number; travel: number; off: () => void } | null>(null)
 
   const end = (): void => {
     const d = drag.current
@@ -87,18 +102,18 @@ export function OrbitSphere({ onTurn, onTap, label, title, ariaLabel, className,
         if (dx === 0 && dy === 0) return
         d.x = p.clientX
         d.y = p.clientY
-        d.moved = true
+        d.travel += Math.abs(dx) + Math.abs(dy)
         turn.current(dx, dy, d.size)
         return
       }
       // Lifted, or taken by the browser: the drag is over, and with no move it was a tap.
-      const moved = d.moved
+      const moved = d.travel > TAP_SLOP
       end()
       if (p.type === 'pointerup' && !moved) tap.current?.()
     }
     for (const t of FOLLOWED) doc.addEventListener(t, listener, true)
     drag.current = {
-      id, x: e.clientX, y: e.clientY, size: el.getBoundingClientRect().width, moved: false,
+      id, x: e.clientX, y: e.clientY, size: el.getBoundingClientRect().width, travel: 0,
       off: () => { for (const t of FOLLOWED) doc.removeEventListener(t, listener, true) },
     }
   }
@@ -110,7 +125,14 @@ export function OrbitSphere({ onTurn, onTap, label, title, ariaLabel, className,
     if (!el.isConnected || el.getClientRects().length === 0) end()
   }
 
-  const handlers = { ...noCallout, onPointerDown: down, onLostPointerCapture: lost }
+  const handlers = { ...noCallout, ...aria, onPointerDown: down, onLostPointerCapture: lost }
+  if (children !== undefined) {
+    return (
+      <button className={className} title={title} aria-label={ariaLabel} {...handlers}>
+        {children}
+      </button>
+    )
+  }
   if (square) {
     return (
       <button className={className ? `orbsquare ${className}` : 'orbsquare'} title={title} aria-label={ariaLabel} {...handlers}>

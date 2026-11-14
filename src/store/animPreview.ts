@@ -10,7 +10,7 @@
  *
  * `point` is the path point being edited, drawn larger on the bench.
  *
- * It outlives the MOTION panel, so a phone can close the panel and watch, and
+ * It outlives the MOTION sheet, so a phone can close the sheet and watch, and
  * stops when the shard on the bench changes, when the tool changes (an
  * editing tool needs the object at rest under its handles), and when the
  * workshop closes.

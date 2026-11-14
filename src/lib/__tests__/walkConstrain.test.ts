@@ -260,7 +260,7 @@ describe('a sealed object', () => {
 
 describe('what the controls show', () => {
   it('the workshop row lights the setting a shard publishes as: OPAQUE for one that never chose', () => {
-    const src = readFileSync(join(__dirname, '..', '..', 'workshop', 'Workshop.tsx'), 'utf8')
+    const src = readFileSync(join(__dirname, '..', '..', 'workshop', 'sheets', 'ShardSheet.tsx'), 'utf8')
     const row = src.slice(src.indexOf('CONSTRAIN MOVEMENT IN WALK MODE'), src.indexOf('</div>', src.indexOf('CONSTRAIN MOVEMENT IN WALK MODE')))
     expect(row).toContain('authoredConstrainOf(shard) === c')
     // The walker's reading would light OFF for a shard that never chose.

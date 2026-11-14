@@ -1,6 +1,6 @@
 /**
- * AnimEditor.tsx: the workshop's MOTION panel (its own top-level button,
- * a sibling of SHARD; arkinox, 2026-11-14), the editor for an object's
+ * AnimEditor.tsx: the workshop's MOTION sheet (its own top-level area,
+ * sheets/MotionSheet.tsx; arkinox, 2026-11-14), the editor for an object's
  * `anim` (DECK-0003 §1.14; lib/animEdit.ts holds every rule and conversion,
  * this only draws them). arkinox, 2026-11-14: "i don't want to
  * ship animations without shipping workshop tools to create and edit
@@ -117,8 +117,8 @@ export function AnimEditor(): JSX.Element {
 
   return (
     <div className="ws__anim" role="group" aria-label="Motions">
-      {/* The panel is MOTION (Workshop.tsx); this row is its preview, there once there is a motion to show. */}
-      {list.length > 0 && <div className="workshop__row">
+      {/* The sheet is MOTION (sheets/MotionSheet.tsx); this row is its preview, pinned at the top, there once there is a motion to show. */}
+      {list.length > 0 && <div className="workshop__row ws__anim-preview">
         <span className="workshop__label">PREVIEW</span>
         {preview.on && preview.playing
           ? <button className="workshop__btn" title="Pause the preview" aria-label="Pause" onClick={() => preview.pause()}><Pause size={12} aria-hidden /> PAUSE</button>

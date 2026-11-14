@@ -21,7 +21,6 @@ import { useWorkshop } from '../../store/useWorkshop'
 import { useAnimPreview } from '../../store/animPreview'
 import { AnimEditor } from '../AnimEditor'
 
-const SOURCE = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
 const EDITOR = readFileSync(join(__dirname, '..', 'AnimEditor.tsx'), 'utf8')
 
 function hoop(): ShardModel {
@@ -59,19 +58,14 @@ async function click(m: Awaited<ReturnType<typeof mount>>, label: string): Promi
 }
 
 describe('the MOTION panel', () => {
-  it('has its own top-level MOTION button and panel, a sibling of SHARD; nothing motion stays in SHARD', () => {
-    const chips = SOURCE.slice(SOURCE.indexOf('<div className="ws__chips">'), SOURCE.indexOf('{phase && ('))
-    expect(chips).toMatch(/toggle\('motion'\)/)
-    expect(chips).toMatch(/<Orbit [^>]*\/>MOTION/)
-    expect(chips.indexOf("toggle('motion')")).toBeGreaterThan(chips.indexOf("toggle('shard')"))
-    expect(chips.indexOf("toggle('motion')")).toBeLessThan(chips.indexOf("toggle('avatar')"))
-    const motion = SOURCE.slice(SOURCE.indexOf("{panel === 'motion' && shard && ("), SOURCE.indexOf("{panel === 'avatar' && shard && ("))
-    expect(motion).toContain('role="region" aria-label="Motion"')
-    expect(motion).toContain('<AnimEditor />')
-    const start = SOURCE.indexOf("{panel === 'shard' && shard && (")
-    const shard = SOURCE.slice(start, SOURCE.indexOf('\n      )}\n', start))
+  it('lives whole in the MOTION sheet, a top-level area; nothing motion stays in SHARD', () => {
+    const sheet = readFileSync(join(__dirname, '..', 'sheets', 'MotionSheet.tsx'), 'utf8')
+    expect(sheet).toContain('<AnimEditor />')
+    expect(readFileSync(join(__dirname, '..', 'sheets', 'areas.ts'), 'utf8')).toContain('export const MOTION_READY = true')
+    const shard = readFileSync(join(__dirname, '..', 'sheets', 'ShardSheet.tsx'), 'utf8')
     expect(shard).not.toMatch(/AnimEditor|AnimRow|\bMOTION\b|\banim\b/)
-    expect(SOURCE).not.toContain('AnimRow')
+    // The preview row is pinned at the top of the sheet.
+    expect(EDITOR).toContain('ws__anim-preview')
   })
 
   it('says nothing with an em dash', () => {

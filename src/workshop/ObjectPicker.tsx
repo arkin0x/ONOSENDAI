@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { Sheet } from './shell/Sheet'
 import { nip19 } from 'nostr-tools'
 import { fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from '../lib/contacts'
@@ -123,16 +123,14 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
     if (!shard) { setStatus(raw == null ? 'No relay had that object.' : 'That object is not one the format can read.'); return }
     choose({ ref, name: shard.name, shard })
   }
-  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  // Escape closes it as its X does (arkinox, 2026-10-01).
   useEscape('modal', true, onClose)
 
-  return createPortal(
-    <div className="modal" role="dialog" aria-modal="true" aria-label="Choose an object to stamp" onPointerDown={onClose}>
-      <div className="modal__card login objpick" onPointerDown={(e) => e.stopPropagation()}>
-        <div className="login__head">
-          <h2 className="modal__title">Stamp an object</h2>
-          <button className="secret__close" onClick={onClose} aria-label="Close">✕</button>
-        </div>
+  // A sheet over the dock (workshop redesign, phase 1), standing on the strip
+  // with the bench in view above it, rather than a modal over everything.
+  return (
+    <Sheet name="Choose an object to stamp" title="STAMP AN OBJECT" onClose={onClose} tall className="objpick-sheet">
+      <div className="login objpick">
         <p className="login__note">
           Placed by reference: it stays that object, and follows it when its author edits it. Only published objects can be
           placed: PUBLISH one from SHARD first, here or in snocrash.
@@ -163,7 +161,6 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
           {status && <p className="login__note" style={{ margin: 0 }}>{status}</p>}
         </div>
       </div>
-    </div>,
-    document.body,
+    </Sheet>
   )
 }

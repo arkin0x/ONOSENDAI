@@ -6,7 +6,7 @@
  * on the grid, STAMP lands a shape and ADD a vertex at the snapped point; on
  * a handle, SELECT picks it and FACE collects it; on a face, FACE selects it
  * and its corners, so the pad moves and turns it and DELETE can take it.
- * Dragging orbits on every tool but SELECT, and the orbit ball at the bottom
+ * Dragging orbits on every tool but SELECT, and the view ball at the top
  * right orbits on every tool. In SELECT a drag is the box instead (arkinox,
  * 2026-10-10): each box adds the points inside it, so several little boxes
  * build a selection, and INVERT makes taps and boxes take away. (FACE had the
@@ -34,7 +34,7 @@ import { ACCENT, BG, WARN } from '../lib/palette'
 import { glowTexture } from '../lib/glow'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from 'sno-core/shards'
 import { BenchGrid } from './benchGrid'
-import { benchAxes, benchPose, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
+import { VIEW_DIRS, benchAxes, benchPose, frameOffset, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
 import { OVERLAY_ORDER } from '../scene/shardFaces'
@@ -262,7 +262,7 @@ function ScreenScale({ position, children }: { position: [number, number, number
     const g = ref.current
     if (!g) return
     const cam = state.camera as PerspectiveCamera
-    const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
+    const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / fieldHeight(cam, state.size.height)
     g.scale.setScalar(Math.max(1e-5, cam.position.distanceTo(g.position) * perPixel))
   })
   return <group ref={ref} position={position}>{children}</group>
@@ -322,8 +322,8 @@ function Handles(): JSX.Element | null {
   }, [dots, halos, hits, groups, shard, chosen, pickedSet, invalidate])
   useLayoutEffect(() => { hits.radiusPx = hitRadiusFor(tool) }, [hits, tool])
   useFrame((state) => {
-    dots.update(state.camera as PerspectiveCamera, state.size.height)
-    hits.heightPx = state.size.height
+    dots.update(state.camera as PerspectiveCamera, fieldHeight(state.camera as PerspectiveCamera, state.size.height))
+    hits.heightPx = fieldHeight(state.camera as PerspectiveCamera, state.size.height)
   })
   const pressed = useMemo(() => new PressMemory(), [])
   if (!shard) return null
@@ -523,7 +523,7 @@ function Aim(): null {
  * away instead. Shift does nothing any more, and is harmless. The box is a
  * plain element over the canvas, drawn here without React. A tap (no drag)
  * is left to the handles; orbit is off in SELECT (Bench), so a one-finger
- * drag is the box's alone, and the orbit ball turns the view meanwhile. SELECT
+ * drag is the box's alone, and the view ball turns the view meanwhile. SELECT
  * only: FACE had the box for an evening and did not need it (arkinox,
  * 2026-10-10), so a drag there orbits as it always did. A second finger
  * means a pan: the box cancels and the selection is put back.
@@ -683,8 +683,11 @@ function Keys(): null {
 
 /** Publishes the camera's snapped axes for the pad outside the canvas, only when they change. */
 /**
- * Sends the camera home on request (the default oblique view, the target kept),
- * and shares its orientation with the compass every frame.
+ * Turns the camera on request from the view ball's menu (benchAxes ViewKind):
+ * HOME, the default oblique view with the target kept; TOP, FRONT and SIDE,
+ * straight down an axis at the distance HOME would take; FIT, the whole
+ * shard from where the camera already looks. Shares the camera's orientation
+ * with the view ball every frame.
  */
 function ViewDriver({ sphere }: { sphere: { current: Sphere | null } }): null {
   const camera = useThree((s) => s.camera)
@@ -693,16 +696,31 @@ function ViewDriver({ sphere }: { sphere: { current: Sphere | null } }): null {
   useFrame(() => { benchPose.copy(camera.quaternion) })
   useEffect(() => {
     if (!request || !controls) return
+    const cam = camera as PerspectiveCamera
+    if (request.kind === 'fit') {
+      // The whole shard, from the way the camera faces now: aimed at the
+      // middle of what it draws, as far back as that needs.
+      const s = sphere.current
+      const dir = camera.position.clone().sub(controls.target)
+      if (dir.lengthSq() === 0) dir.set(HOME[0], HOME[1], HOME[2])
+      if (s) controls.target.set(s.center[0], s.center[1], s.center[2])
+      dir.setLength(Math.max(MIN_DISTANCE, fitDistance(s ? s.radius : reachRadius(null, controls.target), cam.fov, cam.aspect)))
+      camera.position.copy(controls.target).add(dir)
+      controls.update()
+      return
+    }
     // Home is the opening view's direction, at its distance or farther: as far
     // as the whole shard needs to fit from the target (benchReach.ts), so a
-    // court sent home is seen whole rather than from inside its walls.
+    // court sent home is seen whole rather than from inside its walls. TOP,
+    // FRONT and SIDE take the same distance down their own axis.
     const home = new Vector3(HOME[0], HOME[1], HOME[2])
-    const cam = camera as PerspectiveCamera
-    home.setLength(Math.max(home.length(), fitDistance(reachRadius(sphere.current, controls.target), cam.fov, cam.aspect)))
-    camera.position.copy(controls.target).add(home)
+    const length = Math.max(home.length(), fitDistance(reachRadius(sphere.current, controls.target), cam.fov, cam.aspect))
+    const dir = request.kind === 'home' ? home : new Vector3(...VIEW_DIRS[request.kind])
+    dir.setLength(length)
+    camera.position.copy(controls.target).add(dir)
     controls.update()
   }, [request]) // eslint-disable-line react-hooks/exhaustive-deps
-  // The orbit ball (Workshop OrbitSphere) turns the camera about the controls'
+  // The view ball (shell/ViewBall) turns the camera about the controls'
   // target through this sink, outside React: a drag arrives at pointer rate.
   // OrbitControls rebuilds its own angles from the camera's position on every
   // update, so moving the camera and calling update keeps the two agreed.
@@ -716,6 +734,59 @@ function ViewDriver({ sphere }: { sphere: { current: Sphere | null } }): null {
     })
     return () => setOrbitSink(null)
   }, [camera, controls])
+  return null
+}
+
+/**
+ * The canvas height the camera's field of view spans, in CSS pixels: the
+ * canvas's own, or the taller virtual view Framer frames the shard in.
+ * What keeps a handle or a dot its size on screen divides by this.
+ */
+function fieldHeight(camera: PerspectiveCamera, height: number): number {
+  const v = camera.view
+  return v && v.enabled && v.height > 0 ? v.fullHeight * (height / v.height) : height
+}
+
+/** How far the framing moves toward where it is going, per frame. */
+const FRAME_EASE = 0.25
+
+/**
+ * Frames the shard into the part of the bench nothing covers (workshop
+ * redesign, phase 1): the top bar above, the strip and dock below, or a sheet
+ * risen over them. The canvas stays the whole screen, so nothing under a
+ * finger moves or resizes; the camera's view offset (benchAxes frameOffset)
+ * puts the middle of its picture in the middle of the uncovered band, eased
+ * there over a few frames. The offset is part of the projection, so taps,
+ * the box and the handles all read it as they read the camera.
+ */
+function Framer(): null {
+  const camera = useThree((s) => s.camera) as PerspectiveCamera
+  const size = useThree((s) => s.size)
+  const invalidate = useThree((s) => s.invalidate)
+  const now = useRef({ top: 0, bottom: 0 })
+  const applied = useRef('')
+  useEffect(() => useBenchView.subscribe((s, prev) => { if (s.insets !== prev.insets) invalidate() }), [invalidate])
+  useEffect(() => () => { camera.clearViewOffset() }, [camera])
+  useFrame(() => {
+    const goal = useBenchView.getState().insets
+    const n = now.current
+    const still = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const ease = (a: number, b: number): number => (still || Math.abs(b - a) < 0.5 ? b : a + (b - a) * FRAME_EASE)
+    n.top = ease(n.top, goal.top)
+    n.bottom = ease(n.bottom, goal.bottom)
+    const o = frameOffset(size.width, size.height, n)
+    const key = o ? `${o.fullWidth}:${o.fullHeight}:${o.y}:${camera.aspect}` : `none:${size.width / size.height}:${camera.aspect}`
+    if (key !== applied.current) {
+      if (o) camera.setViewOffset(o.fullWidth, o.fullHeight, o.x, o.y, o.width, o.height)
+      else {
+        camera.clearViewOffset()
+        camera.aspect = size.width / size.height
+        camera.updateProjectionMatrix()
+      }
+      applied.current = o ? `${o.fullWidth}:${o.fullHeight}:${o.y}:${camera.aspect}` : `none:${size.width / size.height}:${camera.aspect}`
+    }
+    if (n.top !== goal.top || n.bottom !== goal.bottom) invalidate()
+  })
   return null
 }
 
@@ -874,7 +945,7 @@ function BenchImpl(): JSX.Element {
           (shardLight.tsx; arkinox, 2026-10-12). */}
       <ShardLights />
       {/* One finger or left drag orbits, except in SELECT where that drag is
-          the marquee's and the orbit ball turns the view (arkinox,
+          the marquee's and the view ball turns the view (arkinox,
           2026-10-10). Two fingers, or the right button, pan
           the view in the screen plane; pinch or the wheel dollies, in to 0.6 of a
           gibson so a fifth-gibson step fills a good share of a phone's screen,
@@ -889,6 +960,7 @@ function BenchImpl(): JSX.Element {
       <BenchWake />
       <AxesReporter />
       <ViewDriver sphere={sphere} />
+      <Framer />
       {/* Axes, in the compass's colors, so X is red here and out there. */}
       <BenchAxes reach={extent + 1} />
       <Grid />

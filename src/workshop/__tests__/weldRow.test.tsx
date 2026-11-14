@@ -1,24 +1,25 @@
 /**
- * The weld row (arkinox, 2026-10-12): a row of its own at the top of the
- * bottom-left column, standing on the tool chip when nothing else is up, and
- * nowhere near the orbit ball, which it used to cover from the color corner.
+ * The weld row (arkinox, 2026-10-12): a row of its own, never in the color
+ * corner, which it used to cover. With the workshop split by place (workshop
+ * redesign, phase 1) the held rows stand side by side in the strip, and WELD
+ * comes last, so no other row moves when it comes and goes.
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { WeldRow } from '../Workshop'
+import { WeldRow } from '../HeldRows'
 
-const SOURCE = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
+const HELD = readFileSync(join(__dirname, '..', 'HeldRows.tsx'), 'utf8')
+const ACTS = readFileSync(join(__dirname, '..', 'ColorActs.tsx'), 'utf8')
+const STRIP = readFileSync(join(__dirname, '..', 'shell', 'Strip.tsx'), 'utf8')
 
-/** The JSX between an opening `<div className="X"` and the next sibling block at the same indent. */
-function block(cls: string): string {
-  const start = SOURCE.indexOf(`<div className="${cls}"`)
+/** One exported component's source, from its `export function` to the next one. */
+function fn(name: string): string {
+  const start = HELD.indexOf(`export function ${name}(`)
   expect(start).toBeGreaterThan(-1)
-  const indent = SOURCE.lastIndexOf('\n', start)
-  const pad = SOURCE.slice(indent + 1, start)
-  const end = SOURCE.indexOf(`\n${pad}</div>`, start)
-  return SOURCE.slice(start, end)
+  const next = HELD.indexOf('\nexport function ', start + 1)
+  return HELD.slice(start, next === -1 ? undefined : next)
 }
 
 describe('WeldRow', () => {
@@ -33,17 +34,20 @@ describe('WeldRow', () => {
     expect(renderToStaticMarkup(<WeldRow stacked={{ spots: 0, points: 0 }} selected={4} />)).toBe('')
   })
 
-  it('stands first in the bottom-left column, so the chip is the next thing under it when no row is up', () => {
-    const tools = block('ws__tools')
-    const weld = tools.indexOf('<WeldRow')
+  it('stands in the strip, last of the held rows, so none of them moves when it comes and goes', () => {
+    expect(STRIP).toContain('<HeldActions />')
+    const held = fn('HeldActions')
+    const weld = held.indexOf('<WeldRow')
     expect(weld).toBeGreaterThan(-1)
-    for (const row of ['<SelectRow', '<ActionRow', '<TurnRow', '<ControlsPad', 'ws__toolchips']) {
-      expect(tools.indexOf(row)).toBeGreaterThan(weld)
+    for (const row of ['<SelectRow', '<TurnRow', '<ActionRow']) {
+      const at = held.indexOf(row)
+      expect(at).toBeGreaterThan(-1)
+      expect(at).toBeLessThan(weld)
     }
   })
 
-  it('is gone from the color corner beside the orbit ball', () => {
-    expect(block('ws__corner')).not.toMatch(/WeldRow|weld\(\)|STACKED/i)
-    expect(SOURCE).not.toContain('benchops')
+  it('is gone from the color corner and from the move pad beside it', () => {
+    expect(ACTS).not.toMatch(/WeldRow|weld\(\)|STACKED/i)
+    expect(fn('HeldPad')).not.toMatch(/WeldRow/)
   })
 })

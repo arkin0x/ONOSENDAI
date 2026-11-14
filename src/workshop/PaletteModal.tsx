@@ -16,7 +16,6 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { Check, Download, Plus, Trash2, Upload, X } from 'lucide-react'
 import { BUILT_IN, BUILT_IN_NAME, explainPasteProblem, hexAt, parsePaletteText, type Palette } from 'sno-core/snoPalette'
 import { rgbToHex } from 'sno-core/shards'
@@ -262,12 +261,12 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
   // 2026-10-01). Its own confirmations open later, so they close first.
   useEscape('modal', true, fold)
 
-  // Through a portal, for the reason ConfirmModal gives: this is rendered from
-  // inside .ws__corner, which has a z-index and a backdrop-filter and is
-  // therefore a stacking context, so a full-screen modal left in there paints
-  // under the chip row that follows it.
-  return createPortal(
-    <div className={`modal palettes${folding ? ' is-folding' : ''}`} ref={rootRef} role="dialog" aria-modal="true" aria-label="Palette">
+  // A sheet over the dock (workshop redesign, phase 1), standing on the strip
+  // with the object in view above it, rather than a modal over everything.
+  // It is rendered in the workshop's bottom group, beside the strip and the
+  // dock, so no stacking context lies between it and them.
+  return (
+    <div className={`palettes ws__sheet ws__sheet--tall${folding ? ' is-folding' : ''}`} ref={rootRef} role="dialog" aria-label="Palette">
       <div className="palettes__head">
         <div>
           <h2 className="palettes__title">PALETTE</h2>
@@ -485,8 +484,7 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
           onCancel={() => setForgetting(null)}
         />
       )}
-    </div>,
-    document.body,
+    </div>
   )
 }
 

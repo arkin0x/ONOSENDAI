@@ -88,9 +88,26 @@ export const DEFAULT_AXES: BenchAxes = { right: { axis: 0, dir: 1 }, up: { axis:
 /** The bench camera's orientation, for the compass in its own canvas. Mutable, per frame, never store state. */
 export const benchPose = new Quaternion()
 
-/** What the view pad asks of the camera: only the way home, now that the arrows turn the grid. */
-export type ViewAsk = { kind: 'home' }
+/**
+ * What the view ball's menu asks of the camera: HOME (the opening view),
+ * FIT (the whole shard, seen from where you are), or straight down a world
+ * axis, TOP, FRONT or SIDE (workshop redesign, phase 1).
+ */
+export type ViewKind = 'home' | 'fit' | 'top' | 'front' | 'side'
+export type ViewAsk = { kind: ViewKind }
 export type ViewRequest = ViewAsk & { id: number }
+
+/**
+ * The camera's direction from its target for each fixed view, in render
+ * units. TOP is a hair off the vertical, since straight down the up axis
+ * leaves the camera no way to know which way is up; FRONT and SIDE look from
+ * the side HOME opens on, so a view and HOME are never back to front.
+ */
+export const VIEW_DIRS: Record<'top' | 'front' | 'side', [number, number, number]> = {
+  top: [0, 1, 0.001],
+  front: [0, 0, 1],
+  side: [1, 0, 0],
+}
 
 /**
  * The working grid after a quarter turn about a screen axis. 'tip' turns it
@@ -107,9 +124,33 @@ export function planeAfter(plane: WorkPlane, axes: BenchAxes, about: 'tip' | 'ro
   return (3 - plane - a) as WorkPlane
 }
 
-export const useBenchView = create<{ axes: BenchAxes; request: ViewRequest | null }>(() => ({ axes: DEFAULT_AXES, request: null }))
+/**
+ * How much of the bench the workshop's fixed places and an open sheet cover,
+ * in CSS pixels from the top and from the bottom (Workshop measures them).
+ * The bench frames the shard into what is left, so a sheet never hides it
+ * (Bench Framer; workshop redesign, phase 1).
+ */
+export interface BenchInsets { top: number; bottom: number }
 
-/** The orbit ball's diameter in CSS pixels: the pad's width, three keys and two gaps. */
+export const useBenchView = create<{ axes: BenchAxes; request: ViewRequest | null; insets: BenchInsets }>(() => ({ axes: DEFAULT_AXES, request: null, insets: { top: 0, bottom: 0 } }))
+
+/**
+ * The camera's view offset for insets on a canvas `width` by `height`: a
+ * taller virtual view whose middle sits in the middle of the uncovered band,
+ * of which the canvas shows the part on screen. Null when the band is
+ * already centred. Pure, so the framing is tested without a camera.
+ */
+export function frameOffset(width: number, height: number, insets: BenchInsets): { fullWidth: number; fullHeight: number; x: number; y: number; width: number; height: number } | null {
+  const shift = Math.round(insets.bottom - insets.top)
+  if (width <= 0 || height <= 0 || shift === 0 || Math.abs(shift) >= height) return null
+  // Shown band [0, height] of a virtual view `height + |shift|` tall: its
+  // middle lands at (height - shift) / 2, the middle of [top, height - bottom].
+  return shift > 0
+    ? { fullWidth: width, fullHeight: height + shift, x: 0, y: shift, width, height }
+    : { fullWidth: width, fullHeight: height - shift, x: 0, y: 0, width, height }
+}
+
+/** The old orbit ball's diameter in CSS pixels, kept as the drag's scale: the view ball turns the view as the ball did. */
 export const SPHERE_PX = 152
 /** A drag across the ball's full width turns the view half way round. */
 export const RAD_PER_PX = Math.PI / SPHERE_PX
@@ -118,7 +159,7 @@ const POLE_MARGIN = 0.02
 
 /**
  * The camera's offset from its target after a drag of dx, dy pixels on the
- * orbit ball: longitude from dx, latitude from dy, the same senses as a drag
+ * view ball: longitude from dx, latitude from dy, the same senses as a drag
  * on the bench itself (right turns the view left round the target, down
  * brings the top toward you), the poles kept clear. Pure, so the ball's feel
  * is tested without a camera.
@@ -134,7 +175,7 @@ type OrbitSink = (dx: number, dy: number) => void
 let orbitSink: OrbitSink | null = null
 /** The bench registers what an orbit drag does to its camera (Bench ViewDriver); null while no bench is up. */
 export function setOrbitSink(sink: OrbitSink | null): void { orbitSink = sink }
-/** Turn the bench view by a drag of dx, dy pixels on the orbit ball. Nothing happens without a bench. */
+/** Turn the bench view by a drag of dx, dy pixels on the view ball. Nothing happens without a bench. */
 export function orbitBy(dx: number, dy: number): void { orbitSink?.(dx, dy) }
 
 let asked = 0

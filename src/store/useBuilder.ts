@@ -239,10 +239,11 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     // A spectated pubkey with no chain on the relay: nothing to aim at.
     if (last < 0) return
     const i = index === null || index >= last ? null : Math.max(0, Math.floor(index))
-    const action = chain[i ?? last]
+    const action = cs.focusStand(i ?? last) ?? chain[i ?? last]
     // Its place, in its plane, as history would show it: the coordinate the
     // chain stands on there (a game's entry point, a broken chain's last
-    // valid place). Only the view's cursor moves (aimView).
+    // valid place, the last action that counts from a proof the relay's
+    // rules reject on: store focusStand). Only the view's cursor moves (aimView).
     cs.aimView(action.position, action.plane)
     set({ scrub: i })
   },

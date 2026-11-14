@@ -6,7 +6,8 @@
  *   ignored and stays;
  * - a brand-new visitor lands in VIEW at their avatar, or in region mode;
  * - it waits for the identity to be judged only when /tutorial also asked;
- * - on a /C/ prefix link, region mode starts on that link's region;
+ * - on a /C/ prefix link, region mode starts on that link's region, and so
+ *   does the Region button while the link's view is up (owner, 2026-11-13);
  * - the mode wins over the first-arrival tutorial (owner, 2026-11-13): the
  *   tutorial neither starts nor resumes on that load, and its progress is
  *   left as it was; a run already going, or /tutorial, still wins;
@@ -43,7 +44,7 @@ vi.mock('../useCyberspace', async (orig) => {
 import { MINTED_KEY, samePosition, useCyberspace } from '../useCyberspace'
 import { applyArrivalMode, takeArrivalMode, watchArrivalMode } from '../arrivalMode'
 import { startCoordRoute, useCoordRoute } from '../useCoordRoute'
-import { useRegion } from '../useRegion'
+import { toggleRegion, useRegion } from '../useRegion'
 import { isNewArrival, useTutorial, watchFirstArrival } from '../useTutorial'
 import { useTv } from '../useTv'
 import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialRoute, arrivalModeAsked, noteLanding, readProgress, setTutorialSwitch, takeTutorialAsk, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
@@ -294,6 +295,67 @@ describe('on a /C/ link', () => {
     expect(region().prefix).toBe(MIDWEST)
     stop()
     route()
+  })
+
+  describe('the Region button on the link\'s view (owner, 2026-11-13)', () => {
+    /** The region the button made before: the cursor's one cell at the zoom now. */
+    const cellRegion = (): string => coveringRegion([cs().cursor], cs().scaleExp, cs().anchorPlane)!.prefix
+
+    it('starts with the box on the link\'s region, as ?mode=region does; off and on again, the same', () => {
+      const route = startCoordRoute({ pathname: `/C/${MIDWEST}`, search: '', hash: '' }, { replaceState: vi.fn() })
+      expect(cs().viewing()).toBe(true)
+      // Not what the cursor's one cell would give.
+      expect(cellRegion()).not.toBe(MIDWEST)
+      toggleRegion()
+      expect(region().active).toBe(true)
+      expect(region().prefix).toBe(MIDWEST)
+      expect(region().entryPrefix).toBe(MIDWEST)
+      toggleRegion()
+      expect(region().active).toBe(false)
+      toggleRegion()
+      expect(region().prefix).toBe(MIDWEST)
+      // A look round inside the box keeps it.
+      toggleRegion()
+      const right = cs().axes().right
+      cs().moveCursor({ axis: right.axis, dir: right.dir as 1 | -1 })
+      toggleRegion()
+      expect(region().prefix).toBe(MIDWEST)
+      route()
+    })
+
+    it('after another view replaces the link, the button starts at the cursor\'s cell, as before', () => {
+      const route = startCoordRoute({ pathname: `/C/${MIDWEST}`, search: '', hash: '' }, { replaceState: vi.fn() })
+      const { base } = prefixRegion(MIDWEST)
+      // Somewhere else inside the same box, so only the view change can be what decides.
+      cs().viewAt({ x: base.x + 1n, y: base.y + 1n, z: base.z + 1n }, 0, 'ELSEWHERE')
+      expect(useCoordRoute.getState().label).toBeNull()
+      toggleRegion()
+      expect(region().active).toBe(true)
+      expect(region().prefix).toBe(cellRegion())
+      expect(region().prefix).not.toBe(MIDWEST)
+      route()
+    })
+
+    it('with the cursor panned out of the link\'s box, the button starts at the cursor\'s cell', () => {
+      const route = startCoordRoute({ pathname: `/C/${MIDWEST}`, search: '', hash: '' }, { replaceState: vi.fn() })
+      const { base } = prefixRegion(MIDWEST)
+      cs().aimView({ x: base.x - 1n, y: base.y, z: base.z }, cs().anchorPlane)
+      // Still the link's view, by its label.
+      expect(cs().focus?.label).toBe(`C/${MIDWEST}`)
+      toggleRegion()
+      expect(region().prefix).toBe(cellRegion())
+      expect(region().prefix).not.toBe(MIDWEST)
+      route()
+    })
+
+    it('on a full coordinate link, the button starts at the cursor\'s cell, as before', () => {
+      const FULL = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9f'
+      const route = startCoordRoute({ pathname: `/C/${FULL}`, search: '', hash: '' }, { replaceState: vi.fn() })
+      toggleRegion()
+      expect(region().active).toBe(true)
+      expect(region().prefix).toBe(cellRegion())
+      route()
+    })
   })
 
   it('?mode=region on a full coordinate link: region mode round that place\'s cell', async () => {

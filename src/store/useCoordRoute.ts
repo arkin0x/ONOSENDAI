@@ -73,6 +73,27 @@ function stopPlace(stop: Stop): { position: Position; plane: Plane } {
 }
 
 /**
+ * The prefix of the /C/ region link whose view is up now, for region mode to
+ * start on (store/useRegion.ts toggleRegion, store/arrivalMode.ts): the
+ * link's view still the one up (its focus label; a search, a block, a star,
+ * RETURN or another link all end it) and the cursor still inside the link's
+ * box, so a look around inside the region keeps it and panning out of it
+ * counts as looking at something else (owner, 2026-11-13). Undefined
+ * otherwise, and for a full coordinate's link, which names a place, not a
+ * region.
+ */
+export function linkRegionSeed(): string | undefined {
+  const { region, label } = useCoordRoute.getState()
+  const cs = useCyberspace.getState()
+  if (!region || label === null || cs.focus?.label !== label) return undefined
+  const inside = (axis: 'x' | 'y' | 'z'): boolean => {
+    const v = cs.cursor[axis] - region.base[axis]
+    return v >= 0n && v < 1n << BigInt(region.heights[axis])
+  }
+  return inside('x') && inside('y') && inside('z') ? region.prefix : undefined
+}
+
+/**
  * Open the route in the current address, if there is one. Returns what
  * undoes the watching it set up (tests, and a remount in development).
  */

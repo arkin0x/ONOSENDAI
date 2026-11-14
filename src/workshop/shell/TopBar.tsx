@@ -16,6 +16,7 @@ import { clock } from '../../lib/avatarMine'
 import { useAvatars } from '../../store/useAvatars'
 import { useShards } from '../../store/useShards'
 import { useWorkshop } from '../../store/useWorkshop'
+import { useBeginner } from '../beginner'
 import { MOTION_READY, type Area } from '../sheets/areas'
 
 const AREAS: Array<{ area: Area; label: string; icon: LucideIcon }> = [
@@ -29,6 +30,8 @@ const AREAS: Array<{ area: Area; label: string; icon: LucideIcon }> = [
 export function TopBar({ open, onArea }: { open: Area | null; onArea: (a: Area) => void }): JSX.Element {
   const hasContent = useWorkshop((s) => { const c = s.current(); return c !== null && (c.vertices.length > 0 || (c.parts?.length ?? 0) > 0) })
   const phase = useAvatars((s) => s.phase)
+  // The first-visit guide, done: DEPLOY lights up for a moment (shell/Guide).
+  const deployGlow = useBeginner((b) => b.glow === 'deploy')
   const mining = useAvatars((s) => s.mining)
   const w = useWorkshop.getState
   const work = phase === 'mining' ? `MINING ${mining ? clock(mining.elapsedMs) : ''}`.trim() : phase === 'signing' ? 'SIGN IT' : phase === 'publishing' ? 'PUBLISHING' : null
@@ -57,7 +60,7 @@ export function TopBar({ open, onArea }: { open: Area | null; onArea: (a: Area) 
         )
       })}
       <button
-        className="ws__topbtn ws__topbtn--deploy"
+        className={`ws__topbtn ws__topbtn--deploy${deployGlow ? ' is-guide' : ''}`}
         disabled={!hasContent}
         onClick={() => { const s = w().current(); if (s) { useShards.getState().startDeployShard(s.id, 'workshop'); w().closeWorkshop() } }}
         title="Place this object in the world"

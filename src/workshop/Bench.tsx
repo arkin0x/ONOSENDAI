@@ -52,6 +52,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { Hold, multiPress, noteGesture, noteMultiTouch, slopFor, tapSlop } from './deadZone'
 import { HandleDots, HandleHalos, HandleHits, PressMemory, dotCapacity, type Halo } from './handleDots'
 import { keepPrograms } from '../lib/keepPrograms'
+import { useBeginner } from './beginner'
 
 type P3 = [number, number, number]
 
@@ -825,6 +826,8 @@ function Keys(): null {
       if (e.code === 'KeyB') { if (w.selection.length) w.colorSelected(w.color); return }
       if (e.code === 'Digit1') w.setTool('view')
       if (e.code === 'Digit2') w.setTool('stamp')
+      // ADD and FACE by key bring them onto a beginner's dock (phase 4).
+      if ((e.code === 'Digit3' || e.code === 'Digit5') && useBeginner.getState().tools === 'four') useBeginner.getState().setTools('all')
       if (e.code === 'Digit3') w.setTool('add')
       if (e.code === 'Digit4') w.setTool('select')
       if (e.code === 'Digit5') w.setTool('face')

@@ -5,6 +5,7 @@
  * With nothing held it shows the tool's options: on its left the tool in
  * hand and a ? that says what a tap does, then the options, then MORE at the
  * right end, on every tool.
+ *   LOOK:   HOME and FIT.
  *   STAMP:  the shape (a chip that opens picture tiles, OBJECT among them),
  *           SIZE, TURN.
  *   SELECT: POINTS, FACES or OBJECTS (what a tap or a box takes), ADD or
@@ -18,11 +19,12 @@
  */
 
 import { useEffect, useState } from 'react'
-import { ArrowBigUp, Box, Boxes, ChevronDown, CircleDot, CircleHelp, Cylinder, Ellipsis, Pyramid, RotateCw, SquareDashedMousePointer, Star, Torus, TriangleRight, Undo2, WandSparkles, Waypoints, X, Triangle, type LucideIcon } from 'lucide-react'
+import { ArrowBigUp, Box, Boxes, House, Scan, ChevronDown, CircleDot, CircleHelp, Cylinder, Ellipsis, Pyramid, RotateCw, SquareDashedMousePointer, Star, Torus, TriangleRight, Undo2, WandSparkles, Waypoints, X, Triangle, type LucideIcon } from 'lucide-react'
 import { FACED, FACING_LABEL, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from 'sno-core/stamps'
 import { useEscape } from '../../hooks/useEscape'
 import { noCallout, useRepeatable } from '../../hooks/useRepeatable'
 import { useWorkshop, type PaintMode, type SelectKind, type Tool } from '../../store/useWorkshop'
+import { requestView } from '../benchAxes'
 import { slotOf } from './Dock'
 import { HeldBar, useHolding } from './HeldBar'
 
@@ -96,6 +98,20 @@ function StampOptions({ onPickObject, tiles, setTiles }: { onPickObject: () => v
           </div>
         </>
       )}
+    </>
+  )
+}
+
+/** LOOK's options: the view sent HOME, or the whole shard FIT in it (as the view ball's menu has them). */
+function LookOptions(): JSX.Element {
+  return (
+    <>
+      <button className="ws__stripbtn ws__stripbtn--tall" onClick={() => requestView({ kind: 'home' })} title="The view the bench opens on" {...noCallout}>
+        <House size={16} strokeWidth={2.25} aria-hidden /><span>HOME</span>
+      </button>
+      <button className="ws__stripbtn ws__stripbtn--tall" onClick={() => requestView({ kind: 'fit' })} title="The whole shard in view, from where you look" {...noCallout}>
+        <Scan size={16} strokeWidth={2.25} aria-hidden /><span>FIT</span>
+      </button>
     </>
   )
 }
@@ -239,6 +255,7 @@ export function Strip({ onPickObject, onMore, moreBadge }: { onPickObject: () =>
         <CircleHelp size={12} strokeWidth={2.25} aria-hidden className="ws__strip-q" />
       </button>
       <div className="ws__strip-opts">
+        {tool === 'view' && <LookOptions />}
         {tool === 'stamp' && <StampOptions onPickObject={onPickObject} tiles={tiles} setTiles={setTiles} />}
         {tool === 'select' && <SelectOptions tiles={tiles} setTiles={setTiles} />}
         {tool === 'paint' && <PaintOptions />}

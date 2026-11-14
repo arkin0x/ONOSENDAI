@@ -9,6 +9,7 @@
  */
 
 import { Eye, MousePointer2, Paintbrush, Plus, Stamp, Triangle, type LucideIcon } from 'lucide-react'
+import { shownTools, useBeginner } from '../beginner'
 import { rgbToHex } from 'sno-core/shards'
 import { useWorkshop, type Tool } from '../../store/useWorkshop'
 
@@ -34,15 +35,27 @@ export const slotOf = (tool: Tool): ToolSlot => DOCK.find((d) => d.tool === tool
 export function Dock({ onColor, colorOpen }: { onColor: () => void; colorOpen: boolean }): JSX.Element {
   const tool = useWorkshop((s) => s.tool)
   const hex = rgbToHex(useWorkshop((s) => s.color))
+  const tools = useBeginner((b) => b.tools)
+  const glow = useBeginner((b) => b.glow)
   const w = useWorkshop.getState
+  // A beginner's four (phase 4, decision 4), unless the tool in hand is one of the other two.
+  const four = tools === 'four' && tool !== 'add' && tool !== 'face'
+  const shown = shownTools(four ? 'four' : 'all')
   return (
     <nav className="ws__dock" aria-label="Tools">
-      {DOCK.map(({ tool: t, label, icon: Icon, key }) => (
-        <button key={t} className={`ws__dockbtn${tool === t ? ' is-on' : ''}`} aria-pressed={tool === t} onClick={() => w().setTool(t)} title={`${label} (${key})`}>
+      {DOCK.filter((d) => shown.has(d.tool)).map(({ tool: t, label, icon: Icon, key }) => (
+        <button key={t} className={`ws__dockbtn${tool === t ? ' is-on' : ''}${glow === t ? ' is-guide' : ''}`} aria-pressed={tool === t} onClick={() => w().setTool(t)} title={`${label} (${key})`}>
           <Icon size={20} strokeWidth={2} aria-hidden />
           <span>{label}</span>
         </button>
       ))}
+      {/* MORE TOOLS: ADD and FACE join the dock to the right; the first four never move. MENU puts them away again. */}
+      {four && (
+        <button className="ws__dockbtn ws__dockbtn--more" onClick={() => useBeginner.getState().setTools('all')} title="Add ADD and FACE to the dock">
+          <Plus size={20} strokeWidth={2} aria-hidden />
+          <span>MORE TOOLS</span>
+        </button>
+      )}
       <button
         className={`ws__colorchip${colorOpen ? ' is-on' : ''}`}
         style={{ background: hex }}

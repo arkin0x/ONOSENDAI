@@ -40,7 +40,11 @@ import { routeImport, useShardImport } from '../store/useShardImport'
 import { useWorkshop } from '../store/useWorkshop'
 import { Bench } from './Bench'
 import { useBenchView } from './benchAxes'
-import { Intro, StorageWarning, Toast } from './Notices'
+import { StorageWarning, Toast } from './Notices'
+import { Guide } from './shell/Guide'
+import { ToolHint } from './shell/ToolHint'
+import { guideDone, startingTools, useBeginner } from './beginner'
+import { useTutorial } from '../store/useTutorial'
 import { ObjectPicker } from './ObjectPicker'
 import { PaletteModal } from './PaletteModal'
 import { ZipImport } from './ZipImport'
@@ -116,6 +120,16 @@ export function Workshop(): JSX.Element | null {
   }, [open, openPanel])
   // Closed, nothing stays open for the next time but what the tutorial asks for.
   useEffect(() => { if (!open) setSheet(null) }, [open])
+  // The beginner path (phase 4, decision 4): the first opening decides the
+  // dock, four tools for someone new, six for anyone who has made something;
+  // and a first visit starts the guide, unless the tutorial has the workshop.
+  const tutorialActive = useTutorial((s) => s.active)
+  useEffect(() => {
+    if (!open) return
+    const b = useBeginner.getState()
+    if (b.tools === null) b.setTools(startingTools(guideDone(), useWorkshop.getState().shards))
+    if (!guideDone() && !tutorialActive && b.step === null) b.setStep('stamp')
+  }, [open, tutorialActive])
   // The moment the work is done: say so, because the signer's prompt may take a
   // while to appear and nothing else marks the end of the mining.
   const lastPhase = useRef<typeof phase>(null)
@@ -231,7 +245,6 @@ export function Workshop(): JSX.Element | null {
       {/* IMPORT's picker, kept mounted so a sheet closing cannot drop its answer. */}
       <input ref={fileInput} type="file" accept={IMPORT_PICKER_ACCEPT} multiple hidden aria-hidden tabIndex={-1} onChange={(e) => { const list = e.currentTarget.files; void importFromFiles(list ? Array.from(list) : null); e.currentTarget.value = '' }} />
       {dropping && <div className="workshop__drop" aria-hidden>DROP TO IMPORT</div>}
-      <Intro />
       <Toast />
       <StorageWarning />
       <ZipImport />
@@ -260,6 +273,9 @@ export function Workshop(): JSX.Element | null {
         )}
         {sheet === 'palette' && <PaletteModal onClose={closeSheet} foldAsk={foldAsk} />}
         {sheet === 'object' && <ObjectPicker onClose={closeSheet} />}
+        {/* The first visit's guide and the tool's fading hint, over the strip; neither over a sheet. */}
+        {sheet === null && <Guide />}
+        <ToolHint hidden={sheet !== null} />
         <Strip onPickObject={() => setSheet('object')} onMore={() => toggle('more')} moreBadge={stacked} />
         <Dock onColor={tapColor} colorOpen={sheet === 'palette'} />
       </div>

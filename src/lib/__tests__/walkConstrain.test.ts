@@ -216,6 +216,19 @@ describe('placed objects keep their own setting (§1.10)', () => {
     expect(firstHit(m, [0, 0, 0], 0, 1, 10, 1e-6)).toBeCloseTo(3, 12)
   })
 
+  it('an object with anim stops no walker yet (design note §9.1: until riding lands), nor anything it places', () => {
+    const spin = { anim: [['turn', 'y', 30, 1, 0]] }
+    const moving = withConstrain({ ...wall(), extra: { ...wall().extra, ...spin } }, 'all')
+    expect(firstHit(wallMesh(wall(), []), [0, 0, 0], 0, 1, 10, 1e-6)).toBeCloseTo(3, 12)
+    expect(firstHit(wallMesh(moving, []), [0, 0, 0], 0, 1, 10, 1e-6)).toBeNull()
+    // A moving part, and a still part of a moving parent.
+    expect(firstHit(wallMesh(host('off'), [part(moving)]), [0, 0, 0], 0, 1, 10, 1e-6)).toBeNull()
+    const movingHost = { ...host('all'), extra: { ...host('all').extra, ...spin } }
+    expect(firstHit(wallMesh(movingHost, [part(wall({}, 'all'))]), [0, 0, 0], 0, 1, 10, 1e-6)).toBeNull()
+    // A malformed anim is no motion: the wall holds.
+    expect(firstHit(wallMesh({ ...wall(), extra: { ...wall().extra, anim: [['spin', 'y']] } }, []), [0, 0, 0], 0, 1, 10, 1e-6)).toBeCloseTo(3, 12)
+  })
+
   it('a part left off lets you through though its parent is ALL', () => {
     const m = wallMesh(host('all'), [part(wall({}, 'off'))])
     expect(firstHit(m, [0, 0, 0], 0, 1, 10, 1e-6)).toBeNull()

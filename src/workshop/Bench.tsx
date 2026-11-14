@@ -37,6 +37,8 @@ import { BenchGrid } from './benchGrid'
 import { benchAxes, benchPose, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
+import { movingOn } from '../scene/animMotion'
+import { hasAnim } from '../lib/anim'
 import { OVERLAY_ORDER } from '../scene/shardFaces'
 import { ShardLights } from '../scene/shardLight'
 import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
@@ -197,7 +199,7 @@ function Ghost(): JSX.Element | null {
     const m = new Matrix4().fromArray(partMatrix({ ref: 0, at: aim, turn: [0, (90 * facing) % 360, 0], step: 0 }, unit, object.shard.unit))
     return (
       <group matrix={m} matrixAutoUpdate={false}>
-        <ShardMesh shard={object.shard} ghost />
+        <ShardMesh shard={object.shard} ghost still />
       </group>
     )
   }
@@ -212,7 +214,7 @@ function Ghost(): JSX.Element | null {
   if (!model) return null
   return (
     <group position={UP(landing(kind, size, facing, aim, extent, plane))}>
-      <ShardMesh shard={model} ghost />
+      <ShardMesh shard={model} ghost still />
     </group>
   )
 }
@@ -327,6 +329,8 @@ function Handles(): JSX.Element | null {
   })
   const pressed = useMemo(() => new PressMemory(), [])
   if (!shard) return null
+  // On VIEW a shard with `anim` is drawn moving (ShardMesh \`still\`): handles at its rest pose would hang in the air beside it.
+  if (tool === 'view' && hasAnim(shard)) return null
 
   const onPress = (e: ThreeEvent<PointerEvent>): void => { pressed.press(e.nativeEvent, e.index) }
 
@@ -782,6 +786,20 @@ function BenchWake(): null {
   return null
 }
 
+/**
+ * An object with `anim` moves on the VIEW tool (ShardMesh `still` is off
+ * there): the bench draws on demand, so while anything on it moves, every
+ * frame is asked for (scene/animMotion.ts movingOn).
+ */
+function AnimWake(): null {
+  const invalidate = useThree((s) => s.invalidate)
+  const gl = useThree((s) => s.gl)
+  useFrame(() => { if (movingOn(gl) > 0) invalidate() })
+  const tool = useWorkshop((s) => s.tool)
+  useEffect(() => { invalidate() }, [tool, invalidate])
+  return null
+}
+
 function AxesReporter(): null {
   const camera = useThree((s) => s.camera)
   useFrame(() => {
@@ -887,13 +905,14 @@ function BenchImpl(): JSX.Element {
       <Aim />
       <Keys />
       <BenchWake />
+      <AnimWake />
       <AxesReporter />
       <ViewDriver sphere={sphere} />
       {/* Axes, in the compass's colors, so X is red here and out there. */}
       <BenchAxes reach={extent + 1} />
       <Grid />
       {showAvatar && <ScaleAvatar />}
-      {shard && <ShardMesh shard={shard} lit onFaceClick={tool === 'face' ? onFace : undefined} onPartClick={tool === 'view' || tool === 'select' || tool === 'face' ? onPart : undefined} selectedParts={partSel} />}
+      {shard && <ShardMesh shard={shard} lit still={tool !== 'view'} onFaceClick={tool === 'face' ? onFace : undefined} onPartClick={tool === 'view' || tool === 'select' || tool === 'face' ? onPart : undefined} selectedParts={partSel} />}
       <Ghost />
       <PickLoop />
       <FaceHighlight />

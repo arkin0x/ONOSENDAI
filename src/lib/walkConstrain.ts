@@ -48,6 +48,7 @@ import { partMatrix, type Placed } from 'sno-core/parts'
 import type { Box } from './clip'
 import { renderPose, type Pose } from './pose'
 import { bounceOf, springboardOf, type Bounce } from './walkBounce'
+import { hasAnim } from './anim'
 
 /** What a shard asks of a walker. */
 export type Constrain = 'off' | 'all' | 'opaque'
@@ -325,6 +326,10 @@ export function wallMesh(shard: ShardModel, placed: readonly Placed[], pose?: Po
   const max: [number, number, number] = [-Infinity, -Infinity, -Infinity]
   // The shard's own corners take the pose through their ticks, as flatten does.
   let tris = new Float64Array(0)
+  // An object with `anim` (lib/anim.ts) is drawn moving, and its walls would
+  // stand at its rest pose: until riding and pushing land (design note §9.2),
+  // it and everything it places stop no walker.
+  if (hasAnim(shard)) return { tris, own: 0, ownWalls: null, ownBounce: 0, ownSpringboard: false, placements: [], min: null, max: null }
   const ownWalls = blocks(shard) ? wallsOf(shard) : null
   if (ownWalls) {
     const pts = shard.vertices.map((v) => toRender(posed(ticksOf(v), pose)))
@@ -346,6 +351,8 @@ export function wallMesh(shard: ShardModel, placed: readonly Placed[], pose?: Po
     for (const p of list) {
       const m = p.model
       if (!m || m.unit + p.part.step < 0 || m.unit + p.part.step > MAX_UNIT) continue
+      // A placed object that moves carries what it places: none of it is a wall yet (see above).
+      if (hasAnim(m)) continue
       const f = mul(frame, partMatrix(p.part, parent.unit, m.unit))
       if (blocks(m)) {
         const walls = wallsOf(m)

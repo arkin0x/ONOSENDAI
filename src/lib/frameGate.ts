@@ -52,6 +52,8 @@ interface Stampable {
   geometry?: { attributes?: Record<string, { version?: number }>; drawRange?: { count: number } }
   count?: number
   children?: Stampable[]
+  /** `ambientMotion`: an object's perpetual `anim` (scene/animMotion.ts), which moves it and everything under it every frame. */
+  userData?: { ambientMotion?: boolean }
 }
 interface StampMaterial {
   opacity?: number
@@ -81,9 +83,16 @@ function stampMaterial(m: StampMaterial): void {
   }
 }
 
-function visit(o: Stampable): void {
+/**
+ * `moving`: under an object in perpetual motion (userData.ambientMotion), whose
+ * world matrices change every frame by design. Those are left out, so a spinner
+ * somewhere in view moves at the idle rate rather than holding the view at the
+ * display's full rate; anything else under it that changes still wakes it.
+ */
+function visit(o: Stampable, moving = false): void {
   mix(o.visible === false ? 1 : 2)
-  const e = o.matrixWorld?.elements
+  const under = moving || o.userData?.ambientMotion === true
+  const e = under ? undefined : o.matrixWorld?.elements
   if (e) { mix(e[0]); mix(e[1]); mix(e[5]); mix(e[12]); mix(e[13]); mix(e[14]) }
   const mat = o.material
   if (mat) {
@@ -96,7 +105,7 @@ function visit(o: Stampable): void {
   const kids = o.children
   if (kids) {
     mix(kids.length)
-    for (let i = 0; i < kids.length; i++) visit(kids[i])
+    for (let i = 0; i < kids.length; i++) visit(kids[i], under)
   }
 }
 

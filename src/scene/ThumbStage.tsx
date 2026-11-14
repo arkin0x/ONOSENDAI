@@ -151,7 +151,7 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
     <group position={[-frame.centre[0], -frame.centre[1], -frame.centre[2]]}>
       <OwnPartsContext.Provider value={!!job.own}>
         {/* The body, not ShardMesh: StageBoundary must see a throw, so a bad shard fails at once and is not retried. */}
-        <ShardMeshBody key={job.key} shard={job.shard} lit />
+        <ShardMeshBody key={job.key} shard={job.shard} lit still />
       </OwnPartsContext.Provider>
     </group>
   )

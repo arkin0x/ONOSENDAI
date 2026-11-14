@@ -47,6 +47,8 @@ import { DOTS_ORDER, basicFaceProps, benchOrders, lineProps, litFaceProps, shard
 
 import { HEADLAMP_FACES, HEADLAMP_LINES } from './headlamp'
 import { holdPlaced, placedBuffers, type PlacedBuffers } from './placedBuffers'
+import { animOf, type Motion } from '../lib/anim'
+import { AnimGroups, clipWalls } from './animMotion'
 
 export { FACE_TAG_STENCIL } from './shardFaces'
 
@@ -163,7 +165,16 @@ interface Props {
    * default, changes nothing.
    */
   dim?: number
+  /**
+   * Drawn exactly as written, whatever its `anim` (lib/anim.ts), its placed
+   * objects too: the workshop's bench while editing (a handle must sit on its
+   * vertex) and the feed's still pictures. Everywhere else an object with
+   * `anim` moves on the paced clock (scene/animMotion.ts).
+   */
+  still?: boolean
 }
+
+const NO_MOTION: readonly Motion[] = Object.freeze([])
 
 const STATIC = [0, 0.9, 1] as const
 
@@ -343,7 +354,19 @@ export function ShardMesh(props: Props): ReactNode {
   return <ShardBoundary shard={props.shard}><ShardMeshBody {...props} /></ShardBoundary>
 }
 
-export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip, clipPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, dim = 1, budget }: Props): JSX.Element | null {
+export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip: regionClip, clipPlanes: givenPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, dim = 1, budget, still = false }: Props): JSX.Element | null {
+  // Its own motion on the paced clock (lib/anim.ts, scene/animMotion.ts): a
+  // group above everything it draws, its placed objects included (a parent's
+  // motion carries what it places). A moving object is cut at its region
+  // where it is at each moment, so its region box becomes planes on the GPU
+  // rather than a cut made once in its geometry.
+  const motions = still ? NO_MOTION : animOf(given)
+  const moving = motions.length > 0
+  const poseTurn = useMemo(() => (moving && pose ? renderPose(pose).elements : null), [moving, pose])
+  const walls = useMemo(() => (moving && regionClip ? clipWalls(regionClip) : null), [moving, regionClip])
+  const clip = moving ? undefined : regionClip
+  const clipPlanes = useMemo(() => (walls && givenPlanes ? [...walls.world, ...givenPlanes] : walls?.world ?? givenPlanes), [walls, givenPlanes])
+  const motion = (node: ReactNode): ReactNode => (moving ? <AnimGroups motions={motions} pose={poseTurn} walls={walls}>{node}</AnimGroups> : node)
   // What everything below is drawn at: the object's own opacity (DECK-0003
   // §1.11, with its 10% floor), times a ghost's; an avatar ignores its own.
   // A placed object reaches here with its own model, so it never takes its
@@ -593,15 +616,16 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   })
 
   const placements = (given.parts?.length ?? 0) > 0
-    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} dim={dim} allowance={allowance} near={near} rootTrusted={trusted} />
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} dim={dim} allowance={allowance} near={near} rootTrusted={trusted} still={still} />
     : null
   // An object may be nothing but the arrangement of others (§1.9 rule 13).
-  if (shard.vertices.length === 0) return placements ? <group scale={scale}>{placements}</group> : null
+  if (shard.vertices.length === 0) return placements ? <group scale={scale}>{motion(placements)}</group> : null
   // The nearest hit is on whichever side faces the tap; it answers and stops it there.
   const pick = { userData: { faceOf: drawn }, ...(onFaceClick ? { onClick: (e: ThreeEvent<MouseEvent>) => { const f = faceOfHit(e); if (f !== null) onFaceClick(e, f) } } : {}) }
 
   return (
     <group scale={scale}>
+      {motion(<>
       {placements}
       {shard.mode === 'solid' && index.length > 0 && (
         <group>
@@ -649,6 +673,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
       {!cull && (shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (
         <points geometry={plain} material={pointMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} />
       )}
+      </>)}
     </group>
   )
 }
@@ -807,7 +832,7 @@ function cutBox(shard: ShardModel, list: readonly Listed[], cut: readonly number
   return min[0] === Infinity ? null : { min, max }
 }
 
-function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, onPartClick, selected, cull, ignoreOpacity, dim, allowance, near, rootTrusted = false }: {
+function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, onPartClick, selected, cull, ignoreOpacity, dim, allowance, near, rootTrusted = false, still = false }: {
   shard: ShardModel
   byRef: Map<string, Resolved>
   nested?: Placed[]
@@ -827,6 +852,8 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
   rootTrusted?: boolean
   /** Where the shard stands in the render frame, for nearest first. */
   near?: Near
+  /** Drawn as written, whatever the placed objects' `anim` (ShardMesh `still`). */
+  still?: boolean
 }): JSX.Element | null {
   const list = useMemo(() => listOf(shard, byRef, nested), [shard, byRef, nested])
   const turn = useMemo(() => (pose ? renderPose(pose) : null), [pose])
@@ -849,7 +876,7 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
     // Its own share (without a ghost's), as every face and line keeps one, so the EDIT breath and the build dim's fade scale it rather than skip it.
     let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={(ghost ? 0.45 : 0.8) * dim} userData-share={0.8 * dim} /></lineSegments>
     // The part's own model, so its own opacity, never the parent's (§1.10).
-    if (model) body = <ShardMesh shard={model} placed nested={r.children} lit={lit} ghost={ghost} world={world} headlamp={headlamp} cull={cull} dim={dim} ignoreOpacity={ignoreOpacity} />
+    if (model) body = <ShardMesh shard={model} placed nested={r.children} lit={lit} ghost={ghost} world={world} headlamp={headlamp} cull={cull} dim={dim} still={still} ignoreOpacity={ignoreOpacity} />
     // Selected: an amber box around what the placement draws, in its own frame so it turns with it.
     const box = selected?.includes(i) ? (model ? placedBounds(model, r.children) : null) ?? { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] } : null
     return (

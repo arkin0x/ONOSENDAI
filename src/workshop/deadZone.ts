@@ -29,6 +29,17 @@ export function noteGesture(pointerType: string | undefined | null): void {
   lastPointerType = pointerType ?? null
 }
 
+/**
+ * Whether the press in flight has had a second finger: then it is a pan, a
+ * pinch or a two- or three-finger tap (undo, redo), and never a tap on the
+ * bench, even if a browser makes a click from its last finger. Set by the
+ * bench's multi-touch watcher (Bench MultiTap), cleared by the next press.
+ */
+let multi = false
+export function noteMultiTouch(on: boolean): void { multi = on }
+/** True while the press in flight is a multi-finger one: the bench's tap handlers ignore it. */
+export function multiPress(): boolean { return multi }
+
 /** The slop for the press in flight (or the last one): what the bench's tap handlers compare R3F's delta against. */
 export function tapSlop(): number {
   return slopFor(lastPointerType)

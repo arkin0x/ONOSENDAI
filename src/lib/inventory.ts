@@ -87,8 +87,9 @@ export interface HeldItem {
   /** Hidden audio taken from a chest (DECK-0007): its file and key, so ITEMS can play it and save it (LISTEN). */
   audio?: AudioItem
   /**
-   * Unix seconds when it left the TAKEN list: moved into the workshop, or
-   * cleared with its X (arkinox, 2026-10-11). The row is kept on disk but is
+   * Unix seconds when it left the TAKEN list: moved into the workshop
+   * (arkinox, 2026-10-11). Rows cleared by the old X or CLEAR ALL (both gone
+   * since 2026-11-14) carry it too. The row is kept on disk but is
    * no longer in ITEMS (inItems), so the chest it came out of offers it
    * again with TAKE (arkinox, 2026-11-09: "it should check each item against
    * my ITEMS current state. anything missing should appear again"), and a
@@ -477,7 +478,8 @@ export function splitPanels(discovered: Hidden[], held: HeldItem[]): { discovere
     loot: {
       keys: held.filter((it) => isKeyItem(it) && !it.archived).sort(newestFirst),
       taken: held.filter((it) => !isKeyItem(it) && !it.cleared && !it.archived).sort(newestFirst),
-      archived: held.filter((it) => !!it.archived).sort(newestFirst),
+      // Never a row cleared off the list (moved into the workshop): it is out of ITEMS, archived or not.
+      archived: held.filter((it) => !!it.archived && !it.cleared).sort(newestFirst),
     },
   }
 }
@@ -519,9 +521,4 @@ export function holdsModel(items: Record<string, HeldItem>, shard: ShardModel): 
   const print = modelPrint(shard)
   for (const it of Object.values(items)) if (!it.cleared && it.shard && modelPrint(it.shard) === print) return true
   return false
-}
-
-/** Whether a TAKEN row may be cleared by CLEAR ALL: anything but a coin, which is money and is cleared one at a time once redeemed. */
-export function clearsWithAll(item: Pick<HeldItem, 'type' | 'text'>, isCoin: (text: string | undefined) => boolean): boolean {
-  return !(item.type === 'message' && isCoin(item.text))
 }

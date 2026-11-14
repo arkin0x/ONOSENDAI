@@ -17,7 +17,7 @@
  * DELETE (remove) takes a row off this identity's ITEMS, here and on disk,
  * and publishes nothing. The item is then not held: it can be found and TAKEN
  * again, and nothing brings it back but a TAKE, a PASTE or forging it. A row
- * cleared off the TAKEN list (its X, MOVE TO WORKSHOP) stays on disk but is
+ * cleared off the TAKEN list (MOVE TO WORKSHOP, or the old X) stays on disk but is
  * out of ITEMS the same way: the chest it came out of offers it again.
  *
  * The identity is watched from load() rather than at module load, because

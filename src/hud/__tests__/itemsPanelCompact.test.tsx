@@ -7,7 +7,8 @@
  * OTHER LOOT rows wrapping as the key item rows do, so nothing runs off the
  * panel at 320px. Each row shows one
  * ACTIONS button that opens its actions under it, one row at a time, and a
- * listed item says LISTED on its line (arkinox, 2026-11-12). Mounted,
+ * listed item says LISTED on its line (arkinox, 2026-11-12). No emoji, no
+ * X and no CLEAR ALL (owner, 2026-11-14; itemsDelete.test). Mounted,
  * each store brought up to date first; the size is read from styles.css.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -101,19 +102,30 @@ async function openKind(label: string): Promise<Awaited<ReturnType<typeof mount>
 }
 
 describe('the ITEMS panel', () => {
-  it('shows only two buttons, KEY ITEMS and OTHER LOOT with their counts, and no rows, headings, PASTE or CLEAR ALL', async () => {
-    expect(kindLabel(KEY_ITEMS_LABEL, 3)).toBe('🔑 KEY ITEMS · 3')
-    expect(kindLabel(OTHER_LOOT_LABEL, 0)).toBe('✨ OTHER LOOT · 0')
+  it('shows only two buttons, KEY ITEMS and OTHER LOOT with their counts, a lucide icon each and no emoji, and no rows, headings, PASTE or CLEAR ALL', async () => {
+    expect(kindLabel(KEY_ITEMS_LABEL, 3)).toBe('KEY ITEMS · 3')
+    expect(kindLabel(OTHER_LOOT_LABEL, 0)).toBe('OTHER LOOT · 0')
     const { restore } = seed()
     const m = await mount(createElement(InventoryPanel))
     const buttons = m.all().filter((h) => h.type === 'button').map(textOf)
     // Beside the house EXPLAIN toggle, which holds the one-line Explanation.
-    expect(buttons.filter((b) => !/^EXPLAIN|^HIDE/i.test(b))).toEqual(['🔑 KEY ITEMS · 2', '✨ OTHER LOOT · 1'])
+    expect(buttons.filter((b) => !/^EXPLAIN|^HIDE/i.test(b))).toEqual(['KEY ITEMS · 2', 'OTHER LOOT · 1'])
     expect(m.all().filter((h) => h.type === 'li')).toHaveLength(0)
     expect(m.all().filter((h) => h.type === 'input' || h.type === 'form')).toHaveLength(0)
     expect(m.says('Silver Key')).toBe(false)
     expect(m.says('A note')).toBe(false)
     expect(m.all().some((h) => cls(h) === 'legend__label')).toBe(false)
+    // Each button is CREATE's (avatars__go shards__compose-open, in a shards__modes row), its icon first.
+    const kinds = m.all().filter((h) => h.type === 'button' && /KEY ITEMS|OTHER LOOT/.test(textOf(h)))
+    expect(cls(m.all().find((h) => cls(h).includes('items-kinds'))!).split(' ')).toContain('shards__modes')
+    for (const b of kinds) {
+      expect(cls(b).split(' ')).toEqual(expect.arrayContaining(['avatars__go', 'shards__compose-open']))
+      expect((b.children[0] as { type: string }).type).toBe('svg')
+      expect(textOf(b)).not.toMatch(/\p{Extended_Pictographic}/u)
+    }
+    expect(m.says('everything you\'ve taken from chests')).toBe(false)
+    await m.press(/^EXPLAIN/i)
+    expect(m.says('Key items open doors and chests. Other loot is everything you\'ve taken from chests.')).toBe(true)
     await m.unmount()
     restore()
   })
@@ -122,11 +134,11 @@ describe('the ITEMS panel', () => {
     const { restore } = seed()
     useInventory.setState({ items: {} })
     const m = await openKind(OTHER_LOOT_LABEL)
-    expect(m.buttons(/^✨ OTHER LOOT · 0$/)).toHaveLength(1)
-    expect(m.buttons(/^🔑 KEY ITEMS · 0$/)).toHaveLength(1)
+    expect(m.buttons(/^OTHER LOOT · 0$/)).toHaveLength(1)
+    expect(m.buttons(/^KEY ITEMS · 0$/)).toHaveLength(1)
     expect(m.says(NO_OTHER_LOOT)).toBe(true)
     await m.press(/^✕$/)
-    await m.press(/^🔑 KEY ITEMS · 0$/)
+    await m.press(/^KEY ITEMS · 0$/)
     expect(m.says(NO_KEY_ITEMS)).toBe(true)
     await m.unmount()
     restore()
@@ -151,17 +163,19 @@ describe('the KEY ITEMS and OTHER LOOT modals', () => {
     restore()
   })
 
-  it('OTHER LOOT lists only what is not a key item, with CLEAR ALL and the X naming OTHER LOOT; never a key item, no PASTE, no FEED', async () => {
+  it('OTHER LOOT lists only what is not a key item, with no X and no CLEAR ALL; never a key item, no PASTE, no FEED', async () => {
     const { restore } = seed()
     const m = await openKind(OTHER_LOOT_LABEL)
     expect(m.all().find((h) => h.props.role === 'dialog')!.props['aria-label']).toBe('Other loot')
     expect(rowsOf(m.all(), true)).toHaveLength(0)
     expect(rowsOf(m.all(), false)).toHaveLength(1)
     expect(m.says('Silver Key')).toBe(false)
-    const x = m.all().find((h) => cls(h) === 'held__clear')
-    expect(x?.props.title).toBe('Clear it from OTHER LOOT')
-    expect(x?.props['aria-label']).toBe('Clear A note from OTHER LOOT')
-    expect(String(m.buttons(/^CLEAR ALL$/)[0]?.props.title)).toMatch(/^Clear everything from OTHER LOOT /)
+    expect(m.all().some((h) => cls(h).includes('held__clear'))).toBe(false)
+    expect(m.buttons(/^CLEAR ALL$/)).toHaveLength(0)
+    // The title wears the Sparkles icon, not an emoji.
+    const title = m.all().find((h) => cls(h) === 'items-modal__title')!
+    expect(textOf(title)).toBe('OTHER LOOT')
+    expect((title.children[0] as { type: string }).type).toBe('svg')
     expect(m.buttons(/^PASTE$/)).toHaveLength(0)
     expect(m.buttons(/^FEED$/)).toHaveLength(0)
     await m.unmount()
@@ -180,8 +194,8 @@ describe('the KEY ITEMS and OTHER LOOT modals', () => {
     expect(stackedOpen()).toBe(0)
     expect(topEscape()).toBeNull()
     // The panel is there again, as it was.
-    expect(m.buttons(/^🔑 KEY ITEMS · 2$/)).toHaveLength(1)
-    await m.press(/^✨ OTHER LOOT · 1$/)
+    expect(m.buttons(/^KEY ITEMS · 2$/)).toHaveLength(1)
+    await m.press(/^OTHER LOOT · 1$/)
     expect(stackedOpen()).toBe(1)
     await m.press(/^✕$/)
     expect(stackedOpen()).toBe(0)
@@ -262,7 +276,7 @@ describe('KEY ITEMS > FEED', () => {
 })
 
 describe('key item buttons', () => {
-  it('are one ACTIONS button a row, opening DETAILS, COPY, PLACE, PUBLISH, ARCHIVE and DELETE in a labelled line under it, all chest__act, DELETE keeping its danger class', async () => {
+  it('are one ACTIONS button a row, opening DETAILS, COPY, PLACE, PUBLISH and ARCHIVE in a labelled line under it, all chest__act; no DELETE under MINE', async () => {
     const { restore } = seed()
     const m = await openKind(KEY_ITEMS_LABEL)
     const [held] = rowsOf(m.all(), true)
@@ -273,14 +287,13 @@ describe('key item buttons', () => {
     await m.press(/^ACTIONS$/)
     const [open] = rowsOf(m.all(), true)
     const heldButtons = buttonsIn(open)
-    expect(heldButtons.map(textOf)).toEqual(['ACTIONS', 'DETAILS', 'COPY', 'PLACE', 'PUBLISH', 'ARCHIVE', 'DELETE'])
+    expect(heldButtons.map(textOf)).toEqual(['ACTIONS', 'DETAILS', 'COPY', 'PLACE', 'PUBLISH', 'ARCHIVE'])
     expect(heldButtons[0].props['aria-expanded']).toBe(true)
     const group = m.all().find((h) => cls(h) === 'held__menu')!
     expect(group.props.role).toBe('group')
     expect(group.props['aria-label']).toBe('Actions for Silver Key')
     expect(heldButtons[0].props['aria-controls']).toBe(group.props.id)
     for (const b of heldButtons) expect(cls(b).split(' ')).toContain('chest__act')
-    expect(cls(heldButtons.find((b) => textOf(b) === 'DELETE')!)).toBe('chest__act chest__act--danger')
     expect(heldButtons.find((b) => textOf(b) === 'PUBLISH')!.props.disabled).toBe(false)
     // ACTIONS again hides them.
     await m.press(/^ACTIONS$/)
@@ -304,13 +317,13 @@ describe('key item buttons', () => {
     restore()
   })
 
-  it('in OTHER LOOT, a taken row shows ACTIONS and its X; ACTIONS opens READ, DETAILS and ARCHIVE in chest__act, and READ reads it', async () => {
+  it('in OTHER LOOT, a taken row shows ACTIONS alone; ACTIONS opens READ, DETAILS and ARCHIVE in chest__act, and READ reads it', async () => {
     const { restore } = seed()
     const m = await openKind(OTHER_LOOT_LABEL)
     const [row] = rowsOf(m.all(), false)
-    expect(buttonsIn(row).filter((b) => cls(b) !== 'held__clear').map(textOf)).toEqual(['ACTIONS'])
+    expect(buttonsIn(row).map(textOf)).toEqual(['ACTIONS'])
     await m.press(/^ACTIONS$/)
-    const taken = buttonsIn(rowsOf(m.all(), false)[0]).filter((b) => cls(b) !== 'held__clear')
+    const taken = buttonsIn(rowsOf(m.all(), false)[0])
     expect(taken.map(textOf)).toEqual(['ACTIONS', 'READ', 'DETAILS', 'ARCHIVE'])
     for (const b of taken) expect(cls(b).split(' ')).toContain('chest__act')
     await m.press(/^READ$/)
@@ -323,7 +336,7 @@ describe('key item buttons', () => {
     const { restore } = seed()
     const m = await mount(createElement(InventoryPanel))
     expect(topEscape()).toBeNull()
-    await m.press(/^🔑 KEY ITEMS/)
+    await m.press(/^KEY ITEMS/)
     await m.press(/^ACTIONS$/)
     expect(topEscape()?.layer).toBe('modal')
     expect(m.all().filter((h) => cls(h) === 'held__menu')).toHaveLength(1)
@@ -349,7 +362,7 @@ describe('key item buttons', () => {
       expect(textOf(meta)).toMatch(/· LISTED/)
       await m.press(/^ACTIONS$/)
       const held = buttonsIn(rowsOf(m.all(), true)[0]).map(textOf)
-      expect(held).toEqual(['ACTIONS', 'DETAILS', 'COPY', 'PLACE', 'ARCHIVE', 'DELETE'])
+      expect(held).toEqual(['ACTIONS', 'DETAILS', 'COPY', 'PLACE', 'ARCHIVE'])
       expect(m.buttons(/LISTED|PUBLISH/)).toHaveLength(0)
       await m.unmount()
     } finally {

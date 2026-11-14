@@ -21,6 +21,10 @@
  *    (spec §7.6: a door stays inline), sealed to the key item, wearing the
  *    hall gate as its looks, and the rest of the dungeon.
  *
+ * The key bag and the world bag carry the sector hint (spec §7.7), as every new
+ * bag ONOSENDAI hides; the room bag carries no hint, no sector tag and no
+ * height, as DECK-0004 §3.7.2 requires of every room bag.
+ *
  * The rest of the dungeon comes in one of two forms. `references`, the owner's
  * world: the eleven unchanged pieces by reference to the objects published
  * 2026-11-13 under the game key, at their addresses and coordinates, so none
@@ -39,7 +43,7 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import { getPublicKey } from 'nostr-tools/pure'
 import { fromPayload, type ShardModel } from 'sno-core/shards'
-import { bagTemplate, chestInnerTemplate, innerAuthentic, keyInnerTemplate, objectTemplateOf, OBJECT_KIND, rumorOf, shardInnerTemplate, SHARD_KIND, HIDDEN_KIND, type BagEntry, type KeyItem, type Reference, type Rumor } from '../hidden'
+import { bagTemplate, newBagSettings, chestInnerTemplate, innerAuthentic, keyInnerTemplate, objectTemplateOf, OBJECT_KIND, rumorOf, shardInnerTemplate, SHARD_KIND, HIDDEN_KIND, type BagEntry, type KeyItem, type Reference, type Rumor } from '../hidden'
 import { BAG_SAFE_BYTES, signedBytes } from '../bagSize'
 import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from '../events'
 import { forgeKey, sealEntries } from '../chests'
@@ -163,7 +167,8 @@ export async function buildDungeon(game: Pick<GameDef, 'pubkey' | 'relayHint' | 
   const key: KeyItem = { ...forged, secretHex, itemPubkey: getPublicKey(hexToBytes(secretHex)), model: { address, ...(game.relayHint ? { relay: game.relayHint } : {}) }, animation: ['bob', 'spin-y'] }
   const keyItem = sign(keyInnerTemplate(key, KEY_BAG.at, plane, createdAt))
   const kb = regionKeyAt(regionBase(KEY_BAG.at, KEY_BAG.height), KEY_BAG.height, 8)
-  file(`02-key-bag-${HIDDEN_KIND}.json`, await bagTemplate([keyItem as unknown as BagEntry], kb.key, kb.lookupId, KEY_BAG.height, createdAt, HIDDEN_KIND))
+  // With the sector hint, as every new bag ONOSENDAI hides (owner, 2026-11-13 and 2026-11-14; spec §7.7).
+  file(`02-key-bag-${HIDDEN_KIND}.json`, await bagTemplate([keyItem as unknown as BagEntry], kb.key, kb.lookupId, KEY_BAG.height, createdAt, HIDDEN_KIND, newBagSettings(KEY_BAG.height), { at: KEY_BAG.at, plane }))
 
   // 3. The door, sealed to the key item, and its room holding the finish tile (DECK-0004 §3.7).
   const doorSecret = secrets.door ?? newDoorSecret()
@@ -193,7 +198,8 @@ export async function buildDungeon(game: Pick<GameDef, 'pubkey' | 'relayHint' | 
     const shards = kept.map((l, i) => sign(shardInnerTemplate(piece(l.piece), l.at, plane, createdAt + 1 + i)))
     entries = [entry, ...shards, door].map((e) => e as unknown as BagEntry)
   }
-  const bag = await bagTemplate(entries, wk, lookupId, height, createdAt, HIDDEN_KIND)
+  // With the sector hint (owner, 2026-11-14), as the key bag. The room bag carries none: DECK-0004 §3.7.2 forbids it.
+  const bag = await bagTemplate(entries, wk, lookupId, height, createdAt, HIDDEN_KIND, newBagSettings(height), { at: game.region.base, plane })
   if (signedBytes(bag) > BAG_SAFE_BYTES) throw new Error(`the world bag is ${signedBytes(bag)} bytes, over ${BAG_SAFE_BYTES}`)
   file(`99-world-bag-${HIDDEN_KIND}.json`, bag)
   return { files, keyItem, door, doorSecret }

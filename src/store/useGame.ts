@@ -259,7 +259,8 @@ export const useGame = create<GameState>((set, get) => {
     const key = doorKey(session.door, useInventory.getState().items, me())
     const secret = key && doorSecretWith(session.door, key)
     if (secret) fillRoom(session, session.door, secret)
-    else set({ message: 'The room behind the gate could not be read: its key is not in your ITEMS.' })
+    // Said only once ITEMS has loaded: before that the key may be on its way from this device's storage.
+    else if (useInventory.getState().storage !== 'loading') set({ message: 'The room behind the gate could not be read: its key is not in your ITEMS.' })
   }
 
   /** After a move or a landing: a pad under a player who stands on it sends them on. */

@@ -37,6 +37,7 @@ vi.mock('../../relay', async (orig) => {
 import { HIDDEN_KIND, OBJECT_KIND } from '../../hidden'
 import { BAG_SAFE_BYTES, signedBytes } from '../../bagSize'
 import { heldFromFind } from '../../inventory'
+import { parseHint } from '../../hint'
 import { gameLive } from '../flag'
 import { DOOR_AT, KEY_AT, TUTORIAL_DEV_PUBKEY, TUTORIAL_ENTRY, TUTORIAL_RELAY, tutorialGameFor } from '../tutorialGame'
 import { loadWorld } from '../world'
@@ -51,6 +52,25 @@ const V1_GAME = { ...tutorialGameFor(TUTORIAL_DEV_PUBKEY), world: { kind: 'fixtu
 /** nak event --sec: the file's kind, created_at, tags and content, signed by its key. */
 const nakSign = (e: { kind: number; created_at: number; tags: string[][]; content: string }, key: Uint8Array): NostrEvent =>
   JSON.parse(JSON.stringify(finalizeEvent({ kind: e.kind, created_at: e.created_at, tags: e.tags, content: e.content }, key))) as NostrEvent
+/**
+ * A bag's sector hint, as ONOSENDAI's hide flow writes it (lib/hint.ts SECTOR_HINT): one well-formed `hint` of heights
+ * 30, 30, 30 whose box holds the bag's region at `at`, in ideaspace, and the X, Y, Z and S tags that box fixes.
+ */
+function expectSectorHint(tags: string[][], at: { x: bigint; y: bigint; z: bigint }, height: number): void {
+  const box = parseHint(tags, height)!
+  expect(box).not.toBeNull()
+  expect(box.heights).toEqual([30, 30, 30])
+  expect(box.plane).toBe(1)
+  const sector = (v: bigint): string => (v >> 30n).toString()
+  expect(box.base).toEqual({ x: (at.x >> 30n) << 30n, y: (at.y >> 30n) << 30n, z: (at.z >> 30n) << 30n })
+  expect(tags.filter((t) => t[0] === 'hint')).toHaveLength(1)
+  expect(tags.find((t) => t[0] === 'X')).toEqual(['X', sector(at.x)])
+  expect(tags.find((t) => t[0] === 'Y')).toEqual(['Y', sector(at.y)])
+  expect(tags.find((t) => t[0] === 'Z')).toEqual(['Z', sector(at.z)])
+  expect(tags.find((t) => t[0] === 'S')).toEqual(['S', `${sector(at.x)}-${sector(at.y)}-${sector(at.z)}`])
+  expect(tags.find((t) => t[0] === 'H')).toEqual(['H', String(height)])
+}
+
 /** The game key's signer, as the generator holds it. */
 const asGame = (key: Uint8Array) => (t: { kind: number; created_at: number; tags: string[][]; content: string }): NostrEvent => finalizeEvent(t, key) as NostrEvent
 const where = (w: { shards: { at: { x: bigint; y: bigint; z: bigint } }[] }) => w.shards.map((s) => `${s.at.x},${s.at.y},${s.at.z}`).sort()
@@ -141,6 +161,14 @@ describe('the world with a real key item and door, published over the LEGACY one
     expect(built.door.tags.find((t) => t[0] === 'door')).toEqual(['door', '5'])
     expect(built.door.tags.filter((t) => t[0] === 'look').map((t) => t.length)).toEqual([2, 3])
     expect(signedBytes(built.files[3].event)).toBeLessThan(BAG_SAFE_BYTES / 4)
+  })
+
+  it('the world bag and the key bag carry the sector hint of their region (spec §7.7); the room bag carries none (DECK-0004 §3.7.2)', async () => {
+    const game = tutorialGameFor(pk)
+    const built = await buildDungeon(game, asGame(sk), await piecesOf(source, TUTORIAL_DEV_PUBKEY, game), 1_800_000_100, 'references')
+    expectSectorHint(built.files[3].event.tags, game.region.base, game.region.height)
+    expectSectorHint(built.files[1].event.tags, KEY_AT, 3)
+    expect(built.files[2].event.tags.some((t) => ['hint', 'X', 'Y', 'Z', 'S', 'H'].includes(t[0]))).toBe(false)
   })
 
   it('the LEGACY world plays until the new world bag lands, then the new one: the door, its key bag, its room', async () => {

@@ -14,6 +14,7 @@ import { blocks } from '../../walkConstrain'
 import { heldFromFind } from '../../inventory'
 import { regionBase } from '../../doors'
 import { regionKeyAt } from '../../shardCrypto'
+import { parseHint } from '../../hint'
 import { DOOR_AT, KEY_AT, KEY_BAG, TUTORIAL_DEV_PUBKEY, TUTORIAL_GAME } from '../tutorialGame'
 import { bagList, loadWorld, worldKey } from '../world'
 import { doorKey, doorLooks, doorSecretWith, keyItemHeld, readKeyBag, readRoom, sceneNow, thingsNow, worldDoorOf } from '../keyDoor'
@@ -67,6 +68,16 @@ describe('the key item, sealed to its own place', () => {
     expect((await bagList(keyBag, kb.key))!.length).toBe(1)
     // Its region is small: height 3, about the top platform.
     expect(keyBag.tags.find((t) => t[0] === 'H')?.[1]).toBe('3')
+    // Both bags carry the sector hint of their region, as the DEV fixture is built (spec §7.7); its sector is the dungeon's.
+    for (const [bag, h] of [[keyBag, 3], [worldBag, 6]] as const) {
+      const box = parseHint(bag.tags, h)!
+      expect(box.heights).toEqual([30, 30, 30])
+      expect(box.base).toEqual({ x: (KEY_AT.x >> 30n) << 30n, y: (KEY_AT.y >> 30n) << 30n, z: (KEY_AT.z >> 30n) << 30n })
+      expect(bag.tags.find((t) => t[0] === 'S')?.[1]).toBe(`${KEY_AT.x >> 30n}-${KEY_AT.y >> 30n}-${KEY_AT.z >> 30n}`)
+    }
+    // The room bag says nothing of where it is (DECK-0004 §3.7.2).
+    const roomBag = events.find((e) => e.kind === HIDDEN_KIND && !e.tags.some((t) => t[0] === 'H'))!
+    expect(roomBag.tags.map((t) => t[0]).sort()).toEqual(['d', 'encrypted', 'version'])
   })
 
   it('a bag at the key\'s place signed by another key is not the game\'s', async () => {

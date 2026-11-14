@@ -28,6 +28,19 @@
  *   TUTORIAL_OUT_DIR=/data/Sync/agents/claude/onosendai/games-dungeon/deploy/world-ee248d6a-v2 \
  *   TUTORIAL_V1_DIR=/data/Sync/agents/claude/onosendai/games-dungeon/deploy/world-ee248d6a \
  *   npx vitest run src/lib/games/__tests__/tutorialDungeon.gen.test.ts
+ *
+ * The key item renamed (lib/games/worldDeploy.ts renamedKeyBag; owner,
+ * 2026-11-14: "Tutorial Dungeon Key"), for the game key, into a NEW or empty
+ * folder: the one event that changes, the key bag, unsigned and in signed/
+ * signed and verified. TUTORIAL_FROM_DIR is the folder of the world whose key
+ * bag is on the relay; its signed key bag is read, opened and resealed with
+ * the same secret, `d`, height, hint and sector, a second newer.
+ *
+ *   GEN_TUTORIAL_KEY_RENAME=1 \
+ *   TUTORIAL_KEY=/data/claude/secrets/onosendai-tutorial-game.hex \
+ *   TUTORIAL_FROM_DIR=/data/Sync/agents/claude/onosendai/games-dungeon/deploy/world-ee248d6a-v2 \
+ *   TUTORIAL_OUT_DIR=/data/Sync/agents/claude/onosendai/games-dungeon/deploy/world-ee248d6a-v2.1 \
+ *   npx vitest run src/lib/games/__tests__/tutorialDungeon.gen.test.ts
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
@@ -37,12 +50,13 @@ import { finalizeEvent, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
 import { hexToBytes, type NostrEvent } from '../../events'
 import { TUTORIAL_DEV_PUBKEY, TUTORIAL_GAME, tutorialGameFor } from '../tutorialGame'
-import { buildDungeon, piecesOf } from '../worldDeploy'
+import { buildDungeon, piecesOf, renamedKeyBag } from '../worldDeploy'
 import { bagList, worldKey } from '../world'
 import v1 from './tutorialDungeon.v1.fixture.json'
 
 const asked = process.env.GEN_TUTORIAL_DUNGEON === '1'
 const askedWorld = process.env.GEN_TUTORIAL_WORLD === '1'
+const askedRename = process.env.GEN_TUTORIAL_KEY_RENAME === '1'
 
 /** A secret key from a file: 64 hex, or an nsec. */
 function secretFrom(path: string): Uint8Array {
@@ -102,6 +116,29 @@ describe('the tutorial dungeon (generator)', () => {
       writeFileSync(join(dir, 'signed', f.name), JSON.stringify(signed) + '\n')
     }
     console.log(`wrote ${built.files.length} events for ${pubkey} into ${dir} (unsigned) and ${dir}/signed (signed, verified)`)
+  })
+
+  it.skipIf(!askedRename)('writes the renamed key bag: unsigned, and signed in signed/', async () => {
+    const sk = secretFrom(process.env.TUTORIAL_KEY ?? '')
+    const pubkey = getPublicKey(sk)
+    if (pubkey === TUTORIAL_DEV_PUBKEY) throw new Error('The DEV key\'s world is the fixture: use GEN_TUTORIAL_DUNGEON.')
+    const from = process.env.TUTORIAL_FROM_DIR
+    const dir = process.env.TUTORIAL_OUT_DIR
+    if (!from || !dir) throw new Error('Say which world\'s key bag to rename with TUTORIAL_FROM_DIR, and where to write it with TUTORIAL_OUT_DIR.')
+    mkdirSync(join(dir, 'signed'), { recursive: true })
+    if (readdirSync(dir).some((f) => f.endsWith('.json')) || readdirSync(join(dir, 'signed')).length) throw new Error(`${dir} already holds events: write into an empty folder.`)
+    const published = JSON.parse(readFileSync(join(from, 'signed', '02-key-bag-33330.json'), 'utf8')) as NostrEvent
+    expect(verifyEvent(published)).toBe(true)
+    const game = tutorialGameFor(pubkey)
+    const renamed = await renamedKeyBag(game, (t) => sign(t, sk), published, Math.max(Math.floor(Date.now() / 1000), published.created_at + 1))
+    const f = renamed.file
+    writeFileSync(join(dir, f.name), JSON.stringify(f.event) + '\n')
+    const signed = sign(f.event, sk)
+    expect(verifyEvent(signed)).toBe(true)
+    expect(signed.pubkey).toBe(pubkey)
+    expect([signed.kind, signed.created_at, JSON.stringify(signed.tags), signed.content]).toEqual([f.event.kind, f.event.created_at, JSON.stringify(f.event.tags), f.event.content])
+    writeFileSync(join(dir, 'signed', f.name), JSON.stringify(signed) + '\n')
+    console.log(`wrote ${f.name} for ${pubkey} into ${dir} (unsigned) and ${dir}/signed (signed, verified): key item ${renamed.was.id.slice(0, 8)} renamed as ${renamed.keyItem.id.slice(0, 8)}`)
   })
 
   it('names the DEV game it builds for', () => {

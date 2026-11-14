@@ -370,7 +370,7 @@ describe('the tutorial dungeon: gravity, the key door and the clock (useGame)', 
     put(at(37, 27, 41))
     G().step('x', 1)
     await vi.waitFor(() => { expect(G().session!.keyBag).toBe('read') })
-    expect(G().session!.keys.map((k) => k.key?.name)).toEqual(['Dungeon Key'])
+    expect(G().session!.keys.map((k) => k.key?.name)).toEqual(['Tutorial Dungeon Key'])
     // Standing by the key does not take it; TAKE does, into ITEMS.
     put(at(37, 27, 42))
     G().tick()
@@ -378,7 +378,7 @@ describe('the tutorial dungeon: gravity, the key door and the clock (useGame)', 
     expect(offerFor(G().session!)).toBe('take')
     G().take()
     const held = Object.values(useInventory.getState().items)
-    expect(held.map((it) => [it.type, it.name, it.source])).toEqual([['key', 'Dungeon Key', 'found']])
+    expect(held.map((it) => [it.type, it.name, it.source])).toEqual([['key', 'Tutorial Dungeon Key', 'found']])
     expect(held[0].id).toBe(G().session!.keys[0].eventId)
     expect(offerFor(G().session!)).toBeNull()
     // TAKE again holds it once.

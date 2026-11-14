@@ -2856,8 +2856,8 @@ select.avatars__input option:checked {
 
 .workshop__deploy {
   font-family: inherit;
-  font-size: 9px;
-  letter-spacing: 0.12em;
+  font-size: 10px;
+  letter-spacing: 0.04em;
   height: 30px;
   padding: 0 12px;
   border-radius: 5px;
@@ -3052,8 +3052,9 @@ select.avatars__input option:checked {
 .workshop__new,
 .workshop__mini {
   font-family: inherit;
-  font-size: 9px;
-  letter-spacing: 0.12em;
+  font-size: 10px;
+  line-height: 1.05;
+  letter-spacing: 0.05em;
   height: 30px;
   padding: 0 10px;
   border-radius: 5px;
@@ -3166,8 +3167,8 @@ select.avatars__input option:checked {
 }
 
 .workshop__pick-meta {
-  font-size: 9px;
-  letter-spacing: 0.08em;
+  font-size: 10px;
+  letter-spacing: 0.02em;
   color: var(--dim);
 }
 
@@ -3211,8 +3212,9 @@ select.avatars__input option:checked {
 }
 
 .workshop__label {
-  font-size: 8px;
-  letter-spacing: 0.16em;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.02em;
   color: var(--dim);
   min-width: 54px;
 }
@@ -3230,7 +3232,7 @@ select.avatars__input option:checked {
 
 .workshop__help {
   flex: 1 1 200px;
-  font-size: 9px;
+  font-size: 10px;
   color: var(--dim);
 }
 
@@ -3280,8 +3282,9 @@ select.avatars__input option:checked {
 
 /* What the unit exponent means, so changing it visibly changes something. */
 .workshop__unit-size {
-  font-size: 9px;
-  letter-spacing: 0.06em;
+  font-size: 10px;
+  line-height: 1.1;
+  letter-spacing: 0;
   color: var(--dim);
 }
 
@@ -3324,8 +3327,8 @@ select.avatars__input option:checked {
 }
 .workshop__tag {
   flex: none;
-  font-size: 8px;
-  letter-spacing: 0.14em;
+  font-size: 10px;
+  letter-spacing: 0;
   color: var(--accent);
   border: 1px solid rgba(0, 229, 255, 0.4);
   border-radius: 4px;
@@ -3334,8 +3337,8 @@ select.avatars__input option:checked {
 
 /* BOUNCE's one-line explain in the SHARD panel, as quiet as the counts line. */
 .ws__explain {
-  font-size: 9px;
-  letter-spacing: 0.08em;
+  font-size: 10px;
+  letter-spacing: 0.02em;
   color: var(--dim);
 }
 
@@ -3478,7 +3481,8 @@ select.avatars__input option:checked {
 }
 .ws__level-key { width: 38px; height: 34px; }
 .ws__level-value {
-  font-size: 9px;
+  font-size: 10px;
+  line-height: 1;
   letter-spacing: 0.08em;
   color: var(--dim, #7fa3b3);
   font-variant-numeric: tabular-nums;
@@ -3564,14 +3568,15 @@ select.avatars__input option:checked {
   box-sizing: border-box;
 }
 .ws__panel-title {
-  font-size: 8px;
-  letter-spacing: 0.16em;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.02em;
   color: var(--dim);
   margin-top: 4px;
 }
 .ws__stats {
-  font-size: 9px;
-  letter-spacing: 0.08em;
+  font-size: 10px;
+  letter-spacing: 0.02em;
   color: var(--dim);
 }
 .ws__toast {
@@ -3582,11 +3587,12 @@ select.avatars__input option:checked {
   z-index: 4;
   pointer-events: none;
   max-width: min(360px, calc(100vw - 24px));
-  padding: 7px 10px;
+  padding: 5px 10px;
   border-radius: 9px;
   text-align: center;
-  font-size: 9px;
-  letter-spacing: 0.1em;
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
   color: var(--accent);
   background: rgba(6, 14, 22, 0.88);
   border: 1px solid rgba(0, 229, 255, 0.3);
@@ -3600,14 +3606,35 @@ select.avatars__input option:checked {
   z-index: 4;
   pointer-events: none;
   max-width: min(360px, calc(100vw - 24px));
-  padding: 7px 10px;
+  padding: 5px 10px;
   border-radius: 9px;
   text-align: center;
-  font-size: 9px;
-  letter-spacing: 0.1em;
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
   color: var(--warn);
   background: rgba(6, 14, 22, 0.92);
   border: 1px solid rgba(255, 176, 32, 0.45);
+}
+/* Workshop labels no smaller than 10px (workshop redesign, phase 0, 2026-11-14:
+   they were 8 and 9). These classes are shared with the rest of the HUD, so the
+   floor is scoped to the workshop and leaves the main scene as it is. Where a
+   row is tight, the letter spacing comes down so a word keeps its old width and
+   nothing wraps or grows over the bench. */
+.workshop .tag,
+.zipimport .tag,
+.workshop .sfold__count,
+.workshop .benchorb__sub,
+.workshop .viewmenu__hub,
+.workshop .viewmenu__op,
+.workshop .viewmenu__close { font-size: 10px; }
+.workshop .chip.ws__chip,
+.workshop .explain__pill { font-size: 10px; letter-spacing: 0.03em; }
+.workshop .sfold__btn { font-size: 10px; letter-spacing: 0.05em; }
+/* On a phone the top chips were set closer at 9px (0.06em, further down); at
+   10px they go untracked so MENU, GRID, SHARD and AVATAR keep their width. */
+@media (max-width: 640px) {
+  .workshop .ws__chips .chip.ws__chip { letter-spacing: 0; }
 }
 /* Bottom left: TOOLS, its panel above the chip. */
 .ws__tools {
@@ -3932,7 +3959,7 @@ select.avatars__input option:checked {
   gap: 4px;
 }
 .benchclip .touchpad__key { width: 48px; height: 48px; flex-direction: column; gap: 2px; font-size: 17px; }
-.benchclip .touchpad__sub { font-size: 8px; }
+.benchclip .touchpad__sub { font-size: 10px; }
 /* A mode key lit while its mode is on (INVERT, arkinox, 2026-10-10), in the
    same lit treatment as a tool chip, so "on" reads the same everywhere. */
 .benchclip .touchpad__key.is-on {
@@ -3942,8 +3969,10 @@ select.avatars__input option:checked {
   font-weight: 700;
 }
 .benchclip .touchpad__key.is-on .touchpad__sub { opacity: 1; }
-/* SUBDIVIDE is the row's one long word: the pad's JOINED and DELETE size, tighter, so it fits a 48px key. */
-.benchclip .touchpad__key--long .touchpad__sub { font-size: 7px; letter-spacing: 0.04em; }
+/* The long words, DESELECT and SUBDIVIDE, a touch smaller and untracked, and
+   each breaks onto two lines (DE SELECT, SUB DIVIDE) so it fits a 48px key
+   without widening it. */
+.benchclip .touchpad__key--long .touchpad__sub { font-size: 9.5px; letter-spacing: 0; line-height: 1.1; text-align: center; }
 /* A key that asks before it acts (PASTE where, FLIP how much) carries a dot
    in its top right corner, so it reads as two steps before it is pressed.
    The dot lights while its question is open (arkinox, 2026-09-27). */
@@ -4031,8 +4060,6 @@ select.avatars__input option:checked {
 .benchclip .touchpad__key--danger { color: var(--danger); }
 .benchpad .touchpad__key--connect { grid-area: connect; color: var(--accent); }
 .benchpad .touchpad__key--delete { grid-area: delete; color: var(--danger); }
-.benchpad .touchpad__key--connect .touchpad__sub,
-.benchpad .touchpad__key--delete .touchpad__sub { font-size: 7px; }
 /* Glyph over word in every cell: the cells are big enough here for both. */
 .benchpad .touchpad__key,
 .benchturn .touchpad__key {
@@ -4041,7 +4068,7 @@ select.avatars__input option:checked {
   font-size: 17px;
 }
 .benchpad .touchpad__sub,
-.benchturn .touchpad__sub { font-size: 8px; }
+.benchturn .touchpad__sub { font-size: 10px; }
 /* CUT and DUPLICATE, or PASTE, on top of the turn keys. It stretches to the
    width of the widest thing in the corner, the nudge pad, and its buttons
    split that evenly, so every row in the column shares one left and one right
@@ -6902,11 +6929,11 @@ select.avatars__input option:checked {
 /* The avatar's price and, while it is mined, the progress: one dim line under the row. */
 .workshop__work {
   flex-basis: 100%;
-  font-size: 8px;
-  letter-spacing: 0.12em;
+  font-size: 10px;
+  letter-spacing: 0;
   color: var(--dim);
   font-variant-numeric: tabular-nums;
-  line-height: 1.5;
+  line-height: 1.2;
 }
 
 /* The avatar adopt in progress, visible from the top row while MENU is closed. */
@@ -8239,8 +8266,8 @@ select.avatars__input option:checked {
 .palettes__band + .palettes__band { margin-top: 16px; }
 .palettes__band-title {
   margin: 0 0 7px;
-  font-size: 8px;
-  letter-spacing: 0.18em;
+  font-size: 10px;
+  letter-spacing: 0.02em;
   color: var(--accent);
   font-weight: 600;
 }
@@ -8270,7 +8297,7 @@ select.avatars__input option:checked {
    swatch (lightInk) so it reads on the darks and the near whites alike. */
 .palettes__n {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
@@ -8294,7 +8321,7 @@ select.avatars__input option:checked {
   padding: 10px 14px calc(14px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--border);
 }
-.palettes__label { font-size: 8px; letter-spacing: 0.16em; color: var(--dim); }
+.palettes__label { font-size: 10px; letter-spacing: 0.02em; color: var(--dim); }
 .palettes__one { display: inline-flex; align-items: center; gap: 2px; }
 .palettes__one .workshop__mode em { font-style: normal; color: var(--dim); margin-left: 5px; }
 .palettes__name { flex: 1; min-width: 120px; }
@@ -8385,7 +8412,7 @@ select.avatars__input option:checked {
 .ws__slot { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 8px; border-radius: 5px; font-family: inherit; cursor: pointer; color: var(--fg); background: rgba(0, 229, 255, 0.05); border: 1px dashed rgba(0, 229, 255, 0.35); }
 .ws__slot.is-full { border-style: solid; }
 .ws__slot-name { font-size: 11px; }
-.ws__slot-meta { font-size: 8px; letter-spacing: 0.12em; color: var(--dim); }
+.ws__slot-meta { font-size: 10px; line-height: 1.1; letter-spacing: 0; color: var(--dim); }
 
 /* ---------- Stash modals (Models, Bags, Bag contents) ---------- */
 .modal__card.stash-modal { border-color: rgba(0, 229, 255, 0.5); max-width: 460px; max-height: calc(100dvh - 32px); overflow-y: auto; }
@@ -8406,8 +8433,8 @@ select.avatars__input option:checked {
   padding: 0 9px;
   height: 34px;
   border-radius: 8px;
-  font-size: 9px;
-  letter-spacing: 0.08em;
+  font-size: 10px;
+  letter-spacing: 0;
   color: var(--accent);
   background: rgba(6, 14, 22, 0.72);
   border: 1px solid var(--border);

@@ -387,6 +387,14 @@ export interface WorkshopState {
    */
   invert: boolean
   setInvert: (on: boolean) => void
+  /**
+   * BOX (workshop redesign, phase 2, decision 1): one finger orbits in every
+   * tool, and in SELECT this switch makes a one-finger drag draw a box
+   * instead. Off when the workshop opens; kept across tools, read only in
+   * SELECT.
+   */
+  boxSelect: boolean
+  setBoxSelect: (on: boolean) => void
   /** STAMP places a built-in shape, or a published object by reference (DECK-0003 §1.10). */
   stampMode: 'shape' | 'object'
   /** The object OBJECT stamps, chosen in the picker. */
@@ -577,6 +585,8 @@ export interface WorkshopState {
   insertImport: (model: ShardModel, notice: string, self?: string) => boolean
   pickForFace: (index: number) => void
   clearFacePick: () => void
+  /** FACE's BACK: the last corner picked, let go. */
+  unpickLast: () => void
   /** Make faces from the picked corners, in order. */
   fill: () => void
   /** Faces for the selected points at once: a flat set becomes one polygon, a solid set its convex hull. */
@@ -972,6 +982,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     tool: 'view',
     selection: [], partSel: [],
     invert: false,
+    boxSelect: false,
     facePick: [],
     selectedFaces: [],
     clip: null,
@@ -996,7 +1007,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     openWorkshop: (id, panel) => {
       const { shards } = get()
       const currentId = id ?? get().currentId ?? newestId(shards) ?? get().create()
-      set({ open: true, currentId, openPanel: panel ?? null, selection: [], partSel: [], selectedFaces: [], facePick: [], tool: 'view', plane: FLOOR, aim: null, past: [], future: [], notice: null })
+      set({ open: true, currentId, openPanel: panel ?? null, selection: [], partSel: [], selectedFaces: [], facePick: [], tool: 'view', plane: FLOOR, aim: null, past: [], future: [], notice: null, boxSelect: false })
     },
 
     closeWorkshop: () => set({ open: false, selection: [], partSel: [], selectedFaces: [], facePick: [], aim: null }),
@@ -1066,6 +1077,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     // the key that shows it is only drawn there.
     setTool: (tool) => set({ tool, facePick: [], selectedFaces: [], aim: null, invert: false, ...(tool === 'face' ? { selection: [], partSel: [] } : {}) }),
     setInvert: (on) => set({ invert: on }),
+    setBoxSelect: (on) => set({ boxSelect: on }),
     setExtent: (extent) => {
       const s = get().current()
       if (!s) return
@@ -1620,6 +1632,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     clearFacePick: () => set({ facePick: [] }),
+    unpickLast: () => set((s) => ({ facePick: s.facePick.slice(0, -1) })),
 
     fill: () => {
       const s = get().current()

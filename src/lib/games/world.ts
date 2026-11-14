@@ -13,19 +13,29 @@ import { HIDDEN_KIND, ciphertextOf, dOf, innerAuthentic, rumorHolds, unbag, type
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { decryptForRegion } from '../shardCrypto'
 import { inRegion } from './play'
-import { resolveReference } from '../references'
-import { query, queryAny, relaySet } from '../relay'
 import { regionKeyAt } from '../shardCrypto'
+import { askGame, resolverOf } from './source'
+import { worldDoorOf } from './keyDoor'
+import type { Hidden } from '../hidden'
 import type { NostrEvent } from '../events'
 import type { WorldShard } from './play'
 import type { GameDef } from './types'
 import type { Position } from '../space'
 
-/** A game's world as read (DECK-0002 §5.1, §2.2): its shards, and the entry point. */
+/** A game's world as read (DECK-0002 §5.1, §2.2): its shards, the entry point, and its door if it has one. */
 export interface World {
   shards: WorldShard[]
   /** Where a player appears by virtue of entering. */
   entry: Position
+  /**
+   * The world's DECK-0004 door, stored inline in the bag and signed by the
+   * game key (lib/games/keyDoor.ts worldDoorOf), or null. A world with one
+   * plays its key and gate as Cyberspace primitives; one without plays the
+   * LEGACY game-only key and gate (GameDef key, door), the world published
+   * 2026-11-13. Chosen by what the newest world bag holds, so this client
+   * plays either world, and the world can switch after the code deploys.
+   */
+  door: Hidden | null
 }
 
 /** The tag that marks the world item whose `C` is the entry point (DECK-0002 §2.2). */
@@ -47,18 +57,6 @@ export function worldKey(game: Pick<GameDef, 'region'>): { key: Uint8Array; look
   if (height > WORLD_MAX_HEIGHT) throw new Error(`This game's region is too large to read here (height ${height}, at most ${WORLD_MAX_HEIGHT}).`)
   const rk = regionKeyAt(base, height, WORLD_MAX_HEIGHT)
   return { key: rk.key, lookupId: rk.lookupId }
-}
-
-/** The game key's bags for the region, from where the game says its world comes from. */
-async function worldBags(game: GameDef, lookupId: string): Promise<NostrEvent[]> {
-  if (game.world.kind === 'fixture') return game.world.load()
-  const filter = { kinds: [HIDDEN_KIND], authors: [game.pubkey], '#d': [lookupId] }
-  const [ours, hinted] = await Promise.all([
-    query(filter),
-    // The hint is asked on its own only when it is not one of this player's relays already (review of #697).
-    game.relayHint && !relaySet().includes(game.relayHint) ? queryAny([game.relayHint], filter).catch(() => []) : Promise.resolve([]),
-  ])
-  return [...ours, ...hinted]
 }
 
 /** A bag's list of entries, opened with `key` (spec §7.6), as written: null when it does not open or is not a list. */
@@ -116,15 +114,16 @@ function entryOf(game: GameDef, list: readonly unknown[]): Position | null {
  */
 export async function loadWorld(game: GameDef): Promise<World> {
   const { key, lookupId } = worldKey(game)
-  const bags = (await worldBags(game, lookupId))
+  // The relays (the hint asked on its own only when it is not one of this player's, review of #697), or the DEV fixture (lib/games/source.ts).
+  const bags = (await askGame(game, { kinds: [HIDDEN_KIND], authors: [game.pubkey], '#d': [lookupId] }))
     .filter((e) => e.kind === HIDDEN_KIND && e.pubkey === game.pubkey && dOf(e) === lookupId && verifyEvent(e))
     .sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : 1))
   const newest = bags[0]
-  if (!newest) return { shards: [], entry: regionCentre(game) }
+  if (!newest) return { shards: [], entry: regionCentre(game), door: null }
   const { base, height, plane } = game.region
   const list = (await bagList(newest, key)) ?? []
   const entry = entryOf(game, list) ?? regionCentre(game)
-  const all = await unbag(newest, key, resolveReference, { at: base, plane }, height)
+  const all = await unbag(newest, key, resolverOf(game), { at: base, plane }, height)
   // A piece the bag names by reference that did not come back would leave a hole: a floor to fall through, a wall to
   // walk through. Said, so nobody moves in half a world (useGame step), rather than drawn as if whole (review of #697).
   const named = list.filter((e) => Array.isArray(e) && e[0] === 'a').length
@@ -135,5 +134,6 @@ export async function loadWorld(game: GameDef): Promise<World> {
   return {
     shards: items.filter((it) => it.type === 'shard' && it.shard).map((it) => ({ key: it.eventId, shard: it.shard!, at: it.at, height: it.height })),
     entry,
+    door: worldDoorOf(game, items),
   }
 }

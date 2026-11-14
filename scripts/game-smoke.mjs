@@ -1,9 +1,12 @@
 /**
  * game-smoke.mjs - the tutorial dungeon, LOCAL, in a real browser, start to
  * finish: enter the game from cyberspace, appear at its entry point, walk the
- * arrival hall to the pad, climb the rotunda in jumps with gravity on, TAKE
- * the key, OPEN the gate, reach the finish for the clear time, and exit back
- * to exactly the view you left (DECK-0002; first-arrival tutorial Track C).
+ * arrival hall to the pad, climb the rotunda in jumps with gravity on, land
+ * on the top platform (which opens the key item's bag), TAKE the key item
+ * into ITEMS, OPEN the gate (a DECK-0004 door) with it, reach the finish (in
+ * the door's room) for the clear time, and exit back to exactly the view you
+ * left, where ITEMS holds the key (DECK-0002, DECK-0004; first-arrival
+ * tutorial Track C).
  * Walking uses the game's keys; each jump is pressed inside the page on its
  * own clock (JUMP, then the direction at set times), so a slow software
  * renderer cannot change where it lands.
@@ -71,6 +74,8 @@ const store = (expr) => page.evaluate((expr) => (0, eval)(`(s) => ${expr}`)(wind
 const game = (expr) => page.evaluate((expr) => (0, eval)(`(g) => ${expr}`)(window.__game.getState()), expr)
 const waitFor = async (fn, ms, every = 250) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await sleep(every) } return false }
 const shot = (name) => page.screenshot({ path: path.join(out, `${device}-${name}.png`) })
+/** The key items in ITEMS (store/useInventory), by name. */
+const heldKeys = () => page.evaluate(async () => Object.values((await import('/src/store/useInventory.ts')).useInventory.getState().items).filter((i) => i.type === 'key').map((i) => i.name))
 const fail = async (why) => { console.log(`FAIL ${why}`); console.log(JSON.stringify({ stats, errors: errors.slice(0, 5) })); await browser.close(); process.exit(1) }
 
 page.setDefaultNavigationTimeout(120_000)
@@ -94,8 +99,12 @@ const viewOf = () => store('JSON.stringify({ view: s.view, scaleExp: s.scaleExp,
 const before = await viewOf()
 await shot('1-cyberspace-before')
 
-// ENTER GAME (Track A's entry point).
-const refused = await page.evaluate(() => window.__enterTutorialDungeon())
+// ENTER GAME: the DEV game, whose world is the bundled fixture (?games=1 turns it on here). The live game reads its world
+// from the relays, which this run never reaches.
+const refused = await page.evaluate(async () => {
+  const t = await import('/src/lib/games/tutorialGame.ts')
+  return window.__game.getState().enter(t.tutorialGameFor(t.TUTORIAL_DEV_PUBKEY))
+})
 if (refused) await fail(`entry refused: ${refused}`)
 if (!await waitFor(() => game('g.session && g.session.world !== null && g.session.at !== null && g.busy === null'), 30_000)) await fail('the world never loaded')
 // Entering is the arrival (DECK-0002 §2.2): one event on the chain, and the player at the world's entry point.
@@ -164,16 +173,20 @@ await expectAt('39,24,36', 'platform 3')
 await walk([['x', -1, 2], ['z', 1, 2]])
 await leap('z', 1, [250, 360])
 await expectAt('37,27,40', 'platform 4')
+// Standing on the top platform opened the key item's bag (its region's key, derived here).
+if (!await waitFor(() => game("g.session.keyBag === 'read' && g.session.keys.length === 1"), 10_000)) await fail(`the key bag did not open: ${await game('g.session.keyBag')} ${await game('g.message')}`)
 await walk([['z', 1, 1]])
 // Turn round to face the key (the camera follows from behind).
 await turn(-HALF)
-await sleep(600)
+await sleep(1500)
 // TAKE is offered by the key, and only taken by the tap.
-if (await game('g.session.progress.keyHeld')) await fail('the key was taken without a tap')
+if ((await heldKeys()).length) await fail('the key was taken without a tap')
 if (!(await page.locator('.gameview__actbtn', { hasText: 'TAKE' }).count())) await fail('no TAKE by the key')
 await shot('6-key')
 await page.locator('.gameview__actbtn', { hasText: 'TAKE' }).click()
-if (!(await game('g.session.progress.keyHeld'))) await fail('TAKE did not take the key')
+const heldNow = await heldKeys()
+console.log(`ITEMS after TAKE: ${JSON.stringify(heldNow)}`)
+if (heldNow.join() !== 'Dungeon Key') await fail('TAKE did not put the key item in ITEMS')
 await sleep(1000)
 await shot('7-key-taken')
 await turn(HALF)
@@ -189,7 +202,9 @@ await shot('8-gate')
 if (await game('g.session.progress.doorOpen')) await fail('the gate opened without a tap')
 await page.locator('.gameview__actbtn', { hasText: 'OPEN' }).click()
 if (!(await game('g.session.progress.doorOpen'))) await fail('OPEN did not open the gate')
-await sleep(1000)
+// Its room, with the finish tile, read with the room key.
+if (!await waitFor(() => game('g.session.room !== null && g.session.room.length === 1'), 10_000)) await fail(`the room did not come in: ${await game('g.message')}`)
+await sleep(1500)
 await shot('9-gate-open')
 
 // Down the hall to the finish tile: the clock stops and the exit card shows the clear time.
@@ -206,6 +221,12 @@ if (!await waitFor(() => game('g.session === null && g.busy === null'), 30_000))
 await sleep(2500)
 await shot('11-cyberspace-after')
 const after = await viewOf()
+// The key item stays in ITEMS: open the ITEMS panel and show it.
+const itemsTitle = page.locator('.panel__title, .panel h2, button, summary', { hasText: /^ITEMS$/ }).first()
+if (await itemsTitle.count()) { await itemsTitle.click().catch(() => {}); await sleep(1200) }
+await shot('12-items')
+const heldKeysAfter = await heldKeys()
+console.log(`ITEMS after leaving: ${JSON.stringify(heldKeysAfter)}`)
 
 const roles = await page.evaluate(async () => {
   const ev = await import('/src/lib/events.ts')
@@ -218,6 +239,6 @@ if (before !== after) console.log(`before ${before}\nafter  ${after}`)
 console.log(JSON.stringify({ stats, errors: errors.slice(0, 5) }))
 await browser.close()
 // On the chain: the entry, the pad's teleport, the exit. The key, the gate, the jumps and the clock are the game's, on the device.
-const ok = before === after && !roles.broken && stats.eventsSent === 0 && roles.roles.slice(-3).join(',') === 'enter:enter-virtual,virtual:teleport,exit:exit-virtual' && !!clear
+const ok = before === after && !roles.broken && stats.eventsSent === 0 && roles.roles.slice(-3).join(',') === 'enter:enter-virtual,virtual:teleport,exit:exit-virtual' && !!clear && heldKeysAfter.join() === 'Dungeon Key'
 console.log(ok ? 'PASS' : 'FAIL')
 process.exit(ok ? 0 : 1)

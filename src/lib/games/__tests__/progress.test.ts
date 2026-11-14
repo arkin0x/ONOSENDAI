@@ -1,13 +1,15 @@
 /**
  * progress.test.ts - the key door and the clock (lib/games/progress.ts):
- * TAKE only within reach and only once, OPEN only with the key and within
- * reach, the key used by the door, the door's looks swapped, the key's look
- * gone once taken, and the clock from the entry to the exit zone.
+ * what a tap can do given what lies in the world (offerHere); the LEGACY
+ * game-only key and gate: TAKE only within reach and only once, OPEN only
+ * with the key and within reach, the key used by the door, the door's looks
+ * swapped, the key's look gone once taken; and the clock from the entry to
+ * the exit zone.
  */
 
 import { describe, expect, it } from 'vitest'
 import { newShard } from 'sno-core/shards'
-import { clockMs, formatClearTime, offerAt, openDoor, reachExit, startProgress, takeKey, within, worldNow } from '../progress'
+import { clockMs, formatClearTime, legacyThings, offerAt, offerHere, openDoor, reachExit, startProgress, takeKey, within, worldNow } from '../progress'
 import { withConstrain } from '../../walkConstrain'
 import type { WorldShard } from '../play'
 import type { GameDef } from '../types'
@@ -20,7 +22,26 @@ const game: Pick<GameDef, 'key' | 'door' | 'exit'> = {
   exit: { lo: P(50, 1, 50), hi: P(52, 2, 52) },
 }
 
-describe('the key door', () => {
+describe('what a tap can do (offerHere)', () => {
+  it('TAKE by any key lying within reach, before the door; OPEN or LOCKED by a shut door as the key held says; nothing once cleared', () => {
+    const pr = startProgress(0)
+    const things = { keys: [P(10, 10, 10), P(20, 10, 20)], door: { at: P(30, 0, 30), opens: false } }
+    expect(offerHere(things, pr, P(20, 11, 21))).toBe('take')
+    expect(offerHere(things, pr, P(30, 1, 32))).toBe('locked')
+    expect(offerHere({ ...things, door: { at: P(30, 0, 30), opens: true } }, pr, P(30, 1, 32))).toBe('open')
+    expect(offerHere(things, { ...pr, doorOpen: true }, P(30, 1, 32))).toBeNull()
+    expect(offerHere({ keys: [], door: null }, pr, P(30, 1, 32))).toBeNull()
+    expect(offerHere(things, { ...pr, clearedMs: 5 }, P(10, 11, 10))).toBeNull()
+  })
+
+  it('the LEGACY things: the key until taken, the gate opened by the key in hand', () => {
+    const pr = startProgress(0)
+    expect(legacyThings(game, pr)).toEqual({ keys: [game.key!.at], door: { at: game.door!.at, opens: false } })
+    expect(legacyThings(game, { ...pr, keyHeld: true })).toEqual({ keys: [], door: { at: game.door!.at, opens: true } })
+  })
+})
+
+describe('the LEGACY key door', () => {
   it('offers TAKE by the key, OPEN or LOCKED by the door, and nothing elsewhere', () => {
     const pr = startProgress(0)
     expect(offerAt(game, pr, P(10, 11, 10))).toBe('take')

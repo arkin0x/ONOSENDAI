@@ -2,21 +2,23 @@
  * progress.ts - the key door and the clear time, as game logic (DECK-0002 §8:
  * what an item of the world means, scores and results are the game's). Pure.
  *
- * - The key: a world shard at the game's `key.at` is its look. It is taken by
- *   a tap within reach (the owner's rule: nothing opens or is taken
- *   automatically, ever), and from then on it is not drawn in the world.
- * - The door: the world shards at `door.at` are its closed look (one that
- *   holds a walker) and its open look (one that does not). Holding the key,
- *   a tap within reach opens it, which uses the key: the closed look is no
- *   longer drawn or solid, the open look is.
+ * - What a tap can do where you stand (offerHere): TAKE by a key lying within
+ *   reach, OPEN or LOCKED by a shut door, never by walking into either (the
+ *   owner's rule: nothing opens or is taken automatically, ever). What lies
+ *   where comes from the world: for a world whose gate is a DECK-0004 door,
+ *   the key items revealed from the key bag and the door (lib/games/keyDoor.ts
+ *   thingsNow); for the LEGACY world, the game's own key and gate (legacyThings).
  * - The clear time: from entering the game to reaching its exit zone, kept
  *   on this device. It is not on the chain (DECK-0002 says nothing of
  *   results; the base protocol leaves them to the game, §8.11.7).
  *
- * The key is a thing of this game only, not a key item of cyberspace
- * (DECK-0004): it is never made, taken or published, so it is never in
- * anyone's inventory, opens nothing outside the dungeon, and every player
- * finds the same key in the same place.
+ * LEGACY (the world published 2026-11-13, until the world with a real door is
+ * live): there the key is a thing of this game only, not a key item of
+ * cyberspace. A world shard at the game's `key.at` is its look, gone once
+ * taken; the world shards at `door.at` are the gate's closed look (one that
+ * holds a walker) and open look (one that does not); OPEN uses the key
+ * (keyHeld false, doorOpen true). takeKey, openDoor, worldNow and offerAt are
+ * that world's, and go with it.
  */
 
 import { blocks } from '../walkConstrain'
@@ -27,10 +29,12 @@ import type { GameDef, GameZone } from './types'
 export interface Progress {
   /** When the clock started (ms since the epoch): the entry. */
   startedAt: number
-  /** The key is in hand. */
+  /** LEGACY: the game-only key is in hand. A real key item is held in ITEMS instead (store/useInventory). */
   keyHeld: boolean
-  /** The door is open (the key was used on it). */
+  /** The door is open: opened by OPEN in this run. */
   doorOpen: boolean
+  /** The DECK-0004 door it was opened on (its event id); absent for the LEGACY gate. A world whose door is another starts shut. */
+  doorId?: string
   /** The clear time, once the exit zone was reached. */
   clearedMs: number | null
 }
@@ -58,25 +62,47 @@ export function inZone(z: GameZone, p: Position): boolean {
   return p.x >= z.lo.x && p.x <= z.hi.x && p.y >= z.lo.y && p.y <= z.hi.y && p.z >= z.lo.z && p.z <= z.hi.z
 }
 
-/** The key has been taken (in hand, or used on the door). */
+/** LEGACY: the game-only key has been taken (in hand, or used on the door). */
 export const keyTaken = (pr: Progress): boolean => pr.keyHeld || pr.doorOpen
 
 /** What a tap could do where the player stands, if anything: the one action button shown. */
 export type Offer = 'take' | 'open' | 'locked' | null
 
-export function offerAt(game: Rules, pr: Progress, at: Position): Offer {
+/** What lies in the world for a tap to act on: keys to TAKE, and the door with whether a key in hand opens it. */
+export interface Things {
+  /** Where each key lies that can be taken. */
+  keys: readonly Position[]
+  /** The door, and whether a key held opens it; null when there is none. */
+  door: { at: Position; opens: boolean } | null
+}
+
+/** The one action a tap would do at `at`, given what lies in the world: TAKE first, then the shut door. */
+export function offerHere(things: Things, pr: Progress, at: Position): Offer {
   if (pr.clearedMs !== null) return null
-  if (game.key && !keyTaken(pr) && within(at, game.key.at, KEY_REACH)) return 'take'
-  if (game.door && !pr.doorOpen && within(at, game.door.at, DOOR_REACH)) return pr.keyHeld ? 'open' : 'locked'
+  if (things.keys.some((k) => within(at, k, KEY_REACH))) return 'take'
+  if (things.door && !pr.doorOpen && within(at, things.door.at, DOOR_REACH)) return things.door.opens ? 'open' : 'locked'
   return null
 }
 
-/** TAKE: the key into hand, when within reach. Null when there is nothing to take here. */
+/** LEGACY: the game-only key (until taken) and gate (opened by the key in hand). */
+export function legacyThings(game: Rules, pr: Progress): Things {
+  return {
+    keys: game.key && !keyTaken(pr) ? [game.key.at] : [],
+    door: game.door ? { at: game.door.at, opens: pr.keyHeld } : null,
+  }
+}
+
+/** LEGACY: what a tap would do in the world with the game-only key and gate. */
+export function offerAt(game: Rules, pr: Progress, at: Position): Offer {
+  return offerHere(legacyThings(game, pr), pr, at)
+}
+
+/** LEGACY TAKE: the key into hand, when within reach. Null when there is nothing to take here. */
 export function takeKey(game: Rules, pr: Progress, at: Position): Progress | null {
   return offerAt(game, pr, at) === 'take' ? { ...pr, keyHeld: true } : null
 }
 
-/** OPEN: the door, with the key in hand and within reach; the key is used. Null otherwise. */
+/** LEGACY OPEN: the door, with the key in hand and within reach; the key is used. Null otherwise. */
 export function openDoor(game: Rules, pr: Progress, at: Position): Progress | null {
   return offerAt(game, pr, at) === 'open' ? { ...pr, keyHeld: false, doorOpen: true } : null
 }
@@ -103,7 +129,7 @@ export function formatClearTime(ms: number): string {
 const same = (a: Position, b: Position): boolean => a.x === b.x && a.y === b.y && a.z === b.z
 
 /**
- * The world as it stands with this progress: what is drawn, and what holds a
+ * LEGACY: the world as it stands with this progress: what is drawn, and what holds a
  * walker. The key's look is gone once taken. At the door, the closed look
  * stands until it is opened and the open look after.
  */

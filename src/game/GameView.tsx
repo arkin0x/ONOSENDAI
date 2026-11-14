@@ -12,7 +12,10 @@
  * sides go the way the camera faces, snapped to the nearest axis. In a game
  * with gravity JUMP jumps (twice in the air for the double jump) and a tick
  * on every frame carries the fall; in one without, UP and DOWN go along Y.
- * TAKE and OPEN show by the key and the door, and are always a tap. The clock
+ * TAKE and OPEN show by the key and the door, and are always a tap. In a
+ * world whose gate is a DECK-0004 door (lib/games/keyDoor.ts), the key item is
+ * drawn as the model it wears once its bag is opened, until it is in ITEMS,
+ * and the door wears its own looks, closed and open. The clock
  * runs on the bar from the entry; the exit zone stops it and shows the exit
  * card. Drag to look around.
  *
@@ -24,7 +27,16 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { KeyRound } from 'lucide-react'
 import { BoxGeometry, EdgesGeometry, Vector3, type Group } from 'three'
-import { useGame } from '../store/useGame'
+import { holdsDoorKey, offerFor, useGame, type GameSession } from '../store/useGame'
+import { useInventory } from '../store/useInventory'
+import { ModelInMotion } from '../scene/ItemModel'
+import { loadItemModel, modelFromPayload, type LoadedModel } from '../hooks/useItemModel'
+import { animationOf, modelOf, type ItemModelRef } from '../lib/itemModel'
+import { keyItemHeld, sceneNow } from '../lib/games/keyDoor'
+import { newestAt } from '../lib/games/source'
+import type { Hidden } from '../lib/hidden'
+import type { HeldItem } from '../lib/inventory'
+import type { Box } from '../lib/clip'
 import { placeShard } from '../scene/WorldShards'
 import { ShardMesh } from '../scene/ShardMesh'
 import { itemCentre, type AxisName, type Position, type ViewAxes } from '../lib/space'
@@ -32,7 +44,7 @@ import { BG, GAME } from '../lib/palette'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import type { GameDef } from '../lib/games/types'
 import type { WorldShard } from '../lib/games/play'
-import { clockMs, formatClearTime, keyTaken, offerAt, worldNow, type Progress } from '../lib/games/progress'
+import { clockMs, formatClearTime, keyTaken, type Progress } from '../lib/games/progress'
 
 /** A held direction key presses at once and then every this many ms: WALK's hold (store/walkHold.ts WALK_HOLD_MS). */
 const HOLD_MS = 110
@@ -154,12 +166,52 @@ function KeyMark({ at }: { at: [number, number, number] }): JSX.Element {
   )
 }
 
-function GameCanvas({ game, world, at, look, progress }: { game: GameDef; world: WorldShard[] | null; at: Position; look: React.MutableRefObject<Look>; progress: Progress }): JSX.Element {
+/**
+ * The model a key item wears (DECK-0004 §2.5), from where the game's world
+ * comes from: the relays for a live game (hooks/useItemModel, the app's one
+ * cache), the bundled fixture for the DEV game. Null when it wears none or it
+ * cannot be had: the item is then drawn as a plain gold block.
+ */
+async function gameModel(game: GameDef, ref: ItemModelRef): Promise<LoadedModel | null> {
+  if (game.world.kind !== 'fixture') return loadItemModel(ref)
+  const ev = newestAt(await game.world.load(), ref.address)
+  if (!ev || ev.tags.some((t) => t[0] === 'encrypted')) return null
+  try { return await modelFromPayload(ref.address, JSON.parse(ev.content)) } catch { return null }
+}
+
+/** A key item lying in the world: the model it wears, in its motion, its centre on its point (DECK-0004 §2.5). */
+function KeyItemMark({ game, item }: { game: GameDef; item: Hidden }): JSX.Element {
+  const ref = useMemo(() => modelOf(item.inner?.tags ?? []), [item])
+  const animation = useMemo(() => animationOf(item.inner?.tags ?? []), [item])
+  const [model, setModel] = useState<LoadedModel | null>(null)
+  useEffect(() => {
+    if (!ref) return
+    let live = true
+    void gameModel(game, ref).then((m) => { if (live) setModel(m) })
+    return () => { live = false }
+  }, [game, ref])
+  const box = useMemo<Box>(() => ({ min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] }), [])
+  const scale = model ? 2 ** model.shard.unit : 1
+  return (
+    <group position={centreOf(game, item.at)}>
+      {model
+        ? <group scale={scale}><ModelInMotion model={model} animation={animation} id={item.eventId} box={box} amplitude={0.08} lit outline={false} /></group>
+        : <mesh><boxGeometry args={[0.5, 0.5, 0.5]} /><meshBasicMaterial color="#ffd23f" /></mesh>}
+    </group>
+  )
+}
+
+function GameCanvas({ session, at, look, items }: { session: GameSession; at: Position; look: React.MutableRefObject<Look>; items: Record<string, HeldItem> }): JSX.Element {
+  const { game, world, door, room, keys, progress } = session
   const me = centreOf(game, at)
   const pads = useMemo(() => game.pads.map((p) => ({ at: centreOf(game, p.at), beacon: p.beacon })), [game])
   const taken = keyTaken(progress)
-  // The key gone once taken, the door's closed or open look (lib/games/progress.ts).
-  const drawn = useMemo(() => (world ? worldNow(game, world, progress).drawn : null), [game, world, taken, progress.doorOpen])
+  // What stands as the door stands: its closed or open look and its room (lib/games/keyDoor.ts), or the LEGACY key and gate.
+  const drawn = useMemo(() => (world ? sceneNow(game, { shards: world, door, room }, progress).drawn : null), [game, world, door, room, taken, progress.doorOpen])
+  // A real key item, once its bag is open, until it is in ITEMS.
+  const lying = useMemo(() => keys.filter((k) => !keyItemHeld(items, k)), [keys, items])
+  // The ring marks where the key lies, seen from below, until it is held (or, LEGACY, taken).
+  const ring = door ? (game.keyBag && !holdsDoorKey(session, items) && !progress.doorOpen ? game.keyBag.at : null) : game.key && !taken ? game.key.at : null
   return (
     <Canvas camera={{ fov: 70, near: 0.05, far: 400, position: [me[0], me[1], me[2] + CAMERA_DISTANCE] }} dpr={[1, 2]} gl={{ antialias: true }} style={{ background: BG }}>
       <fog attach="fog" args={[BG, 6, 60]} />
@@ -169,7 +221,8 @@ function GameCanvas({ game, world, at, look, progress }: { game: GameDef; world:
       <Rig target={me} look={look} />
       {drawn && <Shards game={game} world={drawn} />}
       {pads.map((p, i) => <PadMark key={i} at={p.at} beacon={p.beacon} />)}
-      {game.key && !taken && <KeyMark at={centreOf(game, game.key.at)} />}
+      {ring && <KeyMark at={centreOf(game, ring)} />}
+      {lying.map((k) => <KeyItemMark key={k.eventId} game={game} item={k} />)}
       <Player at={me} />
     </Canvas>
   )
@@ -202,6 +255,8 @@ export function GameView(): JSX.Element | null {
 function GameScreen(): JSX.Element | null {
   const session = useGame((s) => s.session)
   const busy = useGame((s) => s.busy)
+  // ITEMS: a real key item is held once it is there (TAKE), and opens the door from there.
+  const items = useInventory((s) => s.items)
   const message = useGame((s) => s.message)
   // Facing into cyberspace -Z at first: the tutorial dungeon's hall runs that way from its entry point.
   const look = useRef<Look>({ yaw: Math.PI, pitch: 0.35 })
@@ -220,7 +275,7 @@ function GameScreen(): JSX.Element | null {
     const g = useGame.getState()
     const s = g.session
     if (!s?.at) return
-    const offer = offerAt(s.game, s.progress, s.at)
+    const offer = offerFor(s)
     if (offer === 'take') g.take()
     else if (offer === 'open') g.open()
   }
@@ -284,7 +339,7 @@ function GameScreen(): JSX.Element | null {
   const drag = useRef<{ x: number; y: number; id: number } | null>(null)
   if (!session) return null
   const { game, world, worldError, at, progress } = session
-  const offer = at ? offerAt(game, progress, at) : null
+  const offer = offerFor(session, items)
   const cleared = progress.clearedMs !== null
 
   const leave = async (): Promise<void> => {
@@ -310,12 +365,12 @@ function GameScreen(): JSX.Element | null {
         onPointerCancel={() => { drag.current = null }}
       >
         {/* You appear at the entry point once the world says where it is (DECK-0002 §2.2). */}
-        {at && <GameCanvas game={game} world={world} at={at} look={look} progress={progress} />}
+        {at && <GameCanvas session={session} at={at} look={look} items={items} />}
       </div>
       <div className="gameview__bar">
         <span className="gameview__name">{game.name}</span>
         {game.exit && <Clock progress={progress} />}
-        {progress.keyHeld && <span className="gameview__key" aria-label="You have the key"><KeyRound size={14} strokeWidth={2.5} aria-hidden /></span>}
+        {holdsDoorKey(session, items) && !progress.doorOpen && <span className="gameview__key" aria-label="You have the key"><KeyRound size={14} strokeWidth={2.5} aria-hidden /></span>}
         {status && <span className="gameview__status">{status}</span>}
         <button className="gameview__exit" disabled={busy !== null} onClick={(e) => { e.currentTarget.blur(); void leave() }}>EXIT GAME</button>
       </div>

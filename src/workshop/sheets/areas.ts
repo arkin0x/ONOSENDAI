@@ -14,8 +14,7 @@ export type SheetKind = Area | 'palette' | 'object'
 export const AREA_LABEL: Record<Area, string> = { menu: 'MENU', shard: 'SHARD', grid: 'GRID', avatar: 'AVATAR', motion: 'MOTION' }
 
 /**
- * Whether MOTION has an editor to open. The motion editor (PR #735,
- * workshop/AnimEditor.tsx) drops into sheets/MotionSheet.tsx as it is; until
- * it lands, the MOTION button holds its place in the top bar, greyed out.
+ * Whether MOTION has an editor to open: it has (workshop/AnimEditor.tsx in
+ * sheets/MotionSheet.tsx, PR #735).
  */
-export const MOTION_READY = false
+export const MOTION_READY = true

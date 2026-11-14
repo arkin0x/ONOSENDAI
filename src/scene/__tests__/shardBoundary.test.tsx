@@ -35,7 +35,7 @@ describe('a shard that cannot be drawn', () => {
 
   it('leaves the picture stage to its own boundary, so a bad shard fails at once and is not retried', () => {
     const source = readFileSync(resolve(__dirname, '../ThumbStage.tsx'), 'utf8')
-    expect(source).toContain('<ShardMeshBody key={job.key} shard={job.shard} lit />')
+    expect(source).toContain('<ShardMeshBody key={job.key} shard={job.shard} lit still />')
     expect(source).not.toMatch(/<ShardMesh\b/)
   })
 

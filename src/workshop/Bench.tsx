@@ -37,6 +37,11 @@ import { BenchGrid } from './benchGrid'
 import { VIEW_DIRS, benchAxes, benchPose, frameOffset, frameZoom, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
+import { AnimClock, movingOn, reducedMotionNow } from '../scene/animMotion'
+import { animOf, hasAnim } from '../lib/anim'
+import { cycleSeconds } from '../lib/animEdit'
+import type { ClockReading } from '../lib/worldClock'
+import { useAnimPreview } from '../store/animPreview'
 import { OVERLAY_ORDER } from '../scene/shardFaces'
 import { ShardLights } from '../scene/shardLight'
 import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
@@ -197,7 +202,7 @@ function Ghost(): JSX.Element | null {
     const m = new Matrix4().fromArray(partMatrix({ ref: 0, at: aim, turn: [0, (90 * facing) % 360, 0], step: 0 }, unit, object.shard.unit))
     return (
       <group matrix={m} matrixAutoUpdate={false}>
-        <ShardMesh shard={object.shard} ghost />
+        <ShardMesh shard={object.shard} ghost still />
       </group>
     )
   }
@@ -212,7 +217,7 @@ function Ghost(): JSX.Element | null {
   if (!model) return null
   return (
     <group position={UP(landing(kind, size, facing, aim, extent, plane))}>
-      <ShardMesh shard={model} ghost />
+      <ShardMesh shard={model} ghost still />
     </group>
   )
 }
@@ -286,6 +291,8 @@ function Handles(): JSX.Element | null {
   const selection = useWorkshop((s) => s.selection)
   const facePick = useWorkshop((s) => s.facePick)
   const tool = useWorkshop((s) => s.tool)
+  const previewing = useAnimPreview((s) => s.on)
+  const moving = tool === 'view' || previewing
   const invalidate = useThree((s) => s.invalidate)
   const chosen = useMemo(() => new Set(selection), [selection])
   const groups = useMemo(() => {
@@ -327,6 +334,8 @@ function Handles(): JSX.Element | null {
   })
   const pressed = useMemo(() => new PressMemory(), [])
   if (!shard) return null
+  // On VIEW a shard with `anim` is drawn moving (ShardMesh \`still\`): handles at its rest pose would hang in the air beside it.
+  if (moving && hasAnim(shard)) return null
 
   const onPress = (e: ThreeEvent<PointerEvent>): void => { pressed.press(e.nativeEvent, e.index) }
 
@@ -869,6 +878,87 @@ function BenchWake(): null {
   return null
 }
 
+/**
+ * An object with `anim` moves on the VIEW tool (ShardMesh `still` is off
+ * there): the bench draws on demand, so while anything on it moves, every
+ * frame is asked for (scene/animMotion.ts movingOn).
+ */
+function AnimWake(): null {
+  const invalidate = useThree((s) => s.invalidate)
+  const gl = useThree((s) => s.gl)
+  // Every frame only while it actually moves: playing (or VIEW with no preview), and motion not reduced.
+  // Paused, scrubbed or held still, one frame for each change of the preview is enough.
+  useFrame(() => {
+    if (movingOn(gl) === 0 || reducedMotionNow()) return
+    const p = useAnimPreview.getState()
+    if (!p.on || p.playing) invalidate()
+  })
+  const tool = useWorkshop((s) => s.tool)
+  useEffect(() => { invalidate() }, [tool, invalidate])
+  useEffect(() => useAnimPreview.subscribe(() => invalidate()), [invalidate])
+  return null
+}
+
+/**
+ * The bench's own clock for moving objects (scene/animMotion.ts AnimClock):
+ * the motion editor's preview (store/animPreview.ts). Playing, it is the
+ * world clock; paused, the moment it was paused at; scrubbed, a share of the
+ * longest motion's cycle, a time chosen by hand and so drawn under reduced
+ * motion too.
+ */
+const benchReading: ClockReading = { t: 0, version: 0, nowS: 0, chosen: false }
+export function benchClock(shared: ClockReading): ClockReading {
+  const p = useAnimPreview.getState()
+  benchReading.version = shared.version
+  benchReading.nowS = shared.nowS
+  benchReading.chosen = p.scrub !== null
+  if (p.scrub !== null) {
+    const cur = useWorkshop.getState().current()
+    benchReading.t = p.scrub * cycleSeconds(cur ? animOf(cur) : [])
+  } else if (p.on && !p.playing) benchReading.t = p.frozen
+  else benchReading.t = shared.t
+  return benchReading
+}
+
+/**
+ * A path's points on the bench while its motion shows (VIEW, or the editor's
+ * preview): a dot for each and the loop through them, where the object's
+ * origin travels, the point being edited larger. The field's frame is the
+ * render frame (lib/anim.ts), so a point is drawn at its ticks over 120.
+ */
+function PathMarks({ show }: { show: boolean }): JSX.Element | null {
+  const shard = useWorkshop((s) => s.current())
+  const point = useAnimPreview((s) => s.point)
+  const paths = useMemo(() => (shard ? animOf(shard).map((m, i) => ({ m, i })).filter(({ m }) => m.word === 'path') : []), [shard])
+  const lines = useMemo(() => paths.map(({ m }) => {
+    const pts: number[] = []
+    for (let k = 0; k < m.pts.length; k += 4) pts.push(m.pts[k] / 120, m.pts[k + 1] / 120, m.pts[k + 2] / 120)
+    pts.push(pts[0], pts[1], pts[2])
+    const g = new BufferGeometry()
+    g.setAttribute('position', new Float32BufferAttribute(pts, 3))
+    const l = new Line(g, new LineBasicMaterial({ color: WARN, transparent: true, opacity: 0.8, depthTest: false, toneMapped: false }))
+    l.renderOrder = OVERLAY_ORDER
+    return l
+  }), [paths])
+  useEffect(() => () => { for (const l of lines) { l.geometry.dispose(); (l.material as LineBasicMaterial).dispose() } }, [lines])
+  if (!show || paths.length === 0) return null
+  return (
+    <group renderOrder={OVERLAY_ORDER}>
+      {paths.map(({ m, i }, n) => (
+        <group key={i}>
+          <primitive object={lines[n]} />
+          {Array.from({ length: m.pts.length / 4 }, (_, k) => (
+            <mesh key={k} position={[m.pts[k * 4] / 120, m.pts[k * 4 + 1] / 120, m.pts[k * 4 + 2] / 120]} renderOrder={OVERLAY_ORDER}>
+              <sphereGeometry args={[point && point[0] === i && point[1] === k ? 0.16 : 0.09, 12, 12]} />
+              <meshBasicMaterial color={point && point[0] === i && point[1] === k ? ACCENT : WARN} depthTest={false} toneMapped={false} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+    </group>
+  )
+}
+
 function AxesReporter(): null {
   const camera = useThree((s) => s.camera)
   useFrame(() => {
@@ -898,6 +988,8 @@ function AxesReporter(): null {
 function BenchImpl(): JSX.Element {
   const shard = useWorkshop((s) => s.current())
   const tool = useWorkshop((s) => s.tool)
+  // The motion editor's preview draws the motion whatever the tool (store/animPreview.ts).
+  const previewing = useAnimPreview((s) => s.on)
   const extent = shard?.extent ?? GRID_HALF
   const showAvatar = useWorkshop((s) => s.showAvatar)
   const partSel = useWorkshop((s) => s.partSel)
@@ -974,6 +1066,7 @@ function BenchImpl(): JSX.Element {
       <Aim />
       <Keys />
       <BenchWake />
+      <AnimWake />
       <AxesReporter />
       <ViewDriver sphere={sphere} />
       <Framer />
@@ -981,7 +1074,8 @@ function BenchImpl(): JSX.Element {
       <BenchAxes reach={extent + 1} />
       <Grid />
       {showAvatar && <ScaleAvatar />}
-      {shard && <ShardMesh shard={shard} lit onFaceClick={tool === 'face' ? onFace : undefined} onPartClick={tool === 'view' || tool === 'select' || tool === 'face' ? onPart : undefined} selectedParts={partSel} />}
+      {shard && <AnimClock.Provider value={benchClock}><ShardMesh shard={shard} lit still={tool !== 'view' && !previewing} onFaceClick={tool === 'face' ? onFace : undefined} onPartClick={tool === 'view' || tool === 'select' || tool === 'face' ? onPart : undefined} selectedParts={partSel} /></AnimClock.Provider>}
+      <PathMarks show={tool === 'view' || previewing} />
       <Ghost />
       <PickLoop />
       <FaceHighlight />

@@ -30,6 +30,7 @@ import { lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../lib/hyperspa
 import { checkCloudRide, type CloudRideCheck } from '../lib/cloudRide'
 import { Quaternion } from 'three'
 import { generateSecretKey, getEventHash, verifiedSymbol, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
+import { withNoBroadcast } from '../lib/noBroadcast'
 import { nip19 } from 'nostr-tools'
 import { exportNcryptsec } from '../lib/keyExport'
 import {
@@ -1917,6 +1918,11 @@ function otherAccount(pubkey: string): void {
 }
 
 async function signEvent(template: EventTemplate, patienceMs?: number, signer: Signer = currentSigner, late?: (signed: NostrEvent) => void): Promise<NostrEvent> {
+  // While the tutorial runs, a public Cyberspace event asks not to be
+  // broadcast (spec §8.13, lib/noBroadcast.ts): every path signs through
+  // here, so none can forget it. Never on a sealed entry, an item, a list,
+  // a DM, an auth, or a template already mined.
+  template = withNoBroadcast(template, signer.pubkey)
   // The last look before a movement event exists, whatever path asked for
   // it (a hop, a sidestep, BOARD, a ride, a spawn, a respawn): a deploy
   // requiring newer chain rules than this build's gets none from this tab

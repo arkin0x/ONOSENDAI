@@ -21,9 +21,10 @@
 
 import { ACTION_KIND, type NostrEvent } from '../events'
 import { HIDDEN_KIND, OBJECT_KIND } from '../hidden'
-import { DELETION_KIND, newestPerAddress, arrivalTimes, bagRecord, bagsHidden, chainIndex, chainLengthIndexed, deletionOf, isV2Action, objectRecord, type BagRecord, type ChainIndex, type Deletion, type ObjectRecord } from '../countingRules'
+import { DELETION_KIND, newestPerAddress, arrivalTimes, bagRecord, bagsHidden, chainIndex, chainLengthIndexed, deletionOf, isV2Action, isV2Spawn, objectRecord, type BagRecord, type ChainIndex, type Deletion, type ObjectRecord } from '../countingRules'
 import type { Filter } from 'nostr-tools'
 import { V2_EPOCH, askAll, type Ask } from './tape'
+import { noBroadcast } from '../noBroadcast'
 
 /** Times in ascending order, and how many are at or before `t`. */
 export function countTo(times: number[], t: number): number {
@@ -58,6 +59,14 @@ export interface Census {
   deletions: Deletion[]
   /** Each key's first v2 spawn (lib/countingRules arrivalTimes). */
   firstSpawn: Map<string, number>
+  /**
+   * Spawns tagged no-broadcast (spec §8.13: a first arrival's tutorial) whose
+   * key has not arrived yet, by id, with the key and when it was signed: it
+   * arrives with its first untagged action on that chain, which the census
+   * asks for (HELD_BATCH ids a question) until it comes, or until the spawn
+   * is HELD_MAX_AGE_S old. Absent: none.
+   */
+  heldSpawns?: Map<string, { pubkey: string; at: number }>
   /** When it was read, and last read whole, unix s: a later read asks only for what is new (loadCensus). */
   readAt: number
   wholeAt: number
@@ -67,6 +76,15 @@ export interface Census {
 export const READ_OVERLAP_S = 24 * 60 * 60
 /** How often everything is read whole again, s: for one signed earlier than READ_OVERLAP_S before it was published. */
 export const READ_WHOLE_S = 24 * 60 * 60
+/** How many tagged spawns' chains one question asks after (by `#e`). */
+export const HELD_BATCH = 100
+/**
+ * How long a tagged spawn's chain is asked after, s: two weeks, NEW ARRIVALS'
+ * window and the week before it. A key that has done nothing untagged by
+ * then (left during the tutorial) is not asked after again, and so is never
+ * counted, unless it spawns again untagged.
+ */
+export const HELD_MAX_AGE_S = 14 * 24 * 60 * 60
 
 const byId = <T extends { id: string }>(...lists: T[][]): T[] => [...new Map(lists.flat().map((x) => [x.id, x])).values()]
 
@@ -89,19 +107,36 @@ export async function loadCensus(ask: Ask, prev: Census | null = null, nowS: num
     askAll(ask, at({ kinds: [DELETION_KIND], '#k': [String(HIDDEN_KIND), String(OBJECT_KIND)] })),
   ])
   const keep = whole ? null : prev
-  const first = new Map(keep?.firstSpawn ?? [])
-  for (const [pk, t] of arrivalTimes(spawns)) first.set(pk, Math.min(first.get(pk) ?? Infinity, t))
+  // An arrival once seen stands, a whole read included: a key that arrived
+  // after a tagged spawn has no untagged spawn to be found by again.
+  const first = new Map(prev?.firstSpawn ?? [])
+  // A key whose spawn is tagged arrives with its first untagged action on
+  // that chain (lib/countingRules arrivalTimes): those chains are asked for,
+  // by the spawn ids they name, only while their key has not arrived and the
+  // spawn is under HELD_MAX_AGE_S old.
+  const arrive = (got: Map<string, number>): void => { for (const [pk, t] of got) first.set(pk, Math.min(first.get(pk) ?? Infinity, t)) }
+  arrive(arrivalTimes(spawns))
+  const tagged = new Map(spawns.filter((e) => isV2Spawn(e) && noBroadcast(e)).map((e) => [e.id, { pubkey: e.pubkey, at: e.created_at }]))
+  const held = new Map([...(prev?.heldSpawns ?? []), ...tagged].filter(([, h]) => !first.has(h.pubkey) && nowS - h.at < HELD_MAX_AGE_S))
+  const ids = [...held.keys()]
+  const batches: string[][] = []
+  for (let i = 0; i < ids.length; i += HELD_BATCH) batches.push(ids.slice(i, i + HELD_BATCH))
+  const followers = (await Promise.all(batches.map((b) => askAll(ask, at({ kinds: [ACTION_KIND], '#e': b }))))).flat()
+  arrive(arrivalTimes(followers, new Map([...held].map(([id, h]) => [id, h.pubkey]))))
+  for (const [id, h] of held) if (first.has(h.pubkey)) held.delete(id)
   const bagRecords = byId(keep?.bagRecords ?? [], bags.map(bagRecord).filter((b): b is BagRecord => b !== null))
   const objectRecords = byId(keep?.objectRecords ?? [], objects.map(objectRecord).filter((o): o is ObjectRecord => o !== null))
   return {
     arrivals: sorted([...first.values()]),
-    bags: sorted(newestPerAddress(bagRecords).map((b) => b.createdAt)),
+    // Never one tagged no-broadcast (spec §8.13): it stands as the newest of its address, and is not counted.
+    bags: sorted(newestPerAddress(bagRecords).filter((b) => !b.noBroadcast).map((b) => b.createdAt)),
     // A public object carries its payload in content; a hidden one is sealed.
-    objects: sorted(newestPerAddress(objectRecords).filter((o) => o.open).map((o) => o.createdAt)),
+    objects: sorted(newestPerAddress(objectRecords).filter((o) => o.open && !o.noBroadcast).map((o) => o.createdAt)),
     bagRecords,
     objectRecords,
     deletions: byId(keep?.deletions ?? [], deletions.map(deletionOf).filter((d): d is Deletion => d !== null)),
     firstSpawn: first,
+    heldSpawns: held,
     readAt: nowS,
     wholeAt: whole ? nowS : prev.wholeAt,
   }

@@ -7,7 +7,8 @@
  *   check has an answer;
  * - progress kept per player pubkey: a reload resumes, an ended run stays
  *   ended, RESTART begins again;
- * - a first arrival starts LOCAL; a resume or RESTART leaves the publishing switch as it was;
+ * - no start touches the publishing switch: a first arrival starts LIVE (2026-11-14; its run's
+ *   events are tagged no-broadcast, noBroadcastTag.test.ts), a resume or RESTART as it was;
  * - a step's own wait counts, and the next step comes up by itself.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -296,14 +297,21 @@ describe('the script', () => {
 })
 
 describe('the engine', () => {
-  it('starts a first arrival LOCAL, so a newcomer sandboxes (feedback item 15)', () => {
+  it('starts a first arrival LIVE, its switch untouched: TV skips its tagged events instead (owner, 2026-11-14; LOCAL until then)', () => {
     useTutorial.setState({ script: { steps: [TUTORIAL_SCRIPT.steps[0]] } })
     useCyberspace.getState().setLive(true)
     useTutorial.getState().start()
-    expect(useCyberspace.getState().live).toBe(false)
+    expect(useCyberspace.getState().live).toBe(true)
     useTutorial.getState().next() // FIND IT on the welcome, here the last step
     expect(useTutorial.getState().active).toBe(false)
     expect(readProgress(pubkey())?.ended).toBe('finished')
+    // A device whose switch someone turned off keeps it off.
+    localStorage.removeItem(PROGRESS_PREFIX + pubkey())
+    useCyberspace.getState().setLive(false)
+    useTutorial.getState().start()
+    expect(useCyberspace.getState().live).toBe(false)
+    useTutorial.getState().next()
+    useCyberspace.getState().setLive(true)
   })
 
   it('RESTART begins again from the first step for any identity, laid out where it stands, and pause keeps the step', () => {
@@ -760,7 +768,7 @@ describe('the /tutorial address', () => {
     for (const source of ['/tutorial', '/tutorial/', '/TUTORIAL', '/Tutorial']) expect(rewrites.find((r) => r.source === source)?.destination).toBe('/index.html')
   })
 
-  it('a brand-new identity gets the first arrival: the welcome, at its spawn, LOCAL, though the switch was never set', async () => {
+  it('a brand-new identity gets the first arrival: the welcome, at its spawn, LIVE as the switch was never set', async () => {
     useCyberspace.getState().setLive(true)
     loadAt('/tutorial')
     const stop = watchFirstArrival()
@@ -769,7 +777,7 @@ describe('the /tutorial address', () => {
     expect(t.active).toBe(true)
     expect(t.script.steps[t.index].id).toBe('welcome')
     expect(t.anchor).toBe(null)
-    expect(useCyberspace.getState().live).toBe(false)
+    expect(useCyberspace.getState().live).toBe(true)
     expect(readProgress(pubkey())).toEqual({ step: 'welcome' })
     expect(tutorialAsked()).toBe(false)
     stop()
@@ -906,7 +914,9 @@ describe('the /tutorial address', () => {
     expect(useTutorial.getState().active).toBe(true)
     stop()
     useTutorial.getState().pause()
-    // The tour: the same.
+    // The tour: the same, from a LIVE switch, which the tour turns off only
+    // once it is active (a change the waiting ask reacts to).
+    useCyberspace.getState().setLive(true)
     loadAt('/tutorial')
     useDemo.getState().start()
     stop = watchFirstArrival()

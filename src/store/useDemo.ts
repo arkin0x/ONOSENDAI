@@ -564,10 +564,14 @@ export const useDemo = create<DemoState>((set, get) => {
         writePrevLive(prev)
         set({ prevLive: prev })
       }
-      if (cs.live) cs.setLive(false)
       const id = stepId ? STEP_ALIASES[stepId] ?? stepId : undefined
       const at = id ? get().script.steps.findIndex((s) => s.id === id) : 0
       set({ active: true, minimized: false })
+      // Only once the tour is marked active: turning the switch off is a store
+      // change that a waiting /tutorial ask reacts to, and with the tour not
+      // yet active it would start the tutorial, which the tour then paused,
+      // and the ask was lost (review of the no-broadcast change).
+      if (cs.live) cs.setLive(false)
       enter(at >= 0 ? at : 0)
     },
 

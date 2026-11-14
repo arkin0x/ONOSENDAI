@@ -91,7 +91,7 @@ export interface GameSession {
 
 export interface GameState {
   session: GameSession | null
-  /** What is being signed now, if anything: nothing else is asked while it is. */
+  /** What is being signed now, if anything: nothing else is asked while it is, except leaving (exit), which always is. */
   busy: 'entering' | 'teleporting' | 'exiting' | null
   /** The last thing worth saying: a refusal, or a record that did not get signed. */
   message: string | null
@@ -99,7 +99,11 @@ export interface GameState {
   enter: (game: GameDef) => Promise<string | null>  // null only once you are in
   /** Back into the game whose bracket is open at your head (after a reload), signing nothing. */
   resume: () => boolean
-  /** Leave the game: exit-virtual, and the view as it was. Null when out, else why not. */
+  /**
+   * Leave the game: exit-virtual, and the view as it was. Null when out, else why not. Offered at every moment of
+   * play (DECK-0002 §2.3): pressed while a teleport is being signed, it waits for that one and then follows it on the
+   * chain; pressed while entering, it calls the entry off (left at once if the entry got signed meanwhile).
+   */
   exit: () => Promise<string | null>
   /** One press: a gibson along `axis`, by the game's rules. Under gravity only X and Z: Y is the fall's. */
   step: (axis: AxisName, dir: 1 | -1, now?: number) => void
@@ -122,6 +126,12 @@ export const WALK_BUSY_MESSAGE = 'Finish your walk first.'
 export const GAME_NOT_HERE_MESSAGE = 'This game is not one ONOSENDAI plays.'
 export const GAME_ALREADY_MESSAGE = 'A game is already open, or on its way.'
 export const COVERED_MESSAGE = 'Close the workshop or TV first.'
+/** What ENTER comes to when EXIT called it off before the game opened. */
+export const ENTER_CANCELLED_MESSAGE = 'You left before the game opened.'
+/** An EXIT that waited on a teleport while the identity changed: nothing is signed on the other identity's chain. */
+export const EXIT_STOPPED_MESSAGE = 'The exit was not signed: your identity changed meanwhile.'
+/** The bracket was closed from somewhere else (another tab or device): in-game mode ends. */
+const LEFT_ELSEWHERE_MESSAGE = 'Your chain is no longer in this game: it was left, or changed, from another tab or device.'
 /** The key bag held no key when read: said, never shown as a platform with nothing on it. */
 export const KEY_BAG_MISSING_MESSAGE = 'The key could not be found here yet. Step off the platform and back on to look again.'
 /** Something threw where a refusal was expected: said, never left hanging (review of #660). */
@@ -206,6 +216,22 @@ export function holdsDoorKey(session: GameSession, items: Record<string, HeldIte
 const perfNow = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now())
 
 export const useGame = create<GameState>((set, get) => {
+  /**
+   * The entry or teleport being signed now, until it settles. EXIT waits on it (settled, never on how): the exit is
+   * signed only after it, so it follows the last game event on the chain instead of racing it for the same previous.
+   */
+  let inFlight: Promise<unknown> | null = null
+  const settled = (): Promise<unknown> | undefined => inFlight?.then(undefined, () => undefined)
+  /** The entry being signed now: EXIT marks it called off, and it is left at once if it got signed. One per ENTER. */
+  let entering: { cancelled: boolean } | null = null
+  /** Note `p` as the sign in flight until it settles. */
+  const track = <T,>(p: Promise<T>): Promise<T> => {
+    inFlight = p
+    const clear = (): void => { if (inFlight === p) inFlight = null }
+    p.then(clear, clear)
+    return p
+  }
+
   /** Put `next` in place of the session it was made from, if that session still stands, keeping its progress on this device. */
   const commit = (next: GameSession): void => {
     if (get().session?.entryId !== next.entryId) return
@@ -292,8 +318,12 @@ export const useGame = create<GameState>((set, get) => {
   }
 
   /** Sign a pad's teleport from `from` to `to` inside the open game; the tutorial game goes on either way (its own choice), and a failed record is said. */
-  const teleport = async (game: GameDef, entryId: string, to: Position, from: Position, busy: 'teleporting'): Promise<void> => {
+  const teleport = (game: GameDef, entryId: string, to: Position, from: Position, busy: 'teleporting'): Promise<void> => {
     set({ busy })
+    return track(signTeleport(game, entryId, to, from))
+  }
+
+  const signTeleport = async (game: GameDef, entryId: string, to: Position, from: Position): Promise<void> => {
     let note: string | null = null
     try {
       const signed = await useCyberspace.getState().signGameAction(game, entryId, (links) => teleportTemplate({ ...links, toHex: hexAt(game, to), fromHex: hexAt(game, from) }))
@@ -302,10 +332,51 @@ export const useGame = create<GameState>((set, get) => {
       note = `The teleport was not signed: ${failed(err)}`
     } finally {
       // Only for the session it was signed in: one that ended meanwhile (an exit elsewhere, an identity switch) hears nothing of it.
+      // An EXIT pressed meanwhile (busy 'exiting') goes on from here: busy stays its, and its own words come next.
+      const leaving = get().busy === 'exiting'
       const now = get().session
-      if (now && now.entryId === entryId) { commit({ ...now, at: { ...to }, arc: null, doubled: false }); set({ message: note }) }
-      set({ busy: null })
+      if (now && now.entryId === entryId) { commit({ ...now, at: { ...to }, arc: null, doubled: false }); if (!leaving) set({ message: note }) }
+      if (!leaving) set({ busy: null })
     }
+  }
+
+  /** Sign the entry into `game`, then open in-game mode, or leave at once when EXIT called the entry off meanwhile. */
+  const signEnter = async (game: GameDef, snapshot: ViewSnapshot, ticket: { cancelled: boolean }): Promise<string | null> => {
+    const refuse = (why: string): string => { set({ message: why }); return why }
+    let entryId: string
+    try {
+      const entered = await useCyberspace.getState().enterGame(game)
+      if ('refused' in entered) { set({ busy: null }); return ticket.cancelled ? ENTER_CANCELLED_MESSAGE : refuse(entered.refused) }
+      entryId = entered.event.id
+    } catch (err) {
+      set({ busy: null })
+      return ticket.cancelled ? ENTER_CANCELLED_MESSAGE : refuse(failed(err))
+    }
+    let stillIn: string | null = null
+    if (ticket.cancelled) {
+      // Called off, but signed meanwhile: the bracket is open, so it is closed at once, the exit naming this entry as
+      // its previous (spec §8.11.3). Nothing was shown, so there is no view to put back.
+      set({ busy: 'exiting' })
+      let left: Awaited<ReturnType<CyberspaceState['exitGame']>>
+      try {
+        left = await useCyberspace.getState().exitGame(entryId)
+      } catch (err) {
+        left = { refused: failed(err) }
+      }
+      if (!('refused' in left)) { set({ busy: null }); return ENTER_CANCELLED_MESSAGE }
+      // Not left: in, then, with EXIT GAME on screen to try again, and why it did not go said there.
+      stillIn = left.refused
+    }
+    // No arrival is signed: entering is the arrival (DECK-0002 §2.2). The world says where the entry point is.
+    // The clock starts now, at the entry (lib/games/progress.ts).
+    const progress = startProgress(Date.now())
+    saveProgress(entryId, progress)
+    const session: GameSession = { game, entryId, at: null, resumeAt: null, world: null, door: null, keyBag: 'unread', keys: [], room: null, worldError: null, snapshot, arc: null, doubled: false, progress }
+    set({ session, busy: null, ...(stillIn ? { message: stillIn } : {}) })
+    // Found, for the GAMES panel (lib/games/discovered.ts): kept past a respawn, which forgets the chain.
+    noteFoundGame(useCyberspace.getState().identity.pubkey, game.pubkey)
+    readWorld(session)
+    return null
   }
 
   return {
@@ -321,25 +392,9 @@ export const useGame = create<GameState>((set, get) => {
       if (useWorkshop.getState().open || tvIsOn()) return refuse(COVERED_MESSAGE)
       const snapshot = snapshotView()
       set({ busy: 'entering', message: null })
-      let entryId: string
-      try {
-        const entered = await useCyberspace.getState().enterGame(game)
-        if ('refused' in entered) { set({ busy: null }); return refuse(entered.refused) }
-        entryId = entered.event.id
-      } catch (err) {
-        set({ busy: null })
-        return refuse(failed(err))
-      }
-      // No arrival is signed: entering is the arrival (DECK-0002 §2.2). The world says where the entry point is.
-      // The clock starts now, at the entry (lib/games/progress.ts).
-      const progress = startProgress(Date.now())
-      saveProgress(entryId, progress)
-      const session: GameSession = { game, entryId, at: null, resumeAt: null, world: null, door: null, keyBag: 'unread', keys: [], room: null, worldError: null, snapshot, arc: null, doubled: false, progress }
-      set({ session, busy: null })
-      // Found, for the GAMES panel (lib/games/discovered.ts): kept past a respawn, which forgets the chain.
-      noteFoundGame(useCyberspace.getState().identity.pubkey, game.pubkey)
-      readWorld(session)
-      return null
+      const ticket = { cancelled: false }
+      entering = ticket
+      return track(signEnter(game, snapshot, ticket).finally(() => { if (entering === ticket) entering = null }))
     },
 
     resume: () => {
@@ -358,11 +413,27 @@ export const useGame = create<GameState>((set, get) => {
     },
 
     exit: async () => {
+      const busy = get().busy
+      if (busy === 'exiting') return GAME_ALREADY_MESSAGE
+      if (busy === 'entering') {
+        // Nothing to leave yet: the entry is called off, and left at once should it get signed meanwhile (signEnter).
+        if (entering) entering.cancelled = true
+        await settled()
+        return get().session ? get().message ?? GAME_ALREADY_MESSAGE : null
+      }
+      if (busy === 'teleporting') {
+        // Leaving always goes (DECK-0002 §2.3), but after the teleport being signed: the exit then follows the last
+        // game event on the chain, never a second event naming the same previous (spec §8.11.3).
+        const who = useCyberspace.getState().identity.pubkey
+        set({ busy: 'exiting', message: null })
+        await settled()
+        // The identity switched meanwhile (which ends in-game mode): the exit pressed was for the other one's chain.
+        if (get().busy !== 'exiting' || useCyberspace.getState().identity.pubkey !== who) return EXIT_STOPPED_MESSAGE
+      }
       const session = get().session
-      if (get().busy) return GAME_ALREADY_MESSAGE
       // A game played here, or one this client ever played: never stranded by the switch (registry canLeave).
       const open = openBracket(useCyberspace.getState().actions())
-      if (!session && !canLeave(open?.game?.pubkey)) return GAME_NOT_HERE_MESSAGE
+      if (!session && !canLeave(open?.game?.pubkey)) { if (get().busy === 'exiting') set({ busy: null }); return GAME_NOT_HERE_MESSAGE }
       set({ busy: 'exiting', message: null })
       // The last game position, written in the exit's free `c` (DECK-0002 §7): where you are, or, left without going back
       // in (after a reload), the last one on the record of a game played here (review of #697).
@@ -375,7 +446,17 @@ export const useGame = create<GameState>((set, get) => {
       } catch (err) {
         left = { refused: failed(err) }
       }
-      if ('refused' in left) { set({ busy: null, message: left.refused }); return left.refused }
+      if ('refused' in left) {
+        // Refused because the bracket is no longer open at all (closed from another tab or device while this exit
+        // waited): in-game mode ends, as the chain's own watch would have ended it had no exit been on its way.
+        if (session && openBracket(useCyberspace.getState().actions())?.id !== session.entryId) {
+          saveProgress(session.entryId, null)
+          set({ session: null, busy: null, message: LEFT_ELSEWHERE_MESSAGE })
+          return LEFT_ELSEWHERE_MESSAGE
+        }
+        set({ busy: null, message: left.refused })
+        return left.refused
+      }
       set({ session: null, busy: null })
       // That bracket is over: its key, gate and clock are of no more use here.
       if (entryId) saveProgress(entryId, null)
@@ -515,7 +596,7 @@ useCyberspace.subscribe((s, prev) => {
   // That bracket is over, so its key, gate and clock are of no more use here (review of #668). An identity switch, above,
   // keeps them: that identity's game can still be gone back into.
   saveProgress(session.entryId, null)
-  useGame.setState({ session: null, message: respawned ? 'Your respawn left the game.' : 'Your chain is no longer in this game: it was left, or changed, from another tab or device.' })
+  useGame.setState({ session: null, message: respawned ? 'Your respawn left the game.' : LEFT_ELSEWHERE_MESSAGE })
 })
 
 // DEV window handle, the house pattern (__store): the game session, for the LOCAL browser smoke (scripts/game-smoke.mjs).

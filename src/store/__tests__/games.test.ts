@@ -54,7 +54,7 @@ if (typeof localStorage === 'undefined') {
 import { firstBreak, type NostrEvent } from '../../lib/events'
 import { GAME_CHOOSE_FIRST_MESSAGE, GAME_OTHER_BRACKET_MESSAGE, GAME_NEEDS_CHAIN_MESSAGE, GAME_NOT_OPEN_MESSAGE, IN_GAME_HERE_MESSAGE, GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
-import { GAMES_OFF_MESSAGE, GAME_ALREADY_MESSAGE, KEY_BAG_MISSING_MESSAGE, enterTutorialDungeon, loadProgress, offerFor, recordedPosition, useGame } from '../useGame'
+import { ENTER_CANCELLED_MESSAGE, EXIT_STOPPED_MESSAGE, GAMES_OFF_MESSAGE, GAME_ALREADY_MESSAGE, KEY_BAG_MISSING_MESSAGE, enterTutorialDungeon, loadProgress, offerFor, recordedPosition, useGame } from '../useGame'
 import { useInventory } from '../useInventory'
 import type { GameDef } from '../../lib/games/types'
 import { TUTORIAL_ENTRY, TUTORIAL_GAME } from '../../lib/games/tutorialGame'
@@ -783,5 +783,238 @@ describe('leaving a dungeon entered from the tutorial', () => {
     expect(await G().exit()).toBeNull()
     await flush()
     expect(T().active).toBe(false)
+  })
+})
+
+describe('EXIT at every moment of play (DECK-0002 §2.3: leaving is the one override)', () => {
+  /**
+   * The signer held on its next request until released: a teleport or an entry
+   * caught mid-signing, the way a remote signer keeps one waiting.
+   */
+  function holdNextSign(): { asked: Promise<void>; release: () => void; restore: () => void } {
+    const real = S().signEvent
+    let release!: () => void
+    let asked!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    const askedP = new Promise<void>((r) => { asked = r })
+    let held = false
+    useCyberspace.setState({
+      signEvent: (async (t, patience) => {
+        if (!held) { held = true; asked(); await gate }
+        return real(t, patience)
+      }) as typeof real,
+    })
+    return { asked: askedP, release: () => release(), restore: () => useCyberspace.setState({ signEvent: real }) }
+  }
+
+  /** Down the hall from the entry point to the pad, which starts its teleport (the walk of 'walls hold'). */
+  function walkOntoThePad(): void {
+    for (let steps = 0; steps < 30 && !G().busy; steps++) G().step('z', -1)
+    expect(G().busy).toBe('teleporting')
+  }
+
+  it('EXIT pressed while a teleport is being signed waits for it, then signs the exit after it: one well-formed chain', async () => {
+    await enterTutorialDungeon()
+    await worldLoaded()
+    const entry = last()
+    const count = S().events.length
+    const hold = holdNextSign()
+    try {
+      walkOntoThePad()
+      await hold.asked
+      // Pressed mid-teleport: taken at once (LEAVING), not refused as busy.
+      const leaving = G().exit()
+      expect(G().busy).toBe('exiting')
+      hold.release()
+      expect(await leaving).toBeNull()
+    } finally {
+      hold.restore()
+    }
+    expect(G().session).toBeNull()
+    expect(G().busy).toBeNull()
+    expect(S().events.length).toBe(count + 2)
+    const [tp, exit] = S().events.slice(-2)
+    expect(tagOf(tp, 'A')?.[1]).toBe('teleport')
+    expect(tagOf(tp, 'e', 'previous')?.[1]).toBe(entry.id)
+    // The exit follows the teleport: never a second event naming the entry as its previous.
+    expect(tagOf(exit, 'A')?.[1]).toBe('exit-virtual')
+    expect(tagOf(exit, 'e', 'previous')?.[1]).toBe(tp.id)
+    expect(tagOf(exit, 'e', 'entry')?.[1]).toBe(entry.id)
+    // Where the teleport put you is the last game position the exit writes (DECK-0002 §7).
+    expect(tagOf(exit, 'c')?.[1]).toBe(positionHex(TUTORIAL_GAME.pads[0].to, 1))
+    expect(S().actions().slice(-3).map((a) => a.role)).toEqual(['enter', 'virtual', 'exit'])
+    expect(firstBreak(S().actions())).toBeNull()
+    expect(whyNoMove(S().actions())).toBeNull()
+  })
+
+  it('EXIT mid-teleport still leaves when the teleport is refused, and the exit follows the entry', async () => {
+    await enterTutorialDungeon()
+    await worldLoaded()
+    const entry = last()
+    const real = S().signEvent
+    let release!: () => void
+    let asked!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    const askedP = new Promise<void>((r) => { asked = r })
+    let first = true
+    useCyberspace.setState({ signEvent: (async (t, patience) => { if (first) { first = false; asked(); await gate; throw new Error('the signer said no') } return real(t, patience) }) as typeof real })
+    try {
+      walkOntoThePad()
+      await askedP
+      const leaving = G().exit()
+      release()
+      expect(await leaving).toBeNull()
+      // The refused teleport's note is not said over the exit that went.
+      expect(G().message).toBeNull()
+    } finally {
+      useCyberspace.setState({ signEvent: real })
+    }
+    const exit = last()
+    expect(tagOf(exit, 'A')?.[1]).toBe('exit-virtual')
+    expect(tagOf(exit, 'e', 'previous')?.[1]).toBe(entry.id)
+    expect(firstBreak(S().actions())).toBeNull()
+    expect(G().session).toBeNull()
+  })
+
+  it('a second EXIT while the first waits on the teleport is refused, and only one exit is signed', async () => {
+    await enterTutorialDungeon()
+    await worldLoaded()
+    const count = S().events.length
+    const hold = holdNextSign()
+    try {
+      walkOntoThePad()
+      await hold.asked
+      const leaving = G().exit()
+      expect(await G().exit()).toBe(GAME_ALREADY_MESSAGE)
+      hold.release()
+      expect(await leaving).toBeNull()
+    } finally {
+      hold.restore()
+    }
+    expect(S().events.length).toBe(count + 2)
+    expect(firstBreak(S().actions())).toBeNull()
+  })
+
+  it('an identity switch while EXIT waits on the teleport signs no exit on the other chain', async () => {
+    await enterTutorialDungeon()
+    await worldLoaded()
+    const count = S().events.length
+    const identity = S().identity
+    const hold = holdNextSign()
+    let leaving: Promise<string | null>
+    try {
+      walkOntoThePad()
+      await hold.asked
+      leaving = G().exit()
+      // Another identity comes in (useGame's chain watch ends in-game mode); the held teleport then lands on nothing.
+      useCyberspace.setState({ identity: { ...identity, pubkey: 'cd'.repeat(32) } })
+      hold.release()
+      expect(await leaving).toBe(EXIT_STOPPED_MESSAGE)
+    } finally {
+      hold.restore()
+      useCyberspace.setState({ identity })
+    }
+    expect(G().session).toBeNull()
+    expect(G().busy).toBeNull()
+    // Neither the teleport (its identity changed) nor any exit was signed.
+    expect(S().events.length).toBe(count)
+  })
+
+  it('a bracket closed elsewhere while EXIT waits on the teleport ends in-game mode: one exit, no stuck view', async () => {
+    await enterTutorialDungeon()
+    await worldLoaded()
+    const entry = last()
+    const count = S().events.length
+    const hold = holdNextSign()
+    let leaving: Promise<string | null>
+    try {
+      walkOntoThePad()
+      await hold.asked
+      leaving = G().exit()
+      // Another tab closes the bracket first: its exit names the entry as its previous.
+      expect('event' in await S().exitGame(entry.id)).toBe(true)
+      hold.release()
+      expect(typeof await leaving).toBe('string')
+    } finally {
+      hold.restore()
+    }
+    expect(G().session).toBeNull()
+    expect(G().busy).toBeNull()
+    expect(S().events.length).toBe(count + 1)
+    expect(tagOf(last(), 'A')?.[1]).toBe('exit-virtual')
+    expect(tagOf(last(), 'e', 'previous')?.[1]).toBe(entry.id)
+    expect(firstBreak(S().actions())).toBeNull()
+    expect(loadProgress(entry.id)).toBeNull()
+  })
+
+  it('EXIT while entering, before anything is signed, calls the entry off: nothing to exit', async () => {
+    const count = S().events.length
+    const real = S().enterGame
+    let finish!: (r: Awaited<ReturnType<typeof real>>) => void
+    useCyberspace.setState({ enterGame: () => new Promise((r) => { finish = r }) })
+    try {
+      const entering = enterTutorialDungeon()
+      expect(G().busy).toBe('entering')
+      const leaving = G().exit()
+      // The entry never got signed (a head that would not confirm, say).
+      finish({ refused: 'not now' })
+      expect(await leaving).toBeNull()
+      expect(await entering).toBe(ENTER_CANCELLED_MESSAGE)
+    } finally {
+      useCyberspace.setState({ enterGame: real })
+    }
+    expect(G().session).toBeNull()
+    expect(G().busy).toBeNull()
+    expect(S().events.length).toBe(count)
+  })
+
+  it('EXIT while entering, with the entry signed meanwhile, leaves at once: entry then exit, a well-formed chain', async () => {
+    const count = S().events.length
+    const hold = holdNextSign()
+    let entering: Promise<string | null>
+    try {
+      entering = enterTutorialDungeon()
+      await hold.asked
+      expect(G().busy).toBe('entering')
+      const leaving = G().exit()
+      hold.release()
+      expect(await leaving).toBeNull()
+    } finally {
+      hold.restore()
+    }
+    expect(await entering).toBe(ENTER_CANCELLED_MESSAGE)
+    expect(G().session).toBeNull()
+    expect(G().busy).toBeNull()
+    expect(S().events.length).toBe(count + 2)
+    const [entry, exit] = S().events.slice(-2)
+    expect(tagOf(entry, 'A')?.[1]).toBe('enter-virtual')
+    expect(tagOf(exit, 'A')?.[1]).toBe('exit-virtual')
+    expect(tagOf(exit, 'e', 'previous')?.[1]).toBe(entry.id)
+    expect(tagOf(exit, 'e', 'entry')?.[1]).toBe(entry.id)
+    expect(firstBreak(S().actions())).toBeNull()
+    expect(whyNoMove(S().actions())).toBeNull()
+  })
+
+  it('an entry called off but signed, whose exit is refused, opens the game with EXIT GAME there to try again', async () => {
+    const realExit = S().exitGame
+    const hold = holdNextSign()
+    useCyberspace.setState({ exitGame: async () => ({ refused: 'no' }) })
+    let leaving: Promise<string | null>
+    try {
+      const entering = enterTutorialDungeon()
+      await hold.asked
+      leaving = G().exit()
+      hold.release()
+      expect(await entering).toBeNull()
+    } finally {
+      hold.restore()
+      useCyberspace.setState({ exitGame: realExit })
+    }
+    expect(await leaving).toBe('no')
+    expect(G().session).not.toBeNull()
+    expect(G().message).toBe('no')
+    await worldLoaded()
+    expect(await G().exit()).toBeNull()
+    expect(firstBreak(S().actions())).toBeNull()
   })
 })

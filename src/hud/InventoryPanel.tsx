@@ -138,6 +138,9 @@ const LISTING_WARNING = [
   'This cannot be undone. You can ask relays to delete the listing later, but relays and other people may already have kept copies, and chests sealed to this item stay sealed to it. Treat it as permanent.',
 ].join('\n')
 
+/** DELETE on a row no longer archived: refused, never done. */
+const NOT_ARCHIVED = 'Archive it first. Only an archived item can be deleted.'
+
 /**
  * What the DELETE confirmation says is lost, by kind (owner, 2026-11-14):
  * plain words, the money first. A Cashu coin not known to be redeemed is
@@ -153,7 +156,7 @@ export function deleteWarning(item: Pick<HeldItem, 'type' | 'text'>, coinState?:
     return 'This coin may not be redeemed. If it is not, deleting it loses the sats. Open its CARD and check first.'
   }
   if (item.type === 'message' && hasNftLink(item.text)) return 'This message holds an NFT claim link. If you have not claimed it, deleting it loses the NFT.'
-  if (item.type === 'chest') return `This chest and anything still sealed in it leave your ITEMS. ${back}`
+  if (item.type === 'chest') return `This chest and anything still sealed in it leave your ITEMS, coins and their sats included. ${back}`
   return `It leaves your ITEMS on this device. ${back}`
 }
 
@@ -168,27 +171,30 @@ export function ArchiveButton({ item }: { item: Pick<HeldItem, 'id' | 'archived'
  * DELETE, red, and its confirmation, naming the item and saying what is lost
  * (deleteWarning). Nothing goes until DELETE FOREVER in the confirmation;
  * CANCEL, Escape or a tap outside keeps it. Drawn only on an ARCHIVED row
- * (KeyRow, TakenRow). The last copy of a key one of your chests or doors is
- * sealed to is refused, naming them (useShards itemStillNeeded).
+ * (KeyRow, TakenRow), and checked again against the store at each step,
+ * so a row unarchived meanwhile is refused, never deleted. The last copy of
+ * a key one of your chests or doors is sealed to is refused, naming them
+ * (useShards itemStillNeeded).
  */
 export function DeleteItem({ item, asking = false, coinState }: { item: Pick<HeldItem, 'id' | 'name'> & Partial<HeldItem>; asking?: boolean; coinState?: string }): JSX.Element {
+  const filedAway = (): boolean => !!useInventory.getState().items[item.id]?.archived
   const [confirming, setConfirming] = useState(asking)
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
-  const [needed, setNeeded] = useState(false)
   const ask = (): void => {
+    if (!filedAway()) { setRefusal(NOT_ARCHIVED); return }
     const why = item.type && item.event ? itemStillNeeded({ id: item.id, type: item.type, key: item.key, name: item.name, event: item.event, place: item.place ?? null }, useShards.getState().mine, useInventory.getState().items, useCyberspace.getState().identity.pubkey) : null
     setRefusal(why)
-    setNeeded(!!why)
     if (!why) setConfirming(true)
   }
   const remove = async (): Promise<void> => {
+    if (!filedAway()) { setConfirming(false); setRefusal(NOT_ARCHIVED); return }
     setBusy(true)
     setRefusal(null)
     const gone = await useInventory.getState().remove(item.id)
-    // Gone, this row has left the list with it.
-    if (gone) return
     setBusy(false)
+    // Gone, this row has left the list with it, or it is still drawn (another identity's row of the same id): the confirmation closes either way.
+    if (gone) { setConfirming(false); return }
     setConfirming(false)
     setRefusal('Could not delete it from this device. It is still held.')
   }
@@ -196,7 +202,6 @@ export function DeleteItem({ item, asking = false, coinState }: { item: Pick<Hel
     <>
       <button className="chest__act chest__act--danger" onClick={ask} title="Delete it from this device. Asks first">DELETE</button>
       {refusal && <span className="held__refusal" role="status">{refusal}</span>}
-      {needed && !item.archived && <button className="chest__act" onClick={() => { useInventory.getState().archive(item.id); setNeeded(false); setRefusal(null) }} title="File it away under ARCHIVED. It still opens what it opens">ARCHIVE</button>}
       {confirming && (
         <ConfirmModal
           title={`Delete \u201c${item.name}\u201d?`}

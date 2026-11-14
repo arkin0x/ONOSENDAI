@@ -478,7 +478,8 @@ export function splitPanels(discovered: Hidden[], held: HeldItem[]): { discovere
     loot: {
       keys: held.filter((it) => isKeyItem(it) && !it.archived).sort(newestFirst),
       taken: held.filter((it) => !isKeyItem(it) && !it.cleared && !it.archived).sort(newestFirst),
-      archived: held.filter((it) => !!it.archived).sort(newestFirst),
+      // Never a row cleared off the list (moved into the workshop): it is out of ITEMS, archived or not.
+      archived: held.filter((it) => !!it.archived && !it.cleared).sort(newestFirst),
     },
   }
 }

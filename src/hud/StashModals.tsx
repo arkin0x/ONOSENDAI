@@ -62,7 +62,7 @@ export function BagRow({ bag, onOpen }: { bag: Bag; onOpen: () => void }): JSX.E
     <li className="shards__row shards__row--deployed">
       <button className="shards__goto" onClick={onOpen} title="See what is in this bag">
         {/* One line inside the row: the first item's name is cut with an ellipsis, never "+ N more" (owner, 2026-11-14). */}
-        <span className="avatars__who bagrow__title" title={bag.items.length === 1 ? first : `${first} + ${bag.items.length - 1} more`}>
+        <span className="avatars__who bagrow__title">
           <span className="shards__type shards__type--bag">{kinds.map((k) => <ItemIcon key={`${k.type}:${k.coin}`} type={k.type} coin={k.coin} size={12} />)}</span>
           <span className="bagrow__name">{first}</span>
           {bag.items.length > 1 && <span className="bagrow__more">{` + ${bag.items.length - 1} more`}</span>}

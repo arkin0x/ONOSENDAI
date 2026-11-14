@@ -87,17 +87,30 @@ describe('DELETE refused on the card', () => {
 })
 
 describe('ITEMS', () => {
-  it('DELETE of the last copy of a key is refused with ARCHIVE offered; ARCHIVE files it away', async () => {
+  it('DELETE of the last copy of an archived key is refused, naming the chest, and nothing is asked or deleted', async () => {
     const { me, key, lock, restore } = setup()
     // Picked up, then its world copy gone: this row is the last copy.
     useShards.setState({ mine: useShards.getState().mine.filter((d) => d.eventId !== key.eventId) })
-    const row = heldFromForged(me, key.inner as NostrEvent, lock, { lookupId: 'l', bagId: 'b', at: where.at, plane: 0, height: 4 }, 1)
+    const row = { ...heldFromForged(me, key.inner as NostrEvent, lock, { lookupId: 'l', bagId: 'b', at: where.at, plane: 0, height: 4 }, 1), archived: 5 }
     useInventory.setState({ items: { [row.id]: row } })
     const m = await mount(createElement(DeleteItem, { item: row }))
     await m.press(/^DELETE$/)
     expect(m.says('This key opens chest “Wind Chest”. Delete or reseal that first.')).toBe(true)
-    await m.press(/^ARCHIVE$/)
-    expect(useInventory.getState().items[row.id].archived).toBeGreaterThan(0)
+    expect(m.buttons(/^DELETE FOREVER$/)).toHaveLength(0)
+    expect(useInventory.getState().items[row.id]).toBeDefined()
+    await m.unmount()
+    restore()
+  })
+
+  it('DELETE on a row that is not archived is refused: archive it first', async () => {
+    const { me, key, lock, restore } = setup()
+    const row = heldFromForged(me, key.inner as NostrEvent, lock, { lookupId: 'l', bagId: 'b', at: where.at, plane: 0, height: 4 }, 1)
+    useInventory.setState({ items: { [row.id]: row } })
+    const m = await mount(createElement(DeleteItem, { item: row }))
+    await m.press(/^DELETE$/)
+    expect(m.says('Archive it first. Only an archived item can be deleted.')).toBe(true)
+    expect(m.buttons(/^DELETE FOREVER$/)).toHaveLength(0)
+    expect(useInventory.getState().items[row.id]).toBe(row)
     await m.unmount()
     restore()
   })

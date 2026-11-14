@@ -82,8 +82,23 @@ function seed(archived: Array<'key' | 'note' | 'coin'> = []): { key: HeldItem; n
 }
 
 const cls = (h: Host): string => String(h.props.className ?? '')
-/** Whether any button on screen is an X: the old held__clear, a ✕ or an X icon in a row, or a CLEAR. */
-const xButtons = (hosts: Host[]): Host[] => hosts.filter((h) => h.type === 'button' && (cls(h).includes('held__clear') || /^CLEAR/i.test(String(h.props['aria-label'] ?? textOf(h)))) )
+/** Every button under an element. */
+function buttonsUnder(h: Host): Host[] {
+  const out: Host[] = []
+  const walk = (n: Host | string): void => { if (typeof n !== 'string') { if (n.type === 'button') out.push(n); n.children.forEach(walk) } }
+  walk(h)
+  return out
+}
+/**
+ * The X buttons on screen: the old held__clear, anything labelled CLEAR, and
+ * inside a row any ✕ or a button with an icon and no words. The modal's own
+ * close in its head is not a row's.
+ */
+const xButtons = (hosts: Host[]): Host[] => {
+  const rows = hosts.filter((h) => h.type === 'li' && cls(h).includes('held__row'))
+  const inRows = rows.flatMap(buttonsUnder).filter((b) => /^[✕×xX]?$/.test(textOf(b).trim()))
+  return [...hosts.filter((h) => h.type === 'button' && (cls(h).includes('held__clear') || /^CLEAR/i.test(String(h.props['aria-label'] ?? textOf(h))))), ...inRows]
+}
 /** The row's buttons, by its item's name. */
 function rowButtons(hosts: Host[], name: string): string[] {
   const row = hosts.find((h) => h.type === 'li' && cls(h).includes('held__row') && textOf(h).includes(name))
@@ -157,9 +172,13 @@ describe('DELETE', () => {
   it('is never in the ACTIONS of a row under INVENTORY or MINE', async () => {
     const { restore } = seed()
     const loot = await open(/^OTHER LOOT · 2$/)
-    for (const toggle of loot.all().filter((h) => h.type === 'button' && textOf(h) === 'ACTIONS')) {
+    const toggles = loot.all().filter((h) => h.type === 'button' && textOf(h) === 'ACTIONS')
+    expect(toggles).toHaveLength(2)
+    for (const toggle of toggles) {
       ;(toggle.props.onClick as () => void)()
       await new Promise((r) => setTimeout(r, 20))
+      // Open: ARCHIVE is there, DELETE is not.
+      expect(loot.buttons(/^ARCHIVE$/)).toHaveLength(1)
       expect(loot.buttons(/DELETE/)).toHaveLength(0)
     }
     await loot.unmount()
@@ -212,6 +231,42 @@ describe('DELETE', () => {
     expect(useInventory.getState().items[note.id]).toBeDefined()
     await m.unmount()
     restore()
+  })
+
+  it('a row unarchived while its confirmation is open is refused at DELETE FOREVER, never deleted', async () => {
+    const { note, restore } = seed(['note'])
+    const m = await open(/^OTHER LOOT · 1$/)
+    await m.press(/^ARCHIVED 1$/)
+    await m.press(/^ACTIONS$/)
+    await m.press(/^DELETE$/)
+    const confirm = m.buttons(/^DELETE FOREVER$/)[0]
+    // Unarchived from elsewhere (another tab, a test) while the confirmation stood open.
+    useInventory.getState().unarchive(note.id)
+    ;(confirm.props.onClick as () => void)()
+    await new Promise((r) => setTimeout(r, 30))
+    expect(useInventory.getState().items[note.id]).toBeDefined()
+    await m.unmount()
+    restore()
+  })
+
+  it('a delete that fails keeps the item and says so', async () => {
+    const { note, restore } = seed(['note'])
+    const was = useInventory.getState().remove
+    useInventory.setState({ remove: async () => false })
+    try {
+      const m = await open(/^OTHER LOOT · 1$/)
+      await m.press(/^ARCHIVED 1$/)
+      await m.press(/^ACTIONS$/)
+      await m.press(/^DELETE$/)
+      await m.press(/^DELETE FOREVER$/)
+      expect(useInventory.getState().items[note.id]).toBeDefined()
+      expect(m.says('Could not delete it from this device. It is still held.')).toBe(true)
+      expect(m.all().some((h) => h.props.role === 'alertdialog')).toBe(false)
+      await m.unmount()
+    } finally {
+      useInventory.setState({ remove: was })
+      restore()
+    }
   })
 
   it('on an archived coin not redeemed says the sats are lost', async () => {

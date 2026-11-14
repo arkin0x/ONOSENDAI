@@ -2170,7 +2170,7 @@ select.avatars__input option:checked {
  * column, and its lines are cut inside it (owner, 2026-11-14). The bag's
  * title cuts the first item's name only, so "+ N more" stays in view. */
 .shards__goto { min-width: 0; max-width: 100%; }
-.shards__goto > .avatars__who, .shards__goto > .shards__meta { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shards__goto > .avatars__who { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bagrow__title { display: flex; align-items: center; min-width: 0; }
 .bagrow__title > .shards__type { flex: none; margin-right: 4px; }
 .bagrow__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

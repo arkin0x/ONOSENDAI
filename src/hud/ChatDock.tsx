@@ -32,7 +32,7 @@ import { MessageSquare, SendHorizontal, Trash2, Volume2, VolumeX, ChevronDown, B
 import { linesInPlane, listeningPlane, useChat, sendKey, type ChatLine } from '../store/useChat'
 import { useCyberspace } from '../store/useCyberspace'
 import { useSecrets } from '../store/useSecrets'
-import { ProfilePic } from './ProfileBadge'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { pressGuard } from './pressGuard'
 import { useProfile } from '../hooks/useProfile'
 import { formatCellSize } from 'sno-core/scale'
@@ -82,10 +82,10 @@ function Line({ line, now, here, revealed }: { line: ChatLine; now: number; here
   const forMe = mentionsMe(line, me)
   return (
     <li data-line={line.id} className={`chat__line ${line.mine ? 'is-mine' : ''} ${here ? '' : 'is-elsewhere'} ${forMe ? 'is-for-me' : ''} ${revealed ? 'is-revealed' : ''}`} title={forMe ? 'Mentions you' : undefined}>
-      <ProfilePic pubkey={line.from} size={22} />
+      <ProfileTap pubkey={line.from}><ProfilePic pubkey={line.from} size={22} /></ProfileTap>
       <div className="chat__body">
         <span className="chat__meta">
-          <span className="chat__who">{name}</span>
+          <ProfileTap pubkey={line.from} className="chat__who">{name}</ProfileTap>
           <span className="chat__when">{whenLabel(line.at, now)}</span>
         </span>
         <LineText text={line.text} me={me} />

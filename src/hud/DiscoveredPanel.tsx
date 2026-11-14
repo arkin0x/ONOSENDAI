@@ -161,7 +161,7 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
     <li key={it.key} className="loot__row">
       <button className="loot__open" onClick={() => open(it)} title="Open this bag's record">
         <div className="loot__top">
-          <ProfileBadge pubkey={it.author} />
+          <ProfileBadge pubkey={it.author} tappable nested />
           {it.author === me && <span className="avatars__you">YOURS</span>}
           {kinds.has(it.bagId)
             ? <span className="tag tag--live loot__kinds" title={openedTitle(it.bagId, kinds.get(it.bagId)?.count ?? 0, kinds.get(it.bagId)?.planes)}>{kinds.get(it.bagId)?.kinds.map((k) => <ItemIcon key={`${k.type}:${k.coin}`} type={k.type} coin={k.coin} size={10} />)}</span>

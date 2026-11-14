@@ -62,7 +62,7 @@ export function SpectateBar(): JSX.Element | null {
       <span className="spectate__eye" aria-hidden="true">◉</span>
       <span className="spectate__text">
         <span className="spectate__label">SPECTATING</span>
-        <ProfileBadge pubkey={spectate.pubkey} className="spectate__badge" />
+        <ProfileBadge pubkey={spectate.pubkey} className="spectate__badge" tappable />
         <span className="spectate__meta">
           {spectate.lastActive !== null && (
             <span title={formatStamp(spectate.lastActive)}>LAST ACTIVE {formatAgo(spectate.lastActive, now).toUpperCase()} · </span>

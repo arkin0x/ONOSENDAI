@@ -12,7 +12,7 @@ import { cashuLabel } from '../lib/cashu'
 import { againHideable, hideAgainAsks, inItsBag, movable, useShards, type MyDeployment } from '../store/useShards'
 import { movePlaced } from '../store/useBuilder'
 import { useCashu, cashuStateLabel } from './useCashu'
-import { bagsOf, depName, goToDeployment, useStash, type Bag } from './stash'
+import { bagsOf, depName, goToDeployment, openFeedObjectInWorkshop, useStash, type Bag } from './stash'
 import { PublishSwitch } from './PublishSwitch'
 import { useEscape } from '../hooks/useEscape'
 import { MessageCompose } from './MessageCompose'
@@ -27,10 +27,8 @@ import { Explanation } from './Explanation'
 import { ShardThumb } from './ShardThumb'
 import { GitFork, Pencil, Sparkles } from 'lucide-react'
 import type { FeedObject } from 'sno-core/feed'
-import { useWorkshop } from '../store/useWorkshop'
-import { usePublished } from '../store/usePublished'
-import { ownObjectCredit } from '../lib/published'
 import { useCyberspace } from '../store/useCyberspace'
+import { usePublicShard } from '../store/usePublicShard'
 import { GoArrow } from './ui/GoArrow'
 
 export const BAG_EXPLAINER =
@@ -153,25 +151,7 @@ function FeedActions({ object }: { object: FeedObject }): JSX.Element {
   // BUILD starts where you are looking (ruling A), the object lined up as a
   // copy; a cancel comes back to this window.
   const use = (): void => useStash.getState().useFromFeed(object)
-  const remix = (): void => {
-    const ws = useWorkshop.getState()
-    let id: string
-    if (own) {
-      // Your own object comes back under its `d`, as snocrash's adopt brings
-      // one back, so PUBLISH edits it in place rather than publishing a second
-      // copy beside it. The model already here is the one to edit: the relay's
-      // copy may be older than it. A remix of yours keeps the credit it was
-      // published with, so republishing it does not drop the original author
-      // (review of snocrash #35, 2026-10-15); a credit to yourself is not one.
-      const credit = ownObjectCredit(object.event.tags, me)
-      id = ws.shards.some((s) => s.id === object.d) ? object.d : ws.importShard(object.shard, credit, object.d)
-      usePublished.getState().learn([object.event])
-    } else {
-      id = ws.importShard(object.shard, { address: object.address, relay: object.seen?.[0] })
-    }
-    useStash.getState().close()
-    ws.openWorkshop(id)
-  }
+  const remix = (): void => openFeedObjectInWorkshop(object, me)
   return (
     <>
       <button className="feed__act" onClick={use} title="Place it at the build cursor, as a copy that credits its author"><Sparkles size={ICON} strokeWidth={2.25} aria-hidden />DEPLOY AN INSTANCE</button>
@@ -218,9 +198,9 @@ export function StashModals(): JSX.Element | null {
   if (feed) {
     return (
       <Shell title="Shard Feed" onClose={close}>
-        <FeedList actions={(o) => <FeedActions object={o} />} />
+        <FeedList onOpen={(o) => usePublicShard.getState().open(o)} actions={(o) => <FeedActions object={o} />} />
         <Explanation>
-          Everyone&apos;s published objects, newest first. DEPLOY AN INSTANCE puts one at the build cursor as a copy that credits its author (LIVE LINK on the deploy bar follows their edits instead). REMIX copies it into your workshop as your own, still credited. A tile with a price is for sale by its author through a key service: its shape stays sealed until someone buys it, so it cannot be deployed or remixed here. BUY opens the seller's page in a new tab, and the domain beside it is where that page is.
+          Everyone&apos;s published objects, newest first. Tap one to open its card: who made it, its reactions and comments. DEPLOY AN INSTANCE puts one at the build cursor as a copy that credits its author (LIVE LINK on the deploy bar follows their edits instead). REMIX copies it into your workshop as your own, still credited. A tile with a price is for sale by its author through a key service: its shape stays sealed until someone buys it, so it cannot be deployed or remixed here. BUY opens the seller's page in a new tab, and the domain beside it is where that page is.
         </Explanation>
       </Shell>
     )

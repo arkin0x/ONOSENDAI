@@ -11,7 +11,7 @@ import {
 } from '../lib/signers'
 import { MIN_PASSWORD, backupFileName, exportProblem } from '../lib/keyExport'
 import { shortHex } from '../lib/time'
-import { ProfilePic } from './ProfileBadge'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
@@ -159,7 +159,7 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
         {view === 'login' && (
           <>
             <div className="login__current">
-              <ProfilePic pubkey={identity.pubkey} size={40} />
+              <ProfileTap pubkey={identity.pubkey}><ProfilePic pubkey={identity.pubkey} size={40} /></ProfileTap>
               <div className="login__current-text">
                 <span className="secret__name">{profileLabel(profile, identity.npub)}</span>
                 <span className="login__kind">{KIND_LABEL[signerKind] ?? signerKind}</span>

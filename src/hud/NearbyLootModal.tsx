@@ -31,7 +31,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { profileLabel } from '../store/useProfiles'
 import { useShards } from '../store/useShards'
 import { rememberNearbyReturn } from '../lib/nearbyReturn'
-import { ProfilePic } from './ProfileBadge'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { ChestBlock, KeyLine, listedOnce, useChestOpen } from './ItemRows'
 import { useEscape } from '../hooks/useEscape'
 import { NEARBY_TABS, byTab, firstFilledTab, type NearbyTab } from '../lib/nearbyTabs'
@@ -101,7 +101,7 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
             : <span className="nearby__label">{labelOf(item)}</span>}
         <span className="nearby__where">{whereOf(item)}{item.type === 'chest' && item.chest && <> · <LockStatus id={item.key} lock={item.chest.lockPubkey} me={me} /></>}</span>
         <span className="nearby__meta">
-          {author && <ProfilePic pubkey={author} size={14} />}
+          {author && <ProfileTap pubkey={author}><ProfilePic pubkey={author} size={14} /></ProfileTap>}
           <span>{name}</span>
           <span>· {distanceWords(item.distance)}</span>
         </span>
@@ -139,7 +139,7 @@ export function SeedRow({ item, me, onView }: { item: NearbyItem; me: string; on
         <span className="nearby__label">{seedName(view?.dna)}</span>
         <span className="nearby__where">{whereOf(item)} · {bloomGrowthWords(view)}</span>
         <span className="nearby__meta">
-          {planter && <ProfilePic pubkey={planter} size={14} />}
+          {planter && <ProfileTap pubkey={planter} nested><ProfilePic pubkey={planter} size={14} /></ProfileTap>}
           <span>{name}</span>
           <span>· {distanceWords(item.distance)}</span>
         </span>

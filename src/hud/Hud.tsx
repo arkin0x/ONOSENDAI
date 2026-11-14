@@ -17,7 +17,7 @@ import type { Position } from '../lib/space'
 import { useBuilder } from '../store/useBuilder'
 import { padMode } from '../store/padMode'
 import { shortHex } from '../lib/time'
-import { ProfilePic } from './ProfileBadge'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { AskBubble } from './AskBubble'
 import { TvButton } from './TvScreen'
 import { useProfile } from '../hooks/useProfile'
@@ -118,7 +118,7 @@ function IdentityPanel(): JSX.Element {
       </header>
 
       <div className="identity__who">
-        <ProfilePic pubkey={identity.pubkey} size={38} />
+        <ProfileTap pubkey={identity.pubkey}><ProfilePic pubkey={identity.pubkey} size={38} /></ProfileTap>
         <div className="identity__who-text">
           <span className="identity__name">{name}</span>
           <span className="identity__signer">{SIGNER_LABEL[signerKind] ?? signerKind}</span>

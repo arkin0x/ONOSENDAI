@@ -7,7 +7,9 @@
  * becomes active, new ones are polled for, and older ones load a page at a
  * time as the history is scrolled. "Seen" is the newest time you have looked,
  * kept per identity on this device; everything after it is unread, which is
- * what lights the dot on NOTIFICATIONS and raises the toast under XOR BITS.
+ * what lights the dot on NOTIFICATIONS, raises the toast under XOR BITS, and
+ * marks a row new in the modal. Looking is closing the modal: the rows that
+ * were new keep their dots while it is open (setOpen).
  *
  * A comment sealed to one of your own bags is opened with the key this
  * device holds for that bag (the key it was sealed with: the region key, or
@@ -78,12 +80,20 @@ interface NotificationsState {
   /** Why the canonical relay gave the last read nothing, if it did not answer (it is not "nothing yet"). */
   trouble: ReadTrouble | null
   open: boolean
+  /**
+   * What this opening of the modal showed: the newest row there when it
+   * opened, for the identity then active. Closing reads up to this and no
+   * further, so a row that arrives while a card VIEW opened sits over the
+   * list is still new next time (review of the overhaul).
+   */
+  shown: { me: string; upTo: number } | null
   unread: () => number
   start: (me: string) => Promise<void>
   poll: () => Promise<void>
   loadMore: () => Promise<void>
   setOpen: (open: boolean) => void
-  markSeen: () => void
+  /** Read everything up to `upTo` (default: the newest row held). */
+  markSeen: (upTo?: number) => void
   /** A chat line that tagged `me`, made on this device and kept with the rest. */
   addMention: (me: string, n: Notification) => void
 }
@@ -157,6 +167,7 @@ export const useNotifications = create<NotificationsState>((set, get) => {
     done: false,
     trouble: null,
     open: false,
+    shown: null,
     unread: () => unreadCount(get().items, get().lastSeen),
 
     start: async (me) => {
@@ -203,15 +214,23 @@ export const useNotifications = create<NotificationsState>((set, get) => {
       }
     },
 
+    // Read when the modal closes, not when it opens (arkinox, 2026-11-14:
+    // "the new notifications should have the flashing red dot on them; read
+    // notifications should not have the dot"): the ones new at opening keep
+    // their dot while it is up, and whatever it showed is read once it is
+    // closed, by ✕, a tap outside or Escape.
     setOpen: (open) => {
-      set({ open })
-      if (open) get().markSeen()
+      const { open: was, me, items, lastSeen, shown } = get()
+      if (open && !was) { set({ open, shown: me ? { me, upTo: Math.max(lastSeen, items[0]?.createdAt ?? 0) } : null }); return }
+      set({ open, ...(open ? {} : { shown: null }) })
+      // Read only what was there to see, and only for the identity it was shown to.
+      if (was && !open && shown && shown.me === me) get().markSeen(shown.upTo)
     },
 
-    markSeen: () => {
+    markSeen: (upTo) => {
       const { me, items } = get()
-      if (!me || items.length === 0) return
-      const lastSeen = Math.max(get().lastSeen, items[0].createdAt)
+      if (!me || (items.length === 0 && upTo === undefined)) return
+      const lastSeen = Math.max(get().lastSeen, upTo ?? items[0].createdAt)
       set({ lastSeen })
       try { localStorage.setItem(SEEN_KEY(me), String(lastSeen)) } catch { /* private mode */ }
     },

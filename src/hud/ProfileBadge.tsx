@@ -41,14 +41,35 @@ export function ProfilePic({ pubkey, size = 22 }: { pubkey: string; size?: numbe
   )
 }
 
-/** A picture or a name that opens the person's profile (ProfileView) when tapped. */
-export function ProfileTap({ pubkey, className = '', title, children }: { pubkey: string; className?: string; title?: string; children: ReactNode }): JSX.Element {
+/**
+ * A picture or a name that opens the person's profile (ProfileView) when
+ * tapped, over wherever it was tapped; closing the profile comes back there
+ * (modalStack). `nested`: it sits inside another button (a toast, a row that
+ * opens something else), where a button may not go, so it is a span that
+ * acts as one, and the tap opens the profile, not what is around it.
+ */
+export function ProfileTap({ pubkey, className = '', title, nested = false, children }: { pubkey: string; className?: string; title?: string; nested?: boolean; children: ReactNode }): JSX.Element {
+  const tip = title ? `${title}\nTap to view profile` : 'View profile'
+  const open = (e: { stopPropagation: () => void; preventDefault: () => void }): void => { e.stopPropagation(); e.preventDefault(); useProfileView.getState().open(pubkey) }
+  if (nested) {
+    return (
+      <span
+        role="button"
+        tabIndex={0}
+        className={`profile-tap ${className}`}
+        title={tip}
+        aria-label="View profile"
+        onClick={open}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') open(e) }}
+      >{children}</span>
+    )
+  }
   return (
     <button
       type="button"
       className={`profile-tap ${className}`}
-      title={title ? `${title}\nTap to view profile` : 'View profile'}
-      onClick={(e) => { e.stopPropagation(); useProfileView.getState().open(pubkey) }}
+      title={tip}
+      onClick={open}
     >{children}</button>
   )
 }
@@ -61,9 +82,11 @@ interface BadgeProps {
   className?: string
   /** Open the profile when tapped. */
   tappable?: boolean
+  /** Inside another button (ProfileTap `nested`). */
+  nested?: boolean
 }
 
-export function ProfileBadge({ pubkey, fallbackName, size = 22, className = '', tappable = false }: BadgeProps): JSX.Element {
+export function ProfileBadge({ pubkey, fallbackName, size = 22, className = '', tappable = false, nested = false }: BadgeProps): JSX.Element {
   const profile = useProfile(pubkey)
   const npub = safeNpub(pubkey)
   const name = profile?.name ?? fallbackName ?? (npub ? profileLabel(profile, npub) : pubkey.slice(0, 8))
@@ -73,6 +96,6 @@ export function ProfileBadge({ pubkey, fallbackName, size = 22, className = '', 
       <span className="badge__name">{name}</span>
     </>
   )
-  if (tappable) return <ProfileTap pubkey={pubkey} className={`badge ${className}`} title={npub ?? pubkey}>{face}</ProfileTap>
+  if (tappable) return <ProfileTap pubkey={pubkey} className={`badge ${className}`} title={npub ?? pubkey} nested={nested}>{face}</ProfileTap>
   return <span className={`badge ${className}`} title={npub ?? pubkey}>{face}</span>
 }

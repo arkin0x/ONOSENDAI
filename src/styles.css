@@ -8600,6 +8600,35 @@ select.avatars__input option:checked {
 .notif__view { align-self: flex-start; }
 .notif__end { padding: 12px 0; text-align: center; font-size: 9px; letter-spacing: 0.14em; color: var(--dim); min-height: 16px; }
 
+/* A notification not seen yet (arkinox, 2026-11-14: "Maybe have a brighter
+   or slightly glowing background behind notifications that are new"): the
+   pulsing red dot by the name, and the row lit, until the modal closes. */
+.notif__row { padding: 10px 6px; border-radius: 6px; }
+.notif__row.is-new {
+  background: linear-gradient(90deg, rgba(0, 229, 255, 0.11), rgba(0, 229, 255, 0.03));
+  box-shadow: inset 2px 0 0 var(--accent), 0 0 14px rgba(0, 229, 255, 0.07);
+}
+.notif__dot.notif__dot--row { position: static; flex: 0 0 auto; width: 8px; height: 8px; }
+.notif__head .profile-tap { align-self: center; }
+.notif__head .notif__who { min-width: 0; }
+/* A picture alone in a ProfileTap: no line box under it. */
+.profile-tap:has(> .pfp:only-child) { display: inline-flex; line-height: 0; }
+
+/* What VIEW landed on (store/useModalFocus): the comment or the reactions,
+   glowing for a moment so the eye finds it. */
+.comment__self { display: grid; gap: 3px; border-radius: 6px; padding: 2px 4px; margin: -2px -4px; }
+.is-landed { animation: land-glow 4s ease-out; border-radius: 6px; }
+@keyframes land-glow {
+  0%, 65% { background: rgba(0, 229, 255, 0.16); box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.6), 0 0 18px rgba(0, 229, 255, 0.25); }
+  100% { background: transparent; box-shadow: 0 0 0 1px rgba(0, 229, 255, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-landed { animation: none; background: rgba(0, 229, 255, 0.12); box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.5); }
+}
+
+/* PUBLIC beside YOURS: a published shard, anyone can see it (arkinox, 2026-11-14). */
+.secret__mine.secret__public { background: var(--accent); }
+
 /* # beside the block rail, and the block number it asks for. */
 .linescrub__hash { display: inline-flex; align-items: center; justify-content: center; }
 .linescrub__hash.is-on { color: var(--accent); border-color: var(--accent); }

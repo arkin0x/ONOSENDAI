@@ -69,6 +69,11 @@ export function reactionTemplate(target: SocialTarget, content: string, createdA
  * A plaintext NIP-22 comment on an action: the root scope is the action by
  * `E`/`K`/`P`, the parent is the action for a top-level comment or the
  * comment answered for a reply.
+ *
+ * The same for any public thing, such as a published shard (arkinox,
+ * 2026-11-14): an addressable one is named by its address as well (`A`, and
+ * `a` on a top-level comment), so its comments stay with it across its
+ * author's edits, as NIP-22 asks.
  */
 export function actionCommentTemplate(action: SocialTarget, text: string, createdAt: number, parent?: SocialTarget): EventTemplate {
   const body = text.trim().slice(0, MAX_COMMENT_LENGTH)
@@ -80,9 +85,11 @@ export function actionCommentTemplate(action: SocialTarget, text: string, create
     created_at: createdAt,
     content: body,
     tags: [
+      ...(action.address ? [['A', action.address, '']] : []),
       ['E', action.id, '', action.pubkey],
       ['K', String(action.kind)],
       ['P', action.pubkey],
+      ...(!parent && action.address ? [['a', action.address, '']] : []),
       ['e', p.id, '', p.pubkey],
       ['k', String(p.kind)],
       ...tagged.map((pk) => ['p', pk]),

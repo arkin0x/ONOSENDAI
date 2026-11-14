@@ -21,7 +21,7 @@ import { queryAny, relaySet } from '../lib/relay'
 import { isHttpUrl, newest, parseContent } from '../lib/profileEdit'
 import { shortHex } from '../lib/time'
 import { useProfile } from '../hooks/useProfile'
-import { useEscape } from '../hooks/useEscape'
+import { Stacked, useModalStack } from './modalStack'
 import { operatorOf, profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { useProfileView } from '../store/useProfileView'
@@ -40,9 +40,10 @@ function profileRelays(): string[] {
 export function ProfileView(): JSX.Element | null {
   const pubkey = useProfileView((s) => s.pubkey)
   const close = useProfileView((s) => s.close)
-  useEscape('modal', pubkey !== null, close)
+  // Over whatever it was opened from, which is there again when it closes (modalStack).
+  useModalStack(pubkey !== null, close)
   if (!pubkey) return null
-  return <ProfileCard key={pubkey} pubkey={pubkey} onClose={close} />
+  return <Stacked><ProfileCard key={pubkey} pubkey={pubkey} onClose={close} /></Stacked>
 }
 
 /** A field of the kind 0's content, as a non-empty string, or null. */

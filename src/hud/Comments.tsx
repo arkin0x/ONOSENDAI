@@ -25,6 +25,7 @@ import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { Explanation } from './Explanation'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
+import { useLandOn } from '../store/useModalFocus'
 
 function Composer({ placeholder, busy, onPost, onCancel }: { placeholder: string; busy: boolean; onPost: (text: string) => Promise<boolean>; onCancel?: () => void }): JSX.Element {
   const [text, setText] = useState('')
@@ -63,14 +64,18 @@ function Author({ pubkey, mine }: { pubkey: string; mine: boolean }): JSX.Elemen
 
 function CommentRow({ c, me, depth, posting, onPost }: { c: Comment; me: string; depth: number; posting: boolean; onPost: (text: string, parent: CommentParent) => Promise<boolean> }): JSX.Element {
   const [replying, setReplying] = useState(false)
+  // VIEW on a notification about this comment lands here, and it glows (store/useModalFocus).
+  const { ref, lit } = useLandOn<HTMLDivElement>({ comment: c.id })
   return (
     <li className="comment" style={{ marginLeft: Math.min(depth, 4) * 14 }}>
+      <div ref={ref} className={`comment__self${lit ? ' is-landed' : ''}`}>
       <div className="comment__head">
         <Author pubkey={c.pubkey} mine={c.pubkey === me} />
         <span className="comment__when" title={formatStamp(c.createdAt)}>{formatAgo(c.createdAt)}</span>
       </div>
       <p className={`comment__text ${c.sealed ? 'comment__text--sealed' : ''}`}>{c.text}</p>
       {!replying && <button className="comment__reply" onClick={() => setReplying(true)}>REPLY</button>}
+      </div>
       {replying && <Composer placeholder="Your reply" busy={posting} onPost={(t) => onPost(t, commentParent(c))} onCancel={() => setReplying(false)} />}
       {c.replies.length > 0 && (
         <ul className="comments__list">
@@ -151,6 +156,23 @@ export function ActionComments({ action }: { action: SocialTarget }): JSX.Elemen
       state={state}
       placeholder={action.pubkey === me ? 'Add a note under your own move' : 'Say something about this move'}
       note={["A comment on a move is public, because the move itself is public: every movement event in a chain can be read by anyone, so there is nothing for a comment to hide. It is published as a NIP-22 comment (kind 1111) in plain text, so anyone reading this chain, in any client, can read it. The move's author is tagged with a p tag, so their own client tells them a comment arrived."]}
+    />
+  )
+}
+
+/**
+ * Public comments on a published shard (arkinox, 2026-11-14): public words,
+ * since the shard is public, threaded under its address so they stay with it
+ * across its author's edits.
+ */
+export function PublicComments({ target }: { target: SocialTarget }): JSX.Element {
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const state = useActionComments(target)
+  return (
+    <CommentSection
+      state={state}
+      placeholder={target.pubkey === me ? 'Add a note under your own shard' : 'Say something about this shard'}
+      note={['A comment on a published shard is public, like the shard: a NIP-22 comment (kind 1111) in plain text, under the shard\'s address, that any client can read. Its author is tagged, so their client tells them.']}
     />
   )
 }

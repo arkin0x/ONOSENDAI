@@ -42,6 +42,7 @@ import { CHOICE_ICONS, TutorialCoach } from '../TutorialCoach'
 
 /** Each route's icon, as lucide names its svg's class. */
 const ICON_CLASS: Record<string, string> = {
+  straylight: 'lucide-coffee',
   hyperspace: 'lucide-earth',
   dungeon: 'lucide-gamepad-2',
   agents: 'lucide-bot',

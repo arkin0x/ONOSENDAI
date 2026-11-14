@@ -30,7 +30,7 @@ const MENU = read('sheets', 'MenuSheet.tsx')
 const STRIP = read('shell', 'Strip.tsx')
 const VIEWBALL = read('shell', 'ViewBall.tsx')
 /** Where the held rows and the color column draw their keys. */
-const SOURCE = read('HeldRows.tsx') + read('ColorActs.tsx')
+const SOURCE = read('shell', 'Strip.tsx') + read('shell', 'HeldBar.tsx') + read('sheets', 'MoreSheet.tsx')
 const BENCH = read('Bench.tsx')
 
 /** Markup to plain words. */
@@ -44,9 +44,13 @@ function menuExplain(): string {
   return MENU.slice(start + '<Explanation>'.length, end).replace(/\s+/g, ' ').trim()
 }
 
-/** The lucide icon drawn inside the button with this aria-label. */
+/** The lucide icon drawn for the button with this accessible name: a button's own, or a MORE key's `icon`. */
 function iconOf(label: string): string {
-  const at = SOURCE.indexOf(`aria-label="${label}"`)
+  const key = new RegExp(`<Key icon=\\{(\\w+)\\}[^\\n]*aria="${label}"`).exec(SOURCE)
+  if (key) return key[1]
+  // A literal name, or one side of a chosen one (aria-label={held ? 'A' : 'B'}).
+  const lit = SOURCE.indexOf(`aria-label="${label}"`)
+  const at = lit > -1 ? lit : SOURCE.indexOf(`'${label}'}`)
   expect(at, label).toBeGreaterThan(-1)
   const close = SOURCE.indexOf('</button>', at)
   const icon = /<([A-Z][A-Za-z0-9]+) size=/.exec(SOURCE.slice(at, close))
@@ -57,8 +61,9 @@ function iconOf(label: string): string {
 describe('the first-run card', () => {
   const card = text(renderToStaticMarkup(<Intro />))
 
-  it('says one finger draws a box in SELECT only, since it orbits in FACE', () => {
-    expect(card).toContain('in SELECT one finger draws a box')
+  it('says one finger orbits in every tool, and a box is SELECT\'s BOX (workshop redesign, phase 2)', () => {
+    expect(card).toContain('One finger orbits in every tool')
+    expect(card).toContain('BOX makes a drag draw a box')
     expect(card).not.toMatch(/FACE[^.;]*draws a box/)
   })
 
@@ -83,9 +88,9 @@ describe('the LOOK help line', () => {
 describe("MENU's EXPLAIN", () => {
   const explain = menuExplain()
 
-  it('names every tool key, 1 to 5, as Bench.tsx binds them and the dock titles them', () => {
+  it('names every tool key, 1 to 6, as Bench.tsx binds them and the dock titles them', () => {
     const byKey = [...DOCK].sort((a, b) => Number(a.key) - Number(b.key))
-    expect(byKey.map((d) => d.key)).toEqual(['1', '2', '3', '4', '5'])
+    expect(byKey.map((d) => d.key)).toEqual(['1', '2', '3', '4', '5', '6'])
     for (const d of byKey) expect(BENCH).toContain(`if (e.code === 'Digit${d.key}') w.setTool('${d.tool}')`)
     expect(BENCH).not.toContain(`e.code === 'Digit${byKey.length + 1}'`)
     expect(explain).toContain(`Keys: ${byKey.map((d) => `${d.key} ${d.label}`).join(', ')},`)
@@ -93,8 +98,8 @@ describe("MENU's EXPLAIN", () => {
   })
 
   it('names JOINED, the key that is there, and not CONNECT or DELETE FACE', () => {
-    expect(SOURCE).toContain('<span className="touchpad__sub">JOINED</span>')
-    expect(explain).toContain('JOINED takes everything faces join to them')
+    expect(SOURCE).toContain('<Key icon={Link} label="JOINED"')
+    expect(explain).toContain('JOINED under MORE takes everything faces join to them')
     expect(explain).not.toContain('CONNECT')
     expect(explain).not.toContain('DELETE FACE')
   })
@@ -109,7 +114,7 @@ describe('icons', () => {
   it('draws each color button with an icon of its own, used by no action key', () => {
     const color = ['Take the selected color', 'Color everything', 'Color the connected piece', 'Color the selected points'].map(iconOf)
     expect(new Set(color).size).toBe(color.length)
-    const actions = ['Select everything', 'Select connected', 'Subdivide the selection', 'Turn every face outward', 'Flip', 'Cut the selection', 'Copy the selection'].map(iconOf)
+    const actions = ['Select everything', 'Select connected', 'Subdivide the selection', 'Turn every face outward', 'Cut the selection', 'Copy the selection'].map(iconOf)
     for (const icon of color) expect(actions).not.toContain(icon)
   })
 })

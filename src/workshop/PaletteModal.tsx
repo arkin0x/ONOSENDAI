@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Download, Plus, Trash2, Upload, X } from 'lucide-react'
+import { Check, Download, Pipette, Plus, Trash2, Upload, X } from 'lucide-react'
 import { BUILT_IN, BUILT_IN_NAME, explainPasteProblem, hexAt, parsePaletteText, type Palette } from 'sno-core/snoPalette'
 import { rgbToHex } from 'sno-core/shards'
 import { paletteNevent, usePaletteNet } from '../store/usePaletteNet'
@@ -94,6 +94,9 @@ export function PaletteModal({ onClose, foldAsk = 0 }: { onClose: () => void; fo
   const busy = usePaletteNet((s) => s.publishing)
   /** Colors this author has reached for, newest first (useWorkshop.palette). */
   const recent = useWorkshop((s) => s.palette)
+  const canSample = useWorkshop((s) => s.selection.length === 1 || s.selectedFaces.length > 0)
+  // In PAINT nothing is held: the dropper arms the next tap instead, and the palette folds away so it can be made.
+  const painting = useWorkshop((s) => s.tool === 'paint')
 
   const active: Palette = shard?.palette ?? BUILT_IN
   const activeName = shard?.palette ? (shard.paletteName ?? 'a palette of its own') : BUILT_IN_NAME
@@ -300,7 +303,12 @@ export function PaletteModal({ onClose, foldAsk = 0 }: { onClose: () => void; fo
             </p>
           )}
         </div>
-        <button className="chip ws__icon" onClick={fold} aria-label="Close"><X size={16} strokeWidth={2.25} /></button>
+        <span className="palettes__headkeys">
+          {/* The dropper, in the palette's header (workshop redesign, phase 2):
+              the held point's or face's color into hand, as MORE's TAKE COLOR. */}
+          <button className="chip ws__icon" disabled={!canSample && !painting} onClick={() => { if (canSample) w().sampleColor(); else { w().setPaintTake(true); fold() } }} title={canSample ? 'Take the color of the point or face you hold' : 'The next tap takes the color of the point or face it meets'} aria-label="Take the selected color"><Pipette size={16} strokeWidth={2.25} /></button>
+          <button className="chip ws__icon" onClick={fold} aria-label="Close"><X size={16} strokeWidth={2.25} /></button>
+        </span>
       </div>
 
       <div className="palettes__body">

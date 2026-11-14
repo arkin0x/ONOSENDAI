@@ -134,19 +134,24 @@ export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, s
         <Explanation>
           An object is colored points on a grid of whole units, drawn SOLID (faces, colors blending
           across them), POINTS (every point a light) or LINES (one line through the points in the
-          order they were made). STAMP places a whole shape; ADD one point; SELECT points, by tap
-          or by dragging a box, to move, color or delete them together, and JOINED takes everything
-          faces join to them; FACE picks corners and FILL joins them, and a tap on a face selects it
-          to move, color, flip or delete. Your color, last in the dock, opens all 256 colors, with the ones you
-          used most recently on top; the buttons at the bottom right put the color on the whole object, the
-          connected piece or the selected points, and the dropper takes a point's or face's color. Stamps keep their own corners even where they touch, so a red block against a
+          order they were made). STAMP places a whole shape; ADD one point; SELECT takes points,
+          faces or placed objects, as its first chip says, by tap or, with BOX on, by dragging a box,
+          and JOINED under MORE takes everything faces join to them; FACE picks corners and FILL
+          joins them into a face; PAINT puts your color on the POINT, FACE, PIECE or ALL a tap
+          meets, a face by BLEND or with a hard EDGE. Whatever you
+          hold, the bar along the bottom turns, copies, pastes, colors and deletes it, and the handles
+          on it move it a grid step at a time; MORE has the rest. Your color, last in the dock, opens
+          all 256 colors, with the ones you used most recently on top; COLOR puts it on what you hold,
+          MORE puts it on the whole object or the connected piece, and the dropper takes a point's or
+          face's color. One finger turns the view, two pan and pinch; a two-finger tap undoes and a
+          three-finger tap redoes. Stamps keep their own corners even where they touch, so a red block against a
           blue one keeps a crisp edge. The arrows on the left set LEVEL, the height the placing tools work at.
           Under GRID, DEPLOY SCALE MULTIPLIER says how big one grid unit is in the world, from a picometre to
           the width of a sector, and GRID SIZE is how far the grid reaches from the origin. DEPLOY shows
           the object at true size before you place it. Under SHARD, PUBLISH puts the shard on your relays as a
           public object: the Shard Feed lists it, anyone can place it, and PUBLISH AGAIN replaces it under the same
           address; RETRACT asks the relays to drop it. That is separate from hiding, which seals a copy at a place.
-          Keys: 1 LOOK, 2 STAMP, 3 ADD, 4 SELECT, 5 FACE, Q turns a stamp, WASD and
+          Keys: 1 LOOK, 2 STAMP, 3 ADD, 4 SELECT, 5 FACE, 6 PAINT, Q turns a stamp, WASD and
           RF or the arrows nudge the selection in screen directions, C selects what faces join, Del
           deletes, Enter fills, [ ] change the level, Ctrl+Z undoes, Esc closes a sheet, then
           clears, then closes the workshop.

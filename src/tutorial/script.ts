@@ -219,6 +219,8 @@ export const CHOICE: TutorialStep = {
   modal: true,
   go: 'DONE',
   choices: [
+    // First (owner, 2026-11-14): the community, where a newcomer meets the rest of us.
+    { id: 'straylight', label: 'JOIN THE COMMUNITY', about: 'Hang out in Straylight Cafe, the cyberspace community.', step: 'straylight' },
     { id: 'hyperspace', label: 'TRAVEL TO EARTH', about: 'Ride hyperspace to a place on Earth.', step: 'earth' },
     { id: 'dungeon', label: 'PLAY THE DUNGEON', about: 'A game inside cyberspace, with its own rules.', when: 'dungeon' },
     { id: 'agents', label: 'BRING YOUR AI', about: 'Add your AI to cyberspace and talk to it here.', step: 'agents' },
@@ -327,6 +329,42 @@ export const BUILD_PLACE: TutorialStep = {
   branch: true,
 }
 
+/**
+ * STRAYLIGHT CAFE (owner, 2026-11-14): the cyberspace community, a community
+ * on Armada. Three panels, one thing each: what it is, bringing your identity
+ * (by signer: hud/StraylightIdentity.tsx), and the invite, opened in a new
+ * tab (tutorial/straylight.ts). FINISH on the last returns to the choices
+ * with it checked off.
+ */
+export const STRAYLIGHT: TutorialStep = {
+  id: 'straylight',
+  title: 'Straylight Cafe',
+  caption: 'Straylight Cafe is the cyberspace community hub. Hang out, ask questions, and show off what you make.',
+  explain: 'It is a community on Armada, a chat app built on nostr, the same network cyberspace runs on. One identity works in both.',
+  branch: true,
+  then: 'straylight-identity',
+}
+
+/** Bringing your identity: the same signer, or (a local key) the key itself behind SHOW MY KEY. */
+export const STRAYLIGHT_IDENTITY: TutorialStep = {
+  id: 'straylight-identity',
+  title: 'Bring your identity',
+  caption: 'Copy your identity from this app to sign into Armada.',
+  explain: 'On nostr, your identity is a key. An app signs with it through a signer that holds the key, or with a copy of the key itself.',
+  panel: 'straylight-identity',
+  branch: true,
+  then: 'straylight-open',
+}
+
+/** The invite, in a new tab (tutorial/straylight.ts 'open-straylight'). */
+export const STRAYLIGHT_OPEN: TutorialStep = {
+  id: 'straylight-open',
+  title: 'Open Straylight Cafe',
+  caption: 'The invite opens in a new tab. Log in, accept it, and say hi!',
+  action: { label: 'OPEN STRAYLIGHT CAFE', effect: 'open-straylight' },
+  branch: true,
+}
+
 /** The last word: how to open the tutorial again (feedback items 10 and 17). */
 export const FAREWELL: TutorialStep = {
   id: 'done',
@@ -337,5 +375,5 @@ export const FAREWELL: TutorialStep = {
 }
 
 export const TUTORIAL_SCRIPT: TutorialScript = {
-  steps: [WELCOME, BOX, OPEN, TAKE, TO_PLOT, PLANT, BUD, INVENTORY, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, EARTH, EARTH_PICK, EARTH_BOARD, EARTH_RIDE, AGENTS, FRIEND, BUILD_PLACE, FAREWELL],
+  steps: [WELCOME, BOX, OPEN, TAKE, TO_PLOT, PLANT, BUD, INVENTORY, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, STRAYLIGHT, STRAYLIGHT_IDENTITY, STRAYLIGHT_OPEN, EARTH, EARTH_PICK, EARTH_BOARD, EARTH_RIDE, AGENTS, FRIEND, BUILD_PLACE, FAREWELL],
 }

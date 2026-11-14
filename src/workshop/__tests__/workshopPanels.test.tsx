@@ -38,7 +38,7 @@ const SHEET: Record<'menu' | 'shard' | 'avatar' | 'grid', string> = {
   grid: read('sheets', 'GridSheet.tsx'),
 }
 /** Every source the workshop draws its controls from, to count a control once across all of them. */
-const ALL = [WORKSHOP, TOPBAR, ...Object.values(SHEET), read('shell', 'ViewBall.tsx'), read('shell', 'Strip.tsx'), read('shell', 'Rail.tsx'), read('shell', 'Dock.tsx'), read('HeldRows.tsx'), read('ColorActs.tsx')].join('\n')
+const ALL = [WORKSHOP, TOPBAR, ...Object.values(SHEET), read('shell', 'ViewBall.tsx'), read('shell', 'Strip.tsx'), read('shell', 'Rail.tsx'), read('shell', 'Dock.tsx'), read('shell', 'HeldBar.tsx'), read('shell', 'MoveHandles.tsx'), read('sheets', 'MoreSheet.tsx')].join('\n')
 
 /** One marker for each control that moved, and where it went. */
 const MOVED: Record<'shard' | 'avatar', string[]> = {

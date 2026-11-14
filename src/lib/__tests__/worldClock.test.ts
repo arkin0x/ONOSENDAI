@@ -1,8 +1,9 @@
 /**
  * worldClock.test.ts: the world clock (lib/worldClock.ts). A sample's offset
  * is the server's time against the midpoint of the round trip (RTT / 2
- * compensation), the shortest round trip wins, a correction is applied only
- * beyond 250 ms and beyond the sample's own uncertainty, the relay is asked
+ * compensation), the median of a few is taken, a correction is applied only
+ * beyond 2 s (DECK-0003 §1.14) and kept up to date, a step in the device
+ * clock is taken as a correction, the relay is asked
  * first (its X-Server-Time, else its Date) and the page's own origin after,
  * and with no network at all the device clock runs as it is.
  */
@@ -29,10 +30,11 @@ describe('a sample', () => {
     expect(m.offsetMs).toBe(5000 + 500 - 50)
     expect(m.uncertaintyMs).toBe(550)
   })
-  it('the shortest round trip wins (the tightest bound); broken samples are passed over', () => {
+  it('takes the median of the samples (the method §1.14 describes); broken samples are passed over', () => {
     const m = offsetFrom([
       { sentMs: 0, gotMs: 900, serverMs: 9000, resolutionMs: 1 },
       { sentMs: 1000, gotMs: 1040, serverMs: 4020, resolutionMs: 1 },
+      { sentMs: 2000, gotMs: 2040, serverMs: 5020, resolutionMs: 1 },
       { sentMs: 2000, gotMs: 1990, serverMs: 0, resolutionMs: 1 },
       { sentMs: 0, gotMs: 10, serverMs: NaN, resolutionMs: 1 },
     ])!
@@ -41,34 +43,26 @@ describe('a sample', () => {
   })
 })
 
-describe('applying a correction', () => {
+describe('applying a correction (§1.14: more than 2 seconds, kept up to date, dropped at 2 s or less)', () => {
   const at = (offset: number, rtt = 40, resolutionMs = 1): ClockSample => ({ sentMs: 10_000, gotMs: 10_000 + rtt, serverMs: 10_000 + rtt / 2 + offset - resolutionMs / 2, resolutionMs })
-  it('not within 250 ms: the device clock is the better one', () => {
-    expect(MIN_CORRECTION_MS).toBe(250)
-    expect(correctionFor([at(200)], 0)).toBe(0)
-    expect(correctionFor([at(-240)], 0)).toBe(0)
+  it('not at 2 seconds or less: the device clock is the better one', () => {
+    expect(MIN_CORRECTION_MS).toBe(2000)
+    expect(correctionFor([at(1900)], 0)).toBe(0)
+    expect(correctionFor([at(-2000)], 0)).toBe(0)
   })
-  it('beyond 250 ms and beyond the sample\'s doubt: applied', () => {
-    expect(Math.round(correctionFor([at(800)], 0))).toBe(800)
+  it('more than 2 seconds: applied', () => {
+    expect(Math.round(correctionFor([at(2500)], 0))).toBe(2500)
     expect(Math.round(correctionFor([at(-3000)], 0))).toBe(-3000)
   })
-  it('not when the round trip leaves more doubt than the offset', () => {
-    expect(correctionFor([at(400, 1000)], 0)).toBe(0)
-    // A whole-second Date: half a second of doubt plus half the round trip.
-    expect(correctionFor([at(500, 40, 1000)], 0)).toBe(0)
-    expect(Math.round(correctionFor([at(2000, 40, 1000)], 0))).toBe(2000)
+  it('kept up to date by later measurements, a change within the measurement\'s own doubt kept as it was (no wobble)', () => {
+    expect(correctionFor([at(3400, 40, 1000)], 3000)).toBe(3000)
+    expect(Math.round(correctionFor([at(5000, 40, 1000)], 3000))).toBe(5000)
   })
-  it('nothing usable keeps the correction there is', () => {
+  it('dropped when a later measurement falls to 2 seconds or less', () => {
+    expect(correctionFor([at(1000)], 3000)).toBe(0)
+  })
+  it('nothing usable keeps the correction there is; an offset past a day is a broken source', () => {
     expect(correctionFor([], 1234)).toBe(1234)
-  })
-  it('does not flap: a measurement that agrees with the correction in force within its doubt keeps it', () => {
-    // A device 0.7 s off, read through a whole-second Date: once as 1 s, once as 0.5 s.
-    expect(Math.round(correctionFor([at(1000, 40, 1000)], 0))).toBe(1000)
-    expect(correctionFor([at(500, 40, 1000)], 1000)).toBe(1000)
-    // The device came right (a sync): back to none.
-    expect(correctionFor([at(0, 40, 1)], 1000)).toBe(0)
-  })
-  it('ignores an offset past a day: a broken source, not a clock', () => {
     expect(correctionFor([at(2 * 86_400_000)], 0)).toBe(0)
   })
 })
@@ -114,7 +108,9 @@ describe('the server\'s time', () => {
     const samples = await sampleFrom(RELAY_TIME_URL, {}, async () => { now += 30; return { headers: headers({ 'x-server-time': String(now + 900) }) } }, () => now)
     expect(samples).toHaveLength(3)
     // The server read 900 ms past the answer; the answer came 30 ms after the ask: 900 + 15 + half a millisecond.
-    expect(correctionFor(samples, 0)).toBeCloseTo(915.5, 6)
+    expect(offsetFrom(samples)!.offsetMs).toBeCloseTo(915.5, 6)
+    // Under 2 s: the device keeps its own clock.
+    expect(correctionFor(samples, 0)).toBe(0)
   })
 })
 
@@ -179,5 +175,30 @@ describe('when it measures', () => {
       vi.unstubAllGlobals()
       vi.restoreAllMocks()
     }
+  })
+})
+
+describe('a step in the device clock', () => {
+  it('is taken as a correction: the steady clock follows it and the version rises (every moving object eases)', () => {
+    resetWorldClock()
+    const realNow = Date.now
+    let wall = 1_795_132_800_000
+    let steady = 1000
+    Date.now = () => wall
+    const spy = vi.spyOn(performance, 'now').mockImplementation(() => steady)
+    try {
+      resetWorldClock()
+      const r0 = readClock('k', 1, undefined, steady)
+      const v0 = r0.version
+      expect(r0.t).toBeCloseTo(1_795_132_800, 6)
+      // 16 ms later on both clocks: smooth, no step.
+      wall += 16; steady += 16
+      expect(readClock('k', 2, undefined, steady).version).toBe(v0)
+      // The user sets the clock 90 s ahead; the steady clock only moved 16 ms.
+      wall += 90_016; steady += 16
+      const r2 = readClock('k', 3, undefined, steady)
+      expect(r2.version).toBeGreaterThan(v0)
+      expect(r2.t).toBeCloseTo(1_795_132_890.032, 6)
+    } finally { Date.now = realNow; spy.mockRestore() }
   })
 })

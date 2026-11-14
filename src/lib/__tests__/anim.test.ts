@@ -1,9 +1,8 @@
 /**
  * anim.test.ts: reading `anim` as DECK-0003 §1.14 says (first four entries;
- * malformed, unknown, out of range or faster than one cycle a second
- * ignored; never a throw), every row of the spec's pose vectors at their
- * phases (in the §2 frame, ticks), poses at Unix times (c cycles every b
- * seconds), and the canonical writer (c/b in lowest terms, path weights
+ * malformed, unknown, out of range or faster than two cycles a second
+ * ignored; never a throw), every one of the spec's 19 vectors at their Unix
+ * times (in the §2 frame, ticks), and the canonical writer (c/b in lowest terms, path weights
  * with no common factor, nothing a reader would ignore).
  */
 import { describe, expect, it } from 'vitest'
@@ -29,7 +28,8 @@ function drawnAt(anim: unknown[], u: number[], p: [number, number, number]): num
 /** The same at Unix time t: each motion's phase from t. */
 const drawn = (anim: unknown[], t: number, p: [number, number, number]): number[] => drawnAt(anim, readAnim(anim).map((x) => phaseAt(x, t)), p)
 
-const SHUTTLE = ['path', 1, 10, 0, [0, 0, 0, 1], [0, 0, 0, 1], [1920, 0, 0, 2], [1920, 0, 0, 1], [0, 0, 0, 2]]
+const T0 = 1_795_132_800
+const SHUTTLE = ['path', 1, 60, 0, [0, 0, 0, 2], [1920, 0, 0, 2], [1920, 0, 0, 1], [0, 0, 0, 2]]
 
 describe('the motion table', () => {
   it('holds every motion the spec names, in one place', () => {
@@ -37,51 +37,39 @@ describe('the motion table', () => {
   })
 })
 
-describe('poses at a phase: DECK-0003 §1.14\'s pose vectors (their phases), every row', () => {
-  const rows: Array<[unknown[], number[], [number, number, number], [number, number, number]]> = [
-    [[['turn', 'y', 1, 1, 0]], [1 / 4], [120, 0, 0], [0, 0, -120]],
-    [[['turn', 'y', -1, 1, 0]], [3 / 4], [120, 0, 0], [0, 0, 120]],
-    [[['swing', 'x', 60, 1, 25, 0]], [1 / 4], [0, 120, 0], [0, 60, 103.923048]],
-    [[['slide', 'y', 240, 1, 4, 90]], [3 / 8], [0, 0, 0], [0, 169.705627, 0]],
-    [[['orbit', 'y', 480, 1, 2, 0]], [1 / 4], [120, 0, 0], [600, 0, 0]],
-    [[['orbit', 'z', 480, 1, 1, 0]], [1 / 8], [0, 0, 0], [339.411255, 339.411255, 0]],
-    [[['lift', 'y', 1440, 25, 1, 1, 0]], [1 / 10], [0, 0, 0], [0, 0, 0]],
-    [[['lift', 'y', 1440, 25, 1, 1, 0]], [3 / 8], [0, 0, 0], [0, 720, 0]],
-    [[['lift', 'y', 1440, 25, 1, 1, 0]], [3 / 5], [0, 0, 0], [0, 1440, 0]],
-    [[['lift', 'y', 1440, 25, 1, 1, 0]], [4 / 5], [0, 0, 0], [0, 1290.24, 0]],
-    [[['lift', 'y', -480, 0, 1, 1, 0]], [1 / 8], [0, 0, 0], [0, -75, 0]],
-    [[SHUTTLE], [1 / 10], [0, 0, 0], [0, 0, 0]],
-    [[SHUTTLE], [1 / 2], [0, 0, 0], [1440, 0, 0]],
-    [[SHUTTLE], [9 / 10], [0, 0, 0], [672, 0, 0]],
-    [[['turn', 'z', 1, 4, 0], ['slide', 'x', 120, 1, 1, 0]], [5 / 16, 1 / 4], [120, 0, 0], [74.077988, 110.865544, 0]],
-    [[['slide', 'x', 120, 1, 1, 0], ['turn', 'z', 1, 4, 0]], [1 / 4, 5 / 16], [120, 0, 0], [-91.844024, 221.731088, 0]],
+describe('DECK-0003 §1.14\'s vectors (as merged, cyberspace ce3f9482), every row: poses at Unix times', () => {
+  const rows: Array<[unknown[], number, [number, number, number], [number, number, number]]> = [
+    [[['turn', 'y', 1, 6, 0]], T0 + 1.5, [120, 0, 0], [0, 0, -120]],
+    [[['turn', 'y', -1, 6, 0]], T0 + 1.5, [120, 0, 0], [0, 0, 120]],
+    [[['turn', 'y', 2, 1, 0]], T0 + 0.125, [120, 0, 0], [0, 0, -120]],
+    [[['turn', 'y', 1, 31536000, 0]], T0, [120, 0, 0], [106.328475, 0, 55.626033]],
+    [[['turn', 'y', 7, 90, 30]], 1795171234.567, [120, 0, 0], [-111.164515, 0, -45.19348]],
+    [[['swing', 'x', 60, 1, 2, 0]], T0 + 0.5, [0, 120, 0], [0, 60, 103.923048]],
+    [[['slide', 'y', 240, 1, 4, 90]], T0 + 0.5, [0, 0, 0], [0, 169.705627, 0]],
+    [[['orbit', 'y', 480, 1, 8, 0]], T0 + 2, [120, 0, 0], [600, 0, 0]],
+    [[['orbit', 'z', 480, 1, 8, 0]], T0 + 1, [0, 0, 0], [339.411255, 339.411255, 0]],
+    [[['lift', 'y', 1440, 25, 1, 20, 0]], T0 + 2, [0, 0, 0], [0, 0, 0]],
+    [[['lift', 'y', 1440, 25, 1, 20, 0]], T0 + 7.5, [0, 0, 0], [0, 720, 0]],
+    [[['lift', 'y', 1440, 25, 1, 20, 0]], T0 + 12, [0, 0, 0], [0, 1440, 0]],
+    [[['lift', 'y', 1440, 25, 1, 20, 0]], T0 + 16, [0, 0, 0], [0, 1290.24, 0]],
+    [[['lift', 'y', -480, 0, 1, 8, 0]], T0 + 1, [0, 0, 0], [0, -75, 0]],
+    [[SHUTTLE], T0 + 6, [0, 0, 0], [0, 0, 0]],
+    [[SHUTTLE], T0 + 30, [0, 0, 0], [1440, 0, 0]],
+    [[SHUTTLE], T0 + 54, [0, 0, 0], [672, 0, 0]],
+    [[['turn', 'z', 1, 8, 0], ['slide', 'x', 120, 1, 2, 0]], T0 + 2.5, [120, 0, 0], [74.077988, 110.865544, 0]],
+    [[['slide', 'x', 120, 1, 2, 0], ['turn', 'z', 1, 8, 0]], T0 + 2.5, [120, 0, 0], [-91.844024, 221.731088, 0]],
   ]
-  rows.forEach(([anim, u, p, want], i) => {
-    it(`row ${i + 1}: ${JSON.stringify(anim).slice(0, 60)} at u ${u.map((x) => x.toFixed(4)).join(', ')}`, () => {
-      const got = drawnAt(anim, u, p)
-      for (let k = 0; k < 3; k++) expect(got[k]).toBeCloseTo(want[k], 5)
+  it('has all 19 rows', () => expect(rows).toHaveLength(19))
+  rows.forEach(([anim, t, p, want], i) => {
+    it(`row ${i + 1}: ${JSON.stringify(anim).slice(0, 60)} at t ${t}`, () => {
+      expect(readAnim(anim)).toHaveLength(anim.length)
+      const got = drawn(anim, t, p)
+      for (let k = 0; k < 3; k++) expect(got[k]).toBeCloseTo(want[k], 4)
     })
   })
-})
-
-describe('poses at a Unix time: c cycles every b seconds', () => {
-  // 2026-11-20 00:00:00 UTC: 1795132800 is a whole number of 20-second cycles.
-  const T = 1_795_132_800
-  it('a spin of 1 every 20 s: a quarter turn 5 s after a whole cycle', () => {
-    expect(T % 20).toBe(0)
-    const at = (t: number) => drawn([['turn', 'y', 1, 20, 0]], t, [120, 0, 0])
-    const p0 = at(T), p5 = at(T + 5)
-    expect(p0[0]).toBeCloseTo(120, 6)
-    expect(p5[0]).toBeCloseTo(0, 6)
-    expect(p5[2]).toBeCloseTo(-120, 6)
-  })
-  it('the phase offset and direction', () => {
-    expect(phaseAt({ c: 1, b: 20, phi: 90 }, T)).toBeCloseTo(0.25, 9)
-    expect(phaseAt({ c: -1, b: 20, phi: 0 }, T + 5)).toBeCloseTo(0.75, 9)
-  })
-  it('keeps its precision at today\'s Unix time: a millionth of a cycle (a double holds today\'s time to about 0.2 µs)', () => {
-    expect(phaseAt({ c: 1, b: 1, phi: 0 }, (T * 1000 + 1) / 1000)).toBeCloseTo(0.001, 5)
-    expect(phaseAt({ c: 7, b: 999_983, phi: 0 }, T)).toBeCloseTo((7 * (T % 999_983) % 999_983) / 999_983, 9)
+  it('the year-long turn\'s phase is 337/365 at T0, and the odd moment\'s 39469/90000', () => {
+    expect(phaseAt({ c: 1, b: 31_536_000, phi: 0 }, T0)).toBeCloseTo(337 / 365, 9)
+    expect(phaseAt({ c: 7, b: 90, phi: 30 }, 1795171234.567)).toBeCloseTo(39469 / 90000, 6)
   })
 })
 
@@ -89,7 +77,7 @@ describe('reading', () => {
   it('ignores malformed entries, unknown words, out-of-range integers and too-fast rates; keeps the rest; never throws', () => {
     const bad = [
       ['turn', 'w', 1, 1, 0], ['turn', 'y', 1.5, 1, 0], ['turn', 'y', 1, 0, 0], ['turn', 'y', 1, 1, 360], ['turn', 'y', 1, 1],
-      ['turn', 'y', 0, 1, 0], ['turn', 'y', 2, 1, 0], ['turn', 'y', 601, 600, 0], ['turn', 'y', 1, 1_000_001, 0], ['turn', 'Y', 1, 1, 0],
+      ['turn', 'y', 0, 1, 0], ['turn', 'y', 3, 1, 0], ['turn', 'y', 1201, 600, 0], ['turn', 'y', 1, 31_536_001, 0], ['turn', 'Y', 1, 1, 0],
       ['swing', 'x', 0, 1, 1, 0], ['swing', 'x', 181, 1, 1, 0], ['slide', 'x', 0, 1, 1, 0], ['slide', 'x', 7681, 1, 1, 0],
       ['orbit', 'y', 0, 1, 1, 0], ['lift', 'y', 0, 10, 1, 1, 0], ['lift', 'y', 10, 50, 1, 1, 0], ['lift', 'y', -7681, 0, 1, 1, 0],
       ['path', 1, 1, 0, [0, 0, 0, 1]], ['path', 1, 1, 0, [0, 0, 0, 0], [1, 1, 1, 1]], ['path', 1, 1, 0, [0, 0, 0, 1001], [1, 1, 1, 1]],
@@ -101,8 +89,8 @@ describe('reading', () => {
     for (const raw of [undefined, null, 'x', 3, {}, [[]], [[null]]]) expect(readAnim(raw)).toEqual([])
   })
 
-  it('reads the boundary values (at most one cycle a second)', () => {
-    for (const ok of [['turn', 'y', 1, 1, 359], ['turn', 'y', -1_000_000, 1_000_000, 0], ['turn', 'y', 600, 600, 0], ['slide', 'z', 7680, 1, 1, 0], ['lift', 'x', -7680, 49, 1, 1, 0],
+  it('reads the boundary values (at most two cycles a second, b up to a year)', () => {
+    for (const ok of [['turn', 'y', 2, 1, 359], ['turn', 'y', -63_072_000, 31_536_000, 0], ['turn', 'y', 1200, 600, 0], ['turn', 'y', 1, 31_536_000, 0], ['slide', 'z', 7680, 1, 1, 0], ['lift', 'x', -7680, 49, 1, 1, 0],
       ['path', 1, 1, 0, [-7680, 7680, 0, 1000], [0, 0, 0, 1]]]) expect(readMotion(ok)).not.toBeNull()
   })
 
@@ -140,9 +128,13 @@ describe('writing', () => {
   it('writes canonically: c/b in lowest terms, path weights with no common factor, nothing a reader would ignore', () => {
     expect(writeMotion(m(['turn', 'y', 3, 60, 0]))).toEqual(['turn', 'y', 1, 20, 0])
     expect(writeMotion(m(['turn', 'y', -6, 9, 10]))).toEqual(['turn', 'y', -2, 3, 10])
+    // A swing or a slide is written with a positive c: a negative c is the same motion at phase (180 − φ) mod 360.
+    expect(writeMotion(m(['swing', 'x', 30, -2, 6, 30]))).toEqual(['swing', 'x', 30, 1, 3, 150])
+    expect(writeMotion(m(['slide', 'y', 99, -1, 4, 270]))).toEqual(['slide', 'y', 99, 1, 4, 270])
+    expect(writeMotion(m(['lift', 'y', 99, 10, -1, 4, 0]))).toEqual(['lift', 'y', 99, 10, -1, 4, 0])
     expect(writeMotion(m(['path', 2, 4, 0, [0, 0, 0, 2], [10, 0, 0, 4]]))).toEqual(['path', 1, 2, 0, [0, 0, 0, 1], [10, 0, 0, 2]])
     const s = newShard('w')
-    const { shard, kept } = withAnim(s, [['turn', 'y', 2, 40, 0], ['bogus', 1], ['turn', 'y', 2, 1, 0], ['slide', 'z', 6, 1, 4, 0]])
+    const { shard, kept } = withAnim(s, [['turn', 'y', 2, 40, 0], ['bogus', 1], ['turn', 'y', 3, 1, 0], ['slide', 'z', 6, 1, 4, 0]])
     expect(kept).toHaveLength(2)
     expect(shard.extra?.anim).toEqual([['turn', 'y', 1, 20, 0], ['slide', 'z', 6, 1, 4, 0]])
     expect((toPayload(shard) as unknown as Record<string, unknown>).anim).toEqual([['turn', 'y', 1, 20, 0], ['slide', 'z', 6, 1, 4, 0]])

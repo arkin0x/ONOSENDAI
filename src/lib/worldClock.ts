@@ -13,8 +13,9 @@
  * time the answer came, and the server's time in the answer. The server's
  * moment is taken as the midpoint of the round trip, so the offset is
  * server − (sent + got) / 2, good to ± RTT / 2 plus the server time's own
- * resolution. Of a few samples the one with the shortest round trip is kept
- * (the tightest bound, as NTP does).
+ * resolution; a time given in whole seconds is cut down, not rounded, so half
+ * a second is added to it. Of a few samples the median is taken (the
+ * method DECK-0003 §1.14 describes for ONOSENDAI).
  *
  * Where the server's time comes from, in order:
  *   1. The relay (relay.onosendai.tech, its NIP-11 GET): an `X-Server-Time`
@@ -25,14 +26,18 @@
  *   2. Until then, the page's own origin: the `Date` header of a same-origin
  *      HEAD, which a browser can always read (whole seconds).
  *
- * Applying. A correction is applied only when the measured offset is beyond
- * both MIN_CORRECTION_MS and the sample's own uncertainty. 250 ms: a device
- * synced to network time is good to tens of milliseconds, so below a quarter
- * second the device is likely the better clock; and a quarter second is
- * about 4.5 degrees of a platform turning three times a minute, the size of
- * disagreement two players standing on it would just about notice. A whole
- * second `Date` header can only ever justify a correction of more than about
- * half a second plus half the round trip, and that is what it is used for.
+ * Applying (DECK-0003 §1.14, "The moment t"). A correction is applied only
+ * when the measured offset is more than 2 seconds (MIN_CORRECTION_MS): below
+ * that the device's own clock is usually the better one, since most sources
+ * report whole seconds while a synced device is good to a fraction of one.
+ * Once applied it is kept up to date from later measurements (a change within
+ * a measurement's own doubt is noise and kept as it was), and dropped when a
+ * later measurement falls to 2 seconds or less.
+ *
+ * A steady clock. Frames are timed from performance.now(), which never
+ * steps, plus an offset to Unix time; a step in the device clock (a time
+ * sync, or its user setting the clock) is taken as a correction: the offset
+ * follows it and every moving object eases to the new time (§1.14).
  *
  * Re-measured when the page regains focus or visibility, and every ten
  * minutes while anything moves. One reading per frame (readClock).
@@ -50,8 +55,10 @@ export interface ClockReading {
   chosen: boolean
 }
 
-/** Corrections smaller than this are left to the device clock (see the header). */
-export const MIN_CORRECTION_MS = 250
+/** Corrections of this or less are left to the device clock (§1.14: "more than 2 seconds"). */
+export const MIN_CORRECTION_MS = 2000
+/** A jump between the device clock and the steady one larger than this is a step in the device clock, taken as a correction. */
+export const STEP_MS = 1000
 /** How often the clock is measured again while anything moves. */
 export const REMEASURE_MS = 10 * 60_000
 /** Samples taken in one measurement. */
@@ -61,14 +68,30 @@ export const SERVER_TIME_HEADER = 'x-server-time'
 
 let offsetMs = 0
 let version = 0
+const mono = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+/** Unix ms minus steady ms: the device clock as the steady clock carries it, moved only by a step. */
+let base = Date.now() - mono()
+
+/** Unix ms now by the steady clock, following a step in the device clock (and counting it as a correction). */
+function deviceNow(monoMs: number): number {
+  const steady = monoMs + base
+  const real = Date.now()
+  if (Math.abs(real - steady) > STEP_MS) {
+    base += real - steady
+    version++
+    lastStamp = NaN
+    return real
+  }
+  return steady
+}
 
 const reading: ClockReading = { t: 0, version: 0, nowS: 0, chosen: false }
 let lastKey: unknown = null
 let lastStamp = NaN
 
-/** Unix seconds now, corrected. */
-export function worldNow(nowMs: number = Date.now()): number {
-  return (nowMs + offsetMs) / 1000
+/** Unix seconds now, corrected. `nowMs` (tests) stands in for the device clock. */
+export function worldNow(nowMs?: number): number {
+  return ((nowMs ?? deviceNow(mono())) + offsetMs) / 1000
 }
 
 /** The correction in force, ms (0 for none). */
@@ -88,13 +111,15 @@ export function setClockOffset(ms: number): void {
 /**
  * The reading for this frame. `key` and `stamp` name the frame (an r3f
  * clock and its elapsedTime): the first caller in a frame works it out, the
- * rest get the same object. `nowMs` and `monoMs` are for tests.
+ * rest get the same object. `nowMs` (tests) stands in for the device clock;
+ * by default it is the steady clock (deviceNow).
  */
-export function readClock(key: unknown, stamp: number, nowMs: number = Date.now(), monoMs: number = performance.now()): ClockReading {
+export function readClock(key: unknown, stamp: number, nowMs?: number, monoMs: number = mono()): ClockReading {
   if (key === lastKey && stamp === lastStamp) return reading
+  const wall = nowMs ?? deviceNow(monoMs)
   lastKey = key
   lastStamp = stamp
-  reading.t = (nowMs + offsetMs) / 1000
+  reading.t = (wall + offsetMs) / 1000
   reading.version = version
   reading.nowS = monoMs / 1000
   return reading
@@ -105,42 +130,47 @@ export function readClock(key: unknown, stamp: number, nowMs: number = Date.now(
 /** One request's times: sent and answered (device ms), and the server's time with its resolution (ms). */
 export interface ClockSample { sentMs: number; gotMs: number; serverMs: number; resolutionMs: number }
 
+const median = (xs: number[]): number => {
+  const v = [...xs].sort((a, b) => a - b)
+  const mid = v.length >> 1
+  return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2
+}
+
 /**
- * The offset the samples show, and how sure it is: from the sample with the
- * shortest round trip, offset = server + resolution / 2 − midpoint (a time
- * truncated to whole seconds sits on average half a second before the true
- * one), uncertainty = RTT / 2 + resolution / 2. Null without a usable sample.
+ * The offset the samples show, and how sure it is: the median over the
+ * usable samples of server + resolution / 2 − midpoint (a time truncated to
+ * whole seconds sits on average half a second before the true one), and the
+ * median of RTT / 2 + resolution / 2. Null without a usable sample.
  */
 export function offsetFrom(samples: readonly ClockSample[]): { offsetMs: number; uncertaintyMs: number } | null {
-  let best: ClockSample | null = null
-  for (const s of samples) {
-    if (!Number.isFinite(s.serverMs) || !Number.isFinite(s.sentMs) || !(s.gotMs >= s.sentMs)) continue
-    if (!best || s.gotMs - s.sentMs < best.gotMs - best.sentMs) best = s
+  const ok = samples.filter((s) => Number.isFinite(s.serverMs) && Number.isFinite(s.sentMs) && s.gotMs >= s.sentMs)
+  if (ok.length === 0) return null
+  return {
+    offsetMs: median(ok.map((s) => s.serverMs + s.resolutionMs / 2 - (s.sentMs + s.gotMs) / 2)),
+    uncertaintyMs: median(ok.map((s) => (s.gotMs - s.sentMs) / 2 + s.resolutionMs / 2)),
   }
-  if (!best) return null
-  const rtt = best.gotMs - best.sentMs
-  return { offsetMs: best.serverMs + best.resolutionMs / 2 - (best.sentMs + best.gotMs) / 2, uncertaintyMs: rtt / 2 + best.resolutionMs / 2 }
 }
 
 /** An offset this large is no clock error but a broken source (a stale cached response): ignored. */
 export const SANE_OFFSET_MS = 24 * 3600_000
 
 /**
- * The correction to use after a measurement, against the one in force:
- *   - kept, when the measurement agrees with it within its doubt (max of
- *     MIN_CORRECTION_MS and the sample's uncertainty): so a whole-second
- *     Date that reads a device 0.7 s off as 0 one time and 1 s the next does
- *     not flap the clock (and every moving object with it);
- *   - none (0), when it disagrees and the device itself is within that doubt;
- *   - the measured offset otherwise.
+ * The correction to use after a measurement, against the one in force
+ * (§1.14):
+ *   - none (0), when the measured offset is 2 seconds or less: the device is
+ *     the better clock, and a correction in force is dropped;
+ *   - kept, when one is in force and the new measurement agrees with it
+ *     within the measurement's own doubt: noise, so the clock (and every
+ *     moving object with it) does not wobble;
+ *   - the measured offset otherwise (kept up to date).
  * Nothing usable, or an offset past SANE_OFFSET_MS, keeps `current`.
  */
 export function correctionFor(samples: readonly ClockSample[], current: number): number {
   const m = offsetFrom(samples)
   if (!m || Math.abs(m.offsetMs) > SANE_OFFSET_MS) return current
-  const doubt = Math.max(MIN_CORRECTION_MS, m.uncertaintyMs)
-  if (Math.abs(m.offsetMs - current) <= doubt) return current
-  return Math.abs(m.offsetMs) <= doubt ? 0 : m.offsetMs
+  if (Math.abs(m.offsetMs) <= MIN_CORRECTION_MS) return 0
+  if (current !== 0 && Math.abs(m.offsetMs - current) <= m.uncertaintyMs) return current
+  return m.offsetMs
 }
 
 /** The relay asked for the time: the ONOSENDAI relay's NIP-11 document, over https. */
@@ -240,4 +270,5 @@ export function resetWorldClock(): void {
   stopWatching?.()
   stopWatching = null
   offsetMs = 0; version++; lastKey = null; lastStamp = NaN; started = false; live = 0; lastReturn = -Infinity; measuring = null
+  base = Date.now() - mono()
 }

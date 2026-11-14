@@ -116,16 +116,20 @@ export function rateFor(perMin: number): { c: number; b: number; note?: string }
 
 /**
  * Whether a motion may flicker more than three times a second (§1.14: an
- * authoring tool SHOULD warn): its cycles a second, times its legs for a path.
+ * authoring tool SHOULD warn), from its cycles a second and what it does in
+ * one: a turn or an orbit past half a cycle a second (an object with several
+ * spokes, the spec's own example); a swing or a slide, two reversals a cycle;
+ * a lift with rests, two stops a cycle; a path, one change of course a leg.
  */
 export function mayFlicker(m: Motion): boolean {
   const perSecond = Math.abs(m.c) / m.b
-  const flashes = m.word === 'path' ? perSecond * (m.pts.length / 4) : perSecond
-  return flashes > 3
+  if (m.word === 'turn' || m.word === 'orbit') return perSecond > 0.5
+  if (m.word === 'path') return perSecond * (m.pts.length / 4) > 3
+  return perSecond * 2 > 3
 }
 
 /** The speeds the − and + step through, cycles a minute. */
-export const SPEED_STEPS = [0.1, 0.2, 0.25, 0.5, 0.75, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50] as const
+export const SPEED_STEPS = [0.1, 0.2, 0.25, 0.5, 0.75, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 60, 90, 120] as const
 
 /** The next speed step up (dir 1) or down (dir −1) from `perMin`'s size. */
 export function stepSpeed(perMin: number, dir: 1 | -1): number {

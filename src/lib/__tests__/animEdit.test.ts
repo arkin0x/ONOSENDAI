@@ -67,15 +67,22 @@ describe('speed: cycles a minute <-> c cycles every b seconds, lowest terms', ()
     expect(rateFor(-3)).toEqual({ c: -1, b: 20 })
     for (const perMin of [0.01, 0.5, 1, 2.72, 3, 10, 25, 59.99]) expect(perMinute(rateFor(perMin))).toBeCloseTo(perMin, 9)
   })
-  it('clamps to one a second (60 a minute) with a message, and never stops', () => {
-    expect(rateFor(10_000)).toEqual({ c: 1, b: 1, note: LIMITS.speed })
-    expect(LIMITS.speed).toBe('Top speed is 60 a minute')
+  it('clamps to two a second (120 a minute) with a message, and never stops', () => {
+    expect(rateFor(10_000)).toEqual({ c: 2, b: 1, note: LIMITS.speed })
+    expect(LIMITS.speed).toBe('Top speed is 120 a minute')
+    expect(rateFor(120)).toEqual({ c: 2, b: 1 })
     expect(rateFor(0)).toEqual({ c: 1, b: 6000, note: LIMITS.slowest })
     expect(perMinute(rateFor(0))).toBe(0.01)
     expect(rateFor(-0)).toMatchObject({ c: -1 })
   })
-  it('warns about a motion that may flicker more than 3 times a second (§1.14)', () => {
-    expect(setSpeed([m(['turn', 'y', 1, 20, 0])], 0, 50).note).toBeUndefined()
+  it('warns about a motion that may flicker more than 3 times a second (§1.14\'s examples)', () => {
+    // A turn past half a turn a second (an object with several spokes).
+    expect(setSpeed([m(['turn', 'y', 1, 20, 0])], 0, 30).note).toBeUndefined()
+    expect(setSpeed([m(['turn', 'y', 1, 20, 0])], 0, 31).note).toBe(LIMITS.flicker)
+    // A lift with rests at two a second jumps four times a second.
+    expect(setSpeed([m(['lift', 'y', 240, 25, 1, 20, 0])], 0, 120).note).toBe(LIMITS.flicker)
+    expect(setSpeed([m(['lift', 'y', 240, 25, 1, 20, 0])], 0, 60).note).toBeUndefined()
+    // A path that changes course often.
     const path = [m(['path', 1, 1, 0, [1, 0, 0, 1], [2, 0, 0, 1], [3, 0, 0, 1], [4, 0, 0, 1], [0, 0, 0, 1]])]
     expect(setSpeed(path, 0, 50).note).toBe(LIMITS.flicker)
   })
@@ -93,7 +100,8 @@ describe('speed: cycles a minute <-> c cycles every b seconds, lowest terms', ()
     expect(stepSpeed(2.72, 1)).toBe(3)
     expect(stepSpeed(2.72, -1)).toBe(2.5)
     expect(stepSpeed(-2.72, 1)).toBe(-3)
-    expect(stepSpeed(50, 1)).toBe(50)
+    expect(stepSpeed(50, 1)).toBe(60)
+    expect(stepSpeed(120, 1)).toBe(120)
   })
   it('setSpeed and reverse write c/b seconds', () => {
     const list = [m(['turn', 'y', 1, 20, 0])]

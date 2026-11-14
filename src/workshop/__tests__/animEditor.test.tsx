@@ -105,10 +105,17 @@ describe('the MOTION panel', () => {
     await type(m, 'Speed, per minute', '2.5')
     expect(anim()).toEqual([['turn', 'y', 1, 24, 0]])
     await type(m, 'Speed, per minute', '100000')
-    expect(anim()).toEqual([['turn', 'y', 1, 1, 0]])
-    expect(m.says('Top speed is 60 a minute')).toBe(true)
+    expect(anim()).toEqual([['turn', 'y', 2, 1, 0]])
+    expect(m.says('Top speed is 120 a minute')).toBe(true)
     await click(m, 'Reverse')
-    expect(anim()).toEqual([['turn', 'y', -1, 1, 0]])
+    expect(anim()).toEqual([['turn', 'y', -2, 1, 0]])
+    await m.unmount()
+  })
+
+  it('a PENDULUM or a BACK AND FORTH has no REVERSE: the spec writes them with a positive c', async () => {
+    const m = await mount(<AnimEditor />)
+    await m.press('PENDULUM')
+    expect(m.all().some((h) => h.props['aria-label'] === 'Reverse')).toBe(false)
     await m.unmount()
   })
 

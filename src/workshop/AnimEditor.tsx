@@ -210,7 +210,8 @@ function MotionCard({ m, i, count, unit, bind, apply, now }: { m: Motion; i: num
         <NumberField label="Speed, per minute" value={showNumber(Math.abs(speed))} onCommit={(n) => apply(setSpeed(now(), i, (speed < 0 ? -1 : 1) * Math.abs(n)))} />
         <span className="workshop__value">/MIN</span>
         <button className="workshop__btn" {...bind(() => { const l = now(); apply(setSpeed(l, i, stepSpeed(perMinute(l[i]), 1))) })} aria-label="Faster" title="Faster">+</button>
-        <button className={`workshop__btn ${m.c < 0 ? 'is-on' : ''}`} aria-pressed={m.c < 0} title="Run it the other way" aria-label="Reverse" onClick={() => apply(reverse(now(), i))}><Repeat2 size={12} aria-hidden /></button>
+        {/* A swing or a slide run backward is the same back and forth from another start (§1.14 writes it with a positive c): no REVERSE for them. */}
+        {m.word !== 'swing' && m.word !== 'slide' && <button className={`workshop__btn ${m.c < 0 ? 'is-on' : ''}`} aria-pressed={m.c < 0} title="Run it the other way" aria-label="Reverse" onClick={() => apply(reverse(now(), i))}><Repeat2 size={12} aria-hidden /></button>}
         <span className="ws__explain">{rate}</span>
       </div>
       {mayFlicker(m) && <div className="ws__explain ws__anim-note">This may flicker more than 3 times a second</div>}

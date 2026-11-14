@@ -27,7 +27,7 @@
  *
  * Reader rules kept here (§1.14): only the first four entries are read; an
  * entry that is malformed, has an unknown word, has an integer out of its
- * range, or is faster than one cycle a second is ignored (held still)
+ * range, or is faster than two cycles a second is ignored (held still)
  * and the rest still apply; the payload is never rejected for `anim`. A
  * writer writes c/b in lowest terms and a path's weights with no common
  * factor (withAnim). Like `constrain` and `bounce`, the field rides in sno-core's
@@ -41,12 +41,12 @@ export const ANIM_FIELD = 'anim'
 /** Motions read per object; entries past this are ignored (§1.14). */
 export const MAX_MOTIONS = 4
 /**
- * Fastest rate a motion may have, cycles a second: |c| ≤ b. A faster entry is
- * ignored (a strobe, §1.14).
+ * Fastest rate a motion may have, cycles a second: |c| ≤ 2 b. A faster entry
+ * is ignored (a strobe, DECK-0003 §1.14).
  */
-export const MAX_PER_SECOND = 1
-/** Largest `b`, seconds: about eleven and a half days for one cycle. */
-export const MAX_SECONDS = 1_000_000
+export const MAX_PER_SECOND = 2
+/** Largest `b`, seconds: a year of 365 days (§1.14). */
+export const MAX_SECONDS = 31_536_000
 /** Largest distance in ticks (the 64-unit position bound of §1.8). */
 export const REACH = 64 * 120
 /** Largest path leg weight. */
@@ -96,7 +96,7 @@ export interface MotionPose {
 const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v)
 const isAxis = (v: unknown): v is Axis => typeof v === 'string' && (AXES as readonly string[]).includes(v)
 
-/** The rate from the last three numbers of an entry, or null: c nonzero, b 1..1,000,000 seconds, |c| ≤ b, φ 0..359. */
+/** The rate from the last three numbers of an entry, or null: c nonzero, b 1..31,536,000 seconds, |c| ≤ 2 b, φ 0..359. */
 function readRate(c: unknown, b: unknown, phi: unknown): Rate | null {
   if (!isInt(c) || !isInt(b) || !isInt(phi)) return null
   if (c === 0 || b < 1 || b > MAX_SECONDS || Math.abs(c) > MAX_PER_SECOND * b || phi < 0 || phi > 359) return null
@@ -284,7 +284,7 @@ export function phaseAt(r: Rate, t: number): number {
   const whole = Math.floor(t)
   const frac = t - whole
   const b = r.b
-  // b ≤ 1,000,000 and |c| ≤ b, so (c mod b)(whole mod b) stays under 10^12: exact in a double.
+  // b ≤ 31,536,000, so (c mod b)(whole mod b) stays under 10^15: exact in a double.
   const wm = ((whole % b) + b) % b
   const cm = ((r.c % b) + b) % b
   let v = ((cm * wm) % b) / b + (r.c * frac) / b + r.phi / 360
@@ -350,13 +350,17 @@ export function gcd(a: number, b: number): number {
 
 /**
  * The canonical entry for a motion, as a writer writes it (§1.14): integers
- * only, nothing omitted, c and b in lowest terms, a path's leg weights with
- * no common factor.
+ * only, nothing omitted, c and b in lowest terms, a positive c for a swing or
+ * a slide (a negative c draws exactly what a positive c with the phase
+ * (180 − φ) mod 360 draws), a path's leg weights with no common factor.
  */
 export function writeMotion(m: Motion): unknown[] {
   const axis = m.axis >= 0 ? [AXES[m.axis]] : []
   const g = gcd(m.c, m.b) || 1
-  const c = m.c / g, b = m.b / g
+  let c = m.c / g
+  const b = m.b / g
+  let phi = m.phi
+  if ((m.word === 'swing' || m.word === 'slide') && c < 0) { c = -c; phi = (((180 - phi) % 360) + 360) % 360 }
   if (m.word === 'path') {
     let gw = 0
     for (let i = 3; i < m.pts.length; i += 4) gw = gcd(gw, m.pts[i])
@@ -365,7 +369,7 @@ export function writeMotion(m: Motion): unknown[] {
     for (let i = 0; i < m.pts.length; i += 4) pts.push([m.pts[i], m.pts[i + 1], m.pts[i + 2], m.pts[i + 3] / gw])
     return [m.word, c, b, m.phi, ...pts]
   }
-  return [m.word, ...axis, ...m.p, c, b, m.phi]
+  return [m.word, ...axis, ...m.p, c, b, phi]
 }
 
 /**

@@ -440,6 +440,19 @@ export interface Loot {
 const newestFirst = <T extends { at: number }>(a: T, b: T): number => b.at - a.at
 
 /**
+ * Which of the ITEMS panel's two buttons a held row is under (owner,
+ * 2026-11-14: "key items with a key emoji, and loot items with a sparkle
+ * emoji"). A KEY ITEM is a keypair item, the kind 3340 event of DECK-0004:
+ * the one thing a chest or a door can be sealed to, so the one thing that
+ * opens them. That holds however it came to be held: forged, found, pasted,
+ * or taken out of a chest. Everything else held is OTHER LOOT: shards,
+ * messages and Cashu coins, sounds, seeds and DNA, and chests taken out of
+ * chests, since a chest is locked by a key and is never one. Region and room
+ * keys are not held items at all; they are in the KEYRING.
+ */
+export const isKeyItem = (it: Pick<HeldItem, 'type'>): boolean => it.type === 'key'
+
+/**
  * The three-panel model's two local panels, as one pure split (B1 ruling 14):
  * DISCOVERED is everything opened where it stands, grouped by the bag it was
  * in and newest first; LOOT is what is held, keys apart from the rest. A key
@@ -462,8 +475,8 @@ export function splitPanels(discovered: Hidden[], held: HeldItem[]): { discovere
   return {
     discovered: grouped,
     loot: {
-      keys: held.filter((it) => it.type === 'key' && !it.archived).sort(newestFirst),
-      taken: held.filter((it) => it.type !== 'key' && !it.cleared && !it.archived).sort(newestFirst),
+      keys: held.filter((it) => isKeyItem(it) && !it.archived).sort(newestFirst),
+      taken: held.filter((it) => !isKeyItem(it) && !it.cleared && !it.archived).sort(newestFirst),
       archived: held.filter((it) => !!it.archived).sort(newestFirst),
     },
   }

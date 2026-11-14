@@ -102,17 +102,20 @@ describe('ITEMS', () => {
     restore()
   })
 
-  it('shows INVENTORY and ARCHIVED once something is archived; an archived row is only under ARCHIVED, and UNARCHIVE brings it back', async () => {
+  it('KEY ITEMS shows MINE, FEED and, once a key item is archived, ARCHIVED; an archived row is only under ARCHIVED, and UNARCHIVE brings it back', async () => {
     const { me, key, lock, restore } = setup()
     const row = heldFromForged(me, key.inner as NostrEvent, lock, { lookupId: 'l', bagId: 'b', at: where.at, plane: 0, height: 4 }, 1)
     useInventory.setState({ items: { [row.id]: row } })
     const m = await mount(createElement(InventoryPanel))
-    expect(m.buttons(/^INVENTORY$/)).toHaveLength(0)
+    await m.press(/^🔑 KEY ITEMS · 1$/)
+    expect(m.buttons(/^ARCHIVED/)).toHaveLength(0)
     expect(m.says('Wind Key')).toBe(true)
     await m.press(/^ACTIONS$/)
     await m.press(/^ARCHIVE$/)
-    expect(m.buttons(/^INVENTORY$/)).toHaveLength(1)
+    expect(m.buttons(/^MINE 0$/)).toHaveLength(1)
     expect(m.buttons(/^ARCHIVED 1$/)).toHaveLength(1)
+    // Not counted on the panel's button, as the old chip never counted it.
+    expect(m.buttons(/^🔑 KEY ITEMS · 0$/)).toHaveLength(1)
     expect(m.says('Wind Key')).toBe(false)
     await m.press(/^ARCHIVED 1$/)
     expect(m.says('Wind Key')).toBe(true)
@@ -121,6 +124,13 @@ describe('ITEMS', () => {
     expect(useInventory.getState().items[row.id].archived).toBeUndefined()
     expect(m.buttons(/^ARCHIVED/)).toHaveLength(0)
     expect(m.says('Wind Key')).toBe(true)
+    // An archived key item is never under OTHER LOOT.
+    useInventory.getState().archive(row.id)
+    await m.press(/^✕$/)
+    await m.press(/^✨ OTHER LOOT · 0$/)
+    expect(m.buttons(/^ARCHIVED/)).toHaveLength(0)
+    expect(m.says('Wind Key')).toBe(false)
+    await m.press(/^✕$/)
     await m.unmount()
     restore()
   })

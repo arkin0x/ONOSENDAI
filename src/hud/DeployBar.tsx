@@ -93,7 +93,7 @@ import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
 import { BAG_SAFE_BYTES } from '../lib/bagSize'
 import { findCashuToken } from '../lib/cashu'
 import { AXIS_BITS, SECTOR_HEIGHT, SECTOR_HINT, isSectorHint, searchExponent } from '../lib/hint'
-import { deployPoint } from '../lib/space'
+import { deployPoint, type Position } from '../lib/space'
 import { buildPlane, buildStepOf, moveStepOf } from '../lib/buildCursor'
 import { stepBuild } from '../store/buildStep'
 import { useBuilder } from '../store/useBuilder'
@@ -110,7 +110,7 @@ import { seedDraftHeight } from '../lib/seeds/plant'
 import { seedSnapOffered } from '../lib/seeds/orientation'
 import { CHEST_LOOKS, DOOR_LOOKS, LOOK_LABELS } from '../lib/looks'
 import { LookPicker } from './LookPicker'
-import { SHALLOW_WARN, shallowBag, shallowExplain } from '../lib/shallowBag'
+import { SHALLOW_WARN, autoHeightMax, shallowBag, shallowExplain } from '../lib/shallowBag'
 import { CONSTRAINS, CONSTRAIN_TIPS } from '../lib/walkConstrain'
 import { GoArrow } from './ui/GoArrow'
 
@@ -154,8 +154,41 @@ export function HeightWarnings({ height, intoChest, localMax }: { height: number
   if (shallowBag(height)) return <div className="deploybar__row deploybar__shallow" role="note" title={shallowExplain(localMax)}>{SHALLOW_WARN}</div>
   return (
     <div className="deploybar__row deploybar__warn">
-      ⚠ Past height {SCAN_MAX_HEIGHT}, discovery will not surface this automatically. Only someone who already knows this spot and height can compute the region and open it.
+      ⚠ Past height {SCAN_MAX_HEIGHT}, discovery will not surface this automatically, not even on your other devices. Only someone who already knows this spot and height can compute the region and open it.
     </div>
+  )
+}
+
+/**
+ * The automatic height's fit (lib/deployFit.ts): a shard's own reach, a seed's
+ * measured bloom (`seedFit`), or a chest's look (`wearsLook`, measured by
+ * its `fitShape` when it has one) with every aimed content. Tried only up to
+ * `autoMax` (lib/shallowBag.ts autoHeightMax): null when nothing up to it
+ * holds the thing, and the height then stays at `autoMax`. Null too when
+ * nothing is fitted (a message, a key).
+ */
+export function autoFitHeight(o: { shard: Pick<ShardModel, 'vertices' | 'parts'> | null; wearsLook: boolean; fitShape: Pick<ShardModel, 'vertices' | 'parts'> | null; unit: number; cursor: Position; step: number; aimed: FitPoint[]; seedFit: number | null; autoMax: number }): number | null {
+  if (o.shard) return fitHeight(o.shard, o.unit, o.cursor, o.step, 0, o.autoMax)
+  if (o.seedFit !== null) return o.seedFit
+  if (o.wearsLook || o.aimed.length > 0) return fitHeightAll(o.fitShape ? reachGibsons(o.fitShape, o.unit) : 0n, o.aimed, o.cursor, o.step, 0, o.autoMax)
+  return null
+}
+
+/**
+ * Why the automatic height did not hold the whole thing: nothing up to
+ * `autoMax` (lib/shallowBag.ts autoHeightMax, discovery's reach) holds it, so
+ * the height stays at `autoMax`. Higher holds more, up to `ceiling`, but only
+ * by +, under the past-height warning: an automatic height past discovery hid
+ * a player's shards from his own laptop (owner, 2026-11-14).
+ */
+export function FitNote({ cause, autoMax, ceiling }: { cause: 'size' | 'edge' | 'contents'; autoMax: number; ceiling: number }): JSX.Element {
+  const higher = ceiling > autoMax ? ' Press + to hide it higher; there no scan finds it, not even on your other devices.' : ''
+  return (
+    <div className="deploybar__row deploybar__fitnote">{cause === 'edge'
+      ? `Sits across a region edge, so part of it will be cut off; move it to fit.${higher}`
+      : cause === 'contents'
+        ? <>No region up to 2^{autoMax} holds the chest and everything aimed inside it; what falls outside stands at the chest when it opens.{higher}</>
+        : <>At this scale the model is larger than any region up to 2^{autoMax}; part of it will be cut off. Hide it at a smaller scale, or move the cursor.{higher}</>}</div>
   )
 }
 
@@ -297,6 +330,8 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
 
   const inputs = { localMax: Math.min(MAX_COMPUTE_HEIGHT, hopLimit), cloudMode, cloudCap }
   const ceiling = deployCeiling(inputs)
+  // What the automatic height may reach: never past discovery's reach (autoHeightMax). + still goes to `ceiling`.
+  const autoMax = autoHeightMax(ceiling)
   const route = deployRoute(height, inputs)
   const localSeconds = localKeySeconds(height, cantorMs)
   const experience = useExperience((s) => ratioOf(s.samples))
@@ -388,20 +423,20 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   // the 64 units every bloom is held to, a 128-gibson span that straddles some
   // power-of-two boundary near most points, so the height climbed to wherever
   // the nearest one ended (13 at the owner's spot every time).
-  const seedFit = pending?.type === 'seed' ? seedDraftHeight(pending.seed.fit, cursor, plane, step, ceiling) : null
+  const seedFit = pending?.type === 'seed' ? seedDraftHeight(pending.seed.fit, cursor, plane, step, autoMax) : null
   // What the height is fitted to: a shard's own reach, the chest's look and
   // aimed contents, so its region holds the whole model it wears, or a seed's bloom.
   const fitting = !!shard || !!lookModel || aimed.points.length > 0 || seedFit !== null
   const fitH = useMemo(
-    () => (shard ? fitHeight(shard, unit, cursor, step, 0, ceiling) : seedFit !== null ? seedFit : lookModel || aimed.points.length > 0 ? fitHeightAll(fitShape ? reachGibsons(fitShape, unit) : 0n, aimed.points, cursor, step, 0, ceiling) : null),
-    [shard, lookModel, fitShape, unit, cursor, step, ceiling, aimed, seedFit],
+    () => autoFitHeight({ shard, wearsLook: !!lookModel, fitShape, unit, cursor, step, aimed: aimed.points, seedFit, autoMax }),
+    [shard, lookModel, fitShape, unit, cursor, step, autoMax, aimed, seedFit],
   )
   useEffect(() => {
     // Once placed, its height is fixed with its place, whatever the cursor does while the modal is filled.
     if (!heightAuto || !fitting || filling) return
-    const want = fitH ?? ceiling
+    const want = fitH ?? autoMax
     if (want !== useShards.getState().deployHeight) useShards.getState().setDeployHeight(want)
-  }, [heightAuto, fitting, fitH, ceiling, filling])
+  }, [heightAuto, fitting, fitH, autoMax, filling])
   const fitModel = shard ?? (aimed.points.length === 0 ? fitShape : null)
   // ADD on a door (4.8): what is placed next starts at the door's height, set by hand from then on.
   const into = useShards((s) => s.deployInto)
@@ -411,7 +446,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
     useShards.setState({ deployHeightAuto: false })
     useShards.getState().setDeployHeight(into)
   }, [lined, into])
-  const fit: { auto: boolean; height: number | null; cause: 'size' | 'edge' | 'contents' } = { auto: heightAuto && fitting, height: fitH, cause: fitModel ? fitCause(fitModel, unit, fitH, ceiling) : seedFit !== null ? 'size' : 'contents' }
+  const fit: { auto: boolean; height: number | null; cause: 'size' | 'edge' | 'contents' } = { auto: heightAuto && fitting, height: fitH, cause: fitModel ? fitCause(fitModel, unit, fitH, autoMax) : seedFit !== null ? 'size' : 'contents' }
   // Aimed contents the region at this height does not hold: they stand at the chest when it opens (revealedIn).
   const outside = aimed.points.length + aimed.elsewhere === 0 ? 0 : outsideAt(deployPoint(cursor, step, height), height, aimed.points) + aimed.elsewhere
   // STEP changes only the build cursor: in BUILD mode, its view drivable, not
@@ -577,13 +612,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
         </DeployRow>
       )}
 
-      {!intoChest && fit.auto && fit.height === null && (
-        <div className="deploybar__row deploybar__fitnote">{fit.cause === 'edge'
-          ? 'Sits across a region edge; move it to fit.'
-          : fit.cause === 'contents'
-            ? <>No region up to 2^{ceiling} holds the chest and everything aimed inside it; what falls outside stands at the chest when it opens.</>
-            : <>At this scale the model is larger than any region up to 2^{ceiling}; part of it will be cut off. Hide it at a smaller scale, or move the cursor.</>}</div>
-      )}
+      {!intoChest && fit.auto && fit.height === null && <FitNote cause={fit.cause} autoMax={autoMax} ceiling={ceiling} />}
 
       {/* Hidden audio's sphere (arkinox, 2026-10-23): full volume inside it,
           fading to silence at the region's walls; for a one-shot it is the

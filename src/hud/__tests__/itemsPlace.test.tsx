@@ -20,7 +20,7 @@ import { heldFromEntry, heldFromFind, heldFromForged, type HeldItem, type HeldPl
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { useShards } from '../../store/useShards'
-import { InventoryPanel, useOpenActions } from '../InventoryPanel'
+import { InventoryPanel, useItemsModal, useOpenActions } from '../InventoryPanel'
 
 const at = { x: 1n, y: 2n, z: 3n }
 const place: HeldPlace = { lookupId: 'l', bagId: 'b', at: { x: '1', y: '2', z: '3' }, plane: 0, height: 4 }
@@ -30,8 +30,15 @@ const COIN = 'cashuAeyJ0b2tlbiI6W3sibWludCI6Imh0dHBzOi8vbWludC50ZXN0IiwicHJvb2Zz
 function render(items: HeldItem[], me: string, open: string): string {
   useInventory.setState({ owner: me, items: Object.fromEntries(items.map((it) => [it.id, it])), storage: 'memory' })
   useOpenActions.setState({ open })
-  for (const store of [useShards, useInventory, useCyberspace, useOpenActions] as const) Object.assign(store.getInitialState(), store.getState())
-  return renderToStaticMarkup(<InventoryPanel />)
+  // Both modals, KEY ITEMS then OTHER LOOT, so every row is drawn once.
+  const html = (['keys', 'loot'] as const).map((kind) => {
+    useItemsModal.setState({ open: kind })
+    for (const store of [useShards, useInventory, useCyberspace, useOpenActions, useItemsModal] as const) Object.assign(store.getInitialState(), store.getState())
+    return renderToStaticMarkup(<InventoryPanel />)
+  }).join('')
+  useItemsModal.setState({ open: null })
+  Object.assign(useItemsModal.getInitialState(), { open: null })
+  return html
 }
 
 /** The PLACE buttons in the row of `item`, its ACTIONS open, and in the whole panel then. */

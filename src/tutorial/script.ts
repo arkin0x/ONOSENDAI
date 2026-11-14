@@ -118,9 +118,9 @@ export const INVENTORY: TutorialStep = {
   id: 'inventory',
   title: 'Your items',
   caption: "Whatever you take from chests appears in ITEMS in the menu. That's your stuff.",
-  hint: 'Look in ITEMS at the top of the menu.',
+  hint: 'Look in ITEMS at the top of the menu: KEY ITEMS and OTHER LOOT.',
   explain: 'A shard in ITEMS can be placed in the world, built with, or changed in the workshop.',
-  // The ITEMS panel by its slot id: DISCOVERED shares the .panel--loot class.
+  // The ITEMS panel by its slot id (its two buttons, KEY ITEMS and OTHER LOOT): DISCOVERED shares the .panel--loot class.
   scene: { target: 'keep', highlight: '[data-panel-id="items"]' },
   effect: 'teach-inventory',
   // NEXT closes the menu, so on a phone the course step is not behind it (feedback 2026-11-12, item 15).
@@ -322,7 +322,7 @@ export const BUILD_PLACE: TutorialStep = {
   id: 'build-place',
   title: 'Build something',
   caption: 'Move a shard from ITEMS to your workshop, then place it in BUILD.',
-  hint: 'ITEMS: ACTIONS, MOVE TO WORKSHOP. Then BUILD, OBJECT, pick it, PLACE.',
+  hint: 'ITEMS: OTHER LOOT, ACTIONS, MOVE TO WORKSHOP. Then BUILD, OBJECT, pick it, PLACE.',
   explain: 'BUILD puts what you hold into the world where the cursor is. The workshop is where you change or make a shard; it will not interrupt this.',
   scene: { target: 'keep', highlight: '.hamburger-menu' },
   effect: 'teach-build',

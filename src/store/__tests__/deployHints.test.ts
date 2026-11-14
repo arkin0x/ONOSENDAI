@@ -227,8 +227,10 @@ describe('the sector hint is ON by default for every new bag (owner ruling 2026-
   })
 
   it('a new bag above height 30 starts off, and it comes back on at 30 or lower', () => {
-    useShards.setState({ deployCeiling: () => 40, deployHeight: 35 })
+    // Raised by hand: a new deploy never starts above SCAN_MAX_HEIGHT on a carried height (carriedHeight.test.ts).
+    useShards.setState({ deployCeiling: () => 40 })
     S().startDeployMessage('high')
+    S().setDeployHeight(35)
     expect(S().deployBag.hint).toBeNull()
     S().setDeployHeight(30)
     expect(S().deployBag.hint).toEqual(SECTOR_HINT)

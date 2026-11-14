@@ -10,6 +10,10 @@
  * up the screen it reaches in --spectate-top, so the pad stands above it
  * however many lines its words wrap to (styles.css).
  *
+ * FETCHING CHAIN is only a status: while it shows, they already stand where
+ * they were last seen, if anywhere (lib/spectator.ts knownStand), not at their
+ * spawn (owner, 2026-11-14).
+ *
  * Where their chain stops, if it does (lib/chainStop.ts, the rules your own
  * chain is held to), as a plain fact: the day, never a RESPAWN, which is
  * theirs to do and not yours (2026-11-12).
@@ -53,7 +57,8 @@ export function SpectateBar(): JSX.Element | null {
   const status =
     spectate.status === 'loading' ? 'FETCHING CHAIN'
       : spectate.status === 'error' ? 'RELAY UNREACHABLE'
-        : spectate.status === 'empty' ? 'NO CHAIN ON RELAY, AT PUBKEY COORDINATE'
+        // With nothing on the relay they stay where they were seen, if they were (lib/spectator.ts knownStand).
+        : spectate.status === 'empty' ? (spectate.known ? 'NO CHAIN ON RELAY, WHERE LAST SEEN' : 'NO CHAIN ON RELAY, AT PUBKEY COORDINATE')
           : spectate.status === 'partial' ? `${spectate.actions.length} ACTION${spectate.actions.length === 1 ? '' : 'S'} SO FAR · A STRETCH IS MISSING ON THE RELAYS`
           : `${spectate.actions.length} ACTION${spectate.actions.length === 1 ? '' : 'S'}`
 

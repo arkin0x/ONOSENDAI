@@ -9,11 +9,62 @@
  */
 
 import { ChainGapError, fetchChainEvents, mergeEvents, watchAuthor } from './chains'
-import { useCyberspace } from '../store/useCyberspace'
+import { useCyberspace, type KnownStand } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
-import type { NostrEvent } from './events'
+import { buildChain, type NostrEvent } from './events'
 import { useMutes } from '../store/useMutes'
 import { BRIEF_TOAST_MS, useToast } from '../store/useToast'
+import { usePresence } from '../store/usePresence'
+import { useRoster } from '../store/useRoster'
+import { heldChain, standingOf } from './neighborChains'
+
+/**
+ * Where `pubkey` was last seen standing, before their chain is fetched: the
+ * newest of what this client already holds about them, or null when it holds
+ * nothing (owner, 2026-11-14: "i saw this avatar moving at block 101 yes
+ * when i hit spectate it puts me all the way at his spawn and says fetching
+ * chain"). Presence first, where they are drawn near you, their chain
+ * already read and its stops applied (usePresence, lib/neighborChains.ts);
+ * then a target already placed; then the AVATARS list's newest action,
+ * placed by its cached verdict (standingOf). A tie goes to the earlier.
+ */
+export function knownStand(pubkey: string): KnownStand | null {
+  const found: KnownStand[] = []
+  const person = usePresence.getState().people[pubkey]
+  if (person) found.push({ position: person.position, plane: person.plane, lastActive: person.lastActive })
+  // Someone presence knows to be stopped stands where they stopped whatever
+  // newer action the others hold, until a spawn starts a new chain, as
+  // presence itself places them (usePresence standing). A target is placed
+  // at its raw head, so it never outranks them then.
+  const frozen = person?.frozen === true
+  const target = useCyberspace.getState().targets[pubkey]
+  if (!frozen && target && (target.status === 'live' || target.status === 'partial')) found.push({ position: target.position, plane: target.plane, lastActive: target.lastActive })
+  const listed = useRoster.getState().list.find((a) => a.pubkey === pubkey)
+  if (listed && !(frozen && listed.type !== 'spawn')) {
+    const at = standingOf(listed)
+    found.push({ position: at.position, plane: at.plane, lastActive: at.createdAt })
+  }
+  let best: KnownStand | null = null
+  for (const k of found) if (best === null || (k.lastActive ?? -1) > (best.lastActive ?? -1)) best = k
+  return best ? { ...best, position: { ...best.position } } : null
+}
+
+/**
+ * Their chain as presence already read it (lib/neighborChains.ts), when it
+ * reaches the action presence draws them at and is no older than where they
+ * were last seen (`known`): shown at once, trail and all, while the relays
+ * are asked again. Empty otherwise, since it would stand them somewhere
+ * older and the fetch would then move them forward again.
+ */
+function chainInHand(pubkey: string, known: KnownStand | null): NostrEvent[] {
+  const person = usePresence.getState().people[pubkey]
+  if (!person) return []
+  const held = heldChain(pubkey)
+  const chain = buildChain(held, pubkey)
+  const head = chain[chain.length - 1]
+  if (!head || !chain.some((a) => a.id === person.actionId)) return []
+  return known?.lastActive != null && head.createdAt < known.lastActive ? [] : held
+}
 
 let current: { pubkey: string; close: () => void } | null = null
 
@@ -32,7 +83,10 @@ export async function spectate(pubkey: string, seed: NostrEvent[] = []): Promise
   const store = useCyberspace.getState()
   // In BUILD mode the build cursor's view stays up and is aimed at them, so
   // the mode carries on beside the spectation (store/useBuilder.ts).
-  store.beginSpectate(pubkey, useBuilder.getState().active)
+  // They start where they were last seen, if anywhere (knownStand), and
+  // FETCHING CHAIN says the rest is on its way.
+  const known = knownStand(pubkey)
+  store.beginSpectate(pubkey, useBuilder.getState().active, known)
 
   // Anything published while the fetch is in flight is caught by the watch,
   // which starts from a minute ago so nothing falls between the two.
@@ -41,22 +95,33 @@ export async function spectate(pubkey: string, seed: NostrEvent[] = []): Promise
   // the explored link survives the refetch: the ids match and the store keeps it.
   let events: ReturnType<typeof mergeEvents> = mergeEvents([], seed)
   if (events.length > 0) store.setSpectateChain(pubkey, events)
+  else {
+    // The chain presence already read is shown while the relays are asked
+    // again; FETCHING CHAIN stays up until they answer.
+    events = mergeEvents([], chainInHand(pubkey, known))
+    if (events.length > 0) store.setSpectateChain(pubkey, events, 'loading')
+  }
   // Set when the relays hold the chain with a stretch missing; kept for every
   // later update, since a new action does not fill an old hole.
   let partial = false
+  // FETCHING CHAIN stays up until the fetch below settles, whatever the
+  // watch hears meanwhile.
+  let fetching = true
   const close = watchAuthor(pubkey, since, (ev) => {
     if (current?.pubkey !== pubkey) return
     events = mergeEvents(events, [ev])
-    useCyberspace.getState().setSpectateChain(pubkey, events, partial ? 'partial' : undefined)
+    useCyberspace.getState().setSpectateChain(pubkey, events, partial ? 'partial' : fetching ? 'loading' : undefined)
   })
   current = { pubkey, close }
 
   try {
     const fetched = await fetchChainEvents(pubkey)
+    fetching = false
     if (current?.pubkey !== pubkey) return
     events = mergeEvents(fetched, events)
     useCyberspace.getState().setSpectateChain(pubkey, events)
   } catch (err) {
+    fetching = false
     if (current?.pubkey !== pubkey) return
     // A stretch of the chain is on no relay: show it up to the hole and say
     // so, because for a viewer the hole may never fill. Your own chain holds

@@ -9,9 +9,15 @@
  * | Answers | How it is told | VIEW |
  * |---|---|---|
  * | a chain action (kind 3333) | reaction `k` 3333, or comment root `K` 3333 | the action's modal |
- * | a hidden item (a shard or message in a bag) | reaction `k` 3330 / 1 / 33331, or comment root `K` 33330 | that deployment |
+ * | a hidden item (a shard or message in a bag) | reaction `k` 3330 / 3340 / 3341 / 3351 / 33331, or `k` 1 / 1063 from a Cyberspace client, or comment root `K` 33330 | that deployment |
  * | a published shard, hidden nowhere here | reaction `k` 33331, or comment root `K` 33331 | its card, PUBLIC (usePublicShard) |
- * | a comment of yours | reaction `k` 1111, or comment parent `k` 1111 | whatever that comment answers |
+ * | a comment of yours | reaction `k` 1111, or comment parent `k` 1111, in a Cyberspace thread | whatever that comment answers |
+ * | an item listing, avatar, DNA or tending of yours | reaction `k` 33340 / 11333 / 3350 / 3352 | nothing yet |
+ *
+ * Only Cyberspace things count (arkinox, 2026-11-14: "i am now seeing all of
+ * my nostr notifications. I only want to see cyberspace-related
+ * notifications here"): what cannot be shown to answer one is dropped, never
+ * kept as a maybe (see Candidate).
  *
  * Every row's button says VIEW, and lands on the comment or the reactions (landingOf).
  *
@@ -22,11 +28,77 @@
 
 import { COMMENT_KIND, parseComment } from './comments'
 import type { NostrEvent } from './events'
-import { HIDDEN_KIND, MESSAGE_KIND, SHARD_KIND, itemLineage } from './hidden'
+import { CHEST_KIND, HIDDEN_KIND, KEY_KIND, MESSAGE_KIND, SHARD_KIND, itemLineage } from './hidden'
 import { ACTION_KIND, REACTION_KIND, parseReaction } from './social'
+import { AUDIO_KIND } from './audioItem'
+import { AVATAR_KIND } from './avatar'
+import { ITEM_LISTING_KIND } from './itemListing'
+import { DNA_KIND, SEED_KIND, TEND_KIND } from './seeds/seedItem'
+import { CLIENT_NAME } from './client'
 
 /** An object hidden by reference is its own addressable event (spec §7.6). */
 const OBJECT_KIND = 33331
+
+/**
+ * The kinds that are Cyberspace's alone (onosendai/kinds.md): a reaction
+ * naming one, or a comment whose thread is rooted at one, is about a
+ * Cyberspace thing. The items a bag holds (3330, 3340, 3341, 3351), the bag
+ * (33330), a move (3333), an object (33331), an item listing (33340), an
+ * avatar (11333), a DNA (3350) and a tending (3352).
+ */
+export const CYBERSPACE_KINDS: readonly number[] = [ACTION_KIND, HIDDEN_KIND, SHARD_KIND, KEY_KIND, CHEST_KIND, SEED_KIND, OBJECT_KIND, ITEM_LISTING_KIND, AVATAR_KIND, DNA_KIND, TEND_KIND]
+
+/**
+ * The kinds a hidden item shares with all of nostr: a message (kind 1) and an
+ * audio file (1063). A reaction to one is a Cyberspace thing only when a
+ * Cyberspace client wrote it (nothing else can see a hidden item) and the
+ * target is published nowhere (a hidden item never is).
+ */
+export const SHARED_ITEM_KINDS: readonly number[] = [MESSAGE_KIND, AUDIO_KIND]
+
+/** The clients that open bags, by their NIP-89 `client` tag: this app and the agents server (cyberspace-mcp). */
+export const CYBERSPACE_CLIENTS: readonly string[] = [CLIENT_NAME, 'cyberspace-mcp']
+
+/** Things of yours with nothing for VIEW to open yet: an item listing, an avatar, a tending. A DNA can be carried in a bag, so VIEW looks for it there. */
+const PUBLIC_ONLY_KINDS: readonly number[] = [ITEM_LISTING_KIND, AVATAR_KIND, TEND_KIND]
+
+/** What a thing of one of PUBLIC_ONLY_KINDS is called in a notification. */
+export function publicThingName(kind: number | undefined): string | null {
+  if (kind === ITEM_LISTING_KIND) return 'your item listing'
+  if (kind === AVATAR_KIND) return 'your avatar'
+  if (kind === DNA_KIND) return 'your DNA'
+  if (kind === TEND_KIND) return 'your tending'
+  return null
+}
+
+/** Whether a Cyberspace client wrote the event, by its `client` tag. */
+function fromCyberspaceClient(ev: Pick<NostrEvent, 'tags'>): boolean {
+  return ev.tags.some((t) => t[0] === 'client' && CYBERSPACE_CLIENTS.includes(t[1]))
+}
+
+/** The kind an address names, `<kind>:<author>:<d>`, or null. */
+function kindOfAddress(address: string | undefined): number | null {
+  const k = Number(address?.split(':')[0])
+  return address && Number.isInteger(k) ? k : null
+}
+
+/**
+ * The relay filters notifications are read by, so a relay sends only what
+ * can be Cyberspace's, each paged on its own (store/useNotifications):
+ * reactions naming a Cyberspace kind (or a comment, settled by its thread),
+ * comments in a thread rooted at one, and reactions to a kind 1 or 1063,
+ * which only a Cyberspace client's `client` tag (and the target being
+ * published nowhere) tells apart from likes on ordinary notes. A reaction
+ * with no `k` names no kind, so it is not asked for: every Cyberspace client
+ * writes `k`, and classify still places one that a relay sends anyway.
+ */
+export function notificationFilters(me: string): { kinds: number[]; '#p': string[]; '#k'?: string[]; '#K'?: string[] }[] {
+  return [
+    { kinds: [REACTION_KIND], '#p': [me], '#k': [...CYBERSPACE_KINDS, COMMENT_KIND].map(String) },
+    { kinds: [COMMENT_KIND], '#p': [me], '#K': CYBERSPACE_KINDS.map(String) },
+    { kinds: [REACTION_KIND], '#p': [me], '#k': SHARED_ITEM_KINDS.map(String) },
+  ]
+}
 
 export type NotifOn =
   | { type: 'action'; id: string }
@@ -64,12 +136,16 @@ function kindOn(kind: number | null, id: string, lookupId?: string): NotifOn | n
   if (kind === ACTION_KIND) return { type: 'action', id }
   if (kind === COMMENT_KIND) return { type: 'comment', id }
   if (kind === SHARD_KIND || kind === OBJECT_KIND) return { type: 'item', id, lookupId }
+  if (kind !== null && CYBERSPACE_KINDS.includes(kind)) return { type: 'item', id, lookupId, kind }
   return null
 }
 
-/** Comment threads that are ONOSENDAI's: a move's, a bag's, or a published shard's (arkinox, 2026-11-14). */
+/**
+ * Comment threads that are Cyberspace's: a move's, a bag's, a published
+ * shard's (arkinox, 2026-11-14), or any other thing of a Cyberspace kind.
+ */
 function ourRoot(rootKind: number): boolean {
-  return rootKind === ACTION_KIND || rootKind === HIDDEN_KIND || rootKind === OBJECT_KIND
+  return CYBERSPACE_KINDS.includes(rootKind)
 }
 
 /** What this device already knows is yours, so no lookup is needed for it. */
@@ -87,18 +163,21 @@ export const NOTHING_KNOWN: Known = { actions: new Set(), items: new Map() }
  * told from ordinary social traffic (arkinox, 2026-09-30: likes on plain notes
  * were showing as "reacted to your hidden item").
  *
- * - `kind1`: a reaction to a kind 1. A hidden message is a kind 1 that is
- *   never published on its own, so a target found on a relay is an ordinary
- *   note (dropped), and one found nowhere is kept as a possible hidden message.
- * - `comment`: a reaction to a kind 1111. Kept when that comment's thread is a
- *   move or a bag, dropped when it is some other app's thread, kept when the
+ * - `kind1`: a reaction to a kind 1 or 1063 that a Cyberspace client wrote
+ *   (any other client's is dropped outright). A hidden message is never
+ *   published on its own, so a target found on a relay is an ordinary note
+ *   (dropped), and one found nowhere is kept as a possible hidden message.
+ * - `comment`: a reaction to a kind 1111. Kept when that comment's thread is
+ *   a Cyberspace thing's, dropped when it is some other app's thread or the
  *   comment cannot be found.
  * - `unknown`: a reaction with no `k` tag, which many clients leave off.
- *   Classified by the target's real kind; kept as a possible hidden message
- *   when the target cannot be found.
+ *   Classified by the target's real kind; dropped when the target cannot be
+ *   found.
  *
- * When in doubt a notification is kept, never dropped (arkinox: "err on the
- * side of bleedover notifications rather than missing something").
+ * When in doubt a notification is dropped (arkinox, 2026-11-14: "I only want
+ * to see cyberspace-related notifications here"), which reverses the earlier
+ * "err on the side of bleedover" (2026-09-30): that kept every like on a
+ * note the lookup missed, and the lookup misses many.
  */
 export interface Candidate {
   n: Notification
@@ -117,23 +196,30 @@ export function classify(ev: NostrEvent, me: string, known: Known = NOTHING_KNOW
     const r = parseReaction(ev)
     if (!r) return null
     const base = { id: ev.id, from: ev.pubkey, createdAt: ev.created_at, what: 'reaction' as const, content: r.content, image: r.image, sealed: false, ciphertext: null, bag: null }
-    const mineItem = known.items.has(r.targetId)
-    const item: NotifOn = { type: 'item', id: r.targetId, lookupId: known.items.get(r.targetId), ...(r.targetAddress ? { address: r.targetAddress } : {}), ...(r.targetKind !== null ? { kind: r.targetKind } : {}) }
+    // The kind reacted to: `k`, else the kind its `a` names.
+    const targetKind = r.targetKind ?? kindOfAddress(r.targetAddress)
+    const lookupId = known.items.get(r.targetId) ?? (targetKind === HIDDEN_KIND ? r.targetAddress?.split(':')[2] : undefined)
+    const item: NotifOn = { type: 'item', id: r.targetId, lookupId, ...(r.targetAddress ? { address: r.targetAddress } : {}), ...(targetKind !== null ? { kind: targetKind } : {}) }
     if (known.actions.has(r.targetId)) return { n: { ...base, on: { type: 'action', id: r.targetId } }, lookup: null }
-    if (mineItem) return { n: { ...base, on: item }, lookup: null }
-    if (r.targetKind === MESSAGE_KIND) return { n: { ...base, on: item, guessed: true }, lookup: { id: r.targetId, rule: 'kind1' } }
-    if (r.targetKind === COMMENT_KIND) return { n: { ...base, on: { type: 'comment', id: r.targetId } }, lookup: { id: r.targetId, rule: 'comment' } }
-    if (r.targetKind === null) return { n: { ...base, on: item, guessed: true }, lookup: { id: r.targetId, rule: 'unknown' } }
-    const on = r.targetKind === SHARD_KIND || r.targetKind === OBJECT_KIND ? item : kindOn(r.targetKind, r.targetId)
-    return on ? { n: { ...base, on }, lookup: null } : null
+    if (known.items.has(r.targetId)) return { n: { ...base, on: item }, lookup: null }
+    if (targetKind === ACTION_KIND) return { n: { ...base, on: { type: 'action', id: r.targetId } }, lookup: null }
+    if (targetKind === COMMENT_KIND) return { n: { ...base, on: { type: 'comment', id: r.targetId } }, lookup: { id: r.targetId, rule: 'comment' } }
+    if (targetKind !== null && CYBERSPACE_KINDS.includes(targetKind)) return { n: { ...base, on: item }, lookup: null }
+    // A like on a kind 1 or 1063 is a like on an ordinary note unless a
+    // client that opens bags wrote it.
+    if (targetKind !== null && SHARED_ITEM_KINDS.includes(targetKind)) {
+      return fromCyberspaceClient(ev) ? { n: { ...base, on: item, guessed: true }, lookup: { id: r.targetId, rule: 'kind1' } } : null
+    }
+    if (targetKind === null) return { n: { ...base, on: item, guessed: true }, lookup: { id: r.targetId, rule: 'unknown' } }
+    return null
   }
 
   if (ev.kind === COMMENT_KIND) {
     const c = parseComment(ev)
     if (!c) return null
     const rootKind = Number(ev.tags.find((t) => t[0] === 'K')?.[1])
-    // Only a move's thread or a bag's is ONOSENDAI's; NIP-22 threads of any
-    // other kind belong to other apps.
+    // Only a thread rooted at a Cyberspace thing is Cyberspace's; NIP-22
+    // threads of any other kind belong to other apps.
     if (!ourRoot(rootKind)) return null
     const bag = rootKind === HIDDEN_KIND ? c.rootAddress : null
     const lookupId = bag?.split(':')[2]
@@ -144,7 +230,9 @@ export function classify(ev: NostrEvent, me: string, known: Known = NOTHING_KNOW
       ? { type: 'comment', id: c.parentId }
       : rootKind === ACTION_KIND ? { type: 'action', id: c.rootAddress }
         : rootKind === OBJECT_KIND ? { type: 'item', id: c.parentId, kind: OBJECT_KIND, ...(shardAddress ? { address: shardAddress } : {}) }
-          : (kindOn(c.parentKind, c.parentId, lookupId) ?? { type: 'item', id: c.parentId, lookupId })
+          : rootKind === HIDDEN_KIND ? (kindOn(c.parentKind, c.parentId, lookupId) ?? { type: 'item', id: c.parentId, lookupId })
+            // Any other Cyberspace thing's thread: the thing, by its kind.
+            : { type: 'item', id: c.parentId, kind: rootKind, ...(c.rootAddress.startsWith(`${rootKind}:`) ? { address: c.rootAddress } : {}) }
     if (!on) return null
     return { n: { id: ev.id, from: ev.pubkey, createdAt: ev.created_at, what: 'comment', content: c.preview, sealed: c.ciphertext !== null, ciphertext: c.ciphertext, bag, on }, lookup: null }
   }
@@ -161,9 +249,9 @@ export function resolve(c: Candidate, found: ReadonlyMap<string, Target>): Notif
       // Published on its own, so an ordinary note, not a hidden message.
       return t ? null : c.n
     case 'comment':
-      return !t || (t.kind === COMMENT_KIND && commentIsOurs(t)) ? c.n : null
+      return t && t.kind === COMMENT_KIND && commentIsOurs(t) ? c.n : null
     case 'unknown': {
-      if (!t) return c.n
+      if (!t) return null
       if (t.kind === COMMENT_KIND) return commentIsOurs(t) ? { ...c.n, on: { type: 'comment', id: c.lookup.id }, guessed: false } : null
       const on = kindOn(t.kind, c.lookup.id)
       return on ? { ...c.n, on, guessed: false } : null
@@ -278,6 +366,7 @@ export const SHARD_UNCHECKED = 'That shard could not be read from any relay. Try
 export const SHARD_NOT_FOUND = 'That shard could not be found on any relay.'
 export const SHARD_SEALED = 'That shard is sealed, and was not hidden on this device.'
 export const SHARD_UNREADABLE = 'That shard could not be read.'
+export const NOTHING_TO_OPEN = 'There is nothing to open for that here yet.'
 
 /**
  * What VIEW opens on an item: the row this device hid it as, or a shard that
@@ -302,6 +391,7 @@ export async function itemToView<T extends HiddenRowLike>(
 ): Promise<ItemView<T>> {
   const here = hiddenRowFor(rows(), on)
   if (here) return { row: here }
+  if (on.kind !== undefined && PUBLIC_ONLY_KINDS.includes(on.kind)) return { why: NOTHING_TO_OPEN }
   if (!onShard(on)) return { why: NOT_HIDDEN_HERE }
   let address = on.address
   if (address === undefined && on.id !== null) {

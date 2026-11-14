@@ -33,7 +33,7 @@ import { BackupTrouble, RelayTrouble } from './RelayTrouble'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AtSign, MessageCircle, MessageSquare } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
-import { itemToView, landingOf, publishedShardOnly, theirPublishedShard, type Notification } from '../lib/notifications'
+import { itemToView, landingOf, publicThingName, publishedShardOnly, theirPublishedShard, type Notification } from '../lib/notifications'
 import { reactionGlyph } from '../lib/social'
 import { parseAction } from '../lib/events'
 import { COMMENT_KIND, PLACEHOLDER } from '../lib/comments'
@@ -88,7 +88,8 @@ function verbOf(n: Notification): string {
   // Someone else's published shard, whose public thread tagged you (2026-11-14).
   const theirs = theirPublishedShard(n.on, rows, me)
   // A target found nowhere is kept rather than missed, and said as a possibility.
-  const on = n.on.type === 'action' ? 'your move' : n.on.type === 'item' ? (shardOnly ? 'your shard' : theirs ? 'a shard' : n.guessed ? 'what may be your hidden message' : 'your hidden item') : 'your comment'
+  const named = n.on.type === 'item' ? publicThingName(n.on.kind) : null
+  const on = n.on.type === 'action' ? 'your move' : n.on.type === 'item' ? (named ?? (shardOnly ? 'your shard' : theirs ? 'a shard' : n.guessed ? 'what may be your hidden message' : 'your hidden item')) : 'your comment'
   if (n.what === 'reaction') return `reacted to ${on}`
   return n.on.type === 'comment' ? 'replied to your comment' : `commented on ${on}`
 }
@@ -331,6 +332,8 @@ export function NotificationsModal(): JSX.Element | null {
   const loading = useNotifications((s) => s.loading)
   const done = useNotifications((s) => s.done)
   const trouble = useNotifications((s) => s.trouble)
+  // How far back the relays have been read: a page that kept nothing moves it, and the end, still in view, asks again.
+  const reach = useNotifications((s) => s.cursors.join(','))
   const list = useRef<HTMLDivElement>(null)
   const end = useRef<HTMLDivElement>(null)
 
@@ -341,7 +344,7 @@ export function NotificationsModal(): JSX.Element | null {
     }, { root: list.current, rootMargin: '200px' })
     seen.observe(end.current)
     return () => seen.disconnect()
-  }, [open, items.length])
+  }, [open, items.length, reach])
   // Escape closes it as a tap outside does (arkinox, 2026-10-01); what VIEW
   // opens stacks over it, and Escape closes that first (modalStack).
   useModalStack(open, () => useNotifications.getState().setOpen(false))
@@ -359,7 +362,7 @@ export function NotificationsModal(): JSX.Element | null {
         <div className="notif__scroll" ref={list}>
           {trouble && !loading && <RelayTrouble trouble={trouble} onRetry={() => void useNotifications.getState().poll()} />}
           {!loading && <BackupTrouble onRetry={() => void useNotifications.getState().poll()} />}
-          {items.length === 0 && !loading && !trouble && <p className="comments__empty">Nothing yet. Reactions and comments on your moves and hidden items, and chat lines that tag you, land here.</p>}
+          {items.length === 0 && done && !loading && !trouble && <p className="comments__empty">Nothing yet. Reactions and comments on your moves and hidden items, and chat lines that tag you, land here.</p>}
           <ul className="notif__list">
             {items.map((n) => <Row key={n.id} n={n} words={opened[n.id]} />)}
           </ul>

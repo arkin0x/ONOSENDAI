@@ -4004,7 +4004,7 @@ select.avatars__input option:checked {
 /* A phone: the strip's tool label keeps its icon and ?, the chips their
    picture and name, so every tool's options and MORE fit without scrolling,
    up to a 430px phone. The dock still says which tool is lit. */
-@media (max-width: 440px) {
+@media (max-width: 440px), (orientation: landscape) and (max-height: 520px) {
   .ws__strip { gap: 4px; }
   .ws__strip-tool { width: 46px; }
   .ws__strip-tool > span { display: none; }
@@ -4271,20 +4271,111 @@ select.avatars__input option:checked {
 
 /* A wide screen: the bottom group floats at the bottom centre, 640px wide,
    and the top bar keeps to the top left instead of spanning the screen. */
-@media (min-width: 900px) {
+/* Keys printed on their buttons where there is a keyboard and room (phase 5). */
+.ws__key { display: none; }
+.ws__dockbtn, .ws__heldbtn { position: relative; }
+
+/* A desktop (phase 5): the phone's places, spread out. The dock and the strip
+   float at the bottom centre of the canvas; the open area (a sheet on the
+   phone) docks as a column on the right, closable, with DEPLOY above it; the
+   view ball stands at the top right of the canvas, left of the column while
+   it is open. Short wide windows (a phone held sideways) take the landscape
+   layout below instead. */
+@media (min-width: 900px) and (min-height: 521px) {
   /* Floating off the bottom edge: the home indicator's room is the gap's, not the dock's. */
-  .workshop { --ws-bottom-gap: max(12px, env(safe-area-inset-bottom, 0px)); --ws-gutter: 12px; --ws-safe-b: 0px; }
+  .workshop { --ws-bottom-gap: max(12px, env(safe-area-inset-bottom, 0px)); --ws-gutter: 12px; --ws-safe-b: 0px; --ws-col: 380px; }
   .ws__topbar { right: auto; }
   .ws__topbtn { flex: none; width: 72px; }
   .ws__topbtn--close { width: var(--ws-bar); }
-  .ws__topbtn.ws__topbtn--deploy { flex: none; width: 96px; }
-  /* Centred by its left edge, not a transform: a transform would make it the
-     box the held rows' full-screen catchers are fixed to. */
-  .ws__bottom { left: calc(50% - 320px); right: auto; width: 640px; }
+  .ws__topbtn.ws__topbtn--deploy { position: fixed; top: calc(var(--ws-safe-t) + var(--ws-gutter)); right: var(--ws-gutter); width: var(--ws-col); flex-direction: row; gap: 8px; }
+  /* Centred in the canvas by its edges and margins, not a transform: a
+     transform would make it the box fixed children (the column, the
+     questions' catchers) are placed against. */
+  .ws__bottom { left: var(--ws-gutter); right: var(--ws-gutter); width: auto; max-width: 640px; margin: 0 auto; }
+  /* With the column open, the bottom group keeps its place while there is
+     room for it beside the column, and only on a narrower window slides left. */
+  .workshop:has(.ws__sheet) .ws__bottom { left: max(var(--ws-gutter), calc(100% - var(--ws-col) - 3 * var(--ws-gutter) - 640px)); right: calc(var(--ws-col) + 2 * var(--ws-gutter)); }
+  .workshop:has(.ws__sheet) .ws__view { right: calc(var(--ws-col) + 2 * var(--ws-gutter)); }
   .ws__strip { border: 1px solid var(--border); border-radius: 12px 12px 0 0; }
   .ws__dock { border: 1px solid var(--border); border-top: 0; border-radius: 0 0 12px 12px; }
-  .ws__sheet { border: 1px solid var(--border); border-radius: 14px; }
+  .ws__sheet,
+  .ws__sheet.ws__sheet--tall,
+  .ws__sheet[aria-label='Menu'] {
+    position: fixed;
+    left: auto;
+    right: var(--ws-gutter);
+    top: calc(var(--ws-top-end) + 10px);
+    bottom: var(--ws-gutter);
+    width: var(--ws-col);
+    height: auto;
+    max-height: none;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+  }
+  .ws__sheet-grab { display: none; }
+  /* The palette in the column: eight to a row, as upright, not the wide window's sixteen. */
+  .palettes.ws__sheet .palettes__grid { grid-template-columns: repeat(8, 1fr); }
 }
+@media (min-width: 900px) and (min-height: 521px) and (hover: hover) {
+  /* A two-step key's dot gives the top right to the printed key. */
+  .ws__heldbtn--two::after { right: auto; left: 8px; }
+  .ws__key { display: block; position: absolute; top: 3px; right: 6px; padding: 0; font-family: inherit; font-size: 9.5px; line-height: 1; letter-spacing: 0.04em; color: var(--dim); background: none; border: 0; box-shadow: none; pointer-events: none; }
+  .ws__dockbtn.is-on .ws__key { color: var(--ws-ink); }
+}
+
+/* A phone held sideways (phase 5): the top bar keeps to the top left, the
+   rail under it, the view ball top right; the dock and the strip share one
+   bottom row, the dock on the left half and the strip on the right; and a
+   sheet is a panel down the right side, so the rail is never under it. The
+   notch's side keeps its room. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .workshop {
+    --ws-safe-l: env(safe-area-inset-left, 0px);
+    --ws-safe-r: env(safe-area-inset-right, 0px);
+    --ws-bar: 44px;
+    --ws-strip: 0px;
+    --ws-dock: calc(56px + var(--ws-safe-b));
+    --ws-col: min(360px, max(300px, 44vw));
+  }
+  .ws__topbar { left: max(var(--ws-gutter), var(--ws-safe-l)); right: auto; }
+  .ws__topbtn { flex: none; width: 60px; }
+  .ws__topbtn--close { width: var(--ws-bar); }
+  .ws__topbtn.ws__topbtn--deploy { flex: none; width: 76px; }
+  .ws__rail { left: max(var(--ws-gutter), var(--ws-safe-l)); }
+  .ws__view { right: max(var(--ws-gutter), var(--ws-safe-r)); }
+  .workshop:has(.ws__sheet) .ws__view { right: calc(var(--ws-col) + 2 * var(--ws-gutter) + var(--ws-safe-r)); }
+  .ws__bottom { flex-direction: row; padding: 0 var(--ws-safe-r) 0 var(--ws-safe-l); background: rgba(4, 9, 15, 0.97); border-top: 1px solid var(--border); }
+  /* The dock as wide as its tools need, from 44px a slot; the strip the
+     rest, at least the held bar's eight slots. The dock paints over a
+     question's full-screen catcher, as it does upright: a flex item's order
+     sets its painting order too, and the strip comes after it here. */
+  .ws__dock { order: 0; flex: 0 1 auto; min-width: 0; gap: 0; padding-left: 2px; padding-right: 2px; border-top: 0; z-index: 2; }
+  .ws__dock .ws__dockbtn { flex: 0 1 56px; min-width: 44px; }
+  .ws__dock .ws__dockbtn.ws__dockbtn--more { flex: 0 1 88px; }
+  .ws__dock .ws__colorchip { flex: 0 0 44px; }
+  .ws__strip { order: 1; flex: 1 0 352px; min-width: 352px; height: var(--ws-dock); padding-bottom: var(--ws-safe-b); border-top: 0; border-left: 1px solid var(--border); }
+  /* Eight 44px slots in 352px: the held bar fits a 667px phone held sideways beside a six-tool dock. */
+  .ws__strip.ws__strip--held { padding: 0; }
+  /* The guide's card keeps clear of the rail. */
+  .ws__guide { left: calc(max(var(--ws-gutter), var(--ws-safe-l)) + 104px); }
+  .ws__sheet,
+  .ws__sheet.ws__sheet--tall,
+  .ws__sheet[aria-label='Menu'] {
+    position: fixed;
+    left: auto;
+    right: max(var(--ws-gutter), var(--ws-safe-r));
+    top: calc(var(--ws-top-end) + 8px);
+    bottom: calc(var(--ws-dock) + 8px);
+    width: var(--ws-col);
+    height: auto;
+    max-height: none;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+  }
+  .ws__sheet-grab { display: none; }
+  .palettes.ws__sheet .palettes__grid { grid-template-columns: repeat(8, 1fr); }
+}
+
 /* The orbit ball (arkinox, 2026-10-10): the pad's size, right of it. A drag
    on it turns the view about the shard and keeps turning after the finger
    leaves it (pointer capture); a tap sends the view home. Drawn as a lit

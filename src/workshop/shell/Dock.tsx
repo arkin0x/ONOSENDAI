@@ -47,6 +47,8 @@ export function Dock({ onColor, colorOpen }: { onColor: () => void; colorOpen: b
         <button key={t} className={`ws__dockbtn${tool === t ? ' is-on' : ''}${glow === t ? ' is-guide' : ''}`} aria-pressed={tool === t} onClick={() => w().setTool(t)} title={`${label} (${key})`}>
           <Icon size={20} strokeWidth={2} aria-hidden />
           <span>{label}</span>
+          {/* The key, printed on the button where there is a keyboard (phase 5). */}
+          <kbd className="ws__key" aria-hidden>{key}</kbd>
         </button>
       ))}
       {/* MORE TOOLS: ADD and FACE join the dock to the right; the first four never move. MENU puts them away again. */}

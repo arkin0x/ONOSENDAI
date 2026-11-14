@@ -136,39 +136,60 @@ export function planeAfter(plane: WorkPlane, axes: BenchAxes, about: 'tip' | 'ro
  * frames the shard into what is left, so a sheet never hides it (Bench
  * Framer; workshop redesign, phase 1).
  */
-export interface BenchInsets { top: number; bottom: number; rest?: number }
+export interface BenchInsets {
+  top: number
+  bottom: number
+  rest?: number
+  /** A side panel (landscape phone, desktop: the open area as a column) covering the right, in CSS pixels. */
+  right?: number
+}
 
-export const useBenchView = create<{ axes: BenchAxes; request: ViewRequest | null; insets: BenchInsets }>(() => ({ axes: DEFAULT_AXES, request: null, insets: { top: 0, bottom: 0, rest: 0 } }))
+export const useBenchView = create<{ axes: BenchAxes; request: ViewRequest | null; insets: BenchInsets }>(() => ({ axes: DEFAULT_AXES, request: null, insets: { top: 0, bottom: 0, rest: 0, right: 0 } }))
+
+/** One axis of frameOffset: a virtual length and where the shown part starts. */
+function frameAxis(length: number, shift: number): { full: number; at: number } {
+  // Shown band [0, length] of a virtual one `length + |shift|` long: its
+  // middle lands at (length - shift) / 2, the middle of what is uncovered.
+  return shift > 0 ? { full: length + shift, at: shift } : { full: length - shift, at: 0 }
+}
 
 /**
  * The camera's view offset for insets on a canvas `width` by `height`: a
- * taller virtual view whose middle sits in the middle of the uncovered band,
- * of which the canvas shows the part on screen. Null when the band is
- * already centred. Pure, so the framing is tested without a camera.
+ * larger virtual view whose middle sits in the middle of the uncovered part,
+ * of which the canvas shows the part on screen; down from the top bar to the
+ * strip or a sheet, and in from a side panel on the right (phase 5). Null when
+ * the uncovered part is already centred. Pure, so the framing is tested
+ * without a camera.
  */
 export function frameOffset(width: number, height: number, insets: BenchInsets): { fullWidth: number; fullHeight: number; x: number; y: number; width: number; height: number } | null {
-  const shift = Math.round(insets.bottom - insets.top)
-  if (width <= 0 || height <= 0 || shift === 0 || Math.abs(shift) >= height) return null
-  // Shown band [0, height] of a virtual view `height + |shift|` tall: its
-  // middle lands at (height - shift) / 2, the middle of [top, height - bottom].
-  return shift > 0
-    ? { fullWidth: width, fullHeight: height + shift, x: 0, y: shift, width, height }
-    : { fullWidth: width, fullHeight: height - shift, x: 0, y: 0, width, height }
+  const shiftY = Math.round(insets.bottom - insets.top)
+  const shiftX = Math.round(insets.right ?? 0)
+  if (width <= 0 || height <= 0 || (shiftY === 0 && shiftX === 0) || Math.abs(shiftY) >= height || Math.abs(shiftX) >= width) return null
+  const v = frameAxis(height, shiftY)
+  const h = frameAxis(width, shiftX)
+  return { fullWidth: h.full, fullHeight: v.full, x: h.at, y: v.at, width, height }
 }
 
 /**
  * The camera zoom that goes with frameOffset: the field of view spans the
- * whole virtual view, so without it the shown part would be magnified by
- * fullHeight / height. At rest (no sheet up) the bench keeps the scale it
- * always had; a sheet shrinks it by the share of the resting band the sheet
- * takes, so what fitted above the bars still fits above the sheet. Pure.
+ * whole virtual view's height, so without it the shown part would be
+ * magnified by fullHeight / height (a three.js view offset keeps pixels
+ * square, so the height alone sets the scale). At rest (no sheet up) the
+ * bench keeps the scale it always had; a sheet or a side panel shrinks it by
+ * the share of the resting band it takes, so what fitted still fits. Pure.
  */
-export function frameZoom(height: number, fullHeight: number, insets: BenchInsets): number {
+export function frameZoom(height: number, fullHeight: number, insets: BenchInsets, width = 0): number {
   if (height <= 0 || fullHeight <= 0) return 1
   const rest = Math.min(insets.rest ?? insets.bottom, insets.bottom)
   const restBand = height - insets.top - rest
   const band = height - insets.top - insets.bottom
-  const fit = restBand > 0 && band > 0 ? Math.min(1, band / restBand) : 1
+  const right = Math.max(0, insets.right ?? 0)
+  // A shard is fitted to the smaller side of what it has (benchReach
+  // fitDistance), so the shrink is the smaller side left over that before.
+  const w = width > 0 ? width : Infinity
+  const was = Math.min(w, restBand)
+  const now = Math.min(w - right, band)
+  const fit = was > 0 && now > 0 ? Math.min(1, now / was) : 1
   return (height / fullHeight) * fit
 }
 

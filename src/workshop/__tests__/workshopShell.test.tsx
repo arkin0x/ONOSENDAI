@@ -917,3 +917,11 @@ describe('the beginner path (phase 4)', () => {
     await m.unmount()
   })
 })
+
+describe('the paint step color', () => {
+  it('is a warm built-in color, never the block\'s own', async () => {
+    const { paintStepColor } = await import('../shell/Guide')
+    expect(paintStepColor('#00e8f9')).toBe('#f47000')
+    expect(paintStepColor('#f47000')).toBe('#f22400')
+  })
+})

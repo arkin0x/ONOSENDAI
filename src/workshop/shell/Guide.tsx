@@ -39,11 +39,12 @@ const DEPLOY_GLOW_MS = 6000
 /**
  * A color for the paint step that the block is not already: the block was
  * stamped in the color in hand, and painting it that color would change
- * nothing to see. The built-in's warm, bright tones first. Pure.
+ * nothing to see. The built-in's warm, bright tones, far from its cyan. Pure.
  */
 export function paintStepColor(block: string): string {
-  for (const i of [21, 5, 13, 45, 37, 29]) { const hex = hexAt(BUILT_IN, i); if (hex !== block) return hex }
-  return hexAt(BUILT_IN, 21)
+  // Orange, red, yellow, magenta (hue h step s is index h * 8 + s).
+  for (const i of [117, 108, 143, 77]) { const hex = hexAt(BUILT_IN, i); if (hex !== block) return hex }
+  return hexAt(BUILT_IN, 117)
 }
 
 export function Guide(): JSX.Element | null {

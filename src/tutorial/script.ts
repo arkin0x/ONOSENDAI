@@ -340,7 +340,7 @@ export const STRAYLIGHT: TutorialStep = {
   id: 'straylight',
   title: 'Straylight Cafe',
   caption: 'Straylight Cafe is the cyberspace community hub. Hang out, ask questions, and show off what you make.',
-  explain: 'It is a community on Armada, a chat app built on nostr, the same network cyberspace runs on. You can be the same you in both.',
+  explain: 'It is a community on Armada, a chat app built on nostr, the same network cyberspace runs on. One identity works in both.',
   branch: true,
   then: 'straylight-identity',
 }
@@ -349,8 +349,8 @@ export const STRAYLIGHT: TutorialStep = {
 export const STRAYLIGHT_IDENTITY: TutorialStep = {
   id: 'straylight-identity',
   title: 'Bring your identity',
-  caption: 'Armada can know you as the same person you are here.',
-  explain: 'On nostr, you are your key. An app signs as you through a signer that holds your key, or with a copy of the key itself.',
+  caption: 'Copy your identity from this app to sign into Armada.',
+  explain: 'On nostr, your identity is a key. An app signs with it through a signer that holds the key, or with a copy of the key itself.',
   panel: 'straylight-identity',
   branch: true,
   then: 'straylight-open',

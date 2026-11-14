@@ -33,8 +33,8 @@ export const SAME_SIGNER: Readonly<Record<Exclude<SignerKind, 'local'>, string>>
 
 /** The words around the key, for a player on a key this device made. */
 export const LOCAL_KEY_COPY = {
-  why: "Your key lives in this app. To be you in Armada, paste it into Armada's login.",
-  warning: 'This is the key to your identity. Anyone who has it can be you. Paste it only into Armada, and never send it to anyone.',
+  why: "Your identity is a key stored in this app. Copy it, then paste it into Armada's login.",
+  warning: 'This is the key to your identity. Anyone who has it can sign as you. Paste it only into Armada, and never send it to anyone.',
   show: 'SHOW MY KEY',
   copy: 'COPY KEY',
   hide: 'HIDE KEY',

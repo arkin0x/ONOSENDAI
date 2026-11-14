@@ -36,7 +36,10 @@ import { holdEnd, holdReleaseAll, holdStart } from '../store/walkHold'
 import { addWalkInputCloser, setWalkMenuCovering, walkMenuCovering } from '../store/walkInput'
 import { canFly, useViewFly } from '../lib/viewFly'
 import { useRegion } from '../store/useRegion'
-import { leaveWalk, viewToAvatar } from '../store/padMode'
+import { buildToScan, leaveWalk, scanToHop, viewToAvatar } from '../store/padMode'
+import { currentScanRange, scanBuying, scanRoute, useScan } from '../store/useScan'
+import { heldCube } from '../lib/scanCube'
+import { useSecrets } from '../store/useSecrets'
 
 // Cyberspace TV is watching only: WALK's input is closed while it is on (store/walkInput.ts).
 addWalkInputCloser(() => useTv.getState().on)
@@ -211,6 +214,24 @@ export function useKeyboard(): void {
       // BUILD mode (store/useBuilder.ts): the same keys move the build cursor,
       // and the few that would reach the movement chain are answered here.
       const building = useBuilder.getState().active
+      // SCAN mode (store/useScan.ts): VIEW's view, made SCAN's. Space scans
+      // there, and neither Space nor Shift flies.
+      const scanning = !building && useScan.getState().active && store.viewing()
+      const flies = canFly(store, building) && !scanning
+
+      // N: into SCAN, from HOP, VIEW or BUILD (where BUILD's cursor was), or
+      // out of it to HOP, as the mode button does from SCAN.
+      if (event.code === 'KeyN') {
+        event.preventDefault()
+        // WALK is left by its own keys and buttons, back to the mode it came from.
+        if (store.walking) return
+        if (scanning) scanToHop()
+        else if (building) buildToScan()
+        // From HOP only where the mode button stands: nothing lined up, placing or proving.
+        else if (store.viewing() || (store.atHead() && store.plan === null && store.proof.status !== 'computing'
+          && !useShards.getState().pending && store.cursor.x === store.position.x && store.cursor.y === store.position.y && store.cursor.z === store.position.z)) useScan.getState().enter()
+        return
+      }
 
       // B: into BUILD mode, or out of it, like the BUILD control. Leaving is
       // refused while a deploy is lined up (useBuilder `exit`): that is
@@ -266,7 +287,18 @@ export function useKeyboard(): void {
         // In VIEW, Space flies the view forward while held, the way the camera
         // faces (arkinox, 2026-11-11), as the Forward button does; it never
         // commits there. R and F are FAR and NEAR again, a cell at a time.
-        if (canFly(store, building)) { useViewFly.getState().setKey(1); return }
+        if (flies) { useViewFly.getState().setKey(1); return }
+        // In SCAN, Space scans the purple cube: on this device, or a cube
+        // already held. A HOSAKA height is the SCAN button's, which shows the price.
+        if (scanning) {
+          // Held down, Space does not scan again and again.
+          if (event.repeat) return
+          const scan = useScan.getState()
+          const held = heldCube(useSecrets.getState().keys, store.cursor, store.anchorPlane, scan.height) !== null
+          const free = held || scanRoute(scan.height, currentScanRange()) === 'local'
+          if (!scan.job && free) void scan.start({ route: held ? 'held' : 'local' })
+          return
+        }
         // Building never moves you: with nothing to place, Space does nothing.
         if (building) return
         // The next action, as the button names it: HOSAKA's step brings up the
@@ -292,7 +324,10 @@ export function useKeyboard(): void {
         // collapses the region to that one cell at the zoom you are now at
         // (store/useRegion.ts; arkinox, 2026-11-11).
         if (useRegion.getState().active) { useRegion.getState().collapseToEntry(); return }
-        const idle = store.proof.status !== 'computing' && store.cloud.status === 'idle' && store.plan === null
+        // In SCAN, X stops a scan under way first, as STOP stops a proof.
+        if (scanning && (useScan.getState().job || useScan.getState().confirm)) { useScan.getState().cancel(); return }
+        // A SCAN's HOSAKA purchase is no move: X leaves it to finish (store/useScan.ts).
+        const idle = store.proof.status !== 'computing' && (store.cloud.status === 'idle' || scanBuying()) && store.plan === null
         if (building && idle) useBuilder.getState().toAvatar()
         else if (idle && store.viewing()) viewToAvatar()
         else store.cancel()
@@ -327,6 +362,12 @@ export function useKeyboard(): void {
       // The build STEP while a deploy is lined up (store/buildStep.ts): comma
       // is finer, period coarser, the < and > on the same keys.
       if (event.code === 'Comma' || event.code === 'Period') {
+        // In SCAN they step the scan height, down and up.
+        if (scanning && !useShards.getState().pending) {
+          event.preventDefault()
+          useScan.getState().stepHeight(event.code === 'Comma' ? -1 : 1)
+          return
+        }
         if (!useShards.getState().pending) return
         event.preventDefault()
         stepBuild(event.code === 'Comma' ? -1 : 1)
@@ -357,7 +398,7 @@ export function useKeyboard(): void {
       // In VIEW, Shift flies the view backward while held (arkinox, 2026-11-11),
       // as the Back button does. Not while a rotate key is down: Shift with
       // W A S D rotates (below), and a rotate must not also drift the view back.
-      if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight') && canFly(store, building) && rotateHeld.size === 0) {
+      if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight') && flies && rotateHeld.size === 0) {
         event.preventDefault()
         useViewFly.getState().setKey(-1)
         return

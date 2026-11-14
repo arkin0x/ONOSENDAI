@@ -15,6 +15,7 @@ import type { Position } from '../lib/space'
 import { useHyperspace } from '../store/useHyperspace'
 import { useEscape } from '../hooks/useEscape'
 import { useBuilder } from '../store/useBuilder'
+import { useScan } from '../store/useScan'
 
 /** What VIEWING says for a free view (VIEW, or what BUILD mode leaves behind). */
 export const FREE_VIEW_LABEL = 'A COORD'
@@ -48,6 +49,8 @@ export function FocusBar(): JSX.Element | null {
   // (HyperspaceViewBar).
   const building = useBuilder((s) => s.active)
   const shown = !(focusLabel === null || spectating || (viewOwned && !focus?.view) || building)
+  // SCAN rides VIEW's view (store/useScan.ts): the bar says so, and RETURN ends both.
+  const scanning = useScan((s) => s.active)
   // Escape is RETURN while this bar stands, a chip on the Escape stack
   // (arkinox, 2026-10-01); it used to be a fallback in the keyboard hook.
   useEscape('chip', shown, () => useCyberspace.getState().clearFocus())
@@ -56,7 +59,7 @@ export function FocusBar(): JSX.Element | null {
     <div className="hyperbar hyperbar--focus" role="status">
       <span className="hyperbar__glyph" aria-hidden="true">◈</span>
       <span className="hyperbar__text">
-        <span className="hyperbar__label">VIEWING</span>
+        <span className="hyperbar__label">{scanning ? 'SCANNING' : 'VIEWING'}</span>
         <span className="hyperbar__meta">{focusLabel}</span>
       </span>
       {/* A free view (VIEW, or what BUILD mode leaves behind when you exit)

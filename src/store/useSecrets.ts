@@ -78,9 +78,11 @@ export interface HeldKey {
   plane: Plane
   /**
    * How it was come by: a hop of your own, which grants the region it crossed;
-   * a scan that opened something where you stood; or a purchase from HOSAKA.
+   * a scan that opened something where you stood; a cube SCAN mode computed
+   * on this device (store/useScan.ts); or a purchase from HOSAKA, SCAN's
+   * above this device's ceiling included.
    */
-  source: 'hop' | 'scan' | 'cloud'
+  source: 'hop' | 'scan' | 'scanmode' | 'cloud'
   /** The action that bought it, for the chain overlay's key marker. */
   eventId?: string
   /** First held, in seconds since the epoch. */
@@ -388,7 +390,8 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   setSort: (sort) => set({ sort }),
 
   buy: async (at, plane, height, expect) => {
-    if (get().buying) return null
+    // One purchase at a time (a SCAN's may be under way while a hide asks): said, not a stale error.
+    if (get().buying) { set({ buyError: 'HOSAKA is already computing a key for you. Try again when it is done.' }); return null }
     const cs = useCyberspace.getState()
     set({ buying: { height, status: 'submitting', costMsats: 0, estSeconds: null, startedAt: Date.now() }, buyError: null })
     // The store's job driver: a short balance gets the job's own invoice in

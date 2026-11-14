@@ -12,7 +12,7 @@
  * WALK's forward and back wear too (ui/FlyArrows.tsx).
  *
  * Only while a free view is up (canFly): VIEW, or a place looked at with the
- * cursor brought along, and never in BUILD or WALK, which have their own.
+ * cursor brought along, and never in BUILD, WALK or SCAN, which have their own.
  */
 
 import { useEffect, type PointerEvent as ReactPointerEvent } from 'react'
@@ -21,6 +21,7 @@ import { useBuilder } from '../store/useBuilder'
 import { canFly, steerBy, useViewFly, type FlyDir } from '../lib/viewFly'
 import { noCallout } from '../hooks/useRepeatable'
 import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
+import { useScan } from '../store/useScan'
 
 /** Which of the fly's holds a press is: so far only the fly buttons. */
 type FlyHold = 'button'
@@ -64,7 +65,9 @@ export function flyHold(source: FlyHold, dir: Exclude<FlyDir, 0>) {
 
 export function ViewFlyButtons(): JSX.Element | null {
   const building = useBuilder((s) => s.active)
-  const shown = useCyberspace((s) => canFly(s, building))
+  // SCAN's height and SCAN button stand here instead (ScanControls.tsx).
+  const scanning = useScan((s) => s.active)
+  const shown = useCyberspace((s) => canFly(s, building)) && !scanning
   // Gone mid-press (RETURN, the mode ended): the fly stops with it.
   useEffect(() => { if (!shown) useViewFly.getState().setButton(0) }, [shown])
   useEffect(() => () => useViewFly.getState().setButton(0), [])

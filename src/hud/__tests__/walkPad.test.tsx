@@ -77,6 +77,7 @@ vi.mock('zustand', async (importOriginal) => {
 import { TouchControls } from '../TouchControls'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useBuilder } from '../../store/useBuilder'
+import { useScan } from '../../store/useScan'
 import { useWalk } from '../../store/useWalk'
 import { useShards } from '../../store/useShards'
 import { useViewFly } from '../../lib/viewFly'
@@ -129,6 +130,7 @@ beforeEach(async () => {
   useShards.setState({ pending: null, placedLast: null, deployStatus: 'idle' })
   useWalk.getState().exit()
   useBuilder.getState().exit()
+  useScan.getState().exit()
   S().clearFocus()
   await placeSpawn()
   S().cancel()
@@ -317,7 +319,7 @@ describe('HOP and VIEW keep their pad', () => {
 })
 
 describe('the commit slot on screen', () => {
-  it('VIEW goes to BUILD, BUILD is lit white and goes to HOP, and BUILD has RECALL off your avatar', () => {
+  it('VIEW goes to BUILD, BUILD is lit white and goes to SCAN, lit purple, then HOP, and BUILD has RECALL off your avatar', () => {
     S().viewHere()
     press(find('is-view'))
     expect(currentPadMode()).toBe('build')
@@ -330,6 +332,15 @@ describe('the commit slot on screen', () => {
     S().moveCursor({ axis: 'x', dir: 1 })
     expect(find('touchops__cancel').props.children).toBe('RECALL')
     press(build)
+    expect(currentPadMode()).toBe('scan')
+    expect(find('touchpad').props.className).toContain('touchpad--mode-scan')
+    expect(find('touchops').props.className).toContain('touchops--mode-scan')
+    const scan = find('is-scan')
+    expect(scan.props.className).toContain('is-on')
+    expect(scan.props.children).toBe('SCAN')
+    // SCAN is not VIEW: no Region key.
+    expect(cells()).not.toContain('region')
+    press(scan)
     expect(currentPadMode()).toBe('hop')
   })
 
@@ -541,9 +552,9 @@ describe('the pad and the commit block with the chain status strip up', () => {
   const lifted = (): boolean => (find('touchpad').props.className ?? '').split(' ').includes('is-lifted')
   const opsDrawn = (): boolean => drawn().some((b) => b.props.className?.split(' ').includes('touchops'))
 
-  it('lifts the pad in HOP, VIEW, WALK and BUILD alike, and not without the strip', () => {
+  it('lifts the pad in HOP, VIEW, WALK, BUILD and SCAN alike, and not without the strip', () => {
     useCyberspace.setState({ held: true })
-    for (const mode of ['hop', 'view', 'build', 'hop'] as const) {
+    for (const mode of ['hop', 'view', 'build', 'scan', 'hop'] as const) {
       expect(currentPadMode()).toBe(mode)
       expect(opsDrawn()).toBe(true)
       expect(find('touchops').props.className).toContain('touchops--status')

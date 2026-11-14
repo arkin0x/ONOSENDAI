@@ -24,6 +24,13 @@ export const SIDESTEP = '#c07dff'
  */
 export const BUILD = '#f2f7ff'
 /**
+ * SCAN mode (store/useScan.ts; arkinox, 2026-11-14: "It's theme will be
+ * purple"): the cube a scan looks in, and the mode's HUD (styles.css --scan).
+ * A bluer, lighter violet than SIDESTEP's ideaspace purple, so the cube never
+ * reads as a sidestep or as the other plane's trail.
+ */
+export const SCAN = '#a98bff'
+/**
  * Play inside a game: the moves a chain makes inside a virtual bracket and
  * the region the game is played in (spec §8.11.7). Pink, because nothing
  * that means travel is pink: the trail is red, sidesteps purple, stations

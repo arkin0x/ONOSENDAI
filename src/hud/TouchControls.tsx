@@ -24,10 +24,11 @@
  * The commit slot is also the pad's mode switch (arkinox, 2026-10-13,
  * 2026-11-02 and 2026-11-11; store/padMode.ts): HOP, the resting state,
  * where the pad lines up a move and COMMIT sends it; VIEW, a free look from
- * your head; BUILD, placing things at a build cursor (store/useBuilder.ts).
- * HOP turns VIEW on, VIEW turns BUILD on where it was looking, BUILD goes
- * back to HOP. The mode button is lit while its mode is the one the pad is
- * in, HOP as lit as COMMIT.
+ * your head; BUILD, placing things at a build cursor (store/useBuilder.ts);
+ * SCAN, looking for hidden things in a cube at the cursor (store/useScan.ts).
+ * HOP turns VIEW on, VIEW turns BUILD on where it was looking, BUILD turns
+ * SCAN on where its cursor was, SCAN goes back to HOP. The mode button is
+ * lit while its mode is the one the pad is in, HOP as lit as COMMIT.
  *
  * WALK, first person, where every press is a step (store/useWalk.ts), is a
  * toggle in RECALL's slot (arkinox, 2026-11-12): with the cursor on your
@@ -37,7 +38,8 @@
  * crossing over in 400 ms. While steps wait on their proofs the lit WALK is
  * STOP, as before. With the cursor off your avatar the slot is RECALL, which
  * brings the cursor home and stays in the mode (store/padMode.ts recall).
- * Each mode tints the pad's keys its own color, blue, yellow, red, white, so
+ * Each mode tints the pad's keys its own color, blue, yellow, red, white,
+ * purple, so
  * the hand knows what a press will do before it presses.
  *
  * WALK's pad is its own (arkinox, 2026-11-02): no scale keys, one large
@@ -87,6 +89,7 @@ import { regionAtOriginalSize, toggleRegion, useRegion } from '../store/useRegio
 import { holdEnd, holdEndAll, holdStart } from '../store/walkHold'
 import { flyDir, useViewFly } from '../lib/viewFly'
 import { walkHeldDir, type HeldDir } from '../lib/walkKeys'
+import { scanBuying, useScan } from '../store/useScan'
 
 /**
  * arkinox's wording, kept exactly as he wrote it, bullet shapes and blank
@@ -104,7 +107,7 @@ export const GO_LIVE_BODY = [
 ].join('\n')
 
 /** The mode button's word for each mode it can name. */
-const MODE_WORD: Record<WalkFrom, string> = { hop: 'HOP', view: 'VIEW', build: 'BUILD' }
+const MODE_WORD: Record<WalkFrom, string> = { hop: 'HOP', view: 'VIEW', build: 'BUILD', scan: 'SCAN' }
 
 /** One key of the pad: the grid cell it stands in, what it shows, and what a press does. */
 export interface PadKey {
@@ -261,7 +264,9 @@ export function TouchControls(): JSX.Element {
   // A deploy lined up that leaving BUILD would cancel: BUILD and WALK wait
   // for PLACE or CANCEL (store/padMode.ts buildHeld).
   const held = useShards((s) => buildHeld(s))
-  const mode = padMode(walking, building, viewing)
+  // SCAN mode (store/useScan.ts): VIEW's view, made SCAN's.
+  const scanning = useScan((s) => s.active)
+  const mode = padMode(walking, building, viewing, scanning)
   // The commit block under the pad: at your head, in VIEW, and in BUILD, but
   // not while spectating, where the SPECTATING bar holds that corner (BUILD
   // is left there by EXIT, B or Esc, as before). Whenever it is drawn with
@@ -281,7 +286,7 @@ export function TouchControls(): JSX.Element {
   const stopping = walking && (computing || behind > 0)
   const walkSlot = walking ? !stopping : resting && !computing && (
     mode === 'hop' ? home && !armed && !deploying
-    : mode === 'view' ? ownHead && !armed && !deploying && !viewAway && !flown && !(regionActive && regionGrown)
+    : mode === 'view' || mode === 'scan' ? ownHead && !armed && !deploying && !viewAway && !flown && !(regionActive && regionGrown)
     : ownHead && buildHome
   )
   const walkHeld = !walking && building && held
@@ -362,7 +367,8 @@ export function TouchControls(): JSX.Element {
     const wait = on && m === 'build' && held
     const title = !on ? `Leave WALK and go back to ${MODE_WORD[m]}`
       : wait ? 'Place or cancel what is lined up first'
-      : m === 'build' ? 'Building: the pad moves the build cursor and never you. Press to go back to HOP'
+      : m === 'build' ? 'Building: the pad moves the build cursor and never you. Press for SCAN here'
+      : m === 'scan' ? 'Scanning: the pad moves the cursor, SCAN looks inside the purple cube. Press to go back to HOP'
       : m === 'view' ? 'Viewing: the pad moves the cursor without planning a hop. Press for BUILD here; RECALL brings the cursor home and stays in VIEW'
       : 'Hop: the pad lines up a move and COMMIT sends it. Press for VIEW, a free look that moves nothing'
     return (
@@ -411,7 +417,7 @@ export function TouchControls(): JSX.Element {
                 own: REMOVE PIN is gone with the cross marker (arkinox, 2026-11-11).
                 On a /C/ region link's view it starts on the link's region
                 (useRegion toggleRegion; owner, 2026-11-13). */}
-            {viewing && !building && (
+            {viewing && !building && !scanning && (
               <button
                 className={`touchpad__key touchpad__key--region${regionActive ? ' is-on' : ''}`}
                 title="Region: pick a region for a private speakeasy"
@@ -491,10 +497,12 @@ export function TouchControls(): JSX.Element {
           className="touchops__cancel"
           title={walking ? 'Stop the walk where the chain is now (X)'
             : computing ? 'Cancel proof (X)'
+            : !resting && scanning && scanBuying() ? 'Recall the cursor and the view to your avatar, still in SCAN. HOSAKA keeps scanning (X)'
             : !resting ? 'Cancel the route or the HOSAKA job (X)'
             : regionActive && regionGrown ? 'Reset the region to its size when region mode started (RECALL)'
             : building ? 'Bring the build cursor back to your avatar, still in BUILD (X)'
             : regionActive ? 'Recall the cursor to where region mode started; there already, end region mode and recall it home, still in VIEW'
+            : scanning ? 'Recall the cursor and the view to your avatar, still in SCAN (X)'
             : viewing ? 'Recall the cursor and the view to your avatar, still in VIEW (X)' : 'Recall cursor (X)'}
           {...noCallout}
           onPointerDown={(e) => {
@@ -510,8 +518,8 @@ export function TouchControls(): JSX.Element {
           {computing || stopping ? 'STOP' : regionActive && regionGrown ? 'RESET' : 'RECALL'}
         </button>}
         {/* The mode switch, in the commit slot while there is nothing to
-            commit: HOP to VIEW to BUILD and back to HOP (store/padMode.ts,
-            arkinox 2026-11-11), lit, HOP as lit as COMMIT (2026-11-12). In
+            commit: HOP to VIEW to BUILD to SCAN and back to HOP
+            (store/padMode.ts, arkinox 2026-11-11 and 2026-11-14), lit, HOP as lit as COMMIT (2026-11-12). In
             WALK it names the mode WALK came from, dim, and goes back to it.
             VIEW (arkinox, 2026-10-10) is a free view from your head, the pad
             moving the cursor to look around without planning a hop; BUILD
@@ -519,6 +527,7 @@ export function TouchControls(): JSX.Element {
             by the mode it names, so only its own dim to lit eases. */}
         {walking ? modeButton(walkFrom, false)
           : building ? modeButton('build', true)
+          : viewing && scanning ? modeButton('scan', true)
           : viewing ? modeButton('view', true)
           : (!armed && !deploying && !computing) ? modeButton('hop', true)
           : (

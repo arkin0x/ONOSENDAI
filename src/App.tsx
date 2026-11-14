@@ -73,6 +73,7 @@ import { RegionChip } from './hud/RegionChip'
 import { useRegion } from './store/useRegion'
 import { WalkLookSphere } from './hud/WalkLookSphere'
 import { ViewFlyButtons } from './hud/ViewFlyButtons'
+import { ScanControls } from './hud/ScanControls'
 import { SyncWarning } from './hud/SyncWarning'
 import { RouteOverlay } from './hud/RouteOverlay'
 import { ViewMenu } from './hud/ViewMenu'
@@ -452,6 +453,8 @@ export default function App(): JSX.Element {
         {/* VIEW's fly, forward and back, in the dock above the menu button
             (ViewFlyButtons.tsx). */}
         {!crowded && !offerUp && !deploying && <ViewFlyButtons />}
+        {/* SCAN's height and SCAN button, in the fly buttons' place (ScanControls.tsx). */}
+        {!crowded && !offerUp && !deploying && <ScanControls />}
       </div>
       {/* Off-head too: tapping a block hides the pad like any scene tap, and
           without this there was no way to bring it back while viewing. */}

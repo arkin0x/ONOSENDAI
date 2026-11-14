@@ -16,6 +16,7 @@ import { sectorTag, xyzToSectorId, type Plane } from 'cyberspace-core'
 import type { Position } from '../lib/space'
 import { useBuilder } from '../store/useBuilder'
 import { padMode } from '../store/padMode'
+import { useScan } from '../store/useScan'
 import { shortHex } from '../lib/time'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { AskBubble } from './AskBubble'
@@ -512,7 +513,7 @@ const SHARED_ROWS: Array<[string, string]> = [
   ['Esc', 'close: dialog, then menu, then the latest chip'],
 ]
 
-const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build', { title: string; rows: Array<[string, string]>; hint: string }> = {
+const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build' | 'scan', { title: string; rows: Array<[string, string]>; hint: string }> = {
   hop: {
     title: 'Controls · HOP',
     rows: [
@@ -523,6 +524,7 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build', { title: string; rows
       ['Q / E', 'scale step out / in (zoom)'],
       ['Shift + W A S D', 'rotate view 90°'],
       ['B', 'build mode in / out'],
+      ['N', 'scan mode in / out'],
     ],
     hint: 'HOP lines up a move with the cursor and commits it with Space, which computes its proof and signs it. W A S D move the cursor, R and F move it FAR and NEAR along the depth axis, and Q and E zoom. X recalls the cursor to your avatar. B goes into build mode. On the pad, WALK beside the mode button goes into WALK when the cursor is on your avatar and nothing is under way.',
   },
@@ -536,6 +538,7 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build', { title: string; rows
       ['X', 'recall cursor and view to your avatar, still in VIEW (region mode: reset the cursor, collapse the region)'],
       ['Q / E', 'scale step out / in (zoom)'],
       ['Shift + W A S D', 'rotate view 90°'],
+      ['N', 'scan mode in / out'],
     ],
     hint: 'VIEW is a free look from your head: the cursor moves without lining up a hop. Space and Shift fly the view forward and back the way the camera faces; R and F are FAR and NEAR, a cell at a time. X, or RECALL on the pad, brings the cursor home and VIEW stays; Esc ends VIEW. The Region button picks a region for a private speakeasy.',
   },
@@ -548,7 +551,7 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build', { title: string; rows
       ['Z', 'gravity on / off'],
       ['X', 'stop the walk, or leave WALK for the mode you came from'],
     ],
-    hint: 'WALK is first person: every press is a step, proved behind you. W A S D walk, Space jumps, C goes down, and Z switches gravity. X stops the steps still to prove, or leaves WALK for HOP, VIEW or BUILD, whichever you came from; on the pad, so do WALK and the dim mode button.',
+    hint: 'WALK is first person: every press is a step, proved behind you. W A S D walk, Space jumps, C goes down, and Z switches gravity. X stops the steps still to prove, or leaves WALK for HOP, VIEW, BUILD or SCAN, whichever you came from; on the pad, so do WALK and the dim mode button.',
   },
   build: {
     title: 'Controls · BUILD',
@@ -559,8 +562,23 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build', { title: string; rows
       ['Space', 'place what is lined up'],
       ['X', 'recall the build cursor to your avatar'],
       ['B', 'leave build mode'],
+      ['N', 'scan mode, where the build cursor is'],
     ],
     hint: 'BUILD places things at a build cursor and never moves you. The movement keys and zoom move that cursor; , and . change the step it places at; Space places. X, or RECALL on the pad, brings the build cursor home and BUILD stays; B leaves.',
+  },
+  scan: {
+    title: 'Controls · SCAN',
+    rows: [
+      ['W A S D', 'move cursor one step'],
+      ['R / F', 'cursor FAR / NEAR along the depth axis'],
+      [', / .', 'scan height down / up'],
+      ['Space', 'scan the purple cube'],
+      ['X', 'cancel the scan, or recall the cursor'],
+      ['Q / E', 'scale step out / in (zoom)'],
+      ['Shift + W A S D', 'rotate view 90°'],
+      ['N', 'scan mode out, back to HOP'],
+    ],
+    hint: 'SCAN looks for things hidden at the scan height in the purple cube at the cursor. Up to your device limit it is free; above it HOSAKA computes it for the price shown, and only the SCAN button pays.',
   },
 }
 
@@ -568,7 +586,8 @@ function Controls(): JSX.Element {
   const walking = useCyberspace((s) => s.walking)
   const viewing = useCyberspace((s) => s.viewing())
   const building = useBuilder((s) => s.active)
-  const mode = padMode(walking, building, viewing)
+  const scanning = useScan((s) => s.active)
+  const mode = padMode(walking, building, viewing, scanning)
   const { title, rows, hint } = MODE_ROWS[mode]
 
   return (

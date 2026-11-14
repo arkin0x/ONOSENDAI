@@ -35,7 +35,11 @@ export function Sheet({ name, title, sub, onClose, tall = false, bodyRef, classN
     <section className={`ws__sheet${tall ? ' ws__sheet--tall' : ''}${className ? ` ${className}` : ''}`} role="region" aria-label={name}>
       <div
         className="ws__sheet-head"
-        onPointerDown={(e) => { if ((e.target as HTMLElement).closest('button')) return; swipe.current = { id: e.pointerId, y: e.clientY } }}
+        onPointerDown={(e) => {
+          if ((e.target as HTMLElement).closest('button')) return
+          swipe.current = { id: e.pointerId, y: e.clientY }
+          try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* followed while over the header anyway */ }
+        }}
         onPointerMove={(e) => { const s = swipe.current; if (s && s.id === e.pointerId && e.clientY - s.y > SWIPE_CLOSE_PX) { swipe.current = null; onClose() } }}
         onPointerUp={() => { swipe.current = null }}
         onPointerCancel={() => { swipe.current = null }}

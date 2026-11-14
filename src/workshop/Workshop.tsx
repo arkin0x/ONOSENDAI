@@ -79,11 +79,11 @@ function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind 
     const measure = (): void => {
       const box = el.getBoundingClientRect()
       const top = el.querySelector('.ws__topbar')?.getBoundingClientRect().bottom ?? box.top
-      const cover = el.querySelector('.ws__sheet') ?? el.querySelector('.ws__strip')
-      const edge = cover?.getBoundingClientRect().top ?? box.bottom
-      const insets = { top: Math.max(0, Math.round(top - box.top)), bottom: Math.max(0, Math.round(box.bottom - edge)) }
+      const strip = el.querySelector('.ws__strip')?.getBoundingClientRect().top ?? box.bottom
+      const edge = el.querySelector('.ws__sheet')?.getBoundingClientRect().top ?? strip
+      const insets = { top: Math.max(0, Math.round(top - box.top)), bottom: Math.max(0, Math.round(box.bottom - edge)), rest: Math.max(0, Math.round(box.bottom - strip)) }
       const now = useBenchView.getState().insets
-      if (now.top !== insets.top || now.bottom !== insets.bottom) useBenchView.setState({ insets })
+      if (now.top !== insets.top || now.bottom !== insets.bottom || now.rest !== insets.rest) useBenchView.setState({ insets })
     }
     const ro = new ResizeObserver(measure)
     for (const sel of ['.ws__topbar', '.ws__bottom', '.ws__sheet']) { const n = el.querySelector(sel); if (n) ro.observe(n) }
@@ -92,7 +92,7 @@ function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind 
     return () => { ro.disconnect(); window.removeEventListener('resize', measure) }
   }, [root, sheet, open])
   // Shut, the bench frames nothing: the next opening starts from the middle.
-  useEffect(() => { if (!open) useBenchView.setState({ insets: { top: 0, bottom: 0 } }) }, [open])
+  useEffect(() => { if (!open) useBenchView.setState({ insets: { top: 0, bottom: 0, rest: 0 } }) }, [open])
 }
 
 export function Workshop(): JSX.Element | null {
@@ -124,6 +124,10 @@ export function Workshop(): JSX.Element | null {
   }, [phase])
   // The view ball's menu, shut by a tap anywhere else, and by a sheet rising.
   const [viewOpen, setViewOpen] = useState(false)
+  // Asks the palette to fold away, by counting up (PaletteModal foldAsk).
+  const [foldAsk, setFoldAsk] = useState(0)
+  // MENU's paste box, kept here so it survives MENU closing and opening, as it did as a panel.
+  const [paste, setPaste] = useState<{ open: boolean; text: string }>({ open: false, text: '' })
   useEffect(() => { if (sheet) setViewOpen(false) }, [sheet])
   useEffect(() => {
     if (!viewOpen) return
@@ -171,6 +175,10 @@ export function Workshop(): JSX.Element | null {
   const w = useWorkshop.getState
   const say = (notice: string): void => useWorkshop.setState({ notice })
   const toggle = (s: SheetKind): void => setSheet((cur) => (cur === s ? null : s))
+  // The view menu and a sheet are never up together: Esc closes one at a time, in sight.
+  const toggleView = (): void => { if (!viewOpen) setSheet(null); setViewOpen(!viewOpen) }
+  // The color in hand, tapped again with the palette up: the palette folds back into it, as its X does.
+  const tapColor = (): void => { if (sheet === 'palette') setFoldAsk((n) => n + 1); else setSheet('palette') }
 
   /**
    * IMPORT: a 3D file picked or dropped, read off the main thread
@@ -228,7 +236,7 @@ export function Workshop(): JSX.Element | null {
 
       <TopBar open={area} onArea={toggle} />
       <Rail />
-      <ViewBall open={viewOpen} onToggle={() => setViewOpen((o) => !o)} />
+      <ViewBall open={viewOpen} onToggle={toggleView} onClose={() => setViewOpen(false)} />
       {/* Where the one selected point is, under the view ball. A readout, so
           taps go through to the bench. */}
       {one && (
@@ -245,7 +253,7 @@ export function Workshop(): JSX.Element | null {
       <div className="ws__bottom">
         {area === 'menu' && shard && (
           <Sheet name={REGION.menu} title={AREA_LABEL.menu} sub={shard.name} onClose={closeSheet} bodyRef={menuScroll}>
-            <MenuBody currentId={shard.id} onOpen={closeSheet} onImport={() => fileInput.current?.click()} importing={importing} />
+            <MenuBody currentId={shard.id} onOpen={closeSheet} onImport={() => fileInput.current?.click()} importing={importing} paste={paste} setPaste={setPaste} />
           </Sheet>
         )}
         {area && Body && shard && (
@@ -253,10 +261,10 @@ export function Workshop(): JSX.Element | null {
             <Body />
           </Sheet>
         )}
-        {sheet === 'palette' && <PaletteModal onClose={closeSheet} />}
+        {sheet === 'palette' && <PaletteModal onClose={closeSheet} foldAsk={foldAsk} />}
         {sheet === 'object' && <ObjectPicker onClose={closeSheet} />}
         <Strip onPickObject={() => setSheet('object')} />
-        <Dock onColor={() => toggle('palette')} colorOpen={sheet === 'palette'} />
+        <Dock onColor={tapColor} colorOpen={sheet === 'palette'} />
       </div>
     </div>
   )

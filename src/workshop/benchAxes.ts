@@ -126,13 +126,14 @@ export function planeAfter(plane: WorkPlane, axes: BenchAxes, about: 'tip' | 'ro
 
 /**
  * How much of the bench the workshop's fixed places and an open sheet cover,
- * in CSS pixels from the top and from the bottom (Workshop measures them).
- * The bench frames the shard into what is left, so a sheet never hides it
- * (Bench Framer; workshop redesign, phase 1).
+ * in CSS pixels from the top and from the bottom (Workshop measures them),
+ * and `rest`, what the bottom bars alone cover with no sheet up. The bench
+ * frames the shard into what is left, so a sheet never hides it (Bench
+ * Framer; workshop redesign, phase 1).
  */
-export interface BenchInsets { top: number; bottom: number }
+export interface BenchInsets { top: number; bottom: number; rest?: number }
 
-export const useBenchView = create<{ axes: BenchAxes; request: ViewRequest | null; insets: BenchInsets }>(() => ({ axes: DEFAULT_AXES, request: null, insets: { top: 0, bottom: 0 } }))
+export const useBenchView = create<{ axes: BenchAxes; request: ViewRequest | null; insets: BenchInsets }>(() => ({ axes: DEFAULT_AXES, request: null, insets: { top: 0, bottom: 0, rest: 0 } }))
 
 /**
  * The camera's view offset for insets on a canvas `width` by `height`: a
@@ -148,6 +149,22 @@ export function frameOffset(width: number, height: number, insets: BenchInsets):
   return shift > 0
     ? { fullWidth: width, fullHeight: height + shift, x: 0, y: shift, width, height }
     : { fullWidth: width, fullHeight: height - shift, x: 0, y: 0, width, height }
+}
+
+/**
+ * The camera zoom that goes with frameOffset: the field of view spans the
+ * whole virtual view, so without it the shown part would be magnified by
+ * fullHeight / height. At rest (no sheet up) the bench keeps the scale it
+ * always had; a sheet shrinks it by the share of the resting band the sheet
+ * takes, so what fitted above the bars still fits above the sheet. Pure.
+ */
+export function frameZoom(height: number, fullHeight: number, insets: BenchInsets): number {
+  if (height <= 0 || fullHeight <= 0) return 1
+  const rest = Math.min(insets.rest ?? insets.bottom, insets.bottom)
+  const restBand = height - insets.top - rest
+  const band = height - insets.top - insets.bottom
+  const fit = restBand > 0 && band > 0 ? Math.min(1, band / restBand) : 1
+  return (height / fullHeight) * fit
 }
 
 /** The old orbit ball's diameter in CSS pixels, kept as the drag's scale: the view ball turns the view as the ball did. */

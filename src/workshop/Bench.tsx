@@ -34,7 +34,7 @@ import { ACCENT, BG, WARN } from '../lib/palette'
 import { glowTexture } from '../lib/glow'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from 'sno-core/shards'
 import { BenchGrid } from './benchGrid'
-import { VIEW_DIRS, benchAxes, benchPose, frameOffset, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
+import { VIEW_DIRS, benchAxes, benchPose, frameOffset, frameZoom, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
 import { OVERLAY_ORDER } from '../scene/shardFaces'
@@ -691,6 +691,7 @@ function Keys(): null {
  */
 function ViewDriver({ sphere }: { sphere: { current: Sphere | null } }): null {
   const camera = useThree((s) => s.camera)
+  const size = useThree((s) => s.size)
   const controls = useThree((s) => s.controls) as unknown as { target: Vector3; update: () => void } | null
   const request = useBenchView((s) => s.request)
   useFrame(() => { benchPose.copy(camera.quaternion) })
@@ -704,7 +705,7 @@ function ViewDriver({ sphere }: { sphere: { current: Sphere | null } }): null {
       const dir = camera.position.clone().sub(controls.target)
       if (dir.lengthSq() === 0) dir.set(HOME[0], HOME[1], HOME[2])
       if (s) controls.target.set(s.center[0], s.center[1], s.center[2])
-      dir.setLength(Math.max(MIN_DISTANCE, fitDistance(s ? s.radius : reachRadius(null, controls.target), cam.fov, cam.aspect)))
+      dir.setLength(Math.max(MIN_DISTANCE, fitDistance(s ? s.radius : reachRadius(null, controls.target), cam.fov, canvasAspect(size))))
       camera.position.copy(controls.target).add(dir)
       controls.update()
       return
@@ -714,7 +715,7 @@ function ViewDriver({ sphere }: { sphere: { current: Sphere | null } }): null {
     // court sent home is seen whole rather than from inside its walls. TOP,
     // FRONT and SIDE take the same distance down their own axis.
     const home = new Vector3(HOME[0], HOME[1], HOME[2])
-    const length = Math.max(home.length(), fitDistance(reachRadius(sphere.current, controls.target), cam.fov, cam.aspect))
+    const length = Math.max(home.length(), fitDistance(reachRadius(sphere.current, controls.target), cam.fov, canvasAspect(size)))
     const dir = request.kind === 'home' ? home : new Vector3(...VIEW_DIRS[request.kind])
     dir.setLength(length)
     camera.position.copy(controls.target).add(dir)
@@ -744,7 +745,15 @@ function ViewDriver({ sphere }: { sphere: { current: Sphere | null } }): null {
  */
 function fieldHeight(camera: PerspectiveCamera, height: number): number {
   const v = camera.view
-  return v && v.enabled && v.height > 0 ? v.fullHeight * (height / v.height) : height
+  return (v && v.enabled && v.height > 0 ? v.fullHeight * (height / v.height) : height) * camera.zoom
+}
+
+/**
+ * The canvas's own shape. The camera's aspect is the virtual view's while
+ * Framer offsets it, which is not what fits a shard on the screen.
+ */
+function canvasAspect(size: { width: number; height: number }): number {
+  return size.height > 0 ? size.width / size.height : 1
 }
 
 /** How far the framing moves toward where it is going, per frame. */
@@ -756,17 +765,19 @@ const FRAME_EASE = 0.25
  * risen over them. The canvas stays the whole screen, so nothing under a
  * finger moves or resizes; the camera's view offset (benchAxes frameOffset)
  * puts the middle of its picture in the middle of the uncovered band, eased
- * there over a few frames. The offset is part of the projection, so taps,
- * the box and the handles all read it as they read the camera.
+ * there over a few frames, and the camera's zoom keeps the scale (frameZoom):
+ * as it always was at rest, smaller by the share a sheet takes. Both are part
+ * of the projection, so taps, the box and the handles all read them as they
+ * read the camera.
  */
 function Framer(): null {
   const camera = useThree((s) => s.camera) as PerspectiveCamera
   const size = useThree((s) => s.size)
   const invalidate = useThree((s) => s.invalidate)
-  const now = useRef({ top: 0, bottom: 0 })
+  const now = useRef({ top: 0, bottom: 0, rest: 0 })
   const applied = useRef('')
   useEffect(() => useBenchView.subscribe((s, prev) => { if (s.insets !== prev.insets) invalidate() }), [invalidate])
-  useEffect(() => () => { camera.clearViewOffset() }, [camera])
+  useEffect(() => () => { camera.clearViewOffset(); camera.zoom = 1; camera.updateProjectionMatrix() }, [camera])
   useFrame(() => {
     const goal = useBenchView.getState().insets
     const n = now.current
@@ -774,16 +785,20 @@ function Framer(): null {
     const ease = (a: number, b: number): number => (still || Math.abs(b - a) < 0.5 ? b : a + (b - a) * FRAME_EASE)
     n.top = ease(n.top, goal.top)
     n.bottom = ease(n.bottom, goal.bottom)
+    n.rest = goal.rest ?? goal.bottom
     const o = frameOffset(size.width, size.height, n)
-    const key = o ? `${o.fullWidth}:${o.fullHeight}:${o.y}:${camera.aspect}` : `none:${size.width / size.height}:${camera.aspect}`
-    if (key !== applied.current) {
+    const zoom = frameZoom(size.height, o ? o.fullHeight : size.height, n)
+    // The aspect is in the key because R3F puts its own back on a resize.
+    const keyOf = (): string => `${o ? `${o.fullWidth}:${o.fullHeight}:${o.y}` : 'none'}:${zoom.toFixed(4)}:${camera.aspect}`
+    if (keyOf() !== applied.current) {
+      camera.zoom = zoom
       if (o) camera.setViewOffset(o.fullWidth, o.fullHeight, o.x, o.y, o.width, o.height)
       else {
         camera.clearViewOffset()
-        camera.aspect = size.width / size.height
+        camera.aspect = canvasAspect(size)
         camera.updateProjectionMatrix()
       }
-      applied.current = o ? `${o.fullWidth}:${o.fullHeight}:${o.y}:${camera.aspect}` : `none:${size.width / size.height}:${camera.aspect}`
+      applied.current = keyOf()
     }
     if (n.top !== goal.top || n.bottom !== goal.bottom) invalidate()
   })
@@ -802,6 +817,7 @@ function Framer(): null {
  */
 function Reach({ sphere }: { sphere: { current: Sphere | null } }): null {
   const shard = useWorkshop((s) => s.current())
+  const size = useThree((s) => s.size)
   const resolved = useResolved(shard ?? null)
   const camera = useThree((s) => s.camera) as PerspectiveCamera
   const controls = useThree((s) => s.controls) as unknown as { target: Vector3; maxDistance: number } | null
@@ -812,7 +828,7 @@ function Reach({ sphere }: { sphere: { current: Sphere | null } }): null {
     if (!controls) return
     const distance = camera.position.distanceTo(controls.target)
     const r = reachRadius(sphere.current, controls.target)
-    controls.maxDistance = nextMaxDistance(reachFor(r, camera.fov, camera.aspect), distance)
+    controls.maxDistance = nextMaxDistance(reachFor(r, camera.fov, canvasAspect(size)), distance)
     const { near, far } = clipPlanes(distance, r)
     // Only on a real change: a still bench must not rebuild its projection every frame.
     if (Math.abs(near - camera.near) > camera.near * 0.05 || Math.abs(far - camera.far) > camera.far * 0.05) {

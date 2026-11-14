@@ -42,7 +42,7 @@ const { mount } = await import('../../test/elementRoot')
 const { Workshop } = await import('../Workshop')
 const { useWorkshop } = await import('../../store/useWorkshop')
 const { escapeTop } = await import('../../hooks/useEscape')
-const { frameOffset, useBenchView } = await import('../benchAxes')
+const { frameOffset, frameZoom, useBenchView } = await import('../benchAxes')
 const { newShard } = await import('sno-core/shards')
 
 const CSS = readFileSync(join(__dirname, '..', '..', 'styles.css'), 'utf8')
@@ -86,7 +86,8 @@ beforeEach(() => {
   // the document's; this renderer has neither, so stand-ins do, once the
   // modules that read the real ones at load are loaded.
   vi.stubGlobal('window', globalThis)
-  if (typeof document === 'undefined') vi.stubGlobal('document', { addEventListener: () => {}, removeEventListener: () => {} })
+  vi.stubGlobal('matchMedia', () => ({ matches: true }))
+  if (typeof document === 'undefined') vi.stubGlobal('document', { addEventListener: () => {}, removeEventListener: () => {}, querySelector: () => null })
   const s = cube()
   useWorkshop.setState({ open: true, shards: [s], currentId: s.id, tool: 'view', selection: [], partSel: [], selectedFaces: [], facePick: [], clip: null, past: [], future: [], openPanel: null, notice: null })
   localStorage.setItem('onosendai:workshop-intro', '1')
@@ -329,11 +330,30 @@ describe('the view ball', () => {
     const top = buttonsIn(menu).find((b) => textOf(b) === 'TOP')!
     ;(top.props.onClick as () => void)()
     expect(useBenchView.getState().request?.kind).toBe('top')
+    // A view picked puts the menu away, so the view is seen.
+    await new Promise((r) => setTimeout(r, 5))
+    expect(byClass(m.all(), 'ws__viewmenu').length).toBe(0)
     await m.unmount()
   })
 })
 
-describe('the bench framing (benchAxes frameOffset)', () => {
+describe('the bench framing (benchAxes frameOffset, frameZoom)', () => {
+  it('keeps the scale the bench always had at rest, and shrinks it by the share a sheet takes', () => {
+    // At rest: the field the canvas shows is the field it always showed.
+    const rest = { top: 62, bottom: 116, rest: 116 }
+    const o = frameOffset(375, 812, rest)!
+    const z = frameZoom(812, o.fullHeight, rest)
+    // Shown field = fov over fullHeight, times height / fullHeight, over zoom: the same as fov over height.
+    expect((812 / o.fullHeight) / z).toBeCloseTo(1, 12)
+    // A sheet up: what fitted in the resting band fits in what is left.
+    const up = { top: 62, bottom: 450, rest: 116 }
+    const s = frameOffset(375, 812, up)!
+    const zs = frameZoom(812, s.fullHeight, up)
+    expect((812 / s.fullHeight) / zs).toBeCloseTo((812 - 62 - 116) / (812 - 62 - 450), 12)
+    // No offset, no zoom.
+    expect(frameZoom(812, 812, { top: 0, bottom: 0, rest: 0 })).toBe(1)
+  })
+
   it('centres the shard in the band the bars and a sheet leave', () => {
     // Nothing covered, or covered evenly: no offset.
     expect(frameOffset(375, 812, { top: 0, bottom: 0 })).toBeNull()

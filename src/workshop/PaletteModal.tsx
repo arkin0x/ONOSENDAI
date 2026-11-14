@@ -85,7 +85,7 @@ export function inkContrast(hex: string): number {
   return Math.max(contrast(LIGHT_INK, bg), contrast(DARK_INK, bg))
 }
 
-export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element {
+export function PaletteModal({ onClose, foldAsk = 0 }: { onClose: () => void; foldAsk?: number }): JSX.Element {
   const shard = useWorkshop((s) => s.current())
   const palettes = useWorkshop((s) => s.palettes)
   const color = useWorkshop((s) => s.color)
@@ -260,6 +260,14 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
   // Escape folds it as the close button does, back into the chip (arkinox,
   // 2026-10-01). Its own confirmations open later, so they close first.
   useEscape('modal', true, fold)
+  // So does a second tap on the color chip in the dock (the workshop counts them).
+  const asked = useRef(foldAsk)
+  useEffect(() => {
+    if (foldAsk === asked.current) return
+    asked.current = foldAsk
+    fold()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [foldAsk])
 
   // A sheet over the dock (workshop redesign, phase 1), standing on the strip
   // with the object in view above it, rather than a modal over everything.

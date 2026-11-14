@@ -273,17 +273,11 @@ function TurnRow({ inHand }: { inHand: number }): JSX.Element | null {
   )
 }
 
-/** What every held row reads from the store, gathered once. */
-function useHeld() {
+/** How many points the selection holds: vertices sharing a spot count once. */
+function useSelectedPoints(): number {
   const shard = useWorkshop((s) => s.current())
-  const tool = useWorkshop((s) => s.tool)
   const selection = useWorkshop((s) => s.selection)
-  const partSel = useWorkshop((s) => s.partSel)
-  const facePick = useWorkshop((s) => s.facePick)
-  const faceHeld = useWorkshop((s) => s.selectedFaces.length > 0)
-  const stacked = useMemo(() => (shard ? stackedSpots(shard) : { spots: 0, points: 0 }), [shard])
-  const selectedPoints = shard ? new Set(selection.map((i) => { const v = shard.vertices[i]; return v ? ticksOf(v).join(',') : '' })).size : 0
-  return { shard, tool, selection, partSel, facePick, faceHeld, stacked, selectedPoints }
+  return shard ? new Set(selection.map((i) => { const v = shard.vertices[i]; return v ? ticksOf(v).join(',') : '' })).size : 0
 }
 
 /**
@@ -293,7 +287,14 @@ function useHeld() {
  * Their keys and their questions (PASTE where, FLIP how much) are unchanged.
  */
 export function HeldActions(): JSX.Element {
-  const { shard, tool, selection, partSel, facePick, faceHeld, stacked, selectedPoints } = useHeld()
+  const shard = useWorkshop((s) => s.current())
+  const tool = useWorkshop((s) => s.tool)
+  const selection = useWorkshop((s) => s.selection)
+  const partSel = useWorkshop((s) => s.partSel)
+  const facePick = useWorkshop((s) => s.facePick)
+  const faceHeld = useWorkshop((s) => s.selectedFaces.length > 0)
+  const stacked = useMemo(() => (shard ? stackedSpots(shard) : { spots: 0, points: 0 }), [shard])
+  const selectedPoints = useSelectedPoints()
   return (
     <>
       {(tool === 'select' || tool === 'face') && <SelectRow inHand={selection.length > 0 || partSel.length > 0 || faceHeld || facePick.length > 0} />}
@@ -311,7 +312,9 @@ export function HeldActions(): JSX.Element {
  * object in its place, and the pad behind MORE.
  */
 export function HeldPad(): JSX.Element | null {
-  const { selection, partSel, selectedPoints } = useHeld()
+  const selection = useWorkshop((s) => s.selection)
+  const partSel = useWorkshop((s) => s.partSel)
+  const selectedPoints = useSelectedPoints()
   if (selection.length === 0 && partSel.length === 0) return null
   return (
     <div className="ws__held">

@@ -6,7 +6,7 @@
  * from the old panel unchanged; the tutorial still opens the workshop on it.
  */
 
-import { memo, useState } from 'react'
+import { memo } from 'react'
 import { ClipboardCopy, CopyPlus } from 'lucide-react'
 import { IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
 import { bounceChip } from '../../lib/walkBounce'
@@ -83,19 +83,24 @@ interface MenuBodyProps {
   /** IMPORT's file picker, kept mounted by the workshop so a closing sheet cannot drop its answer. */
   onImport: () => void
   importing: boolean
+  /** The paste box, open or not and what is typed in it: kept by the workshop, so it survives MENU closing. */
+  paste: { open: boolean; text: string }
+  setPaste: (p: { open: boolean; text: string }) => void
 }
 
 /** MENU's body, inside its sheet. */
-export function MenuBody({ currentId, onOpen, onImport, importing }: MenuBodyProps): JSX.Element {
+export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, setPaste }: MenuBodyProps): JSX.Element {
   const shardCount = useWorkshop((s) => s.shards.length)
   const hasContent = useWorkshop((s) => { const c = s.current(); return c !== null && (c.vertices.length > 0 || (c.parts?.length ?? 0) > 0) })
-  const [pasteOpen, setPasteOpen] = useState(false)
-  const [pasteText, setPasteText] = useState('')
+  const pasteOpen = box.open
+  const pasteText = box.text
+  const setPasteOpen = (open: boolean): void => setPaste({ open, text: open ? box.text : '' })
+  const setPasteText = (text: string): void => setPaste({ open: true, text })
   const w = useWorkshop.getState
   const say = (notice: string): void => useWorkshop.setState({ notice })
   const importText = (text: string): void => {
     const id = w().importText(text)
-    if (id) { setPasteOpen(false); setPasteText(''); say('Pasted as a new object.') }
+    if (id) { setPasteOpen(false); say('Pasted as a new object.') }
     else say('That is not an object.')
   }
   const paste = async (): Promise<void> => {
@@ -118,7 +123,7 @@ export function MenuBody({ currentId, onOpen, onImport, importing }: MenuBodyPro
           <textarea className="workshop__paste-box" value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder='Paste an object here: {"v":2,"name":"…","vertices":[…],…}' aria-label="Object to import" spellCheck={false} />
           <div className="workshop__list-row">
             <button className="workshop__btn" disabled={!pasteText.trim()} onClick={() => importText(pasteText)}>IMPORT</button>
-            <button className="workshop__btn" onClick={() => { setPasteOpen(false); setPasteText('') }}>CANCEL</button>
+            <button className="workshop__btn" onClick={() => setPasteOpen(false)}>CANCEL</button>
           </div>
         </div>
       )}

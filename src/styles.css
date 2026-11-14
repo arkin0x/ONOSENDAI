@@ -3468,8 +3468,9 @@ select.avatars__input option:checked {
   --ws-bottom: calc(var(--ws-strip) + var(--ws-dock));
   /* Where the bottom group stands off the screen's edge: flush on a phone. */
   --ws-bottom-gap: 0px;
-  /* The rail's foot: two 44px keys, a gap, the level's two keys and its value. */
-  --ws-rail-end: calc(var(--ws-top-end) + 10px + 236px);
+  /* The rail's height: two 44px keys, a gap, the level's two keys and its value. */
+  --ws-rail-h: 236px;
+  --ws-rail-end: calc(var(--ws-top-end) + 10px + var(--ws-rail-h));
   --ws-ink: #05070d;
   --ws-surface: rgba(6, 14, 22, 0.86);
   --ws-label: 10px;
@@ -3789,6 +3790,11 @@ select.avatars__input option:checked {
 .ws__strip .benchweld__count { font-size: 9.5px; height: 44px; backdrop-filter: none; }
 .ws__strip .benchpaste { left: 72px; bottom: calc(100% + 8px); z-index: 4; }
 .ws__strip .benchpaste .workshop__btn { min-height: 44px; font-size: var(--ws-label); }
+/* The move pad's words, up to the bars' floor (it stands on the strip until phase 2's handles). */
+.ws__held .benchpad .touchpad__sub,
+.ws__held .benchpad .touchpad__key--connect .touchpad__sub,
+.ws__held .benchpad .touchpad__key--delete .touchpad__sub,
+.ws__held .touchpad__hub { font-size: 9.5px; letter-spacing: 0.04em; }
 /* The palette as a sheet: the whole of it scrolls under its header, the 256
    first and the palette making after them, so the swatches get the room. */
 .palettes.ws__sheet { display: block; overflow-y: auto; overscroll-behavior: contain; }
@@ -3873,8 +3879,10 @@ select.avatars__input option:checked {
   right: 0;
   bottom: var(--ws-dock);
   z-index: 2;
-  max-height: min(42vh, calc(100vh - var(--ws-dock) - var(--ws-rail-end) - 8px));
-  max-height: min(42dvh, calc(100dvh - var(--ws-dock) - var(--ws-rail-end) - 8px));
+  /* Never above the rail's foot, and never shorter than a usable 160px (a
+     landscape phone, until phase 5 gives it its own layout). */
+  max-height: max(160px, min(42vh, calc(100vh - var(--ws-dock) - var(--ws-rail-end) - 8px)));
+  max-height: max(160px, min(42dvh, calc(100dvh - var(--ws-dock) - var(--ws-rail-end) - 8px)));
   display: flex;
   flex-direction: column;
   background: rgba(7, 14, 22, 0.97);
@@ -3885,14 +3893,23 @@ select.avatars__input option:checked {
 }
 /* MENU is navigation: it may take all the height the rail leaves. */
 .ws__sheet[aria-label='Menu'] {
-  max-height: calc(100vh - var(--ws-dock) - var(--ws-rail-end) - 8px);
-  max-height: calc(100dvh - var(--ws-dock) - var(--ws-rail-end) - 8px);
+  max-height: max(160px, calc(100vh - var(--ws-dock) - var(--ws-rail-end) - 8px));
+  max-height: max(160px, calc(100dvh - var(--ws-dock) - var(--ws-rail-end) - 8px));
 }
 .ws__sheet.ws__sheet--tall {
   bottom: 100%;
-  height: calc(100vh - var(--ws-bottom) - var(--ws-rail-end) - 8px);
-  height: calc(100dvh - var(--ws-bottom) - var(--ws-rail-end) - 8px);
+  height: max(200px, calc(100vh - var(--ws-bottom) - var(--ws-rail-end) - 8px));
+  height: max(200px, calc(100dvh - var(--ws-bottom) - var(--ws-rail-end) - 8px));
   max-height: none;
+}
+/* A short screen (an iPhone SE with Safari's bars): the rail folds to two
+   columns, UNDO beside REDO and the level's keys beside each other, so the
+   sheets keep their room. */
+@media (max-height: 700px) {
+  .workshop { --ws-rail-h: 124px; }
+  .ws__rail { display: grid; grid-template-columns: 44px 44px; gap: 6px; }
+  .ws__level { grid-column: 1 / -1; display: grid; grid-template-columns: 44px 44px; gap: 6px; margin-top: 0; }
+  .ws__level-value { grid-column: 1 / -1; grid-row: 2; min-height: 24px; flex-direction: row; gap: 5px; }
 }
 .ws__sheet-head {
   flex: none;
@@ -3955,8 +3972,17 @@ select.avatars__input option:checked {
   padding-top: 8px;
 }
 .ws__sheet-body .workshop__row:first-child { border-top: none; padding-top: 0; }
-/* The object picker's card, its own frame gone: the sheet is the frame now. */
+/* The object picker's card, its own frame gone: the sheet is the frame now,
+   and its words up from the app's modal sizes to the workshop's floor. */
 .objpick-sheet .objpick { width: 100%; padding: 0; background: none; border: 0; box-shadow: none; }
+.objpick-sheet .login__note,
+.objpick-sheet .login__label,
+.objpick-sheet .objpick__meta,
+.objpick-sheet .objpick__tab,
+.objpick-sheet .secret__act,
+.objpick-sheet .avatars__input { font-size: 10.5px; }
+.objpick-sheet .secret__act { min-height: 44px; }
+.objpick-sheet .objpick__list { max-height: none; }
 .ws__panel-title {
   font-size: 9.5px;
   letter-spacing: 0.16em;
@@ -4027,7 +4053,8 @@ select.avatars__input option:checked {
 /* A wide screen: the bottom group floats at the bottom centre, 640px wide,
    and the top bar keeps to the top left instead of spanning the screen. */
 @media (min-width: 900px) {
-  .workshop { --ws-bottom-gap: 12px; --ws-gutter: 12px; }
+  /* Floating off the bottom edge: the home indicator's room is the gap's, not the dock's. */
+  .workshop { --ws-bottom-gap: max(12px, env(safe-area-inset-bottom, 0px)); --ws-gutter: 12px; --ws-safe-b: 0px; }
   .ws__topbar { right: auto; }
   .ws__topbtn { flex: none; width: 72px; }
   .ws__topbtn--close { width: var(--ws-bar); }
@@ -4036,7 +4063,7 @@ select.avatars__input option:checked {
      box the held rows' full-screen catchers are fixed to. */
   .ws__bottom { left: calc(50% - 320px); right: auto; width: 640px; }
   .ws__strip { border: 1px solid var(--border); border-radius: 12px 12px 0 0; }
-  .ws__dock { --ws-safe-b: 0px; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 12px 12px; }
+  .ws__dock { border: 1px solid var(--border); border-top: 0; border-radius: 0 0 12px 12px; }
   .ws__sheet { border: 1px solid var(--border); border-radius: 14px; }
 }
 /* The main pad's nine cells, for the selection: CONNECT and DELETE take the

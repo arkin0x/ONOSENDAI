@@ -56,8 +56,8 @@ function GridPad(): JSX.Element {
   )
 }
 
-/** The views menu under the ball. */
-function ViewMenu(): JSX.Element {
+/** The views menu under the ball. A view picked puts it away, so the view is seen. */
+function ViewMenu({ onClose }: { onClose: () => void }): JSX.Element {
   const division = useWorkshop((s) => s.division)
   const showAvatar = useWorkshop((s) => s.showAvatar)
   const w = useWorkshop.getState
@@ -65,7 +65,7 @@ function ViewMenu(): JSX.Element {
     <div className="ws__viewmenu" role="group" aria-label="Views">
       <div className="ws__viewmenu-views" role="group" aria-label="View">
         {VIEWS.map((v) => (
-          <button key={v.kind} className="ws__viewmenu-btn" title={v.title} onClick={() => requestView({ kind: v.kind })}>{v.label}</button>
+          <button key={v.kind} className="ws__viewmenu-btn" title={v.title} onClick={() => { requestView({ kind: v.kind }); onClose() }}>{v.label}</button>
         ))}
       </div>
       <GridPad />
@@ -84,7 +84,7 @@ function ViewMenu(): JSX.Element {
   )
 }
 
-export function ViewBall({ open, onToggle }: { open: boolean; onToggle: () => void }): JSX.Element {
+export function ViewBall({ open, onToggle, onClose }: { open: boolean; onToggle: () => void; onClose: () => void }): JSX.Element {
   return (
     <div className="ws__view">
       <OrbitSphere
@@ -98,7 +98,7 @@ export function ViewBall({ open, onToggle }: { open: boolean; onToggle: () => vo
       >
         <Compass3D bench pose={benchPose} dirs={BENCH_DIRS} />
       </OrbitSphere>
-      {open && <ViewMenu />}
+      {open && <ViewMenu onClose={onClose} />}
     </div>
   )
 }

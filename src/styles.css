@@ -11558,3 +11558,22 @@ html.tv-broadcast body { overflow: hidden; }
 /* The identity step has the key's warning, the key and its buttons, and nothing in the scene to look at:
    its coach may take a little over half the screen, so SHOW MY KEY and COPY KEY are not below the fold on a phone. */
 .demo.tutorial:has(.straylight-id) { max-height: 56vh; max-height: 56dvh; }
+
+/* ITEMS in the menu: two buttons, KEY ITEMS and OTHER LOOT, each opening its
+   modal (owner, 2026-11-14). Each button the panel's width, sized for a thumb. */
+.items-kinds { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px; }
+.items-kinds__go { height: 36px; font-size: 10px; text-align: left; padding: 0 12px; }
+/* The modal they open: tabs, then one scroller holding the rows (no list
+   scrolling inside it), PASTE kept under it. */
+.items-modal__card { max-height: min(84vh, 760px); max-height: min(calc(100dvh - 32px), 760px); }
+.items-modal__scroll { overflow-y: auto; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.items-modal .held__list { max-height: none; overflow-y: visible; flex: 0 0 auto; }
+.items-modal .held__views { margin: 0; }
+.items-modal__note { margin: 0; font-size: 10px; line-height: 1.5; color: var(--dim); }
+.items-modal .held__views { align-items: center; }
+.held__tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.held__clearall { margin-left: auto; }
+/* FEED: who listed it, their picture and name one tap to their profile; NOT FOUND in the warning colour. */
+.items-feed__who { max-width: 100%; min-width: 0; display: inline-flex; align-items: center; gap: 3px; padding: 0; font: inherit; color: inherit; background: none; border: 0; cursor: pointer; vertical-align: middle; }
+.items-feed__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.items-feed__unfound { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }

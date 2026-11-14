@@ -5,13 +5,15 @@
  * you": it is the part of cyberspace you are in, and the chip says so with
  * that word. Tap it for the names; TARGET makes one of them a target, which
  * is the existing path to their chain, their marker at any distance, and the
- * scene following them.
+ * scene following them. Someone you already target is still here, so is
+ * still counted and listed, their button reading TARGETED in their color
+ * (tap to stop targeting, as everywhere else that button appears).
  */
 
 import { useEffect, useState } from 'react'
 import { Users } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
-import { sectorKey, usePresence, type Person } from '../store/usePresence'
+import { sectorKey, sectorPeople, usePresence, type Person } from '../store/usePresence'
 import { useChat } from '../store/useChat'
 import { useProfile } from '../hooks/useProfile'
 import { ProfilePic } from './ProfileBadge'
@@ -20,6 +22,7 @@ import type { Position } from '../lib/space'
 import type { Plane } from 'cyberspace-core'
 import { useEscape } from '../hooks/useEscape'
 import { useMutes } from '../store/useMutes'
+import { targetColor } from '../lib/targets'
 
 function ageLabel(at: number, now: number): string {
   const s = Math.max(0, now - at)
@@ -32,6 +35,7 @@ function ageLabel(at: number, now: number): string {
 function Row({ person, now }: { person: Person; now: number }): JSX.Element {
   const profile = useProfile(person.pubkey)
   const me = useCyberspace((s) => s.position)
+  const on = useCyberspace((s) => !!s.targets[person.pubkey])
   const name = profile?.name ?? `${person.pubkey.slice(0, 12)}…`
   const d = [person.position.x - me.x, person.position.y - me.y, person.position.z - me.z].map((v) => (v < 0n ? -v : v))
   const far = d.reduce((a, b) => (a > b ? a : b), 0n)
@@ -42,7 +46,13 @@ function Row({ person, now }: { person: Person; now: number }): JSX.Element {
         <span className="presence__name">{name}</span>
         <span className="presence__meta">{formatDistance(far)} away · {ageLabel(person.lastActive, now)}</span>
       </span>
-      <button className="avatars__go presence__target" onClick={() => useCyberspace.getState().addTarget(person.pubkey, profile?.name ?? null)}>TARGET</button>
+      <button
+        className={`targets__toggle presence__target ${on ? 'is-on' : ''}`}
+        style={on ? { color: targetColor(person.pubkey), borderColor: targetColor(person.pubkey) } : undefined}
+        aria-pressed={on}
+        title={on ? 'Stop targeting' : 'Target'}
+        onClick={() => useCyberspace.getState().toggleTarget(person.pubkey, profile?.name ?? null)}
+      >{on ? 'TARGETED' : 'TARGET'}</button>
     </li>
   )
 }
@@ -86,7 +96,6 @@ export function PresenceChip(): JSX.Element | null {
   const blocked = useMutes((s) => s.muted.pubkeys)
   const loading = usePresence((s) => s.loading)
   const lastArrivalAt = usePresence((s) => s.lastArrivalAt)
-  const targets = useCyberspace((s) => s.targets)
   const me = useCyberspace((s) => s.identity.pubkey)
   const muted = useChat((s) => s.muted)
   // "In this sector" means yours, where you stand and are looking (arkinox,
@@ -106,7 +115,8 @@ export function PresenceChip(): JSX.Element | null {
     const t = window.setTimeout(() => setLit(false), ARRIVAL_MS)
     return () => window.clearTimeout(t)
   }, [lastArrivalAt])
-  const others = Object.values(people).filter((p) => p.pubkey !== me && !targets[p.pubkey] && !blocked.has(p.pubkey)).sort((a, b) => b.lastActive - a.lastActive)
+  // Your targets count and list too: who is nearby is not who you follow (arkinox, 2026-11-14).
+  const others = sectorPeople(people, me, blocked).sort((a, b) => b.lastActive - a.lastActive)
   // Gone when there is nothing to say and nobody is reading it. Open, it
   // stays until closed, whatever the scan does meanwhile.
   if (away) return null

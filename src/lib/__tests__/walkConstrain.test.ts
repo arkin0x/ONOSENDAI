@@ -217,7 +217,7 @@ describe('placed objects keep their own setting (§1.10)', () => {
   })
 
   it('an object with anim stops no walker yet (design note §9.1: until riding lands), nor anything it places', () => {
-    const spin = { anim: [['turn', 'y', 30, 1, 0]] }
+    const spin = { anim: [['turn', 'y', 1, 20, 0]] }
     const moving = withConstrain({ ...wall(), extra: { ...wall().extra, ...spin } }, 'all')
     expect(firstHit(wallMesh(wall(), []), [0, 0, 0], 0, 1, 10, 1e-6)).toBeCloseTo(3, 12)
     expect(firstHit(wallMesh(moving, []), [0, 0, 0], 0, 1, 10, 1e-6)).toBeNull()

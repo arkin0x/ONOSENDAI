@@ -39,9 +39,8 @@ import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
 import { AnimClock, movingOn, reducedMotionNow } from '../scene/animMotion'
 import { animOf, hasAnim } from '../lib/anim'
-import { cycleBlocks } from '../lib/animEdit'
-import { pacedHeight } from '../lib/pacedClock'
-import { pacedEnds, type PacedReading } from '../lib/pacedSource'
+import { cycleSeconds } from '../lib/animEdit'
+import type { ClockReading } from '../lib/worldClock'
 import { useAnimPreview } from '../store/animPreview'
 import { OVERLAY_ORDER } from '../scene/shardFaces'
 import { ShardLights } from '../scene/shardLight'
@@ -815,25 +814,22 @@ function AnimWake(): null {
 
 /**
  * The bench's own clock for moving objects (scene/animMotion.ts AnimClock):
- * the motion editor's preview (store/animPreview.ts). Playing, it is the paced
- * clock, approximate if need be (a preview need not wait for headers); paused,
- * the height it was paused at; scrubbed, a share of the longest motion's
- * cycle, a position chosen by hand and so drawn under reduced motion too.
+ * the motion editor's preview (store/animPreview.ts). Playing, it is the
+ * world clock; paused, the moment it was paused at; scrubbed, a share of the
+ * longest motion's cycle, a time chosen by hand and so drawn under reduced
+ * motion too.
  */
-const benchReading: PacedReading = { beta: 0, known: true, secondsPerBlock: 0, version: 0, nowS: 0, t: 0, chosen: false }
-export function benchClock(shared: PacedReading): PacedReading {
+const benchReading: ClockReading = { t: 0, version: 0, nowS: 0, chosen: false }
+export function benchClock(shared: ClockReading): ClockReading {
   const p = useAnimPreview.getState()
   benchReading.version = shared.version
   benchReading.nowS = shared.nowS
-  benchReading.t = shared.t
-  benchReading.secondsPerBlock = shared.secondsPerBlock
-  benchReading.known = true
   benchReading.chosen = p.scrub !== null
   if (p.scrub !== null) {
     const cur = useWorkshop.getState().current()
-    benchReading.beta = p.scrub * cycleBlocks(cur ? animOf(cur) : [])
-  } else if (p.on && !p.playing) benchReading.beta = p.frozen
-  else benchReading.beta = pacedHeight(shared.t, pacedEnds())
+    benchReading.t = p.scrub * cycleSeconds(cur ? animOf(cur) : [])
+  } else if (p.on && !p.playing) benchReading.t = p.frozen
+  else benchReading.t = shared.t
   return benchReading
 }
 

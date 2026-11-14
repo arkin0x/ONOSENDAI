@@ -1,19 +1,18 @@
 /**
  * animEdit.test.ts: the motion editor's rules (lib/animEdit.ts). Presets
  * write the canonical motions, sized for the object; the controls' units
- * convert both ways (cycles a minute <-> c/b a block in lowest terms, gibsons
+ * convert both ways (cycles a minute <-> c cycles every b seconds in lowest terms, gibsons
  * <-> ticks at the object's unit, the workshop's Z <-> the field's Z); every
  * limit of DECK-0003 §1.14 holds with a plain message; and whatever an edit
  * makes, a reader reads it back unchanged.
  */
 import { describe, expect, it } from 'vitest'
-import { readAnim, readMotion, writeMotion, MAX_RATE, REACH, type Motion } from '../anim'
+import { readAnim, readMotion, writeMotion, REACH, type Motion } from '../anim'
 import {
-  addPoint, addPreset, amountOf, bestRational, cycleBlocks, gibsonsOf, LIMITS, listOf, moveMotion, movePoint, objectReach, perMinute, pointsOf, PRESETS,
+  addPoint, addPreset, amountOf, cycleSeconds, gibsonsOf, LIMITS, listOf, moveMotion, movePoint, objectReach, perMinute, pointsOf, PRESETS,
   rateFor, rawOf, removeMotion, removePoint, reverse, setAmount, setAxis, setPhase, setPoint, setRest, setSpeed, stepSpeed, ticksOf, type Edited,
 } from '../animEdit'
 
-const T = 660.721 // seconds a paced block, about the pace of November 2026
 const m = (raw: unknown): Motion => readMotion(raw)!
 /** What a reader reads back from an edit's list, as written. */
 const roundTrip = (e: Edited): unknown[][] => rawOf(listOf(rawOf(e.list)))
@@ -21,13 +20,13 @@ const roundTrip = (e: Edited): unknown[][] => rawOf(listOf(rawOf(e.list)))
 describe('presets write the canonical motions', () => {
   const size = 600
   const want: Record<string, unknown[]> = {
-    spin: ['turn', 'y', 30, 1, 0],
-    bob: ['slide', 'y', 75, 120, 1, 0],
-    pendulum: ['swing', 'x', 30, 60, 1, 0],
-    slide: ['slide', 'x', 600, 40, 1, 0],
-    elevator: ['lift', 'y', 1200, 25, 20, 1, 0],
-    orbit: ['orbit', 'z', 600, 20, 1, 0],
-    path: ['path', 10, 1, 0, [600, 0, 0, 1], [0, 0, 0, 1]],
+    spin: ['turn', 'y', 1, 20, 0],
+    bob: ['slide', 'y', 75, 1, 4, 0],
+    pendulum: ['swing', 'x', 30, 1, 10, 0],
+    slide: ['slide', 'x', 600, 1, 15, 0],
+    elevator: ['lift', 'y', 1200, 25, 1, 30, 0],
+    orbit: ['orbit', 'z', 600, 1, 30, 0],
+    path: ['path', 1, 60, 0, [600, 0, 0, 1], [0, 0, 0, 1]],
   }
   for (const p of PRESETS) {
     it(`${p.label} writes ${JSON.stringify(want[p.id])}`, () => {
@@ -55,36 +54,29 @@ describe('presets write the canonical motions', () => {
   })
 })
 
-describe('speed: cycles a minute <-> c/b a block, lowest terms', () => {
-  it('shows c/b as cycles a minute at today\'s pace', () => {
-    expect(perMinute({ c: 30, b: 1 }, T)).toBeCloseTo(2.724, 3)
-    expect(perMinute({ c: -1, b: 4 }, 600)).toBeCloseTo(-0.025, 6)
+describe('speed: cycles a minute <-> c cycles every b seconds, lowest terms', () => {
+  it('shows c/b seconds as cycles a minute', () => {
+    expect(perMinute({ c: 1, b: 20 })).toBe(3)
+    expect(perMinute({ c: -1, b: 4 })).toBe(-15)
   })
-  it('stores a typed speed as the simplest fraction in lowest terms within half a percent', () => {
-    for (const perMin of [0.1, 0.5, 1, 2.72, 3, 10, 25, 50]) {
-      const r = rateFor(perMin, T)
-      expect(Number.isInteger(r.c) && Number.isInteger(r.b)).toBe(true)
-      expect(r.b).toBeGreaterThanOrEqual(1)
-      expect(Math.abs(perMinute(r, T) - perMin)).toBeLessThanOrEqual(perMin * 0.005 + 1e-9)
-      const g = (a: number, b: number): number => (b ? g(b, a % b) : a)
-      expect(g(Math.abs(r.c), r.b)).toBe(1)
-    }
-    expect(rateFor(-3, T).c).toBeLessThan(0)
+  it('stores exactly the speed shown, to two decimals, in lowest terms: 3 a minute is 1 every 20 s', () => {
+    expect(rateFor(3)).toEqual({ c: 1, b: 20 })
+    expect(rateFor(2.5)).toEqual({ c: 1, b: 24 })
+    expect(rateFor(0.1)).toEqual({ c: 1, b: 600 })
+    expect(rateFor(2.72)).toEqual({ c: 17, b: 375 })
+    expect(rateFor(-3)).toEqual({ c: -1, b: 20 })
+    for (const perMin of [0.01, 0.5, 1, 2.72, 3, 10, 25, 59.99]) expect(perMinute(rateFor(perMin))).toBeCloseTo(perMin, 9)
   })
-  it('clamps to 600 a block with a message, and never stops', () => {
-    expect(rateFor(10_000, T)).toEqual({ c: MAX_RATE, b: 1, note: LIMITS.speed })
-    expect(rateFor(0, T)).toEqual({ c: 1, b: 1000, note: LIMITS.slowest })
-  })
-  it('the stepper\'s round speeds land on short fractions; retyping the speed shown keeps the fraction', () => {
-    expect(rateFor(3, T)).toEqual({ c: 33, b: 1 })
-    expect(rateFor(0.1, T)).toEqual({ c: 11, b: 10 })
-    expect(rateFor(2.72, T, { c: 30, b: 1 })).toEqual({ c: 30, b: 1 })
-    expect(rawOf(setSpeed([m(['turn', 'y', 30, 1, 0])], 0, 2.72, T).list)).toEqual([['turn', 'y', 30, 1, 0]])
+  it('clamps to one a second (60 a minute) with a message, and never stops', () => {
+    expect(rateFor(10_000)).toEqual({ c: 1, b: 1, note: LIMITS.speed })
+    expect(LIMITS.speed).toBe('Top speed is 60 a minute')
+    expect(rateFor(0)).toEqual({ c: 1, b: 1_000_000, note: LIMITS.slowest })
+    expect(rateFor(-0)).toMatchObject({ c: -1 })
   })
   it('warns about a motion that may flicker more than 3 times a second (§1.14)', () => {
-    expect(setSpeed([m(['turn', 'y', 30, 1, 0])], 0, 50, T).note).toBeUndefined()
+    expect(setSpeed([m(['turn', 'y', 1, 20, 0])], 0, 50).note).toBeUndefined()
     const path = [m(['path', 1, 1, 0, [1, 0, 0, 1], [2, 0, 0, 1], [3, 0, 0, 1], [4, 0, 0, 1], [0, 0, 0, 1]])]
-    expect(setSpeed(path, 0, 50, T).note).toBe(LIMITS.flicker)
+    expect(setSpeed(path, 0, 50).note).toBe(LIMITS.flicker)
   })
   it('an elevator crossing to or from Z keeps the travel shown', () => {
     const list = [m(['lift', 'y', 240, 10, 1, 1, 0])]
@@ -96,21 +88,16 @@ describe('speed: cycles a minute <-> c/b a block, lowest terms', () => {
     const list = [m(['path', 1, 1, 0, [120, 0, 0, 2], [0, 0, 0, 1]])]
     expect(setPoint(list, 0, 1, 'time', 2, 0).note).toBe(LIMITS.ratio)
   })
-  it('best rational: exact for simple fractions', () => {
-    expect(bestRational(0.25)).toEqual({ c: 1, b: 4 })
-    expect(bestRational(30)).toEqual({ c: 30, b: 1 })
-    expect(bestRational(2 / 3)).toEqual({ c: 2, b: 3 })
-  })
   it('the steppers walk a list of round speeds, keeping the direction', () => {
     expect(stepSpeed(2.72, 1)).toBe(3)
     expect(stepSpeed(2.72, -1)).toBe(2.5)
     expect(stepSpeed(-2.72, 1)).toBe(-3)
     expect(stepSpeed(50, 1)).toBe(50)
   })
-  it('setSpeed and reverse write c/b', () => {
-    const list = [m(['turn', 'y', 30, 1, 0])]
-    expect(rawOf(setSpeed(list, 0, perMinute({ c: 1, b: 2 }, T), T).list)).toEqual([['turn', 'y', 1, 2, 0]])
-    expect(rawOf(reverse(list, 0).list)).toEqual([['turn', 'y', -30, 1, 0]])
+  it('setSpeed and reverse write c/b seconds', () => {
+    const list = [m(['turn', 'y', 1, 20, 0])]
+    expect(rawOf(setSpeed(list, 0, 6).list)).toEqual([['turn', 'y', 1, 10, 0]])
+    expect(rawOf(reverse(list, 0).list)).toEqual([['turn', 'y', -1, 20, 0]])
   })
 })
 
@@ -189,14 +176,14 @@ describe('the list and a path\'s points', () => {
     // Written with no common factor: 1000 and 2 are 500 and 1.
     expect(rawOf(capped.list)[0].slice(4).map((p) => (p as number[])[3])).toEqual([500, 1])
   })
-  it('the scrub runs through the longest motion\'s cycle', () => {
-    expect(cycleBlocks([{ c: 30, b: 1 }, { c: 1, b: 4 }])).toBe(4)
-    expect(cycleBlocks([])).toBe(1)
+  it('the scrub runs through the longest motion\'s cycle, in seconds', () => {
+    expect(cycleSeconds([{ c: 1, b: 20 }, { c: 1, b: 4 }])).toBe(20)
+    expect(cycleSeconds([])).toBe(1)
   })
   it('whatever an edit makes, a reader reads back unchanged', () => {
     let list: Motion[] = []
     for (const id of ['spin', 'elevator', 'path', 'orbit'] as const) list = addPreset(list, id, 777).list
-    list = setSpeed(list, 1, 7.3, T).list
+    list = setSpeed(list, 1, 7.3).list
     list = setAmount(list, 3, 9.75, 1).list
     list = addPoint(list, 2).list
     list = setPoint(list, 2, 1, 'y', -4.5, 0).list

@@ -1,13 +1,14 @@
 /**
- * anim.ts: an object's perpetual motion on the shared paced clock (DECK-0003
- * §1.14 `anim`, spec PR #107; design note anim-block-paced-design-2026-11-10).
+ * anim.ts: an object's perpetual motion on the world clock (DECK-0003 §1.14
+ * `anim`, spec PR #107 as revised 2026-11-14: Unix time, not Bitcoin).
  *
  * `anim` is an optional payload field: a list of motions, each one JSON
  * array, a word and then integers (and an axis letter). Every motion ends in
- * the same three integers, `c` cycles every `b` paced blocks with a phase
- * offset of `φ` whole degrees, so its phase at paced height β is
+ * the same three integers, `c` cycles every `b` seconds with a phase offset
+ * of `φ` whole degrees, so its phase at Unix time t (seconds, corrected by
+ * lib/worldClock.ts) is
  *
- *   u = frac(c × β / b + φ / 360)
+ *   u = frac(c × t / b + φ / 360)
  *
  * and its pose is a pure function of u. The motions compose in the order
  * written, the first innermost, about the object's own origin, in its own
@@ -16,7 +17,7 @@
  * frame, which keeps cyberspace axes (Z negated from the wire); it IS the
  * render frame times 120 (sno-core toRender), so a motion's matrix sits
  * directly above a mesh drawn in the render frame. Nothing here knows the
- * clock (lib/pacedClock.ts) or the screen (scene/ShardMesh.tsx).
+ * clock (lib/worldClock.ts) or the screen (scene/ShardMesh.tsx).
  *
  * THE MOTION TABLE (MOTIONS below) is the only place a motion is defined:
  * its word, how its parameters are read, and its pose at a phase. The words
@@ -26,7 +27,7 @@
  *
  * Reader rules kept here (§1.14): only the first four entries are read; an
  * entry that is malformed, has an unknown word, has an integer out of its
- * range, or is faster than 600 cycles per paced block is ignored (held still)
+ * range, or is faster than one cycle a second is ignored (held still)
  * and the rest still apply; the payload is never rejected for `anim`. A
  * writer writes c/b in lowest terms and a path's weights with no common
  * factor (withAnim). Like `constrain` and `bounce`, the field rides in sno-core's
@@ -39,10 +40,14 @@ import type { ShardModel } from 'sno-core/shards'
 export const ANIM_FIELD = 'anim'
 /** Motions read per object; entries past this are ignored (§1.14). */
 export const MAX_MOTIONS = 4
-/** Fastest rate a motion may have, cycles per paced block; a faster entry is ignored (a strobe, §1.14). */
-export const MAX_RATE = 600
-/** Largest `b`, paced blocks. */
-export const MAX_BLOCKS = 1_000_000
+/**
+ * Fastest rate a motion may have, cycles a second: |c| ≤ b. A faster entry is
+ * ignored (a strobe, §1.14). One a second is the old cap of 600 cycles per
+ * ten-minute block, kept as it was.
+ */
+export const MAX_PER_SECOND = 1
+/** Largest `b`, seconds: about eleven and a half days for one cycle. */
+export const MAX_SECONDS = 1_000_000
 /** Largest distance in ticks (the 64-unit position bound of §1.8). */
 export const REACH = 64 * 120
 /** Largest path leg weight. */
@@ -59,9 +64,9 @@ const AXIS_INDEX: Readonly<Record<Axis, 0 | 1 | 2>> = { x: 0, y: 1, z: 2 }
 
 /** The shared rate and phase of every motion. */
 export interface Rate {
-  /** Cycles every `b` paced blocks; negative runs the cycle backward. */
+  /** Cycles every `b` seconds; negative runs the cycle backward. */
   c: number
-  /** Paced blocks, at least 1. */
+  /** Seconds, at least 1. */
   b: number
   /** Phase offset, whole degrees 0..359. */
   phi: number
@@ -92,10 +97,10 @@ export interface MotionPose {
 const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v)
 const isAxis = (v: unknown): v is Axis => typeof v === 'string' && (AXES as readonly string[]).includes(v)
 
-/** The rate from the last three numbers of an entry, or null: c nonzero, b 1..1,000,000, |c| ≤ 600 b, φ 0..359. */
+/** The rate from the last three numbers of an entry, or null: c nonzero, b 1..1,000,000 seconds, |c| ≤ b, φ 0..359. */
 function readRate(c: unknown, b: unknown, phi: unknown): Rate | null {
   if (!isInt(c) || !isInt(b) || !isInt(phi)) return null
-  if (c === 0 || b < 1 || b > MAX_BLOCKS || Math.abs(c) > MAX_RATE * b || phi < 0 || phi > 359) return null
+  if (c === 0 || b < 1 || b > MAX_SECONDS || Math.abs(c) > MAX_PER_SECOND * b || phi < 0 || phi > 359) return null
   return { c, b, phi }
 }
 
@@ -272,11 +277,12 @@ export function hasAnim(s: Pick<ShardModel, 'extra'>): boolean {
 }
 
 /**
- * u = frac(c × β / b + φ / 360), in [0, 1). β's whole part is reduced modulo
- * b first, with exact integer arithmetic where it is safe, so the phase keeps
- * its precision at any height (§1.14).
+ * u = frac(c × t / b + φ / 360), in [0, 1), t in Unix seconds. t's whole part
+ * is reduced modulo b first, with exact integer arithmetic, so the phase
+ * keeps its precision at any time (about 1.8 billion seconds today).
  */
-export function phaseAt(r: Rate, beta: number): number {
+export function phaseAt(r: Rate, t: number): number {
+  const beta = t
   const whole = Math.floor(beta)
   const frac = beta - whole
   const b = r.b

@@ -1,30 +1,29 @@
 /**
- * animMotion.ts: an object's `anim` drawn on the shared paced clock
- * (lib/anim.ts for the motions, lib/pacedClock.ts and lib/pacedSource.ts for
- * the clock). Used by ShardMesh, so a shard moves wherever it is drawn: in
+ * animMotion.ts: an object's `anim` drawn on the world clock (lib/anim.ts for
+ * the motions, lib/worldClock.ts for the clock: Unix time, corrected against
+ * the relay's). Used by ShardMesh, so a shard moves wherever it is drawn: in
  * the world, as a part of another object, as the model an item wears, and in
  * a card's turning preview (inside its turntable).
  *
  * Each frame: one shared clock reading, each motion's phase, the per-object
- * ease when what the clock knows changes (§2.4), the motions composed into
+ * ease when the clock's correction changes (§1.14), the motions composed into
  * one matrix, and that matrix written into a group above the mesh. The
  * motion is in the object's own model frame; a world shard's geometry is
  * already turned by its pose (ShardMesh `pose`, lib/pose.ts renderPose G),
  * so the group carries G · A · Gᵀ, which moves the posed geometry exactly as
  * A moves the unposed one. Nothing is allocated per frame.
  *
- * Holds still at phase 0 (the motion's rest pose; for turn, swing, slide and
- * lift that is the object as written) whenever the viewer prefers reduced
- * motion, or β is not known yet (pacedSource: never guess). Leaving either
- * eases into the true pose, the shortest way round, as a clock change does.
+ * Holds still at the rest pose (the object as written) whenever the viewer
+ * prefers reduced motion. Leaving it eases into the true pose, the shortest
+ * way round, as a clock correction does. Nothing waits on the network: the
+ * clock is the device's until a correction is measured.
  */
 
 import { createContext, createElement, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Plane, Vector3, type Group } from 'three'
 import { composeRender, motionPose, newPose, phaseAt, smoothstep, type Motion, type MotionPose } from '../lib/anim'
-import { easeSeconds, wrapHalf } from '../lib/pacedClock'
-import { noteMoving, readPaced, type PacedReading } from '../lib/pacedSource'
+import { noteMoving, readClock, type ClockReading } from '../lib/worldClock'
 import type { Box } from '../lib/clip'
 
 // ---- reduced motion, one listener for the whole page -------------------------
@@ -62,50 +61,57 @@ export interface PhaseState {
   err: Float64Array
   start: Float64Array
   len: Float64Array
-  /** What the phases were last worked from: the clock's version, whether known, whether held by reduced motion; -1 before the first frame. */
+  /** What the phases were last worked from: the clock's version, and whether held by reduced motion; -1 before the first frame. */
   version: number
-  known: boolean
   held: boolean
 }
 
 export function newPhaseState(n: number): PhaseState {
-  return { shown: new Float64Array(n), err: new Float64Array(n), start: new Float64Array(n), len: new Float64Array(n), version: -1, known: false, held: false }
+  return { shown: new Float64Array(n), err: new Float64Array(n), start: new Float64Array(n), len: new Float64Array(n), version: -1, held: false }
 }
 
 /**
  * The phase each motion is shown at, written into `st.shown`. Pure but for
  * `st`: the eases live there.
  *
- * - Reduced motion, or β not known: the rest pose at once, no ease
- *   (`st.held`; the caller draws the object as written, DECK-0003 §1.14),
- *   unless the reading is a position the viewer chose by hand (the
- *   workshop's scrub). Holding still while the clock is not known is the
- *   owner's rule for ONOSENDAI ("never guess"); the spec lets a reader run on
- *   at the last pace it knows instead.
- * - Otherwise the true phase, eased into whenever the clock's version or
- *   knowledge changed since the last frame (§2.4): the error wrapped to the
- *   shortest way round, over min(3 s, max(0.5 s, |e| × P)).
+ * - Reduced motion: the rest pose at once, no ease (`st.held`; the caller
+ *   draws the object as written, DECK-0003 §1.14), unless the reading is a
+ *   time the viewer chose by hand (the workshop's scrub).
+ * - Otherwise the true phase, eased into whenever the clock's correction
+ *   changed since the last frame, or reduced motion was just turned off: the
+ *   error wrapped to the shortest way round, over min(3 s, max(0.5 s, |e| × P)),
+ *   P the cycle's length in seconds.
  * - The first frame draws the true pose at once.
  */
-export function stepPhases(motions: readonly Motion[], r: PacedReading, reduced: boolean, st: PhaseState): void {
+/** The phase error wrapped into [−0.5, 0.5): the shortest way round a cycle. */
+export function wrapHalf(e: number): number {
+  return e - Math.floor(e + 0.5)
+}
+
+/** How long an ease of `err` cycles takes on a cycle of `period` seconds: min(3, max(0.5, |e| × P)). */
+export function easeSeconds(err: number, period: number): number {
+  const p = Number.isFinite(period) && period > 0 ? period : 0
+  return Math.min(3, Math.max(0.5, Math.abs(err) * p))
+}
+
+export function stepPhases(motions: readonly Motion[], r: ClockReading, reduced: boolean, st: PhaseState): void {
   const n = motions.length
-  if ((reduced || !r.known) && !r.chosen) {
+  if (reduced && !r.chosen) {
     for (let i = 0; i < n; i++) { st.shown[i] = 0; st.err[i] = 0; st.len[i] = 0 }
     st.held = true
     st.version = r.version
-    st.known = r.known
     return
   }
   const first = st.version === -1
   // A position chosen by hand (a scrub) is drawn where it was put, never eased into.
-  const changed = !first && !r.chosen && (st.version !== r.version || st.known !== r.known || st.held)
+  const changed = !first && !r.chosen && (st.version !== r.version || st.held)
   if (r.chosen) for (let i = 0; i < n; i++) st.len[i] = 0
   for (let i = 0; i < n; i++) {
     const m = motions[i]
-    const truth = phaseAt(m, r.beta)
+    const truth = phaseAt(m, r.t)
     if (changed) {
       const e = wrapHalf(truth - st.shown[i])
-      const period = m.c !== 0 ? (r.secondsPerBlock * m.b) / Math.abs(m.c) : 0
+      const period = m.b / Math.abs(m.c)
       st.err[i] = e
       st.start[i] = r.nowS
       st.len[i] = e === 0 ? 0 : easeSeconds(e, period)
@@ -120,7 +126,6 @@ export function stepPhases(motions: readonly Motion[], r: PacedReading, reduced:
     st.shown[i] = shown
   }
   st.version = r.version
-  st.known = r.known
   st.held = false
 }
 
@@ -170,9 +175,9 @@ function wallsOf(b: Box): Plane[] {
  * A canvas's own say over the clock its moving objects read: the workshop's
  * bench preview (play, pause, scrub). Given the frame's shared reading, it
  * returns the reading to draw by (its own object, rewritten in place). Absent
- * everywhere else, where the shared paced clock is the only clock.
+ * everywhere else, where the world clock is the only clock.
  */
-export type ClockOverride = (shared: PacedReading) => PacedReading
+export type ClockOverride = (shared: ClockReading) => ClockReading
 export const AnimClock = createContext<ClockOverride | null>(null)
 
 /** A region box's walls, in the frame it is given in, and their world-space twins the materials read (kept current by AnimGroups). */
@@ -219,7 +224,7 @@ export function AnimGroups({ motions, pose, walls, children }: { motions: readon
   useFrame((state) => {
     const group = inner.current
     if (!group) return
-    const r = readPaced(state.clock, state.clock.elapsedTime)
+    const r = readClock(state.clock, state.clock.elapsedTime)
     stepPhases(motions, clock ? clock(r) : r, reducedMotionNow(), st)
     if (st.held) group.matrix.identity()
     else animMatrix(motions, st.shown, poses, g, gT, scratch, group.matrix.elements)

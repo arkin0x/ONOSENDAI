@@ -11,7 +11,7 @@
  *     sized for the object.
  *   - The list: up to four motions in order (the first innermost), each with
  *     move up, move down and remove, and its own controls: AXIS, SPEED in
- *     cycles a minute at today's pace (stored as c/b a block), REVERSE, its
+ *     cycles a minute (stored as c cycles every b seconds), REVERSE, its
  *     amount, REST for an elevator, START (the phase), and a path's points.
  *   - PLAY / PAUSE and a scrub through one cycle, drawn on the bench.
  *
@@ -28,8 +28,6 @@ import {
   addPoint, addPreset, amountKind, amountOf, listOf, mayFlicker, MOTION_NAMES, moveMotion, movePoint, objectReach, perMinute, pointsOf, PRESETS,
   rawOf, removeMotion, removePoint, reverse, setAmount, setAxis, setPhase, setPoint, setRest, setSpeed, showNumber, stepSpeed, type Edited, type PresetId, type ShownPoint,
 } from '../lib/animEdit'
-import { pacedSecondsPerBlock } from '../lib/pacedClock'
-import { pacedEnds } from '../lib/pacedSource'
 import { reducedMotionNow } from '../scene/animMotion'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { useAnimPreview } from '../store/animPreview'
@@ -84,7 +82,6 @@ export function AnimEditor(): JSX.Element {
   const bind = useRepeatable({ scrollSafe: true })
   const [note, setNote] = useState<string | null>(null)
   const currentId = useWorkshop((s) => s.currentId)
-  const pace = pacedSecondsPerBlock(Date.now() / 1000, pacedEnds())
   const reduced = reducedMotionNow()
   const rail = useRef<HTMLDivElement>(null)
   const scrubbing = useRef(false)
@@ -167,7 +164,7 @@ export function AnimEditor(): JSX.Element {
       {list.length >= MAX_MOTIONS && <div className="ws__explain">Up to {MAX_MOTIONS} motions</div>}
 
       {list.map((m, i) => (
-        <MotionCard key={keys.current[i]} m={m} i={i} count={list.length} unit={unit} pace={pace} bind={bind} apply={apply} now={now} />
+        <MotionCard key={keys.current[i]} m={m} i={i} count={list.length} unit={unit} bind={bind} apply={apply} now={now} />
       ))}
 
       {note && <div className="ws__explain ws__anim-note" role="status">{note}</div>}
@@ -181,14 +178,14 @@ type Bind = ReturnType<typeof useRepeatable>
 type Apply = (e: Edited, keyed?: (k: number[]) => number[]) => void
 const swap = (i: number, j: number) => (k: number[]): number[] => { if (j >= 0 && j < k.length) [k[i], k[j]] = [k[j], k[i]]; return k }
 
-function MotionCard({ m, i, count, unit, pace, bind, apply, now }: { m: Motion; i: number; count: number; unit: number; pace: number; bind: Bind; apply: Apply; now: () => Motion[] }): JSX.Element {
+function MotionCard({ m, i, count, unit, bind, apply, now }: { m: Motion; i: number; count: number; unit: number; bind: Bind; apply: Apply; now: () => Motion[] }): JSX.Element {
   const name = MOTION_NAMES[m.word] ?? m.word.toUpperCase()
-  const speed = perMinute(m, pace)
+  const speed = perMinute(m)
   const kind = amountKind(m)
   const amountLabel = m.word === 'swing' ? 'REACH' : m.word === 'orbit' ? 'RADIUS' : m.word === 'lift' ? 'TRAVEL' : 'REACH'
   const amount = amountOf(m, unit)
   const unitStep = m.word === 'swing' ? 5 : 0.25 * 2 ** unit
-  const rate = `${Math.abs(m.c)}${m.b === 1 ? '' : `/${m.b}`} a block`
+  const rate = `${Math.abs(m.c)} every ${m.b} s`
   return (
     <div className="ws__anim-card" role="group" aria-label={`Motion ${i + 1}: ${name}`}>
       <div className="workshop__row">
@@ -209,14 +206,14 @@ function MotionCard({ m, i, count, unit, pace, bind, apply, now }: { m: Motion; 
       )}
       <div className="workshop__row" role="group" aria-label="Speed">
         <span className="workshop__label">SPEED</span>
-        <button className="workshop__btn" {...bind(() => { const l = now(); apply(setSpeed(l, i, stepSpeed(perMinute(l[i], pace), -1), pace)) })} aria-label="Slower" title="Slower">−</button>
-        <NumberField label="Speed, per minute" value={showNumber(Math.abs(speed))} onCommit={(n) => apply(setSpeed(now(), i, (speed < 0 ? -1 : 1) * Math.abs(n), pace))} />
+        <button className="workshop__btn" {...bind(() => { const l = now(); apply(setSpeed(l, i, stepSpeed(perMinute(l[i]), -1))) })} aria-label="Slower" title="Slower">−</button>
+        <NumberField label="Speed, per minute" value={showNumber(Math.abs(speed))} onCommit={(n) => apply(setSpeed(now(), i, (speed < 0 ? -1 : 1) * Math.abs(n)))} />
         <span className="workshop__value">/MIN</span>
-        <button className="workshop__btn" {...bind(() => { const l = now(); apply(setSpeed(l, i, stepSpeed(perMinute(l[i], pace), 1), pace)) })} aria-label="Faster" title="Faster">+</button>
+        <button className="workshop__btn" {...bind(() => { const l = now(); apply(setSpeed(l, i, stepSpeed(perMinute(l[i]), 1))) })} aria-label="Faster" title="Faster">+</button>
         <button className={`workshop__btn ${m.c < 0 ? 'is-on' : ''}`} aria-pressed={m.c < 0} title="Run it the other way" aria-label="Reverse" onClick={() => apply(reverse(now(), i))}><Repeat2 size={12} aria-hidden /></button>
         <span className="ws__explain">{rate}</span>
       </div>
-      {mayFlicker(m, pace) && <div className="ws__explain ws__anim-note">This may flicker more than 3 times a second</div>}
+      {mayFlicker(m) && <div className="ws__explain ws__anim-note">This may flicker more than 3 times a second</div>}
       {kind && (
         <div className="workshop__row" role="group" aria-label={amountLabel}>
           <span className="workshop__label">{amountLabel}</span>

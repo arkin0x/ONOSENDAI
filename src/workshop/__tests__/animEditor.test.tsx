@@ -20,9 +20,6 @@ import { newShard, toPayload, type ShardModel } from 'sno-core/shards'
 import { useWorkshop } from '../../store/useWorkshop'
 import { useAnimPreview } from '../../store/animPreview'
 import { AnimEditor } from '../AnimEditor'
-import { perMinute } from '../../lib/animEdit'
-import { pacedSecondsPerBlock } from '../../lib/pacedClock'
-import { pacedEnds } from '../../lib/pacedSource'
 
 const SOURCE = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
 const EDITOR = readFileSync(join(__dirname, '..', 'AnimEditor.tsx'), 'utf8')
@@ -84,10 +81,10 @@ describe('the MOTION panel', () => {
   it('presets press into canonical motions, sized for the object, and play the preview', async () => {
     const m = await mount(<AnimEditor />)
     await m.press('SPIN')
-    expect(anim()).toEqual([['turn', 'y', 30, 1, 0]])
+    expect(anim()).toEqual([['turn', 'y', 1, 20, 0]])
     expect(useAnimPreview.getState()).toMatchObject({ on: true, playing: true })
     await m.press('FERRIS WHEEL')
-    expect(anim()).toEqual([['turn', 'y', 30, 1, 0], ['orbit', 'z', 600, 20, 1, 0]])
+    expect(anim()).toEqual([['turn', 'y', 1, 20, 0], ['orbit', 'z', 600, 1, 30, 0]])
     expect(m.says('1. SPIN')).toBe(true)
     expect(m.says('2. FERRIS WHEEL')).toBe(true)
     await m.unmount()
@@ -106,45 +103,45 @@ describe('the MOTION panel', () => {
     await m.unmount()
   })
 
-  it('SPEED shows cycles a minute and stores c/b a block in lowest terms; REVERSE flips it', async () => {
+  it('SPEED shows cycles a minute and stores c cycles every b seconds in lowest terms; REVERSE flips it', async () => {
     const m = await mount(<AnimEditor />)
     await m.press('SPIN')
-    const pace = pacedSecondsPerBlock(Date.now() / 1000, pacedEnds())
-    expect(byLabel(m, 'Speed, per minute').props.value).toBe(String(Math.round(perMinute({ c: 30, b: 1 }, pace) * 100) / 100))
-    await type(m, 'Speed, per minute', String(perMinute({ c: 1, b: 2 }, pace)))
-    expect(anim()).toEqual([['turn', 'y', 1, 2, 0]])
+    expect(byLabel(m, 'Speed, per minute').props.value).toBe('3')
+    expect(m.says('1 every 20 s')).toBe(true)
+    await type(m, 'Speed, per minute', '2.5')
+    expect(anim()).toEqual([['turn', 'y', 1, 24, 0]])
     await type(m, 'Speed, per minute', '100000')
-    expect(anim()).toEqual([['turn', 'y', 600, 1, 0]])
-    expect(m.says('Top speed is 600 a block')).toBe(true)
+    expect(anim()).toEqual([['turn', 'y', 1, 1, 0]])
+    expect(m.says('Top speed is 60 a minute')).toBe(true)
     await click(m, 'Reverse')
-    expect(anim()).toEqual([['turn', 'y', -600, 1, 0]])
+    expect(anim()).toEqual([['turn', 'y', -1, 1, 0]])
     await m.unmount()
   })
 
   it('AXIS, the amount in gibsons, REST and START write what they show', async () => {
     const m = await mount(<AnimEditor />)
     await m.press('ELEVATOR')
-    expect(anim()).toEqual([['lift', 'y', 1200, 25, 20, 1, 0]])
+    expect(anim()).toEqual([['lift', 'y', 1200, 25, 1, 30, 0]])
     await m.press('X')
     await type(m, 'TRAVEL, gibsons', '2.5')
     await step(m, 'Longer rests')
     await type(m, 'Start, degrees', '90')
-    expect(anim()).toEqual([['lift', 'x', 300, 30, 20, 1, 90]])
+    expect(anim()).toEqual([['lift', 'x', 300, 30, 1, 30, 90]])
     await m.unmount()
   })
 
   it('a path\'s points: add, set, move and remove; Z in the bench\'s frame is the field\'s negated', async () => {
     const m = await mount(<AnimEditor />)
     await m.press('FOLLOW PATH')
-    expect(anim()).toEqual([['path', 10, 1, 0, [600, 0, 0, 1], [0, 0, 0, 1]]])
+    expect(anim()).toEqual([['path', 1, 60, 0, [600, 0, 0, 1], [0, 0, 0, 1]]])
     await m.press('ADD POINT')
     await type(m, 'Point 2 Z', '2')
     await type(m, 'Point 2 time', '4')
-    expect(anim()).toEqual([['path', 10, 1, 0, [600, 0, 0, 1], [600, 120, -240, 4], [0, 0, 0, 1]]])
+    expect(anim()).toEqual([['path', 1, 60, 0, [600, 0, 0, 1], [600, 120, -240, 4], [0, 0, 0, 1]]])
     await click(m, 'Move point 2 up')
     expect((anim() as unknown[][])[0][4]).toEqual([600, 120, -240, 4])
     await click(m, 'Remove point 1')
-    expect(anim()).toEqual([['path', 10, 1, 0, [600, 0, 0, 1], [0, 0, 0, 1]]])
+    expect(anim()).toEqual([['path', 1, 60, 0, [600, 0, 0, 1], [0, 0, 0, 1]]])
     expect(byLabel(m, 'Remove point 1').props.disabled).toBe(true)
     await m.unmount()
   })
@@ -164,7 +161,7 @@ describe('the MOTION panel', () => {
     expect(anim()).toBeUndefined()
     useWorkshop.getState().redo()
     await settled()
-    expect(anim()).toEqual([['turn', 'y', 30, 1, 0]])
+    expect(anim()).toEqual([['turn', 'y', 1, 20, 0]])
     await click(m, 'Remove SPIN')
     expect(useWorkshop.getState().current()!.extra).toBeUndefined()
     await m.unmount()
@@ -173,11 +170,11 @@ describe('the MOTION panel', () => {
   it('what it publishes carries the canonical field', async () => {
     const m = await mount(<AnimEditor />)
     await m.press('PENDULUM')
-    await type(m, 'Speed, per minute', String(perMinute({ c: 3, b: 4 }, pacedSecondsPerBlock(Date.now() / 1000, pacedEnds()))))
+    await type(m, 'Speed, per minute', '4')
     const payload = toPayload(useWorkshop.getState().current()!) as unknown as Record<string, unknown>
-    expect(payload.anim).toEqual([['swing', 'x', 30, 3, 4, 0]])
+    expect(payload.anim).toEqual([['swing', 'x', 30, 1, 15, 0]])
     const wire = JSON.parse(useWorkshop.getState().exportCurrent()!)
-    expect(JSON.stringify(wire)).toContain('"anim":[["swing","x",30,3,4,0]]')
+    expect(JSON.stringify(wire)).toContain('"anim":[["swing","x",30,1,15,0]]')
     await m.unmount()
   })
 

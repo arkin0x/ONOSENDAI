@@ -169,7 +169,7 @@ interface Props {
    * Drawn exactly as written, whatever its `anim` (lib/anim.ts), its placed
    * objects too: the workshop's bench while editing (a handle must sit on its
    * vertex) and the feed's still pictures. Everywhere else an object with
-   * `anim` moves on the paced clock (scene/animMotion.ts).
+   * `anim` moves on the world clock (scene/animMotion.ts).
    */
   still?: boolean
 }
@@ -355,7 +355,7 @@ export function ShardMesh(props: Props): ReactNode {
 }
 
 export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip: regionClip, clipPlanes: givenPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, dim = 1, budget, still = false }: Props): JSX.Element | null {
-  // Its own motion on the paced clock (lib/anim.ts, scene/animMotion.ts): a
+  // Its own motion on the world clock (lib/anim.ts, scene/animMotion.ts): a
   // group above everything it draws, its placed objects included (a parent's
   // motion carries what it places). A moving object is cut at its region
   // where it is at each moment, so its region box becomes planes on the GPU

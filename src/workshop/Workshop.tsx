@@ -1176,7 +1176,7 @@ export function Workshop(): JSX.Element | null {
         </div>
       )}
 
-      {/* MOTION: the open shard's perpetual motion on the paced clock (lib/anim.ts,
+      {/* MOTION: the open shard's perpetual motion on the world clock (lib/anim.ts,
           DECK-0003 §1.14), all of it in one self-contained editor (AnimEditor).
           Moving objects stop no walker yet. Like SHARD, nothing without a shard. */}
       {panel === 'motion' && shard && (

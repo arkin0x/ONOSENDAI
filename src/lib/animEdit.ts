@@ -17,7 +17,7 @@
  */
 
 import type { ShardModel } from 'sno-core/shards'
-import { gcd, MAX_BLOCKS, MAX_MOTIONS, MAX_RATE, MAX_WEIGHT, PATH_MAX, PATH_MIN, readMotion, REACH, writeMotion, type Motion } from './anim'
+import { gcd, MAX_MOTIONS, MAX_PER_SECOND, MAX_SECONDS, MAX_WEIGHT, PATH_MAX, PATH_MIN, readMotion, REACH, writeMotion, type Motion } from './anim'
 
 const TICKS = 120
 
@@ -41,18 +41,17 @@ export interface Preset {
 const clampReach = (n: number): number => Math.max(1, Math.min(REACH, Math.round(n)))
 
 /**
- * The presets, in menu order. Speeds are whole cycles per paced block so the
- * field stays short; at November 2026's pace (about 660 s a block) 30 a block
- * is about 2.7 a minute.
+ * The presets, in menu order. Speeds are c cycles every b seconds, short
+ * fractions: SPIN's 1 every 20 s is 3 turns a minute.
  */
 export const PRESETS: readonly Preset[] = [
-  { id: 'spin', label: 'SPIN', tip: 'Turn round and round', make: () => ['turn', 'y', 30, 1, 0] },
-  { id: 'bob', label: 'BOB', tip: 'Float up and down a little', make: (r) => ['slide', 'y', clampReach(Math.max(15, r / 8)), 120, 1, 0] },
-  { id: 'pendulum', label: 'PENDULUM', tip: 'Swing back and forth', make: () => ['swing', 'x', 30, 60, 1, 0] },
-  { id: 'slide', label: 'BACK AND FORTH', tip: 'Glide side to side', make: (r) => ['slide', 'x', clampReach(r), 40, 1, 0] },
-  { id: 'elevator', label: 'ELEVATOR', tip: 'Rise, wait, come back', make: (r) => ['lift', 'y', clampReach(Math.max(240, 2 * r)), 25, 20, 1, 0] },
-  { id: 'orbit', label: 'FERRIS WHEEL', tip: 'Ride a circle, stay upright', make: (r) => ['orbit', 'z', clampReach(r), 20, 1, 0] },
-  { id: 'path', label: 'FOLLOW PATH', tip: 'Travel a loop of points', make: (r) => { const d = clampReach(Math.max(240, r)); return ['path', 10, 1, 0, [d, 0, 0, 1], [0, 0, 0, 1]] } },
+  { id: 'spin', label: 'SPIN', tip: 'Turn round and round', make: () => ['turn', 'y', 1, 20, 0] },
+  { id: 'bob', label: 'BOB', tip: 'Float up and down a little', make: (r) => ['slide', 'y', clampReach(Math.max(15, r / 8)), 1, 4, 0] },
+  { id: 'pendulum', label: 'PENDULUM', tip: 'Swing back and forth', make: () => ['swing', 'x', 30, 1, 10, 0] },
+  { id: 'slide', label: 'BACK AND FORTH', tip: 'Glide side to side', make: (r) => ['slide', 'x', clampReach(r), 1, 15, 0] },
+  { id: 'elevator', label: 'ELEVATOR', tip: 'Rise, wait, come back', make: (r) => ['lift', 'y', clampReach(Math.max(240, 2 * r)), 25, 1, 30, 0] },
+  { id: 'orbit', label: 'FERRIS WHEEL', tip: 'Ride a circle, stay upright', make: (r) => ['orbit', 'z', clampReach(r), 1, 30, 0] },
+  { id: 'path', label: 'FOLLOW PATH', tip: 'Travel a loop of points', make: (r) => { const d = clampReach(Math.max(240, r)); return ['path', 1, 60, 0, [d, 0, 0, 1], [0, 0, 0, 1]] } },
 ]
 
 /** How far an object reaches from its origin, in ticks of its own lattice: what a preset sizes to (at least one unit). */
@@ -67,7 +66,7 @@ export function objectReach(s: Pick<ShardModel, 'vertices'>): number {
 /** The plain messages the editor shows when an edit meets a limit. */
 export const LIMITS = {
   motions: `Up to ${MAX_MOTIONS} motions`,
-  speed: `Top speed is ${MAX_RATE} a block`,
+  speed: `Top speed is ${MAX_PER_SECOND * 60} a minute`,
   slowest: 'That is as slow as it goes',
   points: `Up to ${PATH_MAX} points`,
   fewPoints: `A path needs ${PATH_MIN} points`,
@@ -93,80 +92,33 @@ export function ticksOf(gibsons: number, unit: number): number {
   return Math.round((gibsons / 2 ** unit) * TICKS)
 }
 
-/** Cycles a minute, signed, at a pace of `secondsPerBlock`. */
-export function perMinute(m: Pick<Motion, 'c' | 'b'>, secondsPerBlock: number): number {
-  return (m.c / m.b) * (60 / secondsPerBlock)
+/** Cycles a minute, signed. */
+export function perMinute(m: Pick<Motion, 'c' | 'b'>): number {
+  return (m.c / m.b) * 60
 }
 
 /**
- * The best c/b in lowest terms for `x` cycles per paced block (x > 0), with
- * b at most `maxB`: the continued fraction's convergents and their
- * semiconvergents, the closest kept.
+ * The rate for a speed in cycles a minute (its sign the direction): exactly
+ * what is shown, to two decimals, as c cycles every b seconds in lowest
+ * terms (3 a minute is 1 every 20 s; 2.5 is 1 every 24 s), clamped to what
+ * the field allows (at most one a second, never stopped). A note when clamped.
  */
-export function bestRational(x: number, maxB = 1000): { c: number; b: number } {
-  if (!(x > 0)) return { c: 0, b: 1 }
-  let h0 = 0, h1 = 1, k0 = 1, k1 = 0
-  let v = x
-  let best = { c: Math.max(1, Math.round(x)), b: 1 }
-  const better = (c: number, b: number): void => {
-    if (b < 1 || b > maxB || c < 1) return
-    if (Math.abs(c / b - x) < Math.abs(best.c / best.b - x) - 1e-15) best = { c, b }
-  }
-  for (let i = 0; i < 64; i++) {
-    const a = Math.floor(v)
-    // Semiconvergents between the last two convergents, then the next convergent.
-    for (let t = Math.max(1, Math.ceil(a / 2)); t <= a; t++) better(t * h1 + h0, t * k1 + k0)
-    const h2 = a * h1 + h0, k2 = a * k1 + k0
-    if (k2 > maxB) break
-    h0 = h1; h1 = h2; k0 = k1; k1 = k2
-    better(h1, k1)
-    const frac = v - a
-    if (frac < 1e-12) break
-    v = 1 / frac
-  }
-  const g = gcd(best.c, best.b) || 1
-  return { c: best.c / g, b: best.b / g }
-}
-
-/** How close a stored speed must come to the one asked for: half a percent, under what the controls show. */
-export const SPEED_TOLERANCE = 0.005
-
-/**
- * The simplest c/b (smallest b, then in lowest terms) within SPEED_TOLERANCE
- * of `x` cycles a block, b at most 1000: so 3 a minute is written 33/1, not
- * 2742/83, and retyping the speed shown keeps the fraction it came from.
- */
-export function simplestRational(x: number): { c: number; b: number } {
-  const tol = Math.max(x * SPEED_TOLERANCE, 1e-9)
-  for (let b = 1; b <= 1000; b++) {
-    const c = Math.round(x * b)
-    if (c >= 1 && Math.abs(c / b - x) <= tol) { const g = gcd(c, b) || 1; return { c: c / g, b: b / g } }
-  }
-  return bestRational(x)
-}
-
-/**
- * The rate for a speed in cycles a minute (its sign the direction), at a pace
- * of `secondsPerBlock`: the simplest c/b in lowest terms, clamped to what the
- * field allows (at most 600 a block, never stopped). A note when clamped.
- * `keep`, the rate it had: kept when it is already within tolerance.
- */
-export function rateFor(perMin: number, secondsPerBlock: number, keep?: { c: number; b: number }): { c: number; b: number; note?: string } {
+export function rateFor(perMin: number): { c: number; b: number; note?: string } {
   const sign = perMin < 0 || Object.is(perMin, -0) ? -1 : 1
-  const x = (Math.abs(perMin) * secondsPerBlock) / 60
-  if (x > MAX_RATE) return { c: sign * MAX_RATE, b: 1, note: LIMITS.speed }
-  if (!(x >= 1 / 1000)) return { c: sign, b: 1000, note: LIMITS.slowest }
-  if (keep && Math.abs(Math.abs(keep.c) / keep.b - x) <= x * SPEED_TOLERANCE) return { c: sign * Math.abs(keep.c), b: keep.b }
-  const r = simplestRational(x)
-  return { c: sign * r.c, b: r.b }
+  // Hundredths of a cycle a minute: the speed over 6000 is cycles a second.
+  const hundredths = Math.round(Math.abs(perMin) * 100)
+  if (hundredths > MAX_PER_SECOND * 6000) return { c: sign * MAX_PER_SECOND, b: 1, note: LIMITS.speed }
+  if (hundredths === 0) return { c: sign, b: MAX_SECONDS, note: LIMITS.slowest }
+  const g = gcd(hundredths, 6000)
+  return { c: sign * (hundredths / g), b: 6000 / g }
 }
 
 /**
  * Whether a motion may flicker more than three times a second (§1.14: an
  * authoring tool SHOULD warn): its cycles a second, times its legs for a path.
  */
-export function mayFlicker(m: Motion, secondsPerBlock: number): boolean {
-  const perSecond = Math.abs(m.c) / m.b / secondsPerBlock
+export function mayFlicker(m: Motion): boolean {
+  const perSecond = Math.abs(m.c) / m.b
   const flashes = m.word === 'path' ? perSecond * (m.pts.length / 4) : perSecond
   return flashes > 3
 }
@@ -242,12 +194,12 @@ export function setAxis(list: readonly Motion[], i: number, axis: 0 | 1 | 2): Ed
 }
 
 /** Motion i at a speed in cycles a minute (its sign the direction), stored as c/b in lowest terms. */
-export function setSpeed(list: readonly Motion[], i: number, perMin: number, secondsPerBlock: number): Edited {
+export function setSpeed(list: readonly Motion[], i: number, perMin: number): Edited {
   const m = list[i]
   if (!m) return { list: [...list] }
-  const r = rateFor(perMin, secondsPerBlock, m)
+  const r = rateFor(perMin)
   const next = { ...copy(m), c: r.c, b: r.b }
-  return { list: replace(list, i, next), note: r.note ?? (mayFlicker(next, secondsPerBlock) ? LIMITS.flicker : undefined) }
+  return { list: replace(list, i, next), note: r.note ?? (mayFlicker(next) ? LIMITS.flicker : undefined) }
 }
 
 /** Motion i run the other way. */
@@ -392,8 +344,8 @@ export function movePoint(list: readonly Motion[], i: number, j: number, dir: 1 
   return { list: replace(list, i, { ...copy(m), pts }) }
 }
 
-/** The longest cycle among the motions, in paced blocks: what the scrub runs through once. */
-export function cycleBlocks(list: readonly Pick<Motion, 'c' | 'b'>[]): number {
+/** The longest cycle among the motions, in seconds: what the scrub runs through once. */
+export function cycleSeconds(list: readonly Pick<Motion, 'c' | 'b'>[]): number {
   let longest = 0
   for (const m of list) if (m.c !== 0) longest = Math.max(longest, m.b / Math.abs(m.c))
   return longest || 1
@@ -401,5 +353,5 @@ export function cycleBlocks(list: readonly Pick<Motion, 'c' | 'b'>[]): number {
 
 /** Whether b stays within the field (a speed so slow it could not be written is clamped first by rateFor). */
 export function rateWritable(m: Pick<Motion, 'c' | 'b'>): boolean {
-  return m.c !== 0 && m.b >= 1 && m.b <= MAX_BLOCKS && Math.abs(m.c) <= MAX_RATE * m.b
+  return m.c !== 0 && m.b >= 1 && m.b <= MAX_SECONDS && Math.abs(m.c) <= MAX_PER_SECOND * m.b
 }

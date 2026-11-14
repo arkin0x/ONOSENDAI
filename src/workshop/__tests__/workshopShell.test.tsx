@@ -43,7 +43,7 @@ const { Workshop } = await import('../Workshop')
 const { useWorkshop } = await import('../../store/useWorkshop')
 const { escapeTop } = await import('../../hooks/useEscape')
 const { frameOffset, frameZoom, useBenchView } = await import('../benchAxes')
-const { newShard } = await import('sno-core/shards')
+const { newShard, ticksOf } = await import('sno-core/shards')
 
 const CSS = readFileSync(join(__dirname, '..', '..', 'styles.css'), 'utf8')
 
@@ -52,7 +52,7 @@ function cube() {
   const s = newShard('Cube')
   return {
     ...s,
-    vertices: [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]].map((p) => ({ p: p.map((n) => n * 4096) as [number, number, number], c: [1, 1, 1] as [number, number, number] })),
+    vertices: [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]].map((p) => ({ p: p as [number, number, number], c: [1, 1, 1] as [number, number, number] })),
     faces: [[0, 1, 2], [0, 2, 3]] as Array<[number, number, number]>,
   }
 }
@@ -220,15 +220,13 @@ describe('the sheets', () => {
     await m.unmount()
   })
 
-  it('put the move pad and the color column away while one is up', async () => {
+  it('leave nothing floating over the bench but the move handles: no pad, no color column (phase 2)', async () => {
     useWorkshop.getState().setTool('select')
     useWorkshop.getState().setSelection([0, 1])
     const m = await mount(<Workshop />)
-    expect(byClass(m.all(), 'benchpad').length).toBe(1)
-    expect(byClass(m.all(), 'ws__acts').length).toBe(1)
-    await m.press('SHARD')
-    expect(byClass(m.all(), 'benchpad').length).toBe(0)
-    expect(byClass(m.all(), 'ws__acts').length).toBe(0)
+    for (const gone of ['benchpad', 'ws__acts', 'ws__held', 'ws__at']) expect(byClass(m.all(), gone).length, gone).toBe(0)
+    expect(byClass(m.all(), 'ws__handles').length).toBe(1)
+    expect(byClass(m.all(), 'ws__handle').map((h) => textOf(h))).toEqual(['+X', '+Y', '+Z'])
     await m.unmount()
   })
 
@@ -275,19 +273,185 @@ describe('the sheets', () => {
 })
 
 describe('the strip', () => {
-  it('holds STAMP\'s options and, with something held, the held rows', async () => {
+  const strip = (m: Awaited<ReturnType<typeof mount>>): Host => byClass(m.all(), 'ws__strip')[0]
+  const slots = (m: Awaited<ReturnType<typeof mount>>): string[] => buttonsIn(strip(m)).filter((b) => cls(b).includes('ws__heldbtn')).map((b) => textOf(b).replace(/\d+/g, '').trim())
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5))
+
+  it('STAMP: a shape chip that opens picture tiles (OBJECT among them), SIZE, TURN, MORE', async () => {
     useWorkshop.getState().setTool('stamp')
+    useWorkshop.getState().setStampKind('block')
     const m = await mount(<Workshop />)
-    const strip = (): Host => byClass(m.all(), 'ws__strip')[0]
-    expect(buttonsIn(strip()).map(textOf)).toEqual(expect.arrayContaining(['BLOCK', 'OBJECT']))
-    expect(buttonsIn(strip()).some((b) => b.props['aria-label'] === 'Larger')).toBe(true)
+    const words = buttonsIn(strip(m)).map(textOf)
+    expect(words[0]).toBe('STAMP')
+    expect(words).toEqual(expect.arrayContaining(['BLOCK', 'TURN', 'MORE']))
+    expect(buttonsIn(strip(m)).some((b) => b.props['aria-label'] === 'Larger')).toBe(true)
+    expect(byClass(m.all(), 'ws__tiles').length).toBe(0)
+    await m.press('BLOCK')
+    const tiles = byClass(m.all(), 'ws__tile').map(textOf)
+    expect(tiles).toEqual(['BLOCK', 'WEDGE', 'PYRAMID', 'COLUMN', 'RING', 'STAR', 'ARROW', 'OBJECT'])
+    const pyramid = byClass(m.all(), 'ws__tile').find((h) => textOf(h) === 'PYRAMID')!
+    ;(pyramid.props.onClick as () => void)()
+    await tick()
+    expect(useWorkshop.getState().stampKind).toBe('pyramid')
+    expect(byClass(m.all(), 'ws__tiles').length).toBe(0)
+    await m.unmount()
+  })
+
+  it('SELECT: ADD or REMOVE, BOX, ALL, MORE; BOX is what makes a drag draw a box', async () => {
     useWorkshop.getState().setTool('select')
-    useWorkshop.getState().setSelection([0, 1, 2])
-    await new Promise((r) => setTimeout(r, 5))
-    const labels = buttonsIn(strip()).map(label)
-    for (const l of ['Invert: taps and boxes take points out', 'Deselect everything', 'Turn left', 'Turn right', 'Cut the selection', 'Copy the selection', 'Select everything', 'Fill the selection', 'Subdivide the selection']) expect(labels).toContain(l)
-    // STAMP's options are STAMP's alone.
-    expect(labels).not.toContain('BLOCK')
+    const m = await mount(<Workshop />)
+    expect(buttonsIn(strip(m)).map(textOf)).toEqual(['SELECT', 'ADD', 'REMOVE', 'BOX', 'ALL', 'MORE'])
+    await m.press('REMOVE')
+    expect(useWorkshop.getState().invert).toBe(true)
+    await m.press('BOX')
+    expect(useWorkshop.getState().boxSelect).toBe(true)
+    await m.press('ALL')
+    expect(useWorkshop.getState().selection).toEqual([0, 1, 2, 3])
+    // One finger orbits in every tool but SELECT with BOX on, where the drag is the box's.
+    const bench = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
+    expect(bench).toContain("enableRotate={!(tool === 'select' && boxSelect)}")
+    expect(bench).toContain("const on = useWorkshop((s) => s.tool === 'select' && s.boxSelect)")
+    await m.unmount()
+  })
+
+  it('FACE: the corners, then FILL, BACK, CANCEL, AUTO, in that order, greyed until they apply', async () => {
+    useWorkshop.getState().setTool('face')
+    const m = await mount(<Workshop />)
+    const keys = (): Host[] => buttonsIn(strip(m)).slice(1, 5)
+    expect(keys().map(textOf)).toEqual(['FILL', 'BACK', 'CANCEL', 'AUTO'])
+    expect(keys().map((b) => b.props.disabled)).toEqual([true, true, true, false])
+    useWorkshop.setState({ facePick: [0, 1] })
+    await tick()
+    expect(textOf(byClass(m.all(), 'ws__corners')[0])).toContain('2/3')
+    expect(keys().map((b) => b.props.disabled)).toEqual([true, false, false, false])
+    await m.press('BACK')
+    expect(useWorkshop.getState().facePick).toEqual([0])
+    // Picking corners is not holding: FACE's strip stays.
+    expect(slots(m)).toEqual([])
+    await m.unmount()
+  })
+
+  it('becomes the held bar, with the same slots in the same order, whatever is held in whatever tool', async () => {
+    const SLOTS = ['PT', 'LEFT', 'RIGHT', 'COPY', 'PASTE', 'COLOR', 'DELETE', 'MORE']
+    const m = await mount(<Workshop />)
+    const cases: Array<[string, () => void]> = [
+      ['LOOK, one point', () => { useWorkshop.getState().setTool('view'); useWorkshop.getState().setSelection([0]) }],
+      ['SELECT, three points', () => { useWorkshop.getState().setTool('select'); useWorkshop.getState().setSelection([0, 1, 2]) }],
+      ['STAMP, two points', () => { useWorkshop.getState().setTool('stamp'); useWorkshop.getState().setSelection([0, 1]) }],
+      ['FACE, a face', () => { useWorkshop.getState().setTool('face'); useWorkshop.getState().selectFace(0) }],
+    ]
+    for (const [name, set] of cases) {
+      set()
+      await tick()
+      const got = slots(m)
+      expect(got.slice(1), name).toEqual(SLOTS.slice(1))
+      // DELETE second from the right, always.
+      expect(got[got.length - 2], name).toBe('DELETE')
+    }
+    // PASTE greyed with nothing copied, never gone.
+    const paste = (): Host => buttonsIn(strip(m)).find((b) => textOf(b) === 'PASTE')!
+    expect(paste().props.disabled).toBe(true)
+    useWorkshop.getState().setTool('select'); useWorkshop.getState().setSelection([0, 1])
+    await m.press('COPY')
+    expect(paste().props.disabled).toBe(false)
+    // The count lets go.
+    const count = buttonsIn(strip(m)).find((b) => cls(b).includes('ws__heldbtn--count'))!
+    expect(String(count.props['aria-label'])).toContain('2 points held')
+    ;(count.props.onClick as () => void)()
+    await tick()
+    expect(useWorkshop.getState().selection).toEqual([])
+    expect(slots(m)).toEqual([])
+    await m.unmount()
+  })
+
+  it('counts a face held in FACE as a face, not its corners', async () => {
+    useWorkshop.getState().setTool('face')
+    useWorkshop.getState().selectFace(0)
+    const m = await mount(<Workshop />)
+    const count = buttonsIn(strip(m)).find((b) => cls(b).includes('ws__heldbtn--count'))!
+    expect(textOf(count).replace(/\s+/g, ' ')).toBe('1 FACE')
+    // AUTO and FLIP, and REMOVE for face taps, are in MORE while the face is held.
+    await m.press('MORE')
+    for (const w of ['FLIP FACE', 'FLIP SURFACE', 'AUTO', 'REMOVE']) expect(m.buttons(w).length, w).toBeGreaterThan(0)
+    expect(m.buttons('BOX').length).toBe(0)
+    await m.unmount()
+  })
+
+  it('keeps a typed move one UNDO with a full history, and refuses a place off the grid whole', async () => {
+    const s0 = useWorkshop.getState().current()!
+    useWorkshop.setState({ past: Array.from({ length: 64 }, () => s0) })
+    useWorkshop.getState().setTool('select')
+    useWorkshop.getState().setSelection([1])
+    const m = await mount(<Workshop />)
+    await m.press('MORE')
+    const inputs = (): Host[] => m.all().filter((h) => h.type === 'input' && String(h.props['aria-label']).endsWith(', in units'))
+    ;(inputs()[0].props.onChange as (e: unknown) => void)({ target: { value: '2' } })
+    ;(inputs()[2].props.onChange as (e: unknown) => void)({ target: { value: '1' } })
+    await tick()
+    const submit = (): void => { const form = m.all().find((h) => h.type === 'form')!; (form.props.onSubmit as (e: unknown) => void)({ preventDefault: () => {} }) }
+    submit()
+    await tick()
+    expect(ticksOf(useWorkshop.getState().current()!.vertices[1])).toEqual([240, 0, 120])
+    expect(useWorkshop.getState().past.length).toBe(64)
+    useWorkshop.getState().undo()
+    expect(ticksOf(useWorkshop.getState().current()!.vertices[1])).toEqual([120, 0, 0])
+    // Off the grid: nothing moves, not even the axes that would fit.
+    useWorkshop.getState().redo()
+    useWorkshop.getState().setSelection([1])
+    await tick()
+    ;(inputs()[0].props.onChange as (e: unknown) => void)({ target: { value: '1' } })
+    ;(inputs()[1].props.onChange as (e: unknown) => void)({ target: { value: '9999' } })
+    await tick()
+    submit()
+    await tick()
+    expect(ticksOf(useWorkshop.getState().current()!.vertices[1])).toEqual([240, 0, 120])
+    await m.unmount()
+  })
+
+  it('asks BLEND or EDGE before COLOR puts the color on a face', async () => {
+    useWorkshop.getState().setTool('face')
+    useWorkshop.getState().selectFace(0)
+    const m = await mount(<Workshop />)
+    await m.press('COLOR')
+    const menu = m.all().find((h) => h.props['aria-label'] === 'How to color the selected faces')!
+    expect(buttonsIn(menu).map(textOf)).toEqual(['BLEND', 'EDGE'])
+    await m.unmount()
+  })
+
+  it('opens MORE: what is held, the exact place, the move pad, and the whole shard', async () => {
+    useWorkshop.getState().setTool('select')
+    useWorkshop.getState().setSelection([1])
+    const m = await mount(<Workshop />)
+    await m.press('MORE')
+    const sheet = m.all().find((h) => h.props['aria-label'] === 'More')!
+    expect(sheet).toBeDefined()
+    const words = buttonsIn(sheet).map(textOf)
+    for (const w of ['JOINED', 'CUT', 'DUPLICATE', 'FILL', 'SUBDIVIDE', 'PIECE', 'TAKE COLOR', 'SET', 'ALL', 'COLOR ALL', 'BOX', 'REMOVE']) expect(words, w).toContain(w)
+    expect(buttonsIn(sheet).filter((b) => String(b.props['aria-label'] ?? '').startsWith('Move ')).length).toBe(6)
+    // Typed exact numbers move the point there in one step, one UNDO back.
+    const inputs = m.all().filter((h) => h.type === 'input' && String(h.props['aria-label']).endsWith(', in units'))
+    expect(inputs.map((i) => i.props.value)).toEqual(['1', '0', '0'])
+    const before = useWorkshop.getState().past.length
+    ;(inputs[0].props.onChange as (e: unknown) => void)({ target: { value: '3' } })
+    ;(inputs[1].props.onChange as (e: unknown) => void)({ target: { value: '1 1/2' } })
+    await tick()
+    const form = m.all().find((h) => h.type === 'form' && h.props['aria-label'] === "The point's place")!
+    ;(form.props.onSubmit as (e: unknown) => void)({ preventDefault: () => {} })
+    await tick()
+    const v = useWorkshop.getState().current()!.vertices[1]
+    expect(ticksOf(v)).toEqual([3 * 120, 1.5 * 120, 0])
+    expect(useWorkshop.getState().past.length).toBe(before + 1)
+    await m.unmount()
+  })
+
+  it('carries a badge on MORE while points are stacked, with WELD inside', async () => {
+    const s = cube()
+    s.vertices.push({ ...s.vertices[0] })
+    useWorkshop.setState({ shards: [s], currentId: s.id })
+    const m = await mount(<Workshop />)
+    expect(textOf(byClass(m.all(), 'ws__badge')[0])).toBe('1')
+    await m.press('MORE')
+    expect(m.buttons('WELD 1').length).toBe(1)
     await m.unmount()
   })
 
@@ -307,8 +471,9 @@ describe('the strip', () => {
 
   it('opens the object picker as a sheet from OBJECT', async () => {
     useWorkshop.getState().setTool('stamp')
-    useWorkshop.setState({ stampObject: null })
+    useWorkshop.setState({ stampObject: null, stampMode: 'shape' })
     const m = await mount(<Workshop />)
+    await m.press(/^BLOCK|^WEDGE|^PYRAMID|^COLUMN|^RING|^STAR|^ARROW/)
     await m.press('OBJECT')
     expect(m.all().some((h) => h.props['aria-label'] === 'Choose an object to stamp')).toBe(true)
     expect(places(m.all()).dock).toEqual(DOCK)
@@ -379,5 +544,50 @@ describe('the bench framing (benchAxes frameOffset, frameZoom)', () => {
   it('never frames into nothing', () => {
     expect(frameOffset(0, 812, { top: 0, bottom: 400 })).toBeNull()
     expect(frameOffset(375, 812, { top: 0, bottom: 900 })).toBeNull()
+  })
+})
+
+describe('the move handles and exact numbers (phase 2)', () => {
+  it('fold a whole drag into one UNDO from the shard alone, so a full history folds too', () => {
+    const src = readFileSync(join(__dirname, '..', 'shell', 'MoveHandles.tsx'), 'utf8')
+    expect(src).toContain('if (d.before && now.currentId === d.shardId && now.current() !== d.before) useWorkshop.setState({ past: dragHistory(d.past, d.before, now.past) })')
+    expect(src).not.toMatch(/past\.length - d\.past\.length/)
+  })
+  it('never take a multi-finger press for a tap on the bench', () => {
+    const bench = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
+    const taps = bench.match(/if \(e\.delta > tapSlop\(\)( \|\| multiPress\(\))?\) return/g) ?? []
+    expect(taps.length).toBeGreaterThanOrEqual(4)
+    for (const t of taps) expect(t).toContain('multiPress()')
+    expect(bench).toContain('if (down.size >= 1) noteMultiTouch(true)')
+  })
+
+  it('turn a drag along an axis into whole grid steps, and an axis seen end on into none', async () => {
+    const { handleSteps } = await import('../benchAxes')
+    // One unit covers 40px to the right: 40px is one unit, 120 ticks, two steps of 60.
+    expect(handleSteps(40, 0, [40, 0], 120, 60)).toBe(2)
+    expect(handleSteps(-40, 0, [40, 0], 120, 60)).toBe(-2)
+    // Across the axis moves nothing.
+    expect(handleSteps(0, 50, [40, 0], 120, 60)).toBe(0)
+    // Y up on screen is negative pixels.
+    expect(handleSteps(0, -80, [0, -40], 120, 120)).toBe(2)
+    expect(handleSteps(30, 30, [0.2, 0.1], 120, 60)).toBe(0)
+  })
+  it('stand a fixed reach out along each axis as it looks on screen, and hide one seen end on', async () => {
+    const { handleAt, HANDLE_REACH_PX } = await import('../shell/MoveHandles')
+    const f = { center: [100, 200] as [number, number], perUnit: [[30, 40], [0, -10], [1, 1]] as [[number, number], [number, number], [number, number]] }
+    expect(handleAt(f, 0)).toEqual([100 + 0.6 * HANDLE_REACH_PX, 200 + 0.8 * HANDLE_REACH_PX])
+    expect(handleAt(f, 1)).toEqual([100, 200 - HANDLE_REACH_PX])
+    expect(handleAt(f, 2)).toBeNull()
+  })
+  it('read places typed as the readout writes them', async () => {
+    const { parseUnits } = await import('../sheets/MoreSheet')
+    expect(parseUnits('3')).toBe(360)
+    expect(parseUnits('-2')).toBe(-240)
+    expect(parseUnits('1/2')).toBe(60)
+    expect(parseUnits('1 1/2')).toBe(180)
+    expect(parseUnits('-3/4')).toBe(-90)
+    expect(parseUnits('0.25')).toBe(30)
+    expect(parseUnits('abc')).toBeNull()
+    expect(parseUnits('1/0')).toBeNull()
   })
 })

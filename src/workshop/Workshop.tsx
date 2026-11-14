@@ -10,7 +10,9 @@
  *      grid LEVEL up, its value, and down. Never hidden.
  *   3. The view ball (shell/ViewBall), top right: drag it to orbit, tap it
  *      for views, the grid plane and the snap.
- *   4. The strip (shell/Strip), over the dock: the tool's options.
+ *   4. The strip (shell/Strip), over the dock: the tool's options, or with
+ *      anything held, the held bar's fixed slots (shell/HeldBar); MORE at
+ *      its right end opens everything rarer (sheets/MoreSheet).
  *   5. The dock (shell/Dock), along the bottom: the tools in a fixed order,
  *      then the color in hand.
  *
@@ -19,13 +21,11 @@
  * but never over the dock, the rail or the top bar. The bench frames the
  * shard into what is left (Bench Framer), so a sheet never hides it.
  *
- * What you hold is acted on from the strip (HeldRows), and, until phases 2
- * and 3 replace them, from the move pad at the bottom left and the color
- * column at the bottom right (ColorActs), standing on the strip.
+ * What you hold moves by the handles on it (shell/MoveHandles; phase 2), and
+ * nothing else floats over the bench.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ticksOf, unitsLabel } from 'sno-core/shards'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { importFitFor } from 'sno-core/meshToShard'
 import { BUILT_IN } from 'sno-core/snoPalette'
 import { useEscape } from '../hooks/useEscape'
@@ -33,19 +33,19 @@ import { useScrollMemory } from '../hooks/useScrollMemory'
 import { minedIn } from '../lib/avatarMine'
 import { importFiles } from '../lib/meshImport'
 import { IMPORT_PICKER_ACCEPT } from '../lib/shardZip'
+import { stackedSpots } from '../lib/weld'
 import { useAvatars } from '../store/useAvatars'
 import { useShardFolders } from '../store/useShardFolders'
 import { routeImport, useShardImport } from '../store/useShardImport'
 import { useWorkshop } from '../store/useWorkshop'
 import { Bench } from './Bench'
 import { useBenchView } from './benchAxes'
-import { ColorActs } from './ColorActs'
-import { HeldPad } from './HeldRows'
 import { Intro, StorageWarning, Toast } from './Notices'
 import { ObjectPicker } from './ObjectPicker'
 import { PaletteModal } from './PaletteModal'
 import { ZipImport } from './ZipImport'
 import { Dock } from './shell/Dock'
+import { MoveHandles } from './shell/MoveHandles'
 import { Rail } from './shell/Rail'
 import { Sheet } from './shell/Sheet'
 import { Strip } from './shell/Strip'
@@ -55,10 +55,11 @@ import { AREA_LABEL, type Area, type SheetKind } from './sheets/areas'
 import { AvatarBody } from './sheets/AvatarSheet'
 import { GridBody } from './sheets/GridSheet'
 import { MenuBody } from './sheets/MenuSheet'
+import { MoreBody } from './sheets/MoreSheet'
 import { MotionBody } from './sheets/MotionSheet'
 import { ShardBody } from './sheets/ShardSheet'
 
-const isArea = (s: SheetKind | null): s is Area => s !== null && s !== 'palette' && s !== 'object'
+const isArea = (s: SheetKind | null): s is Area => s !== null && s !== 'palette' && s !== 'object' && s !== 'more'
 
 /** The bodies of the area sheets, by area. */
 const BODY: Record<Exclude<Area, 'menu'>, () => JSX.Element | null> = { shard: ShardBody, grid: GridBody, avatar: AvatarBody, motion: MotionBody }
@@ -98,7 +99,8 @@ function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind 
 export function Workshop(): JSX.Element | null {
   const open = useWorkshop((s) => s.open)
   const shard = useWorkshop((s) => s.current())
-  const one = useWorkshop((s) => { const c = s.current(); return s.selection.length === 1 && c ? c.vertices[s.selection[0]] ?? null : null })
+  // WELD's count, shown on MORE while points stand on one another.
+  const stacked = useMemo(() => (shard ? stackedSpots(shard).spots : 0), [shard])
   const phase = useAvatars((s) => s.phase)
   const minedMs = useAvatars((s) => s.minedMs)
   // The one sheet that is open, if any: an area, the palette, or the object picker.
@@ -237,18 +239,8 @@ export function Workshop(): JSX.Element | null {
       <TopBar open={area} onArea={toggle} />
       <Rail />
       <ViewBall open={viewOpen} onToggle={toggleView} onClose={() => setViewOpen(false)} />
-      {/* Where the one selected point is, under the view ball. A readout, so
-          taps go through to the bench. */}
-      {one && (
-        <span className="ws__at" role="status" aria-label="Selected point">
-          at ({ticksOf(one).map(unitsLabel).join(', ')})
-        </span>
-      )}
-
-      {/* The move pad and the color column, standing on the strip; away
-          while a sheet is up, which covers where they stand. */}
-      {sheet === null && <HeldPad />}
-      {sheet === null && <ColorActs />}
+      {/* The move handles, on what is held, in any tool. */}
+      <MoveHandles />
 
       <div className="ws__bottom">
         {area === 'menu' && shard && (
@@ -261,9 +253,14 @@ export function Workshop(): JSX.Element | null {
             <Body />
           </Sheet>
         )}
+        {sheet === 'more' && (
+          <Sheet name="More" title="MORE" sub={shard?.name} onClose={closeSheet}>
+            <MoreBody />
+          </Sheet>
+        )}
         {sheet === 'palette' && <PaletteModal onClose={closeSheet} foldAsk={foldAsk} />}
         {sheet === 'object' && <ObjectPicker onClose={closeSheet} />}
-        <Strip onPickObject={() => setSheet('object')} />
+        <Strip onPickObject={() => setSheet('object')} onMore={() => toggle('more')} moreBadge={stacked} />
         <Dock onColor={tapColor} colorOpen={sheet === 'palette'} />
       </div>
     </div>

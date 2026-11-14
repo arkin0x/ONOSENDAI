@@ -54,6 +54,7 @@ import { MuteListModal } from './MuteListModal'
 import { useCover } from '../hooks/useCover'
 import { SpeakeasyLine } from './SpeakeasyLine'
 import { appVersion } from '../lib/tv/upgradeAnnounce'
+import { STRAYLIGHT_INVITE } from '../tutorial/straylight'
 
 /** The menu footer's version: VERSION 2.1, or the build stamp for a build with no simple version. */
 const SHOWN_VERSION = ((v) => (v ? `VERSION ${v}` : __ONOSENDAI_VERSION__))(appVersion())
@@ -464,7 +465,7 @@ function ScalePanel(): JSX.Element {
 
 const OFFICIAL: Array<{ href: string; name: string; what: string }> = [
   { href: 'https://github.com/arkin0x/cyberspace', name: 'Cyberspace v2 Specification', what: 'the core protocol documentation' },
-  { href: 'https://straylight.cafe', name: 'straylight.cafe', what: 'cyberspace enthusiast community hub' },
+  { href: STRAYLIGHT_INVITE, name: 'Straylight Cafe', what: 'the cyberspace community, on Armada' },
   { href: 'https://cyberspace.international', name: 'cyberspace.international', what: 'education, proliferation, adoption of cyberspace' },
   { href: 'https://snocrash.art', name: 'SnoCrash', what: 'SNO format 3D model builder' },
   { href: 'https://github.com/arkin0x/ONOSENDAI/tree/v2', name: 'ONOSENDAI v2 Codebase', what: 'this client, on GitHub' },
@@ -487,8 +488,8 @@ function LinksPanel(): JSX.Element {
         These are the official places to read about and build on Cyberspace, and
         each one opens in a new tab. The Cyberspace v2 Specification is the
         protocol itself: coordinates, movement and its proofs, region keys,
-        hyperspace and every event kind. straylight.cafe is the community hub for
-        people exploring cyberspace. cyberspace.international is for teaching
+        hyperspace and every event kind. Straylight Cafe is the cyberspace community, a
+        chat on Armada where people exploring cyberspace hang out. cyberspace.international is for teaching
         Cyberspace and bringing more people and apps to it. SnoCrash builds 3D
         models in the SNO format that Cyberspace objects use. The ONOSENDAI v2
         Codebase is the source code of this client on GitHub.

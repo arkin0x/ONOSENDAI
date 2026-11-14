@@ -3,7 +3,7 @@
  *
  * Made for the workshop (arkinox, 2026-10-10: "not being able to orbit
  * hurts"), where a drag on it turns the view about the shard and a tap sends
- * the view home. WALK uses the same ball in the bottom left to look around
+ * the view home. WALK uses the same ball in the bottom right to look around
  * (arkinox, 2026-10-23: "bring back the sphere we have in the workshop and
  * use it to look"). What a drag and a tap do is the caller's.
  *

@@ -7344,7 +7344,8 @@ select.avatars__input option:checked {
 .ws__anim-num:focus { outline: none; border-color: var(--accent); }
 .ws__sheet-body .ws__anim-card .workshop__row { border-top: none; padding-top: 0; }
 /* The preview row stays at the top of the MOTION sheet while the motions scroll under it. */
-.ws__anim-preview { position: sticky; top: 0; z-index: 1; background: var(--bg); padding-bottom: 6px; }
+/* top: -10px and the matching padding cover the sheet body's own 10px top padding, so nothing scrolls past above it. */
+.ws__anim-preview { position: sticky; top: -10px; z-index: 1; background: rgb(7, 14, 22); padding-top: 10px; padding-bottom: 6px; margin-top: -10px; }
 .ws__anim-axis { font-size: 10px; letter-spacing: 0.1em; }
 .ws__anim-point { gap: 3px; flex-wrap: nowrap; }
 .ws__anim-point .ws__anim-num { padding: 5px 3px; }

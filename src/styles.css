@@ -3778,26 +3778,189 @@ select.avatars__input option:checked {
 .ws__strip .ws__slot { width: auto; max-width: 200px; height: 44px; justify-content: center; }
 .ws__strip .ws__slot-name { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
 .ws__strip .ws__slot-meta { font-size: 9.5px; white-space: nowrap; }
-/* The held rows in the strip, side by side, each a group after a hairline.
-   Not positioned, so a row's question (PASTE where, FLIP how much) anchors to
-   the strip and rises over it, rather than being clipped by the scroller. */
-.ws__strip .benchclip,
-.ws__strip .benchturn { position: static; flex: none; align-self: auto; display: flex; align-items: center; gap: 4px; padding-left: 6px; border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
-.ws__strip-opts > :first-child { border-left: 0; padding-left: 0; }
-/* Three classes, to outrank the rows' own sizes (.benchclip .touchpad__key and kin), which come later. */
-.ws__strip .benchclip .touchpad__key,
-.ws__strip .benchturn .touchpad__key { width: auto; min-width: 48px; height: 44px; padding: 0 6px; flex-direction: column; gap: 2px; font-size: 16px; }
-.ws__strip .benchclip .touchpad__sub,
-.ws__strip .benchturn .touchpad__sub,
-.ws__strip .benchclip .touchpad__key--long .touchpad__sub { font-size: 9.5px; letter-spacing: 0.06em; }
-.ws__strip .benchweld__count { font-size: 9.5px; height: 44px; backdrop-filter: none; }
-.ws__strip .benchpaste { left: 72px; bottom: calc(100% + 8px); z-index: 4; }
-.ws__strip .benchpaste .workshop__btn { min-height: 44px; font-size: var(--ws-label); }
-/* The move pad's words, up to the bars' floor (it stands on the strip until phase 2's handles). */
-.ws__held .benchpad .touchpad__sub,
-.ws__held .benchpad .touchpad__key--connect .touchpad__sub,
-.ws__held .benchpad .touchpad__key--delete .touchpad__sub,
-.ws__held .touchpad__hub { font-size: 9.5px; letter-spacing: 0.04em; }
+/* The held bar (workshop redesign, phase 2): eight fixed slots across the
+   strip, count first, DELETE second from the right, MORE last. Its questions
+   (PASTE where, COLOR how) rise over the strip; the bar is not positioned, so
+   they anchor to the strip. An orange edge says something is held. */
+.ws__strip.ws__strip--held { padding: 0 var(--ws-gutter); border-top: 2px solid var(--warn); }
+.ws__heldbar { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 0; }
+.ws__heldbtn {
+  flex: 1 1 0;
+  min-width: 44px;
+  height: 48px;
+  padding: 0 1px;
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-family: inherit;
+  font-size: var(--ws-label);
+  letter-spacing: 0.02em;
+  color: var(--fg);
+  background: none;
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  touch-action: manipulation;
+  white-space: nowrap;
+}
+.ws__heldbtn:disabled { opacity: 0.32; cursor: default; }
+.ws__heldbtn--danger { color: var(--danger); }
+.ws__heldbtn--count { flex: 1.1 1 0; color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent); background: rgba(255, 176, 32, 0.08); }
+.ws__heldbtn--count b { display: inline-flex; align-items: center; gap: 2px; font-size: 14px; font-weight: 700; }
+.ws__heldbtn--two::after { content: ''; position: absolute; top: 6px; right: 8px; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.8; }
+.ws__heldbtn--two[aria-expanded='true']::after { background: var(--accent); opacity: 1; }
+/* Two classes, to outrank .benchpaste's own place, which comes later. */
+.benchpaste.ws__ask { left: auto; right: var(--ws-gutter); bottom: calc(100% + 8px); z-index: 4; width: 200px; }
+.benchpaste.ws__ask .workshop__btn { min-height: 44px; font-size: var(--ws-label); }
+/* A count on MORE: points standing on one another, for WELD inside. */
+.ws__badge {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-style: normal;
+  font-size: 10px;
+  line-height: 16px;
+  font-weight: 700;
+  color: var(--ws-ink);
+  background: var(--warn);
+}
+/* Tool strips: MORE at the right end on every tool, after a hairline. */
+.ws__strip-more { position: relative; flex: none; margin-left: auto; }
+.ws__stripbtn--tall { flex-direction: column; gap: 2px; min-width: 52px; padding: 0 6px; height: 48px; }
+.ws__stripbtn--tall span { font-size: var(--ws-label); }
+.ws__shapechip { gap: 6px; padding: 0 10px; height: 48px; max-width: 150px; }
+.ws__shapechip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws__seg { flex: none; display: flex; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.ws__seg .ws__stripbtn { border: 0; border-radius: 0; height: 46px; padding: 0 9px; }
+.ws__corners { flex: none; min-width: 58px; height: 46px; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; border: 1px dashed var(--border); border-radius: 9px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.ws__corners b { font-size: 13px; color: var(--fg); }
+.ws__corners span { font-size: 9.5px; letter-spacing: 0.06em; }
+.ws__corners.is-on { border-color: var(--accent); color: var(--accent); }
+/* STAMP's shape tiles, over the strip. */
+.ws__tiles {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% + 8px);
+  z-index: 4;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  max-width: 360px;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(6, 14, 22, 0.97);
+  border: 1px solid var(--border);
+}
+.ws__tile {
+  min-height: 64px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-family: inherit;
+  font-size: var(--ws-label);
+  letter-spacing: 0.04em;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.ws__tile.is-on { color: var(--ws-ink); background: var(--accent); border-color: var(--accent); font-weight: 700; }
+/* MORE's keys: labelled, thumb-sized, in rows that wrap. */
+.ws__more-sec { display: flex; flex-direction: column; gap: 8px; }
+.ws__more-sec + .ws__more-sec { border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); padding-top: 10px; }
+.ws__more-title { margin: 0; font-size: 10px; letter-spacing: 0.14em; color: var(--dim); font-weight: 600; }
+.ws__more-keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; }
+.ws__morebtn {
+  min-height: 56px;
+  padding: 4px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-family: inherit;
+  font-size: var(--ws-label);
+  letter-spacing: 0.04em;
+  text-align: center;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.ws__morebtn:disabled { opacity: 0.32; cursor: default; }
+.ws__morebtn.is-on { color: var(--ws-ink); background: var(--accent); border-color: var(--accent); font-weight: 700; }
+.ws__morebtn--danger { color: var(--danger); }
+.ws__morebtn--wide { min-height: 44px; padding: 0 14px; }
+.ws__morepad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-width: 260px; }
+.ws__morepad .ws__morebtn b { font-size: 16px; font-weight: 400; }
+.ws__exact { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; }
+.ws__exact-field { display: flex; flex-direction: column; gap: 3px; font-size: 10px; color: var(--dim); }
+.ws__exact-input { width: 76px; height: 44px; padding: 0 8px; font-family: inherit; font-size: 13px; color: var(--fg); background: rgba(0, 229, 255, 0.04); border: 1px solid var(--border); border-radius: 8px; }
+.ws__exact-input[aria-invalid='true'] { border-color: var(--danger); }
+/* The move handles: over the bench, positioned by the bench's report. */
+.ws__handles { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.ws__handles[hidden] { display: none; }
+.ws__handles-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.ws__handle-line { stroke-width: 3; stroke-linecap: round; }
+.ws__handle-line--x { stroke: #ff4444; }
+.ws__handle-line--y { stroke: #44ff44; }
+.ws__handle-line--z { stroke: #4488ff; }
+.ws__handle-hub { position: absolute; left: -7px; top: -7px; width: 14px; height: 14px; border-radius: 50%; background: var(--warn); border: 2px solid #05070d; }
+.ws__handle {
+  position: absolute;
+  left: -22px;
+  top: -22px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.78);
+  border: 3px solid currentColor;
+  border-radius: 50%;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ws__handle:active { cursor: grabbing; }
+.ws__handle--x { color: #ff6b6b; }
+.ws__handle--y { color: #5cff7a; }
+.ws__handle--z { color: #6aa3ff; }
+.palettes__headkeys { display: inline-flex; gap: 6px; flex: none; }
+/* A narrow phone: the strip's tool label keeps its icon and ?, the shape
+   chip its picture and name, so STAMP's options and MORE fit without
+   scrolling. The dock still says which tool is lit. */
+@media (max-width: 400px) {
+  .ws__strip { gap: 4px; }
+  .ws__strip-tool { width: 46px; }
+  .ws__strip-tool > span { display: none; }
+  .ws__strip-q { top: 10px; right: 6px; }
+  .ws__shapechip > svg:last-child { display: none; }
+  .ws__shapechip { max-width: 120px; }
+  .ws__stepper-value { min-width: 28px; }
+  .ws__strip-opts { gap: 4px; }
+  .ws__stripbtn--tall { min-width: 48px; padding: 0 4px; }
+}
 /* The palette as a sheet: the whole of it scrolls under its header, the 256
    first and the palette making after them, so the swatches get the room. */
 .palettes.ws__sheet { display: block; overflow-y: auto; overscroll-behavior: contain; }
@@ -4007,20 +4170,6 @@ select.avatars__input option:checked {
 .workshop .explain__pill { font-size: 10px; letter-spacing: 0.03em; }
 .workshop .sfold__btn { font-size: 10px; letter-spacing: 0.05em; }
 
-/* What you hold, acted on: the rows at the bottom left, standing on the strip. */
-.ws__held {
-  position: absolute;
-  left: var(--ws-gutter);
-  bottom: calc(var(--ws-bottom) + var(--ws-bottom-gap) + 8px);
-  z-index: 3;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  pointer-events: none;
-}
-.ws__held > * { pointer-events: auto; }
-
 /* The store's notice, under the top bar between the rail and the view ball. */
 .ws__toast {
   position: absolute;
@@ -4078,26 +4227,6 @@ select.avatars__input option:checked {
   .ws__dock { border: 1px solid var(--border); border-top: 0; border-radius: 0 0 12px 12px; }
   .ws__sheet { border: 1px solid var(--border); border-radius: 14px; }
 }
-/* The main pad's nine cells, for the selection: CONNECT and DELETE take the
- * corners the scale keys have out there. */
-/* Two cells on the end of the row DELETE sits in: CUT then DUPLICATE, or,
-   with nothing selected, PASTE in the cell CUT had. The container lets taps
-   through, since with nothing selected every cell but that one is empty and
-   the bench is underneath. */
-.benchpad {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(3, 48px);
-  grid-template-rows: repeat(3, 48px);
-  gap: 4px;
-  pointer-events: none;
-  grid-template-areas:
-    "away    up   toward"
-    "left    hub  right"
-    "connect down delete";
-}
-.benchpad > * { pointer-events: auto; }
-
 /* The orbit ball (arkinox, 2026-10-10): the pad's size, right of it. A drag
    on it turns the view about the shard and keeps turning after the finger
    leaves it (pointer capture); a tap sends the view home. Drawn as a lit
@@ -4310,28 +4439,6 @@ select.avatars__input option:checked {
   }
 }
 
-/* The clipboard row: first in the bottom-left column, so the pad, TURN and
-   the color column in the other corner never stand on it. */
-.benchclip {
-  position: relative;
-  display: flex;
-  gap: 4px;
-}
-.benchclip .touchpad__key { width: 48px; height: 48px; flex-direction: column; gap: 2px; font-size: 17px; }
-.benchclip .touchpad__sub { font-size: 10px; }
-/* A mode key lit while its mode is on (INVERT, arkinox, 2026-10-10), in the
-   same lit treatment as a tool chip, so "on" reads the same everywhere. */
-.benchclip .touchpad__key.is-on {
-  color: #05070d;
-  background: var(--accent);
-  border-color: var(--accent);
-  font-weight: 700;
-}
-.benchclip .touchpad__key.is-on .touchpad__sub { opacity: 1; }
-/* The long words, DESELECT and SUBDIVIDE, a touch smaller and untracked, and
-   each breaks onto two lines (DE SELECT, SUB DIVIDE) so it fits a 48px key
-   without widening it. */
-.benchclip .touchpad__key--long .touchpad__sub { font-size: 9.5px; letter-spacing: 0; line-height: 1.1; text-align: center; }
 /* A key that asks before it acts (PASTE where, FLIP how much) carries a dot
    in its top right corner, so it reads as two steps before it is pressed.
    The dot lights while its question is open (arkinox, 2026-09-27). */
@@ -4415,61 +4522,6 @@ select.avatars__input option:checked {
   position: fixed;
   inset: 0;
   z-index: 1;
-}
-.benchclip .touchpad__key--danger { color: var(--danger); }
-.benchpad .touchpad__key--connect { grid-area: connect; color: var(--accent); }
-.benchpad .touchpad__key--delete { grid-area: delete; color: var(--danger); }
-/* Glyph over word in every cell: the cells are big enough here for both. */
-.benchpad .touchpad__key,
-.benchturn .touchpad__key {
-  flex-direction: column;
-  gap: 2px;
-  font-size: 17px;
-}
-.benchpad .touchpad__sub,
-.benchturn .touchpad__sub { font-size: 10px; }
-/* CUT and DUPLICATE, or PASTE, on top of the turn keys. It stretches to the
-   width of the widest thing in the corner, the nudge pad, and its buttons
-   split that evenly, so every row in the column shares one left and one right
-   edge and the 8px the column already puts between rows is the only gap. */
-.benchclip {
-  align-self: stretch;
-  display: flex;
-  gap: 4px;
-}
-.benchclip .workshop__btn {
-  flex: 1 1 0;
-  min-width: 0;
-  padding: 5px 4px;
-}
-
-/* The turn row: LEFT, RIGHT, then CUT, COPY and PASTE (arkinox, 2026-10-10),
-   a flex row of 48px keys; relative, so PASTE's question anchors to it. */
-.benchturn {
-  position: relative;
-  display: flex;
-  gap: 4px;
-}
-.benchturn .touchpad__key { width: 48px; height: 48px; }
-/* The weld row (arkinox, 2026-10-12): the stack count as a readout cell the
-   height of a key, then WELD, at the top of the bottom-left column. It stood
-   in the color corner and covered the orbit ball. The readout lets taps
-   through to nothing; only the key acts. */
-.benchweld { align-items: stretch; }
-.benchweld__count {
-  display: flex;
-  align-items: center;
-  height: 48px;
-  padding: 0 10px;
-  box-sizing: border-box;
-  border-radius: 9px;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  white-space: nowrap;
-  color: var(--dim, #7fa3b3);
-  background: rgba(6, 14, 22, 0.85);
-  border: 1px solid var(--border);
-  backdrop-filter: blur(8px);
 }
 /* The mixer rises above the corner stack, clear of the pad on the left. */
 .ws__mixer {
@@ -8737,69 +8789,7 @@ select.avatars__input option:checked {
 .shards__type--bag { display: inline-flex; align-items: center; gap: 3px; vertical-align: -2px; }
 .objpick__row:disabled { opacity: 0.45; cursor: default; }
 
-/* ---- The color corner and palette sheet, ported from snocrash (arkinox, 2026-09-27) ---- */
-/* The selected point's coordinate, under the view ball at the top right
-   (workshop redesign, phase 1). It takes no taps: the bench is underneath. */
-.ws__at {
-  position: absolute;
-  top: calc(var(--ws-top-end) + 80px);
-  right: var(--ws-gutter);
-  z-index: 3;
-  max-width: calc(100vw - 80px);
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 9px;
-  height: 34px;
-  border-radius: 8px;
-  font-size: 10px;
-  letter-spacing: 0;
-  color: var(--accent);
-  background: rgba(6, 14, 22, 0.72);
-  border: 1px solid var(--border);
-  backdrop-filter: blur(6px);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  pointer-events: none;
-}
-
-/* The three reaches, a column at the bottom right standing on the strip (the
-   color itself is the dock's last slot now). Larger than they were, because they
-   are now a first-class control rather than a footer inside a panel. */
-.ws__acts {
-  position: absolute;
-  right: var(--ws-gutter);
-  bottom: calc(var(--ws-bottom) + var(--ws-bottom-gap) + 8px);
-  z-index: 3;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 5px;
-}
-/* The bucket as a two-stage key while a face is in hand (FILL or SEAM): the
-   same dot the two-stage pad keys wear, and its question opens to the left,
-   since the column stands at the right edge. */
-.ws__act--two { position: relative; }
-.ws__act--two::after {
-  content: '';
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #fff;
-}
-.ws__act--two[aria-expanded='true']::after { background: var(--accent); }
-.benchpaste--right { left: auto; right: 0; bottom: 44px; }
-.ws__act {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  border-radius: 9px;
-}
-
+/* ---- The palette sheet, ported from snocrash (arkinox, 2026-09-27) ---- */
 /*
  * The palette folding back into the color chip that opened it.
  *

@@ -105,6 +105,13 @@ export interface TutorialStep {
    * item 15).
    */
   onNext?: string
+  /**
+   * A panel of its own under the caption, by name, for a step whose words
+   * depend on the player (hud/TutorialCoach.tsx draws it): the Straylight
+   * route's identity step says what to do for the signer the player is on
+   * (hud/StraylightIdentity.tsx).
+   */
+  panel?: 'straylight-identity'
   /** A button in the coach that runs a registered effect when tapped (OPEN WORKSHOP); nothing runs untapped. */
   action?: { label: string; effect: string }
   /**

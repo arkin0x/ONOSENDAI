@@ -404,6 +404,23 @@ export interface SpectateState {
   status: 'loading' | 'live' | 'empty' | 'error' | 'partial'
   /** The view you had before spectating, put back when it ends. */
   returnView: Quaternion
+  /**
+   * Where they were last known to stand when the spectation began (presence,
+   * a target, the AVATARS list: lib/spectator.ts knownStand), or null when
+   * nowhere was. The scene stands there until their chain says otherwise, and
+   * stays there if the chain never comes, instead of their spawn (owner,
+   * 2026-11-14: "i saw this avatar moving at block 101 yes when i hit
+   * spectate it puts me all the way at his spawn").
+   */
+  known?: KnownStand | null
+}
+
+/** Where someone was last seen standing, before their chain is in hand. */
+export interface KnownStand {
+  position: Position
+  plane: Plane
+  /** created_at of the action that put them there, when known. */
+  lastActive: number | null
 }
 
 export type ProofStatus = 'idle' | 'computing' | 'done' | 'infeasible'
@@ -1016,15 +1033,20 @@ export interface CyberspaceState {
   /** Step the explored index; clamps at both ends. */
   exploreStep: (delta: number) => void
   /**
-   * Start following a pubkey: anchors on its spawn coordinate until its chain
-   * arrives. With `keepView` and a driven view standing (BUILD mode,
-   * store/useBuilder.ts), the view stays and is aimed at them instead: the
-   * build cursor goes to their spawn, then to their head when the chain
-   * arrives, and the pad keeps driving it.
+   * Start following a pubkey: anchors where they were last `known` to stand,
+   * else on their spawn coordinate, until their chain arrives. With
+   * `keepView` and a driven view standing (BUILD mode, store/useBuilder.ts),
+   * the view stays and is aimed at them instead: the build cursor goes
+   * there, then to their head when the chain arrives, and the pad keeps
+   * driving it.
    */
-  beginSpectate: (pubkey: string, keepView?: boolean) => void
-  /** The spectated chain, fetched or updated. Keeps the explored index when it still fits. */
-  setSpectateChain: (pubkey: string, events: NostrEvent[], status?: 'live' | 'empty' | 'error' | 'partial') => void
+  beginSpectate: (pubkey: string, keepView?: boolean, known?: KnownStand | null) => void
+  /**
+   * The spectated chain, fetched or updated. Keeps the explored index when
+   * it still fits. `loading`: a chain already in hand while the relays are
+   * still being asked (lib/spectator.ts), so FETCHING CHAIN stays up.
+   */
+  setSpectateChain: (pubkey: string, events: NostrEvent[], status?: 'loading' | 'live' | 'empty' | 'error' | 'partial') => void
   /** Back to your own head; with a driven view standing (BUILD mode), the view stays where it is. */
   endSpectate: () => void
   /**
@@ -5967,7 +5989,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const chain = get().focusChain()
     const last = chain.length - 1
     // Nothing to walk: a spectated pubkey with no chain on the relay. The
-    // anchor stays on its spawn coordinate.
+    // anchor stays where the spectation began (where they were last seen,
+    // else their spawn coordinate).
     if (last < 0) { set({ exploreIndex: null }); return }
     // A chain stands where a rejected proof stops it, from the stop on: your
     // own as positionHistory draws it (standingOf), a spectated one where its
@@ -5990,19 +6013,21 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     get().explore(Math.min(last, Math.max(0, from + delta)))
   },
 
-  beginSpectate: (pubkey, keepView = false) => {
-    const spawn = spawnOf(pubkey)
+  beginSpectate: (pubkey, keepView = false, known = null) => {
+    // Where they were last seen (presence, a target, the AVATARS list), else
+    // their spawn: the spawn only when nothing newer is known (owner,
+    // 2026-11-14). Their avatar is drawn at the anchor, so it shows there too.
+    const start = known ?? spawnOf(pubkey)
     const { view, viewHistory, spectate } = get()
+    const watching: SpectateState = { pubkey, npub: nip19.npubEncode(pubkey), events: [], actions: [], lastActive: known?.lastActive ?? null, status: 'loading', returnView: spectate?.returnView ?? view.clone(), known }
     // BUILD mode (arkinox, 2026-10-08): spectating does not end it. The
-    // driven view is the build cursor, so it stays, and is aimed at them, at
-    // their spawn until the chain arrives (setSpectateChain). The angle you
-    // were building from is kept, and nothing is put back at the end.
+    // driven view is the build cursor, so it stays, and is aimed at them,
+    // where they were last seen until the chain arrives (setSpectateChain).
+    // The angle you were building from is kept, and nothing is put back at
+    // the end.
     if (keepView && get().focus?.drive) {
-      set({
-        spectate: { pubkey, npub: nip19.npubEncode(pubkey), events: [], actions: [], lastActive: null, status: 'loading', returnView: spectate?.returnView ?? view.clone() },
-        exploreIndex: null,
-      })
-      get().aimView(spawn.position, spawn.plane)
+      set({ spectate: watching, exploreIndex: null })
+      get().aimView({ ...start.position }, start.plane)
       return
     }
     // The view you arrive with is the black sun orientation (section 11.3),
@@ -6012,13 +6037,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // when spectation ends; switching from one avatar to another keeps the
     // first one's return view.
     set({
-      spectate: { pubkey, npub: nip19.npubEncode(pubkey), events: [], actions: [], lastActive: null, status: 'loading', returnView: spectate?.returnView ?? view.clone() },
+      spectate: watching,
       exploreIndex: null,
       // A standing focus (a shard, EARTH, a viewed stop) would hide the
       // avatar and keep the rig on the old point: spectating replaces it.
       focus: null,
-      anchor: spawn.position,
-      anchorPlane: spawn.plane,
+      anchor: { ...start.position },
+      anchorPlane: start.plane,
       view: canonicalQuaternion(),
       viewHistory: [...viewHistory, view.clone()],
     })
@@ -6041,34 +6066,42 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const freeze = spectateFreeze(actions)
     const placeOf = (i: number): ActionEvent => (freeze && i >= freeze.index ? freeze.at : actions[i])
     const at = keep ? placeOf(get().exploreIndex!) : head && placeOf(actions.length - 1)
-    const spawn = spawnOf(pubkey)
+    // Where the spectation began: where they were last seen, else their
+    // spawn. With no chain (none on the relay, or the relay unreachable) the
+    // scene stays there rather than going back to the spawn (owner, 2026-11-14).
+    const start = prev.known ?? spawnOf(pubkey)
+    const lastActive = head?.createdAt ?? prev.lastActive
     // Under a driven view (BUILD mode) the scene stays on the build cursor,
     // which the chain does not move, with one exception: the first chain to
-    // arrive takes the cursor from their spawn to their head, unless you
-    // already moved it. After that their new actions move their avatar, not
-    // your cursor.
+    // arrive takes the cursor from where it was aimed to their head, unless
+    // you already moved it. After that their new actions move their avatar,
+    // not your cursor.
     if (get().focus?.drive) {
       set({
-        spectate: { ...prev, events, actions, lastActive: head?.createdAt ?? null, status: status ?? (head ? 'live' : 'empty') },
+        spectate: { ...prev, events, actions, lastActive, status: status ?? (head ? 'live' : 'empty') },
         exploreIndex: null,
       })
       const s = get()
       // Where they stand, as their avatar is drawn (lib/buildCursor.ts avatarInBuild, focusStand).
       const stand = head && placeOf(actions.length - 1)
-      if (prev.actions.length === 0 && stand && samePosition(s.cursor, spawn.position) && s.anchorPlane === spawn.plane) s.aimView(stand.position, stand.plane)
+      if (prev.actions.length === 0 && stand && samePosition(s.cursor, start.position) && s.anchorPlane === start.plane) s.aimView(stand.position, stand.plane)
       return
     }
+    const to = at ?? start
+    // The same place kept as the same object, so a chain that agrees with
+    // where they were seen changes nothing on screen.
+    const anchor = samePosition(get().anchor, to.position) ? get().anchor : { ...to.position }
     set({
       spectate: {
         ...prev,
         events,
         actions,
-        lastActive: head?.createdAt ?? null,
+        lastActive,
         status: status ?? (head ? 'live' : 'empty'),
       },
       exploreIndex: keep ? get().exploreIndex : null,
-      anchor: at?.position ?? spawn.position,
-      anchorPlane: at?.plane ?? spawn.plane,
+      anchor,
+      anchorPlane: to.plane,
     })
   },
 
@@ -6164,7 +6197,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // A driven view kept through a spectation (BUILD mode) that ends while
     // the spectation stands goes back to watching them, where they stand:
     // their head, or where a rejected proof stops their chain (spectateFreeze).
-    const watched = spectate ? (spectateFreeze(spectate.actions)?.at ?? spectate.actions[spectate.actions.length - 1] ?? spawnOf(spectate.pubkey)) : null
+    const watched = spectate ? (spectateFreeze(spectate.actions)?.at ?? spectate.actions[spectate.actions.length - 1] ?? spectate.known ?? spawnOf(spectate.pubkey)) : null
     set({
       focus: null,
       // RETURN ends the look, and the pin was the look's subject.

@@ -357,6 +357,50 @@ describe('the strip', () => {
     await m.unmount()
   })
 
+  it('counts a face held in FACE as a face, not its corners', async () => {
+    useWorkshop.getState().setTool('face')
+    useWorkshop.getState().selectFace(0)
+    const m = await mount(<Workshop />)
+    const count = buttonsIn(strip(m)).find((b) => cls(b).includes('ws__heldbtn--count'))!
+    expect(textOf(count).replace(/\s+/g, ' ')).toBe('1 FACE')
+    // AUTO and FLIP, and REMOVE for face taps, are in MORE while the face is held.
+    await m.press('MORE')
+    for (const w of ['FLIP FACE', 'FLIP SURFACE', 'AUTO', 'REMOVE']) expect(m.buttons(w).length, w).toBeGreaterThan(0)
+    expect(m.buttons('BOX').length).toBe(0)
+    await m.unmount()
+  })
+
+  it('keeps a typed move one UNDO with a full history, and refuses a place off the grid whole', async () => {
+    const s0 = useWorkshop.getState().current()!
+    useWorkshop.setState({ past: Array.from({ length: 64 }, () => s0) })
+    useWorkshop.getState().setTool('select')
+    useWorkshop.getState().setSelection([1])
+    const m = await mount(<Workshop />)
+    await m.press('MORE')
+    const inputs = (): Host[] => m.all().filter((h) => h.type === 'input' && String(h.props['aria-label']).endsWith(', in units'))
+    ;(inputs()[0].props.onChange as (e: unknown) => void)({ target: { value: '2' } })
+    ;(inputs()[2].props.onChange as (e: unknown) => void)({ target: { value: '1' } })
+    await tick()
+    const submit = (): void => { const form = m.all().find((h) => h.type === 'form')!; (form.props.onSubmit as (e: unknown) => void)({ preventDefault: () => {} }) }
+    submit()
+    await tick()
+    expect(ticksOf(useWorkshop.getState().current()!.vertices[1])).toEqual([240, 0, 120])
+    expect(useWorkshop.getState().past.length).toBe(64)
+    useWorkshop.getState().undo()
+    expect(ticksOf(useWorkshop.getState().current()!.vertices[1])).toEqual([120, 0, 0])
+    // Off the grid: nothing moves, not even the axes that would fit.
+    useWorkshop.getState().redo()
+    useWorkshop.getState().setSelection([1])
+    await tick()
+    ;(inputs()[0].props.onChange as (e: unknown) => void)({ target: { value: '1' } })
+    ;(inputs()[1].props.onChange as (e: unknown) => void)({ target: { value: '9999' } })
+    await tick()
+    submit()
+    await tick()
+    expect(ticksOf(useWorkshop.getState().current()!.vertices[1])).toEqual([240, 0, 120])
+    await m.unmount()
+  })
+
   it('asks BLEND or EDGE before COLOR puts the color on a face', async () => {
     useWorkshop.getState().setTool('face')
     useWorkshop.getState().selectFace(0)
@@ -497,6 +541,19 @@ describe('the bench framing (benchAxes frameOffset, frameZoom)', () => {
 })
 
 describe('the move handles and exact numbers (phase 2)', () => {
+  it('fold a whole drag into one UNDO from the shard alone, so a full history folds too', () => {
+    const src = readFileSync(join(__dirname, '..', 'shell', 'MoveHandles.tsx'), 'utf8')
+    expect(src).toContain('if (d.before && now.currentId === d.shardId && now.current() !== d.before) useWorkshop.setState({ past: dragHistory(d.past, d.before, now.past) })')
+    expect(src).not.toMatch(/past\.length - d\.past\.length/)
+  })
+  it('never take a multi-finger press for a tap on the bench', () => {
+    const bench = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
+    const taps = bench.match(/if \(e\.delta > tapSlop\(\)( \|\| multiPress\(\))?\) return/g) ?? []
+    expect(taps.length).toBeGreaterThanOrEqual(4)
+    for (const t of taps) expect(t).toContain('multiPress()')
+    expect(bench).toContain('if (down.size >= 1) noteMultiTouch(true)')
+  })
+
   it('turn a drag along an axis into whole grid steps, and an axis seen end on into none', async () => {
     const { handleSteps } = await import('../benchAxes')
     // One unit covers 40px to the right: 40px is one unit, 120 ticks, two steps of 60.

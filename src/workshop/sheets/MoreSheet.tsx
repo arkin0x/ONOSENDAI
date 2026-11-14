@@ -10,8 +10,8 @@
  */
 
 import { useEffect, useState } from 'react'
-import { ClipboardPaste, Copy, Eraser, FlipVertical2, Globe, Grid2x2Plus, Link, Merge, Pipette, Puzzle, Scissors, SquareDashedMousePointer, Triangle, Waypoints } from 'lucide-react'
-import { TICKS_PER_UNIT, ticksOf, unitsLabel } from 'sno-core/shards'
+import { ClipboardPaste, Copy, Eraser, FlipVertical2, Globe, Grid2x2Plus, Link, Merge, Pipette, Puzzle, Scissors, SquareDashedMousePointer, Triangle, WandSparkles, Waypoints } from 'lucide-react'
+import { TICKS_PER_UNIT, ticksOf, unitsLabel, validPoint } from 'sno-core/shards'
 import { noCallout, useRepeatable } from '../../hooks/useRepeatable'
 import { dragHistory } from '../../lib/opacityStep'
 import { stackedSpots } from '../../lib/weld'
@@ -85,10 +85,19 @@ function ExactPlace({ index }: { index: number }): JSX.Element | null {
     const w = useWorkshop.getState
     const st = w()
     const before = st.current()
+    if (!before) return
+    const delta = parsed.map((p, axis) => (p as number) - at[axis])
+    // Every held point and object must land on the grid, or nothing moves:
+    // one axis moved and the next refused would tear the move in half.
+    const fits = st.selection.every((i) => { const v = before.vertices[i]; if (!v) return true; const t = ticksOf(v); return validPoint([t[0] + delta[0], t[1] + delta[1], t[2] + delta[2]], before.extent) })
+      && st.partSel.every((i) => { const q = before.parts?.[i]; return !q || validPoint([q.at[0] + delta[0], q.at[1] + delta[1], q.at[2] + delta[2]], before.extent) })
+    if (!fits) { useWorkshop.setState({ notice: 'That place is off the grid. GRID SIZE makes it bigger.' }); return }
     const past = st.past
-    parsed.forEach((p, axis) => { const d = (p as number) - at[axis]; if (d !== 0) w().moveSelected(axis as 0 | 1 | 2, d) })
+    const shardId = st.currentId
+    delta.forEach((d, axis) => { if (d !== 0) w().moveSelected(axis as 0 | 1 | 2, d) })
+    // One UNDO for the whole move, a full history too (its cap keeps its length).
     const now = w()
-    if (before && now.current() !== before && now.past.length - past.length > 1) useWorkshop.setState({ past: dragHistory(past, before, now.past) })
+    if (now.currentId === shardId && now.current() !== before) useWorkshop.setState({ past: dragHistory(past, before, now.past) })
     setTyped(null)
   }
   return (
@@ -135,7 +144,8 @@ export function MoreBody(): JSX.Element | null {
   if (!shard) return null
   const held = selection.length > 0 || partSel.length > 0 || faceHeld
   const stacked = stackedSpots(shard)
-  const one = selection.length === 1 && partSel.length === 0 ? selection[0] : null
+  // One point, however many vertices share it (two stamps touching at a corner).
+  const one = points === 1 && partSel.length === 0 ? selection[0] : null
   const self = (): string | undefined => ownAddress(useCyberspace.getState().identity.pubkey, w().currentId)
   const clipWords = clip ? [clip.points.length ? `${clip.points.length} point${clip.points.length === 1 ? '' : 's'}` : '', clip.parts.length ? `${clip.parts.length} object${clip.parts.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ') : ''
   return (
@@ -153,6 +163,7 @@ export function MoreBody(): JSX.Element | null {
             <Key icon={Pipette} label="TAKE COLOR" title="Take the color of the point or face you hold" aria="Take the selected color" disabled={!(selection.length === 1 || faceHeld)} onClick={() => w().sampleColor()} />
             {faceHeld && <Key icon={FlipVertical2} label="FLIP FACE" title="The selected faces turned round, each back to its front" onClick={() => w().flipSelectedFace()} />}
             {faceHeld && <Key icon={FlipVertical2} label="FLIP SURFACE" title="The selected faces turned round, and every face joined to them by an edge turned to agree" onClick={() => w().flipSelectedSurface()} />}
+            {faceHeld && <Key icon={WandSparkles} label="AUTO" title="Every face in the object turned to look outward, by the bench's best guess" aria="Turn every face outward" onClick={() => w().autoWind()} />}
           </div>
           {one !== null && (
             <>
@@ -185,13 +196,15 @@ export function MoreBody(): JSX.Element | null {
           )}
         </div>
       </section>
-      {tool === 'select' && (
-        <section className="ws__more-sec" aria-label="SELECT">
-          <h3 className="ws__more-title">SELECT</h3>
+      {(tool === 'select' || tool === 'face') && (
+        <section className="ws__more-sec" aria-label="Taps">
+          <h3 className="ws__more-title">{tool === 'select' ? 'SELECT' : 'FACE'}</h3>
           <div className="ws__more-keys">
-            <button className={`ws__morebtn${box ? ' is-on' : ''}`} aria-pressed={box} onClick={() => w().setBoxSelect(!box)} aria-label="Box: a drag draws a box" title="On: a one-finger drag draws a box. Off: it turns the view" {...noCallout}>
-              <SquareDashedMousePointer size={18} strokeWidth={2} aria-hidden /><span>BOX</span>
-            </button>
+            {tool === 'select' && (
+              <button className={`ws__morebtn${box ? ' is-on' : ''}`} aria-pressed={box} onClick={() => w().setBoxSelect(!box)} aria-label="Box: a drag draws a box" title="On: a one-finger drag draws a box. Off: it turns the view" {...noCallout}>
+                <SquareDashedMousePointer size={18} strokeWidth={2} aria-hidden /><span>BOX</span>
+              </button>
+            )}
             <button className={`ws__morebtn${invert ? ' is-on' : ''}`} aria-pressed={invert} onClick={() => w().setInvert(!invert)} aria-label="Remove: taps and boxes take points out" title="Taps and boxes take points out instead of adding" {...noCallout}>
               <Eraser size={18} strokeWidth={2} aria-hidden /><span>REMOVE</span>
             </button>

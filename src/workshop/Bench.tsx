@@ -44,7 +44,7 @@ import { partMatrix } from 'sno-core/parts'
 import { OwnPartsContext, useResolved } from '../lib/parts'
 import { BASE_FAR, BASE_NEAR, MIN_DISTANCE, clipPlanes, fitDistance, nextMaxDistance, reachFor, reachRadius, shardSphere, type Sphere } from './benchReach'
 import { useCyberspace } from '../store/useCyberspace'
-import { Hold, noteGesture, slopFor, tapSlop } from './deadZone'
+import { Hold, multiPress, noteGesture, noteMultiTouch, slopFor, tapSlop } from './deadZone'
 import { HandleDots, HandleHalos, HandleHits, PressMemory, dotCapacity, type Halo } from './handleDots'
 import { keepPrograms } from '../lib/keepPrograms'
 
@@ -123,7 +123,7 @@ function Grid(): JSX.Element {
   useLayoutEffect(() => { grid.set(extent, division); invalidate() }, [grid, extent, division, invalidate])
 
   const onClick = (e: ThreeEvent<MouseEvent>): void => {
-    if (e.delta > tapSlop()) return
+    if (e.delta > tapSlop() || multiPress()) return
     e.stopPropagation()
     // Read the store at tap time rather than from the render closure: a level
     // changed a moment ago must apply to this tap even if the bench has not
@@ -331,7 +331,7 @@ function Handles(): JSX.Element | null {
   const onPress = (e: ThreeEvent<PointerEvent>): void => { pressed.press(e.nativeEvent, e.index) }
 
   const onClick = (e: ThreeEvent<MouseEvent>): void => {
-    if (e.delta > tapSlop()) return
+    if (e.delta > tapSlop() || multiPress()) return
     const g = e.index === undefined ? undefined : groups[e.index]
     if (!g || !pressed.met(e.index as number)) return
     e.stopPropagation()
@@ -643,7 +643,8 @@ function MultiTap(): null {
     let spoiled = false
     const press = (e: PointerEvent): void => {
       if (e.pointerType !== 'touch') return
-      if (down.size === 0) { first = e.timeStamp; most = 0; spoiled = false }
+      if (down.size === 0) { first = e.timeStamp; most = 0; spoiled = false; noteMultiTouch(false) }
+      if (down.size >= 1) noteMultiTouch(true)
       if (e.timeStamp - first > MULTI_TAP_MS) spoiled = true
       down.set(e.pointerId, { x: e.clientX, y: e.clientY })
       most = Math.max(most, down.size)
@@ -683,7 +684,8 @@ function MultiTap(): null {
  */
 function HandleProjector(): null {
   const camera = useThree((s) => s.camera)
-  const gl = useThree((s) => s.gl)
+  const size = useThree((s) => s.size)
+  const invalidate = useThree((s) => s.invalidate)
   const shard = useWorkshop((s) => s.current())
   const selection = useWorkshop((s) => s.selection)
   const partSel = useWorkshop((s) => s.partSel)
@@ -707,23 +709,23 @@ function HandleProjector(): null {
     }
     return n ? new Vector3(x / n, y / n, z / n) : null
   }, [shard, selection, partSel])
-  useEffect(() => { if (!center) reportHandles(null) }, [center])
+  // Held, or let go: a frame, so the handles come or go even on a still bench.
+  useEffect(() => { if (!center) reportHandles(null); invalidate() }, [center, invalidate])
   useEffect(() => () => reportHandles(null), [])
   const v = useMemo(() => new Vector3(), [])
+  // Model axes in render units: X and Y as they are, model +Z is render -Z.
+  const dirs = useMemo(() => [new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, -1)], [])
   useFrame(() => {
     if (!center) return
-    const r = gl.domElement.getBoundingClientRect()
     const toPx = (p: Vector3): [number, number] | null => {
       v.copy(p).project(camera)
       if (v.z > 1 || v.z < -1) return null
-      return [((v.x + 1) / 2) * r.width, ((1 - v.y) / 2) * r.height]
+      return [((v.x + 1) / 2) * size.width, ((1 - v.y) / 2) * size.height]
     }
     const c = toPx(center)
     if (!c) { reportHandles(null); return }
-    // Model axes in render units: X and Y as they are, model +Z is render -Z.
-    const dirs: Array<[number, number, number]> = [[1, 0, 0], [0, 1, 0], [0, 0, -1]]
     const perUnit = dirs.map((d) => {
-      const e = toPx(new Vector3(center.x + d[0], center.y + d[1], center.z + d[2]))
+      const e = toPx(v.copy(center).add(d))
       return e ? [e[0] - c[0], e[1] - c[1]] as [number, number] : [0, 0] as [number, number]
     }) as [[number, number], [number, number], [number, number]]
     reportHandles({ center: c, perUnit })
@@ -743,7 +745,8 @@ function Keys(): null {
         if (e.code === 'KeyZ') { e.preventDefault(); if (e.shiftKey) w.redo(); else w.undo() }
         if (e.code === 'KeyY') { e.preventDefault(); w.redo() }
         // COPY and PASTE (workshop redesign, phase 2): what is held, and back where it came from.
-        if (e.code === 'KeyC' && (w.selection.length || w.partSel.length)) { e.preventDefault(); w.copySelection() }
+        // Text selected on the page (a shard's name in MENU) copies as text, as anywhere else.
+        if (e.code === 'KeyC' && (w.selection.length || w.partSel.length) && !window.getSelection()?.toString()) { e.preventDefault(); w.copySelection() }
         if (e.code === 'KeyV' && w.clip) { e.preventDefault(); w.pasteClip('exact', ownAddress(useCyberspace.getState().identity.pubkey, w.currentId)) }
         return
       }
@@ -1024,7 +1027,7 @@ function BenchImpl(): JSX.Element {
   // object hidden behind it. In the placing tools it lets the tap through, to
   // the grid it stands on.
   const onPart = (e: ThreeEvent<MouseEvent>, part: number): void => {
-    if (e.delta > tapSlop()) return
+    if (e.delta > tapSlop() || multiPress()) return
     e.stopPropagation()
     const t = useWorkshop.getState().tool
     // VIEW too (arkinox, 2026-10-10): with the tool put down, a tap on a
@@ -1033,7 +1036,7 @@ function BenchImpl(): JSX.Element {
   }
 
   const onFace = (e: ThreeEvent<MouseEvent>, face: number): void => {
-    if (e.delta > tapSlop()) return
+    if (e.delta > tapSlop() || multiPress()) return
     e.stopPropagation()
     useWorkshop.getState().selectFace(face)
   }

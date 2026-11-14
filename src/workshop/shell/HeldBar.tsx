@@ -56,7 +56,9 @@ export function HeldBar({ onMore, moreBadge }: { onMore: () => void; moreBadge: 
   // Esc puts a question away before it lets go of what is held.
   useEscape('modal', asking !== null, () => setAsking(null))
   const w = useWorkshop.getState
-  const count = heldCount(points, objects, faceHeld && tool === 'face' ? selectedFaces.length : 0)
+  // A face held in FACE is a face, though its corners are held with it.
+  const faceCount = faceHeld && tool === 'face'
+  const count = heldCount(faceCount ? 0 : points, faceCount ? 0 : objects, faceCount ? selectedFaces.length : 0)
   const held = clip ? [clip.points.length ? `${clip.points.length} point${clip.points.length === 1 ? '' : 's'}` : '', clip.parts.length ? `${clip.parts.length} object${clip.parts.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ') : ''
   // Read at tap time, as Bench reads it for OBJECT: a paste never makes this shard place itself.
   const self = (): string | undefined => ownAddress(useCyberspace.getState().identity.pubkey, w().currentId)

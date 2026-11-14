@@ -49,7 +49,7 @@ export function MoveHandles(): JSX.Element {
   const hub = useRef<HTMLSpanElement>(null)
   const frame = useRef<HandleFrame | null>(null)
   // The drag in flight: which axis, where it began, the steps it has made, and the history to fold it into.
-  const drag = useRef<{ axis: 0 | 1 | 2; id: number; x: number; y: number; perUnit: [number, number]; steps: number; travel: number; past: ReturnType<typeof useWorkshop.getState>['past']; before: ReturnType<ReturnType<typeof useWorkshop.getState>['current']>; slop: number } | null>(null)
+  const drag = useRef<{ axis: 0 | 1 | 2; id: number; x: number; y: number; perUnit: [number, number]; steps: number; travel: number; past: ReturnType<typeof useWorkshop.getState>['past']; before: ReturnType<ReturnType<typeof useWorkshop.getState>['current']>; shardId: string | null; slop: number } | null>(null)
 
   useEffect(() => {
     const draw = (f: HandleFrame | null): void => {
@@ -84,7 +84,7 @@ export function MoveHandles(): JSX.Element {
     e.stopPropagation()
     try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* followed by the element anyway */ }
     const st = useWorkshop.getState()
-    drag.current = { axis, id: e.pointerId, x: e.clientX, y: e.clientY, perUnit: f.perUnit[axis], steps: 0, travel: 0, past: st.past, before: st.current(), slop: slopFor(e.pointerType) }
+    drag.current = { axis, id: e.pointerId, x: e.clientX, y: e.clientY, perUnit: f.perUnit[axis], steps: 0, travel: 0, past: st.past, before: st.current(), shardId: st.currentId, slop: slopFor(e.pointerType) }
   }
   const move = (e: React.PointerEvent<HTMLButtonElement>): void => {
     const d = drag.current
@@ -108,9 +108,10 @@ export function MoveHandles(): JSX.Element {
     const w = useWorkshop.getState()
     // A tap: one step the handle's way.
     if (d.travel < d.slop && e.type === 'pointerup') { w.moveSelected(d.axis, w.step()); return }
-    // A drag: every step it made, one UNDO.
+    // A drag: every step it made, one UNDO, as an OPACITY drag is (shardRows),
+    // a full history too: the history keeps its cap, so its length tells nothing.
     const now = useWorkshop.getState()
-    if (d.before && now.current() !== d.before && now.past.length - d.past.length > 1) useWorkshop.setState({ past: dragHistory(d.past, d.before, now.past) })
+    if (d.before && now.currentId === d.shardId && now.current() !== d.before) useWorkshop.setState({ past: dragHistory(d.past, d.before, now.past) })
   }
 
   return (
@@ -131,6 +132,8 @@ export function MoveHandles(): JSX.Element {
           onPointerUp={up}
           onPointerCancel={up}
           onContextMenu={(e) => e.preventDefault()}
+          // From the keyboard: one step, as a tap.
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); const w = useWorkshop.getState(); w.moveSelected(axis, w.step()) } }}
         >
           <span>{label}</span>
         </button>

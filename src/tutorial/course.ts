@@ -25,8 +25,10 @@
  *   BOOST    the finish deck at y 9 (stand at y 10): up 8 from the
  *            trampoline, out of reach of a jump and its double jump (7),
  *            so only the trampoline gets you there
- *   FINISH   two checkered flags on the deck; the finish chest in the
- *            deck's own height-3 region
+ *   FINISH   two checkered flags at the deck's far corners, their cloth
+ *            pointing in toward its middle whichever way the layout faces
+ *            (stage.ts flagTurned), so neither pokes through a side wall;
+ *            the finish chest in the deck's own height-3 region
  *   WALL     a low wall round the deck's far edge and its sides (owner,
  *            2026-11-14): a forward hold through the bounce used to carry
  *            the walker over the deck (about 1.2 s held, onto the floor

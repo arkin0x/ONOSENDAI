@@ -13,7 +13,7 @@ import { useEffect, useRef } from 'react'
 import { create } from 'zustand'
 import { Quaternion } from 'three'
 import type { ShardModel } from 'sno-core/shards'
-import type { Tool } from '../store/useWorkshop'
+import { useWorkshop, type Tool } from '../store/useWorkshop'
 import { benchPose, benchPoseFrames } from './benchAxes'
 
 const TOOLS_KEY = 'onosendai:workshop-tools'
@@ -95,6 +95,12 @@ export function startingTools(visited: boolean, shards: readonly Pick<ShardModel
 /** The dock's tools now: the choice made, or, before it is made, what it would be. */
 export function dockTools(tools: DockTools | null, shards: readonly Pick<ShardModel, 'id' | 'vertices' | 'parts'>[]): DockTools {
   return tools ?? startingTools(guideDone(), shards)
+}
+
+/** The dock's tools, live: before the first opening decides (one frame), what it will decide, so six never flash. */
+export function useDockTools(): DockTools {
+  const tools = useBeginner((b) => b.tools)
+  return useWorkshop((s) => dockTools(tools, s.shards))
 }
 
 /** The tools on the dock for a choice, in the dock's order: ADD and FACE only with all six. */

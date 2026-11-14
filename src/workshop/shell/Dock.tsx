@@ -9,7 +9,7 @@
  */
 
 import { Eye, MousePointer2, Paintbrush, Plus, Stamp, Triangle, type LucideIcon } from 'lucide-react'
-import { dockTools, shownTools, useBeginner } from '../beginner'
+import { shownTools, useBeginner, useDockTools } from '../beginner'
 import { rgbToHex } from 'sno-core/shards'
 import { useWorkshop, type Tool } from '../../store/useWorkshop'
 
@@ -35,9 +35,7 @@ export const slotOf = (tool: Tool): ToolSlot => DOCK.find((d) => d.tool === tool
 export function Dock({ onColor, colorOpen }: { onColor: () => void; colorOpen: boolean }): JSX.Element {
   const tool = useWorkshop((s) => s.tool)
   const hex = rgbToHex(useWorkshop((s) => s.color))
-  // Before the first opening has decided (one frame), what it will decide: no flash of six.
-  const shards = useWorkshop((s) => s.shards)
-  const tools = dockTools(useBeginner((b) => b.tools), shards)
+  const tools = useDockTools()
   const glow = useBeginner((b) => b.glow)
   const w = useWorkshop.getState
   // A beginner's four (phase 4, decision 4), unless the tool in hand is one of the other two.

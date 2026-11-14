@@ -7972,6 +7972,7 @@ select.avatars__input option:checked {
 .presence__who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
 .presence__name { font-size: 11px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .presence__meta { font-size: 9px; color: var(--dim); letter-spacing: 0.08em; }
+/* The TARGET / TARGETED toggle of TARGETS (.targets__toggle), a size smaller. */
 .presence__target { padding: 2px 8px; font-size: 8px; }
 
 /* Someone in the sector you have not targeted: the target marker, dimmer. */

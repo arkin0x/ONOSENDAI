@@ -1,10 +1,11 @@
 /**
- * itemsPanelCompact.test.tsx: the ITEMS panel's two headings and its key
- * item buttons (arkinox, 2026-11-09: "the buttons on the Items are way too
- * large. Make them like the buttons below on the 'taken' things", and the
- * headings KEY ITEMS — MAY UNLOCK DOORS OR CHESTS and OTHER LOOT), the
- * header chip named after them, and the OTHER LOOT rows wrapping as the key
- * item rows do, so nothing runs off the panel at 320px. Each row shows one
+ * itemsPanelCompact.test.tsx: the ITEMS panel as two buttons, KEY ITEMS and
+ * OTHER LOOT, each opening a stacked modal of that kind alone, KEY ITEMS
+ * with MINE and FEED (owner, 2026-11-14). Then, inside them, the key item
+ * buttons (arkinox, 2026-11-09: "the buttons on the Items are way too
+ * large. Make them like the buttons below on the 'taken' things"), and the
+ * OTHER LOOT rows wrapping as the key item rows do, so nothing runs off the
+ * panel at 320px. Each row shows one
  * ACTIONS button that opens its actions under it, one row at a time, and a
  * listed item says LISTED on its line (arkinox, 2026-11-12). Mounted,
  * each store brought up to date first; the size is read from styles.css.
@@ -47,13 +48,16 @@ import { useInventory } from '../../store/useInventory'
 import { useItemFeed } from '../../store/useItemFeed'
 import { escapeTop, topEscape } from '../../hooks/useEscape'
 import { useShards } from '../../store/useShards'
-import { heldCount, InventoryPanel, KEY_ITEMS_HEADING, OTHER_LOOT_HEADING } from '../InventoryPanel'
+import { stackedOpen } from '../modalStack'
+import type { ItemListing } from '../../lib/itemListing'
+import { useMutes } from '../../store/useMutes'
+import { FEED_LINE, FEED_PAGE, InventoryPanel, KEY_ITEMS_LABEL, KEY_ITEMS_NOTE, NO_KEY_ITEMS, NO_OTHER_LOOT, OTHER_LOOT_LABEL, kindLabel, tapKeepsActions, useItemsModal } from '../InventoryPanel'
 
 const at = { x: 1n, y: 2n, z: 3n }
 const place = { lookupId: 'l', bagId: 'b', at: { x: '1', y: '2', z: '3' }, plane: 0 as const, height: 4 }
 
-/** You, a key you forged and hold, and a note taken out of a chest. */
-function seed(): () => void {
+/** You, two keys you forged and hold, and a note taken out of a chest. */
+function seed(): { me: string; silver: HeldItem; restore: () => void } {
   const was = useCyberspace.getState().identity
   const sk = generateSecretKey()
   const me = getPublicKey(sk)
@@ -61,12 +65,15 @@ function seed(): () => void {
   const lock = forgeKey('Silver Key')
   const keyEv = finalizeEvent(keyInnerTemplate(lock, at, 0, 2), sk) as NostrEvent
   const key = heldFromForged(me, keyEv, lock, place, 2)
+  const gold = forgeKey('Gold Key')
+  const goldEv = finalizeEvent(keyInnerTemplate(gold, at, 0, 1), sk) as NostrEvent
+  const goldKey = heldFromForged(me, goldEv, gold, place, 1)
   const other = generateSecretKey()
   const noteEv = finalizeEvent(messageInnerTemplate('meet me at the obelisk', at, 0, 3), other) as NostrEvent
   const note: HeldItem = { rowKey: `${me}/${noteEv.id}`, owner: me, id: noteEv.id, type: 'message', name: 'A note', event: noteEv, author: noteEv.pubkey, verified: true, source: 'taken', place, from: { chestId: 'c'.repeat(64), chestName: 'Wind Chest' }, at: 3, text: 'meet me at the obelisk' }
   useShards.setState({ mine: [], discovered: {}, deleted: {} })
-  useInventory.setState({ owner: me, items: { [key.id]: key, [note.id]: note }, storage: 'memory' })
-  return () => useCyberspace.setState({ identity: was })
+  useInventory.setState({ owner: me, items: { [key.id]: key, [goldKey.id]: goldKey, [note.id]: note }, storage: 'memory' })
+  return { me, silver: key, restore: () => { useItemsModal.setState({ open: null }); useCyberspace.setState({ identity: was }) } }
 }
 
 const cls = (h: Host): string => String(h.props.className ?? '')
@@ -86,53 +93,182 @@ beforeEach(() => {
   useInventory.setState({ items: {} })
 })
 
-describe('ITEMS headings', () => {
-  it('reads KEY ITEMS — MAY UNLOCK DOORS OR CHESTS over the items you hold and OTHER LOOT over what was taken, never the old headings', async () => {
-    expect(KEY_ITEMS_HEADING).toBe('KEY ITEMS — MAY UNLOCK DOORS OR CHESTS')
-    expect(OTHER_LOOT_HEADING).toBe('OTHER LOOT')
-    const restore = seed()
+/** Mount the panel and open one of its modals with its button. */
+async function openKind(label: string): Promise<Awaited<ReturnType<typeof mount>>> {
+  const m = await mount(createElement(InventoryPanel))
+  await m.press(new RegExp(`^${label} · `))
+  return m
+}
+
+describe('the ITEMS panel', () => {
+  it('shows only two buttons, KEY ITEMS and OTHER LOOT with their counts, and no rows, headings, PASTE or CLEAR ALL', async () => {
+    expect(kindLabel(KEY_ITEMS_LABEL, 3)).toBe('🔑 KEY ITEMS · 3')
+    expect(kindLabel(OTHER_LOOT_LABEL, 0)).toBe('✨ OTHER LOOT · 0')
+    const { restore } = seed()
     const m = await mount(createElement(InventoryPanel))
-    const labels = m.all().filter((h) => cls(h) === 'legend__label').map(textOf)
-    expect(labels).toEqual([KEY_ITEMS_HEADING, OTHER_LOOT_HEADING])
-    expect(m.says('Items you hold')).toBe(false)
-    expect(labels.some((l) => /^taken$/i.test(l))).toBe(false)
-    // The X and CLEAR ALL name the heading they clear from.
-    const x = m.all().find((h) => cls(h) === 'held__clear')
-    expect(x?.props.title).toBe('Clear it from OTHER LOOT')
-    expect(x?.props['aria-label']).toBe('Clear A note from OTHER LOOT')
-    expect(String(m.buttons(/^CLEAR ALL$/)[0]?.props.title)).toMatch(/^Clear everything from OTHER LOOT /)
+    const buttons = m.all().filter((h) => h.type === 'button').map(textOf)
+    // Beside the house EXPLAIN toggle, which holds the one-line Explanation.
+    expect(buttons.filter((b) => !/^EXPLAIN|^HIDE/i.test(b))).toEqual(['🔑 KEY ITEMS · 2', '✨ OTHER LOOT · 1'])
+    expect(m.all().filter((h) => h.type === 'li')).toHaveLength(0)
+    expect(m.all().filter((h) => h.type === 'input' || h.type === 'form')).toHaveLength(0)
+    expect(m.says('Silver Key')).toBe(false)
+    expect(m.says('A note')).toBe(false)
+    expect(m.all().some((h) => cls(h) === 'legend__label')).toBe(false)
+    await m.unmount()
+    restore()
+  })
+
+  it('counts 0 for an empty kind, and that modal says so in a line', async () => {
+    const { restore } = seed()
+    useInventory.setState({ items: {} })
+    const m = await openKind(OTHER_LOOT_LABEL)
+    expect(m.buttons(/^✨ OTHER LOOT · 0$/)).toHaveLength(1)
+    expect(m.buttons(/^🔑 KEY ITEMS · 0$/)).toHaveLength(1)
+    expect(m.says(NO_OTHER_LOOT)).toBe(true)
+    await m.press(/^✕$/)
+    await m.press(/^🔑 KEY ITEMS · 0$/)
+    expect(m.says(NO_KEY_ITEMS)).toBe(true)
     await m.unmount()
     restore()
   })
 })
 
-describe('the header chip', () => {
-  it('counts KEY ITEMS and LOOT, singular for one key item, LOOT for any count, NOTHING HELD when empty', async () => {
-    expect(heldCount(3, 4)).toBe('3 KEY ITEMS · 4 LOOT')
-    expect(heldCount(1, 1)).toBe('1 KEY ITEM · 1 LOOT')
-    expect(heldCount(2, 0)).toBe('2 KEY ITEMS')
-    expect(heldCount(0, 5)).toBe('0 KEY ITEMS · 5 LOOT')
-    expect(heldCount(0, 0)).toBe('NOTHING HELD')
-    const restore = seed()
-    const m = await mount(createElement(InventoryPanel))
-    expect(m.says('1 KEY ITEM · 1 LOOT')).toBe(true)
-    expect(m.all().some((h) => /TAKEN/.test(textOf(h)) && cls(h) === 'tag')).toBe(false)
+describe('the KEY ITEMS and OTHER LOOT modals', () => {
+  it('KEY ITEMS lists only the key items, newest first, under MAY UNLOCK DOORS OR CHESTS, with PASTE; never the loot', async () => {
+    const { restore } = seed()
+    const m = await openKind(KEY_ITEMS_LABEL)
+    const dialog = m.all().find((h) => h.props.role === 'dialog')!
+    expect(dialog.props['aria-label']).toBe('Key items')
+    expect(rowsOf(m.all(), false)).toHaveLength(0)
+    expect(rowsOf(m.all(), true).map((r) => textOf(r))).toEqual([expect.stringContaining('Silver Key'), expect.stringContaining('Gold Key')])
+    expect(m.says('A note')).toBe(false)
+    expect(m.all().filter((h) => cls(h) === 'legend__label').map(textOf)).toEqual([KEY_ITEMS_NOTE])
+    expect(m.buttons(/^PASTE$/)).toHaveLength(1)
+    expect(m.buttons(/^CLEAR ALL$/)).toHaveLength(0)
+    expect(m.buttons(/^MINE 2$/)).toHaveLength(1)
+    expect(m.buttons(/^FEED$/)).toHaveLength(1)
     await m.unmount()
     restore()
+  })
+
+  it('OTHER LOOT lists only what is not a key item, with CLEAR ALL and the X naming OTHER LOOT; never a key item, no PASTE, no FEED', async () => {
+    const { restore } = seed()
+    const m = await openKind(OTHER_LOOT_LABEL)
+    expect(m.all().find((h) => h.props.role === 'dialog')!.props['aria-label']).toBe('Other loot')
+    expect(rowsOf(m.all(), true)).toHaveLength(0)
+    expect(rowsOf(m.all(), false)).toHaveLength(1)
+    expect(m.says('Silver Key')).toBe(false)
+    const x = m.all().find((h) => cls(h) === 'held__clear')
+    expect(x?.props.title).toBe('Clear it from OTHER LOOT')
+    expect(x?.props['aria-label']).toBe('Clear A note from OTHER LOOT')
+    expect(String(m.buttons(/^CLEAR ALL$/)[0]?.props.title)).toMatch(/^Clear everything from OTHER LOOT /)
+    expect(m.buttons(/^PASTE$/)).toHaveLength(0)
+    expect(m.buttons(/^FEED$/)).toHaveLength(0)
+    await m.unmount()
+    restore()
+  })
+
+  it('are stacked: open over the menu, closed by ✕ or by Escape back to the panel, nothing left on the stack', async () => {
+    const { restore } = seed()
+    const m = await openKind(KEY_ITEMS_LABEL)
+    expect(stackedOpen()).toBe(1)
+    expect(topEscape()?.layer).toBe('modal')
+    expect(escapeTop()).toBe(true)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(useItemsModal.getState().open).toBeNull()
+    expect(m.all().some((h) => h.props.role === 'dialog')).toBe(false)
+    expect(stackedOpen()).toBe(0)
+    expect(topEscape()).toBeNull()
+    // The panel is there again, as it was.
+    expect(m.buttons(/^🔑 KEY ITEMS · 2$/)).toHaveLength(1)
+    await m.press(/^✨ OTHER LOOT · 1$/)
+    expect(stackedOpen()).toBe(1)
+    await m.press(/^✕$/)
+    expect(stackedOpen()).toBe(0)
+    await m.unmount()
+    restore()
+  })
+})
+
+describe('KEY ITEMS > FEED', () => {
+  /** A verified listing as the feed holds one. */
+  const listing = (name: string, lister: string, itemPubkey: string, createdAt: number): ItemListing => ({ id: `${name}-id`.padEnd(64, '0'), lister, itemPubkey, name, about: `about ${name}`, createdAt })
+
+  it('lists published key items by other people, each NOT FOUND, never one you hold (by its keypair) nor your own listing', async () => {
+    const { me, silver, restore } = seed()
+    const was = useItemFeed.getState()
+    const them = getPublicKey(generateSecretKey())
+    const unheld = forgeKey('Moon Key')
+    // Silver Key listed again by someone else under another name: still the key you hold.
+    const feed = [
+      listing('Moon Key', them, unheld.itemPubkey, 9),
+      listing('Renamed Silver', them, silver.key!.itemPubkey, 8),
+      listing('My Own Listing', me, forgeKey('Own').itemPubkey, 7),
+    ]
+    const load = vi.fn(async () => {})
+    useItemFeed.setState({ listings: feed, loading: false, trouble: null, load })
+    try {
+      const m = await openKind(KEY_ITEMS_LABEL)
+      await m.press(/^FEED$/)
+      expect(load).toHaveBeenCalled()
+      expect(m.says(FEED_LINE)).toBe(true)
+      expect(m.says('Moon Key')).toBe(true)
+      expect(m.says('Renamed Silver')).toBe(false)
+      expect(m.says('My Own Listing')).toBe(false)
+      // MINE's rows are not drawn under FEED.
+      expect(m.says('Gold Key')).toBe(false)
+      const rows = m.all().filter((h) => h.type === 'li' && cls(h).includes('held__row'))
+      expect(rows).toHaveLength(1)
+      expect(m.all().filter((h) => textOf(h) === 'NOT FOUND' && cls(h).split(' ').includes('tag'))).toHaveLength(1)
+      // The lister's picture and name open their profile; DETAILS shows the item's keys; nothing publishes.
+      expect(m.all().some((h) => cls(h).includes('profile-tap'))).toBe(true)
+      await m.press(/^DETAILS$/)
+      expect(m.says('about Moon Key')).toBe(true)
+      expect(m.buttons(/PUBLISH|SEAL/)).toHaveLength(0)
+      // Back to MINE: the held keys, Silver Key among them.
+      await m.press(/^MINE 2$/)
+      expect(m.says('Silver Key')).toBe(true)
+      await m.unmount()
+    } finally {
+      useItemFeed.setState({ listings: was.listings, loading: was.loading, trouble: was.trouble, load: was.load })
+      restore()
+    }
+  })
+
+  it('takes a key out of FEED the moment you hold it', async () => {
+    const { me, restore } = seed()
+    const was = useItemFeed.getState()
+    const them = generateSecretKey()
+    const moon = forgeKey('Moon Key')
+    useItemFeed.setState({ listings: [listing('Moon Key', getPublicKey(them), moon.itemPubkey, 9)], loading: false, trouble: null, load: async () => {} })
+    try {
+      const m = await openKind(KEY_ITEMS_LABEL)
+      await m.press(/^FEED$/)
+      expect(m.says('Moon Key')).toBe(true)
+      const ev = finalizeEvent(keyInnerTemplate(moon, at, 0, 4), them) as NostrEvent
+      const found = heldFromForged(me, ev, moon, place, 4)
+      useInventory.setState({ items: { ...useInventory.getState().items, [found.id]: { ...found, source: 'found', author: ev.pubkey } } })
+      await new Promise((r) => setTimeout(r, 20))
+      expect(m.says('Moon Key')).toBe(false)
+      expect(m.says('No one else has listed a key item yet.')).toBe(true)
+      await m.press(/^MINE 3$/)
+      expect(m.says('Moon Key')).toBe(true)
+      await m.unmount()
+    } finally {
+      useItemFeed.setState({ listings: was.listings, load: was.load })
+      restore()
+    }
   })
 })
 
 describe('key item buttons', () => {
   it('are one ACTIONS button a row, opening DETAILS, COPY, PLACE, PUBLISH, ARCHIVE and DELETE in a labelled line under it, all chest__act, DELETE keeping its danger class', async () => {
-    const restore = seed()
-    const m = await mount(createElement(InventoryPanel))
+    const { restore } = seed()
+    const m = await openKind(KEY_ITEMS_LABEL)
     const [held] = rowsOf(m.all(), true)
-    const [taken] = rowsOf(m.all(), false)
     expect(held).toBeDefined()
-    expect(taken).toBeDefined()
-    // Closed: ACTIONS alone on each row, the taken row's X beside it.
+    // Closed: ACTIONS alone on each row.
     expect(buttonsIn(held).map(textOf)).toEqual(['ACTIONS'])
-    expect(buttonsIn(taken).filter((b) => cls(b) !== 'held__clear').map(textOf)).toEqual(['ACTIONS'])
     expect(buttonsIn(held)[0].props['aria-expanded']).toBe(false)
     await m.press(/^ACTIONS$/)
     const [open] = rowsOf(m.all(), true)
@@ -153,44 +289,62 @@ describe('key item buttons', () => {
     restore()
   })
 
-  it('open one row at a time: the taken row’s ACTIONS closes the key item’s, and shows READ, DETAILS and ARCHIVE in chest__act', async () => {
-    const restore = seed()
-    const m = await mount(createElement(InventoryPanel))
+  it('open one row at a time: the second key item’s ACTIONS closes the first’s', async () => {
+    const { restore } = seed()
+    const m = await openKind(KEY_ITEMS_LABEL)
     await m.press(/^ACTIONS$/)
     expect(m.all().filter((h) => cls(h) === 'held__menu')).toHaveLength(1)
-    const takenActions = buttonsIn(rowsOf(m.all(), false)[0]).find((b) => textOf(b) === 'ACTIONS')!
-    ;(takenActions.props.onClick as () => void)()
+    const second = buttonsIn(rowsOf(m.all(), true)[1]).find((b) => textOf(b) === 'ACTIONS')!
+    ;(second.props.onClick as () => void)()
     await new Promise((r) => setTimeout(r, 20))
     expect(m.all().filter((h) => cls(h) === 'held__menu')).toHaveLength(1)
     expect(buttonsIn(rowsOf(m.all(), true)[0]).map(textOf)).toEqual(['ACTIONS'])
-    const taken = buttonsIn(rowsOf(m.all(), false)[0]).filter((b) => cls(b) !== 'held__clear')
-    expect(taken.map(textOf)).toEqual(['ACTIONS', 'READ', 'DETAILS', 'ARCHIVE'])
-    for (const b of taken) expect(cls(b).split(' ')).toContain('chest__act')
+    expect(m.all().find((h) => cls(h) === 'held__menu')!.props['aria-label']).toBe('Actions for Gold Key')
     await m.unmount()
     restore()
   })
 
-  it('close with Escape, on the menu layer, leaving nothing on the Escape stack', async () => {
-    const restore = seed()
+  it('in OTHER LOOT, a taken row shows ACTIONS and its X; ACTIONS opens READ, DETAILS and ARCHIVE in chest__act, and READ reads it', async () => {
+    const { restore } = seed()
+    const m = await openKind(OTHER_LOOT_LABEL)
+    const [row] = rowsOf(m.all(), false)
+    expect(buttonsIn(row).filter((b) => cls(b) !== 'held__clear').map(textOf)).toEqual(['ACTIONS'])
+    await m.press(/^ACTIONS$/)
+    const taken = buttonsIn(rowsOf(m.all(), false)[0]).filter((b) => cls(b) !== 'held__clear')
+    expect(taken.map(textOf)).toEqual(['ACTIONS', 'READ', 'DETAILS', 'ARCHIVE'])
+    for (const b of taken) expect(cls(b).split(' ')).toContain('chest__act')
+    await m.press(/^READ$/)
+    expect(m.says('meet me at the obelisk')).toBe(true)
+    await m.unmount()
+    restore()
+  })
+
+  it('close with Escape before the modal they are in, which the next Escape closes, leaving nothing on the Escape stack', async () => {
+    const { restore } = seed()
     const m = await mount(createElement(InventoryPanel))
     expect(topEscape()).toBeNull()
+    await m.press(/^🔑 KEY ITEMS/)
     await m.press(/^ACTIONS$/)
-    expect(topEscape()?.layer).toBe('menu')
+    expect(topEscape()?.layer).toBe('modal')
     expect(m.all().filter((h) => cls(h) === 'held__menu')).toHaveLength(1)
     expect(escapeTop()).toBe(true)
     await new Promise((r) => setTimeout(r, 20))
     expect(m.all().filter((h) => cls(h) === 'held__menu')).toHaveLength(0)
+    expect(m.all().some((h) => h.props.role === 'dialog')).toBe(true)
+    expect(escapeTop()).toBe(true)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(m.all().some((h) => h.props.role === 'dialog')).toBe(false)
     expect(topEscape()).toBeNull()
     await m.unmount()
     restore()
   })
 
   it('say LISTED on the line of an item already in the ITEM FEED, never as a button, and offer no PUBLISH', async () => {
-    const restore = seed()
+    const { restore } = seed()
     const was = useItemFeed.getState().listedBy
     useItemFeed.setState({ listedBy: () => true })
     try {
-      const m = await mount(createElement(InventoryPanel))
+      const m = await openKind(KEY_ITEMS_LABEL)
       const meta = m.all().find((h) => cls(h) === 'item__meta' && /forged by you/.test(textOf(h)))!
       expect(textOf(meta)).toMatch(/· LISTED/)
       await m.press(/^ACTIONS$/)
@@ -205,8 +359,8 @@ describe('key item buttons', () => {
   })
 
   it('share one wrapping row with the OTHER LOOT rows: the taken row carries held__row--loot, and both classes get the same flex-wrap layout, buttons pushed right and allowed to wrap', async () => {
-    const restore = seed()
-    const m = await mount(createElement(InventoryPanel))
+    const { restore } = seed()
+    const m = await openKind(OTHER_LOOT_LABEL)
     const [taken] = rowsOf(m.all(), false)
     expect(cls(taken).split(' ')).toContain('held__row--loot')
     await m.unmount()
@@ -228,6 +382,108 @@ describe('key item buttons', () => {
     for (const [, sel, body] of rules) {
       expect(sel).not.toMatch(/\.chest__act/)
       expect(body).not.toMatch(/min-height|min-width|padding|font-size/)
+    }
+  })
+})
+
+describe('the tutorial', () => {
+  it('still finds ITEMS: the inventory step highlights the ITEMS slot, which holds this panel, and the build step names OTHER LOOT', async () => {
+    const { INVENTORY, BUILD_PLACE } = await import('../../tutorial/script')
+    expect(INVENTORY.scene?.highlight).toBe('[data-panel-id="items"]')
+    expect(INVENTORY.hint).toMatch(/KEY ITEMS and OTHER LOOT/)
+    expect(BUILD_PLACE.hint).toMatch(/^ITEMS: OTHER LOOT, ACTIONS, MOVE TO WORKSHOP\./)
+    const hud = readFileSync(new URL('../Hud.tsx', import.meta.url), 'utf8')
+    expect(hud).toMatch(/\n\s*items: InventoryPanel,/)
+    const slot = readFileSync(new URL('../PanelSlot.tsx', import.meta.url), 'utf8')
+    expect(slot).toMatch(/data-panel-id=\{id\}/)
+  })
+})
+
+describe('leaving the modals for the world', () => {
+  it('a PLACE that lines up closes the stack, so the scene is in view', async () => {
+    const { restore } = seed()
+    useShards.setState({ pending: null, deployStatus: 'idle' })
+    const m = await openKind(KEY_ITEMS_LABEL)
+    expect(stackedOpen()).toBe(1)
+    await m.press(/^ACTIONS$/)
+    await m.press(/^PLACE$/)
+    expect(useShards.getState().pending).not.toBeNull()
+    expect(stackedOpen()).toBe(0)
+    expect(useItemsModal.getState().open).toBeNull()
+    useShards.getState().cancelDeploy()
+    await m.unmount()
+    restore()
+  })
+
+  it('VIEW in DETAILS closes the stack before it flies there', async () => {
+    const { restore } = seed()
+    const was = useCyberspace.getState().viewAt
+    const viewAt = vi.fn()
+    useCyberspace.setState({ viewAt })
+    try {
+      const m = await openKind(KEY_ITEMS_LABEL)
+      await m.press(/^ACTIONS$/)
+      await m.press(/^DETAILS$/)
+      await m.press(/^VIEW$/)
+      expect(viewAt).toHaveBeenCalled()
+      expect(stackedOpen()).toBe(0)
+      expect(useItemsModal.getState().open).toBeNull()
+      await m.unmount()
+    } finally {
+      useCyberspace.setState({ viewAt: was })
+      restore()
+    }
+  })
+
+  it('the modal closes with the panel: a menu hidden and shown again does not bring it back by itself', async () => {
+    const { restore } = seed()
+    const m = await openKind(OTHER_LOOT_LABEL)
+    expect(useItemsModal.getState().open).toBe('loot')
+    await m.unmount()
+    expect(useItemsModal.getState().open).toBeNull()
+    expect(stackedOpen()).toBe(0)
+    restore()
+  })
+})
+
+describe('a tap and the open ACTIONS', () => {
+  /** An element as the closer reads it: which selectors it is inside, and the modal it is in. */
+  const el = (inRow: boolean, modal: string | null) => ({
+    closest: (sel: string) => (sel.startsWith('[data-actions-row') ? (inRow ? { classList: { contains: () => false } } : null) : modal ? { classList: { contains: (c: string) => modal.split(' ').includes(c) } } : null),
+  })
+  it('stay open for a tap in the row or in a confirmation it opened; close for a tap elsewhere in the ITEMS modal, or outside it', () => {
+    expect(tapKeepsActions(el(true, 'modal items-modal'), 'r')).toBe(true)
+    expect(tapKeepsActions(el(false, 'modal'), 'r')).toBe(true)
+    expect(tapKeepsActions(el(false, 'modal items-modal'), 'r')).toBe(false)
+    expect(tapKeepsActions(el(false, null), 'r')).toBe(false)
+    expect(tapKeepsActions(null, 'r')).toBe(false)
+  })
+})
+
+describe('FEED, filtered and paged', () => {
+  const listing = (name: string, lister: string, createdAt: number): ItemListing => ({ id: `${name}`.padEnd(64, '0'), lister, itemPubkey: forgeKey(name).itemPubkey, name, about: '', createdAt })
+  it('hides a listing by someone muted, and draws a long feed a page at a time', async () => {
+    const { restore } = seed()
+    const was = useItemFeed.getState()
+    const mutedWas = useMutes.getState().muted
+    const blocked = getPublicKey(generateSecretKey())
+    const them = getPublicKey(generateSecretKey())
+    const many = Array.from({ length: FEED_PAGE + 5 }, (_, i) => listing(`Key ${i}`, them, 1000 - i))
+    useItemFeed.setState({ listings: [listing('Blocked Key', blocked, 2000), ...many], loading: false, trouble: null, load: async () => {} })
+    useMutes.setState({ muted: { pubkeys: new Set([blocked]), items: new Set() } })
+    try {
+      const m = await openKind(KEY_ITEMS_LABEL)
+      await m.press(/^FEED$/)
+      expect(m.says('Blocked Key')).toBe(false)
+      const rows = m.all().filter((h) => h.type === 'li' && cls(h).includes('held__row'))
+      expect(rows).toHaveLength(FEED_PAGE)
+      expect(m.says('Key 0')).toBe(true)
+      expect(m.says(`Key ${FEED_PAGE + 4}`)).toBe(false)
+      await m.unmount()
+    } finally {
+      useItemFeed.setState({ listings: was.listings, load: was.load })
+      useMutes.setState({ muted: mutedWas })
+      restore()
     }
   })
 })

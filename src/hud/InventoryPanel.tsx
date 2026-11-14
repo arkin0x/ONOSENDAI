@@ -22,8 +22,8 @@
  * of something you made at the build cursor, with every setting it has: an
  * item (the same key), a message or a sound, never what was found or taken
  * from someone else (arkinox, 2026-11-06; useShards placeCopyOf). ARCHIVE
- * files a row away under ARCHIVED, the second view behind the panel's
- * INVENTORY / ARCHIVED toggle, and UNARCHIVE brings it back (arkinox,
+ * files a row away under ARCHIVED, the second view in the KEY ITEMS or
+ * OTHER LOOT modal, beside MINE or INVENTORY, and UNARCHIVE brings it back (arkinox,
  * 2026-11-06). An archived key still opens and seals what it did; DELETE of
  * the last copy of a key your chests or doors are sealed to is refused, and
  * offers ARCHIVE instead.
@@ -33,10 +33,17 @@
  * reveals all these actions. Right now this is too much clutter"). One row's
  * actions are open at a time; Escape or a tap outside the row closes them.
  * LISTED is said on the row's line, not as a button: it is not an action.
+ *
+ * The panel itself is two buttons, 🔑 KEY ITEMS and ✨ OTHER LOOT, each
+ * opening a modal of that kind alone (owner, 2026-11-14: "My list of these
+ * items is getting too long and I think we need to consolidate it just like
+ * we did with the other menu panels"). The rows, their ACTIONS, ARCHIVED,
+ * PASTE and CLEAR ALL are in those modals now (ItemsModal), and KEY ITEMS
+ * also has FEED, the published key items not yet found.
  */
 
 import { takeIntoKeeping, you } from '../lib/carried'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { create } from 'zustand'
 import { ConfirmModal } from './ConfirmModal'
 import { useEscape } from '../hooks/useEscape'
@@ -47,7 +54,7 @@ import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { hasNftLink } from '../lib/nftLink'
 import { ItemFace, ItemIcon } from './ItemIcon'
 import { ShardThumb } from './ShardThumb'
-import { chestsOpenedBy, clearsWithAll, keyText, splitPanels, type HeldItem } from '../lib/inventory'
+import { chestsOpenedBy, clearsWithAll, isKeyItem, keyText, splitPanels, type HeldItem } from '../lib/inventory'
 import { regionLabel } from '../lib/loot'
 import { provenanceOf } from '../lib/provenance'
 import { safeNpub } from '../lib/npub'
@@ -66,6 +73,10 @@ import { useCashu, cashuStateLabel } from './useCashu'
 import { useMutes } from '../store/useMutes'
 import { hidesThing } from '../lib/muteList'
 import { BlockButton, MuteItemButton } from './BlockButton'
+import { searchListings, type ItemListing } from '../lib/itemListing'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
+import { BackupTrouble, RelayTrouble } from './RelayTrouble'
+import { Stacked, leaveModals, useModalStack } from './modalStack'
 
 /** How a held item came to be held, in a word for the row. */
 const SOURCE: Record<HeldItem['source'], string> = { forged: 'forged by you', found: 'found', taken: 'taken', pasted: 'pasted' }
@@ -97,7 +108,8 @@ function Copyable({ label, value, title }: { label: string; value: string; title
 export function Provenance({ item }: { item: HeldItem }): JSX.Element | null {
   const p = provenanceOf(item)
   if (!p) return null
-  const view = (label: string): void => useCyberspace.getState().viewAt(p.at, p.plane, label.toUpperCase(), 0, { item: true })
+  // Out into the world: the ITEMS modal (and anything under it) closes, so it does not cover the place (modalStack).
+  const view = (label: string): void => { leaveModals(); useCyberspace.getState().viewAt(p.at, p.plane, label.toUpperCase(), 0, { item: true }) }
   const where = `${regionLabel(p.height)} · ${p.plane === 0 ? 'dataspace' : 'ideaspace'}`
   return (
     <>
@@ -126,7 +138,7 @@ const DELETE_WARNING = 'Its secret key leaves this identity\u2019s ITEMS on this
 /** ARCHIVE, or UNARCHIVE on a row already filed away: the row moves between INVENTORY and ARCHIVED. */
 export function ArchiveButton({ item }: { item: Pick<HeldItem, 'id' | 'archived'> }): JSX.Element {
   return item.archived
-    ? <button className="chest__act" onClick={() => useInventory.getState().unarchive(item.id)} title="Back to INVENTORY">UNARCHIVE</button>
+    ? <button className="chest__act" onClick={() => useInventory.getState().unarchive(item.id)} title="Back to MINE or INVENTORY">UNARCHIVE</button>
     : <button className="chest__act" onClick={() => useInventory.getState().archive(item.id)} title="File it away under ARCHIVED. It still opens what it opens">ARCHIVE</button>
 }
 
@@ -184,7 +196,28 @@ export function DeleteItem({ item, asking = false }: { item: Pick<HeldItem, 'id'
 function PlaceButton({ item, onRefused }: { item: HeldItem; onRefused: (why: string | null) => void }): JSX.Element | null {
   const me = useCyberspace((s) => s.identity.pubkey)
   if (typeof placeCopyOf(item, me) === 'string') return null
-  return <button className="chest__act" onClick={() => onRefused(useShards.getState().placeFromItems(item.id))} title="Place a new instance of it at the build cursor, with every setting it has">PLACE</button>
+  const place = (): void => {
+    const why = useShards.getState().placeFromItems(item.id)
+    onRefused(why)
+    // Lined up at the build cursor: the modal goes, so the scene it is placed in is in view.
+    if (!why) leaveModals()
+  }
+  return <button className="chest__act" onClick={place} title="Place a new instance of it at the build cursor, with every setting it has">PLACE</button>
+}
+
+/** What tapKeepsActions reads of a tapped element. */
+interface Tapped { closest: (selector: string) => { classList: { contains: (name: string) => boolean } } | null }
+
+/**
+ * Whether a tap leaves row `id`'s ACTIONS open: a tap in the row, or in a
+ * confirmation it opened (a modal of its own). A tap anywhere else closes
+ * them, the rest of the KEY ITEMS or OTHER LOOT modal around the row included.
+ */
+export function tapKeepsActions(target: Tapped | null, id: string): boolean {
+  if (!target) return false
+  if (target.closest(`[data-actions-row="${id}"]`)) return true
+  const modal = target.closest('.modal')
+  return !!modal && !modal.classList.contains('items-modal')
 }
 
 /** Which row's ACTIONS are open: one at a time across ITEMS, so opening another closes the last. */
@@ -192,16 +225,18 @@ export const useOpenActions = create<{ open: string | null }>(() => ({ open: nul
 
 /**
  * A row's ACTIONS button and the labelled line of actions it opens under
- * the row. Closed again by its button, by Escape (before the menu it is in,
- * focus going back to ACTIONS), by a tap outside the row (a click, so a
- * scroll on a phone leaves it open), never by a tap in a confirmation it
- * opened, and when the row leaves the list or stops being drawn (`shown`).
+ * the row. Closed again by its button, by Escape (before the KEY ITEMS or
+ * OTHER LOOT modal it is in, being opened after it, focus going back to
+ * ACTIONS), by a tap outside the row (a click, so a scroll on a phone leaves
+ * it open), the rest of that modal included, never by a tap in a
+ * confirmation it opened, and when the row leaves the list or stops being
+ * drawn (`shown`).
  */
 function useRowActions(id: string, name: string, shown = true): { button: JSX.Element; group: (acts: ReactNode) => JSX.Element | null; close: () => void } {
   const open = useOpenActions((s) => s.open === id) && shown
   const close = useCallback((): void => { if (useOpenActions.getState().open === id) useOpenActions.setState({ open: null }) }, [id])
   const gid = `held-actions-${id}`
-  useEscape('menu', open, () => {
+  useEscape('modal', open, () => {
     const focused = typeof document === 'undefined' ? null : document.activeElement
     close()
     if (focused?.closest?.(`#${gid}`)) document.getElementById(`${gid}-toggle`)?.focus()
@@ -209,9 +244,7 @@ function useRowActions(id: string, name: string, shown = true): { button: JSX.El
   useEffect(() => {
     if (!open || typeof document === 'undefined') return
     const tap = (e: MouseEvent): void => {
-      const t = e.target
-      if (t instanceof Element && (t.closest(`[data-actions-row="${id}"]`) || t.closest('.modal'))) return
-      close()
+      if (!tapKeepsActions(e.target instanceof Element ? e.target : null, id)) close()
     }
     document.addEventListener('click', tap, true)
     return () => document.removeEventListener('click', tap, true)
@@ -309,19 +342,26 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
   )
 }
 
-/** The heading over the keypair items you hold (arkinox, 2026-11-09, verbatim). */
-export const KEY_ITEMS_HEADING = 'KEY ITEMS — MAY UNLOCK DOORS OR CHESTS'
-/** The heading over what was taken out of chests (arkinox, 2026-11-09). */
+/** The two buttons of the ITEMS panel and the modals they open (owner, 2026-11-14): their words, emoji first. */
+export const KEY_ITEMS_LABEL = '🔑 KEY ITEMS'
+export const OTHER_LOOT_LABEL = '✨ OTHER LOOT'
+/** The heading the OTHER LOOT rows' X and CLEAR ALL name (arkinox, 2026-11-09). */
 export const OTHER_LOOT_HEADING = 'OTHER LOOT'
-
+/** Over the key items you hold: the second half of arkinox's heading (2026-11-09), its first half now the modal's title. */
+export const KEY_ITEMS_NOTE = 'MAY UNLOCK DOORS OR CHESTS'
+export const NO_KEY_ITEMS = 'No key items yet.'
+export const NO_OTHER_LOOT = 'No other loot yet.'
 /**
- * The header chip, named after the two headings (2026-11-09): "3 KEY ITEMS ·
- * 4 LOOT", "1 KEY ITEM", the loot count without a plural, NOTHING HELD when
- * empty.
+ * KEY ITEMS > FEED, in a line (owner, 2026-11-14: "a list of items that can
+ * be used to lock doors and chests that have been publicly published", and
+ * "make it clear in the key items feed that the user still needs to find
+ * those items").
  */
-export function heldCount(keys: number, loot: number): string {
-  if (keys + loot === 0) return 'NOTHING HELD'
-  return `${keys} KEY ITEM${keys === 1 ? '' : 'S'}${loot > 0 ? ` · ${loot} LOOT` : ''}`
+export const FEED_LINE = 'Published key items. Find one to hold it, or lock a door or chest to one.'
+
+/** A button's words: its label and how many, 0 included ("🔑 KEY ITEMS · 3"). */
+export function kindLabel(label: string, count: number): string {
+  return `${label} · ${count}`
 }
 
 /** How long MOVED INTO WORKSHOP stays in a row's place before the row leaves the list (arkinox, 2026-10-11). */
@@ -450,102 +490,243 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   )
 }
 
-export function InventoryPanel(): JSX.Element {
+/** Which ITEMS modal is open: KEY ITEMS, OTHER LOOT, or neither. A store, so the tutorial or a test can open one. */
+export type ItemsKind = 'keys' | 'loot'
+export const useItemsModal = create<{ open: ItemsKind | null }>(() => ({ open: null }))
+
+/** How many FEED rows are drawn at first, and how many more each time the end scrolls into view. */
+export const FEED_PAGE = 100
+
+/**
+ * A published key item someone else listed, in the FEED (store/useItemFeed,
+ * the chest and door lock picker's source): its picture, name, who listed it
+ * (their picture opens their profile, over this modal), when, and NOT FOUND,
+ * since holding it means finding it (owner, 2026-11-14). DETAILS shows its
+ * keys to copy and its words. Nothing here publishes; sealing to it is done
+ * from a chest or a door's lock, where the picker offers SEAL TO IT.
+ */
+function FeedRow({ listing }: { listing: ItemListing }): JSX.Element {
+  const profile = useProfile(listing.lister)
+  const who = profileLabel(profile, safeNpub(listing.lister))
+  const [open, setOpen] = useState(false)
+  return (
+    <li className="secrets__row held__row held__row--item">
+      <ItemFace className="chest__glyph chest__glyph--key" type="key" image={listing.image} />
+      <span className="item__line">
+        <span className="item__name" title={listing.about || listing.name}>{listing.name}</span>
+        <span className="item__meta">
+          listed by <ProfileTap pubkey={listing.lister} className="items-feed__who" title={who}><ProfilePic pubkey={listing.lister} size={12} /><span className="items-feed__name">{who}</span></ProfileTap> · <span title={formatStamp(listing.createdAt)}>{formatAgo(listing.createdAt)}</span>
+        </span>
+      </span>
+      <span className="held__acts">
+        <span className="tag items-feed__unfound" title="You have not found this item. Find it to hold it">NOT FOUND</span>
+        <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>DETAILS</button>
+      </span>
+      {open && (
+        <div className="held__details">
+          <dl>
+            <Copyable label="item" value={safeNpub(listing.itemPubkey)} title={safeNpub(listing.itemPubkey)} />
+            <Copyable label="hex" value={listing.itemPubkey} title={listing.itemPubkey} />
+            <dt>Listed by</dt><dd>{who}</dd>
+            {listing.about && <><dt>About</dt><dd>{listing.about}</dd></>}
+          </dl>
+        </div>
+      )}
+    </li>
+  )
+}
+
+/**
+ * KEY ITEMS > FEED: the published key items (kind 33340 listings, the ITEM
+ * FEED a chest or door lock picks from), read fresh when it opens, newest
+ * first, searchable by name. Never your own listings, nothing by someone
+ * blocked or muted, and never a key item you hold: one you have found is in
+ * MINE (or ARCHIVED) only, matched by its keypair as ITEMS matches keys, so
+ * a renamed or re-listed copy is still the one you hold (owner, 2026-11-14).
+ * The read is one page of the relays' newest (useItemFeed); the rows are
+ * drawn a hundred at a time, more as the end scrolls into view.
+ */
+function FeedList({ held, scroller }: { held: ReadonlySet<string>; scroller: RefObject<HTMLDivElement | null> }): JSX.Element {
+  const listings = useItemFeed((s) => s.listings)
+  const loading = useItemFeed((s) => s.loading)
+  const trouble = useItemFeed((s) => s.trouble)
+  const muted = useMutes((s) => s.muted)
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const [q, setQ] = useState('')
+  const [shownCount, setShownCount] = useState(FEED_PAGE)
+  useEffect(() => { void useItemFeed.getState().load() }, [])
+  const feed = useMemo(
+    () => searchListings(listings, q).filter((l) => l.lister !== me && !held.has(l.itemPubkey) && !hidesThing(muted, { authors: [l.lister], ids: [l.id] }, me)),
+    [listings, q, muted, me, held],
+  )
+  const end = useRef<HTMLLIElement | null>(null)
+  useEffect(() => {
+    if (!end.current || typeof IntersectionObserver === 'undefined') return
+    const seen = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) setShownCount((n) => n + FEED_PAGE)
+    }, { root: scroller.current, rootMargin: '200px' })
+    seen.observe(end.current)
+    return () => seen.disconnect()
+  }, [feed.length, shownCount, scroller])
+  return (
+    <>
+      <input className="avatars__input" value={q} onChange={(e) => { setQ(e.target.value); setShownCount(FEED_PAGE) }} placeholder="Search items by name" aria-label="Search the feed" />
+      {trouble && !loading && <RelayTrouble trouble={trouble} onRetry={() => void useItemFeed.getState().load()} />}
+      {!loading && <BackupTrouble onRetry={() => void useItemFeed.getState().load()} />}
+      <ul className="secrets__list held__list">
+        {feed.length === 0 && !(trouble && !loading && listings.length === 0) && (
+          <li className="secrets__empty">{loading ? 'Reading the item feed…' : q.trim() ? 'No listed item matches.' : 'No one else has listed a key item yet.'}</li>
+        )}
+        {feed.slice(0, shownCount).map((l) => <FeedRow key={l.itemPubkey} listing={l} />)}
+        {feed.length > shownCount && <li ref={end} className="secrets__empty" aria-hidden>…</li>}
+      </ul>
+    </>
+  )
+}
+
+/**
+ * The modal a button of the panel opens, listing that kind alone
+ * (lib/inventory.ts isKeyItem has the rule). Stacked (modalStack): over the
+ * menu, which is there again when it closes by ✕, a tap outside or Escape;
+ * a confirmation, a profile or anything else opened from a row stacks over
+ * it, and Escape steps back one at a time. Its list scrolls inside it.
+ *
+ * KEY ITEMS has MINE, the key items you hold with their ACTIONS, PASTE
+ * under them (an item copied as text is a key item), FEED, the published
+ * key items you have not found (owner, 2026-11-14: "Put a mine and feed
+ * button filters at the top of the key items modal"), and ARCHIVED once a
+ * key item is filed away. OTHER LOOT has INVENTORY, the rest of what you
+ * hold, with CLEAR ALL, and ARCHIVED likewise.
+ */
+function ItemsModal({ kind }: { kind: ItemsKind }): JSX.Element {
   const items = useInventory((s) => s.items)
-  const storage = useInventory((s) => s.storage)
   const discovered = useShards((s) => s.discovered)
   // Nothing by someone blocked, or muted by its id, is listed (store/useMutes); never what you forged.
   const muted = useMutes((s) => s.muted)
-  const self = useCyberspace((s) => s.identity.pubkey)
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const close = useCallback((): void => useItemsModal.setState({ open: null }), [])
+  useModalStack(true, close)
   const { keys, taken, archived } = useMemo(
-    () => splitPanels([], Object.values(items).filter((it) => !hidesThing(muted, { authors: [it.author], ids: [it.id, itemLineage(it.event)] }, self))).loot,
-    [items, muted, self],
+    () => splitPanels([], Object.values(items).filter((it) => !hidesThing(muted, { authors: [it.author], ids: [it.id, itemLineage(it.event)] }, me))).loot,
+    [items, muted, me],
   )
+  const archivedHere = useMemo(() => archived.filter((it) => isKeyItem(it) === (kind === 'keys')), [archived, kind])
+  // Every keypair held, archived too, muted or not: a key item you hold is never in FEED.
+  const held = useMemo(() => new Set(Object.values(items).flatMap((it) => (isKeyItem(it) && it.key && !it.cleared ? [it.key.itemPubkey] : []))), [items])
   // Which DISCOVERED chests each item opens, from the lock tags of chests seen.
   const chests = useMemo(() => Object.values(discovered).filter((h) => h.type === 'chest' && h.chest).map((h) => ({ id: h.eventId, chest: h.chest! })), [discovered])
-  const [paste, setPaste] = useState('')
-  const [note, setNote] = useState<string | null>(null)
   // Whether your forged items are already listed is read from the ITEM FEED,
   // once a session, and only when you hold something you forged.
-  const me = useCyberspace((s) => s.identity.pubkey)
-  const forgedAny = keys.some((k) => k.author === me && k.verified)
+  const forgedAny = kind === 'keys' && keys.some((k) => k.author === me && k.verified)
   useEffect(() => { if (forgedAny && useItemFeed.getState().readAt === 0) void useItemFeed.getState().load() }, [forgedAny])
+
+  const scroller = useRef<HTMLDivElement | null>(null)
+  const [view, setView] = useState<'mine' | 'feed' | 'archived'>('mine')
+  const showing = view === 'archived' && archivedHere.length === 0 ? 'mine' : view
+  const [paste, setPaste] = useState('')
+  const [note, setNote] = useState<string | null>(null)
   const doPaste = (): void => {
     const r = useInventory.getState().paste(paste)
     setNote(r.ok ? (r.already ? `Already in your ITEMS: ${r.item?.name}.` : `Held: ${r.item?.name}.`) : r.reason ?? 'Not an item.')
     if (r.ok) setPaste('')
   }
-  const count = keys.length + taken.length
-  // INVENTORY, or what was filed away under ARCHIVED (arkinox, 2026-11-06).
-  const [view, setView] = useState<'inventory' | 'archived'>('inventory')
-  const showing = view === 'archived' && archived.length > 0 ? 'archived' : 'inventory'
 
+  // CLEAR ALL beside the tabs, on what is held: never on ARCHIVED.
+  const clearAll = kind === 'loot' && showing === 'mine' && taken.length > 0
+  const rows = showing === 'archived' ? archivedHere : kind === 'keys' ? keys : taken
+  const row = (it: HeldItem): JSX.Element => (isKeyItem(it) ? <KeyRow key={it.id} item={it} opens={it.key ? chestsOpenedBy(it.key, chests).length : 0} /> : <TakenRow key={it.id} item={it} />)
+  const tab = (id: typeof view, label: string): JSX.Element => (
+    <button className={`tag tag--tap ${showing === id ? 'is-on' : ''}`} role="tab" aria-selected={showing === id} onClick={() => setView(id)}>{label}</button>
+  )
+  const title = kind === 'keys' ? KEY_ITEMS_LABEL : OTHER_LOOT_LABEL
+  return (
+    <Stacked>
+      <div className={`modal items-modal items-modal--${kind}`} role="dialog" aria-modal="true" aria-label={kind === 'keys' ? 'Key items' : 'Other loot'} onPointerDown={close}>
+        <div className="modal__card secrets__box items-modal__card" onPointerDown={(e) => e.stopPropagation()}>
+          <header className="panel__head secrets__head">
+            <h2>{title}</h2>
+            <button className="targets__remove secrets__close" onClick={close} aria-label="Close" title="Close">✕</button>
+          </header>
+          {(kind === 'keys' || archivedHere.length > 0 || clearAll) && (
+            <div className="held__views">
+              {(kind === 'keys' || archivedHere.length > 0) && (
+                <span className="held__tabs" role="tablist">
+                  {tab('mine', kind === 'keys' ? `MINE ${keys.length}` : `INVENTORY ${taken.length}`)}
+                  {kind === 'keys' && tab('feed', 'FEED')}
+                  {archivedHere.length > 0 && tab('archived', `ARCHIVED ${archivedHere.length}`)}
+                </span>
+              )}
+              {clearAll && (
+                <button className="tag tag--tap held__clearall" onClick={() => useInventory.getState().clearTaken(taken.filter((t) => clearsWithAll(t, keptFromAll)).map((t) => t.id))} title="Clear everything from OTHER LOOT except coins and NFT links, which are cleared one at a time">CLEAR ALL</button>
+              )}
+            </div>
+          )}
+          <div className="items-modal__scroll" ref={scroller}>
+            {showing === 'feed' ? (
+              <>
+                <p className="items-modal__note">{FEED_LINE}</p>
+                <FeedList held={held} scroller={scroller} />
+              </>
+            ) : (
+              <>
+                {showing === 'mine' && kind === 'keys' && keys.length > 0 && <span className="legend__label">{KEY_ITEMS_NOTE}</span>}
+                <ul className="secrets__list held__list">
+                  {rows.length === 0 && <li className="secrets__empty">{kind === 'keys' ? NO_KEY_ITEMS : NO_OTHER_LOOT}</li>}
+                  {rows.map(row)}
+                </ul>
+              </>
+            )}
+          </div>
+          {kind === 'keys' && showing === 'mine' && (
+            <>
+              {/* An item from another device, as COPY wrote it. The prefix is the wire format and keeps its name. */}
+              <form className="loot__paste" onSubmit={(e) => { e.preventDefault(); doPaste() }}>
+                <input className="avatars__input" value={paste} onChange={(e) => { setPaste(e.target.value); setNote(null) }} placeholder="cyberspace-key:…" spellCheck={false} autoComplete="off" aria-label="An item as text" />
+                <button className="avatars__go" type="submit" disabled={!paste.trim()} title="Hold an item copied from ITEMS on another device">PASTE</button>
+              </form>
+              {note && <p className="notice" role="status">{note}</p>}
+            </>
+          )}
+        </div>
+      </div>
+    </Stacked>
+  )
+}
+
+/**
+ * ITEMS in the menu: two buttons and nothing else (owner, 2026-11-14: "I
+ * want to have everything replaced with two buttons, key items with a key
+ * emoji, and loot items with a sparkle emoji ... My list of these items is
+ * getting too long"), each with how many it holds, 0 included, each opening
+ * its modal (ItemsModal). Archived rows are not counted, as the old chip did
+ * not count them. THIS SESSION stays in the head when storage could not be
+ * opened, since then nothing held outlasts the page.
+ */
+export function InventoryPanel(): JSX.Element {
+  const items = useInventory((s) => s.items)
+  const storage = useInventory((s) => s.storage)
+  const muted = useMutes((s) => s.muted)
+  const self = useCyberspace((s) => s.identity.pubkey)
+  const open = useItemsModal((s) => s.open)
+  // The menu unmounts this panel when it hides (an offer, a secret, a phone's BUILD): the modal goes with it, and does not come back by itself with the menu.
+  useEffect(() => () => useItemsModal.setState({ open: null }), [])
+  const { keys, taken } = useMemo(
+    () => splitPanels([], Object.values(items).filter((it) => !hidesThing(muted, { authors: [it.author], ids: [it.id, itemLineage(it.event)] }, self))).loot,
+    [items, muted, self],
+  )
   return (
     <section className="panel panel--loot">
       <header className="panel__head">
         {/* ITEMS (arkinox, 2026-10-10): what you hold. The CSS classes still say loot. */}
         <h2>Items</h2>
-        <span className="loot__tags">
-          {storage === 'memory' && <span className="tag" title="IndexedDB could not be opened; what you hold lasts this session only">THIS SESSION</span>}
-          <span className="tag">{heldCount(keys.length, taken.length)}</span>
-        </span>
+        {storage === 'memory' && <span className="loot__tags"><span className="tag" title="IndexedDB could not be opened; what you hold lasts this session only">THIS SESSION</span></span>}
       </header>
-
-      {archived.length > 0 && (
-        <div className="held__views" role="tablist">
-          <button className={`tag tag--tap ${showing === 'inventory' ? 'is-on' : ''}`} role="tab" aria-selected={showing === 'inventory'} onClick={() => setView('inventory')}>INVENTORY</button>
-          <button className={`tag tag--tap ${showing === 'archived' ? 'is-on' : ''}`} role="tab" aria-selected={showing === 'archived'} onClick={() => setView('archived')}>ARCHIVED {archived.length}</button>
-        </div>
-      )}
-
-      {showing === 'archived' && (
-        <div className="shards__section">
-          <span className="legend__label">Archived</span>
-          <ul className="secrets__list held__list">
-            {archived.map((a) => (a.type === 'key' ? <KeyRow key={a.id} item={a} opens={a.key ? chestsOpenedBy(a.key, chests).length : 0} /> : <TakenRow key={a.id} item={a} />))}
-          </ul>
-        </div>
-      )}
-
-      {/* Two sections, so each keeps its heading: the keypair items you hold,
-          then what was taken out of chests. The headings are arkinox's own
-          words (2026-11-09), the dash included. */}
-      {showing === 'inventory' && keys.length > 0 && (
-        <div className="shards__section">
-          <span className="legend__label">{KEY_ITEMS_HEADING}</span>
-          <ul className="secrets__list held__list">
-            {keys.map((k) => <KeyRow key={k.id} item={k} opens={k.key ? chestsOpenedBy(k.key, chests).length : 0} />)}
-          </ul>
-        </div>
-      )}
-
-      {showing === 'inventory' && taken.length > 0 && (
-        <div className="shards__section">
-          <span className="held__takenhead">
-            <span className="legend__label">{OTHER_LOOT_HEADING}</span>
-            <button className="tag tag--tap" onClick={() => useInventory.getState().clearTaken(taken.filter((t) => clearsWithAll(t, keptFromAll)).map((t) => t.id))} title="Clear everything from OTHER LOOT except coins and NFT links, which are cleared one at a time">CLEAR ALL</button>
-          </span>
-          <ul className="secrets__list held__list">
-            {taken.map((t) => <TakenRow key={t.id} item={t} />)}
-          </ul>
-        </div>
-      )}
-
-      {showing === 'inventory' && count === 0 && <p className="avatars__empty">Nothing held yet.</p>}
-
-      {/* An item from another device, as COPY wrote it. The prefix is the wire format and keeps its name. */}
-      <form className="loot__paste" onSubmit={(e) => { e.preventDefault(); doPaste() }}>
-        <input className="avatars__input" value={paste} onChange={(e) => { setPaste(e.target.value); setNote(null) }} placeholder="cyberspace-key:…" spellCheck={false} autoComplete="off" aria-label="An item as text" />
-        <button className="avatars__go" type="submit" disabled={!paste.trim()} title="Hold an item copied from ITEMS on another device">PASTE</button>
-      </form>
-      {note && <p className="notice" role="status">{note}</p>}
-
-      <Explanation>
-        What you hold: items you took or forged, and what you took out of
-        chests. A chest sealed to one of these items opens with OPEN where it
-        is found, in DISCOVERED BAGS. Kept on this device per identity; COPY
-        and PASTE carry an item to another device as text.
-      </Explanation>
+      <div className="items-kinds">
+        <button className="avatars__go items-kinds__go" onClick={() => useItemsModal.setState({ open: 'keys' })} aria-haspopup="dialog">{kindLabel(KEY_ITEMS_LABEL, keys.length)}</button>
+        <button className="avatars__go items-kinds__go" onClick={() => useItemsModal.setState({ open: 'loot' })} aria-haspopup="dialog">{kindLabel(OTHER_LOOT_LABEL, taken.length)}</button>
+      </div>
+      {open && <ItemsModal key={open} kind={open} />}
+      <Explanation>Key items open doors and chests. Other loot is everything else you took.</Explanation>
     </section>
   )
 }

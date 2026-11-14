@@ -6206,7 +6206,8 @@ select.avatars__input option:checked {
   border-top: 1px solid rgba(0, 229, 255, 0.08);
   font-size: 10px;
 }
-.loot__row:first-child {
+.loot__row:first-child,
+.loot__group + .loot__row {
   border-top: 0;
 }
 .loot__top {
@@ -6220,6 +6221,15 @@ select.avatars__input option:checked {
 }
 .loot__top .avatars__when {
   margin-left: auto;
+}
+/* HIDDEN BAGS' group headings: THIS SECTOR first, then ELSEWHERE (owner,
+   2026-11-14), small and dim like a meta line, never a row of their own. */
+.loot__group {
+  list-style: none;
+  padding: 6px 0 2px;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--dim);
 }
 /* The cube before a bag's height and size, when its hider named the sector
    (DiscoveredPanel row): the meta line's own color, on the baseline. */

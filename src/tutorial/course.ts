@@ -27,6 +27,14 @@
  *            so only the trampoline gets you there
  *   FINISH   two checkered flags on the deck; the finish chest in the
  *            deck's own height-3 region
+ *   WALL     a low wall round the deck's far edge and its sides (owner,
+ *            2026-11-14): a forward hold through the bounce used to carry
+ *            the walker over the deck (about 1.2 s held, onto the floor
+ *            past it; 2 s or more, past the floor's end, falling for good).
+ *            Now the overshoot meets the wall and comes down on the deck.
+ *            Its top is 6 above the deck's (stand y 10 to 14 are walled),
+ *            over the bounce's top (stand y 14) and inside the footprint.
+ *            It takes no taps, so the chest is tapped through it (director)
  *   FLOOR    a catch floor under it all (stand at y -2), and a step behind
  *            the start (stand at y 0): risers of 2 and 1, the stair rule,
  *            so a fall is never more than a walk back
@@ -47,7 +55,7 @@ export const COURSE_R = 20
 
 /** A piece of the course, by its file under tutorial/pieces, at a point of the course frame. */
 export interface CoursePart {
-  piece: 'plat-square-6' | 'plat-square-4' | 'line-start-4x2' | 'trampoline-4' | 'flag-checkered' | 'catch-floor' | 'back-step'
+  piece: 'plat-square-6' | 'plat-square-4' | 'line-start-4x2' | 'trampoline-4' | 'flag-checkered' | 'catch-floor' | 'back-step' | 'wall-far' | 'wall-side'
   at: [number, number, number]
 }
 
@@ -64,6 +72,10 @@ export const COURSE: CoursePart[] = [
   { piece: 'plat-square-6', at: [0, 9, 31] },
   { piece: 'flag-checkered', at: [-3, 9, 34] },
   { piece: 'flag-checkered', at: [3, 9, 34] },
+  // WALL: across the far edge (cells x -4 to 4 at z 35) and down each side (x -4 and 4, z 28 to 34)
+  { piece: 'wall-far', at: [0, 9, 35] },
+  { piece: 'wall-side', at: [-4, 9, 31] },
+  { piece: 'wall-side', at: [4, 9, 31] },
   // FLOOR
   { piece: 'catch-floor', at: [0, -3, 13] },
   { piece: 'back-step', at: [0, -1, -5] },
@@ -227,6 +239,45 @@ export function plantCell(frame: Frame, at: Position): Position | null {
   }
   return null
 }
+
+/** How far the deck's wall rises above the deck's top, in gibsons (stand y 10 to 14 walled; the bounce tops out at 14). */
+export const WALL_RISE = 6
+
+/**
+ * A wall: a box over the cells `hx` and `hz` each way from its origin (its
+ * faces half a gibson out, between cells), from the origin's y up `rise`.
+ * Symmetric about its origin on x and z, as slabPayload is, so it lands the
+ * same whichever way the layout faces; solid to a walker.
+ */
+export function wallPayload(name: string, hx: number, hz: number, rise: number, color: number): Record<string, unknown> {
+  // A half gibson is a whole number and 60 of 120 ticks: -hx - 0.5 is -hx - 1 and 60, hx + 0.5 is hx and 60.
+  const lo = (n: number): [number, number] => [-n - 1, 60]
+  const hi = (n: number): [number, number] => [n, 60]
+  const corners: Array<[[number, number], [number, number], [number, number]]> = []
+  for (const y of [[0, 0], [rise, 0]] as Array<[number, number]>) {
+    corners.push([lo(hx), y, lo(hz)], [hi(hx), y, lo(hz)], [hi(hx), y, hi(hz)], [lo(hx), y, hi(hz)])
+  }
+  const v = corners.map((c) => c.map((a) => a[0]) as [number, number, number])
+  const ticks = corners.map((c) => c.map((a) => a[1]) as [number, number, number])
+  const extent = Math.max(8, ...v.flat().map((n) => Math.abs(n) + 1))
+  return {
+    v: 2,
+    name,
+    unit: 0,
+    extent,
+    mode: 'solid',
+    vertices: v,
+    ticks,
+    colors: v.map(() => color),
+    faces: [[4, 7, 6], [4, 6, 5], [0, 1, 2], [0, 2, 3], [3, 2, 6], [3, 6, 7], [1, 0, 4], [1, 4, 5], [2, 1, 5], [2, 5, 6], [0, 3, 7], [0, 7, 4]],
+    constrain: 'all',
+  }
+}
+
+/** The wall across the deck's far edge: cells x -4 to 4, one deep, its origin at course (0, 9, 35). */
+export const WALL_FAR = wallPayload('Wall', 4, 0, WALL_RISE, 211)
+/** A wall down one side of the deck: cells z 28 to 34, one wide, its origin at course (+-4, 9, 31). */
+export const WALL_SIDE = wallPayload('Wall', 0, 3, WALL_RISE, 211)
 
 /** The catch floor: x -7 to 7 and z -12 to 37 of the course (cells), its origin at course z 13, reaching behind the step. */
 export const CATCH_FLOOR = slabPayload('Catch floor', 7, 25, 200)

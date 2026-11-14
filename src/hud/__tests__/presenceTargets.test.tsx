@@ -4,7 +4,10 @@
  * I'm targeting them I still want to know which avatars are nearby -- it
  * serves a different purpose"). Their row's button reads TARGETED, as it does
  * in TARGETS and on a person's card, and tapping it stops targeting them.
- * You and anyone blocked stay out. No network: profiles are stand-ins.
+ * You and anyone blocked stay out. A row's picture opens that person's
+ * profile over the list, and closing it comes back to the list, still open
+ * (owner, 2026-11-14; modalStack, as every avatar does). No network:
+ * profiles are stand-ins.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -22,12 +25,14 @@ vi.hoisted(() => {
 })
 
 vi.mock('../../hooks/useProfile', () => ({ useProfile: () => null }))
-vi.mock('../ProfileBadge', () => ({ ProfilePic: () => null }))
+// The picture is a stand-in (no image to load); ProfileTap, which opens the profile, is the real one.
+vi.mock('../ProfileBadge', async (orig) => ({ ...(await orig<typeof import('../ProfileBadge')>()), ProfilePic: () => null }))
 
 // The store first: PresenceChip imports it, and its import cycle needs the store built.
 import { useCyberspace } from '../../store/useCyberspace'
 import { usePresence, type Person } from '../../store/usePresence'
 import { useMutes } from '../../store/useMutes'
+import { useProfileView } from '../../store/useProfileView'
 import { PresenceChip } from '../PresenceChip'
 import { mount, textOf, type Mounted } from '../../test/elementRoot'
 import type { Position } from '../../lib/space'
@@ -63,6 +68,7 @@ afterEach(async () => {
   await chip?.unmount()
   chip = null
   usePresence.setState({ people: {} })
+  useProfileView.getState().close()
   useCyberspace.setState({ targets: {} } as never)
   useMutes.setState({ muted: { ...useMutes.getState().muted, pubkeys: new Set() } } as never)
 })
@@ -106,5 +112,34 @@ describe('your targets in "N IN THIS SECTOR"', () => {
     usePresence.setState({ people: { [FRIEND]: person(FRIEND, 300) } })
     chip = await mount(<PresenceChip />)
     expect(chip.says('1 IN THIS SECTOR')).toBe(true)
+  })
+})
+
+describe('a picture in the list opens the profile', () => {
+  const pictures = (m: Mounted) => m.all().filter((h) => h.type === 'button' && String(h.props.className).includes('profile-tap'))
+
+  it('tapping a row\'s picture opens that person\'s profile, and closing it comes back to the list, still open', async () => {
+    chip = await mount(<PresenceChip />)
+    await chip.press('IN THIS SECTOR')
+    const pics = pictures(chip)
+    // One per row, in the list's order: the stranger (more recent), then the friend.
+    expect(pics).toHaveLength(2)
+    ;(pics[1].props.onClick as (e: { stopPropagation: () => void; preventDefault: () => void }) => void)({ stopPropagation: () => {}, preventDefault: () => {} })
+    expect(useProfileView.getState().pubkey).toBe(FRIEND)
+    // The list stays open under the profile.
+    expect(rowButtons(chip)).toHaveLength(2)
+    // Closing the profile (its ✕, a tap outside): the list is there again.
+    useProfileView.getState().close()
+    await vi.waitFor(() => expect(useProfileView.getState().pubkey).toBe(null))
+    expect(rowButtons(chip)).toHaveLength(2)
+    expect(String(chip.all().find((h) => String(h.props.className).includes('presence__head'))?.props['aria-expanded'])).toBe('true')
+  })
+
+  it('a picture is not the TARGET button: tapping it targets nobody', async () => {
+    chip = await mount(<PresenceChip />)
+    await chip.press('IN THIS SECTOR')
+    ;(pictures(chip)[0].props.onClick as (e: { stopPropagation: () => void; preventDefault: () => void }) => void)({ stopPropagation: () => {}, preventDefault: () => {} })
+    expect(useProfileView.getState().pubkey).toBe(STRANGER)
+    expect(useCyberspace.getState().targets[STRANGER]).toBeUndefined()
   })
 })

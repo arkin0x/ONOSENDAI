@@ -8,10 +8,15 @@
  * tutorialOn), and it is not a brand-new arrival: an identity the tutorial
  * starts or resumes for by itself on this load (store/useTutorial.ts
  * tutorialStarts), or a brand-new one (isNewArrival) that has never had a
- * run, gets no toast on this load. That includes a brand-new visitor whose
- * ?mode= link held the tutorial back (store/arrivalMode.ts): a later load can
- * offer it. A brand-new key whose player skipped the tutorial before ever
- * moving is still new to isNewArrival, but has had its run: it is offered.
+ * run, gets no toast on this load. A brand-new key whose player skipped the
+ * tutorial before ever moving is still new to isNewArrival, but has had its
+ * run: it is offered.
+ *
+ * Nor anyone on a load that arrived by a region link, ?mode=view or
+ * ?mode=region (store/arrivalMode.ts, tutorial/gate.ts arrivalModeAsked;
+ * owner, 2026-11-14): whoever follows one came to look at a place, new or
+ * returning. Nothing is offered or counted for that load, and the next
+ * plain load can offer it as usual.
  *
  * When: judged once per identity per load, once the identity is settled and
  * its saved chain is in; offered TOAST_IDLE_MS later, and only once the app
@@ -39,7 +44,7 @@
  */
 
 import { create } from 'zustand'
-import { readProgress, tutorialOn } from './gate'
+import { arrivalModeAsked, readProgress, tutorialOn } from './gate'
 import { cannotStageHere, headUnsettled, identitySettled, isNewArrival, resumeStepFor, resumeTutorial, tutorialStarts, useTutorial } from '../store/useTutorial'
 import { savedChainLoaded, useCyberspace } from '../store/useCyberspace'
 import { useDemo } from '../store/useDemo'
@@ -191,6 +196,8 @@ export function watchTutorialToast(): () => void {
     if (stopped || judgedFor !== pubkey || useCyberspace.getState().identity.pubkey !== pubkey) return
     // A brand-new arrival, or one the tutorial starts or resumes for by itself: no toast on this load.
     if (useTutorial.getState().active || tutorialStarts(pubkey) || (isNewArrival() && !readProgress(pubkey))) return
+    // A region link's visit (?mode=view or ?mode=region): no toast on this load, and no show counted.
+    if (arrivalModeAsked()) return
     clear()
     timer = setTimeout(() => offer(pubkey), TOAST_IDLE_MS)
   }

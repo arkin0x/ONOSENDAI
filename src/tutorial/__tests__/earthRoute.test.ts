@@ -5,6 +5,8 @@
  * - TRAVEL TO EARTH goes to four steps in order, all on the hyperspace
  *   branch: Earth (NEXT), pick a stop (waits for a destination), BOARD
  *   (waits for the chain to be on the line), RIDE (waits for a ride to start);
+ * - RIDE checks Earth off as the ride starts, but the choices come back only
+ *   once it arrives, or is cancelled or fails (owner, 2026-11-14);
  * - the whole Earth is framed as the route starts, on a phone held upright
  *   and on a desktop;
  * - HYPERSPACE is the first panel in the menu while BOARD and RIDE are
@@ -156,16 +158,87 @@ describe('the Earth route, walked', () => {
     expect(usePanelLayout.getState().front).toBe('hyperspace')
     expect(useTutorial.getState().done).toBe(false)
 
-    // RIDE: done as the proof starts, not when the ride lands.
+    // RIDE: done as the proof starts, not when the ride lands, and Earth checked off then and kept.
     useRideRun.setState({ progress: { done: 0, total: 12, etaMs: null, price: null } })
     expect(useTutorial.getState().done).toBe(true)
+    expect(useTutorial.getState().doneChoices).toEqual(['hyperspace'])
+    expect(readProgress(pubkey())).toEqual({ step: 'earth-ride', choices: ['hyperspace'] })
+    // But the choices stay away while the ride runs (owner, 2026-11-14): they used to come back over it.
+    vi.advanceTimersByTime(ADVANCE_MS)
+    expect(id()).toBe('earth-ride')
+    useRideRun.setState({ progress: { done: 6, total: 12, etaMs: 4000, price: null } })
+    vi.advanceTimersByTime(60_000)
+    expect(id()).toBe('earth-ride')
+    // Arrived at the stop: the choices come back a moment later.
+    useRideRun.setState({ progress: null, path: null })
+    expect(id()).toBe('earth-ride')
     vi.advanceTimersByTime(ADVANCE_MS)
     expect(id()).toBe('choice')
     expect(useTutorial.getState().doneChoices).toEqual(['hyperspace'])
     expect(readProgress(pubkey())).toEqual({ step: 'choice', choices: ['hyperspace'] })
   })
 
-  it('only FINISH on a done RIDE checks Earth off: SKIP on RIDE goes back to the choices without it, and NEXT before RIDE only goes on', () => {
+  it('a ride cancelled or failed brings the choices back too, Earth still checked off', () => {
+    for (const ending of [{ error: null }, { error: 'The line is not synced past the destination yet.' }]) {
+      useTutorial.setState({ doneChoices: [] })
+      chooseEarth()
+      for (let i = 0; i < 3; i++) useTutorial.getState().next()
+      expect(id()).toBe('earth-ride')
+      useRideRun.setState({ progress: { done: 0, total: 12, etaMs: null, price: null }, error: null })
+      expect(useTutorial.getState().doneChoices).toEqual(['hyperspace'])
+      vi.advanceTimersByTime(ADVANCE_MS * 3)
+      expect(id()).toBe('earth-ride')
+      // CANCEL (no error) or a failure (its error): the proof stops.
+      useRideRun.setState({ progress: null, path: null, ...ending })
+      vi.advanceTimersByTime(ADVANCE_MS)
+      expect(id()).toBe('choice')
+      expect(useTutorial.getState().doneChoices).toEqual(['hyperspace'])
+      useRideRun.setState({ error: null })
+    }
+  })
+
+  it('a HOSAKA ride brings the choices back when it is no longer under way, not while it computes', () => {
+    const cloud = useCyberspace.getState().cloud
+    try {
+      chooseEarth()
+      for (let i = 0; i < 3; i++) useTutorial.getState().next()
+      useRideRun.setState({ hosaka: true })
+      useCyberspace.setState({ cloud: { ...cloud, status: 'paid', job: { action: 'ride' } as never } })
+      expect(useTutorial.getState().done).toBe(true)
+      expect(useTutorial.getState().doneChoices).toEqual(['hyperspace'])
+      // The panel hands the ride to the store; HOSAKA computes, then checks and signs.
+      useRideRun.setState({ hosaka: false })
+      useCyberspace.setState({ cloud: { ...cloud, status: 'computing', job: { action: 'ride' } as never } })
+      vi.advanceTimersByTime(30_000)
+      useCyberspace.setState({ cloud: { ...cloud, status: 'verifying', job: { action: 'ride' } as never } })
+      vi.advanceTimersByTime(ADVANCE_MS * 2)
+      expect(id()).toBe('earth-ride')
+      // Signed and landed: HOSAKA is idle again.
+      useCyberspace.setState({ cloud: { ...cloud, status: 'idle', job: null } as never })
+      vi.advanceTimersByTime(ADVANCE_MS)
+      expect(id()).toBe('choice')
+    } finally {
+      useCyberspace.setState({ cloud })
+    }
+  })
+
+  it('a ride that had already landed at another stop when it was seen brings the choices back at once', () => {
+    line.state = { previousId: 'a'.repeat(64), coordHex: '0'.repeat(64), fromHeight: 800000 }
+    try {
+      chooseEarth()
+      for (let i = 0; i < 3; i++) useTutorial.getState().next()
+      line.state = { previousId: 'b'.repeat(64), coordHex: '0'.repeat(64), fromHeight: 840000 }
+      useCyberspace.setState({ events: [] } as never)
+      expect(useTutorial.getState().done).toBe(true)
+      vi.advanceTimersByTime(ADVANCE_MS)
+      expect(id()).toBe('choice')
+      expect(useTutorial.getState().doneChoices).toEqual(['hyperspace'])
+    } finally {
+      line.state = undefined
+    }
+  })
+
+  it('only a done RIDE checks Earth off: SKIP on RIDE goes back to the choices without it, and NEXT before RIDE only goes on', () => {
     chooseEarth()
     useTutorial.getState().next()
     useTutorial.getState().next()

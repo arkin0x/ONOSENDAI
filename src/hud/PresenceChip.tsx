@@ -7,7 +7,9 @@
  * is the existing path to their chain, their marker at any distance, and the
  * scene following them. Someone you already target is still here, so is
  * still counted and listed, their button reading TARGETED in their color
- * (tap to stop targeting, as everywhere else that button appears).
+ * (tap to stop targeting, as everywhere else that button appears). A row's
+ * picture opens the person's profile, as every avatar does (ProfileTap);
+ * closing it comes back to the list, still open.
  */
 
 import { useEffect, useState } from 'react'
@@ -16,7 +18,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { sectorKey, sectorPeople, usePresence, type Person } from '../store/usePresence'
 import { useChat } from '../store/useChat'
 import { useProfile } from '../hooks/useProfile'
-import { ProfilePic } from './ProfileBadge'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { formatDistance } from 'sno-core/scale'
 import type { Position } from '../lib/space'
 import type { Plane } from 'cyberspace-core'
@@ -41,7 +43,8 @@ function Row({ person, now }: { person: Person; now: number }): JSX.Element {
   const far = d.reduce((a, b) => (a > b ? a : b), 0n)
   return (
     <li className="presence__row">
-      <ProfilePic pubkey={person.pubkey} size={20} />
+      {/* The picture opens their profile over the list, which is there again when it closes (modalStack; owner, 2026-11-14). */}
+      <ProfileTap pubkey={person.pubkey} title={name}><ProfilePic pubkey={person.pubkey} size={20} /></ProfileTap>
       <span className="presence__who">
         <span className="presence__name">{name}</span>
         <span className="presence__meta">{formatDistance(far)} away · {ageLabel(person.lastActive, now)}</span>

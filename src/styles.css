@@ -3948,6 +3948,59 @@ select.avatars__input option:checked {
 .ws__handle--y { color: #5cff7a; }
 .ws__handle--z { color: #6aa3ff; }
 .palettes__headkeys { display: inline-flex; gap: 6px; flex: none; }
+/* The beginner path (workshop redesign, phase 4). */
+/* MORE TOOLS: a dashed slot after the four, as wide as two of them. */
+.ws__dockbtn.ws__dockbtn--more { flex: 1.6 1 0; color: var(--dim); border: 1px dashed var(--border); }
+/* The real button the first-visit guide points at, glowing. */
+.ws__dockbtn.is-guide,
+.ws__topbtn.is-guide { position: relative; box-shadow: 0 0 0 2px var(--accent), 0 0 16px rgba(0, 229, 255, 0.55); animation: ws-guide 1.4s ease-in-out infinite; }
+.ws__topbtn.ws__topbtn--deploy.is-guide { box-shadow: 0 0 0 2px var(--ok), 0 0 18px rgba(82, 227, 159, 0.7); }
+@keyframes ws-guide { 50% { box-shadow: 0 0 0 2px var(--accent), 0 0 4px rgba(0, 229, 255, 0.2); } }
+@media (prefers-reduced-motion: reduce) { .ws__dockbtn.is-guide, .ws__topbtn.is-guide { animation: none; } }
+/* The first-visit guide: a card over the strip, its step's number, what to do, SKIP. */
+.ws__guide {
+  position: absolute;
+  left: var(--ws-gutter);
+  right: var(--ws-gutter);
+  bottom: calc(100% + 8px);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 12px 10px 12px 12px;
+  border-radius: 14px;
+  background: rgba(6, 14, 22, 0.95);
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.22);
+}
+.ws__guide-n { flex: none; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-weight: 700; font-size: 15px; color: var(--ws-ink); background: var(--accent); }
+.ws__guide-body { flex: 1; min-width: 0; }
+.ws__guide-text { margin: 0; font-size: 12px; line-height: 1.45; color: var(--fg); }
+.ws__guide-sub { margin: 4px 0 0; font-size: 9.5px; letter-spacing: 0.1em; color: var(--dim); }
+.ws__guide-skip { flex: none; min-width: 52px; height: 44px; padding: 0 8px; font-family: inherit; font-size: var(--ws-label); letter-spacing: 0.1em; color: var(--dim); background: none; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; }
+/* What a tap does with the tool in hand: one line over the strip, gone after a few uses. */
+.ws__toolhint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  z-index: 2;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.86);
+  border: 1px solid var(--border);
+  pointer-events: none;
+}
+/* The ?'s answer, a question being asked, or tiles open: the hint and the guide step aside. */
+.ws__bottom:has(.ws__hint, .ws__tiles, .ws__ask) .ws__toolhint,
+.ws__bottom:has(.ws__hint, .ws__tiles, .ws__ask) .ws__guide { display: none; }
 /* A phone: the strip's tool label keeps its icon and ?, the chips their
    picture and name, so every tool's options and MORE fit without scrolling,
    up to a 430px phone. The dock still says which tool is lit. */

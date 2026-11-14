@@ -17,6 +17,8 @@ import { usePublished } from '../../store/usePublished'
 import { useWorkshop } from '../../store/useWorkshop'
 import { BounceChip } from '../shardRows'
 import { copyShardById } from '../shardClipboard'
+import { useBeginner } from '../beginner'
+import { Field, Switch } from '../../hud/ui/Switch'
 
 /**
  * A folder's DELETE CONTENTS in the MENU's list (hud/ShardFolders): the
@@ -91,6 +93,7 @@ interface MenuBodyProps {
 /** MENU's body, inside its sheet. */
 export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, setPaste }: MenuBodyProps): JSX.Element {
   const shardCount = useWorkshop((s) => s.shards.length)
+  const tools = useBeginner((b) => b.tools)
   const hasContent = useWorkshop((s) => { const c = s.current(); return c !== null && (c.vertices.length > 0 || (c.parts?.length ?? 0) > 0) })
   const pasteOpen = box.open
   const pasteText = box.text
@@ -128,6 +131,12 @@ export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, s
         </div>
       )}
       <ShardList currentId={currentId} onOpen={onOpen} />
+      {/* The dock's six tools, or a beginner's four with MORE TOOLS (phase 4). */}
+      <div className="workshop__row">
+        <Field id="ws-all-tools" label="ADD and FACE in the dock">
+          <Switch id="ws-all-tools" className="ui-switch--ok" checked={tools !== 'four'} onCheckedChange={(on) => useBeginner.getState().setTools(on ? 'all' : 'four')} />
+        </Field>
+      </div>
       <div className="workshop__row">
         <button className="workshop__btn workshop__btn--danger" disabled={!hasContent} onClick={() => { if (window.confirm('Delete all vertices, faces and placed objects in the scene?')) w().clearShard() }} title="Empty this scene (undoable)">CLEAR THIS SCENE</button>
         <span className="workshop__gap" />

@@ -22,7 +22,7 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
-const { Intro } = await import('../Notices')
+const { GUIDE_TEXT } = await import('../shell/Guide')
 const { DOCK } = await import('../shell/Dock')
 
 const read = (...p: string[]): string => readFileSync(join(__dirname, '..', ...p), 'utf8')
@@ -58,19 +58,20 @@ function iconOf(label: string): string {
   return icon![1]
 }
 
-describe('the first-run card', () => {
-  const card = text(renderToStaticMarkup(<Intro />))
+describe('the first-visit guide (phase 4, in place of the first-run card)', () => {
+  const card = Object.values(GUIDE_TEXT).join(' ')
 
-  it('says one finger orbits in every tool, and a box is SELECT\'s BOX (workshop redesign, phase 2)', () => {
-    expect(card).toContain('One finger orbits in every tool')
-    expect(card).toContain('BOX makes a drag draw a box')
-    expect(card).not.toMatch(/FACE[^.;]*draws a box/)
+  it('teaches by doing, on the real buttons: STAMP, one finger turning the view, PAINT', () => {
+    expect(GUIDE_TEXT.stamp).toContain('Tap STAMP, then tap the grid')
+    expect(GUIDE_TEXT.turn).toContain('Drag one finger')
+    expect(GUIDE_TEXT.paint).toContain('Tap PAINT')
   })
 
-  it('points at STAMP in the dock, not a TOOLS chip or an ORBIT ball that are no longer there', () => {
-    expect(card).toContain('tap STAMP at the bottom')
+  it('points at nothing that is no longer there: no TOOLS chip, no ORBIT ball, no box in FACE', () => {
     expect(card).not.toMatch(/\bTOOLS\b/)
     expect(card).not.toContain('ORBIT')
+    expect(card).not.toMatch(/FACE[^.;]*draws a box/)
+    expect(text(renderToStaticMarkup(<span>{card}</span>))).not.toContain('\u2014')
   })
 })
 

@@ -44,6 +44,11 @@ const { useWorkshop } = await import('../../store/useWorkshop')
 const { escapeTop } = await import('../../hooks/useEscape')
 const { frameOffset, frameZoom, useBenchView } = await import('../benchAxes')
 const { newShard, ticksOf } = await import('sno-core/shards')
+const { useBeginner, startingTools, HINT_USES, TUTORIAL_SHARD_PREFIX, useViewTurned } = await import('../beginner')
+const { useTutorial } = await import('../../store/useTutorial')
+const { notePose } = await import('../benchAxes')
+const { hintFor } = await import('../shell/ToolHint')
+const { benchPose } = await import('../benchAxes')
 
 const CSS = readFileSync(join(__dirname, '..', '..', 'styles.css'), 'utf8')
 
@@ -92,6 +97,9 @@ beforeEach(() => {
   useWorkshop.setState({ selectKind: 'points', paintMode: 'face', paintEdge: false, boxSelect: false, invert: false })
   useWorkshop.setState({ open: true, shards: [s], currentId: s.id, tool: 'view', selection: [], partSel: [], selectedFaces: [], facePick: [], clip: null, past: [], future: [], openPanel: null, notice: null })
   localStorage.setItem('onosendai:workshop-intro', '1')
+  // The tests before phase 4 see all six tools and no hints; phase 4's own set them as they need.
+  useBeginner.setState({ tools: 'all', step: null, glow: null, done: true, uses: { view: 3, stamp: 3, select: 3, paint: 3, add: 3, face: 3 } })
+  useTutorial.setState({ active: false })
 })
 afterEach(() => {
   useWorkshop.setState({ open: false })
@@ -759,5 +767,161 @@ describe('phase 3 review fixes', () => {
     w().paintTap({ face: 1 })
     expect(w().notice).toBeNull()
     expect(w().palette[0]).toBe('#00ff00')
+  })
+})
+
+describe('the beginner path (phase 4)', () => {
+  const tick = (ms = 5): Promise<void> => new Promise((r) => setTimeout(r, ms))
+  const dockWords = (m: Awaited<ReturnType<typeof mount>>): string[] => buttonsIn(byClass(m.all(), 'ws__dock')[0]).map((b) => textOf(b) || 'COLOR')
+
+  it('starts someone new on four tools, and anyone who has made something on six', () => {
+    expect(startingTools(false, [])).toBe('four')
+    expect(startingTools(false, [{ id: 'a', vertices: [], parts: [] }])).toBe('four')
+    expect(startingTools(true, [])).toBe('all')
+    expect(startingTools(false, [{ id: 'a', vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }] }])).toBe('all')
+    // What the tutorial copied in was found, not made: still someone new.
+    expect(startingTools(false, [{ id: `${TUTORIAL_SHARD_PREFIX}trampoline`, vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }] }])).toBe('four')
+    expect(readFileSync(join(__dirname, '..', '..', 'tutorial', 'director.ts'), 'utf8')).toContain(`export const TUTORIAL_SHARD_ID = '${TUTORIAL_SHARD_PREFIX}'`)
+  })
+
+  it('shows LOOK, STAMP, SELECT, PAINT and MORE TOOLS, which adds ADD and FACE to the right, the four unmoved', async () => {
+    useBeginner.setState({ tools: 'four' })
+    const m = await mount(<Workshop />)
+    expect(dockWords(m)).toEqual(['LOOK', 'STAMP', 'SELECT', 'PAINT', 'MORE TOOLS', 'COLOR'])
+    await m.press('MORE TOOLS')
+    expect(dockWords(m)).toEqual(['LOOK', 'STAMP', 'SELECT', 'PAINT', 'ADD', 'FACE', 'COLOR'])
+    expect(useBeginner.getState().tools).toBe('all')
+    // MENU puts them away again.
+    await m.press('MENU')
+    const sw = m.all().find((h) => h.props.id === 'ws-all-tools')!
+    ;(sw.props.onClick as () => void)()
+    await tick()
+    expect(useBeginner.getState().tools).toBe('four')
+    await m.unmount()
+  })
+
+  it('keeps ADD or FACE on the dock while it is the tool in hand, and their keys bring them on', async () => {
+    useBeginner.setState({ tools: 'four' })
+    useWorkshop.getState().setTool('face')
+    const m = await mount(<Workshop />)
+    expect(dockWords(m)).toContain('FACE')
+    await m.unmount()
+    const bench = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
+    expect(bench).toContain("if ((e.code === 'Digit3' || e.code === 'Digit5') && useBeginner.getState().tools === 'four') useBeginner.getState().setTools('all')")
+  })
+
+  it('guides a first visit on the real buttons: stamp a block, turn the view, paint a face, then DEPLOY lights up', async () => {
+    localStorage.removeItem('onosendai:workshop-intro')
+    useBeginner.setState({ tools: 'four', step: null, done: false })
+    useWorkshop.setState({ shards: [newShard('Empty')], currentId: null as never })
+    useWorkshop.setState({ currentId: useWorkshop.getState().shards[0].id })
+    const m = await mount(<Workshop />)
+    const guide = (): string => textOf(byClass(m.all(), 'ws__guide')[0] ?? { type: 'x', props: {}, children: [] })
+    expect(guide()).toContain('Tap STAMP, then tap the grid')
+    expect(guide()).toContain('STEP 1 OF 3')
+    // STAMP glows until it is in hand.
+    expect(byClass(m.all(), 'is-guide').map(textOf)).toEqual(['STAMP'])
+    await m.press('STAMP')
+    expect(byClass(m.all(), 'is-guide').length).toBe(0)
+    const n0 = useWorkshop.getState().current()!.vertices.length
+    useWorkshop.getState().placeStamp([0, 0, 0])
+    await tick()
+    expect(useWorkshop.getState().current()!.vertices.length).toBeGreaterThan(n0)
+    expect(guide()).toContain('Drag one finger')
+    // The bench draws (no canvas here: its pose is written by hand), then the view turns past the threshold.
+    notePose(benchPose.clone().identity())
+    await tick(300)
+    benchPose.setFromAxisAngle({ x: 0, y: 1, z: 0 } as never, 1)
+    await tick(350)
+    expect(guide()).toContain('Tap PAINT')
+    expect(byClass(m.all(), 'is-guide').map(textOf)).toEqual(['PAINT'])
+    await m.press('PAINT')
+    useWorkshop.getState().paintTap({ face: 0 })
+    await tick()
+    expect(byClass(m.all(), 'ws__guide').length).toBe(0)
+    expect(localStorage.getItem('onosendai:workshop-intro')).toBe('1')
+    expect(byClass(m.all(), 'is-guide').map((h) => textOf(h))).toEqual(['DEPLOY'])
+    benchPose.identity()
+    await m.unmount()
+  })
+
+  it('waits while the tutorial runs, without counting as done, then starts on a new empty shard', async () => {
+    localStorage.removeItem('onosendai:workshop-intro')
+    useBeginner.setState({ tools: null, step: null, done: false })
+    useTutorial.setState({ active: true })
+    const m = await mount(<Workshop />)
+    expect(byClass(m.all(), 'ws__guide').length).toBe(0)
+    expect(useBeginner.getState().step).toBeNull()
+    expect(useBeginner.getState().tools).toBeNull() // not decided while the tutorial has the workshop
+    const shardsBefore = useWorkshop.getState().shards.length
+    useTutorial.setState({ active: false })
+    await tick()
+    expect(useBeginner.getState().step).toBe('stamp')
+    // The cube had points in it: the guide got a new, empty shard.
+    expect(useWorkshop.getState().shards.length).toBe(shardsBefore + 1)
+    expect(useWorkshop.getState().current()!.vertices.length).toBe(0)
+    expect(byClass(m.all(), 'ws__guide').length).toBe(1)
+    await m.unmount()
+  })
+
+  it('measures a turn from the first pose the bench draws, never one left from before', async () => {
+    benchPose.setFromAxisAngle({ x: 0, y: 1, z: 0 } as never, 2)
+    let turned = 0
+    const { mount: mountHook } = await import('../../test/elementRoot')
+    function Probe(): null { useViewTurned(true, () => { turned++ }); return null }
+    const m = await mountHook(<Probe />)
+    // A reopened bench draws HOME: a pose far from the stale one, but no turn.
+    benchPose.identity()
+    notePose(benchPose.clone())
+    await tick(600)
+    expect(turned).toBe(0)
+    benchPose.setFromAxisAngle({ x: 0, y: 1, z: 0 } as never, 1)
+    await tick(350)
+    expect(turned).toBe(1)
+    benchPose.identity()
+    await m.unmount()
+  })
+
+  it('never shows the guide again once skipped', async () => {
+    localStorage.removeItem('onosendai:workshop-intro')
+    useBeginner.setState({ step: null, done: false })
+    const m = await mount(<Workshop />)
+    await m.press('SKIP')
+    expect(useBeginner.getState().done).toBe(true)
+    expect(byClass(m.all(), 'ws__guide').length).toBe(0)
+    expect(localStorage.getItem('onosendai:workshop-intro')).toBe('1')
+    await m.unmount()
+  })
+
+  it('says what a tap does in one line, by tool and its options, and fades it after a few uses', async () => {
+    const base = { stampMode: 'shape' as const, stampKind: 'block' as const, selectKind: 'points' as const, boxSelect: false, paintMode: 'face' as const, facePick: [] as number[] }
+    expect(hintFor({ ...base, tool: 'stamp' })).toBe('Tap the grid to place a BLOCK')
+    expect(hintFor({ ...base, tool: 'paint' })).toBe('Tap a face to paint it')
+    expect(hintFor({ ...base, tool: 'select', selectKind: 'faces' })).toBe('Tap faces to hold them')
+    expect(hintFor({ ...base, tool: 'face', facePick: [1, 2] })).toBe('Tap 1 more corner, then FILL')
+    useBeginner.setState({ uses: {} })
+    useWorkshop.getState().setTool('add')
+    const m = await mount(<Workshop />)
+    expect(textOf(byClass(m.all(), 'ws__toolhint')[0])).toBe('Tap the grid to place a point')
+    for (let i = 0; i < HINT_USES; i++) { useWorkshop.getState().addVertex([i * 120, 0, 0]); await tick(420) }
+    expect(byClass(m.all(), 'ws__toolhint').length).toBe(0)
+    await m.unmount()
+  })
+
+  it('gives LOOK its HOME and FIT in the strip', async () => {
+    const m = await mount(<Workshop />)
+    const strip = byClass(m.all(), 'ws__strip')[0]
+    expect(buttonsIn(strip).map(textOf)).toEqual(['LOOK', 'HOME', 'FIT', 'MORE'])
+    await m.press('FIT')
+    expect(useBenchView.getState().request?.kind).toBe('fit')
+    await m.unmount()
+  })
+})
+
+describe('the paint step color', () => {
+  it('is a warm built-in color, never the block\'s own', async () => {
+    const { paintStepColor } = await import('../shell/Guide')
+    expect(paintStepColor('#00e8f9')).toBe('#f47000')
+    expect(paintStepColor('#f47000')).toBe('#f22400')
   })
 })

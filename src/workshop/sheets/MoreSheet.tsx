@@ -196,11 +196,11 @@ export function MoreBody(): JSX.Element | null {
           )}
         </div>
       </section>
-      {(tool === 'select' || tool === 'face') && (
+      {tool === 'select' && (
         <section className="ws__more-sec" aria-label="Taps">
-          <h3 className="ws__more-title">{tool === 'select' ? 'SELECT' : 'FACE'}</h3>
+          <h3 className="ws__more-title">SELECT</h3>
           <div className="ws__more-keys">
-            {tool === 'select' && (
+            {(
               <button className={`ws__morebtn${box ? ' is-on' : ''}`} aria-pressed={box} onClick={() => w().setBoxSelect(!box)} aria-label="Box: a drag draws a box" title="On: a one-finger drag draws a box. Off: it turns the view" {...noCallout}>
                 <SquareDashedMousePointer size={18} strokeWidth={2} aria-hidden /><span>BOX</span>
               </button>

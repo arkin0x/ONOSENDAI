@@ -3875,6 +3875,7 @@ select.avatars__input option:checked {
   border-radius: 10px;
   cursor: pointer;
 }
+.ws__tiles.ws__tiles--three { grid-template-columns: repeat(3, 1fr); max-width: 300px; }
 .ws__tile.is-on { color: var(--ws-ink); background: var(--accent); border-color: var(--accent); font-weight: 700; }
 /* MORE's keys: labelled, thumb-sized, in rows that wrap. */
 .ws__more-sec { display: flex; flex-direction: column; gap: 8px; }
@@ -3960,6 +3961,11 @@ select.avatars__input option:checked {
   .ws__stepper-value { min-width: 28px; }
   .ws__strip-opts { gap: 4px; }
   .ws__stripbtn--tall { min-width: 48px; padding: 0 4px; }
+  /* SELECT's ALL lives in MORE too: here it gives way so the switch, BOX and MORE fit. */
+  .ws__strip-all { display: none; }
+  .ws__strip-tool { width: 44px; }
+  .ws__seg .ws__stripbtn { min-width: 44px; padding: 0 5px; letter-spacing: 0; }
+  .ws__strip-more { min-width: 44px; }
 }
 /* The palette as a sheet: the whole of it scrolls under its header, the 256
    first and the palette making after them, so the swatches get the room. */

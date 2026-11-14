@@ -79,7 +79,7 @@ function places(all: Host[]) {
 
 const TOP = ['Close the workshop', 'MENU', 'SHARD', 'GRID', 'AVATAR', 'MOTION', 'DEPLOY']
 const RAIL = ['Undo', 'Redo', 'Raise the grid floor', 'Lower the grid floor']
-const DOCK = ['LOOK', 'STAMP', 'SELECT', 'ADD', 'FACE', 'COLOR']
+const DOCK = ['LOOK', 'STAMP', 'SELECT', 'PAINT', 'ADD', 'FACE', 'COLOR']
 
 beforeEach(() => {
   // The toast's timer and the view menu's tap-elsewhere are the window's and
@@ -89,6 +89,7 @@ beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({ matches: true }))
   if (typeof document === 'undefined') vi.stubGlobal('document', { addEventListener: () => {}, removeEventListener: () => {}, querySelector: () => null })
   const s = cube()
+  useWorkshop.setState({ selectKind: 'points', paintMode: 'face', paintEdge: false, boxSelect: false, invert: false })
   useWorkshop.setState({ open: true, shards: [s], currentId: s.id, tool: 'view', selection: [], partSel: [], selectedFaces: [], facePick: [], clip: null, past: [], future: [], openPanel: null, notice: null })
   localStorage.setItem('onosendai:workshop-intro', '1')
 })
@@ -297,10 +298,10 @@ describe('the strip', () => {
     await m.unmount()
   })
 
-  it('SELECT: ADD or REMOVE, BOX, ALL, MORE; BOX is what makes a drag draw a box', async () => {
+  it('SELECT: POINTS, FACES or OBJECTS, ADD or REMOVE, BOX, ALL, MORE; BOX is what makes a drag draw a box', async () => {
     useWorkshop.getState().setTool('select')
     const m = await mount(<Workshop />)
-    expect(buttonsIn(strip(m)).map(textOf)).toEqual(['SELECT', 'ADD', 'REMOVE', 'BOX', 'ALL', 'MORE'])
+    expect(buttonsIn(strip(m)).map(textOf)).toEqual(['SELECT', 'POINTS', 'ADD', 'REMOVE', 'BOX', 'ALL', 'MORE'])
     await m.press('REMOVE')
     expect(useWorkshop.getState().invert).toBe(true)
     await m.press('BOX')
@@ -338,7 +339,7 @@ describe('the strip', () => {
       ['LOOK, one point', () => { useWorkshop.getState().setTool('view'); useWorkshop.getState().setSelection([0]) }],
       ['SELECT, three points', () => { useWorkshop.getState().setTool('select'); useWorkshop.getState().setSelection([0, 1, 2]) }],
       ['STAMP, two points', () => { useWorkshop.getState().setTool('stamp'); useWorkshop.getState().setSelection([0, 1]) }],
-      ['FACE, a face', () => { useWorkshop.getState().setTool('face'); useWorkshop.getState().selectFace(0) }],
+      ['SELECT FACES, a face', () => { useWorkshop.getState().setTool('select'); useWorkshop.getState().setSelectKind('faces'); useWorkshop.getState().selectFace(0) }],
     ]
     for (const [name, set] of cases) {
       set()
@@ -364,16 +365,16 @@ describe('the strip', () => {
     await m.unmount()
   })
 
-  it('counts a face held in FACE as a face, not its corners', async () => {
-    useWorkshop.getState().setTool('face')
+  it('counts a face held (SELECT FACES) as a face, not its corners', async () => {
+    useWorkshop.getState().setTool('select')
+    useWorkshop.getState().setSelectKind('faces')
     useWorkshop.getState().selectFace(0)
     const m = await mount(<Workshop />)
     const count = buttonsIn(strip(m)).find((b) => cls(b).includes('ws__heldbtn--count'))!
     expect(textOf(count).replace(/\s+/g, ' ')).toBe('1 FACE')
     // AUTO and FLIP, and REMOVE for face taps, are in MORE while the face is held.
     await m.press('MORE')
-    for (const w of ['FLIP FACE', 'FLIP SURFACE', 'AUTO', 'REMOVE']) expect(m.buttons(w).length, w).toBeGreaterThan(0)
-    expect(m.buttons('BOX').length).toBe(0)
+    for (const w of ['FLIP FACE', 'FLIP SURFACE', 'AUTO', 'REMOVE', 'BOX']) expect(m.buttons(w).length, w).toBeGreaterThan(0)
     await m.unmount()
   })
 
@@ -409,7 +410,8 @@ describe('the strip', () => {
   })
 
   it('asks BLEND or EDGE before COLOR puts the color on a face', async () => {
-    useWorkshop.getState().setTool('face')
+    useWorkshop.getState().setTool('select')
+    useWorkshop.getState().setSelectKind('faces')
     useWorkshop.getState().selectFace(0)
     const m = await mount(<Workshop />)
     await m.press('COLOR')
@@ -589,5 +591,120 @@ describe('the move handles and exact numbers (phase 2)', () => {
     expect(parseUnits('0.25')).toBe(30)
     expect(parseUnits('abc')).toBeNull()
     expect(parseUnits('1/0')).toBeNull()
+  })
+})
+
+describe('PAINT, and FACE only making faces (phase 3)', () => {
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5))
+  const RED: [number, number, number] = [1, 0, 0]
+  const colors = (): string[] => useWorkshop.getState().current()!.vertices.map((v) => v.c.join(','))
+
+  it('is the dock\'s fourth tool, key 6, with POINT, FACE, PIECE, ALL and BLEND or EDGE in the strip', async () => {
+    const bench = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
+    expect(bench).toContain("if (e.code === 'Digit6') w.setTool('paint')")
+    useWorkshop.getState().setTool('paint')
+    const m = await mount(<Workshop />)
+    const strip = byClass(m.all(), 'ws__strip')[0]
+    expect(buttonsIn(strip).map(textOf)).toEqual(['PAINT', 'POINT', 'FACE', 'PIECE', 'ALL', 'BLEND', 'EDGE', 'MORE'])
+    const blend = (): Host => buttonsIn(byClass(m.all(), 'ws__strip')[0]).find((b) => textOf(b) === 'BLEND')!
+    expect(blend().props.disabled).toBe(false)
+    await m.press('POINT')
+    expect(useWorkshop.getState().paintMode).toBe('point')
+    // BLEND and EDGE are a face's: greyed for the others, never gone.
+    expect(blend().props.disabled).toBe(true)
+    await m.unmount()
+  })
+
+  it('lets go of what is held on the way in, so its strip is its own', () => {
+    useWorkshop.getState().setTool('select')
+    useWorkshop.getState().setSelection([0, 1])
+    useWorkshop.getState().setTool('paint')
+    expect(useWorkshop.getState().selection).toEqual([])
+  })
+
+  it('paints what a tap met, one UNDO each, and leaves what is held alone', () => {
+    const w = useWorkshop.getState
+    useWorkshop.setState({ color: RED, selection: [3] })
+    const before = colors()
+    // POINT: that point only; a face's middle paints nothing.
+    w().setPaintMode('point')
+    w().paintTap({ face: 0 })
+    expect(colors()).toEqual(before)
+    w().paintTap({ vertex: 0 })
+    expect(colors()[0]).toBe('1,0,0')
+    expect(colors()[1]).toBe(before[1])
+    expect(w().selection).toEqual([3])
+    w().undo()
+    expect(colors()).toEqual(before)
+    // FACE, BLEND: its corners. EDGE: a hard seam, the corners as they were.
+    w().setPaintMode('face')
+    w().paintTap({ face: 0 })
+    expect(colors().slice(0, 3)).toEqual(['1,0,0', '1,0,0', '1,0,0'])
+    expect(colors()[3]).toBe(before[3])
+    w().undo()
+    w().setPaintEdge(true)
+    w().paintTap({ face: 1 })
+    expect(colors()).toEqual(before)
+    expect(w().current()!.facecolors?.[1]).toEqual(RED)
+    w().undo()
+    // PIECE and ALL: everything joined, everything.
+    w().setPaintMode('piece')
+    w().paintTap({ vertex: 0 })
+    expect(new Set(colors())).toEqual(new Set(['1,0,0']))
+    w().undo()
+    w().setPaintMode('all')
+    // UNDO lets go; hold something again to see a paint leave it held.
+    w().setSelection([3])
+    const past = w().past.length
+    w().paintTap({ face: 1 })
+    expect(new Set(colors())).toEqual(new Set(['1,0,0']))
+    expect(w().past.length).toBe(past + 1)
+    expect(w().selection).toEqual([3])
+  })
+
+  it('takes a color with the dropper from a point or a face, holding nothing new', () => {
+    const w = useWorkshop.getState
+    const s = w().current()!
+    useWorkshop.setState({ shards: [{ ...s, vertices: s.vertices.map((v, i) => (i === 2 ? { ...v, c: [0, 0, 1] as [number, number, number] } : v)) }], color: RED, selection: [] })
+    w().takeColorAt({ vertex: 2 })
+    expect(w().color).toEqual([0, 0, 1])
+    expect(w().selection).toEqual([])
+  })
+
+  it('FACE taps pick corners only; faces are held from SELECT FACES; LOOK taps nothing', () => {
+    const bench = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
+    expect(bench).toContain("onFaceClick={tool === 'paint' || (tool === 'select' && selectKind === 'faces') ? onFace : undefined}")
+    expect(bench).toContain("if (tool === 'face') w.pickForFace(first)")
+    expect(bench).toContain("if (tool === 'view') return")
+    expect(bench).toContain("if (w.tool === 'select' && w.selectKind === 'objects') w.togglePart(part)")
+    // A box takes what the switch says.
+    expect(bench).toContain("kind = w.selectKind")
+    expect(bench).toMatch(/if \(kind === 'faces'\) \{[\s\S]*facesIn/)
+  })
+
+  it('switches SELECT between POINTS, FACES and OBJECTS from tiles, letting go on a change', async () => {
+    useWorkshop.getState().setTool('select')
+    useWorkshop.getState().setSelection([0, 1])
+    useWorkshop.getState().selectVertex(null)
+    const m = await mount(<Workshop />)
+    await m.press('POINTS')
+    expect(byClass(m.all(), 'ws__tile').map(textOf)).toEqual(['POINTS', 'FACES', 'OBJECTS'])
+    useWorkshop.getState().setSelection([0, 1])
+    await tick()
+    const faces = byClass(m.all(), 'ws__tile').find((h) => textOf(h) === 'FACES')
+    expect(faces).toBeUndefined() // the held bar took the strip, and the tiles with it
+    useWorkshop.getState().selectVertex(null)
+    await tick()
+    await m.press('POINTS')
+    ;(byClass(m.all(), 'ws__tile').find((h) => textOf(h) === 'FACES')!.props.onClick as () => void)()
+    await tick()
+    expect(useWorkshop.getState().selectKind).toBe('faces')
+    // ALL in FACES holds every face, with its corners.
+    await m.press('ALL')
+    expect(useWorkshop.getState().selectedFaces).toEqual([0, 1])
+    useWorkshop.getState().setSelectKind('objects')
+    expect(useWorkshop.getState().selectedFaces).toEqual([])
+    expect(useWorkshop.getState().selection).toEqual([])
+    await m.unmount()
   })
 })

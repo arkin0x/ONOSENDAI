@@ -253,7 +253,7 @@ const HIT_FACE_R = 16
 const HIT_NARROW_R = 5.5
 function hitRadiusFor(tool: Tool): number {
   if (tool === 'add') return HIT_NARROW_R
-  if (tool === 'face') return HIT_FACE_R
+  if (tool === 'face' || tool === 'paint') return HIT_FACE_R
   return HIT_R
 }
 
@@ -343,27 +343,38 @@ function Handles(): JSX.Element | null {
     if (e.delta > tapSlop() || multiPress()) return
     const g = e.index === undefined ? undefined : groups[e.index]
     if (!g || !pressed.met(e.index as number)) return
-    e.stopPropagation()
     const first = g[0]
     const isSel = g.some((i) => chosen.has(i))
     const w = useWorkshop.getState()
-    if (tool === 'face') {
-      // The sphere stands proud of the faces, so it meets the ray first even when
-      // the tap was on a face beside the corner. If a face is under the tap and
-      // the ray passes farther from the corner than its drawn dot, the face wins.
+    // The sphere stands proud of the faces, so it meets the ray first even when
+    // the tap was on a face beside the corner. If a face is under the tap and
+    // the ray passes farther from the corner than its drawn dot, the face won.
+    // Either side of a face, the nearer first (ShardMesh faceOfHit).
+    const face = e.intersections.map(faceOfHit).find((f) => f !== null) ?? null
+    const faceWins = (): boolean => {
+      if (face === null) return false
       const centre = new Vector3(...UP(ticksOf(shard.vertices[first])))
-      // Either side of a face, the nearer first (ShardMesh faceOfHit).
-      const face = e.intersections.map(faceOfHit).find((f) => f !== null) ?? null
       // The dot's drawn radius in world units: its pixels times a pixel's size there.
       const cam = e.camera as PerspectiveCamera
-      const drawn = DOT_ON_R * hits.pixelAt(e.index as number, cam.position, cam.fov)
-      if (face !== null && e.ray.distanceToPoint(centre) > drawn) { w.selectFace(face); return }
-      // Under INVERT a corner tap takes the point out of the selection, as the
-      // key promises of every tap; it picks no corner for a face. Off INVERT
-      // and the tap is the pick it always was.
-      if (w.invert) w.toggleVertex(first)
-      else w.pickForFace(first)
+      return e.ray.distanceToPoint(centre) > DOT_ON_R * hits.pixelAt(e.index as number, cam.position, cam.fov)
     }
+    // LOOK only looks (workshop redesign, phase 3): a tap does nothing.
+    if (tool === 'view') return
+    // SELECT takes what its switch says: a point here, a face under the tap,
+    // or nothing, so a placed object under the dot gets the tap.
+    if (tool === 'select' && w.selectKind !== 'points') {
+      if (w.selectKind === 'faces' && face !== null) { e.stopPropagation(); w.selectFace(face) }
+      return
+    }
+    e.stopPropagation()
+    if (tool === 'paint') {
+      // FACE paints faces only: the face under the tap, however near a corner.
+      const onFace = face !== null && (w.paintMode === 'face' || faceWins())
+      w.paintTap(onFace ? { face: face as number } : { vertex: first })
+      return
+    }
+    // FACE only makes faces (phase 3, decision 3): a tap picks a corner.
+    if (tool === 'face') w.pickForFace(first)
     // In SELECT a tap adds or removes the point; elsewhere it picks that point alone.
     else if (tool === 'select') w.toggleVertex(first)
     else w.selectVertex(isSel ? null : first)
@@ -551,8 +562,11 @@ function Marquee(): null {
     let start: { x: number; y: number } | null = null
     let base: number[] = []
     let baseParts: number[] = []
+    let baseFaces: number[] = []
     let partsIn: number[] = []
     let invert = false
+    // POINTS, FACES or OBJECTS, read at the press (workshop redesign, phase 3).
+    let kind: 'points' | 'faces' | 'objects' = 'points'
     let active = false
     // Written only when the box changes something: the store re-renders every
     // handle on each write, and a box over empty space wrote on every move.
@@ -589,7 +603,7 @@ function Marquee(): null {
     const cancel = (): void => {
       // A second finger has landed: this is a pan, not a box. Put the
       // selection back as it was when the first finger touched.
-      if (start && active) { useWorkshop.getState().setSelection(base); useWorkshop.getState().setPartSelection(baseParts) }
+      if (start && active) { useWorkshop.getState().setSelection(base); useWorkshop.getState().setPartSelection(baseParts); useWorkshop.setState({ selectedFaces: baseFaces }) }
       start = null
       active = false
       box.hidden = true
@@ -601,6 +615,8 @@ function Marquee(): null {
       const w = useWorkshop.getState()
       base = w.selection
       baseParts = w.partSel
+      baseFaces = w.selectedFaces
+      kind = w.selectKind
       // Read at the press: INVERT toggled mid-drag applies to the next box.
       invert = w.invert
       active = false
@@ -613,11 +629,26 @@ function Marquee(): null {
       const x0 = Math.min(start.x, x), y0 = Math.min(start.y, y), x1 = Math.max(start.x, x), y1 = Math.max(start.y, y)
       box.hidden = false
       box.style.left = `${x0}px`; box.style.top = `${y0}px`; box.style.width = `${x1 - x0}px`; box.style.height = `${y1 - y0}px`
-      const points = nextSelection(base, inside(x0, y0, x1, y1), invert)
-      const parts = nextSelection(baseParts, partsIn, invert)
+      const within = inside(x0, y0, x1, y1)
       const w = useWorkshop.getState()
+      if (kind === 'objects') {
+        const parts = nextSelection(baseParts, partsIn, invert)
+        if (!same(parts, w.partSel)) w.setPartSelection(parts)
+        return
+      }
+      if (kind === 'faces') {
+        // A face is in the box when every corner is; it comes with its corners, as a tapped face does.
+        const shard = w.current()
+        if (!shard) return
+        const set = new Set(within)
+        const facesIn = shard.faces.map((f, k) => (f.every((v) => set.has(v)) ? k : -1)).filter((k) => k >= 0)
+        const faces = nextSelection(baseFaces, facesIn, invert)
+        const corners = [...new Set(faces.flatMap((k) => shard.faces[k] ?? []))]
+        if (!same(faces, w.selectedFaces)) useWorkshop.setState({ selectedFaces: faces, selection: corners })
+        return
+      }
+      const points = nextSelection(base, within, invert)
       if (!same(points, w.selection)) w.setSelection(points)
-      if (!same(parts, w.partSel)) w.setPartSelection(parts)
     }
     const up = (): void => { start = null; if (active) { active = false; box.hidden = true } }
     canvas.addEventListener('pointerdown', down)
@@ -793,6 +824,7 @@ function Keys(): null {
       if (e.code === 'Digit3') w.setTool('add')
       if (e.code === 'Digit4') w.setTool('select')
       if (e.code === 'Digit5') w.setTool('face')
+      if (e.code === 'Digit6') w.setTool('paint')
       // Q and E turn the selection a quarter turn while SELECT holds one; Q turns the stamp otherwise.
       if (e.code === 'KeyQ') { if ((w.tool === 'select' || w.tool === 'view') && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else w.turnStamp() }
       if (e.code === 'KeyE') { if ((w.tool === 'select' || w.tool === 'view') && (w.selection.length || w.partSel.length)) w.rotateSelected(1) }
@@ -1104,6 +1136,7 @@ function BenchImpl(): JSX.Element {
   const shard = useWorkshop((s) => s.current())
   const tool = useWorkshop((s) => s.tool)
   const boxSelect = useWorkshop((s) => s.boxSelect)
+  const selectKind = useWorkshop((s) => s.selectKind)
   // The motion editor's preview draws the motion whatever the tool (store/animPreview.ts).
   const previewing = useAnimPreview((s) => s.on)
   const extent = shard?.extent ?? GRID_HALF
@@ -1125,16 +1158,18 @@ function BenchImpl(): JSX.Element {
   const onPart = (e: ThreeEvent<MouseEvent>, part: number): void => {
     if (e.delta > tapSlop() || multiPress()) return
     e.stopPropagation()
-    const t = useWorkshop.getState().tool
-    // VIEW too (arkinox, 2026-10-10): with the tool put down, a tap on a
-    // stamped object picks it, and the pad moves, turns and deletes it.
-    if (t === 'select' || t === 'view') useWorkshop.getState().togglePart(part)
+    const w = useWorkshop.getState()
+    // OBJECTS in SELECT takes it (workshop redesign, phase 3). In PAINT and
+    // FACE the tap stops here, so it never paints or picks through it.
+    if (w.tool === 'select' && w.selectKind === 'objects') w.togglePart(part)
   }
 
   const onFace = (e: ThreeEvent<MouseEvent>, face: number): void => {
     if (e.delta > tapSlop() || multiPress()) return
     e.stopPropagation()
-    useWorkshop.getState().selectFace(face)
+    const w = useWorkshop.getState()
+    if (w.tool === 'paint') w.paintTap({ face })
+    else if (w.tool === 'select' && w.selectKind === 'faces') w.selectFace(face)
   }
 
   // A tap that hits nothing is nothing, in every tool (workshop redesign,
@@ -1185,7 +1220,7 @@ function BenchImpl(): JSX.Element {
       <BenchAxes reach={extent + 1} />
       <Grid />
       {showAvatar && <ScaleAvatar />}
-      {shard && <AnimClock.Provider value={benchClock}><ShardMesh shard={shard} lit still={tool !== 'view' && !previewing} onFaceClick={tool === 'face' ? onFace : undefined} onPartClick={tool === 'view' || tool === 'select' || tool === 'face' ? onPart : undefined} selectedParts={partSel} /></AnimClock.Provider>}
+      {shard && <AnimClock.Provider value={benchClock}><ShardMesh shard={shard} lit still={tool !== 'view' && !previewing} onFaceClick={tool === 'paint' || (tool === 'select' && selectKind === 'faces') ? onFace : undefined} onPartClick={tool === 'select' || tool === 'face' || tool === 'paint' ? onPart : undefined} selectedParts={partSel} /></AnimClock.Provider>}
       <PathMarks show={tool === 'view' || previewing} />
       <Ghost />
       <PickLoop />

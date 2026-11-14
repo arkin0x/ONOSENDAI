@@ -1,14 +1,16 @@
 /**
  * Strip.tsx - the strip, over the dock, one of the workshop's five fixed
- * places: the one place for options (workshop redesign, phases 1 and 2).
+ * places: the one place for options (workshop redesign, phases 1 to 3).
  *
  * With nothing held it shows the tool's options: on its left the tool in
  * hand and a ? that says what a tap does, then the options, then MORE at the
  * right end, on every tool.
  *   STAMP:  the shape (a chip that opens picture tiles, OBJECT among them),
  *           SIZE, TURN.
- *   SELECT: ADD or REMOVE (what a tap or a box does), BOX (a one-finger drag
- *           draws a box instead of orbiting), ALL.
+ *   SELECT: POINTS, FACES or OBJECTS (what a tap or a box takes), ADD or
+ *           REMOVE, BOX (a one-finger drag draws a box instead of
+ *           orbiting), ALL.
+ *   PAINT:  POINT, FACE, PIECE or ALL (what a tap paints), BLEND or EDGE.
  *   FACE:   the corners so far, then FILL, BACK, CANCEL, AUTO, always in
  *           that order, greyed out until they apply.
  * With anything held, in any tool, it is the held bar (HeldBar), whose slots
@@ -16,11 +18,11 @@
  */
 
 import { useEffect, useState } from 'react'
-import { ArrowBigUp, Box, ChevronDown, CircleHelp, Cylinder, Ellipsis, Pyramid, RotateCw, SquareDashedMousePointer, Star, Torus, TriangleRight, Undo2, WandSparkles, Waypoints, X, Triangle, type LucideIcon } from 'lucide-react'
+import { ArrowBigUp, Box, Boxes, ChevronDown, CircleDot, CircleHelp, Cylinder, Ellipsis, Pyramid, RotateCw, SquareDashedMousePointer, Star, Torus, TriangleRight, Undo2, WandSparkles, Waypoints, X, Triangle, type LucideIcon } from 'lucide-react'
 import { FACED, FACING_LABEL, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from 'sno-core/stamps'
 import { useEscape } from '../../hooks/useEscape'
 import { noCallout, useRepeatable } from '../../hooks/useRepeatable'
-import { useWorkshop, type Tool } from '../../store/useWorkshop'
+import { useWorkshop, type PaintMode, type SelectKind, type Tool } from '../../store/useWorkshop'
 import { slotOf } from './Dock'
 import { HeldBar, useHolding } from './HeldBar'
 
@@ -29,8 +31,9 @@ export const TOOL_HELP: Record<Tool, string> = {
   view: 'Look around: one finger orbits, two pan, pinch zooms. Tap the view ball for views, or to tip or roll the grid a quarter so the next points go on another plane. Pick a tool to build.',
   stamp: 'Tap the grid to place the shape where the ghost shows. Q turns it.',
   add: 'Tap the grid to place a vertex at the current level.',
-  select: 'Tap points to gather them. BOX makes a drag draw a box; REMOVE makes taps and boxes take points out. The count in the bar lets go.',
-  face: 'Tap corners in order, then the first again or FILL. Tap a face to hold it. A dark face shows its back: FLIP under MORE turns it round, AUTO turns every face outward.',
+  select: 'Tap to gather points, faces or objects, as the first chip says. BOX makes a drag draw a box; REMOVE makes taps and boxes take out. The count in the bar lets go.',
+  face: 'Tap corners in order, then the first again or FILL. A dark face shows its back: AUTO turns every face outward. To hold a face, SELECT FACES.',
+  paint: 'Pick a color in the last slot, then tap: POINT, FACE, PIECE or ALL says what it paints. BLEND or EDGE is how a face takes it.',
 }
 
 /** Each built-in shape's picture on its tile and on the shape chip. */
@@ -97,24 +100,92 @@ function StampOptions({ onPickObject, tiles, setTiles }: { onPickObject: () => v
   )
 }
 
-/** SELECT's options: what a tap or a box does, whether a drag draws a box, and ALL. */
-function SelectOptions(): JSX.Element {
+/** What SELECT takes, by its switch: the picture and the word on the chip and its tiles. */
+const KINDS: Array<{ kind: SelectKind; label: string; icon: LucideIcon; title: string }> = [
+  { kind: 'points', label: 'POINTS', icon: CircleDot, title: 'Taps and boxes take points' },
+  { kind: 'faces', label: 'FACES', icon: Triangle, title: 'Taps and boxes take faces, with their corners' },
+  { kind: 'objects', label: 'OBJECTS', icon: Boxes, title: 'Taps and boxes take placed objects' },
+]
+
+/**
+ * SELECT's options: what a tap or a box takes (POINTS, FACES or OBJECTS, a
+ * chip that opens tiles, as STAMP's shape does), ADD or REMOVE, BOX, ALL.
+ */
+function SelectOptions({ tiles, setTiles }: { tiles: boolean; setTiles: (on: boolean) => void }): JSX.Element {
   const invert = useWorkshop((s) => s.invert)
   const box = useWorkshop((s) => s.boxSelect)
-  const any = useWorkshop((s) => { const c = s.current(); return !!c && (c.vertices.length > 0 || (c.parts?.length ?? 0) > 0) })
+  const kind = useWorkshop((s) => s.selectKind)
+  const counts = useWorkshop((s) => { const c = s.current(); return { points: c?.vertices.length ?? 0, faces: c?.faces.length ?? 0, objects: c?.parts?.length ?? 0 } }, (a, b) => a.points === b.points && a.faces === b.faces && a.objects === b.objects)
   const w = useWorkshop.getState
+  const on = KINDS.find((k) => k.kind === kind) ?? KINDS[0]
+  const all = (): void => {
+    const c = w().current()
+    if (!c) return
+    if (kind === 'objects') { w().setPartSelection([...Array(c.parts?.length ?? 0).keys()]); return }
+    if (kind === 'faces') { useWorkshop.setState({ selectedFaces: [...Array(c.faces.length).keys()], selection: [...new Set(c.faces.flat())] }); return }
+    w().setSelection([...Array(c.vertices.length).keys()])
+  }
   return (
     <>
+      <button className="ws__stripbtn ws__shapechip is-on" onClick={() => setTiles(!tiles)} aria-haspopup="menu" aria-expanded={tiles} aria-label={`Takes ${on.label}. Tap to change.`} title="What a tap or a box takes">
+        <on.icon size={16} strokeWidth={2.25} aria-hidden />
+        <span className="ws__shapechip-name">{on.label}</span>
+        <ChevronDown size={14} strokeWidth={2.25} aria-hidden />
+      </button>
       <div className="ws__seg" role="group" aria-label="A tap or a box">
-        <button className={`ws__stripbtn${!invert ? ' is-on' : ''}`} aria-pressed={!invert} onClick={() => w().setInvert(false)} title="Taps and boxes add points" {...noCallout}>ADD</button>
-        <button className={`ws__stripbtn${invert ? ' is-on' : ''}`} aria-pressed={invert} onClick={() => w().setInvert(true)} aria-label="Remove: taps and boxes take points out" title="Taps and boxes take points out" {...noCallout}>REMOVE</button>
+        <button className={`ws__stripbtn${!invert ? ' is-on' : ''}`} aria-pressed={!invert} onClick={() => w().setInvert(false)} title="Taps and boxes add" {...noCallout}>ADD</button>
+        <button className={`ws__stripbtn${invert ? ' is-on' : ''}`} aria-pressed={invert} onClick={() => w().setInvert(true)} aria-label="Remove: taps and boxes take points out" title="Taps and boxes take out" {...noCallout}>REMOVE</button>
       </div>
       <button className={`ws__stripbtn ws__stripbtn--tall${box ? ' is-on' : ''}`} aria-pressed={box} onClick={() => w().setBoxSelect(!box)} title="On: a one-finger drag draws a box. Off: it turns the view" aria-label="Box: a drag draws a box" {...noCallout}>
         <SquareDashedMousePointer size={16} strokeWidth={2.25} aria-hidden /><span>BOX</span>
       </button>
-      <button className="ws__stripbtn ws__stripbtn--tall" disabled={!any} onClick={() => { const c = w().current(); if (!c) return; w().setSelection([...Array(c.vertices.length).keys()]); w().setPartSelection([...Array(c.parts?.length ?? 0).keys()]) }} title="Every point and every placed object" aria-label="Select everything" {...noCallout}>
+      <button className="ws__stripbtn ws__stripbtn--tall ws__strip-all" disabled={counts[kind] === 0} onClick={all} title={`Every one of the ${on.label.toLowerCase()}`} aria-label="Select everything" {...noCallout}>
         <Waypoints size={16} strokeWidth={2.25} aria-hidden /><span>ALL</span>
       </button>
+      {tiles && (
+        <>
+          <div className="benchpaste__away" onPointerDown={() => setTiles(false)} />
+          <div className="ws__tiles ws__tiles--three" role="menu" aria-label="What a tap takes">
+            {KINDS.map((k) => (
+              <button key={k.kind} role="menuitemradio" aria-checked={k.kind === kind} className={`ws__tile${k.kind === kind ? ' is-on' : ''}`} title={k.title} onClick={() => { w().setSelectKind(k.kind); setTiles(false) }}>
+                <k.icon size={22} strokeWidth={1.75} aria-hidden /><span>{k.label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+/**
+ * PAINT's options (workshop redesign, phase 3, decision 3): what a tap
+ * paints, a POINT, a FACE, the PIECE it is part of, or ALL; and for a face,
+ * BLEND (its corners, blending into the next face) or EDGE (a hard seam),
+ * greyed for the others. The color is the dock's last slot; the dropper is
+ * in the palette's header and in MORE.
+ */
+function PaintOptions(): JSX.Element {
+  const mode = useWorkshop((s) => s.paintMode)
+  const edge = useWorkshop((s) => s.paintEdge)
+  const w = useWorkshop.getState
+  const MODES: Array<{ mode: PaintMode; label: string; title: string }> = [
+    { mode: 'point', label: 'POINT', title: 'A tap paints the point' },
+    { mode: 'face', label: 'FACE', title: 'A tap paints the face' },
+    { mode: 'piece', label: 'PIECE', title: 'A tap paints everything joined to what it met' },
+    { mode: 'all', label: 'ALL', title: 'A tap paints the whole object' },
+  ]
+  return (
+    <>
+      <div className="ws__seg" role="group" aria-label="What a tap paints">
+        {MODES.map((m) => (
+          <button key={m.mode} className={`ws__stripbtn${mode === m.mode ? ' is-on' : ''}`} aria-pressed={mode === m.mode} onClick={() => w().setPaintMode(m.mode)} title={m.title} {...noCallout}>{m.label}</button>
+        ))}
+      </div>
+      <div className="ws__seg" role="group" aria-label="How a face takes it">
+        <button className={`ws__stripbtn${!edge ? ' is-on' : ''}`} disabled={mode !== 'face'} aria-pressed={!edge} onClick={() => w().setPaintEdge(false)} title="The face's corners take the color, blending into the faces beside it" {...noCallout}>BLEND</button>
+        <button className={`ws__stripbtn${edge ? ' is-on' : ''}`} disabled={mode !== 'face'} aria-pressed={edge} onClick={() => w().setPaintEdge(true)} title="The face takes the color flat, with a hard edge" {...noCallout}>EDGE</button>
+      </div>
     </>
   )
 }
@@ -172,7 +243,8 @@ export function Strip({ onPickObject, onMore, moreBadge }: { onPickObject: () =>
       </button>
       <div className="ws__strip-opts">
         {tool === 'stamp' && <StampOptions onPickObject={onPickObject} tiles={tiles} setTiles={setTiles} />}
-        {tool === 'select' && <SelectOptions />}
+        {tool === 'select' && <SelectOptions tiles={tiles} setTiles={setTiles} />}
+        {tool === 'paint' && <PaintOptions />}
         {tool === 'face' && <FaceOptions />}
       </div>
       <button className="ws__stripbtn ws__stripbtn--tall ws__strip-more" onClick={onMore} title="Everything rarer: PASTE, COLOR ALL, WELD" aria-label="More">

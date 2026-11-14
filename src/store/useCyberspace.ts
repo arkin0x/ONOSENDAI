@@ -1262,6 +1262,14 @@ export interface CyberspaceState {
   canDrive: () => boolean
   /** The chain the scene is anchored on: the spectated avatar's, else yours. */
   focusChain: () => ActionEvent[]
+  /**
+   * Where the chain on show stands at row `index`: the row's own place, or,
+   * from where a proof the relay's rules reject stops it on, the last action
+   * that counts (yours: relayFreezeOf, as positionHistory draws you; a
+   * spectated one: spectateFreeze, where their avatar is drawn among the
+   * others; owner, 2026-11-13). Null when there is no such row.
+   */
+  focusStand: (index: number) => { position: Position; plane: Plane } | null
   /** Whose chain that is. */
   focusPubkey: () => string
   /**
@@ -3587,6 +3595,20 @@ function standingOf(actions: ActionEvent[]): { position: Position; plane: Plane;
   if (!freeze) return { position: head.position, plane: head.plane, positionHistory: actions.map((a) => a.position) }
   const { position, plane } = freeze.at
   return { position, plane, positionHistory: actions.map((a, i) => (i < freeze.index ? a.position : position)) }
+}
+
+/**
+ * Where a spectated chain stands when a proof the relay's rules reject stops
+ * it: the stop's index and the last action that counts before it, or null
+ * (lib/chainStop.ts relayFreezeOf, in the slot SpectateBar's chip reads). The
+ * same place their avatar is drawn at among the others (lib/neighborChains.ts
+ * readChain, by the same rules), so spectating them puts the camera where
+ * that avatar stood, not on an empty newest move (owner, 2026-11-13). Null
+ * for a chain nothing stops, and while the 5.13 list loads, whose arrival
+ * stands them again (the onV1HopList listener below the store).
+ */
+function spectateFreeze(actions: ActionEvent[]): { index: number; at: ActionEvent } | null {
+  return relayFreezeOf(actions, 'spectate')
 }
 
 /**
@@ -5940,11 +5962,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // Nothing to walk: a spectated pubkey with no chain on the relay. The
     // anchor stays on its spawn coordinate.
     if (last < 0) { set({ exploreIndex: null }); return }
-    // Your own chain stands where a rejected proof stops it, from the stop
-    // on, as positionHistory draws it (standingOf); a spectated chain stands
-    // where its rows say.
-    const freeze = get().spectate === null ? relayFreezeOf(chain) : null
-    const placeOf = (i: number): { position: Position; plane: Plane } => (freeze && i >= freeze.index ? freeze.at : chain[i])
+    // A chain stands where a rejected proof stops it, from the stop on: your
+    // own as positionHistory draws it (standingOf), a spectated one where its
+    // avatar is drawn among the others (focusStand; owner, 2026-11-13).
+    const placeOf = (i: number): { position: Position; plane: Plane } => get().focusStand(i) ?? chain[i]
     if (index === null || index >= last) {
       const a = placeOf(last)
       set({ exploreIndex: null, anchor: a.position, anchorPlane: a.plane })
@@ -6006,7 +6027,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const keep = get().exploreIndex !== null
       && get().exploreIndex! < actions.length
       && actions[get().exploreIndex!]?.id === prev.actions[get().exploreIndex!]?.id
-    const at = keep ? actions[get().exploreIndex!] : head
+    // Where they stand: a chain a rejected proof stops stands at the last
+    // action that counts, from the stop on, where their avatar is drawn
+    // among the others (spectateFreeze; owner, 2026-11-13), not at an empty
+    // newest move.
+    const freeze = spectateFreeze(actions)
+    const placeOf = (i: number): ActionEvent => (freeze && i >= freeze.index ? freeze.at : actions[i])
+    const at = keep ? placeOf(get().exploreIndex!) : head && placeOf(actions.length - 1)
     const spawn = spawnOf(pubkey)
     // Under a driven view (BUILD mode) the scene stays on the build cursor,
     // which the chain does not move, with one exception: the first chain to
@@ -6019,7 +6046,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         exploreIndex: null,
       })
       const s = get()
-      if (prev.actions.length === 0 && head && samePosition(s.cursor, spawn.position) && s.anchorPlane === spawn.plane) s.aimView(head.position, head.plane)
+      // Where they stand, as their avatar is drawn (lib/buildCursor.ts avatarInBuild, focusStand).
+      const stand = head && placeOf(actions.length - 1)
+      if (prev.actions.length === 0 && stand && samePosition(s.cursor, spawn.position) && s.anchorPlane === spawn.plane) s.aimView(stand.position, stand.plane)
       return
     }
     set({
@@ -6126,8 +6155,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // the scene showed before the focus began.
     const { position, plane, focusReturnScale, scaleExp, focus, spectate } = get()
     // A driven view kept through a spectation (BUILD mode) that ends while
-    // the spectation stands goes back to watching them, on their head.
-    const watched = spectate ? (spectate.actions[spectate.actions.length - 1] ?? spawnOf(spectate.pubkey)) : null
+    // the spectation stands goes back to watching them, where they stand:
+    // their head, or where a rejected proof stops their chain (spectateFreeze).
+    const watched = spectate ? (spectateFreeze(spectate.actions)?.at ?? spectate.actions[spectate.actions.length - 1] ?? spawnOf(spectate.pubkey)) : null
     set({
       focus: null,
       // RETURN ends the look, and the pin was the look's subject.
@@ -7199,6 +7229,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     return spectate ? spectate.actions : parsedChain(get().events)
   },
 
+  focusStand: (index) => {
+    const chain = get().focusChain()
+    if (!(index >= 0 && index < chain.length)) return null
+    const freeze = get().spectate === null ? relayFreezeOf(chain) : spectateFreeze(chain)
+    return (freeze && index >= freeze.index ? freeze.at : chain[index]) ?? null
+  },
+
   focusPubkey: () => get().spectate?.pubkey ?? get().identity.pubkey,
 
   readoutPair: () => {
@@ -7307,6 +7344,15 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
  */
 onV1HopList(() => {
   const s = useCyberspace.getState()
+  // A spectated chain the list now stops: the scene goes to where they stand
+  // (spectateFreeze), unless a view or BUILD holds it.
+  if (s.spectate && s.focus === null) {
+    const chain = s.spectate.actions
+    const freeze = spectateFreeze(chain)
+    const i = s.exploreIndex ?? chain.length - 1
+    const at = freeze && i >= freeze.index ? freeze.at : null
+    if (at && !(samePosition(at.position, s.anchor) && at.plane === s.anchorPlane)) useCyberspace.setState({ anchor: at.position, anchorPlane: at.plane })
+  }
   const actions = s.actions()
   if (actions.length === 0) return
   const at = standingOf(actions)

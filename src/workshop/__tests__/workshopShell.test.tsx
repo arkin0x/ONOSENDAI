@@ -11,7 +11,17 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { textOf, type Host } from '../../test/elementRoot'
+import { type Host } from '../../test/elementRoot'
+
+/** All the words under an element, leaving out the keys printed on buttons (kbd, phase 5): a button's name is its word. */
+function textOf(h: Host | string): string {
+  if (typeof h === 'string') return h
+  if (h.type === '#text') return String(h.props.text)
+  if (h.type === 'kbd') return ''
+  return h.children.map(textOf).join('')
+}
+/** A printed key's text. */
+const keyText = (h: Host): string => h.children.map((c) => (typeof c === 'string' ? c : c.type === '#text' ? String(c.props.text) : keyText(c))).join('')
 
 if (typeof localStorage === 'undefined') {
   const mem = new Map<string, string>()
@@ -923,5 +933,102 @@ describe('the paint step color', () => {
     const { paintStepColor } = await import('../shell/Guide')
     expect(paintStepColor('#00e8f9')).toBe('#f47000')
     expect(paintStepColor('#f47000')).toBe('#f22400')
+  })
+})
+
+describe('phone sideways and desktop (phase 5)', () => {
+  const block = (q: string): string => {
+    const at = CSS.indexOf(q)
+    expect(at, q).toBeGreaterThan(-1)
+    // To the media block's end: the next line that is a lone closing brace.
+    return CSS.slice(at, CSS.indexOf('\n}\n', at))
+  }
+
+  it('frames the shard beside a column on the right as well as above a sheet', () => {
+    const o = frameOffset(1440, 900, { top: 60, bottom: 130, rest: 130, right: 404 })!
+    expect(o.x).toBe(404)
+    expect(o.fullWidth).toBe(1440 + 404)
+    // The middle of the uncovered width, (1440 - 404) / 2, is where the virtual middle lands.
+    expect(o.fullWidth / 2 - o.x).toBe((1440 - 404) / 2)
+    // Pixels stay square: the scale is the height's. A wide window fits a shard by its height, so a column beside it shrinks nothing.
+    const z = frameZoom(900, o.fullHeight, { top: 60, bottom: 130, rest: 130, right: 404 }, 1440)
+    expect((900 / o.fullHeight) / z).toBeCloseTo(1, 10)
+    // Where the width was the smaller side, the column shrinks the shard by what it takes of it.
+    const n = frameOffset(600, 900, { top: 60, bottom: 130, rest: 130, right: 300 })!
+    const zn = frameZoom(900, n.fullHeight, { top: 60, bottom: 130, rest: 130, right: 300 }, 600)
+    expect((900 / n.fullHeight) / zn).toBeCloseTo(2, 10)
+  })
+
+  it('docks the open area as a column on the right on a desktop, DEPLOY above it, the bottom group beside it', () => {
+    const d = block('@media (min-width: 900px) and (min-height: 521px) {')
+    expect(d).toContain('.ws__topbtn.ws__topbtn--deploy { position: fixed;')
+    expect(d).toContain('width: var(--ws-col);')
+    expect(d).toMatch(/\.ws__sheet\[aria-label='Menu'\] \{\s+position: fixed;/)
+    expect(d).toContain('.workshop:has(.ws__sheet) .ws__bottom { left: max(var(--ws-gutter), calc(100% - var(--ws-col) - 3 * var(--ws-gutter) - 640px)); right: calc(var(--ws-col) + 2 * var(--ws-gutter)); }')
+    expect(d).toContain('.workshop:has(.ws__sheet) .ws__view { right: calc(var(--ws-col) + 2 * var(--ws-gutter)); }')
+    // Never a transform on the bottom group: its fixed children would be placed against it.
+    expect(d).not.toMatch(/\.ws__bottom \{[^}]*transform/)
+  })
+
+  it('puts the dock and the strip in one bottom row on a phone held sideways, with sheets down the right side', () => {
+    const l = block('@media (orientation: landscape) and (max-height: 520px) {\n  .workshop {')
+    expect(l).toContain('.ws__bottom { flex-direction: row;')
+    expect(l).toContain('.ws__dock { order: 0;')
+    expect(l).toContain('.ws__strip { order: 1;')
+    expect(l).toMatch(/\.ws__sheet,\s+\.ws__sheet\.ws__sheet--tall,\s+\.ws__sheet\[aria-label='Menu'\] \{\s+position: fixed;/)
+    expect(l).toContain('env(safe-area-inset-left')
+    // The strip's compact rules hold sideways too, so its options fit its half.
+    expect(CSS).toContain('@media (max-width: 440px), (orientation: landscape) and (max-height: 520px) {')
+  })
+
+  it('prints each key on its button: the tools, and the held bar\'s', async () => {
+    const m = await mount(<Workshop />)
+    const keys = (c: string): string[] => byClass(m.all(), c).map((b) => { const k = b.children.find((x): x is Host => typeof x !== 'string' && x.type === 'kbd'); return k ? keyText(k) : '' })
+    expect(keys('ws__dockbtn')).toEqual(['1', '2', '4', '6', '3', '5'])
+    useWorkshop.getState().setTool('select')
+    useWorkshop.getState().setSelection([0])
+    await new Promise((r) => setTimeout(r, 5))
+    expect(keys('ws__heldbtn').filter(Boolean)).toEqual(['Q', 'E', '^C', '^V', 'B', 'DEL'])
+    await m.unmount()
+  })
+
+  it('keeps the guide\'s step when Esc puts it away, and makes no new shard on the way back', async () => {
+    localStorage.removeItem('onosendai:workshop-intro')
+    useBeginner.setState({ tools: 'four', step: 'turn', done: false, paused: false })
+    const m = await mount(<Workshop />)
+    const before = useWorkshop.getState().shards.length
+    escapeTop()
+    await new Promise((r) => setTimeout(r, 5))
+    expect(byClass(m.all(), 'ws__guide').length).toBe(0)
+    useWorkshop.setState({ open: false })
+    await new Promise((r) => setTimeout(r, 5))
+    useWorkshop.setState({ open: true })
+    await new Promise((r) => setTimeout(r, 5))
+    expect(useBeginner.getState().step).toBe('turn')
+    expect(useWorkshop.getState().shards.length).toBe(before)
+    expect(textOf(byClass(m.all(), 'ws__guide')[0])).toContain('Drag one finger')
+    await m.unmount()
+  })
+
+  it('puts the guide away with Esc for this opening only, and keeps the workshop open', async () => {
+    localStorage.removeItem('onosendai:workshop-intro')
+    useBeginner.setState({ tools: 'four', step: null, done: false, paused: false })
+    useWorkshop.setState({ shards: [newShard('Empty')] })
+    useWorkshop.setState({ currentId: useWorkshop.getState().shards[0].id })
+    const m = await mount(<Workshop />)
+    expect(byClass(m.all(), 'ws__guide').length).toBe(1)
+    escapeTop()
+    await new Promise((r) => setTimeout(r, 5))
+    expect(byClass(m.all(), 'ws__guide').length).toBe(0)
+    expect(useWorkshop.getState().open).toBe(true)
+    expect(useBeginner.getState().done).toBe(false)
+    expect(localStorage.getItem('onosendai:workshop-intro')).toBeNull()
+    // Closed and opened again: the guide is back.
+    useWorkshop.setState({ open: false })
+    await new Promise((r) => setTimeout(r, 5))
+    useWorkshop.setState({ open: true })
+    await new Promise((r) => setTimeout(r, 5))
+    expect(useBeginner.getState().step).toBe('stamp')
+    await m.unmount()
   })
 })

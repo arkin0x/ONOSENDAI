@@ -32,6 +32,8 @@ import { watchArrivalMode } from './store/arrivalMode'
 import './tutorial/director'
 // The Earth route's waits: a stop picked, BOARD, RIDE.
 import './tutorial/earthRoute'
+// The Straylight route's OPEN STRAYLIGHT CAFE: the invite in a new tab.
+import './tutorial/straylight'
 // The final card's DUNGEON, when games are on for this device.
 import './tutorial/dungeon'
 import { GameView } from './game/GameView'

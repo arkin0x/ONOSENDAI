@@ -44,6 +44,10 @@ export function restoreNearbyReturn(r: NearbyReturn): void {
     // back over the "loading" it just set, so nothing flickers to the spawn.
     void spectate(r.spectate.pubkey, r.spectate.events)
     useCyberspace.setState({ spectate: { ...useCyberspace.getState().spectate!, events: r.spectate.events, actions: r.spectate.actions, status: r.spectate.status }, exploreIndex: r.exploreIndex, anchor: r.anchor, anchorPlane: r.anchorPlane })
+    // Where they stand now, which the 5.13 list may have settled since the
+    // snapshot (store focusStand: a chain a rejected proof stops).
+    const at = r.spectate.actions.length > 0 ? useCyberspace.getState().focusStand(r.exploreIndex ?? r.spectate.actions.length - 1) : null
+    if (at) useCyberspace.setState({ anchor: at.position, anchorPlane: at.plane })
   }
   useShards.getState().setNearbyOpen(true)
 }

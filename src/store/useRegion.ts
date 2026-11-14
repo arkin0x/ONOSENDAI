@@ -19,9 +19,13 @@
  * (the relay path is the bare hex; /C/<hex> is the app's own form).
  *
  * Entered on a /C/ region link's own view (an arrival with ?mode=region,
- * store/arrivalMode.ts), the link's region is the seed: region mode starts
- * on exactly that prefix, and the region grows from the whole seed box, not
- * from one cell, so it never shrinks inside the region the link named.
+ * store/arrivalMode.ts, or the Region button pressed there, toggleRegion;
+ * owner, 2026-11-13), the link's region is the seed: region mode starts on
+ * exactly that prefix, and the region grows from the whole seed box, not
+ * from one cell, so it never shrinks inside the region the link named. Once
+ * the view is something else (another view, or the cursor panned out of the
+ * link's box: useCoordRoute linkRegionSeed), the button starts at the
+ * cursor's cell, as anywhere else.
  *
  * A prefix of 1 to 63 hex has no plane (CYBERSPACE_V2.md §2.5): the region is
  * the same box in both, so a plane switch keeps region mode and its prefix,
@@ -32,6 +36,7 @@ import { create } from 'zustand'
 import { coveringRegion, prefixRegion } from '../lib/coordRoute'
 import type { Position } from '../lib/space'
 import { samePosition, useCyberspace } from './useCyberspace'
+import { linkRegionSeed } from './useCoordRoute'
 
 interface RegionState {
   /** Region mode is on. Only ever true while VIEW's free view is up. */
@@ -137,4 +142,15 @@ export const useRegion = create<RegionState>((set, get) => ({
 /** The region is still the size it was on entry: RECALL stays RECALL, not RESET. */
 export function regionAtOriginalSize(s: Pick<RegionState, 'prefix' | 'entryPrefix'>): boolean {
   return s.prefix === s.entryPrefix
+}
+
+/**
+ * The Region button in VIEW: region mode off when it is on; else on, over the
+ * /C/ region link's own region while that link's view is still up
+ * (useCoordRoute linkRegionSeed), at the cursor's cell otherwise.
+ */
+export function toggleRegion(): void {
+  const r = useRegion.getState()
+  if (r.active) r.exit()
+  else r.enter(linkRegionSeed())
 }

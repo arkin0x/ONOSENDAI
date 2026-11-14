@@ -89,6 +89,8 @@ export interface AvatarSource {
   headPlane: Plane
   spectate: object | null
   focusChain: () => ReadonlyArray<{ position: Position; plane: Plane }>
+  /** Where the chain on show stands at a row (store focusStand): the row's place, or where a rejected proof stops it. */
+  focusStand?: (index: number) => { position: Position; plane: Plane } | null
 }
 
 /**
@@ -100,12 +102,17 @@ export interface AvatarSource {
  * avatar drawn at a past action, beside a bar saying how far away your avatar
  * is, looks exactly like building moved you (review of #235). A spectated
  * avatar stands at the action the mark is on, or its head, as history shows
- * it outside the mode; null while their chain has not arrived.
+ * it outside the mode (where a proof the relay's rules reject stops their
+ * chain, from the stop on: store focusStand); null while their chain has not
+ * arrived.
  */
 export function avatarInBuild(s: AvatarSource, scrub: number | null): { position: Position; plane: Plane } | null {
   if (!s.spectate) return { position: s.position, plane: s.headPlane }
   const chain = s.focusChain()
-  return chain[scrub === null ? chain.length - 1 : Math.min(scrub, chain.length - 1)] ?? null
+  const i = scrub === null ? chain.length - 1 : Math.min(scrub, chain.length - 1)
+  // Where they stand there, as among the others: a row from a rejected
+  // proof on stands at the last action that counts (owner, 2026-11-13).
+  return (s.focusStand ? s.focusStand(i) : chain[i]) ?? null
 }
 
 /** The slice of the cyberspace store `cubeAt` reads. */

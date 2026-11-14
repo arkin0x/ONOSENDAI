@@ -6072,11 +6072,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const start = prev.known ?? spawnOf(pubkey)
     const lastActive = head?.createdAt ?? prev.lastActive
     // Under a driven view (BUILD mode) the scene stays on the build cursor,
-    // which the chain does not move, with one exception: the first chain to
-    // arrive takes the cursor from where it was aimed to their head, unless
-    // you already moved it. After that their new actions move their avatar,
-    // not your cursor.
+    // which the chain does not move, with one exception: while the chain is
+    // still being fetched, each chain that arrives takes the cursor from
+    // where it was last aimed (where they were seen, or the chain already in
+    // hand) to their head, unless you already moved it. After that their new
+    // actions move their avatar, not your cursor.
     if (get().focus?.drive) {
+      const aimed = prev.actions.length === 0 ? start : (spectateFreeze(prev.actions)?.at ?? prev.actions[prev.actions.length - 1])
       set({
         spectate: { ...prev, events, actions, lastActive, status: status ?? (head ? 'live' : 'empty') },
         exploreIndex: null,
@@ -6084,7 +6086,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       const s = get()
       // Where they stand, as their avatar is drawn (lib/buildCursor.ts avatarInBuild, focusStand).
       const stand = head && placeOf(actions.length - 1)
-      if (prev.actions.length === 0 && stand && samePosition(s.cursor, start.position) && s.anchorPlane === start.plane) s.aimView(stand.position, stand.plane)
+      if (prev.status === 'loading' && stand && samePosition(s.cursor, aimed.position) && s.anchorPlane === aimed.plane) s.aimView(stand.position, stand.plane)
       return
     }
     const to = at ?? start

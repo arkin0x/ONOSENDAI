@@ -35,13 +35,15 @@ const relay = vi.hoisted(() => ({
   events: [] as unknown[],
   fail: false,
   pending: [] as Array<() => void>,
+  /** The live watch's handler, so a test can deliver an event while the fetch is out. */
+  watch: null as null | ((ev: unknown) => void),
 }))
 vi.mock('../chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../chains')>()),
   fetchChainEvents: () => new Promise((resolve, reject) => {
     relay.pending.push(() => (relay.fail ? reject(new Error('unreachable')) : resolve(relay.events)))
   }),
-  watchAuthor: () => () => {},
+  watchAuthor: (_pk: string, _since: number, on: (ev: unknown) => void) => { relay.watch = on; return () => {} },
 }))
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
@@ -54,6 +56,7 @@ import { spectate, stopSpectating } from '../spectator'
 import { resetChainStops, setV1HopListForTests } from '../chainStop'
 import { loadV1HopList } from '../v1HopList'
 import { buildChain, hopTemplate, spawnTemplate } from '../events'
+import { avatarInBuild } from '../buildCursor'
 import { forgetNeighborChains, readChain, standingOf } from '../neighborChains'
 
 const S = () => useCyberspace.getState()
@@ -85,9 +88,9 @@ const head = chain[chain.length - 1]
 const spawnAt = { position: { x: theirSpawn.x, y: theirSpawn.y, z: theirSpawn.z }, plane: theirSpawn.plane }
 
 /** Someone presence drew near you, as usePresence keeps them. */
-function seen(pubkey: string, at: { position: Person['position']; plane: Person['plane'] }, actionId: string, lastActive: number): void {
+function seen(pubkey: string, at: { position: Person['position']; plane: Person['plane'] }, actionId: string, lastActive: number, frozen = false): void {
   usePresence.setState({
-    people: { [pubkey]: { pubkey, position: at.position, plane: at.plane, lastActive, type: 'hop', checkedAt: lastActive, actionId } },
+    people: { [pubkey]: { pubkey, position: at.position, plane: at.plane, lastActive, type: 'hop', checkedAt: lastActive, actionId, ...(frozen ? { frozen } : {}) } },
   })
 }
 
@@ -123,6 +126,15 @@ describe('SPECTATE on someone presence drew near you', () => {
     expect(camera()).toEqual({ position: head.position, plane: head.plane })
   })
 
+  it('keeps FETCHING CHAIN up when a live event lands before the fetch answers', async () => {
+    seen(pk, chain[1], chain[1].id, chain[1].createdAt)
+    void spectate(pk)
+    relay.watch?.(h2)
+    expect(S().spectate?.status).toBe('loading')
+    await relayAnswers()
+    expect(S().spectate?.status).toBe('live')
+  })
+
   it('moves to the full chain\'s head when it has moved on since', async () => {
     seen(pk, chain[1], chain[1].id, chain[1].createdAt)
     void spectate(pk)
@@ -145,6 +157,8 @@ describe('SPECTATE on someone presence drew near you', () => {
     seen(pk, chain[1], chain[1].id, chain[1].createdAt)
     void spectate(pk)
     expect(S().cursor).toEqual(chain[1].position)
+    // Their avatar is drawn there too, before the chain arrives.
+    expect(avatarInBuild(S(), null)?.position).toEqual(chain[1].position)
     await relayAnswers()
     expect(S().cursor).toEqual(head.position)
     useBuilder.getState().exit()
@@ -175,8 +189,11 @@ describe('a chain the relay\'s rules stop (#728)', () => {
     // The chain presence already read is on screen at once.
     expect(S().focusChain()).toHaveLength(rows.length)
 
+    const before = S().anchor
     await relayAnswers()
     expect(S().spectate?.status).toBe('live')
+    // The very same anchor: nothing on screen moves.
+    expect(S().anchor).toBe(before)
     expect(camera()).toEqual({ position: at22.position, plane: at22.plane })
   })
 })
@@ -199,6 +216,28 @@ describe('other places someone is already known from', () => {
     seen(pk, head, head.id, head.createdAt)
     void spectate(pk)
     expect(camera()).toEqual({ position: head.position, plane: head.plane })
+  })
+
+  it('a newer move on the AVATARS list than the chain presence read: there, without first showing the older chain', async () => {
+    relay.events = [spawnEv, h1]
+    const read = readChain(pk, chain[1].id)
+    await relayAnswers()
+    await read
+    seen(pk, chain[1], chain[1].id, chain[1].createdAt)
+    useRoster.setState({ list: [head] })
+    relay.events = [spawnEv, h1, h2]
+    void spectate(pk)
+    expect(camera()).toEqual({ position: head.position, plane: head.plane })
+    expect(S().focusChain()).toHaveLength(0)
+    await relayAnswers()
+    expect(camera()).toEqual({ position: head.position, plane: head.plane })
+  })
+
+  it('someone presence knows to be stopped stays where they stopped, whatever newer move the list holds', () => {
+    seen(pk, chain[1], chain[1].id, chain[1].createdAt, true)
+    useRoster.setState({ list: [head] })
+    void spectate(pk)
+    expect(camera()).toEqual({ position: chain[1].position, plane: chain[1].plane })
   })
 
   it('nobody knows where they are: the spawn, as before', async () => {

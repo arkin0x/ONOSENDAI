@@ -43,7 +43,10 @@ export function restoreNearbyReturn(r: NearbyReturn): void {
     // Re-arms the live watch and refetches; then the saved chain and link go
     // back over the "loading" it just set, so nothing flickers to the spawn.
     void spectate(r.spectate.pubkey, r.spectate.events)
-    useCyberspace.setState({ spectate: { ...useCyberspace.getState().spectate!, events: r.spectate.events, actions: r.spectate.actions, status: r.spectate.status }, exploreIndex: r.exploreIndex, anchor: r.anchor, anchorPlane: r.anchorPlane })
+    // A snapshot taken before their chain arrived holds none: the chain
+    // spectate() already had in hand is kept rather than wiped.
+    const kept = r.spectate.actions.length > 0 ? { events: r.spectate.events, actions: r.spectate.actions, status: r.spectate.status } : {}
+    useCyberspace.setState({ spectate: { ...useCyberspace.getState().spectate!, ...kept }, exploreIndex: r.exploreIndex, anchor: r.anchor, anchorPlane: r.anchorPlane })
     // Where they stand now, which the 5.13 list may have settled since the
     // snapshot (store focusStand: a chain a rejected proof stops).
     const at = r.spectate.actions.length > 0 ? useCyberspace.getState().focusStand(r.exploreIndex ?? r.spectate.actions.length - 1) : null

@@ -211,7 +211,7 @@ describe('the tutorial dungeon, its key item and door (DECK-0004)', () => {
     expect(p.offer).toBeNull()
     await p.reveal()
     expect(p.keys).toHaveLength(1)
-    expect(p.keys[0].key?.name).toBe('Dungeon Key')
+    expect(p.keys[0].key?.name).toBe('Tutorial Dungeon Key')
     // TAKE is offered by the key, and only there.
     expect(p.offer).toBeNull()
     p.walkTo('z', 41)

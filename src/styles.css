@@ -3960,7 +3960,8 @@ select.avatars__input option:checked {
   .ws__shapechip { max-width: 120px; }
   .ws__stepper-value { min-width: 28px; }
   .ws__strip-opts { gap: 4px; }
-  .ws__stripbtn--tall { min-width: 48px; padding: 0 4px; }
+  .ws__stripbtn--tall { min-width: 44px; padding: 0 4px; }
+  .ws__shapechip { padding: 0 7px; gap: 4px; letter-spacing: 0.02em; }
   .ws__strip-tool { width: 44px; }
   .ws__seg .ws__stripbtn { min-width: 44px; padding: 0 5px; letter-spacing: 0; }
   .ws__strip-more { min-width: 44px; }

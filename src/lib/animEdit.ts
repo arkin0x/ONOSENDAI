@@ -108,7 +108,8 @@ export function rateFor(perMin: number): { c: number; b: number; note?: string }
   // Hundredths of a cycle a minute: the speed over 6000 is cycles a second.
   const hundredths = Math.round(Math.abs(perMin) * 100)
   if (hundredths > MAX_PER_SECOND * 6000) return { c: sign * MAX_PER_SECOND, b: 1, note: LIMITS.speed }
-  if (hundredths === 0) return { c: sign, b: MAX_SECONDS, note: LIMITS.slowest }
+  // The slowest a speed can be shown (0.01 a minute), so what is stored is what is shown.
+  if (hundredths === 0) return { c: sign, b: 6000, note: LIMITS.slowest }
   const g = gcd(hundredths, 6000)
   return { c: sign * (hundredths / g), b: 6000 / g }
 }
@@ -197,6 +198,9 @@ export function setAxis(list: readonly Motion[], i: number, axis: 0 | 1 | 2): Ed
 export function setSpeed(list: readonly Motion[], i: number, perMin: number): Edited {
   const m = list[i]
   if (!m) return { list: [...list] }
+  // The speed shown, typed back: the rate it came from is kept (1 every 7 s shows as 8.57).
+  const sign = perMin < 0 || Object.is(perMin, -0) ? -1 : 1
+  if (sign === Math.sign(m.c) && showNumber(Math.abs(perMin)) === showNumber(Math.abs(perMinute(m)))) return { list: [...list] }
   const r = rateFor(perMin)
   const next = { ...copy(m), c: r.c, b: r.b }
   return { list: replace(list, i, next), note: r.note ?? (mayFlicker(next) ? LIMITS.flicker : undefined) }

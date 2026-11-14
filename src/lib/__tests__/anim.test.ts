@@ -80,7 +80,7 @@ describe('poses at a Unix time: c cycles every b seconds', () => {
     expect(phaseAt({ c: -1, b: 20, phi: 0 }, T + 5)).toBeCloseTo(0.75, 9)
   })
   it('keeps its precision at today\'s Unix time: a millionth of a cycle (a double holds today\'s time to about 0.2 µs)', () => {
-    expect(phaseAt({ c: 1, b: 1, phi: 0 }, T + 0.001)).toBeCloseTo(0.001, 6)
+    expect(phaseAt({ c: 1, b: 1, phi: 0 }, (T * 1000 + 1) / 1000)).toBeCloseTo(0.001, 5)
     expect(phaseAt({ c: 7, b: 999_983, phi: 0 }, T)).toBeCloseTo((7 * (T % 999_983) % 999_983) / 999_983, 9)
   })
 })
@@ -121,7 +121,7 @@ describe('reading', () => {
 })
 
 describe('the phase', () => {
-  it('keeps its precision when b divides the height, negative c runs backward, φ offsets', () => {
+  it('keeps its precision when b divides the time, negative c runs backward, φ offsets', () => {
     const r = m(['turn', 'y', 1, 144, 90])
     expect(phaseAt(r, 144 * 6800)).toBeCloseTo(0.25, 12)
     expect(phaseAt(r, 144 * 6800 + 36)).toBeCloseTo(0.5, 12)

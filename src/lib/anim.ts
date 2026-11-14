@@ -42,8 +42,7 @@ export const ANIM_FIELD = 'anim'
 export const MAX_MOTIONS = 4
 /**
  * Fastest rate a motion may have, cycles a second: |c| ≤ b. A faster entry is
- * ignored (a strobe, §1.14). One a second is the old cap of 600 cycles per
- * ten-minute block, kept as it was.
+ * ignored (a strobe, §1.14).
  */
 export const MAX_PER_SECOND = 1
 /** Largest `b`, seconds: about eleven and a half days for one cycle. */
@@ -282,18 +281,13 @@ export function hasAnim(s: Pick<ShardModel, 'extra'>): boolean {
  * keeps its precision at any time (about 1.8 billion seconds today).
  */
 export function phaseAt(r: Rate, t: number): number {
-  const beta = t
-  const whole = Math.floor(beta)
-  const frac = beta - whole
+  const whole = Math.floor(t)
+  const frac = t - whole
   const b = r.b
-  let v: number
-  if (b <= 67_108_864 && Math.abs(r.c) <= 67_108_864) {
-    const wm = ((whole % b) + b) % b
-    const cm = ((r.c % b) + b) % b
-    v = ((cm * wm) % b) / b + (r.c * frac) / b + r.phi / 360
-  } else {
-    v = (r.c * beta) / b + r.phi / 360
-  }
+  // b ≤ 1,000,000 and |c| ≤ b, so (c mod b)(whole mod b) stays under 10^12: exact in a double.
+  const wm = ((whole % b) + b) % b
+  const cm = ((r.c % b) + b) % b
+  let v = ((cm * wm) % b) / b + (r.c * frac) / b + r.phi / 360
   v -= Math.floor(v)
   return v >= 1 ? 0 : v
 }

@@ -6992,7 +6992,7 @@ select.avatars__input option:checked {
 }
 .ws__anim-num:focus { outline: none; border-color: var(--accent); }
 .ws__panel .ws__anim-card .workshop__row { border-top: none; padding-top: 0; }
-.ws__anim-axis { font-size: 9px; letter-spacing: 0.1em; }
+.ws__anim-axis { font-size: 10px; letter-spacing: 0.1em; }
 .ws__anim-point { gap: 3px; flex-wrap: nowrap; }
 .ws__anim-point .ws__anim-num { padding: 5px 3px; }
 .ws__anim-point .workshop__btn { padding: 0 5px; }

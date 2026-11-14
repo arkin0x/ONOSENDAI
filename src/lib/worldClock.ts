@@ -122,30 +122,49 @@ export function offsetFrom(samples: readonly ClockSample[]): { offsetMs: number;
   return { offsetMs: best.serverMs + best.resolutionMs / 2 - (best.sentMs + best.gotMs) / 2, uncertaintyMs: rtt / 2 + best.resolutionMs / 2 }
 }
 
+/** An offset this large is no clock error but a broken source (a stale cached response): ignored. */
+export const SANE_OFFSET_MS = 24 * 3600_000
+
 /**
- * The correction to use after a measurement: the measured offset when it is
- * beyond both MIN_CORRECTION_MS and its own uncertainty, else none (the
- * device clock is trusted). Null samples (nothing usable) keep `current`.
+ * The correction to use after a measurement, against the one in force:
+ *   - kept, when the measurement agrees with it within its doubt (max of
+ *     MIN_CORRECTION_MS and the sample's uncertainty): so a whole-second
+ *     Date that reads a device 0.7 s off as 0 one time and 1 s the next does
+ *     not flap the clock (and every moving object with it);
+ *   - none (0), when it disagrees and the device itself is within that doubt;
+ *   - the measured offset otherwise.
+ * Nothing usable, or an offset past SANE_OFFSET_MS, keeps `current`.
  */
 export function correctionFor(samples: readonly ClockSample[], current: number): number {
   const m = offsetFrom(samples)
-  if (!m) return current
-  return Math.abs(m.offsetMs) > Math.max(MIN_CORRECTION_MS, m.uncertaintyMs) ? m.offsetMs : 0
+  if (!m || Math.abs(m.offsetMs) > SANE_OFFSET_MS) return current
+  const doubt = Math.max(MIN_CORRECTION_MS, m.uncertaintyMs)
+  if (Math.abs(m.offsetMs - current) <= doubt) return current
+  return Math.abs(m.offsetMs) <= doubt ? 0 : m.offsetMs
 }
 
 /** The relay asked for the time: the ONOSENDAI relay's NIP-11 document, over https. */
 export const RELAY_TIME_URL = 'https://relay.onosendai.tech/'
 
-/** A server time from a response's headers: X-Server-Time (ms) if readable, else Date (whole seconds); null for neither. */
+/**
+ * A server time from a response's headers: X-Server-Time (ms) if readable,
+ * else Date (whole seconds) plus any Age (a cache in between that kept the
+ * upstream Date says how long it held the response); null for neither.
+ */
 export function serverTimeOf(headers: Pick<Headers, 'get'>): { serverMs: number; resolutionMs: number } | null {
   const ms = Number(headers.get(SERVER_TIME_HEADER))
   if (headers.get(SERVER_TIME_HEADER) !== null && Number.isFinite(ms) && ms > 0) return { serverMs: ms, resolutionMs: 1 }
   const date = headers.get('date')
   const parsed = date ? Date.parse(date) : NaN
-  return Number.isFinite(parsed) ? { serverMs: parsed, resolutionMs: 1000 } : null
+  if (!Number.isFinite(parsed)) return null
+  const age = Number(headers.get('age'))
+  return { serverMs: parsed + (Number.isFinite(age) && age > 0 ? age * 1000 : 0), resolutionMs: 1000 }
 }
 
-type Fetcher = (url: string, init: RequestInit) => Promise<{ headers: Pick<Headers, 'get'> }>
+/** How long one request may take before it is given up (a hung source must not stall the fallback). */
+export const REQUEST_TIMEOUT_MS = 4000
+
+type Fetcher = (url: string, init: RequestInit) => Promise<{ headers: Pick<Headers, 'get'>; body?: { cancel?: () => Promise<void> } | null }>
 
 /** A few samples from one source; empty when the source gives no readable time. */
 export async function sampleFrom(url: string, init: RequestInit, fetcher: Fetcher, now: () => number = Date.now): Promise<ClockSample[]> {
@@ -153,8 +172,11 @@ export async function sampleFrom(url: string, init: RequestInit, fetcher: Fetche
   for (let i = 0; i < SAMPLES; i++) {
     try {
       const sentMs = now()
-      const res = await fetcher(url, { ...init, cache: 'no-store' })
+      const signal = typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : undefined
+      const res = await fetcher(url, { ...init, cache: 'no-store', ...(signal ? { signal } : {}) })
       const gotMs = now()
+      // Only the headers matter: let the body go, so it holds no connection.
+      res.body?.cancel?.().catch(() => {})
       const time = serverTimeOf(res.headers)
       if (!time) return out
       out.push({ sentMs, gotMs, ...time })
@@ -163,15 +185,27 @@ export async function sampleFrom(url: string, init: RequestInit, fetcher: Fetche
   return out
 }
 
-/** Measure: the relay first, the page's own origin when the relay gives no readable time. Never throws. */
-export async function measure(fetcher: Fetcher = (u, i) => fetch(u, i)): Promise<void> {
-  let samples = await sampleFrom(RELAY_TIME_URL, { headers: { Accept: 'application/nostr+json' } }, fetcher)
-  if (samples.length === 0 && typeof location !== 'undefined') samples = await sampleFrom(location.origin + '/', { method: 'HEAD' }, fetcher)
-  setClockOffset(correctionFor(samples, offsetMs))
+let measuring: Promise<void> | null = null
+
+/** Measure: the relay first, the page's own origin when the relay gives no readable time. One at a time; never throws. */
+export function measure(fetcher: Fetcher = (u, i) => fetch(u, i)): Promise<void> {
+  measuring ??= (async () => {
+    try {
+      let samples = await sampleFrom(RELAY_TIME_URL, { headers: { Accept: 'application/nostr+json' } }, fetcher)
+      if (samples.length === 0 && typeof location !== 'undefined') samples = await sampleFrom(location.origin + '/', { method: 'HEAD' }, fetcher)
+      setClockOffset(correctionFor(samples, offsetMs))
+    } finally { measuring = null }
+  })()
+  return measuring
 }
+
+/** Least time between the measurements a return to the page asks for (focus and visibility both fire). */
+export const RETURN_GAP_MS = 30_000
 
 let started = false
 let live = 0
+let lastReturn = -Infinity
+let stopWatching: (() => void) | null = null
 
 /** An animated object mounted (+1) or went (−1). The first one starts the measuring. */
 export function noteMoving(delta: 1 | -1): void {
@@ -184,13 +218,26 @@ export function startWorldClock(): void {
   if (started || typeof window === 'undefined' || typeof fetch === 'undefined') return
   started = true
   void measure()
-  setInterval(() => { if (live > 0) void measure() }, REMEASURE_MS)
-  const back = (): void => { if (live > 0 && document.visibilityState !== 'hidden') void measure() }
+  const timer = setInterval(() => { if (live > 0) void measure() }, REMEASURE_MS)
+  const back = (): void => {
+    if (live === 0 || document.visibilityState === 'hidden') return
+    const now = performance.now()
+    if (now - lastReturn < RETURN_GAP_MS) return
+    lastReturn = now
+    void measure()
+  }
   document.addEventListener('visibilitychange', back)
   window.addEventListener('focus', back)
+  stopWatching = () => {
+    clearInterval(timer)
+    document.removeEventListener('visibilitychange', back)
+    window.removeEventListener('focus', back)
+  }
 }
 
-/** Forget everything (tests). */
+/** Forget everything, the interval and listeners included (tests, a hot reload). */
 export function resetWorldClock(): void {
-  offsetMs = 0; version++; lastKey = null; lastStamp = NaN; started = false; live = 0
+  stopWatching?.()
+  stopWatching = null
+  offsetMs = 0; version++; lastKey = null; lastStamp = NaN; started = false; live = 0; lastReturn = -Infinity; measuring = null
 }

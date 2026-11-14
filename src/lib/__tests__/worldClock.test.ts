@@ -6,7 +6,7 @@
  * first (its X-Server-Time, else its Date) and the page's own origin after,
  * and with no network at all the device clock runs as it is.
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   clockOffset, correctionFor, measure, MIN_CORRECTION_MS, offsetFrom, readClock, RELAY_TIME_URL, resetWorldClock, sampleFrom, serverTimeOf,
   setClockOffset, worldNow, type ClockSample,
@@ -61,9 +61,27 @@ describe('applying a correction', () => {
   it('nothing usable keeps the correction there is', () => {
     expect(correctionFor([], 1234)).toBe(1234)
   })
+  it('does not flap: a measurement that agrees with the correction in force within its doubt keeps it', () => {
+    // A device 0.7 s off, read through a whole-second Date: once as 1 s, once as 0.5 s.
+    expect(Math.round(correctionFor([at(1000, 40, 1000)], 0))).toBe(1000)
+    expect(correctionFor([at(500, 40, 1000)], 1000)).toBe(1000)
+    // The device came right (a sync): back to none.
+    expect(correctionFor([at(0, 40, 1)], 1000)).toBe(0)
+  })
+  it('ignores an offset past a day: a broken source, not a clock', () => {
+    expect(correctionFor([at(2 * 86_400_000)], 0)).toBe(0)
+  })
 })
 
 describe('the server\'s time', () => {
+  it('a cache\'s Age is added to the Date it kept', () => {
+    expect(serverTimeOf(headers({ date: 'Fri, 20 Nov 2026 00:00:00 GMT', age: '30' }))).toEqual({ serverMs: 1795132830000, resolutionMs: 1000 })
+  })
+  it('a request that fails part way keeps the samples before it', async () => {
+    let n = 0
+    const samples = await sampleFrom(RELAY_TIME_URL, {}, async () => { if (++n === 2) throw new Error('reset'); return { headers: headers({ 'x-server-time': '5000' }) } }, () => 1000)
+    expect(samples).toHaveLength(1)
+  })
   it('X-Server-Time (ms) first, then Date (whole seconds), else none', () => {
     expect(serverTimeOf(headers({ 'x-server-time': '1795132800123', date: 'Fri, 20 Nov 2026 00:00:00 GMT' }))).toEqual({ serverMs: 1795132800123, resolutionMs: 1 })
     expect(serverTimeOf(headers({ date: 'Fri, 20 Nov 2026 00:00:00 GMT' }))).toEqual({ serverMs: 1795132800000, resolutionMs: 1000 })
@@ -72,9 +90,11 @@ describe('the server\'s time', () => {
   it('asks the relay first; a relay whose headers a browser cannot read gives way to the page\'s own origin', async () => {
     ;(globalThis as { location?: unknown }).location = { origin: 'https://onosendai.tech' }
     const asked: string[] = []
+    const methods: Array<string | undefined> = []
     let now = 1_000_000
-    const fetcher = async (url: string) => {
+    const fetcher = async (url: string, init: RequestInit) => {
       asked.push(url)
+      methods.push(init.method)
       now += 40
       // The relay without exposed headers reads as none; the page's origin sends Date, 5 s ahead.
       return { headers: url === RELAY_TIME_URL ? headers({}) : headers({ date: new Date(Math.floor((now + 5000) / 1000) * 1000).toUTCString() }) }
@@ -84,7 +104,10 @@ describe('the server\'s time', () => {
     try { await measure(fetcher) } finally { Date.now = realNow; delete (globalThis as { location?: unknown }).location }
     expect(asked[0]).toBe(RELAY_TIME_URL)
     expect(asked.slice(1).every((u) => u === 'https://onosendai.tech/')).toBe(true)
-    expect(Math.abs(clockOffset() - 5000)).toBeLessThan(1100)
+    expect(methods.slice(1).every((m) => m === 'HEAD')).toBe(true)
+    // Each sample: sent at N, answered at N + 40 with a Date 5 s ahead truncated to the second, read +500 ms.
+    expect(clockOffset()).toBeGreaterThan(4400)
+    expect(clockOffset()).toBeLessThan(5600)
   })
   it('with the relay\'s X-Server-Time readable, it is used', async () => {
     let now = 2_000_000
@@ -116,5 +139,45 @@ describe('the reading', () => {
     expect(b.t).toBe(1002.5)
     expect(b.version).toBeGreaterThan(v)
     expect(worldNow(1_000_000)).toBe(1002.5)
+  })
+})
+
+describe('when it measures', () => {
+  it('starts once, measures on start, on a return to the page (at most every 30 s), and its timer only while anything moves', async () => {
+    const { noteMoving, REMEASURE_MS, RETURN_GAP_MS } = await import('../worldClock')
+    const listeners: Record<string, () => void> = {}
+    const target = { addEventListener: (k: string, f: () => void) => { listeners[k] = f }, removeEventListener: (k: string) => { delete listeners[k] } }
+    let calls = 0
+    vi.useFakeTimers()
+    vi.stubGlobal('window', target)
+    vi.stubGlobal('document', { ...target, visibilityState: 'visible' })
+    vi.stubGlobal('fetch', async () => { calls++; return { headers: headers({}) } })
+    try {
+      noteMoving(1)
+      noteMoving(1)
+      await vi.advanceTimersByTimeAsync(0)
+      const first = calls
+      expect(first).toBeGreaterThan(0)
+      // A return to the page: focus and visibility both fire; one measurement.
+      vi.setSystemTime(Date.now() + RETURN_GAP_MS + 1)
+      vi.spyOn(performance, 'now').mockReturnValue(1e9)
+      listeners.focus()
+      listeners.visibilitychange()
+      await vi.advanceTimersByTimeAsync(0)
+      const afterReturn = calls
+      expect(afterReturn).toBeGreaterThan(first)
+      // Nothing moves: the timer measures no more.
+      noteMoving(-1)
+      noteMoving(-1)
+      await vi.advanceTimersByTimeAsync(REMEASURE_MS + 1)
+      expect(calls).toBe(afterReturn)
+      // Reset takes the listeners away.
+      resetWorldClock()
+      expect(Object.keys(listeners)).toEqual([])
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    }
   })
 })

@@ -70,7 +70,8 @@ describe('speed: cycles a minute <-> c cycles every b seconds, lowest terms', ()
   it('clamps to one a second (60 a minute) with a message, and never stops', () => {
     expect(rateFor(10_000)).toEqual({ c: 1, b: 1, note: LIMITS.speed })
     expect(LIMITS.speed).toBe('Top speed is 60 a minute')
-    expect(rateFor(0)).toEqual({ c: 1, b: 1_000_000, note: LIMITS.slowest })
+    expect(rateFor(0)).toEqual({ c: 1, b: 6000, note: LIMITS.slowest })
+    expect(perMinute(rateFor(0))).toBe(0.01)
     expect(rateFor(-0)).toMatchObject({ c: -1 })
   })
   it('warns about a motion that may flicker more than 3 times a second (§1.14)', () => {
@@ -98,6 +99,10 @@ describe('speed: cycles a minute <-> c cycles every b seconds, lowest terms', ()
     const list = [m(['turn', 'y', 1, 20, 0])]
     expect(rawOf(setSpeed(list, 0, 6).list)).toEqual([['turn', 'y', 1, 10, 0]])
     expect(rawOf(reverse(list, 0).list)).toEqual([['turn', 'y', -1, 20, 0]])
+    // The speed shown, typed back, keeps the rate it came from.
+    const seven = [m(['turn', 'y', 1, 7, 0])]
+    expect(rawOf(setSpeed(seven, 0, 8.57).list)).toEqual([['turn', 'y', 1, 7, 0]])
+    expect(rawOf(setSpeed(seven, 0, 8.6).list)).toEqual([['turn', 'y', 43, 300, 0]])
   })
 })
 

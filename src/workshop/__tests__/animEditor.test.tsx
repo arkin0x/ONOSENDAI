@@ -61,7 +61,7 @@ async function click(m: Awaited<ReturnType<typeof mount>>, label: string): Promi
   await settled()
 }
 
-describe('MOTION in the SHARD panel', () => {
+describe('the MOTION panel', () => {
   it('has its own top-level MOTION button and panel, a sibling of SHARD; nothing motion stays in SHARD', () => {
     const chips = SOURCE.slice(SOURCE.indexOf('<div className="ws__chips">'), SOURCE.indexOf('{phase && ('))
     expect(chips).toMatch(/toggle\('motion'\)/)
@@ -69,11 +69,11 @@ describe('MOTION in the SHARD panel', () => {
     expect(chips.indexOf("toggle('motion')")).toBeGreaterThan(chips.indexOf("toggle('shard')"))
     expect(chips.indexOf("toggle('motion')")).toBeLessThan(chips.indexOf("toggle('avatar')"))
     const motion = SOURCE.slice(SOURCE.indexOf("{panel === 'motion' && shard && ("), SOURCE.indexOf("{panel === 'avatar' && shard && ("))
-    expect(motion).toContain('aria-label="Motion panel"')
+    expect(motion).toContain('role="region" aria-label="Motion"')
     expect(motion).toContain('<AnimEditor />')
     const start = SOURCE.indexOf("{panel === 'shard' && shard && (")
     const shard = SOURCE.slice(start, SOURCE.indexOf('\n      )}\n', start))
-    expect(shard).not.toMatch(/AnimEditor|AnimRow|MOTION|anim/i)
+    expect(shard).not.toMatch(/AnimEditor|AnimRow|\bMOTION\b|\banim\b/)
     expect(SOURCE).not.toContain('AnimRow')
   })
 
@@ -193,7 +193,7 @@ describe('MOTION in the SHARD panel', () => {
     ;(rail.props.onKeyDown as (e: unknown) => void)({ key: 'ArrowRight', preventDefault() {}, stopPropagation() {} })
     await settled()
     expect(useAnimPreview.getState()).toMatchObject({ playing: false, scrub: 0.05 })
-    expect(textOf(m.all().find((h) => h.props.role === 'group' && h.props['aria-label'] === 'Motion')!)).not.toContain('—')
+    expect(textOf(m.all().find((h) => h.props.role === 'group' && h.props['aria-label'] === 'Motions')!)).not.toContain('—')
     await click(m, 'Stop')
     expect(useAnimPreview.getState()).toMatchObject({ on: false, playing: false, scrub: null })
     // Another shard stops a preview too.

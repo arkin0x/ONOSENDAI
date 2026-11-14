@@ -6968,7 +6968,7 @@ select.avatars__input option:checked {
 .ws__opacity-rail:focus { outline: none; }
 .ws__opacity-rail:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
-/* MOTION in the SHARD panel (workshop/AnimEditor.tsx): a card per motion, numbers typed in small fields. */
+/* The MOTION panel (workshop/AnimEditor.tsx): a card per motion, numbers typed in small fields. */
 .ws__anim { display: grid; gap: 6px; }
 .ws__anim-rail { flex: 1 1 80px; min-width: 70px; }
 .ws__anim-rail:focus { outline: none; }
@@ -6993,9 +6993,10 @@ select.avatars__input option:checked {
 .ws__anim .workshop__btn { touch-action: pan-y; }
 @media (max-width: 360px) { .ws__anim-point { flex-wrap: wrap; } }
 
-/* MENU, GRID, SHARD and AVATAR share a phone's top edge with DEPLOY and the
-   way out (arkinox, 2026-10-23): a little closer set there, so the four stand
-   in one row at 390px. Narrower, the row wraps as it always has. */
+/* MENU, GRID, SHARD, MOTION and AVATAR share a phone's top edge with DEPLOY
+   and the way out (arkinox, 2026-10-23): a little closer set there. Since
+   MOTION joined (2026-11-14) the five wrap to a second row on a phone, until
+   the workshop layout redesign settles where they go. */
 @media (max-width: 640px) {
   .ws__chips { gap: 5px; }
   .ws__chips .ws__chip { padding: 0 7px; gap: 4px; letter-spacing: 0.06em; }

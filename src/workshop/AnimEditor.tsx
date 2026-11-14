@@ -119,42 +119,40 @@ export function AnimEditor(): JSX.Element {
   const share = preview.scrub ?? 0
 
   return (
-    <div className="ws__anim" role="group" aria-label="Motion">
+    <div className="ws__anim" role="group" aria-label="Motions">
       {/* The panel is MOTION (Workshop.tsx); this row is its preview, there once there is a motion to show. */}
       {list.length > 0 && <div className="workshop__row">
         <span className="workshop__label">PREVIEW</span>
-        {list.length > 0 && (preview.on && preview.playing
+        {preview.on && preview.playing
           ? <button className="workshop__btn" title="Pause the preview" aria-label="Pause" onClick={() => preview.pause()}><Pause size={12} aria-hidden /> PAUSE</button>
-          : <button className="workshop__btn" title="Play the preview" aria-label="Play" onClick={() => preview.play()}><Play size={12} aria-hidden /> PLAY</button>)}
-        {list.length > 0 && preview.on && <button className="workshop__btn" title="Stop the preview, back at rest" aria-label="Stop" onClick={() => preview.stop()}><Square size={11} aria-hidden /> STOP</button>}
-        {list.length > 0 && (
-          <div
-            className="explorer__rail ws__anim-rail"
-            ref={rail}
-            role="slider"
-            tabIndex={0}
-            aria-label="Scrub one cycle"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(share * 100)}
-            title="Scrub one cycle"
-            {...noCallout}
-            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); scrubbing.current = true; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); scrubTo(e.clientX) }}
-            onPointerMove={(e) => { if (scrubbing.current) scrubTo(e.clientX) }}
-            onPointerUp={() => { scrubbing.current = false }}
-            onPointerCancel={() => { scrubbing.current = false }}
-            onKeyDown={(e) => {
-              const k = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 0.05 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -0.05 : 0
-              if (!k) return
-              e.preventDefault(); e.stopPropagation()
-              preview.setScrub(Math.max(0, Math.min(1, share + k)))
-            }}
-          >
-            <span className="explorer__line" />
-            <span className="explorer__walked" style={{ width: `${share * 100}%` }} />
-            <span className="explorer__mark" style={{ left: `${share * 100}%` }} />
-          </div>
-        )}
+          : <button className="workshop__btn" title="Play the preview" aria-label="Play" onClick={() => preview.play()}><Play size={12} aria-hidden /> PLAY</button>}
+        {preview.on && <button className="workshop__btn" title="Stop the preview, back at rest" aria-label="Stop" onClick={() => preview.stop()}><Square size={11} aria-hidden /> STOP</button>}
+        <div
+          className="explorer__rail ws__anim-rail"
+          ref={rail}
+          role="slider"
+          tabIndex={0}
+          aria-label="Scrub one cycle"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(share * 100)}
+          title="Scrub one cycle"
+          {...noCallout}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); scrubbing.current = true; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); scrubTo(e.clientX) }}
+          onPointerMove={(e) => { if (scrubbing.current) scrubTo(e.clientX) }}
+          onPointerUp={() => { scrubbing.current = false }}
+          onPointerCancel={() => { scrubbing.current = false }}
+          onKeyDown={(e) => {
+            const k = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 0.05 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -0.05 : 0
+            if (!k) return
+            e.preventDefault(); e.stopPropagation()
+            preview.setScrub(Math.max(0, Math.min(1, share + k)))
+          }}
+        >
+          <span className="explorer__line" />
+          <span className="explorer__walked" style={{ width: `${share * 100}%` }} />
+          <span className="explorer__mark" style={{ left: `${share * 100}%` }} />
+        </div>
       </div>}
       {reduced && list.length > 0 && <div className="ws__explain">Reduced motion is on. Scrub to see it move.</div>}
 

@@ -6,7 +6,8 @@
  * Top left, a row of chips: MENU (the shard list, NEW, PASTE and IMPORT,
  * clear, explain), GRID (the level the placing tools work on, the deploy
  * scale multiplier, and the grid's own size), SHARD (the open shard: name,
- * the Shard Feed, its counts, DRAW, OPACITY, CONSTRAIN, BOUNCE) and AVATAR (what you
+ * the Shard Feed, its counts, DRAW, OPACITY, CONSTRAIN, BOUNCE), MOTION (its
+ * perpetual motion: AnimEditor) and AVATAR (what you
  * wear, the ghost for scale, SET AVATAR), each opening one panel below the
  * row; UNDO and REDO float beside them. Bottom left, TOOLS (STAMP, ADD,
  * SELECT, FACE and each tool's options). Top right, DEPLOY and the way out. Bottom right,
@@ -25,7 +26,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { Box, Orbit, ChevronDown, ChevronUp, ClipboardCopy, ClipboardPaste, Copy, CopyPlus, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Hash, Link, Menu, Merge, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, VenetianMask, WandSparkles, Waypoints, X } from 'lucide-react'
+import { Box, ChevronDown, ChevronUp, ClipboardCopy, ClipboardPaste, Copy, CopyPlus, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Hash, Link, type LucideIcon, Menu, Merge, MousePointer2, Orbit, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, Undo2, VenetianMask, WandSparkles, Waypoints, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
@@ -1179,7 +1180,7 @@ export function Workshop(): JSX.Element | null {
           DECK-0003 §1.14), all of it in one self-contained editor (AnimEditor).
           Moving objects stop no walker yet. Like SHARD, nothing without a shard. */}
       {panel === 'motion' && shard && (
-        <div className="ws__panel" role="region" aria-label="Motion panel">
+        <div className="ws__panel" role="region" aria-label="Motion">
           <AnimEditor />
         </div>
       )}

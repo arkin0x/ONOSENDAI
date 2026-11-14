@@ -53,7 +53,8 @@ function Spinning({ shard, ignoreOpacity, onDrawn }: { shard: ShardModel | null;
   return (
     <group ref={turn}>
       <group position={[-frame.centre[0], -frame.centre[1], -frame.centre[2]]}>
-        <ShardMesh shard={shard} lit ignoreOpacity={ignoreOpacity} />
+        {/* ignoreOpacity marks an avatar's preview, and an avatar ignores `anim` (DECK-0003 §1.14): drawn still. */}
+        <ShardMesh shard={shard} lit ignoreOpacity={ignoreOpacity} still={ignoreOpacity} />
       </group>
     </group>
   )

@@ -155,6 +155,22 @@ describe('what counts as the view changing', () => {
     expect(changes((s) => { m(s.shader).uniforms.uTime.value += 0.016 })).toBe(true)
   })
 
+  it('but not an object in perpetual motion (anim), nor its parts moving with it; anything else about them still counts', () => {
+    const part = { matrixWorld: matrix(), material: { opacity: 1, version: 1 } }
+    const spinner = { matrixWorld: matrix(), userData: { ambientMotion: true }, children: [part] }
+    const s = scene()
+    ;(s.root as unknown as { children: unknown[] }).children.push(spinner)
+    const at = (): number => sceneStamp(s.root as never, s.camera as never)
+    const before = at()
+    spinner.matrixWorld.elements[0] = 0.5
+    part.matrixWorld.elements[14] = 3
+    expect(at()).toBe(before)
+    part.material.opacity = 0.5
+    expect(at()).not.toBe(before)
+    const motion = fs.readFileSync(path.resolve(__dirname, '../animMotion.ts'), 'utf8')
+    expect(motion).toContain("'userData-ambientMotion': true")
+  })
+
   it('but not one marked ambient, the terrain\'s slow pulse', () => {
     expect(changes((s) => { m(s.ambient).uniforms.uTime.value += 0.016 })).toBe(false)
     const field = fs.readFileSync(path.resolve(__dirname, '../ShaderPointField.tsx'), 'utf8')

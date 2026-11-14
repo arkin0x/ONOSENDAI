@@ -154,11 +154,18 @@ describe('the five fixed places', () => {
     await m.unmount()
   })
 
-  it('keep MOTION in its place, greyed out until the motion editor lands', async () => {
+  it('open MOTION like its siblings: its sheet holds the motion editor, PREVIEW and all', async () => {
     const m = await mount(<Workshop />)
     const motion = m.buttons('MOTION')[0]
-    expect(motion.props.disabled).toBe(true)
-    expect(String(motion.props.title)).toContain('coming soon')
+    expect(motion.props.disabled).toBeFalsy()
+    await m.press('MOTION')
+    expect(byClass(m.all(), 'ws__sheet').map((h) => String(h.props['aria-label']))).toEqual(['Motion'])
+    expect(m.all().some((h) => h.props['aria-label'] === 'Add a motion')).toBe(true)
+    await m.press('SPIN')
+    expect(m.says('PREVIEW')).toBe(true)
+    expect(m.all().some((h) => h.props['aria-label'] === 'Scrub one cycle')).toBe(true)
+    await m.press('MOTION')
+    expect(byClass(m.all(), 'ws__sheet')).toEqual([])
     await m.unmount()
   })
 

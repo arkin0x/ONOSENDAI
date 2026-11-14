@@ -30,7 +30,7 @@ const shard = { id: NOW_ID, pubkey: ME, kind: 33331, address: ADDRESS }
 
 const ev = (t: ReturnType<typeof actionCommentTemplate>, id: string) => ({ ...t, id, pubkey: THEM, sig: '' })
 
-let hook: ReturnType<typeof mountHook> | null = null
+let hook: { current: () => ReturnType<typeof useActionComments>; unmount: () => Promise<void> } | null = null
 afterEach(async () => { await hook?.unmount(); hook = null; asked.filters = []; asked.events = [] })
 
 describe('a published shard\'s thread', () => {
@@ -41,10 +41,11 @@ describe('a published shard\'s thread', () => {
     const onOld = ev({ ...older, tags: older.tags.filter((t) => t[0] !== 'a') }, 'b'.repeat(64))
     const reply = ev(actionCommentTemplate(shard, 'a reply', 3, { id: 'a'.repeat(64), pubkey: THEM, kind: 1111 }), 'c'.repeat(64))
     asked.events = [onNow, onOld, reply]
-    hook = mountHook(() => useActionComments(shard), {})
+    const h = mountHook(() => useActionComments(shard), {})
+    hook = h
     await settle(10)
     expect(asked.filters[0]).toEqual({ kinds: [1111], '#A': [ADDRESS], limit: 500 })
-    const comments = (hook.current() as ReturnType<typeof useActionComments>).comments
+    const comments = h.current().comments
     expect(comments.map((c) => c.text)).toEqual(['on this one', 'on the old one'])
     expect(comments[0].replies.map((c) => c.text)).toEqual(['a reply'])
   })

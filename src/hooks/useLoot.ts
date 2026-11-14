@@ -21,15 +21,27 @@
  * phone, 2026-11-04, with 105 bags on the relay). Now that read only adds
  * what it brought, says why (`trouble`), and is asked again when the relay
  * signs this visit in, when the connection is reissued, and on RETRY.
+ *
+ * Your sector first (owner, 2026-11-14). The newest LOOT_BACKFILL bags from
+ * anywhere can leave out every bag hidden where you stand, so a second read
+ * asks for the bags whose hint names your sector: a hinted bag carries the
+ * sector tags of its hint (`S` "sx-sy-sz", spec §7.7, §10), and a bag
+ * without a hint carries none. Its answer joins the same list (one row per
+ * bag), and the panel shows the bags of your sector first. It is read again
+ * whenever your sector changes, and with every backfill, so the same
+ * trouble, retries and AUTH answer it as the newest bags.
  */
 
 import { useEffect } from 'react'
 import { create } from 'zustand'
+import { xyzToSectorId } from 'cyberspace-core'
 import { HIDDEN_KIND } from '../lib/hidden'
 import { afterBackfill, mergeLoot, summarizeBag, type LootItem } from '../lib/loot'
 import { onCanonicalSignIn, onResume, queryChecked, subscribe, type ReadTrouble } from '../lib/relay'
 import { useRelays } from '../store/useRelays'
 import { useShards } from '../store/useShards'
+import { useCyberspace } from '../store/useCyberspace'
+import type { Position } from '../lib/space'
 
 /** Bags taken down from this device, which no relay's answer can bring back. */
 function standing(items: LootItem[]): LootItem[] {
@@ -42,6 +54,32 @@ export interface Loot {
   status: 'loading' | 'ready' | 'error'
   /** Why the canonical relay gave the last backfill nothing, while it has not answered one since. */
   trouble: ReadTrouble | null
+  /**
+   * The sector your chain head stands in, "sx-sy-sz" as a hint's sector is
+   * written (LootItem sector). Null only in the store before any panel has
+   * read it; the hook always has one (before the saved chain is in, the
+   * place known then, as everything else that follows the head).
+   */
+  sector: string | null
+}
+
+/** The sector a position is in, as the `S` tag and LootItem.sector write it. */
+export function sectorOf(p: Position): string {
+  const s = xyzToSectorId(p.x, p.y, p.z)
+  return `${s.sx}-${s.sy}-${s.sz}`
+}
+
+/**
+ * A list with your sector's bags first (owner, 2026-11-14): those whose hint
+ * names `sector`, then every other bag, each group newest first as the list
+ * already is. A bag without a hint is never in your sector's group.
+ */
+export function sectorFirst(items: LootItem[], sector: string | null): { here: LootItem[]; elsewhere: LootItem[] } {
+  if (sector === null) return { here: [], elsewhere: items }
+  const here: LootItem[] = []
+  const elsewhere: LootItem[] = []
+  for (const it of items) (it.sector === sector ? here : elsewhere).push(it)
+  return { here, elsewhere }
 }
 
 /** The relay holds a few dozen bags today; this leaves room without paging. */
@@ -90,6 +128,7 @@ export const useLootStore = create<LootState>(() => ({
   status: cached.length > 0 ? 'ready' : 'loading',
   trouble: null,
   source: '',
+  sector: null,
 }))
 
 let close: (() => void) | null = null
@@ -141,7 +180,19 @@ function scheduleRetry(failed: boolean): void {
   retryTimer = setTimeout(() => { retryTimer = null; askAgainIfRefused() }, wait)
 }
 
-/** Read every bag from the relays, once at a time. */
+/** The bags whose hint names `sector`: a hinted bag carries its hint's sector tags (spec §7.7), an unhinted one none. */
+function sectorFilter(sector: string): { kinds: number[]; '#S': string[]; limit: number } {
+  return { kinds: [HIDDEN_KIND], '#S': [sector], limit: LOOT_BACKFILL }
+}
+
+const summarize = (events: Parameters<typeof summarizeBag>[0][]): LootItem[] => events.map(summarizeBag).filter((x): x is LootItem => x !== null)
+
+/**
+ * Read every bag from the relays, and your sector's (sectorFilter), once at
+ * a time. The newest bags decide what is gone and what the trouble is; your
+ * sector's are added to them, and a read of them the canonical relay did not
+ * answer is trouble too, asked again like any.
+ */
 function backfill(source: string): void {
   if (reading) { again = true; return }
   reading = true
@@ -149,13 +200,24 @@ function backfill(source: string): void {
     reading = false
     if (again) { again = false; backfill(useLootStore.getState().source) }
   }
-  queryChecked({ kinds: [HIDDEN_KIND], limit: LOOT_BACKFILL }).then(
-    ({ events, trouble }) => {
+  const sector = useLootStore.getState().sector
+  const none = Promise.resolve({ events: [], trouble: null })
+  Promise.all([queryChecked({ kinds: [HIDDEN_KIND], limit: LOOT_BACKFILL }), sector ? queryChecked(sectorFilter(sector)) : none]).then(
+    ([{ events, trouble: newest }, near]) => {
       if (useLootStore.getState().source !== source) return
-      const found = events.map(summarizeBag).filter((x): x is LootItem => x !== null)
+      const found = summarize(events)
+      if (sector !== null) noteSectorRead(sector, near.trouble)
+      // The newest bags' trouble, else your sector's: a backfill that began
+      // before you were known to be where you are now did not ask about it,
+      // so a refusal setLootSector heard meanwhile stands, and so does its retry.
+      const trouble = newest ?? sectorTroubleNow()
       useLootStore.setState((s) => {
+        // Your sector's bags: this read's, when it asked for the sector you
+        // are in now; else the ones already known there (setLootSector reads
+        // them on its own), which an answer about the newest bags never drops.
+        const here = sector !== null && sector === s.sector && !near.trouble ? summarize(near.events) : s.items.filter((it) => s.sector !== null && it.sector === s.sector)
         // Without the canonical relay's answer nothing is known to be gone: keep every row, add what came.
-        const items = standing(trouble ? mergeLoot(s.items, found) : afterBackfill(s.items, found, LOOT_BACKFILL))
+        const items = standing(mergeLoot(newest ? mergeLoot(s.items, found) : afterBackfill(s.items, found, LOOT_BACKFILL), here))
         writeCache(items)
         return { items, status: trouble && items.length === 0 ? 'error' : 'ready', trouble }
       })
@@ -168,6 +230,57 @@ function backfill(source: string): void {
       scheduleRetry(true)
     },
   ).finally(done)
+}
+
+/** The last read of a sector's bags that the canonical relay did not answer, until one of that sector is answered. */
+let sectorRefusal: { sector: string; trouble: ReadTrouble } | null = null
+
+function noteSectorRead(sector: string, trouble: ReadTrouble | null): void {
+  // Only about where you are now: a late answer for a sector already left says nothing.
+  if (useLootStore.getState().sector !== sector) return
+  if (trouble) sectorRefusal = { sector, trouble }
+  else if (sectorRefusal?.sector === sector) sectorRefusal = null
+}
+
+/** The trouble of your current sector's read, if its last read was not answered. */
+function sectorTroubleNow(): ReadTrouble | null {
+  return sectorRefusal !== null && sectorRefusal.sector === useLootStore.getState().sector ? sectorRefusal.trouble : null
+}
+
+/**
+ * Your sector is `sector` now: its bags are read at once (and with every
+ * backfill after). What they bring joins the list; a read the canonical relay
+ * did not answer is trouble, asked again (scheduleRetry) by a whole backfill,
+ * unless you have left that sector by the time it comes back.
+ */
+export function setLootSector(sector: string | null): void {
+  const { source, sector: was } = useLootStore.getState()
+  if (sector === was) return
+  useLootStore.setState({ sector })
+  if (!source || !sector) return
+  queryChecked(sectorFilter(sector)).then(
+    ({ events, trouble: refused }) => {
+      if (useLootStore.getState().source !== source) return
+      noteSectorRead(sector, refused)
+      // A late answer for a sector already left: its bags still join, its refusal is no one's trouble now.
+      const trouble = sectorTroubleNow()
+      const here = summarize(events)
+      useLootStore.setState((s) => {
+        const items = standing(mergeLoot(s.items, here))
+        writeCache(items)
+        // An answer here says nothing about the newest bags' trouble; a refusal is trouble of its own.
+        return { items, ...(trouble && !s.trouble ? { trouble } : {}), ...(items.length > 0 && s.status !== 'ready' ? { status: 'ready' as const } : {}) }
+      })
+      if (trouble) scheduleRetry(true)
+    },
+    () => {
+      if (useLootStore.getState().source !== source) return
+      noteSectorRead(sector, 'unreachable')
+      if (!sectorTroubleNow()) return
+      if (!useLootStore.getState().trouble) useLootStore.setState({ trouble: 'unreachable' })
+      scheduleRetry(true)
+    },
+  )
 }
 
 /** Read the bags again (RETRY), keeping the rows on screen while it runs. */
@@ -195,6 +308,9 @@ export function useLoot(): Loot {
   const items = useLootStore((s) => s.items)
   const status = useLootStore((s) => s.status)
   const trouble = useLootStore((s) => s.trouble)
+  // Where you stand: your chain head's sector, read again as it changes.
+  const sector = useCyberspace((s) => sectorOf(s.position))
   useEffect(() => { ensureLoot(relays) }, [relays])
-  return { items, status, trouble }
+  useEffect(() => { setLootSector(sector) }, [sector])
+  return { items, status, trouble, sector }
 }

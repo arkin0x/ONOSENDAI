@@ -20,7 +20,7 @@ import { slotOf } from './Dock'
 
 /** What a tap does with each tool, behind the strip's ?. */
 export const TOOL_HELP: Record<Tool, string> = {
-  view: 'Look around: one finger orbits, two pan, pinch zooms. Tap the view ball for views. Pick a tool to build.',
+  view: 'Look around: one finger orbits, two pan, pinch zooms. Tap the view ball for views, or to tip or roll the grid a quarter so the next points go on another plane. Pick a tool to build.',
   stamp: 'Tap the grid to place the shape where the ghost shows. Q turns it.',
   add: 'Tap the grid to place a vertex at the current level.',
   select: 'Tap points, or drag boxes, to gather them. INVERT makes taps and boxes take points out; DESELECT lets go. Drag the view ball to turn the view.',

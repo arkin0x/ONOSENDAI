@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Globe, PaintBucket, Pipette, Waypoints } from 'lucide-react'
+import { Globe, PaintBucket, Pipette, Puzzle } from 'lucide-react'
 import { rgbToHex } from 'sno-core/shards'
 import { noCallout } from '../hooks/useRepeatable'
 import { useWorkshop } from '../store/useWorkshop'
@@ -46,7 +46,7 @@ export function ColorActs(): JSX.Element | null {
       </button>
       {selection.length > 0 && (
         <button className="workshop__color ws__act" onClick={() => w().colorConnected(w().color)} title="The color onto these points and everything joined to them by faces" aria-label="Color the connected piece" style={{ borderColor: hex }} {...noCallout}>
-          <Waypoints size={17} strokeWidth={2.25} aria-hidden />
+          <Puzzle size={17} strokeWidth={2.25} aria-hidden />
         </button>
       )}
       {/* The bucket: the color onto the points in hand. With faces in

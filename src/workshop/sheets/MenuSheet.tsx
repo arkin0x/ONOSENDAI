@@ -135,9 +135,9 @@ export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, s
           An object is colored points on a grid of whole units, drawn SOLID (faces, colors blending
           across them), POINTS (every point a light) or LINES (one line through the points in the
           order they were made). STAMP places a whole shape; ADD one point; SELECT points, by tap
-          or by dragging a box, to move, color or delete them together, and CONNECT takes everything
+          or by dragging a box, to move, color or delete them together, and JOINED takes everything
           faces join to them; FACE picks corners and FILL joins them, and a tap on a face selects it
-          for DELETE FACE. Your color, last in the dock, opens all 256 colors, with the ones you
+          to move, color, flip or delete. Your color, last in the dock, opens all 256 colors, with the ones you
           used most recently on top; the buttons at the bottom right put the color on the whole object, the
           connected piece or the selected points, and the dropper takes a point's or face's color. Stamps keep their own corners even where they touch, so a red block against a
           blue one keeps a crisp edge. The arrows on the left set LEVEL, the height the placing tools work at.
@@ -146,7 +146,7 @@ export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, s
           the object at true size before you place it. Under SHARD, PUBLISH puts the shard on your relays as a
           public object: the Shard Feed lists it, anyone can place it, and PUBLISH AGAIN replaces it under the same
           address; RETRACT asks the relays to drop it. That is separate from hiding, which seals a copy at a place.
-          Keys: 1 2 3 4 tools, Q turns a stamp, WASD and
+          Keys: 1 LOOK, 2 STAMP, 3 ADD, 4 SELECT, 5 FACE, Q turns a stamp, WASD and
           RF or the arrows nudge the selection in screen directions, C selects what faces join, Del
           deletes, Enter fills, [ ] change the level, Ctrl+Z undoes, Esc closes a sheet, then
           clears, then closes the workshop.

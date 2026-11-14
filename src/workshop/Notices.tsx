@@ -26,7 +26,7 @@ export function Intro(): JSX.Element | null {
       <h3 className="workshop__intro-title">MAKE A SHARD</h3>
       <ol className="workshop__intro-steps">
         <li><b>STAMP</b> a shape: tap STAMP at the bottom, then the grid where the ghost shows.</li>
-        <li>One finger <b>orbits</b> (in SELECT it draws a box), or drag the <b>view ball</b> top right; two fingers <b>pan</b>. The arrows on the left raise the level to stack things.</li>
+        <li>One finger <b>orbits</b>, or drag the <b>view ball</b> top right (in SELECT one finger draws a box); two fingers <b>pan</b>. The arrows on the left raise the level to stack things.</li>
         <li><b>DEPLOY</b> hides it in the world at a place you choose.</li>
       </ol>
       <button className="workshop__btn workshop__intro-ok" onClick={done}>GOT IT</button>

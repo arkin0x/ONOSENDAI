@@ -49,7 +49,8 @@ describe('VIEW ITEM on a reaction to something this identity hid', () => {
   })
 
   it('a moved item, reacted to by its lineage', () => {
-    const on = onOf(reaction([['e', FIRST, '', ME], ['p', ME], ['k', '1']]))
+    // As this app writes it: a like on a kind 1 counts only from a Cyberspace client (2026-11-14).
+    const on = onOf(reaction([['e', FIRST, '', ME], ['p', ME], ['k', '1'], ['client', 'ONOSENDAI']]))
     expect(hiddenRowFor([byReference, moved], on as never)).toBe(moved)
   })
 

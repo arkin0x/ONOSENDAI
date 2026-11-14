@@ -19,7 +19,7 @@ import { nudgeFor, nudgeLabel, useBenchView, type NudgeName } from './benchAxes'
 /**
  * The CONTROLS pad: the main pad's nine cells, for the selection. Arrows move
  * it a unit in screen directions (the sub-label says which world axis that is
- * right now), the corners CONNECT and DELETE, the hub counts the points and
+ * right now), the corners JOINED and DELETE, the hub counts the points and
  * clears them.
  */
 function ControlsPad({ points, objects = 0 }: { points: number; objects?: number }): JSX.Element {
@@ -121,9 +121,9 @@ function SelectRow({ inHand }: { inHand: boolean }): JSX.Element {
         <span className="touchpad__sub">INVERT</span>
       </button>
       {inHand && (
-        <button className="touchpad__key" title="Let everything go (Esc)" aria-label="Deselect everything" {...noCallout} onClick={() => { w().selectVertex(null); w().clearFacePick() }}>
+        <button className="touchpad__key touchpad__key--long" title="Let everything go (Esc)" aria-label="Deselect everything" {...noCallout} onClick={() => { w().selectVertex(null); w().clearFacePick() }}>
           <X size={15} strokeWidth={2.25} aria-hidden />
-          <span className="touchpad__sub">DESELECT</span>
+          <span className="touchpad__sub">DE<wbr />SELECT</span>
         </button>
       )}
     </div>
@@ -184,7 +184,7 @@ function ActionRow({ points, verts, parts, tool, face, picks, faces }: { points:
       {showSub && (
         <button className="touchpad__key touchpad__key--long" title="Cut each fully selected face into four, or a selected edge in two" aria-label="Subdivide the selection" {...noCallout} onClick={() => w().subdivideSelection()}>
           <Grid2x2Plus size={15} strokeWidth={2.25} aria-hidden />
-          <span className="touchpad__sub">SUBDIVIDE</span>
+          <span className="touchpad__sub">SUB<wbr />DIVIDE</span>
         </button>
       )}
       {showAuto && (

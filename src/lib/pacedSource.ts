@@ -75,6 +75,8 @@ export function resetPaced(): void {
   ends = EPOCH_ENDS; tip = null; skewMs = 0; version++; lastKey = null; lastStamp = NaN
   started = false
   paceBook = new HeaderBook()
+  live = 0
+  lastKickMs = -Infinity
 }
 
 /**
@@ -89,6 +91,9 @@ export function readPaced(key: unknown, stamp: number, nowMs: number = Date.now(
   const t = (nowMs + skewMs) / 1000
   reading.nowS = monoMs / 1000
   reading.known = pacedKnown(t, ends, tip)
+  // Not known while the feed runs (a tip gone stale behind a sleeping tab, a
+  // window just closed): look again now rather than at the next poll.
+  if (!reading.known && started && monoMs - lastKickMs > KICK_MS) { lastKickMs = monoMs; void refresh(true) }
   reading.beta = reading.known ? pacedHeight(t, ends) : 0
   reading.secondsPerBlock = pacedSecondsPerBlock(t, ends)
   reading.version = version
@@ -97,10 +102,21 @@ export function readPaced(key: unknown, stamp: number, nowMs: number = Date.now(
 
 // ---- the feed ------------------------------------------------------------------
 
-/** How often the feed looks again for a new tip and window end. */
+/** How often the feed looks again for a new tip and window end, while anything moves. */
 export const PACED_POLL_MS = 60_000
+/** Least time between the looks a not-known reading asks for. */
+export const KICK_MS = 15_000
 
 let started = false
+let lastKickMs = -Infinity
+/** Objects with motion mounted anywhere on the page (scene/animMotion.ts): the poll runs only while there are any. */
+let live = 0
+
+/** An animated object mounted (+1) or went (−1). The first one starts the feed. */
+export function noteMoving(delta: 1 | -1): void {
+  live = Math.max(0, live + delta)
+  if (live > 0) startPacedClock()
+}
 /** Window-end headers from NTH's anchors: a book of its own, so its absences never hold back the seeds clock's. */
 let paceBook = new HeaderBook()
 
@@ -110,20 +126,24 @@ export function startPacedClock(): void {
   started = true
   void measureSkew()
   void refresh()
-  setInterval(() => { void refresh() }, PACED_POLL_MS)
+  setInterval(() => { if (live > 0) void refresh() }, PACED_POLL_MS)
+  // Back from a sleep or a background tab: the tip is likely stale, so ask at once.
+  const back = (): void => { if (live > 0 && document.visibilityState !== 'hidden') void refresh(true) }
+  document.addEventListener('visibilitychange', back)
+  window.addEventListener('focus', back)
 }
 
 let refreshing: Promise<void> | null = null
 
-/** One look: the trusted tip, then any window end at or below it not yet known. */
-export function refresh(): Promise<void> {
+/** One look: the trusted tip, then any window end at or below it not yet known. `force` asks NTH for its tip even if it was asked within the last two minutes. */
+export function refresh(force = false): Promise<void> {
   refreshing ??= (async () => {
     try {
       // Imported here, not at the top: the seeds sources carry the DNA resolver and
       // its shipped DNAs, which a page with no animated object has no reason to load.
       const seeds = await import('./seeds/seedSources')
       const { query } = await import('./relay')
-      const top = await seeds.refreshTrustedTip(null)
+      const top = await seeds.refreshTrustedTip(null, Date.now(), force)
       const tipTime = top !== null ? seeds.headerBook.time(top) : undefined
       const nextTip = top !== null && tipTime !== undefined ? { height: top, time: tipTime } : null
       const K = nextTip ? lastClosedWindow(nextTip.height) : EPOCH_WINDOW

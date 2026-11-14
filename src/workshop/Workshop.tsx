@@ -227,12 +227,15 @@ export function AnimRow(): JSX.Element {
     const value = (text ?? current).trim()
     if (value === '') { w().setAnim(undefined); setText(null); setNote(null); return }
     let raw: unknown
-    try { raw = JSON.parse(value) } catch { setNote('Not JSON: a list of motions, like [["turn","y",30,1,0]]'); return }
-    const entries = Array.isArray(raw) ? raw.length : 0
+    try { raw = JSON.parse(value) } catch { raw = undefined }
+    // Anything but a list changes nothing: it would read as no motion and remove what is there.
+    if (!Array.isArray(raw)) { setNote('Not a list of motions: like [["turn","y",30,1,0]]'); return }
+    const entries = raw.length
     const kept = readAnim(raw).length
     w().setAnim(raw)
     setText(null)
-    setNote(kept === entries ? `${kept} motion${kept === 1 ? '' : 's'}; VIEW shows it moving` : `${kept} of ${entries} kept: a malformed entry, an unknown word, or more than four is ignored`)
+    if (kept === 0) setNote(entries === 0 ? 'Motion removed' : `None of ${entries} could be read, so the motion is removed: a malformed entry or an unknown word is ignored`)
+    else setNote(kept === entries ? `${kept} motion${kept === 1 ? '' : 's'}; VIEW shows it moving` : `${kept} of ${entries} kept: a malformed entry, an unknown word, or more than four is ignored`)
   }
   return (
     <>

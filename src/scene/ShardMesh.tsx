@@ -48,7 +48,7 @@ import { DOTS_ORDER, basicFaceProps, benchOrders, lineProps, litFaceProps, shard
 import { HEADLAMP_FACES, HEADLAMP_LINES } from './headlamp'
 import { holdPlaced, placedBuffers, type PlacedBuffers } from './placedBuffers'
 import { animOf, type Motion } from '../lib/anim'
-import { useAnimMotion } from './animMotion'
+import { AnimGroups, clipWalls } from './animMotion'
 
 export { FACE_TAG_STENCIL } from './shardFaces'
 
@@ -363,14 +363,10 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   const motions = still ? NO_MOTION : animOf(given)
   const moving = motions.length > 0
   const poseTurn = useMemo(() => (moving && pose ? renderPose(pose).elements : null), [moving, pose])
-  const anim = useAnimMotion(motions, poseTurn, moving ? regionClip : undefined)
+  const walls = useMemo(() => (moving && regionClip ? clipWalls(regionClip) : null), [moving, regionClip])
   const clip = moving ? undefined : regionClip
-  const clipPlanes = useMemo(() => (anim.planes && givenPlanes ? [...anim.planes, ...givenPlanes] : anim.planes ?? givenPlanes), [anim.planes, givenPlanes])
-  const glForClip = useThree((s) => s.gl)
-  useEffect(() => { if (anim.planes) glForClip.localClippingEnabled = true }, [glForClip, anim.planes])
-  const motion = (node: ReactNode): ReactNode => (moving
-    ? <group ref={anim.outer}><group ref={anim.inner} matrixAutoUpdate={false}>{node}</group></group>
-    : node)
+  const clipPlanes = useMemo(() => (walls && givenPlanes ? [...walls.world, ...givenPlanes] : walls?.world ?? givenPlanes), [walls, givenPlanes])
+  const motion = (node: ReactNode): ReactNode => (moving ? <AnimGroups motions={motions} pose={poseTurn} walls={walls}>{node}</AnimGroups> : node)
   // What everything below is drawn at: the object's own opacity (DECK-0003
   // §1.11, with its 10% floor), times a ghost's; an avatar ignores its own.
   // A placed object reaches here with its own model, so it never takes its
@@ -880,7 +876,7 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
     // Its own share (without a ghost's), as every face and line keeps one, so the EDIT breath and the build dim's fade scale it rather than skip it.
     let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={(ghost ? 0.45 : 0.8) * dim} userData-share={0.8 * dim} /></lineSegments>
     // The part's own model, so its own opacity, never the parent's (§1.10).
-    if (model) body = <ShardMesh shard={model} placed nested={r.children} lit={lit} ghost={ghost} world={world} headlamp={headlamp} cull={cull} dim={dim} ignoreOpacity={ignoreOpacity} still={still} />
+    if (model) body = <ShardMesh shard={model} placed nested={r.children} lit={lit} ghost={ghost} world={world} headlamp={headlamp} cull={cull} dim={dim} still={still} ignoreOpacity={ignoreOpacity} />
     // Selected: an amber box around what the placement draws, in its own frame so it turns with it.
     const box = selected?.includes(i) ? (model ? placedBounds(model, r.children) : null) ?? { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] } : null
     return (

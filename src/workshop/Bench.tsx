@@ -199,7 +199,7 @@ function Ghost(): JSX.Element | null {
     const m = new Matrix4().fromArray(partMatrix({ ref: 0, at: aim, turn: [0, (90 * facing) % 360, 0], step: 0 }, unit, object.shard.unit))
     return (
       <group matrix={m} matrixAutoUpdate={false}>
-        <ShardMesh shard={object.shard} ghost />
+        <ShardMesh shard={object.shard} ghost still />
       </group>
     )
   }
@@ -214,7 +214,7 @@ function Ghost(): JSX.Element | null {
   if (!model) return null
   return (
     <group position={UP(landing(kind, size, facing, aim, extent, plane))}>
-      <ShardMesh shard={model} ghost />
+      <ShardMesh shard={model} ghost still />
     </group>
   )
 }

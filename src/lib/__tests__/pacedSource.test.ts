@@ -60,7 +60,7 @@ describe('feeding the clock', () => {
     expect(r.beta).toBeCloseTo(pacedHeight(t / 1000, st.ends), 9)
   })
 
-  it('a header that does not hash to H, or an anchor not signed by NTH, gives no time: the blobs are asked instead', async () => {
+  it('a header that does not hash to H gives no time: the blobs are asked instead', async () => {
     served = events.map((e) => {
       if (!e.tags.some((t) => t[0] === 'B' && t[1] === '973727')) return e
       // The header's last byte changed: it no longer hashes to H.
@@ -71,6 +71,21 @@ describe('feeding the clock', () => {
     expect(pacedState().ends).toEqual([EPOCH_END_TIME])
     // Not known: the tip closed window 482 and its end is missing, so everything holds still.
     expect(readPaced('frame', 2, (pacedState().tip!.time + 60) * 1000).known).toBe(false)
+  })
+
+  it('an anchor at the right height from any other key gives no time, even with a header that hashes', async () => {
+    served = events.map((e) => (e.tags.some((t) => t[0] === 'B' && t[1] === '973727') ? { ...e, pubkey: 'ab'.repeat(32) } : e))
+    await refresh()
+    // Not asked of anyone but NTH, and nothing else taken.
+    expect(pacedState().ends).toEqual([EPOCH_END_TIME])
+    expect(fetchSeedHeaders).toHaveBeenCalledWith([973_727])
+  })
+
+  it('a valid-looking NTH anchor whose signature does not verify gives no time', async () => {
+    // A fresh copy, as a relay hands one over: a spread would carry nostr-tools' verified mark from the earlier tests.
+    served = events.map((e) => (e.tags.some((t) => t[0] === 'B' && t[1] === '973727') ? { ...JSON.parse(JSON.stringify(e)), sig: '00'.repeat(64) } : e))
+    await refresh()
+    expect(pacedState().ends).toEqual([EPOCH_END_TIME])
   })
 
   it('one reading a frame: the same object, worked once', () => {

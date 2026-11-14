@@ -82,7 +82,10 @@ describe('ANIM in the SHARD panel', () => {
     await typeAndSet(m, '[["slide","z",720,4,1,0]]')
     await typeAndSet(m, 'turn please')
     expect(anim()).toEqual([['slide', 'z', 720, 4, 1, 0]])
-    expect(m.says('Not JSON')).toBe(true)
+    expect(m.says('Not a list of motions')).toBe(true)
+    // Valid JSON that is not a list changes nothing either.
+    await typeAndSet(m, '{"turn":1}')
+    expect(anim()).toEqual([['slide', 'z', 720, 4, 1, 0]])
     useWorkshop.getState().undo()
     expect(anim()).toBeUndefined()
     useWorkshop.getState().redo()

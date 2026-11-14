@@ -37,10 +37,12 @@ export const EPOCH_END_TIME = 1_792_153_758
 /** β at the epoch's switch: the first height after the epoch window. */
 export const EPOCH_BETA = 971_712
 /**
- * How long a trusted tip vouches that the next window has not switched:
- * a later block's header time is at least about two hours behind the tip's
- * at worst (header times may lag; MTP rule), and the switch comes four hours
- * after it, so two hours past the tip's header time is still safe.
+ * How long a trusted tip vouches that the next window has not switched. In
+ * practice a later block's header time is no more than about two hours
+ * behind the tip's (header times may lag the clock, bounded by the median
+ * time past), and the switch comes four hours after the window end, so two
+ * hours past the tip's header time is still before any switch. Practical,
+ * not guaranteed: a tip stamped up to two hours fast narrows the margin.
  */
 export const TIP_FRESH_S = 7_200
 
@@ -118,9 +120,7 @@ export function pacedKnown(t: number, ends: WindowEnds, tip: TrustedTip | null):
   if (!tip || ends.length === 0) return false
   const K = EPOCH_WINDOW + ends.length - 1
   // The tip has closed a window whose end we do not have.
-  if (tip.height >= windowEndHeight(K + 1)) {
-    return false
-  }
+  if (tip.height >= windowEndHeight(K + 1)) return false
   // The next end is not mined as far as the tip knows; that holds only while the tip is fresh.
   return t < tip.time + TIP_FRESH_S
 }

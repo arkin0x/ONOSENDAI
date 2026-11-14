@@ -10,14 +10,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
 import { Group, Matrix4, Vector3, type Object3D } from 'three'
-import { newShard, type ShardModel } from 'sno-core/shards'
+import { newShard, toRender, type ShardModel } from 'sno-core/shards'
 import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 import { ShardMesh } from '../ShardMesh'
 import { feedPaced, readPaced, resetPaced } from '../../lib/pacedSource'
 import { EPOCH_END_TIME, pacedHeight } from '../../lib/pacedClock'
 import { phaseAt, readAnim } from '../../lib/anim'
 import { newPhaseState, stepPhases } from '../animMotion'
-import type { Pose } from '../../lib/pose'
+import { applyPose, frameAt, poseMatrix, type Pose } from '../../lib/pose'
 
 const A482 = 1_793_300_370
 const ENDS = [EPOCH_END_TIME, A482]
@@ -68,6 +68,8 @@ describe('a shard with anim in the scene', () => {
     await r.frame()
     const g = motionGroup(r.state().scene)
     expect(g).not.toBeNull()
+    // The frame gate leaves its every-frame motion out of what counts as activity (lib/frameGate.ts).
+    expect(g!.userData.ambientMotion).toBe(true)
     const beta = pacedHeight(T / 1000, ENDS)
     const angle = phaseAt({ c: 100, b: 1, phi: 0 }, beta) * 2 * Math.PI
     const p = carried(g!)
@@ -105,19 +107,25 @@ describe('a shard with anim in the scene', () => {
     expect(carried(g).z).toBeCloseTo(Math.sin(later), 6)
   })
 
-  it('folds a world shard\'s pose round its motion: G · A · Gᵀ', async () => {
+  it('folds a world shard\'s pose round its motion: G · A · Gᵀ, against the posed vertex turned in the model', async () => {
     feedPaced({ ends: ENDS, tip: TIP })
-    // A pose that lays model +Y along cyberspace +X (a quarter turn about Z).
-    const pose: Pose = [0, 1, 0, -1, 0, 0, 0, 0, 1]
+    // A shard standing on the Earth somewhere, facing 40 degrees: no symmetry to hide a swapped conjugation.
+    const pose: Pose = poseMatrix(frameAt(37, -122), 40)
     r = await r3fRoot()
     await r.render(createElement(ShardMesh, { shard: hoop([['turn', 'y', 100, 1, 0]]), world: true, pose }))
     await r.frame()
     const g = motionGroup(r.state().scene)!
-    // The axis of the turn, model +Y, is drawn along render +X under this pose: it must stay put.
-    const axis = new Vector3(1, 0, 0).applyMatrix4(g.matrix)
-    expect(axis.x).toBeCloseTo(1, 6)
-    expect(axis.y).toBeCloseTo(0, 6)
-    expect(axis.z).toBeCloseTo(0, 6)
+    const th = phaseAt({ c: 100, b: 1, phi: 0 }, pacedHeight(T / 1000, ENDS)) * 2 * Math.PI
+    for (const v of [[120, 0, 0], [0, 0, 120], [37, 55, -80]] as Array<[number, number, number]>) {
+      // Ground truth: turn the model vertex right-handed about model +Y, then pose it, then the render mapping.
+      const turned: [number, number, number] = [v[0] * Math.cos(th) + v[2] * Math.sin(th), v[1], -v[0] * Math.sin(th) + v[2] * Math.cos(th)]
+      const want = toRender(applyPose(pose, turned))
+      // What is drawn: the posed vertex (the geometry ShardMesh builds), through the motion group.
+      const drawn = new Vector3(...toRender(applyPose(pose, v))).applyMatrix4(g.matrix)
+      expect(drawn.x).toBeCloseTo(want[0], 9)
+      expect(drawn.y).toBeCloseTo(want[1], 9)
+      expect(drawn.z).toBeCloseTo(want[2], 9)
+    }
   })
 
   it('a malformed or unknown anim draws the shard exactly as before, with no motion group', async () => {

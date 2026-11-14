@@ -148,13 +148,18 @@ function Rig({ target, look }: { target: [number, number, number]; look: React.M
   return null
 }
 
-/** The key's mark: a slow gold ring round it while it lies there, so it is seen from below. */
-function KeyMark({ at }: { at: [number, number, number] }): JSX.Element {
+/**
+ * The key's mark: a slow gold ring round it while it lies there, so it is
+ * seen from below. `lift` raises the ring to the key's middle: a key item's
+ * model is centred on its place (DECK-0004 §2.5), so 0; the LEGACY key's
+ * look stood on its place, its base there, so 1.
+ */
+function KeyMark({ at, lift }: { at: [number, number, number]; lift: number }): JSX.Element {
   const ring = useRef<Group>(null)
   useFrame(({ clock }) => {
     if (!ring.current) return
     const t = clock.elapsedTime
-    ring.current.position.y = 1 + 0.2 * Math.sin(t * 2.4)
+    ring.current.position.y = lift + 0.2 * Math.sin(t * 2.4)
     ring.current.rotation.y = t * 1.2
   })
   return (
@@ -210,8 +215,9 @@ function GameCanvas({ session, at, look, items }: { session: GameSession; at: Po
   const drawn = useMemo(() => (world ? sceneNow(game, { shards: world, door, room }, progress).drawn : null), [game, world, door, room, taken, progress.doorOpen])
   // A real key item, once its bag is open, until it is in ITEMS.
   const lying = useMemo(() => keys.filter((k) => !keyItemHeld(items, k)), [keys, items])
-  // The ring marks where the key lies, seen from below, until it is held (or, LEGACY, taken).
-  const ring = door ? (game.keyBag && !holdsDoorKey(session, items) && !progress.doorOpen ? game.keyBag.at : null) : game.key && !taken ? game.key.at : null
+  // The ring marks where the key lies, seen from below, until it is held (or, LEGACY, taken): round the key item itself once its
+  // bag is open, so it follows the item wherever the bag puts it, and before that where the game says the key lies (GameKeyBag).
+  const ring = door ? (game.keyBag && !holdsDoorKey(session, items) && !progress.doorOpen ? { at: lying[0]?.at ?? game.keyBag.at, lift: 0 } : null) : game.key && !taken ? { at: game.key.at, lift: 1 } : null
   return (
     <Canvas camera={{ fov: 70, near: 0.05, far: 400, position: [me[0], me[1], me[2] + CAMERA_DISTANCE] }} dpr={[1, 2]} gl={{ antialias: true }} style={{ background: BG }}>
       <fog attach="fog" args={[BG, 6, 60]} />
@@ -221,7 +227,7 @@ function GameCanvas({ session, at, look, items }: { session: GameSession; at: Po
       <Rig target={me} look={look} />
       {drawn && <Shards game={game} world={drawn} />}
       {pads.map((p, i) => <PadMark key={i} at={p.at} beacon={p.beacon} />)}
-      {ring && <KeyMark at={centreOf(game, ring)} />}
+      {ring && <KeyMark at={centreOf(game, ring.at)} lift={ring.lift} />}
       {lying.map((k) => <KeyItemMark key={k.eventId} game={game} item={k} />)}
       <Player at={me} />
     </Canvas>

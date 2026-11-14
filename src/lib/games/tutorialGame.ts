@@ -79,8 +79,25 @@ export const TUTORIAL_DEV_PUBKEY = '718c171d3e5a21c631dfd33159befec43f8687efb91b
  */
 export const TUTORIAL_ENTRY = at(8, 17, 45)
 
-/** The key's coordinate: on the top platform, beside its centre (no other piece stands there). */
+/**
+ * The key's spot: on the top platform, beside its centre (no other piece
+ * stands there), in the platform's top face. LEGACY: the game-only key's look
+ * stood here, its origin at the middle of its base, so it sat on the platform.
+ */
 export const KEY_AT = at(37, 26, 43)
+/**
+ * The key item's coordinate: two above the key's spot. An item's model is
+ * drawn with its CENTRE on the item's place (DECK-0004 §2.5), not its base as
+ * the LEGACY look was, so at the spot itself the gold key (2.2 gibsons tall)
+ * sank half into the platform (owner, 2026-11-14: "the key appears inside the
+ * platform"). One above still sinks 0.1, and its bob dips lower; two above
+ * floats it clear: its lowest point is 0.9 over the platform at rest, and at
+ * the bottom of its bob 0.82 in the game view and 0.68 in cyberspace's, whose
+ * bob is larger. Still in the key bag's region (y offsets 24 to 31), and
+ * within TAKE's reach (lib/games/progress.ts KEY_REACH) of a player standing
+ * on the platform by it, at the edge of that reach.
+ */
+export const KEY_ITEM_AT = at(37, 28, 43)
 /** The hall gate's coordinate: the sill of the rotunda's hallway, in its rim plane. The door stands here. */
 export const GATE_AT = at(40, 16, 32)
 
@@ -91,7 +108,7 @@ export const GATE_AT = at(40, 16, 32)
  * height 2 leaves the platform's far row out). Reaching it in the game derives
  * its key, a moment's work, and opens the bag. No other platform reaches it.
  */
-export const KEY_BAG = { at: KEY_AT, height: 3 }
+export const KEY_BAG = { at: KEY_ITEM_AT, height: 3 }
 
 /**
  * The gate as a DECK-0004 door: its coordinate one gibson inside the hall's

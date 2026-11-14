@@ -15,7 +15,9 @@ import { heldFromFind } from '../../inventory'
 import { regionBase } from '../../doors'
 import { regionKeyAt } from '../../shardCrypto'
 import { parseHint } from '../../hint'
-import { DOOR_AT, KEY_AT, KEY_BAG, TUTORIAL_DEV_PUBKEY, TUTORIAL_GAME } from '../tutorialGame'
+import { DOOR_AT, KEY_AT, KEY_BAG, KEY_ITEM_AT, TUTORIAL_DEV_PUBKEY, TUTORIAL_GAME } from '../tutorialGame'
+import { modelFromPayload } from '../../../hooks/useItemModel'
+import { animationOf, bobAmplitude, sweptHalf } from '../../itemModel'
 import { bagList, loadWorld, worldKey } from '../world'
 import { doorKey, doorLooks, doorSecretWith, keyItemHeld, readKeyBag, readRoom, sceneNow, thingsNow, worldDoorOf } from '../keyDoor'
 import { startProgress } from '../progress'
@@ -38,19 +40,36 @@ beforeAll(async () => {
 }, 60_000)
 
 describe('the key item, sealed to its own place', () => {
-  it('is a key item signed by the game key, at the key\'s spot, wearing the public gold key', () => {
+  it('is a key item signed by the game key, two above the key\'s spot (its model centred there, DECK-0004 §2.5), wearing the public gold key', () => {
     expect(keys).toHaveLength(1)
     const k = keys[0]
     expect(k.type).toBe('key')
     expect(k.inner?.pubkey).toBe(TUTORIAL_DEV_PUBKEY)
     expect(k.inner?.sig).toBeTruthy()
-    expect(k.at).toEqual(KEY_AT)
+    expect(k.at).toEqual(KEY_ITEM_AT)
     expect(k.key?.itemPubkey).toBe(getPublicKey(hexToBytes(k.key!.secretHex)))
     expect(k.key?.model?.address).toBe(`33331:${TUTORIAL_DEV_PUBKEY}:tutorial-dungeon-key`)
     // The model is a public object (DECK-0004 §2.5), in the fixture with the bags.
     const model = events.find((e) => e.kind === 33331)!
     expect(model.tags.some((t) => t[0] === 'encrypted')).toBe(false)
     expect(JSON.parse(model.content).name).toBe('Tutorial dungeon: the key')
+  })
+
+  it('floats clear of the top platform: its model, centred on its place (DECK-0004 §2.5), never dips into the floor (owner, 2026-11-14)', async () => {
+    const k = keys[0]
+    const address = k.key!.model!.address
+    const model = (await modelFromPayload(address, JSON.parse(events.find((e) => e.kind === 33331)!.content)))!
+    expect(model.shard.unit).toBe(0)
+    // The platform under it, its top face, in gibsons from the key's spot (its origin is the middle of its top face).
+    const platform = shards.find((w) => w.shard.name.includes('platform') && w.at.y === KEY_AT.y && w.at.x === KEY_AT.x)!
+    const top = Math.max(...platform.shard.vertices.map((v) => v.p[1] + (v.t?.[1] ?? 0) / 120)) + Number(platform.at.y - KEY_AT.y)
+    // The key's lowest point at the bottom of its bob, in either view: the cyberspace one (lib/itemModel.ts) bobs further than the game's (0.08).
+    const animation = animationOf(k.inner!.tags)
+    const bob = Math.max(0.08, bobAmplitude(sweptHalf(model.extent, animation), animation))
+    const lowest = Number(KEY_ITEM_AT.y - KEY_AT.y) - model.extent.half[1] - bob
+    expect(lowest - top).toBeGreaterThan(0.5)
+    // And it was not so at the key's spot itself: half the key sank there.
+    expect(0 - model.extent.half[1] - top).toBeLessThan(-1)
   })
 
   it('is not readable from the world: the world bag names no key and no key bag, and the world key opens no key bag', async () => {
@@ -72,8 +91,8 @@ describe('the key item, sealed to its own place', () => {
     for (const [bag, h] of [[keyBag, 3], [worldBag, 6]] as const) {
       const box = parseHint(bag.tags, h)!
       expect(box.heights).toEqual([30, 30, 30])
-      expect(box.base).toEqual({ x: (KEY_AT.x >> 30n) << 30n, y: (KEY_AT.y >> 30n) << 30n, z: (KEY_AT.z >> 30n) << 30n })
-      expect(bag.tags.find((t) => t[0] === 'S')?.[1]).toBe(`${KEY_AT.x >> 30n}-${KEY_AT.y >> 30n}-${KEY_AT.z >> 30n}`)
+      expect(box.base).toEqual({ x: (KEY_ITEM_AT.x >> 30n) << 30n, y: (KEY_ITEM_AT.y >> 30n) << 30n, z: (KEY_ITEM_AT.z >> 30n) << 30n })
+      expect(bag.tags.find((t) => t[0] === 'S')?.[1]).toBe(`${KEY_ITEM_AT.x >> 30n}-${KEY_ITEM_AT.y >> 30n}-${KEY_ITEM_AT.z >> 30n}`)
     }
     // The room bag says nothing of where it is (DECK-0004 §3.7.2).
     const roomBag = events.find((e) => e.kind === HIDDEN_KIND && !e.tags.some((t) => t[0] === 'H'))!
@@ -157,7 +176,7 @@ describe('the gate, a DECK-0004 door', () => {
   it('offers TAKE by the key until it is in ITEMS, and OPEN at the door only with it', () => {
     const pr = startProgress(0)
     const empty = thingsNow(G, { door, keys }, pr, {}, ME)
-    expect(empty.keys).toEqual([KEY_AT])
+    expect(empty.keys).toEqual([KEY_ITEM_AT])
     expect(empty.door).toEqual({ at: DOOR_AT, opens: false })
     const row = heldFromFind(ME, keys[0], 0)!
     const held = thingsNow(G, { door, keys }, pr, { [row.id]: row }, ME)

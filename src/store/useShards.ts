@@ -2965,13 +2965,24 @@ export const useShards = create<ShardsState>((set, get) => {
     return { deployBag, deployHintHeld: deployBag.hint ? null : SECTOR_HINT }
   }
 
-  /** The same fresh-deploy state every start shares, at the height the bar stands at. */
-  const freshDeploy = (): Partial<ShardsState> => ({
-    deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0] as Turns, deployFollow: false, deployConstrain: CONSTRAIN_DEFAULT,
-    ...freshBag(get().deployHeight), deployBagFrom: null, deployStatus: 'idle' as const, deployError: null,
-    // A seed still mining for the deploy this replaces stops itself (plantSeed `current`); nothing of it stays on this bar.
-    deployNote: null, deployMining: false,
-  })
+  /**
+   * The same fresh-deploy state every start shares, at the height the bar
+   * stands at, but never past SCAN_MAX_HEIGHT: a height above it carried from
+   * the last deploy (a + by hand, an EDIT or MOVE of an item hidden there) is
+   * not this deploy's choice, and a bag there is found by no scan, not even on
+   * the hider's other devices (owner, 2026-11-14; lib/shallowBag.ts
+   * autoHeightMax). A MOVE or EDIT sets its own item's height after this.
+   */
+  const freshDeploy = (): Partial<ShardsState> => {
+    const height = Math.min(get().deployHeight, SCAN_MAX_HEIGHT)
+    return {
+      deployHeight: height,
+      deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0] as Turns, deployFollow: false, deployConstrain: CONSTRAIN_DEFAULT,
+      ...freshBag(height), deployBagFrom: null, deployStatus: 'idle' as const, deployError: null,
+      // A seed still mining for the deploy this replaces stops itself (plantSeed `current`); nothing of it stays on this bar.
+      deployNote: null, deployMining: false,
+    }
+  }
 
   /**
    * A chest's contents, signed one by one by this identity and sealed to the

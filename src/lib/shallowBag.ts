@@ -20,6 +20,21 @@ export function shallowBag(height: number): boolean {
   return height <= SCAN_MAX_HEIGHT
 }
 
+/**
+ * The highest height the deploy bar picks by itself (owner, 2026-11-14: a
+ * player's shards hidden at 13 were "missing" on his laptop and still on his
+ * phone). The automatic height fits the whole model (lib/deployFit.ts), and a
+ * model that sits across a big region edge, or is large, used to be fitted
+ * past SCAN_MAX_HEIGHT without anyone choosing it. There no scan finds it,
+ * not even the hider's own other devices: only the device that hid it holds
+ * its row and key. So the automatic height stops here, where discovery
+ * reaches; higher is a choice, made with + under the past-height warning.
+ * `ceiling` is the highest this device can hide at (DeployBar deployCeiling).
+ */
+export function autoHeightMax(ceiling: number): number {
+  return Math.min(ceiling, SCAN_MAX_HEIGHT)
+}
+
 /** The warning's line: short, in view, wherever a shallow bag is decided. */
 export const SHALLOW_WARN = '⚠ ANYONE VIEWING HERE CAN FIND THIS'
 

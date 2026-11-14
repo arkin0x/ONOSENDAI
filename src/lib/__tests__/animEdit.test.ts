@@ -60,12 +60,12 @@ describe('speed: cycles a minute <-> c/b a block, lowest terms', () => {
     expect(perMinute({ c: 30, b: 1 }, T)).toBeCloseTo(2.724, 3)
     expect(perMinute({ c: -1, b: 4 }, 600)).toBeCloseTo(-0.025, 6)
   })
-  it('stores a typed speed as the nearest small fraction, in lowest terms, that reads back the same to two decimals', () => {
+  it('stores a typed speed as the simplest fraction in lowest terms within half a percent', () => {
     for (const perMin of [0.1, 0.5, 1, 2.72, 3, 10, 25, 50]) {
       const r = rateFor(perMin, T)
       expect(Number.isInteger(r.c) && Number.isInteger(r.b)).toBe(true)
       expect(r.b).toBeGreaterThanOrEqual(1)
-      expect(Math.abs(perMinute(r, T) - perMin)).toBeLessThan(0.006)
+      expect(Math.abs(perMinute(r, T) - perMin)).toBeLessThanOrEqual(perMin * 0.005 + 1e-9)
       const g = (a: number, b: number): number => (b ? g(b, a % b) : a)
       expect(g(Math.abs(r.c), r.b)).toBe(1)
     }
@@ -74,6 +74,27 @@ describe('speed: cycles a minute <-> c/b a block, lowest terms', () => {
   it('clamps to 600 a block with a message, and never stops', () => {
     expect(rateFor(10_000, T)).toEqual({ c: MAX_RATE, b: 1, note: LIMITS.speed })
     expect(rateFor(0, T)).toEqual({ c: 1, b: 1000, note: LIMITS.slowest })
+  })
+  it('the stepper\'s round speeds land on short fractions; retyping the speed shown keeps the fraction', () => {
+    expect(rateFor(3, T)).toEqual({ c: 33, b: 1 })
+    expect(rateFor(0.1, T)).toEqual({ c: 11, b: 10 })
+    expect(rateFor(2.72, T, { c: 30, b: 1 })).toEqual({ c: 30, b: 1 })
+    expect(rawOf(setSpeed([m(['turn', 'y', 30, 1, 0])], 0, 2.72, T).list)).toEqual([['turn', 'y', 30, 1, 0]])
+  })
+  it('warns about a motion that may flicker more than 3 times a second (§1.14)', () => {
+    expect(setSpeed([m(['turn', 'y', 30, 1, 0])], 0, 50, T).note).toBeUndefined()
+    const path = [m(['path', 1, 1, 0, [1, 0, 0, 1], [2, 0, 0, 1], [3, 0, 0, 1], [4, 0, 0, 1], [0, 0, 0, 1]])]
+    expect(setSpeed(path, 0, 50, T).note).toBe(LIMITS.flicker)
+  })
+  it('an elevator crossing to or from Z keeps the travel shown', () => {
+    const list = [m(['lift', 'y', 240, 10, 1, 1, 0])]
+    const z = setAxis(list, 0, 2).list
+    expect(amountOf(z[0], 0)).toBe(2)
+    expect(amountOf(setAxis(z, 0, 0).list[0], 0)).toBe(2)
+  })
+  it('a leg time that shrinks to keep the ratio says so', () => {
+    const list = [m(['path', 1, 1, 0, [120, 0, 0, 2], [0, 0, 0, 1]])]
+    expect(setPoint(list, 0, 1, 'time', 2, 0).note).toBe(LIMITS.ratio)
   })
   it('best rational: exact for simple fractions', () => {
     expect(bestRational(0.25)).toEqual({ c: 1, b: 4 })
@@ -164,7 +185,7 @@ describe('the list and a path\'s points', () => {
     expect(setPoint(list, 0, 0, 'x', 500, 0).note).toBe(LIMITS.reach)
     const capped = setPoint(list, 0, 0, 'time', 5000, 0)
     expect(capped.list[0].pts[3]).toBe(1000)
-    expect(capped.note).toBe(LIMITS.reach)
+    expect(capped.note).toBe(LIMITS.time)
     // Written with no common factor: 1000 and 2 are 500 and 1.
     expect(rawOf(capped.list)[0].slice(4).map((p) => (p as number[])[3])).toEqual([500, 1])
   })

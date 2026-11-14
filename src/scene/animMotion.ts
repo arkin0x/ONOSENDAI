@@ -76,11 +76,12 @@ export function newPhaseState(n: number): PhaseState {
  * The phase each motion is shown at, written into `st.shown`. Pure but for
  * `st`: the eases live there.
  *
- * - Reduced motion: the rest pose at once, no ease (`st.held`; the caller
- *   draws the object as written, DECK-0003 §1.14), unless the reading is a
- *   position the viewer chose by hand (the workshop's scrub).
- * - β not known: phase 0, eased into from wherever it was (for turn, swing,
- *   slide and lift that is the rest pose too).
+ * - Reduced motion, or β not known: the rest pose at once, no ease
+ *   (`st.held`; the caller draws the object as written, DECK-0003 §1.14),
+ *   unless the reading is a position the viewer chose by hand (the
+ *   workshop's scrub). Holding still while the clock is not known is the
+ *   owner's rule for ONOSENDAI ("never guess"); the spec lets a reader run on
+ *   at the last pace it knows instead.
  * - Otherwise the true phase, eased into whenever the clock's version or
  *   knowledge changed since the last frame (§2.4): the error wrapped to the
  *   shortest way round, over min(3 s, max(0.5 s, |e| × P)).
@@ -88,7 +89,7 @@ export function newPhaseState(n: number): PhaseState {
  */
 export function stepPhases(motions: readonly Motion[], r: PacedReading, reduced: boolean, st: PhaseState): void {
   const n = motions.length
-  if (reduced && !r.chosen) {
+  if ((reduced || !r.known) && !r.chosen) {
     for (let i = 0; i < n; i++) { st.shown[i] = 0; st.err[i] = 0; st.len[i] = 0 }
     st.held = true
     st.version = r.version
@@ -101,7 +102,7 @@ export function stepPhases(motions: readonly Motion[], r: PacedReading, reduced:
   if (r.chosen) for (let i = 0; i < n; i++) st.len[i] = 0
   for (let i = 0; i < n; i++) {
     const m = motions[i]
-    const truth = r.known ? phaseAt(m, r.beta) : 0
+    const truth = phaseAt(m, r.beta)
     if (changed) {
       const e = wrapHalf(truth - st.shown[i])
       const period = m.c !== 0 ? (r.secondsPerBlock * m.b) / Math.abs(m.c) : 0

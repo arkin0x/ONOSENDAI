@@ -9,11 +9,17 @@
  *             so drawn even under reduced motion
  *
  * `point` is the path point being edited, drawn larger on the bench.
+ *
+ * It outlives the SHARD panel, so a phone can close the panel and watch, and
+ * stops when the shard on the bench changes, when the tool changes (an
+ * editing tool needs the object at rest under its handles), and when the
+ * workshop closes.
  */
 
 import { create } from 'zustand'
 import { pacedHeight } from '../lib/pacedClock'
 import { pacedEnds, pacedState } from '../lib/pacedSource'
+import { useWorkshop } from './useWorkshop'
 
 export interface AnimPreview {
   on: boolean
@@ -49,3 +55,10 @@ export const useAnimPreview = create<AnimPreview>((set) => ({
   setPoint: (point) => set({ point }),
   stop: () => set({ on: false, playing: false, scrub: null, point: null }),
 }))
+
+// What ends a preview: another shard, another tool, the workshop closing.
+useWorkshop.subscribe((now, before) => {
+  if (now.currentId !== before.currentId || now.tool !== before.tool || (!now.open && before.open)) {
+    if (useAnimPreview.getState().on || useAnimPreview.getState().point) useAnimPreview.getState().stop()
+  }
+})

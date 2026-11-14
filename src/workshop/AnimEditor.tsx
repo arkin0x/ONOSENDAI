@@ -20,11 +20,11 @@
  */
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { ArrowDown, ArrowUp, Pause, Play, Repeat2, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Pause, Play, Repeat2, Square, X } from 'lucide-react'
 import type { ShardModel } from 'sno-core/shards'
 import { MAX_MOTIONS, PATH_MAX, readAnim, type Motion } from '../lib/anim'
 import {
-  addPoint, addPreset, amountKind, amountOf, listOf, MOTION_NAMES, moveMotion, movePoint, objectReach, perMinute, pointsOf, PRESETS,
+  addPoint, addPreset, amountKind, amountOf, listOf, mayFlicker, MOTION_NAMES, moveMotion, movePoint, objectReach, perMinute, pointsOf, PRESETS,
   rawOf, removeMotion, removePoint, reverse, setAmount, setAxis, setPhase, setPoint, setRest, setSpeed, showNumber, stepSpeed, type Edited, type PresetId, type ShownPoint,
 } from '../lib/animEdit'
 import { pacedSecondsPerBlock } from '../lib/pacedClock'
@@ -37,11 +37,12 @@ import { useWorkshop } from '../store/useWorkshop'
 const AXIS_NAMES = ['X', 'Y', 'Z'] as const
 
 /** A number typed into a field, committed on Enter or blur; Escape puts the shown value back. */
-function NumberField({ value, onCommit, label, width = '7ch', onFocus }: { value: string; onCommit: (n: number) => void; label: string; width?: string; onFocus?: () => void }): JSX.Element {
+function NumberField({ value, onCommit, label, width = '7ch', onFocus, signed = false }: { value: string; onCommit: (n: number) => void; label: string; width?: string; onFocus?: () => void; signed?: boolean }): JSX.Element {
   const [text, setText] = useState<string | null>(null)
   const commit = (): void => {
     if (text === null) return
-    const n = Number(text.trim())
+    // A comma is a decimal mark too.
+    const n = Number(text.trim().replace(',', '.'))
     setText(null)
     if (text.trim() !== '' && Number.isFinite(n)) onCommit(n)
   }
@@ -55,7 +56,8 @@ function NumberField({ value, onCommit, label, width = '7ch', onFocus }: { value
     <input
       className="ws__anim-num"
       style={{ flex: `0 0 ${width}`, width, minWidth: 0 }}
-      inputMode="decimal"
+      // A phone's decimal keypad has no minus: a value that may be negative gets the full keyboard.
+      inputMode={signed ? 'text' : 'decimal'}
       aria-label={label}
       value={text ?? value}
       spellCheck={false}
@@ -77,16 +79,23 @@ function useAnimState(): { list: Motion[]; unit: number; shard: ShardModel | nul
 export function AnimEditor(): JSX.Element {
   const { list, unit, shard } = useAnimState()
   const preview = useAnimPreview()
-  const bind = useRepeatable()
+  // Scroll-safe: the panel scrolls, and a scroll that starts on a stepper must not change it.
+  const bind = useRepeatable({ scrollSafe: true })
   const [note, setNote] = useState<string | null>(null)
+  const currentId = useWorkshop((s) => s.currentId)
   const pace = pacedSecondsPerBlock(Date.now() / 1000, pacedEnds())
   const reduced = reducedMotionNow()
   const rail = useRef<HTMLDivElement>(null)
   const scrubbing = useRef(false)
-  // The preview goes when the editor does.
-  useEffect(() => () => useAnimPreview.getState().stop(), [])
+  // Another shard: last shard's message goes (the preview stops on its own, store/animPreview.ts).
+  useEffect(() => { setNote(null) }, [currentId])
+  // A key for each card that follows its motion through a reorder, so focus and typing stay with it.
+  const keys = useRef<number[]>([])
+  const nextKey = useRef(0)
+  if (keys.current.length !== list.length) keys.current = list.map(() => nextKey.current++)
 
-  const apply = (e: Edited): void => {
+  const apply = (e: Edited, keyed?: (k: number[]) => number[]): void => {
+    if (keyed) keys.current = keyed([...keys.current])
     useWorkshop.getState().setAnim(e.list.length ? rawOf(e.list) : undefined)
     setNote(e.note ?? null)
   }
@@ -94,7 +103,7 @@ export function AnimEditor(): JSX.Element {
   const now = (): Motion[] => { const c = useWorkshop.getState().current(); const raw = c ? (c as { anim?: unknown }).anim ?? c.extra?.anim : undefined; return Array.isArray(raw) ? listOf(raw) : [] }
   const add = (id: PresetId): void => {
     if (!shard) return
-    apply(addPreset(now(), id, objectReach(shard)))
+    apply(addPreset(now(), id, objectReach(shard)), (k) => (k.length < MAX_MOTIONS ? [...k, nextKey.current++] : k))
     // Show it at once: picking a preset is asking to see it.
     if (!useAnimPreview.getState().on) useAnimPreview.getState().play()
   }
@@ -115,6 +124,7 @@ export function AnimEditor(): JSX.Element {
         {list.length > 0 && (preview.on && preview.playing
           ? <button className="workshop__btn" title="Pause the preview" aria-label="Pause" onClick={() => preview.pause()}><Pause size={12} aria-hidden /> PAUSE</button>
           : <button className="workshop__btn" title="Play the preview" aria-label="Play" onClick={() => preview.play()}><Play size={12} aria-hidden /> PLAY</button>)}
+        {list.length > 0 && preview.on && <button className="workshop__btn" title="Stop the preview, back at rest" aria-label="Stop" onClick={() => preview.stop()}><Square size={11} aria-hidden /> STOP</button>}
         {list.length > 0 && (
           <div
             className="explorer__rail ws__anim-rail"
@@ -157,18 +167,21 @@ export function AnimEditor(): JSX.Element {
       {list.length >= MAX_MOTIONS && <div className="ws__explain">Up to {MAX_MOTIONS} motions</div>}
 
       {list.map((m, i) => (
-        <MotionCard key={i} m={m} i={i} count={list.length} unit={unit} pace={pace} bind={bind} apply={apply} now={now} />
+        <MotionCard key={keys.current[i]} m={m} i={i} count={list.length} unit={unit} pace={pace} bind={bind} apply={apply} now={now} />
       ))}
 
       {note && <div className="ws__explain ws__anim-note" role="status">{note}</div>}
-      {ignored > 0 && <div className="ws__explain">{ignored === 1 ? '1 motion here can\'t be read and goes on the next edit' : `${ignored} motions here can't be read and go on the next edit`}</div>}
+      {ignored > 0 && <div className="ws__explain">{ignored === 1 ? '1 entry here is skipped and goes on the next edit' : `${ignored} entries here are skipped and go on the next edit`}</div>}
     </div>
   )
 }
 
 type Bind = ReturnType<typeof useRepeatable>
 
-function MotionCard({ m, i, count, unit, pace, bind, apply, now }: { m: Motion; i: number; count: number; unit: number; pace: number; bind: Bind; apply: (e: Edited) => void; now: () => Motion[] }): JSX.Element {
+type Apply = (e: Edited, keyed?: (k: number[]) => number[]) => void
+const swap = (i: number, j: number) => (k: number[]): number[] => { if (j >= 0 && j < k.length) [k[i], k[j]] = [k[j], k[i]]; return k }
+
+function MotionCard({ m, i, count, unit, pace, bind, apply, now }: { m: Motion; i: number; count: number; unit: number; pace: number; bind: Bind; apply: Apply; now: () => Motion[] }): JSX.Element {
   const name = MOTION_NAMES[m.word] ?? m.word.toUpperCase()
   const speed = perMinute(m, pace)
   const kind = amountKind(m)
@@ -180,9 +193,9 @@ function MotionCard({ m, i, count, unit, pace, bind, apply, now }: { m: Motion; 
     <div className="ws__anim-card" role="group" aria-label={`Motion ${i + 1}: ${name}`}>
       <div className="workshop__row">
         <span className="workshop__label ws__anim-name">{i + 1}. {name}</span>
-        <button className="workshop__btn" title="Move up" aria-label={`Move ${name} up`} disabled={i === 0} onClick={() => apply(moveMotion(now(), i, -1))}><ArrowUp size={12} aria-hidden /></button>
-        <button className="workshop__btn" title="Move down" aria-label={`Move ${name} down`} disabled={i === count - 1} onClick={() => apply(moveMotion(now(), i, 1))}><ArrowDown size={12} aria-hidden /></button>
-        <button className="workshop__btn workshop__btn--danger" title="Remove" aria-label={`Remove ${name}`} onClick={() => apply(removeMotion(now(), i))}><X size={12} aria-hidden /></button>
+        <button className="workshop__btn" title="Move up" aria-label={`Move ${name} up`} disabled={i === 0} onClick={() => apply(moveMotion(now(), i, -1), swap(i, i - 1))}><ArrowUp size={12} aria-hidden /></button>
+        <button className="workshop__btn" title="Move down" aria-label={`Move ${name} down`} disabled={i === count - 1} onClick={() => apply(moveMotion(now(), i, 1), swap(i, i + 1))}><ArrowDown size={12} aria-hidden /></button>
+        <button className="workshop__btn workshop__btn--danger" title="Remove" aria-label={`Remove ${name}`} onClick={() => apply(removeMotion(now(), i), (k) => k.filter((_, q) => q !== i))}><X size={12} aria-hidden /></button>
       </div>
       {m.axis >= 0 && (
         <div className="workshop__row" role="group" aria-label="Axis">
@@ -203,11 +216,12 @@ function MotionCard({ m, i, count, unit, pace, bind, apply, now }: { m: Motion; 
         <button className={`workshop__btn ${m.c < 0 ? 'is-on' : ''}`} aria-pressed={m.c < 0} title="Run it the other way" aria-label="Reverse" onClick={() => apply(reverse(now(), i))}><Repeat2 size={12} aria-hidden /></button>
         <span className="ws__explain">{rate}</span>
       </div>
+      {mayFlicker(m, pace) && <div className="ws__explain ws__anim-note">This may flicker more than 3 times a second</div>}
       {kind && (
         <div className="workshop__row" role="group" aria-label={amountLabel}>
           <span className="workshop__label">{amountLabel}</span>
           <button className="workshop__btn" {...bind(() => { const l = now(); apply(setAmount(l, i, amountOf(l[i], unit) - unitStep, unit)) })} aria-label="Less" title="Less">−</button>
-          <NumberField label={`${amountLabel}, ${kind === 'degrees' ? 'degrees' : 'gibsons'}`} value={showNumber(amount)} onCommit={(n) => apply(setAmount(now(), i, n, unit))} />
+          <NumberField label={`${amountLabel}, ${kind === 'degrees' ? 'degrees' : 'gibsons'}`} value={showNumber(amount)} signed={m.word === 'lift'} onCommit={(n) => apply(setAmount(now(), i, n, unit))} />
           <span className="workshop__value">{kind === 'degrees' ? '°' : 'G'}</span>
           <button className="workshop__btn" {...bind(() => { const l = now(); apply(setAmount(l, i, amountOf(l[i], unit) + unitStep, unit)) })} aria-label="More" title="More">+</button>
         </div>
@@ -233,18 +247,18 @@ function MotionCard({ m, i, count, unit, pace, bind, apply, now }: { m: Motion; 
   )
 }
 
-function PathPoints({ m, i, unit, apply, now }: { m: Motion; i: number; unit: number; apply: (e: Edited) => void; now: () => Motion[] }): JSX.Element {
+function PathPoints({ m, i, unit, apply, now }: { m: Motion; i: number; unit: number; apply: Apply; now: () => Motion[] }): JSX.Element {
   const points = pointsOf(m, unit)
   const editing = useAnimPreview((s) => s.point)
   const focus = (j: number): void => useAnimPreview.getState().setPoint([i, j])
   const cell = (j: number, key: keyof ShownPoint, label: string, width: string): JSX.Element => (
-    <NumberField label={`Point ${j + 1} ${label}`} width={width} value={key === 'time' ? String(points[j].time) : showNumber(points[j][key])} onFocus={() => focus(j)} onCommit={(n) => apply(setPoint(now(), i, j, key, n, unit))} />
+    <NumberField label={`Point ${j + 1} ${label}`} width={width} signed={key !== 'time'} value={key === 'time' ? String(points[j].time) : showNumber(points[j][key])} onFocus={() => focus(j)} onCommit={(n) => apply(setPoint(now(), i, j, key, n, unit))} />
   )
   return (
     <div className="ws__anim-points" role="group" aria-label="Path points">
       <div className="workshop__row ws__anim-head">
         <span className="workshop__label">POINTS</span>
-        <span className="ws__explain">X Y Z in gibsons, TIME is each leg&apos;s share</span>
+        <span className="ws__explain">X Y Z in gibsons, T is each leg&apos;s share of the time</span>
       </div>
       {points.map((_, j) => (
         <div key={j} className={`workshop__row ws__anim-point ${editing && editing[0] === i && editing[1] === j ? 'is-on' : ''}`} role="group" aria-label={`Point ${j + 1}`}>

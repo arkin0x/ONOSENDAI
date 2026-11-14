@@ -21,9 +21,9 @@ import { gcd, MAX_BLOCKS, MAX_MOTIONS, MAX_RATE, MAX_WEIGHT, PATH_MAX, PATH_MIN,
 
 const TICKS = 120
 
-/** What each motion is called in the editor. */
+/** What each motion is called in the editor: the preset that writes it (a BOB is a small BACK AND FORTH). */
 export const MOTION_NAMES: Readonly<Record<string, string>> = {
-  turn: 'SPIN', swing: 'PENDULUM', slide: 'SLIDE', orbit: 'ORBIT', lift: 'ELEVATOR', path: 'PATH',
+  turn: 'SPIN', swing: 'PENDULUM', slide: 'BACK AND FORTH', orbit: 'FERRIS WHEEL', lift: 'ELEVATOR', path: 'FOLLOW PATH',
 }
 
 export type PresetId = 'spin' | 'bob' | 'pendulum' | 'slide' | 'elevator' | 'orbit' | 'path'
@@ -73,6 +73,9 @@ export const LIMITS = {
   fewPoints: `A path needs ${PATH_MIN} points`,
   reach: 'That is as far as it goes',
   near: 'That is as small as it goes',
+  time: 'A leg takes up to 1000',
+  ratio: 'Same timing, smaller numbers',
+  flicker: 'This may flicker more than 3 times a second',
 } as const
 
 /** An edit's result: the new list, and a message when a limit changed what was asked. */
@@ -125,18 +128,47 @@ export function bestRational(x: number, maxB = 1000): { c: number; b: number } {
   return { c: best.c / g, b: best.b / g }
 }
 
+/** How close a stored speed must come to the one asked for: half a percent, under what the controls show. */
+export const SPEED_TOLERANCE = 0.005
+
+/**
+ * The simplest c/b (smallest b, then in lowest terms) within SPEED_TOLERANCE
+ * of `x` cycles a block, b at most 1000: so 3 a minute is written 33/1, not
+ * 2742/83, and retyping the speed shown keeps the fraction it came from.
+ */
+export function simplestRational(x: number): { c: number; b: number } {
+  const tol = Math.max(x * SPEED_TOLERANCE, 1e-9)
+  for (let b = 1; b <= 1000; b++) {
+    const c = Math.round(x * b)
+    if (c >= 1 && Math.abs(c / b - x) <= tol) { const g = gcd(c, b) || 1; return { c: c / g, b: b / g } }
+  }
+  return bestRational(x)
+}
+
 /**
  * The rate for a speed in cycles a minute (its sign the direction), at a pace
- * of `secondsPerBlock`: c/b in lowest terms, clamped to what the field
- * allows (at most 600 a block, never stopped). A note when it was clamped.
+ * of `secondsPerBlock`: the simplest c/b in lowest terms, clamped to what the
+ * field allows (at most 600 a block, never stopped). A note when clamped.
+ * `keep`, the rate it had: kept when it is already within tolerance.
  */
-export function rateFor(perMin: number, secondsPerBlock: number): { c: number; b: number; note?: string } {
-  const sign = perMin < 0 ? -1 : 1
+export function rateFor(perMin: number, secondsPerBlock: number, keep?: { c: number; b: number }): { c: number; b: number; note?: string } {
+  const sign = perMin < 0 || Object.is(perMin, -0) ? -1 : 1
   const x = (Math.abs(perMin) * secondsPerBlock) / 60
   if (x > MAX_RATE) return { c: sign * MAX_RATE, b: 1, note: LIMITS.speed }
   if (!(x >= 1 / 1000)) return { c: sign, b: 1000, note: LIMITS.slowest }
-  const r = bestRational(x, x < 1 ? 1000 : 100)
+  if (keep && Math.abs(Math.abs(keep.c) / keep.b - x) <= x * SPEED_TOLERANCE) return { c: sign * Math.abs(keep.c), b: keep.b }
+  const r = simplestRational(x)
   return { c: sign * r.c, b: r.b }
+}
+
+/**
+ * Whether a motion may flicker more than three times a second (§1.14: an
+ * authoring tool SHOULD warn): its cycles a second, times its legs for a path.
+ */
+export function mayFlicker(m: Motion, secondsPerBlock: number): boolean {
+  const perSecond = Math.abs(m.c) / m.b / secondsPerBlock
+  const flashes = m.word === 'path' ? perSecond * (m.pts.length / 4) : perSecond
+  return flashes > 3
 }
 
 /** The speeds the − and + step through, cycles a minute. */
@@ -203,15 +235,19 @@ export function moveMotion(list: readonly Motion[], i: number, dir: 1 | -1): Edi
 export function setAxis(list: readonly Motion[], i: number, axis: 0 | 1 | 2): Edited {
   const m = list[i]
   if (!m || m.axis < 0) return { list: [...list] }
-  return { list: replace(list, i, { ...copy(m), axis }) }
+  const next = { ...copy(m), axis }
+  // An elevator's travel is signed, and Z is shown negated: keep the number shown when crossing Z.
+  if (m.word === 'lift' && (m.axis === 2) !== (axis === 2)) next.p[0] = 0 - m.p[0]
+  return { list: replace(list, i, next) }
 }
 
 /** Motion i at a speed in cycles a minute (its sign the direction), stored as c/b in lowest terms. */
 export function setSpeed(list: readonly Motion[], i: number, perMin: number, secondsPerBlock: number): Edited {
   const m = list[i]
   if (!m) return { list: [...list] }
-  const r = rateFor(perMin, secondsPerBlock)
-  return { list: replace(list, i, { ...copy(m), c: r.c, b: r.b }), note: r.note }
+  const r = rateFor(perMin, secondsPerBlock, m)
+  const next = { ...copy(m), c: r.c, b: r.b }
+  return { list: replace(list, i, next), note: r.note ?? (mayFlicker(next, secondsPerBlock) ? LIMITS.flicker : undefined) }
 }
 
 /** Motion i run the other way. */
@@ -302,7 +338,13 @@ export function setPoint(list: readonly Motion[], i: number, j: number, key: key
   if (key === 'time') {
     const w = Math.round(value)
     pts[j * 4 + 3] = Math.max(1, Math.min(MAX_WEIGHT, w))
-    if (pts[j * 4 + 3] !== w) note = w > MAX_WEIGHT ? LIMITS.reach : LIMITS.near
+    if (pts[j * 4 + 3] !== w) note = w > MAX_WEIGHT ? LIMITS.time : LIMITS.near
+    else {
+      // The field keeps the weights with no common factor (§1.14): say so when the numbers shrink.
+      let g = 0
+      for (let q = 3; q < pts.length; q += 4) g = gcd(g, pts[q])
+      if (g > 1) note = LIMITS.ratio
+    }
   } else {
     const k = key === 'x' ? 0 : key === 'y' ? 1 : 2
     let t = ticksOf(value, unit)

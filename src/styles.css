@@ -6989,6 +6989,9 @@ select.avatars__input option:checked {
 .ws__anim-point.is-on { outline: 1px solid var(--accent); border-radius: 4px; }
 .ws__anim-note { color: var(--warn); }
 .ws__anim .workshop__btn svg { vertical-align: -2px; }
+/* The panel scrolls: a drag that starts on a stepper pans it (useRepeatable scrollSafe). */
+.ws__anim .workshop__btn { touch-action: pan-y; }
+@media (max-width: 360px) { .ws__anim-point { flex-wrap: wrap; } }
 
 /* MENU, GRID, SHARD and AVATAR share a phone's top edge with DEPLOY and the
    way out (arkinox, 2026-10-23): a little closer set there, so the four stand

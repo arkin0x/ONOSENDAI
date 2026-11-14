@@ -82,9 +82,11 @@ describe('MOTION in the SHARD panel', () => {
     await m.press('FERRIS WHEEL')
     expect(anim()).toEqual([['turn', 'y', 30, 1, 0], ['orbit', 'z', 600, 20, 1, 0]])
     expect(m.says('1. SPIN')).toBe(true)
-    expect(m.says('2. ORBIT')).toBe(true)
+    expect(m.says('2. FERRIS WHEEL')).toBe(true)
     await m.unmount()
-    // The preview goes with the editor.
+    // The preview outlives the panel (a phone closes it to watch), and stops on a tool change or another shard.
+    expect(useAnimPreview.getState().on).toBe(true)
+    useWorkshop.getState().setTool('select')
     expect(useAnimPreview.getState().on).toBe(false)
   })
 
@@ -144,7 +146,7 @@ describe('MOTION in the SHARD panel', () => {
     const m = await mount(<AnimEditor />)
     await m.press('SPIN')
     await m.press('BOB')
-    await click(m, 'Move SLIDE up')
+    await click(m, 'Move BACK AND FORTH up')
     expect((anim() as unknown[][]).map((x) => x[0])).toEqual(['slide', 'turn'])
     useWorkshop.getState().undo()
     await settled()
@@ -185,6 +187,13 @@ describe('MOTION in the SHARD panel', () => {
     await settled()
     expect(useAnimPreview.getState()).toMatchObject({ playing: false, scrub: 0.05 })
     expect(textOf(m.all().find((h) => h.props.role === 'group' && h.props['aria-label'] === 'Motion')!)).not.toContain('—')
+    await click(m, 'Stop')
+    expect(useAnimPreview.getState()).toMatchObject({ on: false, playing: false, scrub: null })
+    // Another shard stops a preview too.
+    await click(m, 'Play')
+    const other = hoop()
+    useWorkshop.setState({ shards: [...useWorkshop.getState().shards, other], currentId: other.id })
+    expect(useAnimPreview.getState().on).toBe(false)
     await m.unmount()
   })
 })

@@ -58,7 +58,7 @@ describe('the spec\'s pose vectors, every row', () => {
   rows.forEach(([anim, beta, p, want], i) => {
     it(`row ${i + 1}: ${JSON.stringify(anim).slice(0, 60)} at β ${beta}`, () => {
       const got = drawn(anim, beta, p)
-      for (let k = 0; k < 3; k++) expect(got[k]).toBeCloseTo(want[k], 4)
+      for (let k = 0; k < 3; k++) expect(got[k]).toBeCloseTo(want[k], 5)
     })
   })
 })

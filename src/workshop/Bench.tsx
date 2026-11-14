@@ -37,7 +37,7 @@ import { BenchGrid } from './benchGrid'
 import { benchAxes, benchPose, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
-import { AnimClock, movingOn } from '../scene/animMotion'
+import { AnimClock, movingOn, reducedMotionNow } from '../scene/animMotion'
 import { animOf, hasAnim } from '../lib/anim'
 import { cycleBlocks } from '../lib/animEdit'
 import { pacedHeight } from '../lib/pacedClock'
@@ -800,9 +800,16 @@ function BenchWake(): null {
 function AnimWake(): null {
   const invalidate = useThree((s) => s.invalidate)
   const gl = useThree((s) => s.gl)
-  useFrame(() => { if (movingOn(gl) > 0) invalidate() })
+  // Every frame only while it actually moves: playing (or VIEW with no preview), and motion not reduced.
+  // Paused, scrubbed or held still, one frame for each change of the preview is enough.
+  useFrame(() => {
+    if (movingOn(gl) === 0 || reducedMotionNow()) return
+    const p = useAnimPreview.getState()
+    if (!p.on || p.playing) invalidate()
+  })
   const tool = useWorkshop((s) => s.tool)
   useEffect(() => { invalidate() }, [tool, invalidate])
+  useEffect(() => useAnimPreview.subscribe(() => invalidate()), [invalidate])
   return null
 }
 

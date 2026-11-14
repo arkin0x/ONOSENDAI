@@ -19,10 +19,10 @@
  * clock (lib/pacedClock.ts) or the screen (scene/ShardMesh.tsx).
  *
  * THE MOTION TABLE (MOTIONS below) is the only place a motion is defined:
- * its word, how its parameters are read, and its pose at a phase. The names
- * and the parameter model follow the DECK-0003 spec PR once the owner's
- * research on conventions lands (2026-11-14); renaming or adding a motion is
- * one entry there.
+ * its word, how its parameters are read, and its pose at a phase. The words
+ * and shapes are DECK-0003 §1.14's (kept after the motion research of
+ * 2026-11-14; friendly names live in the editor, lib/animEdit.ts). Renaming
+ * or adding a motion is one entry there.
  *
  * Reader rules kept here (§1.14): only the first four entries are read; an
  * entry that is malformed, has an unknown word, has an integer out of its
@@ -37,7 +37,7 @@ import type { ShardModel } from 'sno-core/shards'
 
 /** The payload field. */
 export const ANIM_FIELD = 'anim'
-/** Motions read per object; entries past this are ignored (§4.3). */
+/** Motions read per object; entries past this are ignored (§1.14). */
 export const MAX_MOTIONS = 4
 /** Fastest rate a motion may have, cycles per paced block; a faster entry is ignored (a strobe, §1.14). */
 export const MAX_RATE = 600
@@ -47,7 +47,7 @@ export const MAX_BLOCKS = 1_000_000
 export const REACH = 64 * 120
 /** Largest path leg weight. */
 export const MAX_WEIGHT = 1_000
-/** Waypoints a `path` may have (§4.1). */
+/** Waypoints a `path` may have (§1.14). */
 export const PATH_MIN = 2
 export const PATH_MAX = 32
 /** A model unit in ticks (sno-core TICKS_PER_UNIT). */
@@ -99,7 +99,7 @@ function readRate(c: unknown, b: unknown, phi: unknown): Rate | null {
   return { c, b, phi }
 }
 
-/** `ease(x) = 3x² − 2x³` (§4.2). */
+/** `ease(x) = 3x² − 2x³` (§1.14). */
 export function smoothstep(x: number): number {
   const k = x <= 0 ? 0 : x >= 1 ? 1 : x
   return k * k * (3 - 2 * k)
@@ -236,7 +236,7 @@ export function readMotion(raw: unknown): Motion | null {
   return read ? { ...read, word: raw[0] } : null
 }
 
-/** A payload's `anim`, as a reader keeps it: the first four entries, each read or ignored (§4.3). Never throws. */
+/** A payload's `anim`, as a reader keeps it: the first four entries, each read or ignored (§1.14). Never throws. */
 export function readAnim(raw: unknown): Motion[] {
   if (!Array.isArray(raw)) return []
   const out: Motion[] = []
@@ -274,7 +274,7 @@ export function hasAnim(s: Pick<ShardModel, 'extra'>): boolean {
 /**
  * u = frac(c × β / b + φ / 360), in [0, 1). β's whole part is reduced modulo
  * b first, with exact integer arithmetic where it is safe, so the phase keeps
- * its precision at any height (§2.2).
+ * its precision at any height (§1.14).
  */
 export function phaseAt(r: Rate, beta: number): number {
   const whole = Math.floor(beta)

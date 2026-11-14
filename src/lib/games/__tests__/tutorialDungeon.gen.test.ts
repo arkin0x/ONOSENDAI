@@ -1,55 +1,45 @@
 /**
- * tutorialDungeon.gen.test.ts - the GENERATOR of the tutorial dungeon's bag,
- * not a test. Skipped unless asked for. Two uses, one builder:
+ * tutorialDungeon.gen.test.ts - the GENERATOR of the tutorial dungeon's
+ * world, not a test. Skipped unless asked for. Two uses, one builder
+ * (lib/games/worldDeploy.ts buildDungeon), both made of the pieces of the
+ * dungeon published 2026-11-13 (the v1 DEV fixture, __tests__/
+ * tutorialDungeon.v1.fixture.json, piecesOf):
  *
  * The DEV fixture (lib/games/tutorialDungeon.fixture.json), for LOCAL play:
+ * every piece an inline shard, the door, the key bag, the room and the key's
+ * model, all signed by the DEV key. Never on any relay.
  *
  *   GEN_TUTORIAL_DUNGEON=1 \
- *   TUTORIAL_PIECES=/data/Sync/agents/claude/onosendai/games-dungeon/v1/pieces \
  *   TUTORIAL_KEY=/data/claude/secrets/onosendai-tutorial-game-DEV.hex \
  *   npx vitest run src/lib/games/__tests__/tutorialDungeon.gen.test.ts
  *
- * A bag signed by any other local key: the same, with TUTORIAL_KEY its file
- * (64 hex or an nsec) and TUTORIAL_OUT the file to write the signed bag to.
- * It never writes the fixture for a key that is not the DEV key, and never
- * sends anything anywhere: lib/relay is the offline relay in every test file.
- *
- * The owner's world (DEPLOY.md), UNSIGNED, for the game key he holds and
- * signs with himself (a bunker works: one signature per event). No secret is
- * read; only his pubkey:
+ * The owner's world, for the game key (TUTORIAL_KEY its secret file, 64 hex
+ * or an nsec; read here, never printed), into a NEW or empty folder: one
+ * UNSIGNED file per event in the order to publish them, and in signed/ the
+ * same events signed by the game key and verified. The key item and the door
+ * are signed inside their bags, which is why the secret is needed at all.
+ * TUTORIAL_V1_DIR, the folder of the world published 2026-11-13, checks that
+ * every piece the new world names by reference is one that world published,
+ * at the same address and the same coordinate. Nothing is sent anywhere:
+ * lib/relay is the offline relay in every test file.
  *
  *   GEN_TUTORIAL_WORLD=1 \
- *   TUTORIAL_PUBKEY=<npub or 64 hex> \
- *   TUTORIAL_OUT_DIR=/data/Sync/agents/claude/onosendai/games-dungeon/deploy/world-<first 8 hex> \
+ *   TUTORIAL_KEY=/data/claude/secrets/onosendai-tutorial-game.hex \
+ *   TUTORIAL_OUT_DIR=/data/Sync/agents/claude/onosendai/games-dungeon/deploy/world-ee248d6a-v2 \
+ *   TUTORIAL_V1_DIR=/data/Sync/agents/claude/onosendai/games-dungeon/deploy/world-ee248d6a \
  *   npx vitest run src/lib/games/__tests__/tutorialDungeon.gen.test.ts
- *
- * It writes one JSON file per event into the folder (a new or empty one),
- * the objects first and the bag last, in the order to publish them
- * (lib/games/worldDeploy.ts), built from the DEV fixture's own items.
- *
- * The pieces are Maze Kit payloads (main) and the key, built by
- * games-dungeon/v1/build-pieces.ts. Each is placed where
- * TUTORIAL_DUNGEON_LAYOUT says, as a shard item in one bag sealed to the
- * game's region with its key, every item and the bag signed by the one key.
- * First in the list is the entry marker (pieces/entry.json, an original flat
- * star), inline, carrying the `entry` tag at TUTORIAL_ENTRY (DECK-0002 §2.2).
  */
 
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
+import { finalizeEvent, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
-import { fromPayload } from 'sno-core/shards'
-import { bagTemplate, shardInnerTemplate } from '../../hidden'
-import { hexToBytes } from '../../events'
-import { BAG_SAFE_BYTES, signedBytes } from '../../bagSize'
-import { TUTORIAL_DEV_PUBKEY, TUTORIAL_DUNGEON_LAYOUT, TUTORIAL_ENTRY, TUTORIAL_GAME, tutorialGameFor } from '../tutorialGame'
-import { unsignedWorld } from '../worldDeploy'
-import fixture from '../tutorialDungeon.fixture.json'
-import type { NostrEvent } from '../../events'
-import { inRegion } from '../play'
-import { ENTRY_TAG, worldKey } from '../world'
+import { hexToBytes, type NostrEvent } from '../../events'
+import { TUTORIAL_DEV_PUBKEY, TUTORIAL_GAME, tutorialGameFor } from '../tutorialGame'
+import { buildDungeon, piecesOf } from '../worldDeploy'
+import { bagList, worldKey } from '../world'
+import v1 from './tutorialDungeon.v1.fixture.json'
 
 const asked = process.env.GEN_TUTORIAL_DUNGEON === '1'
 const askedWorld = process.env.GEN_TUTORIAL_WORLD === '1'
@@ -65,62 +55,56 @@ function secretFrom(path: string): Uint8Array {
   return hexToBytes(raw)
 }
 
+const sign = (e: { kind: number; created_at: number; tags: string[][]; content: string }, sk: Uint8Array): NostrEvent =>
+  JSON.parse(JSON.stringify(finalizeEvent({ kind: e.kind, created_at: e.created_at, tags: e.tags, content: e.content }, sk))) as NostrEvent
+
 describe('the tutorial dungeon (generator)', () => {
-  it.skipIf(!asked)('signs the dungeon bag and writes it', async () => {
-    const sk = secretFrom(process.env.TUTORIAL_KEY ?? process.env.TUTORIAL_DEV_KEY ?? '')
-    const pubkey = getPublicKey(sk)
-    // The DEV key by its own constant, never by TUTORIAL_GAME.pubkey: once the owner's key is the game's, his bag
-    // must still go to TUTORIAL_OUT, dated now, and never into the DEV fixture (review of #668).
-    const dev = pubkey === TUTORIAL_DEV_PUBKEY
-    const fixture = resolve(__dirname, '..', 'tutorialDungeon.fixture.json')
-    const out = dev ? fixture : process.env.TUTORIAL_OUT
-    if (!out) throw new Error('This key is not the DEV key: say where to write its bag with TUTORIAL_OUT.')
-    if (!dev && resolve(out) === fixture) throw new Error('The DEV fixture is only ever signed by the DEV key: write this bag elsewhere.')
-    const dir = process.env.TUTORIAL_PIECES ?? ''
-    // The DEV fixture at one fixed moment, so a regenerated bag differs only in its signatures; the owner's bag now.
-    const createdAt = dev ? 1_794_300_000 : Math.floor(Date.now() / 1000)
-    const plane = TUTORIAL_GAME.region.plane
-    // Every piece inside the region, and the key and door coordinates as the rules name them.
-    for (const { at } of [...TUTORIAL_DUNGEON_LAYOUT, { at: TUTORIAL_ENTRY }]) expect(inRegion(TUTORIAL_GAME, at)).toBe(true)
-    const key = (p: { x: bigint; y: bigint; z: bigint }) => `${p.x},${p.y},${p.z}`
-    expect(TUTORIAL_DUNGEON_LAYOUT.filter((l) => key(l.at) === key(TUTORIAL_GAME.key!.at)).map((l) => l.piece)).toEqual(['key'])
-    expect(TUTORIAL_DUNGEON_LAYOUT.filter((l) => key(l.at) === key(TUTORIAL_GAME.door!.at)).map((l) => l.piece).sort()).toEqual(['gate-closed', 'gate-open'])
-    const entries = TUTORIAL_DUNGEON_LAYOUT.map(({ piece, at }, i) => {
-      const raw = JSON.parse(readFileSync(join(dir, `${piece}.json`), 'utf8'))
-      const shard = fromPayload(raw, `tutorial-${piece}-${i}`)
-      if (!shard) throw new Error(`${piece} is not a shard`)
-      return finalizeEvent(shardInnerTemplate(shard, at, plane, createdAt + i), sk)
-    })
-    // The entry point, first in the list (DECK-0002 §2.2: the first item with the tag counts).
-    const marker = fromPayload(JSON.parse(readFileSync(join(dir, 'entry.json'), 'utf8')), 'tutorial-entry')
-    if (!marker) throw new Error('entry is not a shard')
-    const entryTemplate = shardInnerTemplate(marker, TUTORIAL_ENTRY, plane, createdAt + 50)
-    entries.unshift(finalizeEvent({ ...entryTemplate, tags: [...entryTemplate.tags, [ENTRY_TAG]] }, sk))
-    const { key: regionKey, lookupId } = worldKey(TUTORIAL_GAME)
-    const template = await bagTemplate(entries, regionKey, lookupId, TUTORIAL_GAME.region.height, createdAt + 100)
-    // Under the canonical relay's limit, with ONOSENDAI's margin (lib/bagSize.ts).
-    expect(signedBytes(template)).toBeLessThanOrEqual(BAG_SAFE_BYTES)
-    const bag = finalizeEvent(template, sk)
-    writeFileSync(out, JSON.stringify(dev
-      ? { about: 'The tutorial dungeon, signed by a DEV key, sealed to the tutorial game region. For LOCAL tests only; never on any relay. Generated by __tests__/tutorialDungeon.gen.test.ts.', events: [bag] }
-      : bag, null, dev ? 1 : 0) + '\n')
-    console.log(`wrote ${out}: bag ${bag.id}, ${signedBytes(template)} bytes, ${entries.length} items, signed by ${pubkey}`)
+  it.skipIf(!asked)('signs the DEV dungeon and writes the fixture', async () => {
+    const sk = secretFrom(process.env.TUTORIAL_KEY ?? '')
+    if (getPublicKey(sk) !== TUTORIAL_DEV_PUBKEY) throw new Error('The DEV fixture is only ever signed by the DEV key.')
+    const game = tutorialGameFor(TUTORIAL_DEV_PUBKEY)
+    const pieces = await piecesOf(v1.events[0] as NostrEvent, TUTORIAL_DEV_PUBKEY, game)
+    // One fixed moment, so a regenerated fixture differs only in its secrets, nonces and signatures.
+    const built = await buildDungeon(game, sk, pieces, 1_794_300_000, 'inline')
+    const events = built.files.map((f) => sign(f.event, sk))
+    const out = resolve(__dirname, '..', 'tutorialDungeon.fixture.json')
+    writeFileSync(out, JSON.stringify({ about: 'The tutorial dungeon with a real key item and door (DECK-0004), signed by a DEV key: the world bag, the key bag, the room bag and the key\'s model. For LOCAL tests only; never on any relay. Generated by __tests__/tutorialDungeon.gen.test.ts.', events }, null, 1) + '\n')
+    console.log(`wrote ${out}: ${events.map((e) => `${e.kind} ${e.id.slice(0, 8)}`).join(', ')}`)
   })
 
-  it.skipIf(!askedWorld)('writes the owner\'s world, unsigned, for his pubkey', async () => {
-    const raw = (process.env.TUTORIAL_PUBKEY ?? '').trim()
-    let pubkey = raw
-    if (raw.startsWith('npub1')) {
-      const d = nip19.decode(raw)
-      if (d.type !== 'npub') throw new Error('not an npub')
-      pubkey = d.data
-    }
+  it.skipIf(!askedWorld)('writes the owner\'s world: unsigned, and signed in signed/', async () => {
+    const sk = secretFrom(process.env.TUTORIAL_KEY ?? '')
+    const pubkey = getPublicKey(sk)
+    if (pubkey === TUTORIAL_DEV_PUBKEY) throw new Error('The DEV key\'s world is the fixture: use GEN_TUTORIAL_DUNGEON.')
     const dir = process.env.TUTORIAL_OUT_DIR
     if (!dir) throw new Error('Say which folder to write the world into with TUTORIAL_OUT_DIR.')
-    mkdirSync(dir, { recursive: true })
-    if (readdirSync(dir).some((f) => f.endsWith('.json'))) throw new Error(`${dir} already holds events: write a fresh world into an empty folder.`)
-    const files = await unsignedWorld(tutorialGameFor(pubkey), fixture.events[0] as NostrEvent, TUTORIAL_DEV_PUBKEY, Math.floor(Date.now() / 1000))
-    for (const f of files) writeFileSync(join(dir, f.name), JSON.stringify(f.event) + '\n')
-    console.log(`wrote ${files.length} unsigned events for ${pubkey} into ${dir}`)
+    mkdirSync(join(dir, 'signed'), { recursive: true })
+    if (readdirSync(dir).some((f) => f.endsWith('.json')) || readdirSync(join(dir, 'signed')).length) throw new Error(`${dir} already holds events: write a fresh world into an empty folder.`)
+    const game = tutorialGameFor(pubkey)
+    const pieces = await piecesOf(v1.events[0] as NostrEvent, TUTORIAL_DEV_PUBKEY, tutorialGameFor(TUTORIAL_DEV_PUBKEY))
+    const built = await buildDungeon(game, sk, pieces, Math.floor(Date.now() / 1000), 'references')
+    // Every piece named by reference is one the 2026-11-13 world published: the same address at the same coordinate.
+    const v1Dir = process.env.TUTORIAL_V1_DIR
+    if (v1Dir) {
+      const bag = JSON.parse(readFileSync(join(v1Dir, existsSync(join(v1Dir, 'signed', '99-bag-33330.json')) ? 'signed/99-bag-33330.json' : '99-bag-33330.json'), 'utf8')) as NostrEvent
+      const was = ((await bagList(bag, worldKey(game).key)) ?? []).filter((e) => Array.isArray(e)).map((e) => JSON.stringify(e))
+      const now = ((await bagList(built.files[built.files.length - 1].event as NostrEvent, worldKey(game).key)) ?? []).filter((e) => Array.isArray(e)).map((e) => JSON.stringify(e))
+      expect(now.length).toBe(11)
+      for (const r of now) expect(was, `the v1 world names ${r}`).toContain(r)
+    }
+    for (const f of built.files) {
+      writeFileSync(join(dir, f.name), JSON.stringify(f.event) + '\n')
+      const signed = sign(f.event, sk)
+      // Signed by the game key, and nothing but the signature added: kind, time, tags and content as built.
+      expect(verifyEvent(signed)).toBe(true)
+      expect(signed.pubkey).toBe(pubkey)
+      expect([signed.kind, signed.created_at, JSON.stringify(signed.tags), signed.content]).toEqual([f.event.kind, f.event.created_at, JSON.stringify(f.event.tags), f.event.content])
+      writeFileSync(join(dir, 'signed', f.name), JSON.stringify(signed) + '\n')
+    }
+    console.log(`wrote ${built.files.length} events for ${pubkey} into ${dir} (unsigned) and ${dir}/signed (signed, verified)`)
+  })
+
+  it('names the DEV game it builds for', () => {
+    expect(TUTORIAL_GAME.pubkey).toBe(TUTORIAL_DEV_PUBKEY)
   })
 })

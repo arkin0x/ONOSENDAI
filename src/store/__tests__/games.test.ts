@@ -54,7 +54,9 @@ if (typeof localStorage === 'undefined') {
 import { firstBreak, type NostrEvent } from '../../lib/events'
 import { GAME_CHOOSE_FIRST_MESSAGE, GAME_OTHER_BRACKET_MESSAGE, GAME_NEEDS_CHAIN_MESSAGE, GAME_NOT_OPEN_MESSAGE, IN_GAME_HERE_MESSAGE, GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
-import { GAMES_OFF_MESSAGE, GAME_ALREADY_MESSAGE, enterTutorialDungeon, loadProgress, recordedPosition, useGame } from '../useGame'
+import { GAMES_OFF_MESSAGE, GAME_ALREADY_MESSAGE, enterTutorialDungeon, loadProgress, offerFor, recordedPosition, useGame } from '../useGame'
+import { useInventory } from '../useInventory'
+import type { GameDef } from '../../lib/games/types'
 import { TUTORIAL_ENTRY, TUTORIAL_GAME } from '../../lib/games/tutorialGame'
 import { teleportTemplate } from '../../lib/games/bracket'
 import { positionHex } from '../../lib/events'
@@ -109,6 +111,8 @@ beforeEach(async () => {
   }
   localStorage.removeItem(`onosendai:chain:${S().identity.pubkey}`)
   useGame.setState({ session: null, busy: null, message: null })
+  // ITEMS empty for every test: a key item TAKEn in one stays out of the next.
+  useInventory.setState({ items: {} })
   useCyberspace.setState({
     ...fresh, events: [...fresh.events], published: { ...fresh.published }, positionHistory: [...fresh.positionHistory],
     cursor: fresh.position, pendingTarget: null, forkNotice: null, chainConflict: null, plan: null,
@@ -198,8 +202,9 @@ describe('in-game mode (useGame)', () => {
     expect(G().session!.at).toBeNull()
     await worldLoaded()
     expect(G().session!.at).toEqual(TUTORIAL_ENTRY)
-    // Fifteen items: the entry marker, the arrival, the climb, the gate's two looks, the way out.
-    expect(G().session!.world).toHaveLength(15)
+    // Eleven pieces in the world bag: the entry marker, the arrival, the climb, the way out; the gate is the world's door.
+    expect(G().session!.world).toHaveLength(11)
+    expect(G().session!.door?.chest?.door).toBe(6)
     expect(S().events.length).toBe(count + 1)
     // The base position stays where you entered from.
     expect(S().coordHex()).toBe(here)
@@ -345,25 +350,88 @@ describe('the tutorial dungeon: gravity, the key door and the clock (useGame)', 
     expect(S().events.length).toBe(count)
   })
 
-  it('the key is taken only by TAKE within reach, and the gate opens only by OPEN with it', async () => {
+  it('the key bag opens only on the top platform; TAKE puts the key item in ITEMS; the gate opens only by OPEN with it, and its room comes in', async () => {
     await enterTutorialDungeon()
     await worldLoaded()
-    // At the gate without the key: nothing opens.
+    const count = S().events.length
+    // At the gate without the key: LOCKED, nothing opens, and its closed look holds you.
     put(at(40, 17, 33))
+    expect(offerFor(G().session!)).toBe('locked')
     G().open()
     expect(G().session!.progress.doorOpen).toBe(false)
     G().step('z', -1)
     expect(G().session!.at).toEqual(at(40, 17, 33))
-    // Standing by the key does not take it; TAKE does.
+    // The key bag is not read on the floor, nor anywhere but in its region.
+    put(at(40, 17, 41))
+    G().step('x', 1)
+    expect(G().session!.keyBag).toBe('unread')
+    expect(G().session!.keys).toHaveLength(0)
+    // Landing on the top platform opens it: the key item, at its place.
+    put(at(37, 27, 41))
+    G().step('x', 1)
+    await vi.waitFor(() => { expect(G().session!.keyBag).toBe('read') })
+    expect(G().session!.keys.map((k) => k.key?.name)).toEqual(['Dungeon Key'])
+    // Standing by the key does not take it; TAKE does, into ITEMS.
     put(at(37, 27, 42))
     G().tick()
-    expect(G().session!.progress.keyHeld).toBe(false)
+    expect(Object.keys(useInventory.getState().items)).toHaveLength(0)
+    expect(offerFor(G().session!)).toBe('take')
+    G().take()
+    const held = Object.values(useInventory.getState().items)
+    expect(held.map((it) => [it.type, it.name, it.source])).toEqual([['key', 'Dungeon Key', 'found']])
+    expect(held[0].id).toBe(G().session!.keys[0].eventId)
+    expect(offerFor(G().session!)).toBeNull()
+    // TAKE again holds it once.
+    G().take()
+    expect(Object.keys(useInventory.getState().items)).toHaveLength(1)
+    // OPEN at the gate with it: it opens, the key stays in ITEMS, the way through is clear, and the room's finish tile comes in.
+    put(at(40, 17, 33))
+    expect(offerFor(G().session!)).toBe('open')
+    G().open()
+    expect(G().session!.progress.doorOpen).toBe(true)
+    expect(Object.keys(useInventory.getState().items)).toHaveLength(1)
+    await vi.waitFor(() => { expect(G().session!.room).not.toBeNull() })
+    expect(G().session!.room!.map((w) => w.shard.name)).toEqual(['Maze Kit: aerocarnival checkered tile 4'])
+    G().step('z', -1)
+    expect(G().session!.at).toEqual(at(40, 17, 32))
+    // None of it was signed or published: TAKE and OPEN are this device's.
+    expect(S().events.length).toBe(count)
+    expect(G().message).toBeNull()
+  })
+
+  it('a reload after OPEN keeps the gate open, and reads the room again with the key still in ITEMS', async () => {
+    await enterTutorialDungeon()
+    await worldLoaded()
+    put(at(37, 27, 41))
+    G().step('x', 1)
+    await vi.waitFor(() => { expect(G().session!.keyBag).toBe('read') })
+    G().take()
+    put(at(40, 17, 33))
+    G().open()
+    await vi.waitFor(() => { expect(G().session!.room).not.toBeNull() })
+    useGame.setState({ session: null })
+    expect(G().resume()).toBe(true)
+    await worldLoaded()
+    expect(G().session!.progress.doorOpen).toBe(true)
+    await vi.waitFor(() => { expect(G().session!.room).not.toBeNull() })
+  })
+
+  it('the LEGACY world (published 2026-11-13, no door): the game-only key into hand, nothing into ITEMS, the gate opened with it', async () => {
+    const v1: GameDef = { ...TUTORIAL_GAME, world: { kind: 'fixture', load: async () => (await import('../../lib/games/__tests__/tutorialDungeon.v1.fixture.json')).default.events } }
+    expect(await G().enter(v1)).toBeNull()
+    await worldLoaded()
+    expect(G().session!.door).toBeNull()
+    expect(G().session!.world).toHaveLength(15)
+    put(at(40, 17, 33))
+    G().open()
+    expect(G().session!.progress.doorOpen).toBe(false)
+    put(at(37, 27, 42))
+    expect(offerFor(G().session!)).toBe('take')
     G().take()
     expect(G().session!.progress.keyHeld).toBe(true)
-    // TAKE away from the key, or twice, changes nothing more.
-    G().take()
-    expect(G().session!.progress).toMatchObject({ keyHeld: true, doorOpen: false })
-    // OPEN at the gate with the key: it opens, the key is used, and the way through is clear.
+    expect(Object.keys(useInventory.getState().items)).toHaveLength(0)
+    // No key bag in a world with no door.
+    expect(G().session!.keyBag).toBe('unread')
     put(at(40, 17, 33))
     G().open()
     expect(G().session!.progress).toMatchObject({ keyHeld: false, doorOpen: true })
@@ -403,8 +471,13 @@ describe('the tutorial dungeon: gravity, the key door and the clock (useGame)', 
   it('fallen out onto the region\'s floor, the pad there sends you back to the arrival and signs it; the key and the clock stay', async () => {
     await enterTutorialDungeon()
     await worldLoaded()
+    // The key item taken on the top platform first.
+    put(at(37, 27, 42))
+    G().step('x', 1)
+    await vi.waitFor(() => { expect(G().session!.keyBag).toBe('read') })
+    G().take()
+    expect(Object.keys(useInventory.getState().items)).toHaveLength(1)
     const s = G().session!
-    useGame.setState({ session: { ...s, progress: { ...s.progress, keyHeld: true } } })
     // On the floor, two gibsons from the pad under the oculus (lib/games/tutorialGame.ts FALLOUT_PAD).
     put(at(42, 0, 40))
     G().tick()
@@ -418,7 +491,8 @@ describe('the tutorial dungeon: gravity, the key door and the clock (useGame)', 
     expect(tagOf(last(), 'A')?.[1]).toBe('teleport')
     expect(tagOf(last(), 'C')?.[1]).toBe(positionHex(TUTORIAL_ENTRY, 1))
     expect(firstBreak(S().actions())).toBeNull()
-    expect(G().session!.progress).toMatchObject({ keyHeld: true, clearedMs: null, startedAt: s.progress.startedAt })
+    expect(G().session!.progress).toMatchObject({ clearedMs: null, startedAt: s.progress.startedAt })
+    expect(Object.keys(useInventory.getState().items)).toHaveLength(1)
   })
 
   it('resume on a device that never saw the entry starts the clock from the entry itself', async () => {

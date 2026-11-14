@@ -36,6 +36,17 @@
  * rotunda's open oculus and falls finds a pad on the region's floor that sends
  * them back to the arrival (FALLOUT_PAD).
  *
+ * The key and the gate are Cyberspace primitives (owner, 2026-11-13, ruled A):
+ * the key is a key item (DECK-0004 §2) in a bag of its own sealed to the
+ * small region around the top platform (KEY_BAG), opened when a player
+ * reaches it in the game; the gate is a DECK-0004 door in the world bag,
+ * sealed to that key item, whose room holds the finish tile. The code plays
+ * that world and the one published 2026-11-13 (game-only key and gate,
+ * `key` and `door` below, LEGACY) alike, by what the newest world bag holds
+ * (lib/games/keyDoor.ts), so the code deploys first and the world switches
+ * after. Design: onosendai/games-dungeon/DESIGN.md, "The key and the gate as
+ * Cyberspace primitives"; publish order: deploy/world-ee248d6a-v2/DEPLOY-v2.md.
+ *
  * Regenerating the fixture: src/lib/games/__tests__/tutorialDungeon.gen.test.ts.
  */
 
@@ -69,9 +80,21 @@ export const TUTORIAL_DEV_PUBKEY = '718c171d3e5a21c631dfd33159befec43f8687efb91b
 export const TUTORIAL_ENTRY = at(8, 17, 45)
 
 /** The key's coordinate: on the top platform, beside its centre (no other piece stands there). */
-const KEY_AT = at(37, 26, 43)
-/** The hall gate's coordinate: the sill of the rotunda's hallway, in its rim plane. */
-const GATE_AT = at(40, 16, 32)
+export const KEY_AT = at(37, 26, 43)
+/** The hall gate's coordinate: the sill of the rotunda's hallway, in its rim plane. The door stands here. */
+export const GATE_AT = at(40, 16, 32)
+
+/**
+ * The key item's bag: sealed to the region of height 3 holding the key, the
+ * smallest aligned cube that holds the whole top platform and the air a
+ * player stands and jumps in over it (offsets 32 to 39, 24 to 31, 40 to 47:
+ * height 2 leaves the platform's far row out). Reaching it in the game derives
+ * its key, a moment's work, and opens the bag. No other platform reaches it.
+ */
+export const KEY_BAG = { at: KEY_AT, height: 3 }
+
+/** The gate door's height: its room is the whole dungeon region (DECK-0004 §3.7.1: no higher than the bag holding it). */
+export const GATE_DOOR_HEIGHT = 6
 
 /**
  * The way back in for a player who fell out of the dungeon (owner, 2026-11-13:
@@ -131,10 +154,13 @@ export function tutorialGameFor(pubkey: string): GameDef {
     ],
     world: dev ? TUTORIAL_FIXTURE_WORLD : { kind: 'relays' },
     gravity: true,
+    // LEGACY: the game-only key and gate of the world published 2026-11-13, read only while its bag holds no door.
     key: { at: KEY_AT },
     door: { at: GATE_AT },
-    // Standing on the finish tile in the exit shrine.
-    exit: { lo: at(38, 18, 6), hi: at(42, 19, 10) },
+    keyBag: KEY_BAG,
+    // Standing on the finish tile in the exit shrine. From one lower too: the tile stands in the gate's room, and a room
+    // that could not be retrieved leaves you on the shrine's floor there; with the tile in place that gibson is inside it.
+    exit: { lo: at(38, 17, 6), hi: at(42, 19, 10) },
   }
 }
 

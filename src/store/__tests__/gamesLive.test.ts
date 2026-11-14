@@ -3,8 +3,10 @@
  * live game, lib/games/flag.ts): entered with no games switch, the entry
  * names the game with the canonical relay as its hint, and the world comes
  * from the relays (the owner's world as the generator writes it and nak
- * signs it, lib/games/worldDeploy.ts), entered at TUTORIAL_ENTRY. Every
- * other store test plays the DEV game (src/test/noNetwork.ts).
+ * signs it, lib/games/worldDeploy.ts), entered at TUTORIAL_ENTRY: first the
+ * LEGACY world published 2026-11-13, then the world with a real key item and
+ * door published over it, which the same client plays. Every other store
+ * test plays the DEV game (src/test/noNetwork.ts).
  *
  * The relays are an in-memory store and nothing publishes anywhere; the key
  * is a fixed throwaway, never anyone's.
@@ -60,8 +62,8 @@ import { placeSpawn } from '../fixtures/placeSpawn'
 import { enterTutorialDungeon, useGame } from '../useGame'
 import { TUTORIAL_DEV_PUBKEY, TUTORIAL_ENTRY, TUTORIAL_GAME, TUTORIAL_RELAY } from '../../lib/games/tutorialGame'
 import { gameLive } from '../../lib/games/flag'
-import { unsignedWorld } from '../../lib/games/worldDeploy'
-import fixture from '../../lib/games/tutorialDungeon.fixture.json'
+import { buildDungeon, piecesOf, unsignedWorld } from '../../lib/games/worldDeploy'
+import fixture from '../../lib/games/__tests__/tutorialDungeon.v1.fixture.json'
 
 const S = () => useCyberspace.getState()
 
@@ -84,6 +86,21 @@ describe('the tutorial dungeon, live on the owner\'s key', () => {
     const session = useGame.getState().session!
     expect(session.worldError).toBeNull()
     expect(session.world).toHaveLength(15)
+    expect(session.door).toBeNull()
+    expect(session.at).toEqual(TUTORIAL_ENTRY)
+  })
+
+  it('the world with a real key item and door, published over it, is the next entry\'s world', async () => {
+    const sk = hexToBytes(OWNER_SK_HEX)
+    const built = await buildDungeon(TUTORIAL_GAME, sk, await piecesOf(fixture.events[0] as NostrEvent, TUTORIAL_DEV_PUBKEY, TUTORIAL_GAME), 1_800_000_100, 'references')
+    for (const f of built.files) published.push(JSON.parse(JSON.stringify(finalizeEvent({ kind: f.event.kind, created_at: f.event.created_at, tags: f.event.tags, content: f.event.content }, sk))) as NostrEvent)
+    expect(await useGame.getState().exit()).toBeNull()
+    expect(await enterTutorialDungeon()).toBeNull()
+    await vi.waitFor(() => { expect(useGame.getState().session?.world).not.toBeNull() })
+    const session = useGame.getState().session!
+    expect(session.worldError).toBeNull()
+    expect(session.world).toHaveLength(11)
+    expect(session.door?.chest?.door).toBe(6)
     expect(session.at).toEqual(TUTORIAL_ENTRY)
   })
 })

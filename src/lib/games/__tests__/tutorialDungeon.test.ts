@@ -1,11 +1,17 @@
 /**
  * tutorialDungeon.test.ts - the tutorial dungeon can be cleared, start to
  * finish, by the game's own rules against its real world: the DEV fixture's
- * bag, opened with the region key, its shards' real walls, gravity and jumps
+ * bags, opened with their keys, its shards' real walls, gravity and jumps
  * (lib/games/gravity.ts), the pad, the key, the gate and the exit zone
- * (lib/games/progress.ts). Every jump is pressed the way a player presses it:
- * JUMP, then a direction a few times while in the air, on a 16 ms frame
- * clock. Nothing is signed or sent: this is the game logic alone.
+ * (lib/games/progress.ts, lib/games/keyDoor.ts). Every jump is pressed the
+ * way a player presses it: JUMP, then a direction a few times while in the
+ * air, on a 16 ms frame clock. Nothing is signed or sent: this is the game
+ * logic alone.
+ *
+ * Both worlds are played: the one with a real key item and door (the DEV
+ * fixture as it is now, and the owner's world to be published), and the
+ * LEGACY one published 2026-11-13, with a game-only key and gate (the v1 DEV
+ * fixture), which this client must keep playing until the world switches.
  *
  * It also checks the dungeon is a dungeon: the arrival does not join the
  * climb but by the pad, the gate holds until it is opened, and the key
@@ -17,10 +23,21 @@ import { loadWorld } from '../world'
 import { FALLOUT_PAD, TUTORIAL_ENTRY, TUTORIAL_GAME } from '../tutorialGame'
 import { padUnder, type WorldShard } from '../play'
 import { jump, move, standing, tick, type Body } from '../gravity'
-import { offerAt, openDoor, reachExit, startProgress, takeKey, worldNow, type Progress } from '../progress'
+import { offerHere, openDoor, reachExit, startProgress, takeKey, type Offer, type Progress } from '../progress'
+import { doorKey, doorSecretWith, inKeyBag, keyItemHeld, readKeyBag, readRoom, sceneNow, thingsNow, type Scene } from '../keyDoor'
+import { heldFromFind, heldFromForged, type HeldItem } from '../../inventory'
+import { keyInnerTemplate, type Hidden } from '../../hidden'
+import { forgeKey } from '../../chests'
+import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
+import type { NostrEvent } from '../../events'
+import type { GameDef } from '../types'
 import type { Position } from '../../space'
 
+/** The world with a real key item and door: the DEV fixture. */
 const G = TUTORIAL_GAME
+/** The LEGACY world, published 2026-11-13: the same game, its world the v1 fixture. */
+const V1: GameDef = { ...TUTORIAL_GAME, world: { kind: 'fixture', load: async () => (await import('./tutorialDungeon.v1.fixture.json')).default.events } }
+const ME = 'ab'.repeat(32)
 const B = G.region.base
 const at = (x: number, y: number, z: number): Position => ({ x: B.x + BigInt(x), y: B.y + BigInt(y), z: B.z + BigInt(z) })
 const rel = (p: Position): string => `${p.x - B.x},${p.y - B.y},${p.z - B.z}`
@@ -30,9 +47,38 @@ class Player {
   body: Body
   now = 0
   progress: Progress = startProgress(0)
-  constructor(public world: readonly WorldShard[], start: Position) { this.body = { at: start, arc: null, doubled: false } }
-  get solid(): WorldShard[] { return worldNow(G, this.world, this.progress).solid }
+  /** The key items the key bag revealed, and this player's ITEMS (store/useInventory, here a record). */
+  keys: Hidden[] = []
+  items: Record<string, HeldItem> = {}
+  room: WorldShard[] | null = null
+  constructor(public world: readonly WorldShard[], start: Position, public door: Hidden | null = null, public game: GameDef = G) { this.body = { at: start, arc: null, doubled: false } }
+  get scene(): Scene { return { shards: this.world, door: this.door, room: this.room } }
+  get solid(): WorldShard[] { return sceneNow(this.game, this.scene, this.progress).solid }
   get at(): string { return rel(this.body.at) }
+  get offer(): Offer { return offerHere(thingsNow(this.game, { door: this.door, keys: this.keys }, this.progress, this.items, ME), this.progress, this.body.at) }
+  /** Standing in the key bag's region, the bag is opened (useGame reveal). */
+  async reveal(): Promise<void> {
+    if (this.door && inKeyBag(this.game, this.body.at) && this.keys.length === 0) this.keys = await readKeyBag(this.game)
+  }
+  /** TAKE: a real key item into ITEMS, or the LEGACY key into hand. */
+  take(): boolean {
+    if (!this.door) { const pr = takeKey(this.game, this.progress, this.body.at); if (pr) this.progress = pr; return !!pr }
+    if (this.offer !== 'take') return false
+    const k = this.keys.find((h) => !keyItemHeld(this.items, h))!
+    const row = heldFromFind(ME, k, 0)!
+    this.items = { ...this.items, [row.id]: row }
+    return true
+  }
+  /** OPEN: the door with the held key item and its room read, or the LEGACY gate with the key in hand. */
+  async open(): Promise<boolean> {
+    if (!this.door) { const pr = openDoor(this.game, this.progress, this.body.at); if (pr) this.progress = pr; return !!pr }
+    if (this.offer !== 'open') return false
+    const secret = doorSecretWith(this.door, doorKey(this.door, this.items, ME)!)
+    if (!secret) return false
+    this.progress = { ...this.progress, doorOpen: true }
+    this.room = (await readRoom(this.game, this.door, secret)).shards
+    return true
+  }
   /** Run frames for `ms`, landing on a pad sending you on (as useGame onPad). */
   wait(ms: number): void {
     const end = this.now + ms
@@ -80,101 +126,145 @@ class Player {
 }
 
 let world: WorldShard[] = []
+let door: Hidden | null = null
 let entry: Position = TUTORIAL_ENTRY
+let v1World: WorldShard[] = []
 beforeAll(async () => {
   const w = await loadWorld(G)
   world = w.shards
+  door = w.door
   entry = w.entry
+  const old = await loadWorld(V1)
+  v1World = old.shards
+  expect(old.door).toBeNull()
 }, 60_000)
 
-describe('the tutorial dungeon', () => {
-  it('reads its world: the entry marker and every piece of the layout, from the DEV fixture', () => {
-    expect(world.length).toBe(15)
+/** The run to the top platform, from the entry: pad, then four jumps. */
+function climb(p: Player): void {
+  // The entry point stands on the arrival hall's floor.
+  expect(standing(p.game, p.body.at, p.solid)).toBe(true)
+  p.wait(200)
+  expect(p.at).toBe('8,17,45')
+  // Down the hall to the shrine; the pad's riser of 1 is climbed, and the pad sends you to the climb.
+  p.walkTo('z', 26)
+  p.press('z', -1)
+  expect(p.at).toBe('40,17,45')
+  // The climb. To the foot of the first platform, then up onto it: a jump of 3.
+  p.walkTo('z', 42)
+  p.walkTo('x', 41)
+  p.jump('x', 1, [300, 410])
+  expect(p.at).toBe('43,21,42')
+  // Second platform: 3 up, a gap of 2.
+  p.walkTo('z', 40)
+  p.jump('z', -1, [200, 310])
+  expect(p.at).toBe('43,24,38')
+  // Third: level, a gap of 3.
+  p.walkTo('z', 36)
+  p.walkTo('x', 42)
+  p.jump('x', -1, [120, 230, 340])
+  expect(p.at).toBe('39,24,36')
+  // The key's platform: 3 up, a gap of 2.
+  p.walkTo('x', 37)
+  p.walkTo('z', 38)
+  p.jump('z', 1, [250, 360])
+  expect(p.at).toBe('37,27,40')
+}
+
+/** From the key, off the platform, to the gate and through it, to the finish tile. */
+async function gateAndExit(p: Player): Promise<void> {
+  // Off the edge to the floor.
+  p.walkTo('x', 35)
+  p.press('x', -1)
+  p.wait(1500)
+  expect(p.at).toBe('34,17,41')
+  // To the gate: shut until OPEN with the key.
+  p.walkTo('x', 40)
+  p.walkTo('z', 33)
+  p.press('z', -1, 3)
+  expect(p.at).toBe('40,17,33')
+  expect(p.offer).toBe('open')
+  expect(await p.open()).toBe(true)
+  expect(p.progress.doorOpen).toBe(true)
+  // Through the gate and down the hall to the exit shrine's finish tile.
+  p.walkTo('z', 11)
+  p.press('z', -1)
+  expect(p.at).toBe('40,18,10')
+  p.now = 200_000
+  p.progress = reachExit(p.game, p.progress, p.body.at, p.now)
+  expect(p.progress.clearedMs).toBe(200_000)
+}
+
+describe('the tutorial dungeon, its key item and door (DECK-0004)', () => {
+  it('reads its world: the entry marker, the door and the eleven pieces that stay in the world bag', () => {
+    expect(world.length).toBe(11)
+    expect(door).not.toBeNull()
+    expect(door!.chest?.door).toBe(6)
     // The world marks the entry point (DECK-0002 §2.2): where the generator put the marker.
     expect(entry).toEqual(TUTORIAL_ENTRY)
   })
 
-  it('is cleared start to finish: pad, the climb, the key, the gate, the exit', () => {
-    const p = new Player(world, entry)
-    // The entry point stands on the arrival hall's floor.
-    expect(standing(G, p.body.at, p.solid)).toBe(true)
-    p.wait(200)
-    expect(p.at).toBe('8,17,45')
-    // Down the hall to the shrine; the pad's riser of 1 is climbed, and the pad sends you to the climb.
-    p.walkTo('z', 26)
-    p.press('z', -1)
-    expect(p.at).toBe('40,17,45')
-    // The climb. To the foot of the first platform, then up onto it: a jump of 3.
-    p.walkTo('z', 42)
-    p.walkTo('x', 41)
-    p.jump('x', 1, [300, 410])
-    expect(p.at).toBe('43,21,42')
-    // Second platform: 3 up, a gap of 2.
-    p.walkTo('z', 40)
-    p.jump('z', -1, [200, 310])
-    expect(p.at).toBe('43,24,38')
-    // Third: level, a gap of 3.
-    p.walkTo('z', 36)
-    p.walkTo('x', 42)
-    p.jump('x', -1, [120, 230, 340])
-    expect(p.at).toBe('39,24,36')
-    // The key's platform: 3 up, a gap of 2.
-    p.walkTo('x', 37)
-    p.walkTo('z', 38)
-    p.jump('z', 1, [250, 360])
-    expect(p.at).toBe('37,27,40')
+  it('is cleared start to finish: pad, the climb, the key bag opened on the platform, TAKE into ITEMS, OPEN, the exit', async () => {
+    const p = new Player(world, entry, door)
+    climb(p)
+    // Nothing of the key until its bag is opened, which only standing in its region does.
+    expect(p.keys).toHaveLength(0)
+    expect(p.offer).toBeNull()
+    await p.reveal()
+    expect(p.keys).toHaveLength(1)
+    expect(p.keys[0].key?.name).toBe('Dungeon Key')
     // TAKE is offered by the key, and only there.
-    expect(offerAt(G, p.progress, p.body.at)).toBeNull()
+    expect(p.offer).toBeNull()
     p.walkTo('z', 41)
-    expect(offerAt(G, p.progress, p.body.at)).toBe('take')
-    p.progress = takeKey(G, p.progress, p.body.at)!
-    expect(p.progress.keyHeld).toBe(true)
-    // Off the edge to the floor.
-    p.walkTo('x', 35)
-    p.press('x', -1)
-    p.wait(1500)
-    expect(p.at).toBe('34,17,41')
-    // To the gate: shut until OPEN with the key.
-    p.walkTo('x', 40)
-    p.walkTo('z', 33)
-    p.press('z', -1, 3)
-    expect(p.at).toBe('40,17,33')
-    expect(offerAt(G, p.progress, p.body.at)).toBe('open')
-    p.progress = openDoor(G, p.progress, p.body.at)!
-    expect(p.progress.doorOpen).toBe(true)
-    // Through the gate and down the hall to the exit shrine's finish tile.
-    p.walkTo('z', 11)
-    p.press('z', -1)
-    expect(p.at).toBe('40,18,10')
-    p.now = 200_000
-    p.progress = reachExit(G, p.progress, p.body.at, p.now)
-    expect(p.progress.clearedMs).toBe(200_000)
+    expect(p.offer).toBe('take')
+    expect(p.take()).toBe(true)
+    expect(Object.values(p.items).map((it) => it.type)).toEqual(['key'])
+    expect(p.offer).toBeNull()
+    expect(p.take()).toBe(false)
+    // The finish tile is behind the door: not in the world until the room is read.
+    expect(p.solid.some((w) => w.shard.name.includes('checkered'))).toBe(false)
+    await gateAndExit(p)
+    expect(p.room!.map((w) => w.shard.name)).toEqual(['Maze Kit: aerocarnival checkered tile 4'])
   })
 
   it('joins the arrival to the climb only by the pad', () => {
     // The arrival hall's sealed end and the shrine's back wall hold: nowhere to go but the pad.
-    const p = new Player(world, entry)
+    const p = new Player(world, entry, door)
     p.press('z', 1, 4)
     expect(Number(p.body.at.z - B.z)).toBeLessThan(48)
     p.walkTo('x', 8)
     for (const dir of [1, -1] as const) {
-      const q = new Player(world, at(8, 17, 40))
+      const q = new Player(world, at(8, 17, 40), door)
       q.press('x', dir, 6)
       expect(Math.abs(Number(q.body.at.x - B.x) - 8)).toBeLessThanOrEqual(3)
     }
   })
 
-  it('holds you at the gate until it is opened', () => {
-    const p = new Player(world, at(40, 17, 35))
+  it('holds you at the gate until it is opened: its closed look is its own, and no key opens it but the one', async () => {
+    const p = new Player(world, at(40, 17, 35), door)
     p.press('z', -1, 6)
     expect(p.at).toBe('40,17,33')
-    expect(offerAt(G, p.progress, p.body.at)).toBe('locked')
-    expect(openDoor(G, p.progress, p.body.at)).toBeNull()
+    expect(p.offer).toBe('locked')
+    expect(await p.open()).toBe(false)
+    // Another key item, held, opens nothing here: only the one the door is sealed to.
+    const wrong = forgeKey('Another key')
+    const ev = finalizeEvent(keyInnerTemplate(wrong, at(1, 1, 1), 1, 0), generateSecretKey()) as NostrEvent
+    const row = heldFromForged(ME, ev, wrong, { lookupId: '', bagId: '', at: { x: '0', y: '0', z: '0' }, plane: 1, height: 1 }, 0)
+    p.items = { [row.id]: row }
+    expect(doorKey(door!, p.items, ME)).toBeNull()
+    expect(p.offer).toBe('locked')
+  })
+
+  it('opens the key bag only in its region: not from the floor, not from the platform below', () => {
+    expect(inKeyBag(G, at(37, 27, 40))).toBe(true)
+    expect(inKeyBag(G, at(39, 27, 44))).toBe(true)
+    expect(inKeyBag(G, at(40, 17, 45))).toBe(false)
+    expect(inKeyBag(G, at(39, 24, 36))).toBe(false)
+    expect(inKeyBag(G, at(43, 24, 38))).toBe(false)
   })
 
   it('puts the key out of reach without jumping', () => {
     // Walking and the stair rule never leave the floor in the climb: every platform is a jump of 3 or more.
-    const p = new Player(world, at(40, 17, 45))
+    const p = new Player(world, at(40, 17, 45), door)
     for (const [axis, target] of [['x', 44], ['z', 36], ['x', 36], ['z', 43], ['x', 40]] as const) {
       for (let i = 0; i < 12; i++) p.press(axis, Number((axis === 'x' ? p.body.at.x - B.x : p.body.at.z - B.z)) < target ? 1 : -1)
       expect(Number(p.body.at.y - B.y)).toBe(17)
@@ -191,12 +281,12 @@ describe('the tutorial dungeon', () => {
  */
 describe('falling out of the tutorial dungeon', () => {
   /** The key taken, then up through the oculus onto the dome: the owner's way out. */
-  function outOnTheDome(): Player {
-    const p = new Player(world, at(39, 27, 41))
+  async function outOnTheDome(): Promise<Player> {
+    const p = new Player(world, at(39, 27, 41), door)
     p.wait(100)
     expect(p.at).toBe('39,27,41')
-    p.progress = takeKey(G, p.progress, p.body.at)!
-    expect(p.progress.keyHeld).toBe(true)
+    await p.reveal()
+    expect(p.take()).toBe(true)
     p.walkTo('z', 40)
     // JUMP, a gibson into the oculus while rising, the double jump up through it, and a gibson over onto the dome.
     p.jump('x', 1, [100, 450], 300)
@@ -204,12 +294,12 @@ describe('falling out of the tutorial dungeon', () => {
     return p
   }
 
-  it('the open oculus lets a player climb out onto the dome', () => {
-    outOnTheDome()
+  it('the open oculus lets a player climb out onto the dome', async () => {
+    await outOnTheDome()
   })
 
-  it('off the dome, the region\'s floor holds the faller, right by the pad under the oculus', () => {
-    const p = outOnTheDome()
+  it('off the dome, the region\'s floor holds the faller, right by the pad under the oculus', async () => {
+    const p = await outOnTheDome()
     p.walkTo('x', 47)
     for (let i = 0; i < 6 && p.body.at.y - B.y > 0n; i++) { p.press('x', 1); p.wait(3000) }
     // The region's lower edge is the floor (gravity.ts standing): nothing else stops the fall.
@@ -222,8 +312,8 @@ describe('falling out of the tutorial dungeon', () => {
     expect(Math.abs(Number(p.body.at.x - B.x) - 40) + Math.abs(Number(p.body.at.z - B.z) - 40)).toBeLessThanOrEqual(12)
   })
 
-  it('the pad sends the faller back to the arrival, the key still in hand, the clock still running', () => {
-    const p = outOnTheDome()
+  it('the pad sends the faller back to the arrival, the key still in ITEMS, the clock still running', async () => {
+    const p = await outOnTheDome()
     p.walkTo('x', 47)
     for (let i = 0; i < 6 && p.body.at.y - B.y > 0n; i++) { p.press('x', 1); p.wait(3000) }
     const started = p.progress.startedAt
@@ -235,13 +325,13 @@ describe('falling out of the tutorial dungeon', () => {
     // Standing there, on the arrival hall's floor.
     p.wait(200)
     expect(p.at).toBe('8,17,45')
-    expect(p.progress.keyHeld).toBe(true)
+    expect(doorKey(door!, p.items, ME)).not.toBeNull()
     expect(p.progress.startedAt).toBe(started)
     expect(p.progress.clearedMs).toBeNull()
   })
 
-  it('a fall off the hall roof lands on the same floor, and walks to the pad', () => {
-    const p = outOnTheDome()
+  it('a fall off the hall roof lands on the same floor, and walks to the pad', async () => {
+    const p = await outOnTheDome()
     // South off the dome onto the hall's roof, then off its side.
     p.walkTo('z', 36)
     for (let i = 0; i < 12 && Number(p.body.at.z - B.z) > 20; i++) { p.press('z', -1); p.wait(1500) }
@@ -258,7 +348,7 @@ describe('falling out of the tutorial dungeon', () => {
     const key = (x: number, z: number): number => x * 64 + z
     const seen = new Set<number>([key(40, 40)])
     const queue: Array<[number, number]> = [[40, 40]]
-    const solid = worldNow(G, world, startProgress(0)).solid
+    const solid = sceneNow(G, { shards: world, door, room: null }, startProgress(0)).solid
     while (queue.length) {
       const [x, z] = queue.shift()!
       for (const [axis, dir] of [['x', 1], ['x', -1], ['z', 1], ['z', -1]] as const) {
@@ -271,5 +361,38 @@ describe('falling out of the tutorial dungeon', () => {
       }
     }
     expect(seen.size).toBe(64 * 64)
+  })
+})
+
+/**
+ * The LEGACY world, published 2026-11-13: no door in its bag, so the game-only
+ * key and gate (lib/games/progress.ts). This client plays it until the world
+ * with a real key item and door replaces it.
+ */
+describe('the LEGACY tutorial dungeon (the world published 2026-11-13)', () => {
+  it('reads all fifteen pieces and no door', () => {
+    expect(v1World.length).toBe(15)
+  })
+
+  it('is cleared start to finish with the game-only key and gate', async () => {
+    const p = new Player(v1World, entry, null, V1)
+    climb(p)
+    expect(p.offer).toBeNull()
+    p.walkTo('z', 41)
+    expect(p.offer).toBe('take')
+    expect(p.take()).toBe(true)
+    expect(p.progress.keyHeld).toBe(true)
+    // Nothing goes into ITEMS: the LEGACY key lives only in the game.
+    expect(p.items).toEqual({})
+    await gateAndExit(p)
+    expect(p.progress.keyHeld).toBe(false)
+  })
+
+  it('holds you at the gate until it is opened', () => {
+    const p = new Player(v1World, at(40, 17, 35), null, V1)
+    p.press('z', -1, 6)
+    expect(p.at).toBe('40,17,33')
+    expect(p.offer).toBe('locked')
+    expect(openDoor(V1, p.progress, p.body.at)).toBeNull()
   })
 })

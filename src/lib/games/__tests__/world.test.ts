@@ -52,7 +52,7 @@ describe('loading a game world', () => {
   })
 
   it('an empty source is an empty world, entered at the region\'s centre', async () => {
-    expect(await loadWorld(gameOf([]))).toEqual({ shards: [], entry: regionCentre(TUTORIAL_GAME) })
+    expect(await loadWorld(gameOf([]))).toEqual({ shards: [], entry: regionCentre(TUTORIAL_GAME), door: null })
     const b = TUTORIAL_GAME.region.base
     expect(regionCentre(TUTORIAL_GAME)).toEqual({ x: b.x + 32n, y: b.y + 32n, z: b.z + 32n })
   })

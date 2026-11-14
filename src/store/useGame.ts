@@ -14,6 +14,11 @@
  * carries the fall (lib/games/gravity.ts); TAKE and OPEN are the key door;
  * the clock runs from the entry to the exit zone (lib/games/progress.ts). All
  * of that is the game's logic, kept on this device: nothing is signed for it.
+ * In a world whose gate is a DECK-0004 door (lib/games/keyDoor.ts), the key is
+ * a real key item: reaching its bag's region opens the bag, TAKE holds it in
+ * ITEMS (store/useInventory, on this device, nothing published), and OPEN
+ * opens the door with it and reads its room. The LEGACY world, with no door,
+ * keeps the game-only key and gate.
  * Its run is not anchored (DECK-0002 §6.2, play kept on the device): its steps are not events anyone
  * keeps, so an anchor would commit to nothing checkable. EXIT publishes exit-virtual, which puts you back where
  * you entered (spec §8.11.4 rule 2), and the view comes back exactly as it was
@@ -41,8 +46,12 @@ import { gameEnabled, gamesEnabled } from '../lib/games/flag'
 import { TUTORIAL_GAME } from '../lib/games/tutorialGame'
 import { inRegion, padUnder, stepIn, type WorldShard } from '../lib/games/play'
 import { jump as jumpBody, move as moveBody, tick as tickBody, type Arc, type Body } from '../lib/games/gravity'
-import { openDoor, reachExit, startProgress, takeKey, worldNow, type Progress } from '../lib/games/progress'
+import { DOOR_REACH, KEY_REACH, offerHere, openDoor, reachExit, startProgress, takeKey, within, type Offer, type Progress } from '../lib/games/progress'
+import { doorKey, doorSecretWith, inKeyBag, keyItemHeld, readKeyBag, readRoom, sceneNow, thingsNow } from '../lib/games/keyDoor'
 import { loadWorld } from '../lib/games/world'
+import { useInventory } from './useInventory'
+import type { Hidden } from '../lib/hidden'
+import type { HeldItem } from '../lib/inventory'
 import { noteFoundGame } from '../lib/games/discovered'
 import type { GameDef } from '../lib/games/types'
 import type { AxisName, Position } from '../lib/space'
@@ -60,6 +69,14 @@ export interface GameSession {
   resumeAt: Position | null
   /** The world's shards, null while they load. */
   world: WorldShard[] | null
+  /** The world's DECK-0004 door, or null: no door is the LEGACY world (game-only key and gate). */
+  door: Hidden | null
+  /** The key bag (GameDef keyBag): not read yet, being read, read, or failed (read again once you leave its region and come back). */
+  keyBag: 'unread' | 'reading' | 'read' | 'failed'
+  /** The key items the key bag revealed. */
+  keys: Hidden[]
+  /** The door's room once opened and read: its shards. Null until then. */
+  room: WorldShard[] | null
   /** Why the world could not be read, if it could not. */
   worldError: string | null
   /** The view to come back to; null when the game was resumed, not entered, on this page. */
@@ -90,7 +107,7 @@ export interface GameState {
   jump: (now?: number) => void
   /** The fall and the jump brought up to `now` (performance.now()): called every frame while you play. */
   tick: (now?: number) => void
-  /** TAKE the key, within reach. */
+  /** TAKE the key, within reach: into ITEMS for a real key item, into hand for the LEGACY one. */
   take: () => void
   /** OPEN the door, with the key, within reach. */
   open: () => void
@@ -160,9 +177,27 @@ function saveProgress(entryId: string, pr: Progress | null): void {
   } catch { /* no storage: the progress lives as long as the page */ }
 }
 
-/** The world's walls as they stand: the door open or shut, the key gone or not. */
+/** The world's walls as they stand: the door open or shut (its room with it), the LEGACY key gone or not. */
 function solidOf(session: GameSession): WorldShard[] {
-  return session.world ? worldNow(session.game, session.world, session.progress).solid : []
+  return session.world ? sceneNow(session.game, { shards: session.world, door: session.door, room: session.room }, session.progress).solid : []
+}
+
+/** Who is playing: whose ITEMS hold the key. */
+const me = (): string => useCyberspace.getState().identity.pubkey
+
+/**
+ * What a tap would do where you stand in `session`, if anything: the one
+ * button shown (TAKE, OPEN or LOCKED). A real key item counts as held once
+ * it is in this identity's ITEMS (lib/games/keyDoor.ts thingsNow).
+ */
+export function offerFor(session: GameSession, items: Record<string, HeldItem> = useInventory.getState().items): Offer {
+  if (!session.at) return null
+  return offerHere(thingsNow(session.game, session, session.progress, items, me()), session.progress, session.at)
+}
+
+/** Whether the door would open for what this identity holds: a held key item for a door, the LEGACY key in hand otherwise. */
+export function holdsDoorKey(session: GameSession, items: Record<string, HeldItem> = useInventory.getState().items): boolean {
+  return session.door ? doorKey(session.door, items, me()) !== null : session.progress.keyHeld
 }
 
 /** Physics clock: performance.now(), monotonic. */
@@ -176,6 +211,46 @@ export const useGame = create<GameState>((set, get) => {
     const session = progress === next.progress ? next : { ...next, progress }
     if (session.progress !== get().session?.progress) saveProgress(session.entryId, session.progress)
     set({ session })
+    reveal(session)
+  }
+
+  /**
+   * The key bag, opened once you stand in its region (lib/games/keyDoor.ts
+   * readKeyBag): its key derived here, the work of being there. Only in a world
+   * with a door; once per session, and again after a failure only once you have
+   * left the region and come back.
+   */
+  const reveal = (session: GameSession): void => {
+    if (!session.door || !session.at || !session.world || session.worldError) return
+    const inside = inKeyBag(session.game, session.at)
+    if (session.keyBag === 'failed' && !inside) { set({ session: { ...session, keyBag: 'unread' } }); return }
+    if (session.keyBag !== 'unread' || !inside) return
+    set({ session: { ...session, keyBag: 'reading' } })
+    readKeyBag(session.game).then(
+      (keys) => { const now = get().session; if (now?.entryId === session.entryId) set({ session: { ...now, keys, keyBag: 'read' } }) },
+      (err) => { const now = get().session; if (now?.entryId === session.entryId) set({ session: { ...now, keyBag: 'failed' }, message: `The key's place could not be read: ${err instanceof Error ? err.message : String(err)}` }) },
+    )
+  }
+
+  /** The door's room, read with its secret, landing only in the session it was opened in (lib/games/keyDoor.ts readRoom). */
+  const fillRoom = (session: GameSession, door: Hidden, secretHex: string): void => {
+    readRoom(session.game, door, secretHex).then(
+      (room) => {
+        const now = get().session
+        if (now?.entryId !== session.entryId) return
+        // A room whose bag is not found is said, not shown as an empty room (DECK-0004 §3.7.3).
+        set({ session: { ...now, room: room.shards }, ...(room.found ? {} : { message: 'The room behind the gate could not be retrieved.' }) })
+      },
+      (err) => { if (get().session?.entryId === session.entryId) set({ message: `The room behind the gate could not be read: ${err instanceof Error ? err.message : String(err)}` }) },
+    )
+  }
+
+  /** A run that opened the door before a reload: its room read again with the key still held, if it is. */
+  const refillRoom = (session: GameSession): void => {
+    if (!session.door || !session.progress.doorOpen || session.room) return
+    const key = doorKey(session.door, useInventory.getState().items, me())
+    const secret = key && doorSecretWith(session.door, key)
+    if (secret) fillRoom(session, session.door, secret)
   }
 
   /** After a move or a landing: a pad under a player who stands on it sends them on. */
@@ -189,7 +264,14 @@ export const useGame = create<GameState>((set, get) => {
   const readWorld = (session: GameSession): void => {
     loadWorld(session.game).then(
       // You appear at the entry point by virtue of having entered (DECK-0002 §2.2), or where the record left you.
-      (world) => { const now = get().session; if (now?.entryId === session.entryId) set({ session: { ...now, world: world.shards, at: now.at ?? now.resumeAt ?? world.entry, worldError: world.shards.length ? null : 'This game has no world yet.' } }) },
+      (world) => {
+        const now = get().session
+        if (now?.entryId !== session.entryId) return
+        const next: GameSession = { ...now, world: world.shards, door: world.door, at: now.at ?? now.resumeAt ?? world.entry, worldError: world.shards.length ? null : 'This game has no world yet.' }
+        set({ session: next })
+        reveal(next)
+        refillRoom(next)
+      },
       // No world: a resumed player is still drawn where the record left them; nobody moves without walls (step).
       (err) => { const now = get().session; if (now?.entryId === session.entryId) set({ session: { ...now, world: [], at: now.at ?? now.resumeAt, worldError: err instanceof Error ? err.message : String(err) } }) },
     )
@@ -238,7 +320,7 @@ export const useGame = create<GameState>((set, get) => {
       // The clock starts now, at the entry (lib/games/progress.ts).
       const progress = startProgress(Date.now())
       saveProgress(entryId, progress)
-      const session: GameSession = { game, entryId, at: null, resumeAt: null, world: null, worldError: null, snapshot, arc: null, doubled: false, progress }
+      const session: GameSession = { game, entryId, at: null, resumeAt: null, world: null, door: null, keyBag: 'unread', keys: [], room: null, worldError: null, snapshot, arc: null, doubled: false, progress }
       set({ session, busy: null })
       // Found, for the GAMES panel (lib/games/discovered.ts): kept past a respawn, which forgets the chain.
       noteFoundGame(useCyberspace.getState().identity.pubkey, game.pubkey)
@@ -254,7 +336,7 @@ export const useGame = create<GameState>((set, get) => {
       if (!open || !game || !useCyberspace.getState().atHead()) return false
       // The clock goes on from the entry: kept on this device, or the entry's own time when this device never saw it.
       const progress = loadProgress(open.id) ?? startProgress(open.createdAt * 1000)
-      const session: GameSession = { game, entryId: open.id, at: null, resumeAt: recordedPosition(chain, open, game), world: null, worldError: null, snapshot: null, arc: null, doubled: false, progress }
+      const session: GameSession = { game, entryId: open.id, at: null, resumeAt: recordedPosition(chain, open, game), world: null, door: null, keyBag: 'unread', keys: [], room: null, worldError: null, snapshot: null, arc: null, doubled: false, progress }
       set({ session, message: null })
       noteFoundGame(useCyberspace.getState().identity.pubkey, game.pubkey)
       readWorld(session)
@@ -332,15 +414,39 @@ export const useGame = create<GameState>((set, get) => {
     take: () => {
       const session = get().session
       if (!session?.at || get().busy) return
-      const progress = takeKey(session.game, session.progress, session.at)
-      if (progress) commit({ ...session, progress })
+      if (!session.door) {
+        // LEGACY: the game-only key into hand.
+        const progress = takeKey(session.game, session.progress, session.at)
+        if (progress) commit({ ...session, progress })
+        return
+      }
+      if (session.progress.clearedMs !== null) return
+      // A real key item: held like any other found key, into ITEMS, on this device. Nothing is published.
+      const items = useInventory.getState().items
+      const here = session.at
+      const key = session.keys.find((k) => !keyItemHeld(items, k) && within(here, k.at, KEY_REACH))
+      if (key) useInventory.getState().holdFinds([key])
     },
 
     open: () => {
       const session = get().session
       if (!session?.at || get().busy) return
-      const progress = openDoor(session.game, session.progress, session.at)
-      if (progress) commit({ ...session, progress })
+      if (!session.door) {
+        // LEGACY: the game-only gate, with the key in hand.
+        const progress = openDoor(session.game, session.progress, session.at)
+        if (progress) commit({ ...session, progress })
+        return
+      }
+      const door = session.door
+      if (session.progress.doorOpen || session.progress.clearedMs !== null || !within(session.at, door.at, DOOR_REACH)) return
+      // The door, opened as any door is (DECK-0004 §3.7.3): its secret read with the held key item that is its lock.
+      const key = doorKey(door, useInventory.getState().items, me())
+      if (!key) return
+      const secret = doorSecretWith(door, key)
+      if (!secret) { set({ message: 'That key does not open this gate.' }); return }
+      // Open at once; the room comes after, so no relay holds up the gate (store/rooms.ts openDoorNow, the same order).
+      commit({ ...session, progress: { ...session.progress, doorOpen: true } })
+      fillRoom(session, door, secret)
     },
 
     hide: () => { if (!get().busy) set({ session: null }) },

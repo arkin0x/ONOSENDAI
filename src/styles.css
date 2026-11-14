@@ -2857,7 +2857,7 @@ select.avatars__input option:checked {
 .workshop__deploy {
   font-family: inherit;
   font-size: 10px;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   height: 30px;
   padding: 0 12px;
   border-radius: 5px;
@@ -3053,6 +3053,7 @@ select.avatars__input option:checked {
 .workshop__mini {
   font-family: inherit;
   font-size: 10px;
+  line-height: 1.05;
   letter-spacing: 0.05em;
   height: 30px;
   padding: 0 10px;
@@ -3481,6 +3482,7 @@ select.avatars__input option:checked {
 .ws__level-key { width: 38px; height: 34px; }
 .ws__level-value {
   font-size: 10px;
+  line-height: 1;
   letter-spacing: 0.08em;
   color: var(--dim, #7fa3b3);
   font-variant-numeric: tabular-nums;
@@ -3620,6 +3622,8 @@ select.avatars__input option:checked {
    row is tight, the letter spacing comes down so a word keeps its old width and
    nothing wraps or grows over the bench. */
 .workshop .tag,
+.zipimport .tag,
+.workshop .sfold__count,
 .workshop .benchorb__sub,
 .workshop .viewmenu__hub,
 .workshop .viewmenu__op,
@@ -3627,6 +3631,11 @@ select.avatars__input option:checked {
 .workshop .chip.ws__chip,
 .workshop .explain__pill { font-size: 10px; letter-spacing: 0.03em; }
 .workshop .sfold__btn { font-size: 10px; letter-spacing: 0.05em; }
+/* On a phone the top chips were set closer at 9px (0.06em, further down); at
+   10px they go untracked so MENU, GRID, SHARD and AVATAR keep their width. */
+@media (max-width: 640px) {
+  .workshop .ws__chips .chip.ws__chip { letter-spacing: 0; }
+}
 /* Bottom left: TOOLS, its panel above the chip. */
 .ws__tools {
   position: absolute;
@@ -3960,8 +3969,9 @@ select.avatars__input option:checked {
   font-weight: 700;
 }
 .benchclip .touchpad__key.is-on .touchpad__sub { opacity: 1; }
-/* The long words, DESELECT and SUBDIVIDE, a touch smaller and untracked so they
-   fit a 48px key without widening it; SUBDIVIDE breaks onto two lines (SUB, DIVIDE). */
+/* The long words, DESELECT and SUBDIVIDE, a touch smaller and untracked, and
+   each breaks onto two lines (DE SELECT, SUB DIVIDE) so it fits a 48px key
+   without widening it. */
 .benchclip .touchpad__key--long .touchpad__sub { font-size: 9.5px; letter-spacing: 0; line-height: 1.1; text-align: center; }
 /* A key that asks before it acts (PASTE where, FLIP how much) carries a dot
    in its top right corner, so it reads as two steps before it is pressed.
@@ -8392,7 +8402,7 @@ select.avatars__input option:checked {
 .ws__slot { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 8px; border-radius: 5px; font-family: inherit; cursor: pointer; color: var(--fg); background: rgba(0, 229, 255, 0.05); border: 1px dashed rgba(0, 229, 255, 0.35); }
 .ws__slot.is-full { border-style: solid; }
 .ws__slot-name { font-size: 11px; }
-.ws__slot-meta { font-size: 10px; letter-spacing: 0; color: var(--dim); }
+.ws__slot-meta { font-size: 10px; line-height: 1.1; letter-spacing: 0; color: var(--dim); }
 
 /* ---------- Stash modals (Models, Bags, Bag contents) ---------- */
 .modal__card.stash-modal { border-color: rgba(0, 229, 255, 0.5); max-width: 460px; max-height: calc(100dvh - 32px); overflow-y: auto; }

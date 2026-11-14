@@ -89,7 +89,7 @@ const DELETE_CONTENTS: DeleteContents = {
 
 /** One line under the tool row. */
 const TOOL_HELP: Partial<Record<Tool, string>> = {
-  view: 'Look around: one finger orbits, two pan, pinch zooms. The compass turns the view a quarter at a time. Pick a tool to build.',
+  view: 'Look around: one finger orbits, two pan, pinch zooms. Tap the compass to tip or roll the grid a quarter, so the next points go on another plane. Pick a tool to build.',
   stamp: 'Tap the grid to place the shape where the ghost shows. Q turns it.',
   add: 'Tap the grid to place a vertex at the current level.',
   select: 'Tap points, or drag boxes, to gather them. INVERT makes taps and boxes take points out; DESELECT lets go. Drag the ORBIT ball to turn the view.',
@@ -112,7 +112,7 @@ export function Intro(): JSX.Element | null {
     <div className="workshop__intro" role="note" aria-label="How to make an object">
       <h3 className="workshop__intro-title">MAKE A SHARD</h3>
       <ol className="workshop__intro-steps">
-        <li><b>STAMP</b> a shape: open the tool chip at the bottom left, pick STAMP, tap the grid where the ghost shows.</li>
+        <li><b>STAMP</b> a shape: tap VIEW at the bottom left, pick STAMP, tap the grid where the ghost shows.</li>
         <li>One finger <b>orbits</b>, or drag the <b>ORBIT</b> ball (in SELECT one finger draws a box); two fingers <b>pan</b>. GRID raises the level to stack things.</li>
         <li><b>DEPLOY</b> hides it in the world at a place you choose.</li>
       </ol>
@@ -479,7 +479,7 @@ function SelectRow({ inHand }: { inHand: boolean }): JSX.Element {
       {inHand && (
         <button className="touchpad__key touchpad__key--long" title="Let everything go (Esc)" aria-label="Deselect everything" {...noCallout} onClick={() => { w().selectVertex(null); w().clearFacePick() }}>
           <X size={15} strokeWidth={2.25} aria-hidden />
-          <span className="touchpad__sub">DESELECT</span>
+          <span className="touchpad__sub">DE<wbr />SELECT</span>
         </button>
       )}
     </div>
@@ -1064,7 +1064,7 @@ export function Workshop(): JSX.Element | null {
               the object at true size before you place it. Under SHARD, PUBLISH puts the shard on your relays as a
               public object: the Shard Feed lists it, anyone can place it, and PUBLISH AGAIN replaces it under the same
               address; RETRACT asks the relays to drop it. That is separate from hiding, which seals a copy at a place.
-              Keys: 1 to 5 tools, Q turns a stamp, WASD and
+              Keys: 1 VIEW, 2 STAMP, 3 ADD, 4 SELECT, 5 FACE, Q turns a stamp, WASD and
               RF or the arrows nudge the selection in screen directions, C selects what faces join, Del
               deletes, Enter fills, [ ] change the level, Ctrl+Z undoes, Esc closes a panel, then
               clears, then closes the workshop.

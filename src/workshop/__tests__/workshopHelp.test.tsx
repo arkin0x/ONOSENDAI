@@ -57,23 +57,34 @@ describe('the first-run card', () => {
     expect(card).not.toMatch(/FACE[^.;]*draws a box/)
   })
 
-  it('points at the tool chip, not a TOOLS chip that is no longer there', () => {
-    expect(card).toContain('tool chip at the bottom left')
+  it('points at the tool chip, which opens on VIEW, not a TOOLS chip that is no longer there', () => {
+    expect(card).toContain('tap VIEW at the bottom left, pick STAMP')
     expect(card).not.toMatch(/\bTOOLS\b/)
+  })
+})
+
+describe('the VIEW help line', () => {
+  it('says the compass tips or rolls the grid, which is what its pad does, not that it turns the view', () => {
+    const view = /^\s*view: '([^']*)',$/m.exec(SOURCE)
+    expect(view).not.toBeNull()
+    expect(view![1]).toContain('Tap the compass to tip or roll the grid a quarter')
+    expect(view![1]).not.toContain('turns the view')
+    expect(SOURCE).toContain('aria-label="Tip the grid up"')
+    expect(SOURCE).toContain('aria-label="Roll the grid left"')
   })
 })
 
 describe("MENU's EXPLAIN", () => {
   const explain = menuExplain()
 
-  it('counts the tools the keys choose: 1 to 5', () => {
+  it('names every tool key, 1 to 5, as Bench.tsx binds them', () => {
     const tools = /const TOOLS: Tool\[\] = \[([^\]]*)\]/.exec(SOURCE)
     expect(tools).not.toBeNull()
-    const count = tools![1].split(',').length
-    expect(count).toBe(5)
-    for (let n = 1; n <= count; n++) expect(BENCH).toContain(`e.code === 'Digit${n}'`)
-    expect(BENCH).not.toContain(`e.code === 'Digit${count + 1}'`)
-    expect(explain).toContain(`Keys: 1 to ${count} tools`)
+    const names = tools![1].split(',').map((t) => t.trim().replace(/'/g, ''))
+    expect(names).toHaveLength(5)
+    names.forEach((t, i) => expect(BENCH).toContain(`if (e.code === 'Digit${i + 1}') w.setTool('${t}')`))
+    expect(BENCH).not.toContain(`e.code === 'Digit${names.length + 1}'`)
+    expect(explain).toContain(`Keys: ${names.map((t, i) => `${i + 1} ${t.toUpperCase()}`).join(', ')},`)
     expect(explain).not.toContain('1 2 3 4')
   })
 

@@ -1,7 +1,8 @@
 /**
- * AnimEditor.tsx: MOTION in the workshop's SHARD panel, the editor for an
- * object's `anim` (DECK-0003 §1.14; lib/animEdit.ts holds every rule and
- * conversion, this only draws them). arkinox, 2026-11-14: "i don't want to
+ * AnimEditor.tsx: the workshop's MOTION panel (its own top-level button,
+ * a sibling of SHARD; arkinox, 2026-11-14), the editor for an object's
+ * `anim` (DECK-0003 §1.14; lib/animEdit.ts holds every rule and conversion,
+ * this only draws them). arkinox, 2026-11-14: "i don't want to
  * ship animations without shipping workshop tools to create and edit
  * animations".
  *
@@ -119,8 +120,9 @@ export function AnimEditor(): JSX.Element {
 
   return (
     <div className="ws__anim" role="group" aria-label="Motion">
-      <div className="workshop__row">
-        <span className="workshop__label">MOTION</span>
+      {/* The panel is MOTION (Workshop.tsx); this row is its preview, there once there is a motion to show. */}
+      {list.length > 0 && <div className="workshop__row">
+        <span className="workshop__label">PREVIEW</span>
         {list.length > 0 && (preview.on && preview.playing
           ? <button className="workshop__btn" title="Pause the preview" aria-label="Pause" onClick={() => preview.pause()}><Pause size={12} aria-hidden /> PAUSE</button>
           : <button className="workshop__btn" title="Play the preview" aria-label="Play" onClick={() => preview.play()}><Play size={12} aria-hidden /> PLAY</button>)}
@@ -153,7 +155,7 @@ export function AnimEditor(): JSX.Element {
             <span className="explorer__mark" style={{ left: `${share * 100}%` }} />
           </div>
         )}
-      </div>
+      </div>}
       {reduced && list.length > 0 && <div className="ws__explain">Reduced motion is on. Scrub to see it move.</div>}
 
       <div className="workshop__row" role="group" aria-label="Add a motion">

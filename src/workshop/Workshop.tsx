@@ -25,7 +25,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { Box, ChevronDown, ChevronUp, ClipboardCopy, ClipboardPaste, Copy, CopyPlus, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Hash, Link, Menu, Merge, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, VenetianMask, WandSparkles, Waypoints, X } from 'lucide-react'
+import { Box, Orbit, ChevronDown, ChevronUp, ClipboardCopy, ClipboardPaste, Copy, CopyPlus, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Hash, Link, Menu, Merge, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, VenetianMask, WandSparkles, Waypoints, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
@@ -97,7 +97,7 @@ const TOOL_HELP: Partial<Record<Tool, string>> = {
   face: 'Tap corners in order, then the first again or FILL. Tap a face to select it and move it with the pad. A dark face shows its back: FLIP turns it round, AUTO turns every face outward. One finger orbits, or drag the ORBIT ball.',
 }
 
-type Panel = 'menu' | 'tools' | 'grid' | 'shard' | 'avatar'
+type Panel = 'menu' | 'tools' | 'grid' | 'shard' | 'motion' | 'avatar'
 
 const INTRO_KEY = 'onosendai:workshop-intro'
 
@@ -1004,6 +1004,10 @@ export function Workshop(): JSX.Element | null {
         <button className={`chip ws__chip ${panel === 'shard' ? 'is-on' : ''}`} aria-pressed={panel === 'shard'} onClick={() => toggle('shard')}>
           <Box size={12} strokeWidth={2.25} aria-hidden />SHARD
         </button>
+        {/* MOTION (arkinox, 2026-11-14: "move all the motion stuff to a new top-level button called motion"): its own panel, a sibling of SHARD. */}
+        <button className={`chip ws__chip ${panel === 'motion' ? 'is-on' : ''}`} aria-pressed={panel === 'motion'} onClick={() => toggle('motion')}>
+          <Orbit size={12} strokeWidth={2.25} aria-hidden />MOTION
+        </button>
         <button className={`chip ws__chip ${panel === 'avatar' ? 'is-on' : ''}`} aria-pressed={panel === 'avatar'} onClick={() => toggle('avatar')}>
           <VenetianMask size={12} strokeWidth={2.25} aria-hidden />AVATAR
         </button>
@@ -1168,7 +1172,14 @@ export function Workshop(): JSX.Element | null {
           {/* Whether walkers with GRAVITY on bounce off its top (lib/walkBounce.ts),
               beside CONSTRAIN, its closest sibling (arkinox, 2026-11-10). */}
           <BounceRow />
-          {/* Perpetual motion on the paced clock (lib/anim.ts, DECK-0003 §1.14): the editor. Moving objects stop no walker yet. */}
+        </div>
+      )}
+
+      {/* MOTION: the open shard's perpetual motion on the paced clock (lib/anim.ts,
+          DECK-0003 §1.14), all of it in one self-contained editor (AnimEditor).
+          Moving objects stop no walker yet. Like SHARD, nothing without a shard. */}
+      {panel === 'motion' && shard && (
+        <div className="ws__panel" role="region" aria-label="Motion panel">
           <AnimEditor />
         </div>
       )}

@@ -94,7 +94,7 @@ describe('the workshop top bar', () => {
   })
 
   it('opens one panel at a time, from one piece of state', () => {
-    expect(SOURCE).toContain("type Panel = 'menu' | 'tools' | 'grid' | 'shard' | 'avatar'")
+    expect(SOURCE).toContain("type Panel = 'menu' | 'tools' | 'grid' | 'shard' | 'motion' | 'avatar'")
     // Escape closes whichever is open, before anything else in the workshop.
     expect(SOURCE).toContain('if (panel !== null) setPanel(null)')
   })

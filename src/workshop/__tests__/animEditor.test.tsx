@@ -62,11 +62,18 @@ async function click(m: Awaited<ReturnType<typeof mount>>, label: string): Promi
 }
 
 describe('MOTION in the SHARD panel', () => {
-  it('sits after BOUNCE, inside the SHARD panel, in place of the old ANIM row', () => {
+  it('has its own top-level MOTION button and panel, a sibling of SHARD; nothing motion stays in SHARD', () => {
+    const chips = SOURCE.slice(SOURCE.indexOf('<div className="ws__chips">'), SOURCE.indexOf('{phase && ('))
+    expect(chips).toMatch(/toggle\('motion'\)/)
+    expect(chips).toMatch(/<Orbit [^>]*\/>MOTION/)
+    expect(chips.indexOf("toggle('motion')")).toBeGreaterThan(chips.indexOf("toggle('shard')"))
+    expect(chips.indexOf("toggle('motion')")).toBeLessThan(chips.indexOf("toggle('avatar')"))
+    const motion = SOURCE.slice(SOURCE.indexOf("{panel === 'motion' && shard && ("), SOURCE.indexOf("{panel === 'avatar' && shard && ("))
+    expect(motion).toContain('aria-label="Motion panel"')
+    expect(motion).toContain('<AnimEditor />')
     const start = SOURCE.indexOf("{panel === 'shard' && shard && (")
-    const end = SOURCE.indexOf('\n      )}\n', start)
-    const shard = SOURCE.slice(start, end)
-    expect(shard.indexOf('<AnimEditor />')).toBeGreaterThan(shard.indexOf('<BounceRow />'))
+    const shard = SOURCE.slice(start, SOURCE.indexOf('\n      )}\n', start))
+    expect(shard).not.toMatch(/AnimEditor|AnimRow|MOTION|anim/i)
     expect(SOURCE).not.toContain('AnimRow')
   })
 

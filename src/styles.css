@@ -4349,12 +4349,13 @@ select.avatars__input option:checked {
      rest, at least the held bar's eight slots. The dock paints over a
      question's full-screen catcher, as it does upright: a flex item's order
      sets its painting order too, and the strip comes after it here. */
-  .ws__dock { order: 0; flex: 0 1 auto; min-width: 0; padding-left: 4px; padding-right: 4px; border-top: 0; z-index: 2; }
+  .ws__dock { order: 0; flex: 0 1 auto; min-width: 0; gap: 0; padding-left: 2px; padding-right: 2px; border-top: 0; z-index: 2; }
   .ws__dock .ws__dockbtn { flex: 0 1 56px; min-width: 44px; }
   .ws__dock .ws__dockbtn.ws__dockbtn--more { flex: 0 1 88px; }
   .ws__dock .ws__colorchip { flex: 0 0 44px; }
-  .ws__strip { order: 1; flex: 1 0 360px; min-width: 360px; height: var(--ws-dock); padding-bottom: var(--ws-safe-b); border-top: 0; border-left: 1px solid var(--border); }
-  .ws__strip.ws__strip--held { padding: 0 4px; }
+  .ws__strip { order: 1; flex: 1 0 352px; min-width: 352px; height: var(--ws-dock); padding-bottom: var(--ws-safe-b); border-top: 0; border-left: 1px solid var(--border); }
+  /* Eight 44px slots in 352px: the held bar fits a 667px phone held sideways beside a six-tool dock. */
+  .ws__strip.ws__strip--held { padding: 0; }
   /* The guide's card keeps clear of the rail. */
   .ws__guide { left: calc(max(var(--ws-gutter), var(--ws-safe-l)) + 104px); }
   .ws__sheet,

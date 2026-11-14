@@ -1,7 +1,6 @@
 /**
- * anim.ts: an object's perpetual motion on the shared paced clock (design
- * note anim-block-paced-design-2026-11-10, §4 and §5; DECK-0003 `anim`, in
- * draft).
+ * anim.ts: an object's perpetual motion on the shared paced clock (DECK-0003
+ * §1.14 `anim`, spec PR #107; design note anim-block-paced-design-2026-11-10).
  *
  * `anim` is an optional payload field: a list of motions, each one JSON
  * array, a word and then integers (and an axis letter). Every motion ends in
@@ -12,8 +11,12 @@
  *
  * and its pose is a pure function of u. The motions compose in the order
  * written, the first innermost, about the object's own origin, in its own
- * model frame (cyberspace axes, ticks). Nothing here knows the clock
- * (lib/pacedClock.ts) or the screen (scene/ShardMesh.tsx).
+ * model frame as DECK-0003 §2 defines it (Y up, +Z toward the viewer: the
+ * published, version 2 frame), in ticks. That is NOT sno-core's in-memory
+ * frame, which keeps cyberspace axes (Z negated from the wire); it IS the
+ * render frame times 120 (sno-core toRender), so a motion's matrix sits
+ * directly above a mesh drawn in the render frame. Nothing here knows the
+ * clock (lib/pacedClock.ts) or the screen (scene/ShardMesh.tsx).
  *
  * THE MOTION TABLE (MOTIONS below) is the only place a motion is defined:
  * its word, how its parameters are read, and its pose at a phase. The names
@@ -21,11 +24,12 @@
  * research on conventions lands (2026-11-14); renaming or adding a motion is
  * one entry there.
  *
- * Reader rules kept here (§4.3): at most four motions are read (the first
- * four entries; later ones are ignored), a malformed entry or an unknown word
- * is ignored and the rest still apply, a rate above 600 cycles per paced
- * block holds that motion at phase 0, and the payload is never rejected for
- * `anim`. Like `constrain` and `bounce`, the field rides in sno-core's
+ * Reader rules kept here (§1.14): only the first four entries are read; an
+ * entry that is malformed, has an unknown word, has an integer out of its
+ * range, or is faster than 600 cycles per paced block is ignored (held still)
+ * and the rest still apply; the payload is never rejected for `anim`. A
+ * writer writes c/b in lowest terms and a path's weights with no common
+ * factor (withAnim). Like `constrain` and `bounce`, the field rides in sno-core's
  * `extra` until sno-core learns it; a top-level `anim` is read first.
  */
 
@@ -35,8 +39,14 @@ import type { ShardModel } from 'sno-core/shards'
 export const ANIM_FIELD = 'anim'
 /** Motions read per object; entries past this are ignored (§4.3). */
 export const MAX_MOTIONS = 4
-/** Fastest rate a motion may have, cycles per paced block; faster is held still (a strobe, §4.3). */
+/** Fastest rate a motion may have, cycles per paced block; a faster entry is ignored (a strobe, §1.14). */
 export const MAX_RATE = 600
+/** Largest `b`, paced blocks. */
+export const MAX_BLOCKS = 1_000_000
+/** Largest distance in ticks (the 64-unit position bound of §1.8). */
+export const REACH = 64 * 120
+/** Largest path leg weight. */
+export const MAX_WEIGHT = 1_000
 /** Waypoints a `path` may have (§4.1). */
 export const PATH_MIN = 2
 export const PATH_MAX = 32
@@ -66,8 +76,6 @@ export interface Motion extends Rate {
   p: number[]
   /** A path's waypoints, four integers each [x, y, z, w]; empty otherwise. */
   pts: number[]
-  /** Faster than MAX_RATE: held at phase 0. */
-  tooFast: boolean
 }
 
 /**
@@ -84,10 +92,10 @@ export interface MotionPose {
 const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v)
 const isAxis = (v: unknown): v is Axis => typeof v === 'string' && (AXES as readonly string[]).includes(v)
 
-/** The rate from the last three numbers of an entry, or null. */
+/** The rate from the last three numbers of an entry, or null: c nonzero, b 1..1,000,000, |c| ≤ 600 b, φ 0..359. */
 function readRate(c: unknown, b: unknown, phi: unknown): Rate | null {
   if (!isInt(c) || !isInt(b) || !isInt(phi)) return null
-  if (b < 1 || phi < 0 || phi > 359) return null
+  if (c === 0 || b < 1 || b > MAX_BLOCKS || Math.abs(c) > MAX_RATE * b || phi < 0 || phi > 359) return null
   return { c, b, phi }
 }
 
@@ -102,7 +110,7 @@ const TAU = 2 * Math.PI
 /** A motion's definition: how an entry is read, and its pose at a phase. */
 interface MotionDef {
   /** The entry after its word, read into a motion, or null when malformed. */
-  read(rest: readonly unknown[]): Omit<Motion, 'word' | 'tooFast'> | null
+  read(rest: readonly unknown[]): Omit<Motion, 'word'> | null
   /** The pose at phase `u` (0..1), written into `out`. */
   pose(m: Motion, u: number, out: MotionPose): void
 }
@@ -137,19 +145,19 @@ export const MOTIONS: Readonly<Record<string, MotionDef>> = {
     read: axisShape(1, ([reach]) => reach >= 1 && reach <= 180),
     pose: (m, u, out) => { still(out); out.axis = m.axis; out.angle = (m.p[0] * Math.PI / 180) * Math.sin(TAU * u) },
   },
-  /** `["slide", axis, reach, c, b, φ]`: along the axis, offset = reach × sin(2πu), reach in ticks. */
+  /** `["slide", axis, reach, c, b, φ]`: along the axis, offset = reach × sin(2πu), reach 1..7680 ticks. */
   slide: {
-    read: axisShape(1, () => true),
+    read: axisShape(1, ([reach]) => reach >= 1 && reach <= REACH),
     pose: (m, u, out) => { still(out); out.t[m.axis] = m.p[0] * Math.sin(TAU * u) },
   },
   /**
    * `["orbit", axis, radius, c, b, φ]`: the origin goes round a circle of
-   * `radius` ticks about the axis, without turning. At u = 0 it sits at
-   * `radius` along the next axis (x->y, y->z, z->x), and it goes round the
-   * way a turn does (right-handed).
+   * `radius` ticks (1..7680) about the axis, without turning. At u = 0 it
+   * sits at `radius` along the next axis (x->y, y->z, z->x), and it goes
+   * round the way a turn does (right-handed).
    */
   orbit: {
-    read: axisShape(1, ([radius]) => radius >= 0),
+    read: axisShape(1, ([radius]) => radius >= 1 && radius <= REACH),
     pose: (m, u, out) => {
       still(out)
       const a = m.axis, e1 = (a + 1) % 3, e2 = (a + 2) % 3
@@ -161,11 +169,11 @@ export const MOTIONS: Readonly<Record<string, MotionDef>> = {
   },
   /**
    * `["lift", axis, travel, dwell, c, b, φ]`: rests at the origin, travels
-   * `travel` ticks (signed) eased, rests, comes back; `dwell` is the share of
-   * the cycle resting at EACH stop, whole percent 0..49 (§4.2).
+   * `travel` ticks (signed, nonzero, within 7680) eased, rests, comes back;
+   * `dwell` is the share of the cycle resting at EACH stop, whole percent 0..49.
    */
   lift: {
-    read: axisShape(2, ([, dwell]) => dwell >= 0 && dwell <= 49),
+    read: axisShape(2, ([travel, dwell]) => travel !== 0 && Math.abs(travel) <= REACH && dwell >= 0 && dwell <= 49),
     pose: (m, u, out) => {
       still(out)
       const d = m.p[1] / 100
@@ -179,9 +187,9 @@ export const MOTIONS: Readonly<Record<string, MotionDef>> = {
   },
   /**
    * `["path", c, b, φ, [x, y, z, w], ...]`: the origin travels a closed loop
-   * of 2 to 32 waypoints in ticks, linearly. Leg i runs from the waypoint
-   * before it to waypoint i and takes w_i / Σw of the cycle (w ≥ 1), so at
-   * u = 0 the origin is at the last waypoint.
+   * of 2 to 32 waypoints in ticks (each within 7680), linearly. Leg i runs
+   * from the waypoint before it to waypoint i and takes w_i / Σw of the cycle
+   * (w 1..1000), so at u = 0 the origin is at the last waypoint.
    */
   path: {
     read: (rest) => {
@@ -190,7 +198,8 @@ export const MOTIONS: Readonly<Record<string, MotionDef>> = {
       if (!rate) return null
       const pts: number[] = []
       for (const w of rest.slice(3)) {
-        if (!Array.isArray(w) || w.length !== 4 || !w.every(isInt) || w[3] < 1) return null
+        if (!Array.isArray(w) || w.length !== 4 || !w.every(isInt)) return null
+        if (Math.abs(w[0]) > REACH || Math.abs(w[1]) > REACH || Math.abs(w[2]) > REACH || w[3] < 1 || w[3] > MAX_WEIGHT) return null
         pts.push(w[0], w[1], w[2], w[3])
       }
       return { ...rate, axis: -1, p: [], pts }
@@ -224,8 +233,7 @@ export function knownMotion(word: string): boolean {
 export function readMotion(raw: unknown): Motion | null {
   if (!Array.isArray(raw) || typeof raw[0] !== 'string' || !knownMotion(raw[0])) return null
   const read = MOTIONS[raw[0]].read(raw.slice(1))
-  if (!read) return null
-  return { ...read, word: raw[0], tooFast: Math.abs(read.c) > MAX_RATE * read.b }
+  return read ? { ...read, word: raw[0] } : null
 }
 
 /** A payload's `anim`, as a reader keeps it: the first four entries, each read or ignored (§4.3). Never throws. */
@@ -284,9 +292,9 @@ export function phaseAt(r: Rate, beta: number): number {
   return v >= 1 ? 0 : v
 }
 
-/** A motion's pose at phase u, written into `out`; a too-fast motion is at phase 0. */
+/** A motion's pose at phase u, written into `out`. */
 export function motionPose(m: Motion, u: number, out: MotionPose): MotionPose {
-  MOTIONS[m.word].pose(m, m.tooFast ? 0 : u, out)
+  MOTIONS[m.word].pose(m, u, out)
   return out
 }
 
@@ -296,10 +304,10 @@ export function newPose(): MotionPose {
 
 /**
  * Compose motion poses, in order, into a 4x4 in the RENDER frame (three's
- * column-major elements, model units): every motion is applied in the model
- * frame (cyberspace axes, ticks), first innermost, and the result is carried
- * through sno-core's toRender, the flip (x, y, -z) / 120, so it can sit
- * directly above a mesh drawn in the render frame. `out` is written in place.
+ * column-major elements, model units): every motion is applied in the
+ * DECK-0003 §2 model frame, in ticks, first innermost. That frame is the
+ * render frame times 120, so the result sits directly above a mesh drawn
+ * there. `out` is written in place.
  */
 export function composeRender(poses: readonly MotionPose[], count: number, out: Float64Array | number[]): void {
   // A 3x3 linear part L (row-major, model frame) and translation T (ticks): p -> L p + T.
@@ -324,24 +332,40 @@ export function composeRender(poses: readonly MotionPose[], count: number, out: 
     }
     t0 += q.t[0]; t1 += q.t[1]; t2 += q.t[2]
   }
-  // Render frame: F L F with F = diag(1, 1, -1), translation F T / 120. Column-major.
-  out[0] = l0; out[1] = l3; out[2] = -l6; out[3] = 0
-  out[4] = l1; out[5] = l4; out[6] = -l7; out[7] = 0
-  out[8] = -l2; out[9] = -l5; out[10] = l8; out[11] = 0
-  out[12] = t0 / TICKS; out[13] = t1 / TICKS; out[14] = -t2 / TICKS; out[15] = 1
+  // Column-major; the translation from ticks to model units.
+  out[0] = l0; out[1] = l3; out[2] = l6; out[3] = 0
+  out[4] = l1; out[5] = l4; out[6] = l7; out[7] = 0
+  out[8] = l2; out[9] = l5; out[10] = l8; out[11] = 0
+  out[12] = t0 / TICKS; out[13] = t1 / TICKS; out[14] = t2 / TICKS; out[15] = 1
 }
 
 // ---- writing --------------------------------------------------------------
 
-/** The canonical entry for a motion (integers only, nothing omitted), as a writer writes it. */
+/** Greatest common divisor of two nonnegative integers. */
+export function gcd(a: number, b: number): number {
+  a = Math.abs(a); b = Math.abs(b)
+  while (b) { const t = a % b; a = b; b = t }
+  return a
+}
+
+/**
+ * The canonical entry for a motion, as a writer writes it (§1.14): integers
+ * only, nothing omitted, c and b in lowest terms, a path's leg weights with
+ * no common factor.
+ */
 export function writeMotion(m: Motion): unknown[] {
   const axis = m.axis >= 0 ? [AXES[m.axis]] : []
+  const g = gcd(m.c, m.b) || 1
+  const c = m.c / g, b = m.b / g
   if (m.word === 'path') {
+    let gw = 0
+    for (let i = 3; i < m.pts.length; i += 4) gw = gcd(gw, m.pts[i])
+    gw ||= 1
     const pts: number[][] = []
-    for (let i = 0; i < m.pts.length; i += 4) pts.push(m.pts.slice(i, i + 4))
-    return [m.word, m.c, m.b, m.phi, ...pts]
+    for (let i = 0; i < m.pts.length; i += 4) pts.push([m.pts[i], m.pts[i + 1], m.pts[i + 2], m.pts[i + 3] / gw])
+    return [m.word, c, b, m.phi, ...pts]
   }
-  return [m.word, ...axis, ...m.p, m.c, m.b, m.phi]
+  return [m.word, ...axis, ...m.p, c, b, m.phi]
 }
 
 /**

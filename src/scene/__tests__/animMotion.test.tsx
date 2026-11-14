@@ -14,16 +14,15 @@ import { newShard, toRender, type ShardModel } from 'sno-core/shards'
 import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 import { ShardMesh } from '../ShardMesh'
 import { feedPaced, readPaced, resetPaced } from '../../lib/pacedSource'
-import { EPOCH_END_TIME, pacedHeight } from '../../lib/pacedClock'
+import { EPOCH_ENDS, pacedHeight } from '../../lib/pacedClock'
 import { phaseAt, readAnim } from '../../lib/anim'
 import { newPhaseState, stepPhases } from '../animMotion'
 import { applyPose, frameAt, poseMatrix, type Pose } from '../../lib/pose'
 
-const A482 = 1_793_300_370
-const ENDS = [EPOCH_END_TIME, A482]
-/** 2026-11-10 04:11:02 UTC, the note's worked example. */
-const T = Date.UTC(2026, 10, 10, 4, 11, 2)
-const TIP = { height: 975_255, time: T / 1000 - 300 }
+const ENDS = EPOCH_ENDS
+/** 2026-11-20 00:00:00 UTC, DECK-0003 §1.14's vector moment: a 100-per-block turn at 220.253526 degrees. */
+const T = 1_795_132_800_000
+const TIP = { height: 976_480, time: T / 1000 - 300 }
 
 function hoop(anim: unknown): ShardModel {
   return {
@@ -61,7 +60,7 @@ afterEach(async () => {
 })
 
 describe('a shard with anim in the scene', () => {
-  it('turns to its pose at β: the note\'s 100-per-block platform at 162.5 degrees', async () => {
+  it('turns to its pose at β: the spec\'s 100-per-block platform at 220.25 degrees', async () => {
     feedPaced({ ends: ENDS, tip: TIP })
     r = await r3fRoot()
     await r.render(createElement(ShardMesh, { shard: hoop([['turn', 'y', 100, 1, 0]]), world: true }))
@@ -73,10 +72,13 @@ describe('a shard with anim in the scene', () => {
     const beta = pacedHeight(T / 1000, ENDS)
     const angle = phaseAt({ c: 100, b: 1, phi: 0 }, beta) * 2 * Math.PI
     const p = carried(g!)
-    // Model +X turned right-handed about +Y by θ: (cos θ, 0, −sin θ) in the model, z negated in the render frame.
+    // +X turned right-handed about +Y by θ in the §2 frame (the render frame): (cos θ, 0, −sin θ).
     expect(p.x).toBeCloseTo(Math.cos(angle), 6)
-    expect(p.z).toBeCloseTo(Math.sin(angle), 6)
-    expect(angle * 180 / Math.PI).toBeCloseTo(162.4647, 2)
+    expect(p.z).toBeCloseTo(-Math.sin(angle), 6)
+    expect(angle * 180 / Math.PI).toBeCloseTo(220.253526, 3)
+    // The spec's own row: [120, 0, 0] drawn at [-91.583125, 0, 77.540514] ticks.
+    expect(p.x * 120).toBeCloseTo(-91.583125, 4)
+    expect(p.z * 120).toBeCloseTo(77.540514, 4)
     // A second later it is further round: 100 / T_482 of a turn a second.
     vi.setSystemTime(T + 1000)
     await r.frame()
@@ -104,7 +106,7 @@ describe('a shard with anim in the scene', () => {
     await r.frame()
     const later = phaseAt({ c: 100, b: 1, phi: 0 }, pacedHeight((T + 3200) / 1000, ENDS)) * 2 * Math.PI
     expect(carried(g).x).toBeCloseTo(Math.cos(later), 6)
-    expect(carried(g).z).toBeCloseTo(Math.sin(later), 6)
+    expect(carried(g).z).toBeCloseTo(-Math.sin(later), 6)
   })
 
   it('folds a world shard\'s pose round its motion: G · A · Gᵀ, against the posed vertex turned in the model', async () => {
@@ -117,9 +119,11 @@ describe('a shard with anim in the scene', () => {
     const g = motionGroup(r.state().scene)!
     const th = phaseAt({ c: 100, b: 1, phi: 0 }, pacedHeight(T / 1000, ENDS)) * 2 * Math.PI
     for (const v of [[120, 0, 0], [0, 0, 120], [37, 55, -80]] as Array<[number, number, number]>) {
-      // Ground truth: turn the model vertex right-handed about model +Y, then pose it, then the render mapping.
-      const turned: [number, number, number] = [v[0] * Math.cos(th) + v[2] * Math.sin(th), v[1], -v[0] * Math.sin(th) + v[2] * Math.cos(th)]
-      const want = toRender(applyPose(pose, turned))
+      // Ground truth: the vertex in the §2 frame (toRender, ×120), turned right-handed about +Y there,
+      // back into sno-core's frame (z negated), then posed and drawn as ShardMesh draws any vertex.
+      const r = toRender(v).map((x) => x * 120)
+      const turned = [r[0] * Math.cos(th) + r[2] * Math.sin(th), r[1], -r[0] * Math.sin(th) + r[2] * Math.cos(th)]
+      const want = toRender(applyPose(pose, [turned[0], turned[1], -turned[2]]))
       // What is drawn: the posed vertex (the geometry ShardMesh builds), through the motion group.
       const drawn = new Vector3(...toRender(applyPose(pose, v))).applyMatrix4(g.matrix)
       expect(drawn.x).toBeCloseTo(want[0], 9)
@@ -157,6 +161,16 @@ describe('stepPhases', () => {
     expect(st.shown[0]).toBeGreaterThan(0)
     stepPhases(motions, reading(T + 16), true, st)
     expect([...st.shown]).toEqual([0, 0])
+  })
+
+  it('reduced motion draws the rest pose (held), except for a position chosen by hand (the workshop\'s scrub)', () => {
+    feedPaced({ ends: ENDS, tip: TIP })
+    const st = newPhaseState(motions.length)
+    stepPhases(motions, reading(T), true, st)
+    expect(st.held).toBe(true)
+    stepPhases(motions, { ...reading(T + 16), chosen: true }, true, st)
+    expect(st.held).toBe(false)
+    expect(st.shown[0]).toBeGreaterThan(0)
   })
 
   it('the first frame draws the true phase at once', () => {

@@ -45,6 +45,13 @@ export interface PacedReading {
   version: number
   /** Monotonic seconds (performance.now): what an ease is timed by, so a device clock that jumps never cuts one short. */
   nowS: number
+  /** Wall-clock Unix seconds, skew applied: the moment β is worked at. */
+  t: number
+  /**
+   * A position the viewer chose by hand (the workshop's scrub): drawn even under
+   * reduced motion, since it is not motion the viewer did not ask for.
+   */
+  chosen: boolean
 }
 
 let ends: WindowEnds = EPOCH_ENDS
@@ -52,13 +59,18 @@ let tip: TrustedTip | null = null
 let skewMs = 0
 let version = 0
 
-const reading: PacedReading = { beta: 0, known: false, secondsPerBlock: 0, version: 0, nowS: 0 }
+const reading: PacedReading = { beta: 0, known: false, secondsPerBlock: 0, version: 0, nowS: 0, t: 0, chosen: false }
 let lastKey: unknown = null
 let lastStamp = NaN
 
 /** The clock state as it stands (the HUD, tests). */
 export function pacedState(): { ends: WindowEnds; tip: TrustedTip | null; skewMs: number; version: number } {
   return { ends, tip, skewMs, version }
+}
+
+/** The window ends known now (no copy: read only). */
+export function pacedEnds(): WindowEnds {
+  return ends
 }
 
 /** Set what the clock knows; bumps the version when anything changed. Exported for tests and the source below. */
@@ -90,6 +102,7 @@ export function readPaced(key: unknown, stamp: number, nowMs: number = Date.now(
   lastStamp = stamp
   const t = (nowMs + skewMs) / 1000
   reading.nowS = monoMs / 1000
+  reading.t = t
   reading.known = pacedKnown(t, ends, tip)
   // Not known while the feed runs (a tip gone stale behind a sleeping tab, a
   // window just closed): look again now rather than at the next poll.

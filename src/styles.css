@@ -6968,6 +6968,28 @@ select.avatars__input option:checked {
 .ws__opacity-rail:focus { outline: none; }
 .ws__opacity-rail:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
+/* MOTION in the SHARD panel (workshop/AnimEditor.tsx): a card per motion, numbers typed in small fields. */
+.ws__anim { display: grid; gap: 6px; }
+.ws__anim-rail { flex: 1 1 80px; min-width: 70px; }
+.ws__anim-rail:focus { outline: none; }
+.ws__anim-rail:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.ws__anim-card { display: grid; gap: 5px; padding: 6px; border: 1px solid rgba(0, 229, 255, 0.18); border-radius: 6px; }
+.ws__anim-name { color: var(--fg); min-width: 0; flex: 1 1 auto; }
+.ws__anim-num {
+  font-family: inherit; font-size: 11px; text-align: right; padding: 5px 6px; height: 30px; box-sizing: border-box;
+  font-variant-numeric: tabular-nums; color: var(--fg); background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.22); border-radius: 5px;
+}
+.ws__anim-num:focus { outline: none; border-color: var(--accent); }
+.ws__panel .ws__anim-card .workshop__row { border-top: none; padding-top: 0; }
+.ws__anim-axis { font-size: 9px; letter-spacing: 0.1em; }
+.ws__anim-point { gap: 3px; flex-wrap: nowrap; }
+.ws__anim-point .ws__anim-num { padding: 5px 3px; }
+.ws__anim-point .workshop__btn { padding: 0 5px; }
+.ws__anim-point.is-on { outline: 1px solid var(--accent); border-radius: 4px; }
+.ws__anim-note { color: var(--warn); }
+.ws__anim .workshop__btn svg { vertical-align: -2px; }
+
 /* MENU, GRID, SHARD and AVATAR share a phone's top edge with DEPLOY and the
    way out (arkinox, 2026-10-23): a little closer set there, so the four stand
    in one row at 390px. Narrower, the row wraps as it always has. */

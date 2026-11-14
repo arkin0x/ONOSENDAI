@@ -1,81 +1,86 @@
 /**
- * pacedClock.test.ts: the paced height β against the design note's own
- * numbers (anim-block-paced-design-2026-11-10 §2.2, real header times), when
- * β counts as known, the skew rule, and the ease's arithmetic.
+ * pacedClock.test.ts: the paced height β against DECK-0003 §1.14's own
+ * vectors (spec PR #107, its "The paced height" table, every row), when β
+ * counts as known, the skew rule, and the ease's arithmetic.
  */
 import { describe, expect, it } from 'vitest'
 import {
   contiguousEnds, EPOCH_BETA, EPOCH_END_TIME, EPOCH_ENDS, EPOCH_PREV_END_TIME, lastClosedWindow, pacedHeight, pacedKnown,
-  pacedSecondsPerBlock, skewFrom, SWITCH_DELAY_S, TIP_FRESH_S, windowEndHeight, wrapHalf, easeSeconds,
+  pacedSecondsPerBlock, paceOf, skewFrom, SWITCH_DELAY_S, TIP_FRESH_S, windowEndHeight, wrapHalf, easeSeconds,
 } from '../pacedClock'
+import { phaseAt } from '../anim'
 
-/** Header time of 973,727, the end of window 482 (headers-v1 blob and NTH's backfilled anchor). */
-const A482 = 1_793_300_370
-const ENDS = [EPOCH_END_TIME, A482]
-/** 2026-11-10 04:11:02 UTC, the note's worked example. */
-const NOTE_T = Date.UTC(2026, 10, 10, 4, 11, 2) / 1000
+/** Hypothetical end of window 484 from the spec's table: 600 s a block after the epoch's end. */
+const A484 = 1_795_841_983
+const WITH_484 = [...EPOCH_ENDS, A484]
 
-describe('the epoch', () => {
-  it('is window 481, its ends the header times of 969,695 and 971,711', () => {
-    expect(windowEndHeight(480)).toBe(969_695)
-    expect(windowEndHeight(481)).toBe(971_711)
-    expect(EPOCH_PREV_END_TIME).toBe(1_791_011_720)
-    expect(EPOCH_END_TIME).toBe(1_792_153_758)
-    expect(lastClosedWindow(971_711)).toBe(481)
-    expect(lastClosedWindow(971_710)).toBe(480)
-    expect(lastClosedWindow(975_741)).toBe(482)
+describe('the epoch (§1.14)', () => {
+  it('is window 483, its ends the header times of 973,727 and 975,743', () => {
+    expect(windowEndHeight(482)).toBe(973_727)
+    expect(windowEndHeight(483)).toBe(975_743)
+    expect(EPOCH_PREV_END_TIME).toBe(1_793_300_370)
+    expect(EPOCH_END_TIME).toBe(1_794_632_383)
+    expect(EPOCH_BETA).toBe(975_744)
+    expect(lastClosedWindow(975_743)).toBe(483)
+    expect(lastClosedWindow(975_742)).toBe(482)
   })
 
-  it('β is 971,712 at the epoch switch, and T_481 is 566.487 s', () => {
-    const s481 = EPOCH_END_TIME + SWITCH_DELAY_S
-    expect(s481).toBe(1_792_168_158)
-    expect(pacedHeight(s481, EPOCH_ENDS)).toBe(EPOCH_BETA)
-    expect(pacedSecondsPerBlock(s481, EPOCH_ENDS)).toBeCloseTo(566.487, 3)
-    // Defined before it too, running backward at T_481.
-    expect(pacedHeight(s481 - 566.4871031746031, EPOCH_ENDS)).toBeCloseTo(EPOCH_BETA - 1, 9)
+  it('T_483 is 1332013 / 2016 seconds and s_483 is 1794646783', () => {
+    expect(EPOCH_END_TIME + SWITCH_DELAY_S).toBe(1_794_646_783)
+    expect(pacedSecondsPerBlock(1_794_646_783, EPOCH_ENDS)).toBeCloseTo(1_332_013 / 2016, 9)
   })
 })
 
-describe('the note\'s worked example (§2.2)', () => {
-  it('β(s_482) = 973,736.074 and T_482 = 568.756 s', () => {
-    const s482 = A482 + SWITCH_DELAY_S
-    expect(pacedHeight(s482, ENDS)).toBeCloseTo(973_736.0743232712, 6)
-    expect(pacedSecondsPerBlock(s482, ENDS)).toBeCloseTo(568.756, 3)
-    // Continuous across the switch: only the slope changes.
-    expect(pacedHeight(s482 - 1e-3, ENDS)).toBeCloseTo(pacedHeight(s482, ENDS), 4)
+describe('the spec\'s paced height vectors, every row', () => {
+  const rows: Array<[number, number[], number, string]> = [
+    [1_794_646_783, EPOCH_ENDS as number[], 975744.000000000, 'the epoch\'s switch moment'],
+    [1_794_632_383, EPOCH_ENDS as number[], 975722.205618113, 'before the switch, β runs back at the epoch\'s pace'],
+    [1_794_733_183, EPOCH_ENDS as number[], 975874.766291320, 'one day after the switch'],
+    [1_795_132_800, EPOCH_ENDS as number[], 976479.586118154, '2026-11-20 00:00:00 UTC'],
+    [1_795_856_382, WITH_484, 977574.726564981, 'one second before window 484\'s switch'],
+    [1_795_856_383, WITH_484, 977574.728078480, 'window 484\'s switch: no jump'],
+    [1_795_862_383, WITH_484, 977584.728078480, '6,000 seconds at 600 seconds a block is 10 more'],
+    [1_795_862_383, EPOCH_ENDS as number[], 977583.809070932, 'the same moment without 484: still at the epoch\'s pace'],
+    [1_794_652_783, [...EPOCH_ENDS, 1_794_631_383], 975784.000000000, 'an end earlier than the epoch\'s: switch held, span clamped'],
+  ]
+  for (const [t, ends, beta, what] of rows) {
+    it(`${what}: β(${t}) = ${beta}`, () => {
+      expect(pacedHeight(t, ends)).toBeCloseTo(beta, 6)
+    })
+  }
+
+  it('a turn of 100 per block stands at 220.253526 degrees at 2026-11-20 00:00:00 UTC', () => {
+    expect(phaseAt({ c: 100, b: 1, phi: 0 }, pacedHeight(1_795_132_800, EPOCH_ENDS)) * 360).toBeCloseTo(220.253526, 3)
   })
 
-  it('β at 2026-11-10 04:11:02 UTC is 975,439.955', () => {
-    expect(pacedHeight(NOTE_T, ENDS)).toBeCloseTo(975_439.9545129081, 6)
-  })
-
-  it('before 482 is known, the same moment continues at T_481 (extrapolated, never shown)', () => {
-    const b = pacedHeight(NOTE_T, EPOCH_ENDS)
-    expect(b).toBeCloseTo(EPOCH_BETA + (NOTE_T - (EPOCH_END_TIME + SWITCH_DELAY_S)) / (1_142_038 / 2016), 6)
-    expect(Math.abs(b - 975_439.955)).toBeGreaterThan(1)
+  it('a span is clamped to a quarter and four times two weeks', () => {
+    expect(paceOf(1)).toBe(302_400 / 2016)
+    expect(paceOf(10_000_000)).toBe(4_838_400 / 2016)
+    expect(paceOf(1_209_600)).toBe(600)
   })
 })
 
 describe('when β is known', () => {
-  const tip = { height: 975_741, time: NOTE_T - 600 }
+  const T = 1_795_132_800
+  const tip = { height: 976_480, time: T - 600 }
   it('with every end through the tip\'s last closed window, and a fresh tip', () => {
-    expect(pacedKnown(NOTE_T, ENDS, tip)).toBe(true)
+    expect(pacedKnown(T, EPOCH_ENDS, tip)).toBe(true)
   })
   it('not without a tip', () => {
-    expect(pacedKnown(NOTE_T, ENDS, null)).toBe(false)
+    expect(pacedKnown(T, EPOCH_ENDS, null)).toBe(false)
   })
   it('not when the tip has closed a window whose end is missing', () => {
-    expect(pacedKnown(NOTE_T, EPOCH_ENDS, tip)).toBe(false)
-    expect(pacedKnown(NOTE_T, ENDS, { height: 975_743, time: NOTE_T })).toBe(false)
+    expect(pacedKnown(T, EPOCH_ENDS, { height: windowEndHeight(484), time: T })).toBe(false)
+    expect(pacedKnown(T, WITH_484, { height: windowEndHeight(484), time: T })).toBe(true)
   })
   it('not once the tip is too old to vouch the next window has not switched', () => {
-    expect(pacedKnown(tip.time + TIP_FRESH_S - 1, ENDS, tip)).toBe(true)
-    expect(pacedKnown(tip.time + TIP_FRESH_S, ENDS, tip)).toBe(false)
+    expect(pacedKnown(tip.time + TIP_FRESH_S - 1, EPOCH_ENDS, tip)).toBe(true)
+    expect(pacedKnown(tip.time + TIP_FRESH_S, EPOCH_ENDS, tip)).toBe(false)
   })
-  it('a run of ends stops at the first gap, and at an end that does not move forward', () => {
-    const times = new Map([[482, A482], [484, A482 + 2_000_000]])
-    expect(contiguousEnds((k) => times.get(k), 484)).toEqual([EPOCH_END_TIME, A482])
-    expect(contiguousEnds(() => EPOCH_END_TIME - 5, 483)).toEqual([EPOCH_END_TIME])
+  it('a run of ends stops at the first gap', () => {
+    const times = new Map([[484, A484], [486, A484 + 2_000_000]])
+    expect(contiguousEnds((k) => times.get(k), 486)).toEqual(WITH_484)
+    expect(contiguousEnds(() => undefined, 485)).toEqual(EPOCH_ENDS)
   })
 })
 

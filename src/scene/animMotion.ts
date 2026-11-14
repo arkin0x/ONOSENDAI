@@ -19,7 +19,7 @@
  * eases into the true pose, the shortest way round, as a clock change does.
  */
 
-import { createElement, useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { createContext, createElement, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Plane, Vector3, type Group } from 'three'
 import { composeRender, motionPose, newPose, phaseAt, smoothstep, type Motion, type MotionPose } from '../lib/anim'
@@ -76,8 +76,11 @@ export function newPhaseState(n: number): PhaseState {
  * The phase each motion is shown at, written into `st.shown`. Pure but for
  * `st`: the eases live there.
  *
- * - Reduced motion: phase 0 at once, no ease (holding still is the point).
- * - β not known: phase 0, eased into from wherever it was.
+ * - Reduced motion: the rest pose at once, no ease (`st.held`; the caller
+ *   draws the object as written, DECK-0003 §1.14), unless the reading is a
+ *   position the viewer chose by hand (the workshop's scrub).
+ * - β not known: phase 0, eased into from wherever it was (for turn, swing,
+ *   slide and lift that is the rest pose too).
  * - Otherwise the true phase, eased into whenever the clock's version or
  *   knowledge changed since the last frame (§2.4): the error wrapped to the
  *   shortest way round, over min(3 s, max(0.5 s, |e| × P)).
@@ -85,7 +88,7 @@ export function newPhaseState(n: number): PhaseState {
  */
 export function stepPhases(motions: readonly Motion[], r: PacedReading, reduced: boolean, st: PhaseState): void {
   const n = motions.length
-  if (reduced) {
+  if (reduced && !r.chosen) {
     for (let i = 0; i < n; i++) { st.shown[i] = 0; st.err[i] = 0; st.len[i] = 0 }
     st.held = true
     st.version = r.version
@@ -93,10 +96,12 @@ export function stepPhases(motions: readonly Motion[], r: PacedReading, reduced:
     return
   }
   const first = st.version === -1
-  const changed = !first && (st.version !== r.version || st.known !== r.known || st.held)
+  // A position chosen by hand (a scrub) is drawn where it was put, never eased into.
+  const changed = !first && !r.chosen && (st.version !== r.version || st.known !== r.known || st.held)
+  if (r.chosen) for (let i = 0; i < n; i++) st.len[i] = 0
   for (let i = 0; i < n; i++) {
     const m = motions[i]
-    const truth = r.known && !m.tooFast ? phaseAt(m, r.beta) : 0
+    const truth = r.known ? phaseAt(m, r.beta) : 0
     if (changed) {
       const e = wrapHalf(truth - st.shown[i])
       const period = m.c !== 0 ? (r.secondsPerBlock * m.b) / Math.abs(m.c) : 0
@@ -160,6 +165,15 @@ function wallsOf(b: Box): Plane[] {
   return out
 }
 
+/**
+ * A canvas's own say over the clock its moving objects read: the workshop's
+ * bench preview (play, pause, scrub). Given the frame's shared reading, it
+ * returns the reading to draw by (its own object, rewritten in place). Absent
+ * everywhere else, where the shared paced clock is the only clock.
+ */
+export type ClockOverride = (shared: PacedReading) => PacedReading
+export const AnimClock = createContext<ClockOverride | null>(null)
+
 /** A region box's walls, in the frame it is given in, and their world-space twins the materials read (kept current by AnimGroups). */
 export interface ClipWalls { local: Plane[]; world: Plane[] }
 export function clipWalls(b: Box): ClipWalls {
@@ -182,6 +196,7 @@ export function clipWalls(b: Box): ClipWalls {
 export function AnimGroups({ motions, pose, walls, children }: { motions: readonly Motion[]; pose: ArrayLike<number> | null; walls: ClipWalls | null; children: ReactNode }): JSX.Element {
   const outer = useRef<Group>(null)
   const inner = useRef<Group>(null)
+  const clock = useContext(AnimClock)
   const n = motions.length
   const st = useMemo(() => newPhaseState(n), [n, motions])
   const poses = useMemo(() => Array.from({ length: n }, newPose), [n])
@@ -204,8 +219,9 @@ export function AnimGroups({ motions, pose, walls, children }: { motions: readon
     const group = inner.current
     if (!group) return
     const r = readPaced(state.clock, state.clock.elapsedTime)
-    stepPhases(motions, r, reducedMotionNow(), st)
-    animMatrix(motions, st.shown, poses, g, gT, scratch, group.matrix.elements)
+    stepPhases(motions, clock ? clock(r) : r, reducedMotionNow(), st)
+    if (st.held) group.matrix.identity()
+    else animMatrix(motions, st.shown, poses, g, gT, scratch, group.matrix.elements)
     group.matrixWorldNeedsUpdate = true
     if (walls && outer.current) {
       outer.current.updateWorldMatrix(true, false)

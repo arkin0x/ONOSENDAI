@@ -372,7 +372,8 @@ function GameScreen(): JSX.Element | null {
         {game.exit && <Clock progress={progress} />}
         {holdsDoorKey(session, items) && !progress.doorOpen && <span className="gameview__key" aria-label="You have the key"><KeyRound size={14} strokeWidth={2.5} aria-hidden /></span>}
         {status && <span className="gameview__status">{status}</span>}
-        <button className="gameview__exit" disabled={busy !== null} onClick={(e) => { e.currentTarget.blur(); void leave() }}>EXIT GAME</button>
+        {/* Leaving is offered at every moment of play (DECK-0002 §2.3): only an exit already on its way holds it. */}
+        <button className="gameview__exit" disabled={busy === 'exiting'} onClick={(e) => { e.currentTarget.blur(); void leave() }}>EXIT GAME</button>
       </div>
       {(message || worldError) && (
         <p className="gameview__note" role="status">
@@ -391,7 +392,7 @@ function GameScreen(): JSX.Element | null {
         <div className="gameview__card" role="dialog" aria-label="Dungeon clear">
           <span className="gameview__cardtitle">CLEAR</span>
           <span className="gameview__cardtime">{formatClearTime(progress.clearedMs!)}</span>
-          <button className="gameview__exit gameview__exit--card" disabled={busy !== null} onClick={(e) => { e.currentTarget.blur(); void leave() }}>EXIT GAME</button>
+          <button className="gameview__exit gameview__exit--card" disabled={busy === 'exiting'} onClick={(e) => { e.currentTarget.blur(); void leave() }}>EXIT GAME</button>
         </div>
       )}
       <div className="gamepad" aria-label="game controls" hidden={cleared}>

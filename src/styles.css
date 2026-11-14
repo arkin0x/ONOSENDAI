@@ -3875,6 +3875,7 @@ select.avatars__input option:checked {
   border-radius: 10px;
   cursor: pointer;
 }
+.ws__tiles.ws__tiles--three { grid-template-columns: repeat(3, 1fr); max-width: 300px; }
 .ws__tile.is-on { color: var(--ws-ink); background: var(--accent); border-color: var(--accent); font-weight: 700; }
 /* MORE's keys: labelled, thumb-sized, in rows that wrap. */
 .ws__more-sec { display: flex; flex-direction: column; gap: 8px; }
@@ -3947,10 +3948,10 @@ select.avatars__input option:checked {
 .ws__handle--y { color: #5cff7a; }
 .ws__handle--z { color: #6aa3ff; }
 .palettes__headkeys { display: inline-flex; gap: 6px; flex: none; }
-/* A narrow phone: the strip's tool label keeps its icon and ?, the shape
-   chip its picture and name, so STAMP's options and MORE fit without
-   scrolling. The dock still says which tool is lit. */
-@media (max-width: 400px) {
+/* A phone: the strip's tool label keeps its icon and ?, the chips their
+   picture and name, so every tool's options and MORE fit without scrolling,
+   up to a 430px phone. The dock still says which tool is lit. */
+@media (max-width: 440px) {
   .ws__strip { gap: 4px; }
   .ws__strip-tool { width: 46px; }
   .ws__strip-tool > span { display: none; }
@@ -3959,7 +3960,11 @@ select.avatars__input option:checked {
   .ws__shapechip { max-width: 120px; }
   .ws__stepper-value { min-width: 28px; }
   .ws__strip-opts { gap: 4px; }
-  .ws__stripbtn--tall { min-width: 48px; padding: 0 4px; }
+  .ws__stripbtn--tall { min-width: 44px; padding: 0 4px; }
+  .ws__shapechip { padding: 0 7px; gap: 4px; letter-spacing: 0.02em; }
+  .ws__strip-tool { width: 44px; }
+  .ws__seg .ws__stripbtn { min-width: 44px; padding: 0 5px; letter-spacing: 0; }
+  .ws__strip-more { min-width: 44px; }
 }
 /* The palette as a sheet: the whole of it scrolls under its header, the 256
    first and the palette making after them, so the swatches get the room. */

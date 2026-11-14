@@ -46,7 +46,6 @@ export function HeldBar({ onMore, moreBadge }: { onMore: () => void; moreBadge: 
   const objects = useWorkshop((s) => s.partSel.length)
   const selectedFaces = useWorkshop((s) => s.selectedFaces)
   const faceHeld = selectedFaces.length > 0
-  const tool = useWorkshop((s) => s.tool)
   const clip = useWorkshop((s) => s.clip)
   const canMove = useWorkshop((s) => s.selection.length > 0 || s.partSel.length > 0)
   const canColor = useWorkshop((s) => s.selection.length > 0)
@@ -56,13 +55,13 @@ export function HeldBar({ onMore, moreBadge }: { onMore: () => void; moreBadge: 
   // Esc puts a question away before it lets go of what is held.
   useEscape('modal', asking !== null, () => setAsking(null))
   const w = useWorkshop.getState
-  // A face held in FACE is a face, though its corners are held with it.
-  const faceCount = faceHeld && tool === 'face'
+  // A face held is a face, though its corners are held with it (SELECT FACES).
+  const faceCount = faceHeld
   const count = heldCount(faceCount ? 0 : points, faceCount ? 0 : objects, faceCount ? selectedFaces.length : 0)
   const held = clip ? [clip.points.length ? `${clip.points.length} point${clip.points.length === 1 ? '' : 's'}` : '', clip.parts.length ? `${clip.parts.length} object${clip.parts.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ') : ''
   // Read at tap time, as Bench reads it for OBJECT: a paste never makes this shard place itself.
   const self = (): string | undefined => ownAddress(useCyberspace.getState().identity.pubkey, w().currentId)
-  const deletesFace = tool === 'face' && faceHeld
+  const deletesFace = faceHeld
   const letGo = (): void => { w().selectVertex(null); w().clearFacePick() }
   return (
     <div className="ws__heldbar" role="toolbar" aria-label="What you hold">
@@ -115,7 +114,7 @@ export function HeldBar({ onMore, moreBadge }: { onMore: () => void; moreBadge: 
           {asking === 'color' && faceHeld && (
             <div className="benchpaste ws__ask ws__ask--color" role="menu" aria-label="How to color the selected faces">
               <button className="workshop__btn" role="menuitem" title="The color onto the corners of every selected face; it blends across the edges they share, and a face with a seam takes the color flat" onClick={() => { setAsking(null); w().colorSelected(w().color) }}>BLEND</button>
-              <button className="workshop__btn" role="menuitem" title="The color onto every selected face as a hard edge, not blended from its corners" onClick={() => { setAsking(null); w().colorFaces(selectedFaces, w().color) }}>EDGE</button>
+              <button className="workshop__btn" role="menuitem" title="The color onto every selected face as a hard edge, not blended from its corners" onClick={() => { setAsking(null); w().colorFaces(selectedFaces, w().color, true) }}>EDGE</button>
             </div>
           )}
         </>

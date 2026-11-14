@@ -130,7 +130,7 @@ function Key({ icon: Icon, label, title, onClick, disabled, aria, danger }: { ic
   )
 }
 
-export function MoreBody(): JSX.Element | null {
+export function MoreBody({ onClose }: { onClose?: () => void } = {}): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
   const tool = useWorkshop((s) => s.tool)
   const selection = useWorkshop((s) => s.selection)
@@ -160,7 +160,7 @@ export function MoreBody(): JSX.Element | null {
             <Key icon={Triangle} label="FILL" title="Faces across these points: a flat set becomes one face, a solid set its hull (Enter)" aria="Fill the selection" disabled={points < 3} onClick={() => w().fillSelection()} />
             <Key icon={Grid2x2Plus} label="SUBDIVIDE" title="Cut each fully selected face into four, or a selected edge in two" aria="Subdivide the selection" disabled={points < 2} onClick={() => w().subdivideSelection()} />
             <Key icon={Puzzle} label="PIECE" title="The color in hand onto these points and everything joined to them by faces" aria="Color the connected piece" disabled={selection.length === 0} onClick={() => w().colorConnected(w().color)} />
-            <Key icon={Pipette} label="TAKE COLOR" title="Take the color of the point or face you hold" aria="Take the selected color" disabled={!(selection.length === 1 || faceHeld)} onClick={() => w().sampleColor()} />
+            <Key icon={Pipette} label="TAKE COLOR" title="Take the color of the point or face you hold" aria="Take the selected color" disabled={!(points === 1 || faceHeld)} onClick={() => w().sampleColor()} />
             {faceHeld && <Key icon={FlipVertical2} label="FLIP FACE" title="The selected faces turned round, each back to its front" onClick={() => w().flipSelectedFace()} />}
             {faceHeld && <Key icon={FlipVertical2} label="FLIP SURFACE" title="The selected faces turned round, and every face joined to them by an edge turned to agree" onClick={() => w().flipSelectedSurface()} />}
             {faceHeld && <Key icon={WandSparkles} label="AUTO" title="Every face in the object turned to look outward, by the bench's best guess" aria="Turn every face outward" onClick={() => w().autoWind()} />}
@@ -189,18 +189,19 @@ export function MoreBody(): JSX.Element | null {
               <Key icon={ClipboardPaste} label="CLEAR CLIPBOARD" title={`Let the ${clipWords} go; PASTE goes with them`} danger onClick={() => w().clearClip()} />
             </>
           )}
-          <Key icon={Waypoints} label="ALL" title="Every point and every placed object" aria="Select everything" disabled={shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0} onClick={() => { w().setSelection([...Array(shard.vertices.length).keys()]); w().setPartSelection([...Array(shard.parts?.length ?? 0).keys()]) }} />
+          <Key icon={Waypoints} label="ALL" title={tool === 'select' ? `Every one of the ${w().selectKind}` : 'Every point and every placed object'} aria="Select everything" disabled={shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0} onClick={() => w().selectAll()} />
+          {tool === 'paint' && <Key icon={Pipette} label="TAKE COLOR" title="The next tap takes the color of the point or face it meets" aria="Take a color with the next tap" onClick={() => { w().setPaintTake(true); onClose?.() }} />}
           <Key icon={Globe} label="COLOR ALL" title="The color in hand onto every vertex and every face in the object" aria="Color everything" disabled={shard.vertices.length === 0} onClick={() => w().colorAll(w().color)} />
           {stacked.spots > 0 && (
             <Key icon={Merge} label={`WELD ${stacked.spots}`} title={selection.length >= 2 ? `Fold the selected points that stand on one spot into one (${stacked.points} points share ${stacked.spots} spot${stacked.spots === 1 ? '' : 's'})` : `Fold every point standing on another into one (${stacked.points} points share ${stacked.spots} spot${stacked.spots === 1 ? '' : 's'}); faces that disagree on color keep their own`} aria={selection.length >= 2 ? 'Weld the selected stacked points' : 'Weld every stacked point'} onClick={() => w().weld()} />
           )}
         </div>
       </section>
-      {(tool === 'select' || tool === 'face') && (
+      {tool === 'select' && (
         <section className="ws__more-sec" aria-label="Taps">
-          <h3 className="ws__more-title">{tool === 'select' ? 'SELECT' : 'FACE'}</h3>
+          <h3 className="ws__more-title">SELECT</h3>
           <div className="ws__more-keys">
-            {tool === 'select' && (
+            {(
               <button className={`ws__morebtn${box ? ' is-on' : ''}`} aria-pressed={box} onClick={() => w().setBoxSelect(!box)} aria-label="Box: a drag draws a box" title="On: a one-finger drag draws a box. Off: it turns the view" {...noCallout}>
                 <SquareDashedMousePointer size={18} strokeWidth={2} aria-hidden /><span>BOX</span>
               </button>

@@ -88,9 +88,9 @@ describe('the LOOK help line', () => {
 describe("MENU's EXPLAIN", () => {
   const explain = menuExplain()
 
-  it('names every tool key, 1 to 5, as Bench.tsx binds them and the dock titles them', () => {
+  it('names every tool key, 1 to 6, as Bench.tsx binds them and the dock titles them', () => {
     const byKey = [...DOCK].sort((a, b) => Number(a.key) - Number(b.key))
-    expect(byKey.map((d) => d.key)).toEqual(['1', '2', '3', '4', '5'])
+    expect(byKey.map((d) => d.key)).toEqual(['1', '2', '3', '4', '5', '6'])
     for (const d of byKey) expect(BENCH).toContain(`if (e.code === 'Digit${d.key}') w.setTool('${d.tool}')`)
     expect(BENCH).not.toContain(`e.code === 'Digit${byKey.length + 1}'`)
     expect(explain).toContain(`Keys: ${byKey.map((d) => `${d.key} ${d.label}`).join(', ')},`)

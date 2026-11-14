@@ -4,10 +4,11 @@
  * icon and a word, then the color in hand, always last. The tool in hand is
  * lit. It replaces the TOOLS chip and panel and the put-down X: LOOK is the
  * tool that builds nothing, a tap away like the rest. The keys stay as they
- * were (1 LOOK, 2 STAMP, 3 ADD, 4 SELECT, 5 FACE).
+ * were (1 LOOK, 2 STAMP, 3 ADD, 4 SELECT, 5 FACE), and PAINT, the sixth
+ * tool (phase 3), is 6.
  */
 
-import { Eye, MousePointer2, Plus, Stamp, Triangle, type LucideIcon } from 'lucide-react'
+import { Eye, MousePointer2, Paintbrush, Plus, Stamp, Triangle, type LucideIcon } from 'lucide-react'
 import { rgbToHex } from 'sno-core/shards'
 import { useWorkshop, type Tool } from '../../store/useWorkshop'
 
@@ -15,13 +16,14 @@ import { useWorkshop, type Tool } from '../../store/useWorkshop'
 export interface ToolSlot { tool: Tool; label: string; icon: LucideIcon; key: string }
 
 /**
- * The order the dock shows them, which never changes: the proposal's order
- * (LOOK, STAMP, SELECT, then ADD and FACE), with PAINT to come after SELECT.
+ * The order the dock shows them, which never changes: the proposal's order,
+ * LOOK, STAMP, SELECT, PAINT (a beginner's four), then ADD and FACE.
  */
 export const DOCK: ToolSlot[] = [
   { tool: 'view', label: 'LOOK', icon: Eye, key: '1' },
   { tool: 'stamp', label: 'STAMP', icon: Stamp, key: '2' },
   { tool: 'select', label: 'SELECT', icon: MousePointer2, key: '4' },
+  { tool: 'paint', label: 'PAINT', icon: Paintbrush, key: '6' },
   { tool: 'add', label: 'ADD', icon: Plus, key: '3' },
   { tool: 'face', label: 'FACE', icon: Triangle, key: '5' },
 ]

@@ -34,9 +34,10 @@ export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-target' |
 
 /**
  * The Earth route's waits (tutorial/earthRoute.ts): a stop picked as the
- * ride's destination, boarded, and a ride started.
+ * ride's destination, boarded, a ride started, and that ride over (arrived,
+ * cancelled or failed).
  */
-export type EarthRouteAction = 'pick-stop' | 'board' | 'ride'
+export type EarthRouteAction = 'pick-stop' | 'board' | 'ride' | 'ride-over'
 
 export interface TutorialStep {
   /** Unique across the script; also what a player's saved progress names. */
@@ -74,6 +75,14 @@ export interface TutorialStep {
   /** What the scene should show as the step comes up; omitted leaves it as it is. */
   scene?: DemoScene
   wait?: TutorialWait
+  /**
+   * A second wait, after `wait`: the step counts as done when `wait` happens
+   * (a route's last step checks its route off then), but goes on by itself
+   * only once this one has happened too. The Earth route's RIDE (owner,
+   * 2026-11-14): done when the ride starts, and the choices come back only
+   * when it arrives at the stop or stops short, never over the ride itself.
+   */
+  advanceOn?: TutorialWait
   /** The one-line instruction shown while waiting. */
   hint?: string
   /** NEXT stays off until the `wait` has happened; otherwise NEXT reads SKIP while waiting. */

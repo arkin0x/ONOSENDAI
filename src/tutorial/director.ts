@@ -113,6 +113,15 @@ async function setupFor(player: string, anchor: TutorialAnchor | null): Promise<
   return { st, layout: tutorialLayout({ x: at.x, y: at.y, z: at.z }, at.plane as Plane), guide: guideKey() }
 }
 
+/**
+ * The staged shards that let a tap through to what is behind them: the blue
+ * box around the welcome chest, and the finish deck's wall behind the finish
+ * chest (tutorial/course.ts WALL).
+ */
+export function passTapsOf(stage: Pick<Stage, 'ids'>): string[] {
+  return [stage.ids.blueBox, ...(stage.ids.walls ?? [])]
+}
+
 /** Stage the tutorial for `player` and hand its bags to discovery; a restart stages anew. */
 async function stageFor(player: string, restart: boolean): Promise<void> {
   const mine = ++run
@@ -133,8 +142,8 @@ async function stageFor(player: string, restart: boolean): Promise<void> {
       st.writeStage(stage, player)
     }
     if (!current()) return
-    // The blue box lets taps through to the chest inside it.
-    setGuideBags(stage.bags, { passTaps: [stage.ids.blueBox] })
+    // The blue box lets taps through to the chest inside it, and the deck's wall to the finish chest before it.
+    setGuideBags(stage.bags, { passTaps: passTapsOf(stage) })
     useTutorialStage.setState({ stage, layout })
   } catch (err) {
     if (mine !== run) return
@@ -155,7 +164,7 @@ async function restoreKept(player: string): Promise<void> {
     const { st, layout, guide } = await setupFor(player, anchorFor(player))
     const stage = st.readStage(player, guide.pubkey, st.stageKey(layout))
     if (!stage || mine !== run || useTutorial.getState().active || useCyberspace.getState().identity.pubkey !== player) return
-    setGuideBags(stage.bags, { passTaps: [stage.ids.blueBox] })
+    setGuideBags(stage.bags, { passTaps: passTapsOf(stage) })
   } catch (err) {
     console.warn('[tutorial] could not put the kept stage back:', err)
   }

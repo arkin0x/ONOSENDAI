@@ -82,12 +82,12 @@ describe('taking people in', () => {
     expect(Object.keys(usePresence.getState().people)).toHaveLength(0)
   })
 
-  it('others() leaves out your targets as well', () => {
+  it('others() keeps your targets: who is nearby is not who you follow (arkinox, 2026-11-14)', () => {
     const sk = generateSecretKey()
     usePresence.getState().ingest(spawnAt(here, 100, sk))
     expect(usePresence.getState().others()).toHaveLength(1)
     useCyberspace.setState({ targets: { [getPublicKey(sk)]: { pubkey: getPublicKey(sk), npub: 'npub1x', name: null, position: here, plane: 0, lastActive: null, status: 'live' } } })
-    expect(usePresence.getState().others()).toHaveLength(0)
+    expect(usePresence.getState().others().map((p) => p.pubkey)).toEqual([getPublicKey(sk)])
     useCyberspace.setState({ targets: {} })
   })
 

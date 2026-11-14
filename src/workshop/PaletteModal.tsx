@@ -16,7 +16,6 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { Check, Download, Plus, Trash2, Upload, X } from 'lucide-react'
 import { BUILT_IN, BUILT_IN_NAME, explainPasteProblem, hexAt, parsePaletteText, type Palette } from 'sno-core/snoPalette'
 import { rgbToHex } from 'sno-core/shards'
@@ -86,7 +85,7 @@ export function inkContrast(hex: string): number {
   return Math.max(contrast(LIGHT_INK, bg), contrast(DARK_INK, bg))
 }
 
-export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element {
+export function PaletteModal({ onClose, foldAsk = 0 }: { onClose: () => void; foldAsk?: number }): JSX.Element {
   const shard = useWorkshop((s) => s.current())
   const palettes = useWorkshop((s) => s.palettes)
   const color = useWorkshop((s) => s.color)
@@ -261,13 +260,21 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
   // Escape folds it as the close button does, back into the chip (arkinox,
   // 2026-10-01). Its own confirmations open later, so they close first.
   useEscape('modal', true, fold)
+  // So does a second tap on the color chip in the dock (the workshop counts them).
+  const asked = useRef(foldAsk)
+  useEffect(() => {
+    if (foldAsk === asked.current) return
+    asked.current = foldAsk
+    fold()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [foldAsk])
 
-  // Through a portal, for the reason ConfirmModal gives: this is rendered from
-  // inside .ws__corner, which has a z-index and a backdrop-filter and is
-  // therefore a stacking context, so a full-screen modal left in there paints
-  // under the chip row that follows it.
-  return createPortal(
-    <div className={`modal palettes${folding ? ' is-folding' : ''}`} ref={rootRef} role="dialog" aria-modal="true" aria-label="Palette">
+  // A sheet over the dock (workshop redesign, phase 1), standing on the strip
+  // with the object in view above it, rather than a modal over everything.
+  // It is rendered in the workshop's bottom group, beside the strip and the
+  // dock, so no stacking context lies between it and them.
+  return (
+    <div className={`palettes ws__sheet ws__sheet--tall${folding ? ' is-folding' : ''}`} ref={rootRef} role="dialog" aria-label="Palette">
       <div className="palettes__head">
         <div>
           <h2 className="palettes__title">PALETTE</h2>
@@ -485,8 +492,7 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
           onCancel={() => setForgetting(null)}
         />
       )}
-    </div>,
-    document.body,
+    </div>
   )
 }
 

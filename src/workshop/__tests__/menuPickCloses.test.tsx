@@ -16,14 +16,15 @@ import { mount, textOf, type Host } from '../../test/elementRoot'
 // Thumbnails draw through a shared WebGL stage; nothing here to draw on, and nothing to see.
 vi.mock('../../hud/ShardThumb', () => ({ ShardThumb: () => null }))
 
-const { ShardList } = await import('../Workshop')
+const { ShardList } = await import('../sheets/MenuSheet')
 const { useWorkshop } = await import('../../store/useWorkshop')
 const { useShardFolders } = await import('../../store/useShardFolders')
 const { useCyberspace } = await import('../../store/useCyberspace')
 const { EMPTY_TREE } = await import('../../lib/shardFolders')
 
 const workshop = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
-const list = workshop.slice(workshop.indexOf('export const ShardList = memo('), workshop.indexOf('export function Workshop('))
+const menu = readFileSync(join(__dirname, '..', 'sheets', 'MenuSheet.tsx'), 'utf8')
+const list = menu.slice(menu.indexOf('export const ShardList = memo('), menu.indexOf('interface MenuBodyProps'))
 
 const shard = (id: string, name: string, at: number) => ({ id, name, vertices: [], faces: [], mode: 'solid', unit: 0, extent: 8, updatedAt: at })
 const SHARDS = [shard('oak', 'oak tree', 3), shard('pond', 'still pond', 2), shard('gate', 'stone gate', 1)]
@@ -71,9 +72,10 @@ describe('tapping a shard in MENU', () => {
   it('leaves MENU open for the row\'s other tools: duplicate, copy, move and delete', () => {
     // onOpen is called once in the list, by the pick, and by nothing else in the row.
     expect(list.split('onOpen()').length - 1).toBe(1)
-    for (const tool of ['w().duplicate(s.id)', 'copy(s.id)', 'w().remove(s.id)', '{f.tool}']) expect(list).toContain(tool)
-    expect(workshop).toContain('<ShardList currentId={shard.id} onOpen={closeMenu} />')
-    expect(workshop).toContain('const closeMenu = useCallback(() => setPanel(null), [])')
+    for (const tool of ['w().duplicate(s.id)', 'copyShardById(s.id)', 'w().remove(s.id)', '{f.tool}']) expect(list).toContain(tool)
+    expect(menu).toContain('<ShardList currentId={currentId} onOpen={onOpen} />')
+    expect(workshop).toContain('<MenuBody currentId={shard.id} onOpen={closeSheet}')
+    expect(workshop).toContain('const closeSheet = useCallback(() => setSheet(null), [])')
   })
 
   it('while SELECT is on, picks the row or lets it go instead, MENU stays open and the picks are kept', async () => {

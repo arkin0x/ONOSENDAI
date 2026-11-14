@@ -171,6 +171,6 @@ describe('where it is offered', () => {
   it('only the workshop\'s own list is handed DELETE CONTENTS; the pickers are not', () => {
     const src = join(__dirname, '..', '..')
     const handing = sources(src).filter((p) => /<ShardFolders\b[^>]*deleteContents=/.test(readFileSync(p, 'utf8')))
-    expect(handing.map((p) => p.slice(src.length + 1))).toEqual([join('workshop', 'Workshop.tsx')])
+    expect(handing.map((p) => p.slice(src.length + 1))).toEqual([join('workshop', 'sheets', 'MenuSheet.tsx')])
   })
 })

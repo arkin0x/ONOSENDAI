@@ -3451,74 +3451,39 @@ select.avatars__input option:checked {
   color: var(--accent);
 }
 
-/* ---------- Workshop overlays: chips, panels, corner pad, color bar ----------
+/* ---------- Workshop: five fixed places ----------
  *
- * The bench fills the screen; everything else floats on it the way the
- * instruments float on the world. Top left, the chip row and the history;
- * top right, DEPLOY and the way out; bottom right, the CONTROLS pad and the
- * COLOR bar. One panel at a time opens under the chip row. */
-.ws__top {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  right: 12px;
-  z-index: 3;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  pointer-events: none;
+ * The bench fills the screen; every control lives in one of five places that
+ * never move (workshop redesign, phase 1): the top bar, the rail on the left
+ * under it, the view ball top right, the strip over the dock, and the dock
+ * along the bottom. A place may grey a control out; it never moves or hides
+ * one. Sheets (an area, the palette, the object picker) rise from the bottom,
+ * one at a time, over the strip but never over the dock, the rail or the top
+ * bar. Every target in the bars is at least 44px, every label 9.5px or more. */
+.workshop {
+  --ws-gutter: 8px;
+  --ws-safe-t: env(safe-area-inset-top, 0px);
+  --ws-safe-b: env(safe-area-inset-bottom, 0px);
+  --ws-bar: 46px;
+  --ws-top-end: calc(var(--ws-safe-t) + var(--ws-gutter) + var(--ws-bar));
+  --ws-strip: 56px;
+  --ws-dock: calc(60px + var(--ws-safe-b));
+  --ws-bottom: calc(var(--ws-strip) + var(--ws-dock));
+  /* Where the bottom group stands off the screen's edge: flush on a phone. */
+  --ws-bottom-gap: 0px;
+  /* The rail's height: two 44px keys, a gap, the level's two keys and its value. */
+  --ws-rail-h: 236px;
+  --ws-rail-end: calc(var(--ws-top-end) + 10px + var(--ws-rail-h));
+  --ws-ink: #05070d;
+  --ws-surface: rgba(6, 14, 22, 0.86);
+  --ws-label: 10px;
 }
-.ws__top > * { pointer-events: auto; }
-/* The grid floor's LEVEL under the chip row (Workshop LevelStack, arkinox
-   2026-10-10): up, the level, down, one narrow column so it covers as little
-   of the bench as a chip does. */
-.ws__level {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-}
-.ws__level-key { width: 38px; height: 34px; }
-.ws__level-value {
-  font-size: 10px;
-  line-height: 1;
-  letter-spacing: 0.08em;
-  color: var(--dim, #7fa3b3);
-  font-variant-numeric: tabular-nums;
-}
-/* Room on the right for DEPLOY and the way out, which share the top edge. */
-.ws__chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding-right: 124px;
-}
-.ws__chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 34px;
-  padding: 0 12px;
-}
-.ws__chip.is-on {
-  color: #05070d;
-  background: var(--accent);
-  border-color: var(--accent);
-  font-weight: 700;
-}
-.ws__history {
-  display: inline-flex;
-  gap: 6px;
-}
+
 /* .chip.ws__icon, not .ws__icon: .chip sets `padding: 9px 12px` and comes
    later in the sheet at equal specificity, so it won, and a 34px box with 12px
-   of side padding left the icon about 10px of room. The button looked the
-   right size and its mark was half of one (arkinox, 2026-09-15).
-
+   of side padding left the icon about 10px of room (arkinox, 2026-09-15).
    38px square with a 16px mark, which is the touchpad key, so every round icon
-   button in the app is one size. */
+   button in the app is one size. The palette's close and the TV's off wear it. */
 .chip.ws__icon {
   width: 38px;
   height: 38px;
@@ -3533,161 +3498,182 @@ select.avatars__input option:checked {
   opacity: 0.3;
   cursor: default;
 }
-.ws__exit {
+
+/* 1. The top bar: one row, never wrapped. */
+.ws__topbar {
   position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 3;
+  top: calc(var(--ws-safe-t) + var(--ws-gutter));
+  left: var(--ws-gutter);
+  right: var(--ws-gutter);
+  z-index: 5;
   display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  height: var(--ws-bar);
+}
+.ws__topbtn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--ws-bar);
+  display: inline-flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-}
-.ws__exit .workshop__deploy {
-  height: 34px;
-  border-radius: 9px;
-}
-.ws__panel {
-  width: min(380px, 100%);
-  box-sizing: border-box;
-  max-height: calc(100vh - 210px);
-  overflow: auto;
-  padding: 10px;
-  border-radius: 10px;
-  background: rgba(6, 14, 22, 0.92);
+  justify-content: center;
+  gap: 3px;
+  padding: 0 2px;
+  position: relative;
+  font-family: inherit;
+  font-size: var(--ws-label);
+  letter-spacing: 0.04em;
+  color: var(--fg);
+  background: var(--ws-surface);
   border: 1px solid var(--border);
-  backdrop-filter: blur(8px);
+  border-radius: 12px;
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ws__topbtn > span { overflow: hidden; text-overflow: clip; max-width: 100%; }
+.ws__topbtn svg { flex: none; }
+.ws__topbtn.is-on { color: var(--ws-ink); background: var(--accent); border-color: var(--accent); font-weight: 700; }
+.ws__topbtn:disabled { opacity: 0.35; cursor: default; }
+.ws__topbtn--close { flex: 0 0 var(--ws-bar); border-radius: 50%; }
+.ws__topbtn.ws__topbtn--deploy { flex: 1.3 1 0; color: var(--ws-ink); background: var(--ok); border-color: var(--ok); font-weight: 700; }
+.ws__topbtn.ws__topbtn--deploy:disabled { opacity: 0.35; }
+/* The avatar being mined, signed or published: a ring turning round AVATAR. */
+.ws__topbtn-ring {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(var(--warn) 0 25%, transparent 25% 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: ws-ring 1.4s linear infinite;
+  pointer-events: none;
+}
+.ws__topbtn.is-signing .ws__topbtn-ring { background: var(--warn); animation-duration: 0.9s; animation-name: ws-pulse; }
+@keyframes ws-ring { to { transform: rotate(360deg); } }
+@keyframes ws-pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .ws__topbtn-ring { animation: none; } }
+
+/* 2. The rail: history, then the level, down the left edge. */
+.ws__rail {
+  position: absolute;
+  top: calc(var(--ws-top-end) + 10px);
+  left: var(--ws-gutter);
+  z-index: 5;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
 }
-/* Rules written for the old toolbar rows gave these a flex basis; in a column panel that becomes height. */
-.ws__panel .workshop__help,
-.ws__panel .workshop__name {
-  flex: none;
-  width: 100%;
-  box-sizing: border-box;
+.ws__railbtn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--fg);
+  background: var(--ws-surface);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  touch-action: manipulation;
 }
-.ws__panel-title {
-  font-size: 10px;
-  line-height: 1;
-  letter-spacing: 0.02em;
-  color: var(--dim);
-  margin-top: 4px;
-}
-.ws__stats {
-  font-size: 10px;
-  letter-spacing: 0.02em;
-  color: var(--dim);
-}
-.ws__toast {
-  position: absolute;
-  top: 56px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 4;
-  pointer-events: none;
-  max-width: min(360px, calc(100vw - 24px));
-  padding: 5px 10px;
-  border-radius: 9px;
-  text-align: center;
-  font-size: 10px;
-  line-height: 1.2;
-  letter-spacing: 0.03em;
-  color: var(--accent);
-  background: rgba(6, 14, 22, 0.88);
-  border: 1px solid rgba(0, 229, 255, 0.3);
-}
-/* Unsaved changes: below the toast, and it stays until saving works again. */
-.ws__storage {
-  position: absolute;
-  top: 96px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 4;
-  pointer-events: none;
-  max-width: min(360px, calc(100vw - 24px));
-  padding: 5px 10px;
-  border-radius: 9px;
-  text-align: center;
-  font-size: 10px;
-  line-height: 1.2;
-  letter-spacing: 0.03em;
-  color: var(--warn);
-  background: rgba(6, 14, 22, 0.92);
-  border: 1px solid rgba(255, 176, 32, 0.45);
-}
-/* Workshop labels no smaller than 10px (workshop redesign, phase 0, 2026-11-14:
-   they were 8 and 9). These classes are shared with the rest of the HUD, so the
-   floor is scoped to the workshop and leaves the main scene as it is. Where a
-   row is tight, the letter spacing comes down so a word keeps its old width and
-   nothing wraps or grows over the bench. */
-.workshop .tag,
-.zipimport .tag,
-.workshop .sfold__count,
-.workshop .benchorb__sub,
-.workshop .viewmenu__hub,
-.workshop .viewmenu__op,
-.workshop .viewmenu__close { font-size: 10px; }
-.workshop .chip.ws__chip,
-.workshop .explain__pill { font-size: 10px; letter-spacing: 0.03em; }
-.workshop .sfold__btn { font-size: 10px; letter-spacing: 0.05em; }
-/* On a phone the top chips were set closer at 9px (0.06em, further down); at
-   10px they go untracked so MENU, GRID, SHARD and AVATAR keep their width. */
-@media (max-width: 640px) {
-  .workshop .ws__chips .chip.ws__chip { letter-spacing: 0; }
-}
-/* Bottom left: TOOLS, its panel above the chip. */
-.ws__tools {
-  position: absolute;
-  left: 12px;
-  bottom: 14px;
-  z-index: 3;
+.ws__railbtn:disabled { opacity: 0.3; cursor: default; }
+.ws__level {
+  margin-top: 6px;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: center;
+  gap: 2px;
 }
-.ws__panel--up {
-  max-height: calc(100vh - 140px);
+.ws__level-value {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 30px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 3px #000;
 }
-/* A panel open at the top left stands over every button below it (arkinox,
-   2026-10-10: MENU and GRID ended up behind them). */
-.ws__top--open { z-index: 5; }
-/* The one selected point's readout, top right under DEPLOY and the way out. */
-.ws__at--top {
-  position: absolute;
-  top: 56px;
-  right: 12px;
-  z-index: 3;
-  pointer-events: none;
-}
-/* TOOLS with a tool in hand: the chip and, joined to its right, the X that
- * puts the tool down. */
-.ws__toolchips { display: inline-flex; }
-.ws__toolchips .ws__chip:first-child:not(:only-child) {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-/* Two classes, to outrank .chip's own radius, which comes later in the sheet. */
-.ws__toolchips .ws__chip--x {
-  padding: 0 9px;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  border-left: 0;
-}
-/* Top right, under DEPLOY and the way out: the compass, the grid pad under it. */
+.ws__level-value b { font-size: 12px; font-weight: 600; color: var(--fg); }
+.ws__level-value span { font-size: 9.5px; letter-spacing: 0.1em; color: var(--dim); }
+
+/* 3. The view ball, top right, and its menu under it. */
 .ws__view {
   position: absolute;
-  top: 54px;
-  right: 12px;
-  z-index: 3;
+  top: calc(var(--ws-top-end) + 10px);
+  right: var(--ws-gutter);
+  z-index: 6;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
 }
-/* The compass and the view pad live in the corner on the bench, not at the
- * screen's fixed spots. */
+.ws__viewball {
+  width: 60px;
+  height: 60px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(82, 227, 159, 0.45);
+  background: radial-gradient(circle at 36% 32%, rgba(82, 227, 159, 0.16), rgba(6, 14, 22, 0.8) 62%, rgba(6, 14, 22, 0.92));
+  box-shadow: 0 0 12px rgba(82, 227, 159, 0.12);
+  backdrop-filter: blur(6px);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+}
+.ws__viewball:active { cursor: grabbing; }
+.ws__viewball.is-on { border-color: var(--ok); box-shadow: 0 0 0 2px rgba(82, 227, 159, 0.35); }
+.ws__viewball .compass-3d.compass-3d--bench { width: 100%; height: 100%; border: 0; background: none; }
+.ws__viewball .compass-3d,
+.ws__viewball .compass-3d * { pointer-events: none; }
+.ws__viewball .compass-label { font-size: 9.5px; }
+.ws__viewmenu {
+  width: 252px;
+  max-height: calc(100vh - var(--ws-top-end) - 90px - var(--ws-bottom));
+  max-height: calc(100dvh - var(--ws-top-end) - 90px - var(--ws-bottom));
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  border-radius: 12px;
+  background: rgba(6, 14, 22, 0.94);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+.ws__viewmenu-views { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.ws__viewmenu-btn {
+  min-height: 44px;
+  padding: 0 6px;
+  font-family: inherit;
+  font-size: var(--ws-label);
+  letter-spacing: 0.08em;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.ws__viewmenu-btn:disabled { opacity: 0.35; cursor: default; }
+.ws__viewmenu-btn--sq { width: 44px; padding: 0; font-size: 16px; }
+.ws__viewmenu-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.ws__viewmenu-grid { display: grid; grid-template-columns: repeat(4, 44px); justify-content: space-between; align-items: center; gap: 4px; }
+.ws__viewmenu-grid .workshop__label { grid-column: 1 / -1; }
+.ws__viewmenu-reset { grid-column: 1 / -1; }
+.ws__viewmenu .workshop__label { font-size: 9.5px; }
+.ws__viewmenu .workshop__value { font-size: 11px; min-width: 3ch; text-align: center; }
+/* The compass and the grid pad in the bench's own corner, not the world's fixed spots. */
 .compass-3d.compass-3d--bench {
   position: static;
   transform: none;
@@ -3702,22 +3688,395 @@ select.avatars__input option:checked {
   right: auto;
   bottom: auto;
 }
-/* COLOR folded: a swatch of the current colour, the picker's dashed edge. */
-.ws__colorchip {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  border: 2px dashed rgba(255, 255, 255, 0.7);
-}
-.ws__corner {
+
+/* 4 and 5. The strip and the dock, one group along the bottom; the sheets rise from it. */
+.ws__bottom {
   position: absolute;
-  right: 14px;
-  bottom: 14px;
+  left: 0;
+  right: 0;
+  bottom: var(--ws-bottom-gap);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+}
+.ws__strip {
+  position: relative;
+  z-index: 1;
+  height: var(--ws-strip);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--ws-gutter) 0 0;
+  /* No backdrop filter: it would make the strip the box a held row's
+     full-screen catcher (.benchpaste__away) is fixed to. */
+  background: rgba(6, 14, 22, 0.96);
+  border-top: 1px solid var(--border);
+}
+.ws__strip-tool {
+  flex: none;
+  width: 64px;
+  height: 100%;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  position: relative;
+  font-family: inherit;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  background: none;
+  border: 0;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+}
+.ws__strip-tool.is-on { color: var(--accent); }
+.ws__strip-q { position: absolute; top: 8px; right: 8px; }
+.ws__strip-opts {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+.ws__strip-opts::-webkit-scrollbar { display: none; }
+.ws__strip-group { flex: none; display: flex; align-items: center; gap: 4px; }
+.ws__stripbtn {
+  flex: none;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-family: inherit;
+  font-size: var(--ws-label);
+  letter-spacing: 0.08em;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+.ws__stripbtn.is-on { color: var(--ws-ink); background: var(--accent); border-color: var(--accent); font-weight: 700; }
+.ws__stripbtn:disabled { opacity: 0.35; cursor: default; }
+.ws__stripbtn--sq { width: 44px; padding: 0; font-size: 16px; }
+.ws__stepper { gap: 0; border: 1px solid var(--border); border-radius: 9px; }
+.ws__stepper .ws__stripbtn { border: 0; background: none; }
+.ws__stepper-value { min-width: 34px; display: flex; flex-direction: column; align-items: center; font-variant-numeric: tabular-nums; }
+.ws__stepper-value b { font-size: 12px; font-weight: 600; }
+.ws__stepper-value span { font-size: 9.5px; letter-spacing: 0.08em; color: var(--dim); }
+.ws__strip .ws__slot { width: auto; max-width: 200px; height: 44px; justify-content: center; }
+.ws__strip .ws__slot-name { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.ws__strip .ws__slot-meta { font-size: 9.5px; white-space: nowrap; }
+/* The held rows in the strip, side by side, each a group after a hairline.
+   Not positioned, so a row's question (PASTE where, FLIP how much) anchors to
+   the strip and rises over it, rather than being clipped by the scroller. */
+.ws__strip .benchclip,
+.ws__strip .benchturn { position: static; flex: none; align-self: auto; display: flex; align-items: center; gap: 4px; padding-left: 6px; border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.ws__strip-opts > :first-child { border-left: 0; padding-left: 0; }
+/* Three classes, to outrank the rows' own sizes (.benchclip .touchpad__key and kin), which come later. */
+.ws__strip .benchclip .touchpad__key,
+.ws__strip .benchturn .touchpad__key { width: auto; min-width: 48px; height: 44px; padding: 0 6px; flex-direction: column; gap: 2px; font-size: 16px; }
+.ws__strip .benchclip .touchpad__sub,
+.ws__strip .benchturn .touchpad__sub,
+.ws__strip .benchclip .touchpad__key--long .touchpad__sub { font-size: 9.5px; letter-spacing: 0.06em; }
+.ws__strip .benchweld__count { font-size: 9.5px; height: 44px; backdrop-filter: none; }
+.ws__strip .benchpaste { left: 72px; bottom: calc(100% + 8px); z-index: 4; }
+.ws__strip .benchpaste .workshop__btn { min-height: 44px; font-size: var(--ws-label); }
+/* The move pad's words, up to the bars' floor (it stands on the strip until phase 2's handles). */
+.ws__held .benchpad .touchpad__sub,
+.ws__held .benchpad .touchpad__key--connect .touchpad__sub,
+.ws__held .benchpad .touchpad__key--delete .touchpad__sub,
+.ws__held .touchpad__hub { font-size: 9.5px; letter-spacing: 0.04em; }
+/* The palette as a sheet: the whole of it scrolls under its header, the 256
+   first and the palette making after them, so the swatches get the room. */
+.palettes.ws__sheet { display: block; overflow-y: auto; overscroll-behavior: contain; }
+.palettes.ws__sheet .palettes__head { position: sticky; top: 0; z-index: 1; background: rgba(7, 14, 22, 0.98); border-radius: 14px 14px 0 0; }
+.palettes.ws__sheet .palettes__body { overflow: visible; }
+/* What a tap does with the tool in hand, over the strip, while the ? is lit. */
+.ws__hint {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  width: max-content;
+  max-width: min(340px, calc(100vw - 24px));
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.95);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+}
+.ws__dock {
+  position: relative;
+  z-index: 1;
+  height: var(--ws-dock);
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 6px var(--ws-gutter) calc(6px + var(--ws-safe-b));
+  background: rgba(4, 9, 15, 0.97);
+  border-top: 1px solid rgba(0, 229, 255, 0.12);
+}
+.ws__dockbtn {
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 2px;
+  font-family: inherit;
+  font-size: var(--ws-label);
+  letter-spacing: 0.06em;
+  color: var(--fg);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  touch-action: manipulation;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ws__dockbtn.is-on { color: var(--ws-ink); background: var(--accent); font-weight: 700; }
+/* The color in hand, always the dock's last slot: tap for the palette. */
+.ws__colorchip {
+  flex: 0 0 56px;
+  padding: 0;
+  border-radius: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  position: relative;
+}
+.ws__colorchip::after {
+  content: '';
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1.5px solid rgba(5, 7, 13, 0.75);
+}
+.ws__colorchip.is-on { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The sheets: an area covers the strip; the palette and the object picker stand on it. */
+.ws__sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--ws-dock);
+  z-index: 2;
+  /* Never above the rail's foot, and never shorter than a usable 160px (a
+     landscape phone, until phase 5 gives it its own layout). */
+  max-height: max(160px, min(42vh, calc(100vh - var(--ws-dock) - var(--ws-rail-end) - 8px)));
+  max-height: max(160px, min(42dvh, calc(100dvh - var(--ws-dock) - var(--ws-rail-end) - 8px)));
+  display: flex;
+  flex-direction: column;
+  background: rgba(7, 14, 22, 0.97);
+  border-top: 1px solid var(--border);
+  border-radius: 14px 14px 0 0;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45);
+}
+/* MENU is navigation: it may take all the height the rail leaves. */
+.ws__sheet[aria-label='Menu'] {
+  max-height: max(160px, calc(100vh - var(--ws-dock) - var(--ws-rail-end) - 8px));
+  max-height: max(160px, calc(100dvh - var(--ws-dock) - var(--ws-rail-end) - 8px));
+}
+.ws__sheet.ws__sheet--tall {
+  bottom: 100%;
+  height: max(200px, calc(100vh - var(--ws-bottom) - var(--ws-rail-end) - 8px));
+  height: max(200px, calc(100dvh - var(--ws-bottom) - var(--ws-rail-end) - 8px));
+  max-height: none;
+}
+/* A short screen (an iPhone SE with Safari's bars): the rail folds to two
+   columns, UNDO beside REDO and the level's keys beside each other, so the
+   sheets keep their room. */
+@media (max-height: 700px) {
+  .workshop { --ws-rail-h: 124px; }
+  .ws__rail { display: grid; grid-template-columns: 44px 44px; gap: 6px; }
+  .ws__level { grid-column: 1 / -1; display: grid; grid-template-columns: 44px 44px; gap: 6px; margin-top: 0; }
+  .ws__level-value { grid-column: 1 / -1; grid-row: 2; min-height: 24px; flex-direction: row; gap: 5px; }
+}
+.ws__sheet-head {
+  flex: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 10px var(--ws-gutter) 4px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  touch-action: none;
+}
+.ws__sheet-grab {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  width: 40px;
+  height: 4px;
+  margin-left: -20px;
+  border-radius: 2px;
+  background: rgba(200, 245, 255, 0.25);
+}
+.ws__sheet-title { margin: 0; font-size: 11px; letter-spacing: 0.18em; color: var(--accent); font-weight: 700; }
+.ws__sheet-sub { flex: 1; min-width: 0; font-size: 10px; letter-spacing: 0.1em; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; }
+.ws__sheet-x {
+  flex: none;
+  margin-left: auto;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--fg);
+  background: none;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.ws__sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* Rules written for the old toolbar rows gave these a flex basis; in a column sheet that becomes height. */
+.ws__sheet-body .workshop__help,
+.ws__sheet-body .workshop__name {
+  flex: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* A rule between the controls, so a row reads as one control. */
+.ws__sheet-body .workshop__row {
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  padding-top: 8px;
+}
+.ws__sheet-body .workshop__row:first-child { border-top: none; padding-top: 0; }
+/* The object picker's card, its own frame gone: the sheet is the frame now,
+   and its words up from the app's modal sizes to the workshop's floor. */
+.objpick-sheet .objpick { width: 100%; padding: 0; background: none; border: 0; box-shadow: none; }
+.objpick-sheet .login__note,
+.objpick-sheet .login__label,
+.objpick-sheet .objpick__meta,
+.objpick-sheet .objpick__tab,
+.objpick-sheet .secret__act,
+.objpick-sheet .avatars__input { font-size: 10.5px; }
+.objpick-sheet .secret__act { min-height: 44px; }
+.objpick-sheet .objpick__list { max-height: none; }
+.ws__panel-title {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--dim);
+  margin-top: 4px;
+}
+.ws__stats {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--dim);
+}
+
+/* Workshop labels no smaller than 10px (workshop redesign, phase 0, 2026-11-14:
+   they were 8 and 9). These classes are shared with the rest of the HUD, so the
+   floor is scoped to the workshop and leaves the main scene as it is. */
+.workshop .tag,
+.zipimport .tag,
+.workshop .sfold__count { font-size: 10px; }
+.workshop .explain__pill { font-size: 10px; letter-spacing: 0.03em; }
+.workshop .sfold__btn { font-size: 10px; letter-spacing: 0.05em; }
+
+/* What you hold, acted on: the rows at the bottom left, standing on the strip. */
+.ws__held {
+  position: absolute;
+  left: var(--ws-gutter);
+  bottom: calc(var(--ws-bottom) + var(--ws-bottom-gap) + 8px);
   z-index: 3;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+.ws__held > * { pointer-events: auto; }
+
+/* The store's notice, under the top bar between the rail and the view ball. */
+.ws__toast {
+  position: absolute;
+  top: calc(var(--ws-top-end) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  pointer-events: none;
+  width: max-content;
+  max-width: min(360px, calc(100vw - 150px));
+  padding: 8px 10px;
+  border-radius: 9px;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1.45;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  background: rgba(6, 14, 22, 0.9);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+}
+/* Unsaved changes: below the toast, and it stays until saving works again. */
+.ws__storage {
+  position: absolute;
+  top: calc(var(--ws-top-end) + 64px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  pointer-events: none;
+  width: max-content;
+  max-width: min(360px, calc(100vw - 150px));
+  padding: 8px 10px;
+  border-radius: 9px;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1.45;
+  letter-spacing: 0.06em;
+  color: var(--warn);
+  background: rgba(6, 14, 22, 0.92);
+  border: 1px solid rgba(255, 176, 32, 0.45);
+}
+
+/* A wide screen: the bottom group floats at the bottom centre, 640px wide,
+   and the top bar keeps to the top left instead of spanning the screen. */
+@media (min-width: 900px) {
+  /* Floating off the bottom edge: the home indicator's room is the gap's, not the dock's. */
+  .workshop { --ws-bottom-gap: max(12px, env(safe-area-inset-bottom, 0px)); --ws-gutter: 12px; --ws-safe-b: 0px; }
+  .ws__topbar { right: auto; }
+  .ws__topbtn { flex: none; width: 72px; }
+  .ws__topbtn--close { width: var(--ws-bar); }
+  .ws__topbtn.ws__topbtn--deploy { flex: none; width: 96px; }
+  /* Centred by its left edge, not a transform: a transform would make it the
+     box the held rows' full-screen catchers are fixed to. */
+  .ws__bottom { left: calc(50% - 320px); right: auto; width: 640px; }
+  .ws__strip { border: 1px solid var(--border); border-radius: 12px 12px 0 0; }
+  .ws__dock { border: 1px solid var(--border); border-top: 0; border-radius: 0 0 12px 12px; }
+  .ws__sheet { border: 1px solid var(--border); border-radius: 14px; }
 }
 /* The main pad's nine cells, for the selection: CONNECT and DELETE take the
  * corners the scale keys have out there. */
@@ -4172,14 +4531,6 @@ select.avatars__input option:checked {
   background: #fff;
   border: 2px solid #000;
   box-shadow: 0 0 0 1px #fff;
-}
-@media (max-width: 640px) {
-  .ws__panel--up {
-    max-height: calc(100vh - 220px);
-  }
-  .ws__panel {
-    max-height: calc(100vh - 260px);
-  }
 }
 
 @media (max-width: 600px) {
@@ -6936,11 +7287,6 @@ select.avatars__input option:checked {
   line-height: 1.2;
 }
 
-/* The avatar adopt in progress, visible from the top row while MENU is closed. */
-.ws__chip.ws__chip--work {
-  color: var(--warn, #ffb347);
-  border-color: color-mix(in srgb, var(--warn, #ffb347) 50%, transparent);
-}
 
 /* Something deployed while LOCAL, and the button that sends it. */
 .shards__note {
@@ -6975,28 +7321,6 @@ select.avatars__input option:checked {
   border-color: color-mix(in srgb, var(--warn) 45%, transparent);
 }
 
-/* The workshop's panels hover over the compass and its pad, which share the
-   top-right corner: the panel is what you are reading, so it wins. The compass
-   drops a layer rather than the panels rising one, because DEPLOY and the way
-   out share the top edge with the chips and must stay pressable above all of it.
-   The chip row also reserves 124px on its right for those two buttons, and that
-   strip must let a press through rather than swallow it. */
-.ws__view { z-index: 2; }
-
-.ws__chips { pointer-events: none; }
-
-.ws__chips > * { pointer-events: auto; }
-
-/* A rule between the controls in MENU and GRID, so a row reads as one control. */
-.ws__panel .workshop__row {
-  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  padding-top: 8px;
-}
-
-.ws__panel .workshop__row:first-child { border-top: none; padding-top: 0; }
-
-/* With undo and redo out of the way, the open panel sits right under its chip. */
-.ws__top--open { gap: 5px; }
 
 /* OPACITY in SHARD (Workshop OpacityRow): the hyperspace scrubber's rail, with
    a ring while the keys have it, since its arrows move it. */
@@ -7005,13 +7329,6 @@ select.avatars__input option:checked {
 .ws__opacity-rail:focus { outline: none; }
 .ws__opacity-rail:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
-/* MENU, GRID, SHARD and AVATAR share a phone's top edge with DEPLOY and the
-   way out (arkinox, 2026-10-23): a little closer set there, so the four stand
-   in one row at 390px. Narrower, the row wraps as it always has. */
-@media (max-width: 640px) {
-  .ws__chips { gap: 5px; }
-  .ws__chips .ws__chip { padding: 0 7px; gap: 4px; letter-spacing: 0.06em; }
-}
 
 /* The delete X, big enough to hit and to read. */
 .workshop__mini--x {
@@ -8421,12 +8738,14 @@ select.avatars__input option:checked {
 .objpick__row:disabled { opacity: 0.45; cursor: default; }
 
 /* ---- The color corner and palette sheet, ported from snocrash (arkinox, 2026-09-27) ---- */
-/* The selected point's coordinate, over the turn keys in the bottom-left
-   column (it stood on the end of the TOOLS row until the dropper beside the
-   colour chip needed that width on a phone). The corner is capped short of
-   the colour column, and the readout is the part that gives way, so the two
-   never meet. It takes no taps: the bench is underneath. */
+/* The selected point's coordinate, under the view ball at the top right
+   (workshop redesign, phase 1). It takes no taps: the bench is underneath. */
 .ws__at {
+  position: absolute;
+  top: calc(var(--ws-top-end) + 80px);
+  right: var(--ws-gutter);
+  z-index: 3;
+  max-width: calc(100vw - 80px);
   min-width: 0;
   display: inline-flex;
   align-items: center;
@@ -8445,11 +8764,14 @@ select.avatars__input option:checked {
   pointer-events: none;
 }
 
-/* The three reaches, out of the folded column they used to sit in and standing
-   above the colour chip in their own right. Larger than they were, because they
+/* The three reaches, a column at the bottom right standing on the strip (the
+   color itself is the dock's last slot now). Larger than they were, because they
    are now a first-class control rather than a footer inside a panel. */
 .ws__acts {
-  position: relative;
+  position: absolute;
+  right: var(--ws-gutter);
+  bottom: calc(var(--ws-bottom) + var(--ws-bottom-gap) + 8px);
+  z-index: 3;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -8476,15 +8798,6 @@ select.avatars__input option:checked {
   height: 34px;
   padding: 0;
   border-radius: 9px;
-}
-/* The chip and, to its left while one point or face is in hand, the dropper.
-   The reaches above set their dashed edge to the color in hand inline, so
-   the edge says what a press puts down; the dropper keeps the white edge,
-   since it takes a color rather than applying one. */
-.ws__chiprow {
-  display: flex;
-  align-items: center;
-  gap: 5px;
 }
 
 /*

@@ -1,6 +1,7 @@
 /**
- * workshopPanels.test.tsx - the workshop's top bar (arkinox, 2026-10-23):
- * MENU, GRID, SHARD and AVATAR, in that order, one panel open at a time.
+ * workshopPanels.test.tsx - the workshop's top bar (arkinox, 2026-10-23;
+ * workshop redesign, phase 1): MENU, SHARD, GRID, AVATAR and MOTION, each its
+ * own sheet, one open at a time.
  * MENU keeps the shard list and the ways in; SHARD has the open shard's name,
  * the Shard Feed, its counts, DRAW, OPACITY (a slider with a number to type)
  * and CONSTRAIN; AVATAR has what you wear, the ghost for scale and SET AVATAR.
@@ -25,26 +26,19 @@ if (typeof localStorage === 'undefined') {
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { useWorkshop } from '../../store/useWorkshop'
 import { dragHistory } from '../../lib/opacityStep'
-import { OpacityRow } from '../Workshop'
+import { OpacityRow } from '../shardRows'
 
-const SOURCE = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
-
-/** The JSX of one top-bar panel, from its `{panel === 'x' && shard && (` to its close. */
-function panel(name: string): string {
-  const open = `{panel === '${name}' && shard && (`
-  const start = SOURCE.indexOf(open)
-  expect(start).toBeGreaterThan(-1)
-  const end = SOURCE.indexOf('\n      )}\n', start)
-  expect(end).toBeGreaterThan(start)
-  return SOURCE.slice(start, end)
+const read = (...p: string[]): string => readFileSync(join(__dirname, '..', ...p), 'utf8')
+const WORKSHOP = read('Workshop.tsx')
+const TOPBAR = read('shell', 'TopBar.tsx')
+const SHEET: Record<'menu' | 'shard' | 'avatar' | 'grid', string> = {
+  menu: read('sheets', 'MenuSheet.tsx'),
+  shard: read('sheets', 'ShardSheet.tsx'),
+  avatar: read('sheets', 'AvatarSheet.tsx'),
+  grid: read('sheets', 'GridSheet.tsx'),
 }
-
-/** The chip row's JSX. */
-function chips(): string {
-  const start = SOURCE.indexOf('<div className="ws__chips">')
-  const end = SOURCE.indexOf('\n      </div>', start)
-  return SOURCE.slice(start, end)
-}
+/** Every source the workshop draws its controls from, to count a control once across all of them. */
+const ALL = [WORKSHOP, TOPBAR, ...Object.values(SHEET), read('shell', 'ViewBall.tsx'), read('shell', 'Strip.tsx'), read('shell', 'Rail.tsx'), read('shell', 'Dock.tsx'), read('HeldRows.tsx'), read('ColorActs.tsx')].join('\n')
 
 /** One marker for each control that moved, and where it went. */
 const MOVED: Record<'shard' | 'avatar', string[]> = {
@@ -53,7 +47,7 @@ const MOVED: Record<'shard' | 'avatar', string[]> = {
     '<span className="workshop__label">SHARD FEED</span>',
     // PUBLISH, and the ask before publishing a shard that carries sealed
     // parts (#543), whose LEAVE THEM OUT publishes too: so publish(shard)
-    // itself is written twice in the SHARD panel, and the markers are the
+    // itself is written twice in the SHARD sheet, and the markers are the
     // button's press and the ask.
     'onClick={() => { if (carriesSealedParts(shard)) setPublishAsk(shard.id); else void usePublished.getState().publish(shard) }}',
     '{publishAsk === shard.id && (',
@@ -81,51 +75,57 @@ const MOVED: Record<'shard' | 'avatar', string[]> = {
   ],
 }
 
-describe('the workshop top bar', () => {
-  it('reads MENU, GRID, SHARD, AVATAR, with SHARD a box and AVATAR a venetian mask', () => {
-    const row = chips()
-    const at = ['>MENU', '>GRID', '>SHARD', '>AVATAR'].map((label) => row.indexOf(label))
+describe('the workshop top bar (workshop redesign, phase 1)', () => {
+  it('reads MENU, SHARD, GRID, AVATAR, MOTION, with SHARD a box and AVATAR a venetian mask, between the way out and DEPLOY', () => {
+    const at = ["area: 'menu', label: 'MENU', icon: Menu", "area: 'shard', label: 'SHARD', icon: Box", "area: 'grid', label: 'GRID', icon: Grid3x3", "area: 'avatar', label: 'AVATAR', icon: VenetianMask", "area: 'motion', label: 'MOTION'"].map((m) => TOPBAR.indexOf(m))
     for (const i of at) expect(i).toBeGreaterThan(-1)
     expect([...at].sort((a, b) => a - b)).toEqual(at)
-    expect(row).toContain("<Box size={12} strokeWidth={2.25} aria-hidden />SHARD")
-    expect(row).toContain("<VenetianMask size={12} strokeWidth={2.25} aria-hidden />AVATAR")
-    expect(row).toContain("toggle('shard')")
-    expect(row).toContain("toggle('avatar')")
+    const close = TOPBAR.indexOf('aria-label="Close the workshop"')
+    const areas = TOPBAR.indexOf('{AREAS.map(')
+    const deploy = TOPBAR.indexOf('<span>DEPLOY</span>')
+    expect(close).toBeGreaterThan(-1)
+    expect(close).toBeLessThan(areas)
+    expect(areas).toBeLessThan(deploy)
   })
 
-  it('opens one panel at a time, from one piece of state', () => {
-    expect(SOURCE).toContain("type Panel = 'menu' | 'tools' | 'grid' | 'shard' | 'avatar'")
+  it('opens one sheet at a time, from one piece of state', () => {
+    expect(WORKSHOP).toContain('const [sheet, setSheet] = useState<SheetKind | null>(null)')
     // Escape closes whichever is open, before anything else in the workshop.
-    expect(SOURCE).toContain('if (panel !== null) setPanel(null)')
+    expect(WORKSHOP).toContain('if (sheet !== null) setSheet(null)')
   })
 
-  it('puts each moved control in its new panel, once, and none of them in MENU', () => {
-    const menu = panel('menu')
+  it('puts each moved control in its own sheet, once, and none of them in MENU', () => {
     for (const [where, markers] of Object.entries(MOVED)) {
-      const body = panel(where)
+      const body = SHEET[where as 'shard' | 'avatar']
       for (const m of markers) {
         expect(body, `${m} in ${where.toUpperCase()}`).toContain(m)
-        expect(SOURCE.split(m).length - 1, `${m} once`).toBe(1)
-        expect(menu, `${m} not in MENU`).not.toContain(m)
+        expect(ALL.split(m).length - 1, `${m} once`).toBe(1)
+        expect(SHEET.menu, `${m} not in MENU`).not.toContain(m)
       }
     }
   })
 
   it('keeps the list and the ways in under MENU', () => {
-    const menu = panel('menu')
-    for (const m of ['SHARDS ({shardCount})', '+ NEW SHARD', '>PASTE</button>', "{importing ? 'READING' : 'IMPORT'}", '{pasteOpen && (', '<ShardList currentId={shard.id} onOpen={closeMenu} />', 'CLEAR THIS SCENE', '<Explanation>']) {
-      expect(menu).toContain(m)
+    for (const m of ['SHARDS ({shardCount})', '+ NEW SHARD', '>PASTE</button>', "{importing ? 'READING' : 'IMPORT'}", '{pasteOpen && (', '<ShardList currentId={currentId} onOpen={onOpen} />', 'CLEAR THIS SCENE', '<Explanation>']) {
+      expect(SHEET.menu).toContain(m)
     }
   })
 
   it('puts SHARD in order: name, Shard Feed, counts, DRAW, OPACITY, CONSTRAIN', () => {
-    const s = panel('shard')
+    const s = SHEET.shard
     const order = MOVED.shard.filter((m) => !m.includes('retract') && !m.includes('publish(') && !m.includes('publishAsk ===') && !m.includes('BYTES')).map((m) => s.indexOf(m))
     expect([...order].sort((a, b) => a - b)).toEqual(order)
   })
 
-  it('sends the mining chip to AVATAR', () => {
-    expect(chips()).toContain("onClick={() => { if (panel !== 'avatar') toggle('avatar') }} title=\"Your avatar: see AVATAR\"")
+  it('keeps one LEVEL, the rail\'s, and none in GRID', () => {
+    expect(SHEET.grid).not.toContain('LevelStack')
+    expect(ALL.split('aria-label="Raise the grid floor"').length - 1).toBe(1)
+  })
+
+  it('shows the avatar being mined as a ring on AVATAR, which opens AVATAR', () => {
+    expect(TOPBAR).toContain("const busy = area === 'avatar' && work !== null")
+    expect(TOPBAR).toContain('{busy && <span className="ws__topbtn-ring" aria-hidden />}')
+    expect(TOPBAR).toContain('`${work}: see AVATAR`')
   })
 })
 

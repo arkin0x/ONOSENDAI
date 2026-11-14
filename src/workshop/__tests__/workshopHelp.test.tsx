@@ -5,6 +5,7 @@
  * that no longer says TOOLS; MENU's EXPLAIN said "1 2 3 4 tools" (there are
  * five) and named a CONNECT and a DELETE FACE that are gone. And one icon,
  * Waypoints, stood for both "select all" and "color the connected piece".
+ * Phase 1 split the workshop by place: the help lives where its controls do.
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -21,22 +22,26 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
-const { Intro } = await import('../Workshop')
+const { Intro } = await import('../Notices')
+const { DOCK } = await import('../shell/Dock')
 
-const SOURCE = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
-const BENCH = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
+const read = (...p: string[]): string => readFileSync(join(__dirname, '..', ...p), 'utf8')
+const MENU = read('sheets', 'MenuSheet.tsx')
+const STRIP = read('shell', 'Strip.tsx')
+const VIEWBALL = read('shell', 'ViewBall.tsx')
+/** Where the held rows and the color column draw their keys. */
+const SOURCE = read('HeldRows.tsx') + read('ColorActs.tsx')
+const BENCH = read('Bench.tsx')
 
 /** Markup to plain words. */
 const text = (html: string): string => html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
 
 /** MENU's EXPLAIN, as one line of words. */
 function menuExplain(): string {
-  const menu = SOURCE.indexOf("{panel === 'menu' && shard && (")
-  expect(menu).toBeGreaterThan(-1)
-  const start = SOURCE.indexOf('<Explanation>', menu)
-  const end = SOURCE.indexOf('</Explanation>', start)
-  expect(start).toBeGreaterThan(menu)
-  return SOURCE.slice(start + '<Explanation>'.length, end).replace(/\s+/g, ' ').trim()
+  const start = MENU.indexOf('<Explanation>')
+  const end = MENU.indexOf('</Explanation>', start)
+  expect(start).toBeGreaterThan(-1)
+  return MENU.slice(start + '<Explanation>'.length, end).replace(/\s+/g, ' ').trim()
 }
 
 /** The lucide icon drawn inside the button with this aria-label. */
@@ -57,34 +62,33 @@ describe('the first-run card', () => {
     expect(card).not.toMatch(/FACE[^.;]*draws a box/)
   })
 
-  it('points at the tool chip, which opens on VIEW, not a TOOLS chip that is no longer there', () => {
-    expect(card).toContain('tap VIEW at the bottom left, pick STAMP')
+  it('points at STAMP in the dock, not a TOOLS chip or an ORBIT ball that are no longer there', () => {
+    expect(card).toContain('tap STAMP at the bottom')
     expect(card).not.toMatch(/\bTOOLS\b/)
+    expect(card).not.toContain('ORBIT')
   })
 })
 
-describe('the VIEW help line', () => {
-  it('says the compass tips or rolls the grid, which is what its pad does, not that it turns the view', () => {
-    const view = /^\s*view: '([^']*)',$/m.exec(SOURCE)
+describe('the LOOK help line', () => {
+  it('says the view ball tips or rolls the grid, which is what its menu does', () => {
+    const view = /^\s*view: '([^']*)',$/m.exec(STRIP)
     expect(view).not.toBeNull()
-    expect(view![1]).toContain('Tap the compass to tip or roll the grid a quarter')
-    expect(view![1]).not.toContain('turns the view')
-    expect(SOURCE).toContain('aria-label="Tip the grid up"')
-    expect(SOURCE).toContain('aria-label="Roll the grid left"')
+    expect(view![1]).toContain('Tap the view ball for views, or to tip or roll the grid a quarter')
+    expect(view![1]).not.toContain('compass')
+    expect(VIEWBALL).toContain('aria-label="Tip the grid up"')
+    expect(VIEWBALL).toContain('aria-label="Roll the grid left"')
   })
 })
 
 describe("MENU's EXPLAIN", () => {
   const explain = menuExplain()
 
-  it('names every tool key, 1 to 5, as Bench.tsx binds them', () => {
-    const tools = /const TOOLS: Tool\[\] = \[([^\]]*)\]/.exec(SOURCE)
-    expect(tools).not.toBeNull()
-    const names = tools![1].split(',').map((t) => t.trim().replace(/'/g, ''))
-    expect(names).toHaveLength(5)
-    names.forEach((t, i) => expect(BENCH).toContain(`if (e.code === 'Digit${i + 1}') w.setTool('${t}')`))
-    expect(BENCH).not.toContain(`e.code === 'Digit${names.length + 1}'`)
-    expect(explain).toContain(`Keys: ${names.map((t, i) => `${i + 1} ${t.toUpperCase()}`).join(', ')},`)
+  it('names every tool key, 1 to 5, as Bench.tsx binds them and the dock titles them', () => {
+    const byKey = [...DOCK].sort((a, b) => Number(a.key) - Number(b.key))
+    expect(byKey.map((d) => d.key)).toEqual(['1', '2', '3', '4', '5'])
+    for (const d of byKey) expect(BENCH).toContain(`if (e.code === 'Digit${d.key}') w.setTool('${d.tool}')`)
+    expect(BENCH).not.toContain(`e.code === 'Digit${byKey.length + 1}'`)
+    expect(explain).toContain(`Keys: ${byKey.map((d) => `${d.key} ${d.label}`).join(', ')},`)
     expect(explain).not.toContain('1 2 3 4')
   })
 

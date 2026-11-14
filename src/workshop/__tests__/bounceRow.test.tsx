@@ -39,10 +39,11 @@ import { useWorkshop } from '../../store/useWorkshop'
 import { useShardFolders } from '../../store/useShardFolders'
 import { useCyberspace } from '../../store/useCyberspace'
 import { EMPTY_TREE } from '../../lib/shardFolders'
-import { BounceChip, BounceRow, ShardList } from '../Workshop'
+import { BounceChip, BounceRow } from '../shardRows'
+import { ShardList } from '../sheets/MenuSheet'
 import { withBounce } from '../../lib/walkBounce'
 
-const SOURCE = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
+const SOURCE = readFileSync(join(__dirname, '..', 'sheets', 'ShardSheet.tsx'), 'utf8')
 
 function pad(name = 'Pad'): ShardModel {
   return { ...newShard(name), mode: 'solid', vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }], faces: [] }
@@ -61,10 +62,8 @@ beforeEach(() => {
 })
 
 describe('BOUNCE in the SHARD panel', () => {
-  it('sits right after CONSTRAIN, inside the SHARD panel', () => {
-    const start = SOURCE.indexOf("{panel === 'shard' && shard && (")
-    const end = SOURCE.indexOf('\n      )}\n', start)
-    const shard = SOURCE.slice(start, end)
+  it('sits right after CONSTRAIN, inside the SHARD sheet', () => {
+    const shard = SOURCE.slice(SOURCE.indexOf('export function ShardBody('))
     const constrain = shard.indexOf('CONSTRAIN MOVEMENT IN WALK MODE')
     const bounce = shard.indexOf('<BounceRow />')
     expect(constrain).toBeGreaterThan(-1)

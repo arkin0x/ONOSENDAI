@@ -2166,6 +2166,16 @@ select.avatars__input option:checked {
   padding-right: 4px;
 }
 
+/* A deployed row's button never runs past the panel: it shrinks to its grid
+ * column, and its lines are cut inside it (owner, 2026-11-14). The bag's
+ * title cuts the first item's name only, so "+ N more" stays in view. */
+.shards__goto { min-width: 0; max-width: 100%; }
+.shards__goto > .avatars__who, .shards__goto > .shards__meta { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bagrow__title { display: flex; align-items: center; min-width: 0; }
+.bagrow__title > .shards__type { flex: none; margin-right: 4px; }
+.bagrow__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bagrow__more { flex: none; white-space: pre; }
+
 /* MOVE on a DEPLOYED row: the publish switch's small capitals, one button. */
 .shards__move {
   padding: 3px 8px;
@@ -11705,9 +11715,16 @@ html.tv-broadcast body { overflow: hidden; }
 .demo.tutorial:has(.straylight-id) { max-height: 56vh; max-height: 56dvh; }
 
 /* ITEMS in the menu: two buttons, KEY ITEMS and OTHER LOOT, each opening its
-   modal (owner, 2026-11-14). Each button the panel's width, sized for a thumb. */
-.items-kinds { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px; }
-.items-kinds__go { height: 36px; font-size: 10px; text-align: left; padding: 0 12px; }
+   modal (owner, 2026-11-14). Side by side, half the width each, CREATE's row
+   of buttons (.shards__modes, .shards__compose-open) in all but wrapping:
+   two halves always, the words cut with an ellipsis before they wrap. */
+.items-kinds { flex-wrap: nowrap; margin: 4px 0 8px; }
+.items-kinds .items-kinds__go { flex: 1 1 0; min-width: 0; display: inline-flex; align-items: center; justify-content: center; }
+.items-kinds__go > .shards__build-icon { flex: none; }
+.items-kinds__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The modal's title wears the same icon before its words. */
+.items-modal__title { display: flex; align-items: center; gap: 6px; }
+.items-modal__icon { flex: none; }
 /* The modal they open: tabs, then one scroller holding the rows (no list
    scrolling inside it), PASTE kept under it. */
 .items-modal__card { max-height: min(84vh, 760px); max-height: min(calc(100dvh - 32px), 760px); }
@@ -11717,7 +11734,6 @@ html.tv-broadcast body { overflow: hidden; }
 .items-modal__note { margin: 0; font-size: 10px; line-height: 1.5; color: var(--dim); }
 .items-modal .held__views { align-items: center; }
 .held__tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-.held__clearall { margin-left: auto; }
 /* FEED: who listed it, their picture and name one tap to their profile; NOT FOUND in the warning colour. */
 .items-feed__who { max-width: 100%; min-width: 0; display: inline-flex; align-items: center; gap: 3px; padding: 0; font: inherit; color: inherit; background: none; border: 0; cursor: pointer; vertical-align: middle; }
 .items-feed__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

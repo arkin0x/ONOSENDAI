@@ -13,9 +13,13 @@
  * chests, which open here as they do where they were found. COPY puts an item
  * on the clipboard as text (`cyberspace-key:` and its event) and PASTE reads
  * one back, so an item crosses devices. DELETE takes an item off this
- * identity's list after a confirmation naming it (arkinox, 2026-11-01: "I
- * can't delete items"), since an item is a secret key: it publishes and
- * retracts nothing, and the item can be found and TAKEN again. An item you forged can be PUBLISHED to the ITEM FEED (a kind
+ * identity's list after a confirmation naming it and saying what is lost
+ * (arkinox, 2026-11-01: "I can't delete items"). It publishes and retracts
+ * nothing, and the item can be found and TAKEN again. DELETE is only on an
+ * ARCHIVED row, red, in its ACTIONS, and only the confirmation removes
+ * anything (owner, 2026-11-14: "Delete should only happen after
+ * confirmation from a red DELETE button in the archive item's actions. No
+ * X Buttons"). Nothing under MINE or INVENTORY deletes; ARCHIVE first. An item you forged can be PUBLISHED to the ITEM FEED (a kind
  * 33340 listing, lib/itemListing.ts): its name, picture and public key, never
  * its private key, so anyone can seal a chest to it (arkinox, 2026-10-13).
  * The confirmation says it cannot be taken back. PLACE puts a new instance
@@ -34,12 +38,14 @@
  * actions are open at a time; Escape or a tap outside the row closes them.
  * LISTED is said on the row's line, not as a button: it is not an action.
  *
- * The panel itself is two buttons, 🔑 KEY ITEMS and ✨ OTHER LOOT, each
- * opening a modal of that kind alone (owner, 2026-11-14: "My list of these
- * items is getting too long and I think we need to consolidate it just like
- * we did with the other menu panels"). The rows, their ACTIONS, ARCHIVED,
- * PASTE and CLEAR ALL are in those modals now (ItemsModal), and KEY ITEMS
- * also has FEED, the published key items not yet found.
+ * The panel itself is two buttons side by side, KEY ITEMS and OTHER LOOT,
+ * each with its lucide icon and opening a modal of that kind alone (owner,
+ * 2026-11-14: "My list of these items is getting too long and I think we
+ * need to consolidate it just like we did with the other menu panels"). The
+ * rows, their ACTIONS, ARCHIVED and PASTE are in those modals (ItemsModal),
+ * and KEY ITEMS also has FEED, the published key items not yet found. There
+ * is no X on a row and no CLEAR ALL (owner, 2026-11-14: "I'm afraid to press
+ * Clear All ... get rid of it").
  */
 
 import { takeIntoKeeping, you } from '../lib/carried'
@@ -48,13 +54,13 @@ import { create } from 'zustand'
 import { ConfirmModal } from './ConfirmModal'
 import { useEscape } from '../hooks/useEscape'
 import { useItemFeed } from '../store/useItemFeed'
-import { X } from 'lucide-react'
+import { Key, Sparkles, type LucideIcon } from 'lucide-react'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { hasNftLink } from '../lib/nftLink'
 import { ItemFace, ItemIcon } from './ItemIcon'
 import { ShardThumb } from './ShardThumb'
-import { chestsOpenedBy, clearsWithAll, isKeyItem, keyText, splitPanels, type HeldItem } from '../lib/inventory'
+import { chestsOpenedBy, isKeyItem, keyText, splitPanels, type HeldItem } from '../lib/inventory'
 import { regionLabel } from '../lib/loot'
 import { provenanceOf } from '../lib/provenance'
 import { safeNpub } from '../lib/npub'
@@ -132,8 +138,24 @@ const LISTING_WARNING = [
   'This cannot be undone. You can ask relays to delete the listing later, but relays and other people may already have kept copies, and chests sealed to this item stay sealed to it. Treat it as permanent.',
 ].join('\n')
 
-/** The DELETE confirmation: an item is a secret key, and this copy of it goes. */
-const DELETE_WARNING = 'Its secret key leaves this identity\u2019s ITEMS on this device. Nothing is published or retracted. COPY it first to keep a way back; otherwise it returns only if you find it and TAKE it again.'
+/**
+ * What the DELETE confirmation says is lost, by kind (owner, 2026-11-14):
+ * plain words, the money first. A Cashu coin not known to be redeemed is
+ * sats; a message with an NFT claim link may be an NFT; a key item is its
+ * secret key. Nothing is published or retracted by any of them.
+ */
+export function deleteWarning(item: Pick<HeldItem, 'type' | 'text'>, coinState?: string): string {
+  const back = 'It comes back only if you find it and TAKE it again.'
+  if (item.type === 'key') return `Its secret key leaves this device. COPY it first if you want a way back. ${back}`
+  if (item.type === 'message' && readCashuToken(item.text ?? null).raw !== null) {
+    if (coinState === 'redeemed') return `This coin is already redeemed. ${back}`
+    if (coinState === 'unclaimed') return 'This coin is not redeemed. Deleting it loses the sats. Open its CARD and redeem it first.'
+    return 'This coin may not be redeemed. If it is not, deleting it loses the sats. Open its CARD and check first.'
+  }
+  if (item.type === 'message' && hasNftLink(item.text)) return 'This message holds an NFT claim link. If you have not claimed it, deleting it loses the NFT.'
+  if (item.type === 'chest') return `This chest and anything still sealed in it leave your ITEMS. ${back}`
+  return `It leaves your ITEMS on this device. ${back}`
+}
 
 /** ARCHIVE, or UNARCHIVE on a row already filed away: the row moves between INVENTORY and ARCHIVED. */
 export function ArchiveButton({ item }: { item: Pick<HeldItem, 'id' | 'archived'> }): JSX.Element {
@@ -143,11 +165,13 @@ export function ArchiveButton({ item }: { item: Pick<HeldItem, 'id' | 'archived'
 }
 
 /**
- * DELETE and its confirmation, naming the item. Nothing goes until the second
- * tap. The last copy of a key one of your chests or doors is sealed to is
- * refused, naming them, with ARCHIVE offered instead (useShards itemStillNeeded).
+ * DELETE, red, and its confirmation, naming the item and saying what is lost
+ * (deleteWarning). Nothing goes until DELETE FOREVER in the confirmation;
+ * CANCEL, Escape or a tap outside keeps it. Drawn only on an ARCHIVED row
+ * (KeyRow, TakenRow). The last copy of a key one of your chests or doors is
+ * sealed to is refused, naming them (useShards itemStillNeeded).
  */
-export function DeleteItem({ item, asking = false }: { item: Pick<HeldItem, 'id' | 'name'> & Partial<HeldItem>; asking?: boolean }): JSX.Element {
+export function DeleteItem({ item, asking = false, coinState }: { item: Pick<HeldItem, 'id' | 'name'> & Partial<HeldItem>; asking?: boolean; coinState?: string }): JSX.Element {
   const [confirming, setConfirming] = useState(asking)
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
@@ -170,14 +194,14 @@ export function DeleteItem({ item, asking = false }: { item: Pick<HeldItem, 'id'
   }
   return (
     <>
-      <button className="chest__act chest__act--danger" onClick={ask} title="Delete it from your ITEMS">DELETE</button>
+      <button className="chest__act chest__act--danger" onClick={ask} title="Delete it from this device. Asks first">DELETE</button>
       {refusal && <span className="held__refusal" role="status">{refusal}</span>}
       {needed && !item.archived && <button className="chest__act" onClick={() => { useInventory.getState().archive(item.id); setNeeded(false); setRefusal(null) }} title="File it away under ARCHIVED. It still opens what it opens">ARCHIVE</button>}
       {confirming && (
         <ConfirmModal
           title={`Delete \u201c${item.name}\u201d?`}
-          body={DELETE_WARNING}
-          confirmLabel="DELETE ITEM"
+          body={deleteWarning({ type: item.type ?? 'key', text: item.text }, coinState)}
+          confirmLabel="DELETE FOREVER"
           cancelLabel="CANCEL"
           danger
           busy={busy}
@@ -257,7 +281,7 @@ function useRowActions(id: string, name: string, shown = true): { button: JSX.El
   }
 }
 
-/** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, and ACTIONS: DETAILS, COPY, PLACE, PUBLISH, ARCHIVE and DELETE. */
+/** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, and ACTIONS: DETAILS, COPY, PLACE, PUBLISH, ARCHIVE, and DELETE once archived. */
 function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
   const profile = useProfile(item.author || null)
@@ -311,7 +335,7 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
             <button className="chest__act" disabled={busy} onClick={() => setConfirming(true)} title="Publish this item to the ITEM FEED so anyone can seal a chest to it">{busy ? 'LISTING…' : 'PUBLISH'}</button>
           )}
           <ArchiveButton item={item} />
-          <DeleteItem item={item} />
+          {item.archived && <DeleteItem item={item} />}
         </>,
       )}
       {refusal && <span className="held__refusal" role="status">{refusal}</span>}
@@ -342,11 +366,14 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
   )
 }
 
-/** The two buttons of the ITEMS panel and the modals they open (owner, 2026-11-14): their words, emoji first. */
-export const KEY_ITEMS_LABEL = '🔑 KEY ITEMS'
-export const OTHER_LOOT_LABEL = '✨ OTHER LOOT'
-/** The heading the OTHER LOOT rows' X and CLEAR ALL name (arkinox, 2026-11-09). */
-export const OTHER_LOOT_HEADING = 'OTHER LOOT'
+/**
+ * The two buttons of the ITEMS panel and the modals they open (owner,
+ * 2026-11-14): their words, and the lucide icon drawn before them ("Dont use
+ * emojis, use appropriate lucide icons").
+ */
+export const KEY_ITEMS_LABEL = 'KEY ITEMS'
+export const OTHER_LOOT_LABEL = 'OTHER LOOT'
+export const KIND_ICON: Record<'keys' | 'loot', LucideIcon> = { keys: Key, loot: Sparkles }
 /** Over the key items you hold: the second half of arkinox's heading (2026-11-09), its first half now the modal's title. */
 export const KEY_ITEMS_NOTE = 'MAY UNLOCK DOORS OR CHESTS'
 export const NO_KEY_ITEMS = 'No key items yet.'
@@ -359,24 +386,13 @@ export const NO_OTHER_LOOT = 'No other loot yet.'
  */
 export const FEED_LINE = 'Published key items. Find one to hold it, or lock a door or chest to one.'
 
-/** A button's words: its label and how many, 0 included ("🔑 KEY ITEMS · 3"). */
+/** A button's words: its label and how many, 0 included ("KEY ITEMS · 3"). */
 export function kindLabel(label: string, count: number): string {
   return `${label} · ${count}`
 }
 
 /** How long MOVED INTO WORKSHOP stays in a row's place before the row leaves the list (arkinox, 2026-10-11). */
 export const MOVED_NOTICE_MS = 5000
-
-/** Whether a message's text is a Cashu coin: money, so it is never cleared with the rest. */
-const isCoin = (text: string | undefined): boolean => readCashuToken(text ?? null).raw !== null
-/**
- * What CLEAR ALL leaves: coins, and messages holding a nonfungible.cash claim
- * link. A cleared row leaves ITEMS and comes back only from its chest, so an
- * unclaimed NFT swept up with the rest would be out of reach unless that
- * chest is opened again (review of #440). An NFT row
- * keeps its own X, since whether it was claimed is never known here.
- */
-const keptFromAll = (text: string | undefined): boolean => isCoin(text) || hasNftLink(text)
 
 /**
  * A taken audio's moderation row: MUTE THIS AUDIO always (its id is its own,
@@ -398,8 +414,9 @@ export function takenAudioModeration(item: Pick<HeldItem, 'id' | 'author' | 'ver
  * Something taken out of a chest: a coin, a shard, a message or a chest,
  * with what each can do. A shard MOVES into the workshop: the row turns
  * into MOVED INTO WORKSHOP for five seconds and then leaves the list
- * (arkinox, 2026-10-11). The X clears a row off the list; a coin has it
- * only once redeemed, since a cleared coin's card is out of reach.
+ * (arkinox, 2026-10-11). No X (owner, 2026-11-14): ARCHIVE is in its
+ * ACTIONS, and only an archived row has DELETE, which asks first and says
+ * when a coin's sats would be lost.
  */
 export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const [open, setOpen] = useState(false)
@@ -422,7 +439,6 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
     // Held by the store, not this row: the row leaves the list even when the menu closes first.
     window.setTimeout(() => useInventory.getState().clearTaken([item.id]), MOVED_NOTICE_MS)
   }
-  const clearable = !coin || cashu.state === 'redeemed'
   if (moved) {
     return (
       <li className="secrets__row held__row held__row--moved" role="status">
@@ -431,7 +447,7 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
     )
   }
   return (
-    // Laid out as a key item row: its buttons wrap under the name on a narrow phone, the X with them (arkinox, 2026-11-09).
+    // Laid out as a key item row: its buttons wrap under the name on a narrow phone (arkinox, 2026-11-09).
     <li className="secrets__row held__row held__row--loot" data-actions-row={item.id}>
       {item.type === 'shard' && item.shard ? <ShardThumb shard={item.shard} /> : <ItemIcon className={`chest__glyph chest__glyph--${coin ? 'cashu' : item.type}`} type={item.type} coin={coin} />}
       {item.type === 'chest' && item.chest
@@ -446,14 +462,7 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
             </span>
           </span>
         )}
-      <span className="held__acts">
-        {actions.button}
-        {clearable && (
-          <button className="held__clear" onClick={() => useInventory.getState().clearTaken([item.id])} title="Clear it from OTHER LOOT" aria-label={`Clear ${label} from OTHER LOOT`}>
-            <X size={14} aria-hidden />
-          </button>
-        )}
-      </span>
+      <span className="held__acts">{actions.button}</span>
       {actions.group(
         <>
           {item.type === 'shard' && <button className="chest__act" onClick={moveToWorkshop} title="Move this model into your workshop">MOVE TO WORKSHOP</button>}
@@ -462,6 +471,7 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
           {item.place && <button className={`chest__act ${details ? 'is-on' : ''}`} onClick={() => setDetails((d) => !d)} aria-expanded={details}>DETAILS</button>}
           <PlaceButton item={item} onRefused={setRefusal} />
           <ArchiveButton item={item} />
+          {item.archived && <DeleteItem item={{ ...item, name: label }} coinState={coin ? cashu.state : undefined} />}
         </>,
       )}
       {refusal && <span className="held__refusal" role="status">{refusal}</span>}
@@ -596,7 +606,7 @@ function FeedList({ held, scroller }: { held: ReadonlySet<string>; scroller: Ref
  * key items you have not found (owner, 2026-11-14: "Put a mine and feed
  * button filters at the top of the key items modal"), and ARCHIVED once a
  * key item is filed away. OTHER LOOT has INVENTORY, the rest of what you
- * hold, with CLEAR ALL, and ARCHIVED likewise.
+ * hold, and ARCHIVED likewise. No CLEAR ALL (owner, 2026-11-14).
  */
 function ItemsModal({ kind }: { kind: ItemsKind }): JSX.Element {
   const items = useInventory((s) => s.items)
@@ -631,34 +641,28 @@ function ItemsModal({ kind }: { kind: ItemsKind }): JSX.Element {
     if (r.ok) setPaste('')
   }
 
-  // CLEAR ALL beside the tabs, on what is held: never on ARCHIVED.
-  const clearAll = kind === 'loot' && showing === 'mine' && taken.length > 0
   const rows = showing === 'archived' ? archivedHere : kind === 'keys' ? keys : taken
   const row = (it: HeldItem): JSX.Element => (isKeyItem(it) ? <KeyRow key={it.id} item={it} opens={it.key ? chestsOpenedBy(it.key, chests).length : 0} /> : <TakenRow key={it.id} item={it} />)
   const tab = (id: typeof view, label: string): JSX.Element => (
     <button className={`tag tag--tap ${showing === id ? 'is-on' : ''}`} role="tab" aria-selected={showing === id} onClick={() => setView(id)}>{label}</button>
   )
   const title = kind === 'keys' ? KEY_ITEMS_LABEL : OTHER_LOOT_LABEL
+  const Icon = KIND_ICON[kind]
   return (
     <Stacked>
       <div className={`modal items-modal items-modal--${kind}`} role="dialog" aria-modal="true" aria-label={kind === 'keys' ? 'Key items' : 'Other loot'} onPointerDown={close}>
         <div className="modal__card secrets__box items-modal__card" onPointerDown={(e) => e.stopPropagation()}>
           <header className="panel__head secrets__head">
-            <h2>{title}</h2>
+            <h2 className="items-modal__title"><Icon className="items-modal__icon" size={14} strokeWidth={2.5} aria-hidden />{title}</h2>
             <button className="targets__remove secrets__close" onClick={close} aria-label="Close" title="Close">✕</button>
           </header>
-          {(kind === 'keys' || archivedHere.length > 0 || clearAll) && (
+          {(kind === 'keys' || archivedHere.length > 0) && (
             <div className="held__views">
-              {(kind === 'keys' || archivedHere.length > 0) && (
-                <span className="held__tabs" role="tablist">
-                  {tab('mine', kind === 'keys' ? `MINE ${keys.length}` : `INVENTORY ${taken.length}`)}
-                  {kind === 'keys' && tab('feed', 'FEED')}
-                  {archivedHere.length > 0 && tab('archived', `ARCHIVED ${archivedHere.length}`)}
-                </span>
-              )}
-              {clearAll && (
-                <button className="tag tag--tap held__clearall" onClick={() => useInventory.getState().clearTaken(taken.filter((t) => clearsWithAll(t, keptFromAll)).map((t) => t.id))} title="Clear everything from OTHER LOOT except coins and NFT links, which are cleared one at a time">CLEAR ALL</button>
-              )}
+              <span className="held__tabs" role="tablist">
+                {tab('mine', kind === 'keys' ? `MINE ${keys.length}` : `INVENTORY ${taken.length}`)}
+                {kind === 'keys' && tab('feed', 'FEED')}
+                {archivedHere.length > 0 && tab('archived', `ARCHIVED ${archivedHere.length}`)}
+              </span>
             </div>
           )}
           <div className="items-modal__scroll" ref={scroller}>
@@ -695,13 +699,24 @@ function ItemsModal({ kind }: { kind: ItemsKind }): JSX.Element {
 
 /**
  * ITEMS in the menu: two buttons and nothing else (owner, 2026-11-14: "I
- * want to have everything replaced with two buttons, key items with a key
- * emoji, and loot items with a sparkle emoji ... My list of these items is
- * getting too long"), each with how many it holds, 0 included, each opening
- * its modal (ItemsModal). Archived rows are not counted, as the old chip did
+ * want to have everything replaced with two buttons ... My list of these
+ * items is getting too long"), each with how many it holds, 0 included, each
+ * opening its modal (ItemsModal). Side by side, half the width each, as
+ * CREATE's row of buttons is and with its classes, a lucide icon before the
+ * words (owner, 2026-11-14: "buttons should be 50/50 width, same relative
+ * size as CREATE menu buttons. Dont use emojis"). Archived rows are not counted, as the old chip did
  * not count them. THIS SESSION stays in the head when storage could not be
  * opened, since then nothing held outlasts the page.
  */
+function KindButton({ kind, label }: { kind: ItemsKind; label: string }): JSX.Element {
+  const Icon = KIND_ICON[kind]
+  return (
+    <button className="avatars__go shards__compose-open items-kinds__go" onClick={() => useItemsModal.setState({ open: kind })} aria-haspopup="dialog">
+      <Icon className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /><span className="items-kinds__label">{label}</span>
+    </button>
+  )
+}
+
 export function InventoryPanel(): JSX.Element {
   const items = useInventory((s) => s.items)
   const storage = useInventory((s) => s.storage)
@@ -721,12 +736,12 @@ export function InventoryPanel(): JSX.Element {
         <h2>Items</h2>
         {storage === 'memory' && <span className="loot__tags"><span className="tag" title="IndexedDB could not be opened; what you hold lasts this session only">THIS SESSION</span></span>}
       </header>
-      <div className="items-kinds">
-        <button className="avatars__go items-kinds__go" onClick={() => useItemsModal.setState({ open: 'keys' })} aria-haspopup="dialog">{kindLabel(KEY_ITEMS_LABEL, keys.length)}</button>
-        <button className="avatars__go items-kinds__go" onClick={() => useItemsModal.setState({ open: 'loot' })} aria-haspopup="dialog">{kindLabel(OTHER_LOOT_LABEL, taken.length)}</button>
+      <div className="shards__modes items-kinds">
+        <KindButton kind="keys" label={kindLabel(KEY_ITEMS_LABEL, keys.length)} />
+        <KindButton kind="loot" label={kindLabel(OTHER_LOOT_LABEL, taken.length)} />
       </div>
       {open && <ItemsModal key={open} kind={open} />}
-      <Explanation>Key items open doors and chests. Other loot is everything else you took.</Explanation>
+      <Explanation>Key items open doors and chests. Other loot is everything you've taken from chests.</Explanation>
     </section>
   )
 }

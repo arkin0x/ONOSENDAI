@@ -41,9 +41,9 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js'
-import { getPublicKey } from 'nostr-tools/pure'
+import { getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import { fromPayload, type ShardModel } from 'sno-core/shards'
-import { bagTemplate, newBagSettings, chestInnerTemplate, innerAuthentic, keyInnerTemplate, objectTemplateOf, OBJECT_KIND, rumorOf, shardInnerTemplate, SHARD_KIND, HIDDEN_KIND, type BagEntry, type KeyItem, type Reference, type Rumor } from '../hidden'
+import { bagTemplate, newBagSettings, chestInnerTemplate, innerAuthentic, keyInnerTemplate, keyItemOf, KEY_KIND, objectTemplateOf, OBJECT_KIND, rumorOf, shardInnerTemplate, SHARD_KIND, HIDDEN_KIND, type BagEntry, type KeyItem, type Reference, type Rumor } from '../hidden'
 import { BAG_SAFE_BYTES, signedBytes } from '../bagSize'
 import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from '../events'
 import { forgeKey, sealEntries } from '../chests'
@@ -93,10 +93,23 @@ export async function piecesOf(v1Bag: NostrEvent, signer: string, game: Pick<Gam
 
 /** The `d` of the key's public model: fixed, so a rebuild replaces it (DECK-0003 §3.1). */
 export const KEY_MODEL_D = 'tutorial-dungeon-key'
-/** The key item as it is named and described (DECK-0004 §2.1). */
-export const KEY_NAME = 'Dungeon Key'
+/**
+ * The key item as it is named and described (DECK-0004 §2.1). "Tutorial
+ * Dungeon Key", so it has a fairly benign namespace among all items (owner,
+ * 2026-11-14); it was "Dungeon Key" when the world went up that day, and the
+ * published key item was renamed with renamedKeyBag, keeping its secret.
+ */
+export const KEY_NAME = 'Tutorial Dungeon Key'
 export const KEY_ABOUT = 'Opens the gate of the tutorial dungeon.'
-/** The door as it is named, and what it says it asks for (DECK-0004 §3.1). */
+/**
+ * The door as it is named, and what it says it asks for (DECK-0004 §3.1).
+ * GATE_REQUIRES records ON PURPOSE the text of the door published 2026-11-14,
+ * which still says "The Dungeon Key" after the key's rename: that text is
+ * signed inside the world bag, and changing it there is a new door and a new
+ * world bag, which shuts the gate on every run in progress. Kept so a rebuild
+ * (and the DEV fixture) matches the live door; change it together with the
+ * next world bag that goes up anyway.
+ */
 export const GATE_NAME = 'Dungeon Gate'
 export const GATE_REQUIRES = 'The Dungeon Key'
 
@@ -203,6 +216,55 @@ export async function buildDungeon(game: Pick<GameDef, 'pubkey' | 'relayHint' | 
   if (signedBytes(bag) > BAG_SAFE_BYTES) throw new Error(`the world bag is ${signedBytes(bag)} bytes, over ${BAG_SAFE_BYTES}`)
   file(`99-world-bag-${HIDDEN_KIND}.json`, bag)
   return { files, keyItem, door, doorSecret }
+}
+
+/** What renamedKeyBag made: the new key bag (unsigned), and the key item sealed in it, signed. */
+export interface RenamedKeyBag {
+  file: WorldFile
+  keyItem: NostrEvent
+  /** The key item it replaces, as it was sealed in the published bag. */
+  was: NostrEvent
+}
+
+/**
+ * The published key bag `published`, with its key item renamed to KEY_NAME and
+ * described as KEY_ABOUT, and NOTHING else changed: the same secret (so the
+ * same item public key, the door's lock: the door, its secret, its room and
+ * the world bag are untouched), the same place, model, motions and date on the
+ * item; the same `d`, height, hint and sector tags on the bag, which is newer
+ * (`createdAt`, after the published one's), so it replaces it at its address.
+ * The key item is signed again by `signAs` (the game key: its title is under
+ * its signature) and the bag sealed again with the region key. Throws unless
+ * the published bag is the game key's key bag holding exactly one key item
+ * signed by the game key.
+ */
+export async function renamedKeyBag(game: Pick<GameDef, 'pubkey' | 'region'>, signAs: SignAsGame, published: NostrEvent, createdAt: number): Promise<RenamedKeyBag> {
+  const pk = game.pubkey
+  const { plane } = game.region
+  const kb = regionKeyAt(regionBase(KEY_BAG.at, KEY_BAG.height), KEY_BAG.height, 8)
+  if (published.pubkey !== pk || published.kind !== HIDDEN_KIND || !verifyEvent(published) || published.tags.find((t) => t[0] === 'd')?.[1] !== kb.lookupId) throw new Error('that is not the game key\'s key bag')
+  if (!(createdAt > published.created_at)) throw new Error('the renamed bag must be newer than the published one')
+  const list = await bagList(published, kb.key)
+  if (!list || list.length !== 1) throw new Error('the key bag does not open to exactly one entry')
+  const was = list[0] as NostrEvent
+  if (!was || Array.isArray(was) || was.kind !== KEY_KIND || !innerAuthentic(was, pk)) throw new Error('the key bag\'s entry is not a key item signed by the game key')
+  const old = keyItemOf(was)
+  if (!old) throw new Error('the key bag\'s key item does not read')
+  if (old.name === KEY_NAME) throw new Error(`the key item is already named ${KEY_NAME}`)
+  // The published item's own tags and date, with only its title and description changed.
+  const template: EventTemplate = { kind: KEY_KIND, created_at: was.created_at, content: KEY_ABOUT, tags: was.tags.map((t) => t[0] === 'title' ? ['title', KEY_NAME] : [...t]) }
+  // Exactly what buildDungeon writes for this item under its new name (keyInnerTemplate at KEY_BAG.at), so no tag was kept that a fresh build would not write, and the item stands where it stood.
+  const fresh = keyInnerTemplate({ ...old, name: KEY_NAME, about: KEY_ABOUT }, KEY_BAG.at, plane, was.created_at)
+  if (JSON.stringify(fresh) !== JSON.stringify(template)) throw new Error('the published key item is not one this builder would write: rename it by hand')
+  const keyItem = signAs(template)
+  if (keyItem.pubkey !== pk || !innerAuthentic(keyItem, pk)) throw new Error('the signer is not the game key')
+  const now = keyItemOf(keyItem)
+  if (!now || now.secretHex !== old.secretHex || now.itemPubkey !== old.itemPubkey || now.name !== KEY_NAME) throw new Error('the renamed key item is not the same key')
+  const bag = await bagTemplate([keyItem as unknown as BagEntry], kb.key, kb.lookupId, KEY_BAG.height, createdAt, HIDDEN_KIND, newBagSettings(KEY_BAG.height), { at: KEY_BAG.at, plane })
+  // Every tag of the bag but its ciphertext as published: the same address, height, hint and sector.
+  const outside = (tags: string[][]): string => JSON.stringify(tags.filter((t) => t[0] !== 'encrypted'))
+  if (outside(bag.tags) !== outside(published.tags) || bag.content !== published.content) throw new Error('the renamed bag\'s outside differs from the published one\'s')
+  return { file: { name: `02-key-bag-${HIDDEN_KIND}.json`, event: { ...bag, pubkey: pk } }, keyItem, was }
 }
 
 /** The `d` of the object at place `i`: fixed, so a rebuild replaces it (32 hex, as placement ids are). */

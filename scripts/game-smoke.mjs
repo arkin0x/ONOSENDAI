@@ -186,7 +186,7 @@ await shot('6-key')
 await page.locator('.gameview__actbtn', { hasText: 'TAKE' }).click()
 const heldNow = await heldKeys()
 console.log(`ITEMS after TAKE: ${JSON.stringify(heldNow)}`)
-if (heldNow.join() !== 'Dungeon Key') await fail('TAKE did not put the key item in ITEMS')
+if (heldNow.join() !== 'Tutorial Dungeon Key') await fail('TAKE did not put the key item in ITEMS')
 await sleep(1000)
 await shot('7-key-taken')
 await turn(HALF)
@@ -239,6 +239,6 @@ if (before !== after) console.log(`before ${before}\nafter  ${after}`)
 console.log(JSON.stringify({ stats, errors: errors.slice(0, 5) }))
 await browser.close()
 // On the chain: the entry, the pad's teleport, the exit. The key, the gate, the jumps and the clock are the game's, on the device.
-const ok = before === after && !roles.broken && stats.eventsSent === 0 && roles.roles.slice(-3).join(',') === 'enter:enter-virtual,virtual:teleport,exit:exit-virtual' && !!clear && heldKeysAfter.join() === 'Dungeon Key'
+const ok = before === after && !roles.broken && stats.eventsSent === 0 && roles.roles.slice(-3).join(',') === 'enter:enter-virtual,virtual:teleport,exit:exit-virtual' && !!clear && heldKeysAfter.join() === 'Tutorial Dungeon Key'
 console.log(ok ? 'PASS' : 'FAIL')
 process.exit(ok ? 0 : 1)

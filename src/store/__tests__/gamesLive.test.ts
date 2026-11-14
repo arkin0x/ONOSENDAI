@@ -111,7 +111,7 @@ describe('the tutorial dungeon, live on the owner\'s key', () => {
     useGame.getState().step('x', 1)
     await vi.waitFor(() => { expect(useGame.getState().session!.keyBag).toBe('read') })
     useGame.getState().take()
-    expect(Object.values(useInventory.getState().items).map((it) => it.name)).toContain('Dungeon Key')
+    expect(Object.values(useInventory.getState().items).map((it) => it.name)).toContain('Tutorial Dungeon Key')
     put(at(40, 17, 33))
     useGame.getState().open()
     await vi.waitFor(() => { expect(useGame.getState().session!.room?.map((w) => w.shard.name)).toEqual(['Maze Kit: aerocarnival checkered tile 4']) })

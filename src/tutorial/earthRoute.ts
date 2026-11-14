@@ -22,6 +22,10 @@
  *     (paid for and under way: an invoice still open is not a ride yet), or
  *     one landed at another stop since the step came up. Not the ride's end:
  *     nobody waits out a ride to be told they did it.
+ *   - 'ride-over' (wait): no ride under way any more, here or by HOSAKA:
+ *     it arrived at the stop, or was cancelled, or failed. RIDE's second
+ *     wait (TutorialStep advanceOn), armed once the ride has started: the
+ *     choices come back only then, never over the ride (owner, 2026-11-14).
  * Nothing here boards, rides or spends anything: those are the player's taps.
  */
 
@@ -95,3 +99,17 @@ registerTutorialWatcher('ride', (onDone) => {
     [(l) => useRideRun.subscribe(l), onChain],
   )
 })
+
+/** A ride under way: its proof computing here, HOSAKA's being planned from the panel, or HOSAKA's paid for and under way. */
+export function rideUnderWay(): boolean {
+  const run = useRideRun.getState()
+  if (run.progress !== null || run.hosaka) return true
+  const cs = useCyberspace.getState()
+  return cs.cloud.job?.action === 'ride' && jobInProgress(cs.cloud.status)
+}
+
+registerTutorialWatcher('ride-over', (onDone) => watchState(
+  () => !rideUnderWay(),
+  onDone,
+  [(l) => useRideRun.subscribe(l), onChain],
+))

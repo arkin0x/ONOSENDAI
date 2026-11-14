@@ -26,7 +26,7 @@ import { findCashuToken } from '../lib/cashu'
 import { Box } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { refreshLoot, useLoot } from '../hooks/useLoot'
+import { refreshLoot, sectorFirst, useLoot } from '../hooks/useLoot'
 import { BackupTrouble, RelayTrouble } from './RelayTrouble'
 import { bagReading, messagePreview } from '../lib/hidden'
 import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
@@ -104,7 +104,7 @@ export function DiscoveredPanel(): JSX.Element {
 }
 
 function BagList({ mode }: { mode: Mode }): JSX.Element {
-  const { items, status, trouble } = useLoot()
+  const { items, status, trouble, sector } = useLoot()
   const [more, setMore] = useState(false)
   // The VIEW MORE list is a modal: Escape closes it as a tap outside does (arkinox, 2026-10-01).
   useEscape('modal', more, () => setMore(false))
@@ -138,7 +138,15 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
   const nearbyCount = useNearbyLoot().length
   // One state per panel: the opened bags here, the rest there.
   const curated = useShards((s) => s.curated)
-  const shown = useMemo(() => shownBags(items, opened, mode, curated, muted, me), [items, opened, mode, curated, muted, me])
+  // HIDDEN BAGS lists your sector's bags first, then the rest as before (owner, 2026-11-14).
+  const shown = useMemo(() => {
+    const rows = shownBags(items, opened, mode, curated, muted, me)
+    if (mode !== 'hidden') return rows
+    const { here, elsewhere } = sectorFirst(rows, sector)
+    return [...here, ...elsewhere]
+  }, [items, opened, mode, curated, muted, me, sector])
+  /** How many of `shown`, from the top, are in your sector (HIDDEN BAGS only). */
+  const hereCount = useMemo(() => (mode === 'hidden' && sector !== null ? shown.filter((it) => it.sector === sector).length : 0), [shown, mode, sector])
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
     return everyWhileVisible(() => setNow(Date.now() / 1000), 10_000)
@@ -181,6 +189,22 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
     </li>
   )
 
+  /**
+   * Rows under group headings when any are in your sector: THIS SECTOR, then
+   * ELSEWHERE for the rest (a bag without a hint is always elsewhere). With
+   * none here, the plain list, as before.
+   */
+  const grouped = (rows: LootItem[]): JSX.Element[] => {
+    if (hereCount === 0) return rows.map(row)
+    const out: JSX.Element[] = []
+    rows.forEach((it, i) => {
+      if (i === 0) out.push(<li key="group:here" className="loot__group" title="Bags whose hider named the sector you stand in">THIS SECTOR</li>)
+      if (i === hereCount) out.push(<li key="group:elsewhere" className="loot__group" title="Every other bag, newest first">ELSEWHERE</li>)
+      out.push(row(it))
+    })
+    return out
+  }
+
   return (
     <section className="panel panel--loot">
       <header className="panel__head">
@@ -196,7 +220,7 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
       <BackupTrouble onRetry={refreshLoot} />
 
       <ul className="avatars__list loot__list">
-        {shown.slice(0, SHOWN).map(row)}
+        {grouped(shown.slice(0, SHOWN))}
         {status === 'ready' && !trouble && shown.length === 0 && (
           <li className="avatars__empty">
             {mode === 'discovered'
@@ -225,8 +249,8 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
             are called "bags" and might have clues as to where they can be found.
             The size is the area wherein the bag can be found; larger is more work
             to decrypt but easier to find, smaller is less work to decrypt but
-            harder to find. A bag moves to DISCOVERED BAGS the moment your keys
-            open it.
+            harder to find. Bags whose hider named the sector you stand in come
+            first. A bag moves to DISCOVERED BAGS the moment your keys open it.
           </Explanation>
         )
         : (
@@ -245,7 +269,7 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
               <h2>{title}</h2>
               <span className="tag" title={countTitle}>{count}</span>
             </header>
-            <ul className="avatars__list avatars__list--all loot__list">{shown.map(row)}</ul>
+            <ul className="avatars__list avatars__list--all loot__list">{grouped(shown)}</ul>
             <div className="modal__row">
               <button className="modal__cancel" onClick={() => setMore(false)}>CLOSE</button>
             </div>

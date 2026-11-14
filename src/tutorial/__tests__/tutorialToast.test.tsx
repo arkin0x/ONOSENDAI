@@ -4,7 +4,8 @@
  *
  * - shown to a returning identity that has not finished the tutorial (never
  *   started, skipped, or left unfinished), never to one that finished, never
- *   to a brand-new arrival, never with the switch off;
+ *   to a brand-new arrival, never with the switch off, never on a visit that
+ *   came by a ?mode=view or ?mode=region link (owner, 2026-11-14);
  * - never during the tutorial, Cyberspace TV, the /demo tour, the 24/7
  *   broadcast, a hyperspace ride or a game: it waits, and steps aside;
  * - at most once a day and three times in all per identity, counting shows,
@@ -186,6 +187,26 @@ describe('who is offered the toast', () => {
     await vi.advanceTimersByTimeAsync(TOAST_RETRY_MS * 5)
     expect(offer()).toBe(null)
     stop()
+  })
+
+  it.each(['?mode=view', '?mode=region'])('nobody on a visit that came by a %s link, returning or not, and nothing counted: the next plain visit can offer it', async (search) => {
+    for (const ended of [undefined, 'skipped'] as const) {
+      localStorage.removeItem(TOAST_PREFIX + pubkey())
+      if (ended) writeProgress(pubkey(), { step: 'box', ended })
+      noteLanding('/')
+      takeArrivalMode({ pathname: '/', search, hash: '' }, { state: null, replaceState: () => {} })
+      forgetTutorialToast()
+      let stop = await arrive()
+      await vi.advanceTimersByTimeAsync(TOAST_RETRY_MS * 5)
+      expect(offer()).toBe(null)
+      expect(readToastRecord(pubkey())).toEqual({ shows: 0, last: 0 })
+      stop()
+      // The next plain visit: offered.
+      load('/')
+      stop = await arrive()
+      expect(offer()).toBe(pubkey())
+      stop()
+    }
   })
 
   it('nobody with the tutorial switch off', async () => {

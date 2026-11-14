@@ -18,7 +18,7 @@ import type { Filter } from 'nostr-tools'
 import type { WorldItem } from './useShards'
 import { relaysFor } from '../lib/inbox'
 import { queryAny } from '../lib/relay'
-import { SHARD_NOT_FOUND, SHARD_SEALED } from '../lib/notifications'
+import { SHARD_NOT_FOUND, SHARD_SEALED, SHARD_UNREADABLE } from '../lib/notifications'
 
 interface PublicShardState {
   object: FeedObject | null
@@ -73,7 +73,8 @@ export async function openPublishedShard(at: { address?: string; id: string | nu
   const newest = [...found].filter((ev) => ev.kind === SNO_KIND).sort((a, b) => b.created_at - a.created_at)[0]
   if (!newest) return SHARD_NOT_FOUND
   const object = objectFromEvent(newest)
-  if (!object) return SHARD_SEALED
+  // Sealed to a place or for sale (an `encrypted` tag), or a payload this client cannot read.
+  if (!object) return newest.tags.some((t) => t[0] === 'encrypted') ? SHARD_SEALED : SHARD_UNREADABLE
   usePublicShard.getState().open(object)
   return null
 }

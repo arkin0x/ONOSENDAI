@@ -267,6 +267,7 @@ export const NOT_HIDDEN_HERE = 'That item is not one this device hid, so it cann
 export const SHARD_UNCHECKED = 'That shard could not be read from any relay. Try again later.'
 export const SHARD_NOT_FOUND = 'That shard could not be found on any relay.'
 export const SHARD_SEALED = 'That shard is sealed, and was not hidden on this device.'
+export const SHARD_UNREADABLE = 'That shard could not be read.'
 
 /**
  * What VIEW opens on an item: the row this device hid it as, or a shard that

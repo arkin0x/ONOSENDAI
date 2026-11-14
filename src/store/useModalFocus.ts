@@ -19,7 +19,7 @@ import type { LandOn } from '../lib/notifications'
 /** How long a landing waits for its comment or reactions to be drawn. */
 export const LAND_WAIT_MS = 20_000
 /** How long the landed-on thing glows. */
-export const LAND_GLOW_MS = 2600
+export const LAND_GLOW_MS = 4000
 /**
  * Scrolled again after these delays: what loads above it (reactions above
  * comments, a profile's about above both) moves it down as it arrives.

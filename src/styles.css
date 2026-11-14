@@ -8616,9 +8616,9 @@ select.avatars__input option:checked {
 /* What VIEW landed on (store/useModalFocus): the comment or the reactions,
    glowing for a moment so the eye finds it. */
 .comment__self { display: grid; gap: 3px; border-radius: 6px; padding: 2px 4px; margin: -2px -4px; }
-.is-landed { animation: land-glow 2.6s ease-out; border-radius: 6px; }
+.is-landed { animation: land-glow 4s ease-out; border-radius: 6px; }
 @keyframes land-glow {
-  0%, 45% { background: rgba(0, 229, 255, 0.16); box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.6), 0 0 18px rgba(0, 229, 255, 0.25); }
+  0%, 65% { background: rgba(0, 229, 255, 0.16); box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.6), 0 0 18px rgba(0, 229, 255, 0.25); }
   100% { background: transparent; box-shadow: 0 0 0 1px rgba(0, 229, 255, 0); }
 }
 @media (prefers-reduced-motion: reduce) {

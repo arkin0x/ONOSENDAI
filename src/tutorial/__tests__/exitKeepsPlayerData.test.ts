@@ -10,7 +10,8 @@
  * hid (useShards mine), its find on screen (discovered, by their own key), a
  * shard of their own in the workshop, an item in ITEMS. Each exit (SKIP or the
  * coach's X, FINISH, a pause or the panel's switch off, RESTART, a resume, a
- * kept stage made stale by a STAGE_VERSION bump, another identity) must leave
+ * kept stage made stale by a STAGE_VERSION bump; another identity ends or
+ * pauses the run, watchFirstArrival, so it is one of those) must leave
  * all of it, publish nothing (no deletion above all), and still take the
  * guide's finds away where the design says it does.
  *
@@ -68,7 +69,7 @@ const OWN_ITEM = 'c'.repeat(64)
 
 /** The player's own things, in every store a run could touch; and one find of the guide's. */
 function playerMade(guide: string, guideFind: string): void {
-  const row = { eventId: OWN_ROW, type: 'shard', lookupId: 'd'.repeat(64), keyHex: 'e'.repeat(64), height: 13, plane: 0, x: '1', y: '1', z: '1', createdAt: 1, published: true, inner: { id: OWN_ROW, pubkey: me(), kind: 3330, tags: [], content: '', created_at: 1 } } as unknown as MyDeployment
+  const row = { eventId: OWN_ROW, type: 'shard', lookupId: 'd'.repeat(64), keyHex: 'e'.repeat(64), height: 13, plane: 0, at: { x: '1', y: '1', z: '1' }, createdAt: 1, published: true, inner: { id: OWN_ROW, pubkey: me(), kind: 3330, tags: [], content: '', created_at: 1 } } as unknown as MyDeployment
   useShards.setState({
     mine: [row],
     discovered: {

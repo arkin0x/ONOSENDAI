@@ -67,7 +67,7 @@ describe('the automatic height of a shard', () => {
 describe('what the bar says', () => {
   it('the fit note says the height stopped and that + goes higher, past every scan', () => {
     const html = renderToStaticMarkup(<FitNote cause="edge" autoMax={SCAN_MAX_HEIGHT} ceiling={SCAN_MAX_HEIGHT + 8} />)
-    expect(html).toContain('Sits across a region edge; move it to fit.')
+    expect(html).toContain('Sits across a region edge, so part of it will be cut off; move it to fit.')
     expect(html).toContain('Press + to hide it higher')
     expect(html).toContain('not even on your other devices')
     const size = renderToStaticMarkup(<FitNote cause="size" autoMax={SCAN_MAX_HEIGHT} ceiling={SCAN_MAX_HEIGHT + 8} />)

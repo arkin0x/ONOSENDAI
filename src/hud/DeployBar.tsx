@@ -185,7 +185,7 @@ export function FitNote({ cause, autoMax, ceiling }: { cause: 'size' | 'edge' | 
   const higher = ceiling > autoMax ? ' Press + to hide it higher; there no scan finds it, not even on your other devices.' : ''
   return (
     <div className="deploybar__row deploybar__fitnote">{cause === 'edge'
-      ? `Sits across a region edge; move it to fit.${higher}`
+      ? `Sits across a region edge, so part of it will be cut off; move it to fit.${higher}`
       : cause === 'contents'
         ? <>No region up to 2^{autoMax} holds the chest and everything aimed inside it; what falls outside stands at the chest when it opens.{higher}</>
         : <>At this scale the model is larger than any region up to 2^{autoMax}; part of it will be cut off. Hide it at a smaller scale, or move the cursor.{higher}</>}</div>

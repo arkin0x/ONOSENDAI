@@ -69,7 +69,7 @@ export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, 
       <group scale={[k, k, k]}>
         {/* An avatar is opaque whatever its shard says (DECK-0003 §3.3); only the build dim sees through it. */}
         {/* An avatar ignores `anim` (DECK-0003 §1.14, §3.3). */}
-        <ShardMesh shard={shard} world cull={firstPerson} ignoreOpacity dim={dim} still />
+        <ShardMesh shard={shard} world cull={firstPerson} still ignoreOpacity dim={dim} />
       </group>
     )
   }

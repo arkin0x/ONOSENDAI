@@ -33,6 +33,7 @@ import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, OPACITY_FLOOR, TICK
 import { clampOpacity, dragHistory, opacityAt, opacityFraction, opacityPercent, stepOpacity } from '../lib/opacityStep'
 import { CONSTRAINS, CONSTRAIN_TIPS, authoredConstrainOf, withAuthoredConstrain } from '../lib/walkConstrain'
 import { BOUNCE_MAX, BOUNCE_MIN, BOUNCE_PRESETS, BOUNCE_REFLECT, BOUNCE_START, bounceChip, bounceChipTip, bounceOf, clampBounce, springboardOf } from '../lib/walkBounce'
+import { animText, readAnim } from '../lib/anim'
 import { stepDivision } from './divisions'
 import { IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
 import { IMPORT_PICKER_ACCEPT } from '../lib/shardZip'
@@ -204,6 +205,44 @@ export function BounceRow(): JSX.Element {
         </>
       )}
       {bounce !== 0 && <div className="ws__explain">Walkers with gravity on bounce off its top.</div>}
+    </>
+  )
+}
+
+/**
+ * ANIM (lib/anim.ts; design note anim-block-paced-design-2026-11-10): the
+ * object's perpetual motion on the paced clock, typed as the payload writes
+ * it, e.g. [["turn","y",30,1,0]]. SET reads it as every reader will (a
+ * malformed entry or an unknown word is dropped, only the first four are
+ * kept) and says what was kept; CLEAR removes it. A minimal control until
+ * the motion names settle (they follow the DECK-0003 spec PR): the VIEW tool
+ * shows it moving.
+ */
+export function AnimRow(): JSX.Element {
+  const current = useWorkshop((s) => { const c = s.current(); return c ? animText(c) : '' })
+  const [text, setText] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+  const w = useWorkshop.getState
+  const set = (): void => {
+    const value = (text ?? current).trim()
+    if (value === '') { w().setAnim(undefined); setText(null); setNote(null); return }
+    let raw: unknown
+    try { raw = JSON.parse(value) } catch { setNote('Not JSON: a list of motions, like [["turn","y",30,1,0]]'); return }
+    const entries = Array.isArray(raw) ? raw.length : 0
+    const kept = readAnim(raw).length
+    w().setAnim(raw)
+    setText(null)
+    setNote(kept === entries ? `${kept} motion${kept === 1 ? '' : 's'}; VIEW shows it moving` : `${kept} of ${entries} kept: a malformed entry, an unknown word, or more than four is ignored`)
+  }
+  return (
+    <>
+      <form className="workshop__row" onSubmit={(e) => { e.preventDefault(); set() }}>
+        <span className="workshop__label">ANIM</span>
+        <input className="workshop__name ws__anim" value={text ?? current} placeholder='[["turn","y",30,1,0]]' aria-label="Motion on the paced clock" spellCheck={false} onChange={(e) => { setText(e.target.value); setNote(null) }} />
+        <button className="workshop__btn" type="submit" title="Set the motion">SET</button>
+        {current !== '' && <button className="workshop__btn" type="button" title="Remove the motion" onClick={() => { w().setAnim(undefined); setText(null); setNote(null) }}>CLEAR</button>}
+      </form>
+      {note && <div className="ws__explain">{note}</div>}
     </>
   )
 }
@@ -1167,6 +1206,8 @@ export function Workshop(): JSX.Element | null {
           {/* Whether walkers with GRAVITY on bounce off its top (lib/walkBounce.ts),
               beside CONSTRAIN, its closest sibling (arkinox, 2026-11-10). */}
           <BounceRow />
+          {/* Perpetual motion on the paced clock (lib/anim.ts): animated objects stop no walker yet. */}
+          <AnimRow />
         </div>
       )}
 

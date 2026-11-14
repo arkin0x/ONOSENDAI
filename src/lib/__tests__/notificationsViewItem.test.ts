@@ -13,7 +13,7 @@
  * shard that is only published, hidden nowhere, is no hidden item at all.
  */
 import { describe, expect, it } from 'vitest'
-import { NOT_HIDDEN_HERE, SHARD_NOT_HIDDEN, SHARD_UNCHECKED, classify, hiddenRowFor, itemToView, publishedShardOnly, type Notification } from '../notifications'
+import { NOT_HIDDEN_HERE, SHARD_UNCHECKED, classify, hiddenRowFor, itemToView, publishedShardOnly, type Notification } from '../notifications'
 import type { NostrEvent } from '../events'
 
 const ME = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
@@ -90,35 +90,35 @@ describe('review of #590', () => {
   it('Ditto, no `a`: the shard is fetched and its address finds the row', async () => {
     const f = fetching(skulls)
     const on = onOf(reaction([['e', NOW], ['k', '33331']]))
-    expect(await itemToView(() => [moved, byReference], on as never, ME, f.fetch)).toEqual({ row: byReference })
+    expect(await itemToView(() => [moved, byReference], on as never, f.fetch)).toEqual({ row: byReference })
     expect(f.calls).toEqual([NOW])
   })
 
-  it('Ditto, no `a`: a shard of his hidden nowhere here says it is only published', async () => {
+  it('Ditto, no `a`: a shard of his hidden nowhere here opens as published, by the address it was read under (2026-11-14)', async () => {
     const f = fetching({ ...skulls, tags: [['d', 'maze-kit/locks/doors/door-hall/door-hall-open']] })
     const on = onOf(reaction([['e', NOW], ['k', '33331']]))
-    expect(await itemToView(() => [byReference], on as never, ME, f.fetch)).toEqual({ why: SHARD_NOT_HIDDEN })
+    expect(await itemToView(() => [byReference], on as never, f.fetch)).toEqual({ published: { address: `33331:${ME}:maze-kit/locks/doors/door-hall/door-hall-open`, id: NOW } })
   })
 
   it('the fetch fails, or finds nothing: it says it could not check, never that it was not hidden', async () => {
     const on = onOf(reaction([['e', NOW], ['k', '33331']]))
-    expect(await itemToView(() => [moved], on as never, ME, fetching(new Error('no relay answered')).fetch)).toEqual({ why: SHARD_UNCHECKED })
-    expect(await itemToView(() => [moved], on as never, ME, fetching(null).fetch)).toEqual({ why: SHARD_UNCHECKED })
+    expect(await itemToView(() => [moved], on as never, fetching(new Error('no relay answered')).fetch)).toEqual({ why: SHARD_UNCHECKED })
+    expect(await itemToView(() => [moved], on as never, fetching(null).fetch)).toEqual({ why: SHARD_UNCHECKED })
   })
 
-  it('with an `a`, nothing is fetched: his own shard is "published", someone else\'s is the plain refusal', async () => {
+  it('with an `a`, nothing is fetched: his own shard and someone else\'s both open as published, never a dead end (2026-11-14)', async () => {
     const f = fetching(skulls)
     const own = onOf(reaction([['e', NOW], ['a', `33331:${ME}:not-hidden`], ['k', '33331']]))
     const theirs = onOf(reaction([['e', NOW], ['a', `33331:${OTHER}:their-thing`], ['k', '33331']]))
-    expect(await itemToView(() => [byReference], own as never, ME, f.fetch)).toEqual({ why: SHARD_NOT_HIDDEN })
-    expect(await itemToView(() => [byReference], theirs as never, ME, f.fetch)).toEqual({ why: NOT_HIDDEN_HERE })
+    expect(await itemToView(() => [byReference], own as never, f.fetch)).toEqual({ published: { address: `33331:${ME}:not-hidden`, id: NOW } })
+    expect(await itemToView(() => [byReference], theirs as never, f.fetch)).toEqual({ published: { address: `33331:${OTHER}:their-thing`, id: NOW } })
     expect(f.calls).toEqual([])
   })
 
   it('anything that is not a shard is the plain refusal, and is not fetched', async () => {
     const f = fetching(skulls)
     const on = onOf(reaction([['e', '6'.repeat(64)], ['k', '3330']]))
-    expect(await itemToView(() => [moved], on as never, ME, f.fetch)).toEqual({ why: NOT_HIDDEN_HERE })
+    expect(await itemToView(() => [moved], on as never, f.fetch)).toEqual({ why: NOT_HIDDEN_HERE })
     expect(f.calls).toEqual([])
   })
 })

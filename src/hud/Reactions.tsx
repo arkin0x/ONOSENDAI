@@ -2,6 +2,7 @@
  * Reactions.tsx: who reacted to something, one row per emoji, and a row of
  * one-tap reactions to add yours (arkinox, 2026-09-28, laid out as the
  * reaction list under a note in other clients: the emoji, then the faces).
+ * A face opens that person's profile (ProfileTap).
  *
  * Tapping a reaction you already gave takes it back (a NIP-09 deletion of your
  * kind 7). The faces are the reactors' profile pictures; past MAX_FACES a row
@@ -11,7 +12,8 @@
 import { useReactions } from '../hooks/useSocial'
 import { REACTIONS, reactionGlyph, type SocialTarget } from '../lib/social'
 import { useCyberspace } from '../store/useCyberspace'
-import { ProfilePic } from './ProfileBadge'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
+import { useLandOn } from '../store/useModalFocus'
 
 /** Faces drawn per emoji row before "+N". */
 const MAX_FACES = 8
@@ -24,8 +26,10 @@ export function Reactions({ target, alsoTell = [] }: { target: SocialTarget; als
   const me = useCyberspace((s) => s.identity.pubkey)
   const { groups, loading, busy, error, toggle } = useReactions(target, alsoTell)
   const given = new Set(groups.filter((g) => g.ids.has(me)).map((g) => g.content))
+  // VIEW on a reaction lands here once they are read, and the row glows (store/useModalFocus).
+  const { ref, lit } = useLandOn<HTMLElement>('reactions', !loading)
   return (
-    <section className="reactions" aria-label="Reactions">
+    <section ref={ref} className={`reactions${lit ? ' is-landed' : ''}`} aria-label="Reactions">
       <span className="secret__label">Reactions{loading ? ' …' : groups.length ? ` (${groups.reduce((n, g) => n + g.pubkeys.length, 0)})` : ''}</span>
       {groups.length > 0 && (
         <ul className="reactions__list">
@@ -33,7 +37,7 @@ export function Reactions({ target, alsoTell = [] }: { target: SocialTarget; als
             <li key={g.content} className="reactions__row">
               <span className="reactions__glyph" title={g.content}><Glyph content={g.content} image={g.image} /></span>
               <span className="reactions__faces">
-                {g.pubkeys.slice(0, MAX_FACES).map((pk) => <ProfilePic key={pk} pubkey={pk} size={26} />)}
+                {g.pubkeys.slice(0, MAX_FACES).map((pk) => <ProfileTap key={pk} pubkey={pk}><ProfilePic pubkey={pk} size={26} /></ProfileTap>)}
                 {g.pubkeys.length > MAX_FACES && <span className="reactions__more">+{g.pubkeys.length - MAX_FACES}</span>}
               </span>
             </li>

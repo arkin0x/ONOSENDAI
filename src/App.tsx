@@ -10,7 +10,7 @@ import { Workshop } from './workshop/Workshop'
 import { DeployBar } from './hud/DeployBar'
 import { StashModals } from './hud/StashModals'
 import { ThumbHost } from './scene/ThumbStage'
-import { SecretModal } from './hud/SecretModal'
+import { PublicShardModal, SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { BuildBar } from './hud/BuildBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
@@ -482,6 +482,7 @@ export default function App(): JSX.Element {
       <CrashNote where="a modal" closesCard>
         <StashModals />
         <SecretModal />
+        <PublicShardModal />
         <ActionModal />
         <NotificationsModal />
         <AgentTalkHost />

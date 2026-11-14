@@ -7,7 +7,9 @@
  * becomes active, new ones are polled for, and older ones load a page at a
  * time as the history is scrolled. "Seen" is the newest time you have looked,
  * kept per identity on this device; everything after it is unread, which is
- * what lights the dot on NOTIFICATIONS and raises the toast under XOR BITS.
+ * what lights the dot on NOTIFICATIONS, raises the toast under XOR BITS, and
+ * marks a row new in the modal. Looking is closing the modal: the rows that
+ * were new keep their dots while it is open (setOpen).
  *
  * A comment sealed to one of your own bags is opened with the key this
  * device holds for that bag (the key it was sealed with: the region key, or
@@ -203,9 +205,15 @@ export const useNotifications = create<NotificationsState>((set, get) => {
       }
     },
 
+    // Read when the modal closes, not when it opens (arkinox, 2026-11-14:
+    // "the new notifications should have the flashing red dot on them; read
+    // notifications should not have the dot"): the ones new at opening keep
+    // their dot while it is up, and whatever it showed is read once it is
+    // closed, by ✕, a tap outside or Escape.
     setOpen: (open) => {
+      const was = get().open
       set({ open })
-      if (open) get().markSeen()
+      if (was && !open) get().markSeen()
     },
 
     markSeen: () => {

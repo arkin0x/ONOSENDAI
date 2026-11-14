@@ -17,18 +17,19 @@ import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { useSocialUi } from '../store/useSocialUi'
-import { ProfilePic } from './ProfileBadge'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { Reactions } from './Reactions'
 import { ActionComments } from './Comments'
-import { useEscape } from '../hooks/useEscape'
+import { Stacked, useModalStack } from './modalStack'
 
 export function ActionModal(): JSX.Element | null {
   const action = useSocialUi((s) => s.action)
   const me = useCyberspace((s) => s.identity.pubkey)
   const unpublished = useCyberspace((s) => (action && action.pubkey === me ? s.published[action.id] !== 'ok' : false))
   const profile = useProfile(action?.pubkey ?? null)
-  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
-  useEscape('modal', action !== null, () => useSocialUi.getState().closeAction())
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01); over a
+  // modal that opened it (notifications), which is there again when it closes (modalStack).
+  useModalStack(action !== null, () => useSocialUi.getState().closeAction())
   if (!action) return null
 
   const close = (): void => useSocialUi.getState().closeAction()
@@ -37,6 +38,7 @@ export function ActionModal(): JSX.Element | null {
   const target = { id: action.id, pubkey: action.pubkey, kind: ACTION_KIND }
 
   return (
+    <Stacked>
     <div className="modal modal--top" role="dialog" aria-modal="true" aria-label="Action" onPointerDown={close}>
       <div className="modal__card secret" onPointerDown={(e) => e.stopPropagation()}>
         <div className="secret__head">
@@ -48,9 +50,9 @@ export function ActionModal(): JSX.Element | null {
         <div className="secret__creator">
           <span className="secret__label">Moved by</span>
           <div className="secret__person">
-            <ProfilePic pubkey={action.pubkey} size={40} />
+            <ProfileTap pubkey={action.pubkey}><ProfilePic pubkey={action.pubkey} size={40} /></ProfileTap>
             <div className="secret__person-text">
-              <span className="secret__name">{profileLabel(profile, npub)}{mine ? ' (you)' : ''}</span>
+              <ProfileTap pubkey={action.pubkey} className="secret__name">{profileLabel(profile, npub)}{mine ? ' (you)' : ''}</ProfileTap>
               <span className="secret__npub" title={npub}>{shortHex(npub, 14, 8)}</span>
             </div>
           </div>
@@ -70,5 +72,6 @@ export function ActionModal(): JSX.Element | null {
         <ActionComments action={target} />
       </div>
     </div>
+    </Stacked>
   )
 }

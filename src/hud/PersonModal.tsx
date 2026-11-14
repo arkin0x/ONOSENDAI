@@ -28,7 +28,7 @@ import type { NostrEvent } from 'nostr-tools'
 import type { ShardModel } from 'sno-core/shards'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { useProfile } from '../hooks/useProfile'
-import { useEscape } from '../hooks/useEscape'
+import { Stacked, leaveModals, useModalStack } from './modalStack'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { useAvatarShard, useAvatars } from '../store/useAvatars'
@@ -51,9 +51,9 @@ export function PersonModal(): JSX.Element | null {
   const close = usePersonCard((s) => s.close)
   // Escape closes it as a tap outside does; registered on the modal layer,
   // which also hides the pad while the card is up (useModalUp).
-  useEscape('modal', pubkey !== null, close)
+  useModalStack(pubkey !== null, close)
   if (!pubkey) return null
-  return <PersonCardLive pubkey={pubkey} onClose={close} />
+  return <Stacked><PersonCardLive pubkey={pubkey} onClose={close} /></Stacked>
 }
 
 /** The card with the avatar this client draws for `pubkey` (useAvatars). */
@@ -108,10 +108,12 @@ export function PersonCard({ pubkey, shard, event = null, onClose, Preview = Car
     flash('shard')
   }
   const target = (): void => useCyberspace.getState().toggleTarget(pubkey, profile?.name ?? null)
-  const watch = (): void => { onClose(); void spectate(pubkey) }
+  // Out into the world: every modal closes, not this one alone (modalStack).
+  const watch = (): void => { onClose(); leaveModals(); void spectate(pubkey) }
   const chat = (): void => {
     if (noChat) return
     onClose()
+    leaveModals()
     useChat.getState().startTo({ pubkey, label: name })
   }
   const hasShard = !!shard && shard.vertices.length > 0

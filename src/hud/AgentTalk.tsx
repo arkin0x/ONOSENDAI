@@ -225,7 +225,7 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
     <div className="modal" role="dialog" aria-modal="true" aria-label="Talk to your agent" onPointerDown={backdrop}>
       <div className="modal__card login talk" onPointerDown={(e) => e.stopPropagation()}>
         <div className="login__head">
-          <h2 className="modal__title talk__title">TALK <ProfileBadge pubkey={agent} /></h2>
+          <h2 className="modal__title talk__title">TALK <ProfileBadge pubkey={agent} tappable /></h2>
           <button className="avatars__go talk__clear" onClick={() => setConfirmClear(true)} disabled={talk.messages.length === 0} title="Delete this conversation's messages kept on this device">
             <Trash2 size={10} aria-hidden /> CLEAR HISTORY
           </button>

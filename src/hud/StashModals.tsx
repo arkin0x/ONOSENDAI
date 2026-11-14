@@ -31,6 +31,7 @@ import { useWorkshop } from '../store/useWorkshop'
 import { usePublished } from '../store/usePublished'
 import { ownObjectCredit } from '../lib/published'
 import { useCyberspace } from '../store/useCyberspace'
+import { usePublicShard } from '../store/usePublicShard'
 import { GoArrow } from './ui/GoArrow'
 
 export const BAG_EXPLAINER =
@@ -218,9 +219,9 @@ export function StashModals(): JSX.Element | null {
   if (feed) {
     return (
       <Shell title="Shard Feed" onClose={close}>
-        <FeedList actions={(o) => <FeedActions object={o} />} />
+        <FeedList onOpen={(o) => usePublicShard.getState().open(o)} actions={(o) => <FeedActions object={o} />} />
         <Explanation>
-          Everyone&apos;s published objects, newest first. DEPLOY AN INSTANCE puts one at the build cursor as a copy that credits its author (LIVE LINK on the deploy bar follows their edits instead). REMIX copies it into your workshop as your own, still credited. A tile with a price is for sale by its author through a key service: its shape stays sealed until someone buys it, so it cannot be deployed or remixed here. BUY opens the seller's page in a new tab, and the domain beside it is where that page is.
+          Everyone&apos;s published objects, newest first. Tap one to open its card: who made it, its reactions and comments. DEPLOY AN INSTANCE puts one at the build cursor as a copy that credits its author (LIVE LINK on the deploy bar follows their edits instead). REMIX copies it into your workshop as your own, still credited. A tile with a price is for sale by its author through a key service: its shape stays sealed until someone buys it, so it cannot be deployed or remixed here. BUY opens the seller's page in a new tab, and the domain beside it is where that page is.
         </Explanation>
       </Shell>
     )

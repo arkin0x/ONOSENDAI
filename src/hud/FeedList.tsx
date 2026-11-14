@@ -5,7 +5,8 @@
  *
  * Shared by the two places the feed is shown: the FEED tab of PLACE OBJECT,
  * where a tap lines the object up at the build cursor, and the SHARD FEED
- * window, where each tile carries DEPLOY AN INSTANCE and REMIX. The data is
+ * window, where each tile carries DEPLOY AN INSTANCE and REMIX, and a tap on
+ * the tile opens the shard's card (usePublicShard, arkinox 2026-11-14). The data is
  * useFeed's (sno-core's read); the pictures are ShardThumb's, as in every
  * other list of shards.
  *
@@ -41,7 +42,7 @@ function Author({ pubkey }: { pubkey: string }): JSX.Element {
   return <>{profileLabel(profile, nip19.npubEncode(pubkey))}</>
 }
 
-function Tile({ object, onPick, actions }: { object: FeedObject; onPick?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode }): JSX.Element {
+function Tile({ object, onPick, onOpen, actions }: { object: FeedObject; onPick?: (o: FeedObject) => void; onOpen?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode }): JSX.Element {
   const s = object.shard
   const body = (
     <>
@@ -57,7 +58,9 @@ function Tile({ object, onPick, actions }: { object: FeedObject; onPick?: (o: Fe
     <li className="feed__tile">
       {onPick
         ? <button className="feed__pick" onClick={() => onPick(object)} title={`Place "${s.name}" at the build cursor`}>{body}</button>
-        : <div className="feed__pick">{body}</div>}
+        : onOpen
+          ? <button className="feed__pick" onClick={() => onOpen(object)} title={`Open "${s.name}": who made it, reactions and comments`}>{body}</button>
+          : <div className="feed__pick">{body}</div>}
       {actions && <div className="feed__acts">{actions(object)}</div>}
     </li>
   )
@@ -108,7 +111,7 @@ export function ListingTile({ listing }: { listing: FeedListing }): JSX.Element 
   )
 }
 
-export function FeedList({ onPick, actions }: { onPick?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode }): JSX.Element {
+export function FeedList({ onPick, onOpen, actions }: { onPick?: (o: FeedObject) => void; onOpen?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode }): JSX.Element {
   const allObjects = useFeed((s) => s.objects)
   const allListings = useFeed((s) => s.listings)
   // Less what the mute list hides: someone blocked, or one muted by its id (store/useMutes).
@@ -146,7 +149,7 @@ export function FeedList({ onPick, actions }: { onPick?: (o: FeedObject) => void
       <ul className="feed__list" ref={setList}>
         {items.map((o) => isListing(o)
           ? <ListingTile key={o.address} listing={o} />
-          : <Tile key={o.address} object={o} onPick={onPick} actions={actions} />)}
+          : <Tile key={o.address} object={o} onPick={onPick} onOpen={onOpen} actions={actions} />)}
         <li className="feed__end" ref={end}>
           {loading || (items.length === 0 && !exhausted)
             ? 'Reading the relays…'

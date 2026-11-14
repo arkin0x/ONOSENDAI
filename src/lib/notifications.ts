@@ -10,7 +10,10 @@
  * |---|---|---|
  * | a chain action (kind 3333) | reaction `k` 3333, or comment root `K` 3333 | the action's modal |
  * | a hidden item (a shard or message in a bag) | reaction `k` 3330 / 1 / 33331, or comment root `K` 33330 | that deployment |
+ * | a published shard, hidden nowhere here | reaction `k` 33331, or comment root `K` 33331 | its card, PUBLIC (usePublicShard) |
  * | a comment of yours | reaction `k` 1111, or comment parent `k` 1111 | whatever that comment answers |
+ *
+ * Every row's button says VIEW, and lands on the comment or the reactions (landingOf).
  *
  * Comments on hidden items are sealed to the place (comments.ts); the store
  * opens the ones on your own bags, and the rest say only that a sealed
@@ -64,9 +67,9 @@ function kindOn(kind: number | null, id: string, lookupId?: string): NotifOn | n
   return null
 }
 
-/** Comment threads that are ONOSENDAI's: a move's, or a bag's. */
+/** Comment threads that are ONOSENDAI's: a move's, a bag's, or a published shard's (arkinox, 2026-11-14). */
 function ourRoot(rootKind: number): boolean {
-  return rootKind === ACTION_KIND || rootKind === HIDDEN_KIND
+  return rootKind === ACTION_KIND || rootKind === HIDDEN_KIND || rootKind === OBJECT_KIND
 }
 
 /** What this device already knows is yours, so no lookup is needed for it. */
@@ -134,10 +137,14 @@ export function classify(ev: NostrEvent, me: string, known: Known = NOTHING_KNOW
     if (!ourRoot(rootKind)) return null
     const bag = rootKind === HIDDEN_KIND ? c.rootAddress : null
     const lookupId = bag?.split(':')[2]
+    // A published shard's thread is the object, by its address (lib/social actionCommentTemplate).
+    const shardAddress = rootKind === OBJECT_KIND && c.rootAddress.startsWith(`${OBJECT_KIND}:`) ? c.rootAddress : undefined
     // A reply answers a comment; a top-level comment answers the thing itself.
     const on: NotifOn | null = c.parentKind === COMMENT_KIND
       ? { type: 'comment', id: c.parentId }
-      : rootKind === ACTION_KIND ? { type: 'action', id: c.rootAddress } : (kindOn(c.parentKind, c.parentId, lookupId) ?? { type: 'item', id: c.parentId, lookupId })
+      : rootKind === ACTION_KIND ? { type: 'action', id: c.rootAddress }
+        : rootKind === OBJECT_KIND ? { type: 'item', id: c.parentId, kind: OBJECT_KIND, ...(shardAddress ? { address: shardAddress } : {}) }
+          : (kindOn(c.parentKind, c.parentId, lookupId) ?? { type: 'item', id: c.parentId, lookupId })
     if (!on) return null
     return { n: { id: ev.id, from: ev.pubkey, createdAt: ev.created_at, what: 'comment', content: c.preview, sealed: c.ciphertext !== null, ciphertext: c.ciphertext, bag, on }, lookup: null }
   }
@@ -255,25 +262,31 @@ export function publishedShardOnly(on: NotifOn, rows: readonly HiddenRowLike[], 
   return on.type === 'item' && onShard(on) && (on.address === undefined || authorOf(on.address) === me) && !hiddenRowFor(rows, on)
 }
 
-/** VIEW ITEM's refusals. */
+/** VIEW's refusals on an item. */
 export const NOT_HIDDEN_HERE = 'That item is not one this device hid, so it cannot be opened from here.'
-export const SHARD_NOT_HIDDEN = 'That shard is published, not hidden by you on this device, so there is no place to go.'
-export const SHARD_UNCHECKED = 'That shard could not be read from any relay, so this cannot tell whether you hid it on this device. Try again later.'
-
-/** What VIEW ITEM opens, or why it opens nothing. */
-export type ItemView<T> = { row: T } | { why: string }
+export const SHARD_UNCHECKED = 'That shard could not be read from any relay. Try again later.'
+export const SHARD_NOT_FOUND = 'That shard could not be found on any relay.'
+export const SHARD_SEALED = 'That shard is sealed, and was not hidden on this device.'
 
 /**
- * What VIEW ITEM goes to (hiddenRowFor), or why not. A reaction on a shard
- * with no `a` (Ditto writes none) names it by id alone, and only the shard
- * itself says its address, so it is fetched (`fetch`) before anything is
- * refused. A fetch that fails or finds nothing cannot tell, and says so
- * rather than claiming the shard was never hidden here (review of #590).
+ * What VIEW opens on an item: the row this device hid it as, or a shard that
+ * is published (its address, or its id when nothing says the address), or
+ * why it opens nothing.
+ */
+export type ItemView<T> = { row: T } | { published: { address?: string; id: string | null } } | { why: string }
+
+/**
+ * What VIEW goes to (hiddenRowFor), or why not. A reaction on a shard with
+ * no `a` (Ditto writes none) names it by id alone, and only the shard itself
+ * says its address, so it is fetched (`fetch`) before anything else: its
+ * address may find a row hidden here. A shard hidden nowhere here is opened
+ * as the published shard it is (arkinox, 2026-11-14: "we should have a modal
+ * to view published SNO/shards"), yours or another author's. A fetch that
+ * fails or finds nothing cannot tell, and says so (review of #590).
  */
 export async function itemToView<T extends HiddenRowLike>(
   rows: () => readonly T[],
   on: { id: string | null; lookupId?: string; address?: string; kind?: number },
-  me: string,
   fetch: (id: string) => Promise<{ kind: number; pubkey: string; tags: string[][] } | null>,
 ): Promise<ItemView<T>> {
   const here = hiddenRowFor(rows(), on)
@@ -289,5 +302,21 @@ export async function itemToView<T extends HiddenRowLike>(
     const row = hiddenRowFor(rows(), { id: null, address })
     if (row) return { row }
   }
-  return { why: address !== undefined && authorOf(address) === me ? SHARD_NOT_HIDDEN : NOT_HIDDEN_HERE }
+  return { published: { ...(address !== undefined ? { address } : {}), id: on.id } }
+}
+
+/** Where VIEW lands in what it opens: a comment (highlighted), or the reactions. */
+export type LandOn = { comment: string } | { reactions: true }
+
+/**
+ * What VIEW scrolls to once the thing is open (arkinox, 2026-11-14: "If I
+ * click view, I want to see the reactions section or comment thread"): a
+ * comment or a reply is that comment; a reaction to your comment is your
+ * comment; a reaction to a move or an item is the reactions. A chat tag has
+ * its own landing (the line in chat).
+ */
+export function landingOf(n: Pick<Notification, 'id' | 'what' | 'on'>): LandOn | null {
+  if (n.what === 'mention') return null
+  if (n.what === 'comment') return { comment: n.id }
+  return n.on.type === 'comment' ? { comment: n.on.id } : { reactions: true }
 }

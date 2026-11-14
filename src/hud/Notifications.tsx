@@ -7,9 +7,14 @@
  * - a toast under XOR BITS while anything is unread, "🤙 (face) and N more…"
  *   (a speech-bubble icon in place of the emoji when the newest is a comment);
  * - the modal itself: every notification, newest first, loading older ones
- *   as you scroll, each saying who, what, and what it was on, with a button
- *   that goes there (the move's modal, your deployment, or the thread a
- *   reply was in).
+ *   as you scroll, each saying who, what, and what it was on, with one VIEW
+ *   button that opens it and lands on what the notification is about: the
+ *   comment, glowing, or the reactions (arkinox, 2026-11-14: "view thread,
+ *   view shard, and view item seem like they should all be the same action").
+ *   What VIEW opens stacks over this modal, which is there again when it
+ *   closes (modalStack).
+ * - New ones, not yet seen, carry the pulsing red dot and a brighter row
+ *   while the modal is open; closing it marks them read (useNotifications).
  *
  * The toast also says when one of your agents sent you a private message you
  * have not opened (arkinox, 2026-10-11: "or just use the existing
@@ -26,13 +31,13 @@
 
 import { BackupTrouble, RelayTrouble } from './RelayTrouble'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { AtSign, MessageCircle, MessageSquare } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
-import { itemToView, publishedShardOnly, type Notification } from '../lib/notifications'
+import { itemToView, landingOf, publishedShardOnly, type Notification } from '../lib/notifications'
 import { reactionGlyph } from '../lib/social'
 import { parseAction } from '../lib/events'
 import { COMMENT_KIND, PLACEHOLDER } from '../lib/comments'
+import { SNO_KIND } from 'sno-core/feed'
 import { relaysFor } from '../lib/inbox'
 import { queryAny } from '../lib/relay'
 import { formatAgo, formatStamp } from '../lib/time'
@@ -44,8 +49,10 @@ import { walkChain } from '../store/useBuilder'
 import { useNotifications, POLL_MS } from '../store/useNotifications'
 import { useShards } from '../store/useShards'
 import { useSocialUi } from '../store/useSocialUi'
-import { ProfilePic } from './ProfileBadge'
-import { useEscape } from '../hooks/useEscape'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
+import { Stacked, leaveModals, useModalStack } from './modalStack'
+import { useModalFocus } from '../store/useModalFocus'
+import { openPublishedShard } from '../store/usePublicShard'
 import { useAgentUnread } from '../hooks/useAgentDmWatch'
 import { setTalking } from '../store/useAgentDms'
 import { useChat } from '../store/useChat'
@@ -132,7 +139,7 @@ export function NotificationsToast(): JSX.Element | null {
     return (
       <button className="hyperbar notif__toast" onClick={() => setTalking(agent)} aria-label={`${agentUnread.total} unread from your agents. Tap to read.`}>
         <MessageSquare className="notif__toast-glyph notif__icon" size={16} strokeWidth={2.25} aria-hidden />
-        <ProfilePic pubkey={agent} size={22} />
+        <ProfileTap pubkey={agent} nested><ProfilePic pubkey={agent} size={22} /></ProfileTap>
         <span className="notif__toast-text">{more > 0 ? `${who} messaged you, and ${more} more…` : `${who} messaged you`}</span>
       </button>
     )
@@ -152,7 +159,7 @@ export function NotificationsToast(): JSX.Element | null {
   return (
     <button className="hyperbar notif__toast" onClick={open} aria-label={`${unread} unread notifications. Tap to see.`}>
       <span className="notif__toast-glyph" aria-hidden="true">{glyphOf(latest)}</span>
-      <ProfilePic pubkey={latest.from} size={22} />
+      <ProfileTap pubkey={latest.from} nested><ProfilePic pubkey={latest.from} size={22} /></ProfileTap>
       <span className="notif__toast-text">{text}</span>
     </button>
   )
@@ -185,21 +192,56 @@ async function openMove(id: string): Promise<string | null> {
   return null
 }
 
-/** Open one of your deployments by what a notification names: an id, an address or its bag (lib/notifications itemToView). */
+/**
+ * Open what an item notification names: the row this device hid it as
+ * (lib/notifications itemToView), else the shard as published (arkinox,
+ * 2026-11-14: "when I click View Shard, it just says the shard is published
+ * so there's nothing to see... that's horrible ux").
+ */
 async function openItem(on: { id: string | null; lookupId?: string; address?: string; kind?: number }): Promise<string | null> {
-  const got = await itemToView(() => useShards.getState().mine, on, useCyberspace.getState().identity.pubkey, fetchById)
+  const got = await itemToView(() => useShards.getState().mine, on, fetchById)
   if ('why' in got) return got.why
+  if ('published' in got) return openPublishedShard(got.published, useCyberspace.getState().identity.pubkey)
   goToDeployment(got.row)
   return null
 }
 
-/** Go to what a notification is about. Resolves to a reason when it cannot. */
-async function view(n: Notification): Promise<string | null> {
-  // A tag in local chat: the dock, scrolled to that line.
-  if (n.on.type === 'chat') { useChat.getState().reveal(n.on.id); return null }
+/** How far up a thread VIEW climbs to find the item a reply hangs under. */
+const THREAD_CLIMB = 8
+
+/**
+ * The item a comment in a bag's thread answers: the top comment's parent,
+ * found by climbing reply to parent. Null when a step cannot be read: the
+ * bag is all VIEW then knows.
+ */
+async function itemOfThread(comment: { kind: number; tags: string[][] }): Promise<string | null> {
+  let c: { kind: number; tags: string[][] } | null = comment
+  for (let i = 0; c && i < THREAD_CLIMB; i += 1) {
+    const parent = c.tags.find((t) => t[0] === 'e')?.[1]
+    if (!parent) return null
+    if (Number(c.tags.find((t) => t[0] === 'k')?.[1]) !== COMMENT_KIND) return parent
+    c = await fetchById(parent)
+  }
+  return null
+}
+
+/**
+ * Go to what a notification is about, landing on its comment or its
+ * reactions (store/useModalFocus). Resolves to a reason when it cannot.
+ */
+export async function view(n: Notification): Promise<string | null> {
+  // A tag in local chat: the dock, scrolled to that line, with no modal over it.
+  if (n.on.type === 'chat') { leaveModals(); useChat.getState().reveal(n.on.id); return null }
+  useModalFocus.getState().land(landingOf(n))
+  const why = await openTarget(n)
+  if (why) useModalFocus.getState().done()
+  return why
+}
+
+async function openTarget(n: Notification): Promise<string | null> {
   if (n.on.type === 'action') return openMove(n.on.id)
   if (n.on.type === 'item') return openItem(n.on)
-  // A reply or a reaction to your comment: go where that comment was made.
+  // A reply or a reaction to your comment: open where that comment was made.
   const comment = await fetchById(n.on.id)
   if (!comment || comment.kind !== COMMENT_KIND) return 'That comment could not be found on any relay.'
   const rootKind = Number(comment.tags.find((t) => t[0] === 'K')?.[1])
@@ -207,8 +249,13 @@ async function view(n: Notification): Promise<string | null> {
     const root = comment.tags.find((t) => t[0] === 'E')?.[1]
     return root ? openMove(root) : 'That comment names no move.'
   }
+  if (rootKind === SNO_KIND) {
+    const address = comment.tags.find((t) => t[0] === 'A')?.[1]
+    const id = comment.tags.find((t) => t[0] === 'E')?.[1] ?? null
+    return openPublishedShard({ ...(address ? { address } : {}), id }, useCyberspace.getState().identity.pubkey)
+  }
   const bag = comment.tags.find((t) => t[0] === 'A')?.[1]
-  return openItem({ id: null, lookupId: bag?.split(':')[2] })
+  return openItem({ id: await itemOfThread(comment), lookupId: bag?.split(':')[2] })
 }
 
 function Row({ n, words }: { n: Notification; words?: string }): JSX.Element {
@@ -216,24 +263,27 @@ function Row({ n, words }: { n: Notification; words?: string }): JSX.Element {
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
   const who = profileLabel(profile, nip19.npubEncode(n.from))
+  // Not seen before: the dot and the brighter row, until the modal closes (useNotifications setOpen).
+  const fresh = useNotifications((s) => n.createdAt > s.lastSeen)
   // Your rows load per identity after the list may already be up (#559): their arrival rewords a shard you hid.
   const me = useCyberspace((s) => s.identity.pubkey)
-  const shardOnly = useShards((s) => publishedShardOnly(n.on, s.mine, me))
+  useShards((s) => publishedShardOnly(n.on, s.mine, me))
+  // What VIEW opens stacks over this modal, which stays open under it (modalStack).
   const go = async (): Promise<void> => {
     setBusy(true); setProblem(null)
     const why = await view(n)
     setBusy(false)
     if (why) setProblem(why)
-    else useNotifications.getState().setOpen(false)
   }
   const text = n.what === 'comment' ? (n.sealed ? words ?? null : n.content) : null
   return (
-    <li className="notif__row">
+    <li className={`notif__row${fresh ? ' is-new' : ''}`}>
       <span className="notif__glyph" aria-hidden="true">{glyphOf(n)}</span>
       <div className="notif__main">
         <div className="notif__head">
-          <ProfilePic pubkey={n.from} size={22} />
-          <span className="notif__who">{who}</span>
+          <ProfileTap pubkey={n.from}><ProfilePic pubkey={n.from} size={22} /></ProfileTap>
+          <ProfileTap pubkey={n.from} className="notif__who">{who}</ProfileTap>
+          {fresh && <span className="notif__dot notif__dot--row" role="img" aria-label="New" />}
           <span className="notif__when" title={formatStamp(n.createdAt)}>{formatAgo(n.createdAt)}</span>
         </div>
         <p className="notif__verb">{verbOf(n)}</p>
@@ -244,7 +294,7 @@ function Row({ n, words }: { n: Notification; words?: string }): JSX.Element {
             : <p className="notif__words notif__words--sealed">{n.sealed ? 'Sealed to the place it answers: go there to read it.' : PLACEHOLDER}</p>
         )}
         <button className="secret__act notif__view" disabled={busy} onClick={() => void go()}>
-          {busy ? 'OPENING…' : n.on.type === 'action' ? 'VIEW MOVE' : n.on.type === 'item' ? (shardOnly ? 'VIEW SHARD' : 'VIEW ITEM') : n.on.type === 'chat' ? 'VIEW IN CHAT' : 'VIEW THREAD'}
+          {busy ? 'OPENING…' : 'VIEW'}
         </button>
         {problem && <p className="comments__error">{problem}</p>}
       </div>
@@ -273,12 +323,14 @@ export function NotificationsModal(): JSX.Element | null {
     seen.observe(end.current)
     return () => seen.disconnect()
   }, [open, items.length])
-  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
-  useEscape('modal', open, () => useNotifications.getState().setOpen(false))
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01); what VIEW
+  // opens stacks over it, and Escape closes that first (modalStack).
+  useModalStack(open, () => useNotifications.getState().setOpen(false))
 
   if (!open) return null
   const close = (): void => useNotifications.getState().setOpen(false)
-  return createPortal(
+  return (
+    <Stacked>
     <div className="modal modal--top" role="dialog" aria-modal="true" aria-label="Notifications" onPointerDown={close}>
       <div className="modal__card secret notif" onPointerDown={(e) => e.stopPropagation()}>
         <div className="secret__head">
@@ -295,7 +347,7 @@ export function NotificationsModal(): JSX.Element | null {
           <div ref={end} className="notif__end">{loading ? 'LOADING…' : done && items.length > 0 ? 'THAT IS EVERYTHING' : ''}</div>
         </div>
       </div>
-    </div>,
-    document.body,
+    </div>
+    </Stacked>
   )
 }

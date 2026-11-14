@@ -198,7 +198,7 @@ describe('the tutorial dungeon, its key item and door (DECK-0004)', () => {
   it('reads its world: the entry marker, the door and the eleven pieces that stay in the world bag', () => {
     expect(world.length).toBe(11)
     expect(door).not.toBeNull()
-    expect(door!.chest?.door).toBe(6)
+    expect(door!.chest?.door).toBe(5)
     // The world marks the entry point (DECK-0002 §2.2): where the generator put the marker.
     expect(entry).toEqual(TUTORIAL_ENTRY)
   })

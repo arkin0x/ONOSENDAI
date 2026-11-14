@@ -13,8 +13,9 @@
  *    platform (tutorialGame.ts KEY_BAG), holding the key item, inline and
  *    signed by the game key. The world bag never names it: it is found as any
  *    bag is, by its region's lookup id;
- * 3. the room bag: the gate door's room (DECK-0004 §3.7.2), sealed with the
- *    room key, holding the finish tile, inline and signed;
+ * 3. the room bag: the gate door's room (DECK-0004 §3.7.2), the region of
+ *    height 5 that is the way out, sealed with the room key, holding the
+ *    finish tile, inline and signed;
  * 4. the world bag, LAST, so no reader finds a gate before its key and its
  *    room exist: the entry point inline first (DECK-0002 §2.2), the door inline
  *    (spec §7.6: a door stays inline), sealed to the key item, wearing the
@@ -27,7 +28,7 @@
  * shard signed by the DEV key, as the fixture has always been.
  *
  * The door and the key item are signed inside their bags, so the bags are
- * sealed over those signatures: building needs the game key's secret, and the
+ * sealed over those signatures: building needs the game key's signer, and the
  * bags' own templates come out unsigned, to be signed as they are.
  *
  * unsignedWorld is the world published 2026-11-13 (LEGACY: game-only key and
@@ -36,7 +37,7 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js'
-import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
+import { getPublicKey } from 'nostr-tools/pure'
 import { fromPayload, type ShardModel } from 'sno-core/shards'
 import { bagTemplate, chestInnerTemplate, innerAuthentic, keyInnerTemplate, objectTemplateOf, OBJECT_KIND, rumorOf, shardInnerTemplate, SHARD_KIND, HIDDEN_KIND, type BagEntry, type KeyItem, type Reference, type Rumor } from '../hidden'
 import { BAG_SAFE_BYTES, signedBytes } from '../bagSize'
@@ -46,7 +47,7 @@ import { newDoorSecret, regionBase, roomEntries, roomKey, roomLookupId, ROOM_BAG
 import { lookTags } from '../looks'
 import { publicObjectTemplate } from '../published'
 import { regionKeyAt } from '../shardCrypto'
-import { GATE_AT, GATE_DOOR_HEIGHT, KEY_BAG, TUTORIAL_DEV_PUBKEY, TUTORIAL_DUNGEON_LAYOUT, TUTORIAL_ENTRY } from './tutorialGame'
+import { DOOR_AT, GATE_AT, GATE_DOOR_HEIGHT, KEY_BAG, TUTORIAL_DEV_PUBKEY, TUTORIAL_DUNGEON_LAYOUT, TUTORIAL_ENTRY } from './tutorialGame'
 import { bagList, ENTRY_TAG, worldKey } from './world'
 import type { GameDef } from './types'
 import type { Position } from '../space'
@@ -101,6 +102,21 @@ export const MOVED_PIECES: ReadonlySet<string> = new Set(['key', 'gate-closed', 
 /** Where the finish tile stands: its place in the layout. */
 export const FINISH_AT: Position = TUTORIAL_DUNGEON_LAYOUT.find((l) => l.piece === 'finish')!.at
 
+/**
+ * A piece moved along cyberspace Z by `dz` gibsons relative to its origin, for a
+ * look whose door stands `dz` from where the piece stood: a model's +Z is
+ * cyberspace -Z (lib/games/play.ts), and a unit-0 model unit is one gibson.
+ */
+export function shiftedZ(shard: ShardModel, dz: number): ShardModel {
+  if (shard.unit !== 0 || !Number.isInteger(dz)) throw new Error('a whole-gibson shift of a unit-0 piece only')
+  const vertices = shard.vertices.map((v) => ({ ...v, p: [v.p[0], v.p[1], v.p[2] - dz] as [number, number, number] }))
+  const reach = Math.max(shard.extent, ...vertices.map((v) => Math.abs(v.p[2]) + 1))
+  return { ...shard, vertices, extent: reach }
+}
+
+/** Signs one event as the game key: the generator's, holding the key's secret (lib/signers.ts is the app's only raw-key signer). */
+export type SignAsGame = (template: EventTemplate) => NostrEvent
+
 /** What a build made: its files in publish order (unsigned), and what is sealed inside them, for checks. */
 export interface DungeonBuild {
   files: WorldFile[]
@@ -114,13 +130,18 @@ export interface DungeonBuild {
 
 /**
  * The world with a real key item and door (see the top of this file), for
- * the game key whose secret is `sk`, dated `createdAt`. `secrets` fixes the
+ * the game key, every inner event signed by `sign` (the game key's signer, the
+ * caller's), dated `createdAt`. `secrets` fixes the
  * key item's secret and the door secret, for tests; otherwise both are fresh
  * from the platform's secure source, as every key item and door is.
  */
-export async function buildDungeon(game: Pick<GameDef, 'pubkey' | 'relayHint' | 'region'>, sk: Uint8Array, pieces: Pieces, createdAt: number, form: 'references' | 'inline', secrets: { key?: string; door?: string } = {}): Promise<DungeonBuild> {
-  const pk = getPublicKey(sk)
-  if (pk !== game.pubkey) throw new Error('the secret is not the game key\'s')
+export async function buildDungeon(game: Pick<GameDef, 'pubkey' | 'relayHint' | 'region'>, signAs: SignAsGame, pieces: Pieces, createdAt: number, form: 'references' | 'inline', secrets: { key?: string; door?: string } = {}): Promise<DungeonBuild> {
+  const pk = game.pubkey
+  const sign = (t: EventTemplate): NostrEvent => {
+    const e = signAs(t)
+    if (e.pubkey !== pk) throw new Error('the signer is not the game key')
+    return e
+  }
   if (form === 'references' && pk === TUTORIAL_DEV_PUBKEY) throw new Error('the DEV key\'s world is the bundled fixture; it is never published')
   const piece = (name: string): ShardModel => {
     const p = pieces[name]
@@ -128,7 +149,6 @@ export async function buildDungeon(game: Pick<GameDef, 'pubkey' | 'relayHint' | 
     return p
   }
   const { plane, height } = game.region
-  const sign = (t: EventTemplate): NostrEvent => finalizeEvent(t, sk) as NostrEvent
   const files: WorldFile[] = []
   const file = (name: string, t: EventTemplate): void => { files.push({ name, event: { ...t, pubkey: pk } }) }
 
@@ -148,8 +168,11 @@ export async function buildDungeon(game: Pick<GameDef, 'pubkey' | 'relayHint' | 
   // 3. The door, sealed to the key item, and its room holding the finish tile (DECK-0004 §3.7).
   const doorSecret = secrets.door ?? newDoorSecret()
   const sealed = sealEntries(roomEntries(doorSecret) as BagEntry[], key.itemPubkey)
-  const door = sign(chestInnerTemplate({ name: GATE_NAME, lockPubkey: key.itemPubkey, senderPubkey: sealed.senderPubkey, requires: GATE_REQUIRES, payload: sealed.payload, look: lookTags(piece('gate-closed'), piece('gate-open')), door: GATE_DOOR_HEIGHT }, GATE_AT, plane, createdAt))
-  const location = regionKeyAt(regionBase(GATE_AT, GATE_DOOR_HEIGHT), GATE_DOOR_HEIGHT, 8).key
+  // At DOOR_AT, its looks shifted back by the same gibson, so the gate stands where it stood (tutorialGame.ts DOOR_AT).
+  const dz = Number(DOOR_AT.z - GATE_AT.z)
+  const look = lookTags(shiftedZ(piece('gate-closed'), dz), shiftedZ(piece('gate-open'), dz))
+  const door = sign(chestInnerTemplate({ name: GATE_NAME, lockPubkey: key.itemPubkey, senderPubkey: sealed.senderPubkey, requires: GATE_REQUIRES, payload: sealed.payload, look, door: GATE_DOOR_HEIGHT }, DOOR_AT, plane, createdAt))
+  const location = regionKeyAt(regionBase(DOOR_AT, GATE_DOOR_HEIGHT), GATE_DOOR_HEIGHT, 8).key
   const rk = roomKey(location, hexToBytes(doorSecret))
   const finish = sign(shardInnerTemplate(piece('finish'), FINISH_AT, plane, createdAt))
   file(`03-room-bag-${HIDDEN_KIND}.json`, await bagTemplate([finish as unknown as BagEntry], rk, roomLookupId(rk), GATE_DOOR_HEIGHT, createdAt, HIDDEN_KIND, ROOM_BAG_SETTINGS))

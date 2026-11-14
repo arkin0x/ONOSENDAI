@@ -14,7 +14,7 @@ import { blocks } from '../../walkConstrain'
 import { heldFromFind } from '../../inventory'
 import { regionBase } from '../../doors'
 import { regionKeyAt } from '../../shardCrypto'
-import { GATE_AT, KEY_AT, KEY_BAG, TUTORIAL_DEV_PUBKEY, TUTORIAL_GAME } from '../tutorialGame'
+import { DOOR_AT, KEY_AT, KEY_BAG, TUTORIAL_DEV_PUBKEY, TUTORIAL_GAME } from '../tutorialGame'
 import { bagList, loadWorld, worldKey } from '../world'
 import { doorKey, doorLooks, doorSecretWith, keyItemHeld, readKeyBag, readRoom, sceneNow, thingsNow, worldDoorOf } from '../keyDoor'
 import { startProgress } from '../progress'
@@ -84,14 +84,23 @@ describe('the key item, sealed to its own place', () => {
 })
 
 describe('the gate, a DECK-0004 door', () => {
-  it('is in the world bag inline, signed by the game key, height 6, at the gate, sealed to the key item', () => {
+  it('is in the world bag inline, signed by the game key, height 5, one gibson inside the gate sill, sealed to the key item', () => {
     expect(door.type).toBe('chest')
     expect(door.inner?.pubkey).toBe(TUTORIAL_DEV_PUBKEY)
-    expect(door.chest?.door).toBe(6)
-    expect(door.at).toEqual(GATE_AT)
+    expect(door.chest?.door).toBe(5)
+    expect(door.at).toEqual(DOOR_AT)
     expect(door.chest?.lockPubkey).toBe(keys[0].key!.itemPubkey)
     expect(door.ref).toBeUndefined()
     expect(door.sealedRef).toBeUndefined()
+  })
+
+  it('locks the way out at height 5: its room holds the finish tile, and every world piece in that region is at height 6', async () => {
+    expect(door.height).toBe(6)
+    const room = regionBase(DOOR_AT, 5)
+    const inRoomRegion = shards.filter((s) => regionBase(s.at, 5).x === room.x && regionBase(s.at, 5).y === room.y && regionBase(s.at, 5).z === room.z)
+    // The hall and the exit shrine stand in the room's region, in the world bag, at height 6: another height, another bag (DECK-0004 §3.7.4).
+    expect(inRoomRegion.map((s) => s.shard.name).sort()).toEqual(['Maze Kit: hall, dead end', 'Maze Kit: hall, straight'])
+    for (const s of inRoomRegion) expect(s.height).toBe(6)
   })
 
   it('a door signed by another key is not the world\'s door', () => {
@@ -119,11 +128,11 @@ describe('the gate, a DECK-0004 door', () => {
     expect(open.map((w) => w.shard.name)).toEqual(['Maze Kit: hall gate (4 x 6), open'])
     expect(blocks(closed[0].shard)).toBe(true)
     expect(blocks(open[0].shard)).toBe(false)
-    expect(closed[0].at).toEqual(GATE_AT)
+    expect(closed[0].at).toEqual(DOOR_AT)
   })
 
   it('stands in the scene as it stands: the closed look and no room, then the open look and the room', () => {
-    const room: WorldShard[] = [{ key: 'tile', shard: shards[0].shard, at: GATE_AT, height: 6 }]
+    const room: WorldShard[] = [{ key: 'tile', shard: shards[0].shard, at: DOOR_AT, height: 6 }]
     const pr = startProgress(0)
     const shut = sceneNow(G, { shards, door, room }, pr).solid.map((w) => w.key)
     expect(shut).toContain(`${door.eventId}:closed`)
@@ -138,10 +147,10 @@ describe('the gate, a DECK-0004 door', () => {
     const pr = startProgress(0)
     const empty = thingsNow(G, { door, keys }, pr, {}, ME)
     expect(empty.keys).toEqual([KEY_AT])
-    expect(empty.door).toEqual({ at: GATE_AT, opens: false })
+    expect(empty.door).toEqual({ at: DOOR_AT, opens: false })
     const row = heldFromFind(ME, keys[0], 0)!
     const held = thingsNow(G, { door, keys }, pr, { [row.id]: row }, ME)
     expect(held.keys).toEqual([])
-    expect(held.door).toEqual({ at: GATE_AT, opens: true })
+    expect(held.door).toEqual({ at: DOOR_AT, opens: true })
   })
 })

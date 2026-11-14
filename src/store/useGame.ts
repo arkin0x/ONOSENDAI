@@ -122,6 +122,8 @@ export const WALK_BUSY_MESSAGE = 'Finish your walk first.'
 export const GAME_NOT_HERE_MESSAGE = 'This game is not one ONOSENDAI plays.'
 export const GAME_ALREADY_MESSAGE = 'A game is already open, or on its way.'
 export const COVERED_MESSAGE = 'Close the workshop or TV first.'
+/** The key bag held no key when read: said, never shown as a platform with nothing on it. */
+export const KEY_BAG_MISSING_MESSAGE = 'The key could not be found here yet. Step off the platform and back on to look again.'
 /** Something threw where a refusal was expected: said, never left hanging (review of #660). */
 const failed = (err: unknown): string => `Something went wrong: ${err instanceof Error ? err.message : String(err)}`
 
@@ -166,7 +168,7 @@ export function loadProgress(entryId: string): Progress | null {
   try {
     const raw = JSON.parse(localStorage.getItem(progressKey(entryId)) ?? 'null') as Partial<Progress> | null
     if (!raw || typeof raw.startedAt !== 'number' || !Number.isFinite(raw.startedAt)) return null
-    return { startedAt: raw.startedAt, keyHeld: raw.keyHeld === true, doorOpen: raw.doorOpen === true, clearedMs: typeof raw.clearedMs === 'number' && Number.isFinite(raw.clearedMs) ? raw.clearedMs : null }
+    return { startedAt: raw.startedAt, keyHeld: raw.keyHeld === true, doorOpen: raw.doorOpen === true, clearedMs: typeof raw.clearedMs === 'number' && Number.isFinite(raw.clearedMs) ? raw.clearedMs : null, ...(typeof raw.doorId === 'string' ? { doorId: raw.doorId } : {}) }
   } catch { return null }
 }
 
@@ -227,12 +229,18 @@ export const useGame = create<GameState>((set, get) => {
     if (session.keyBag !== 'unread' || !inside) return
     set({ session: { ...session, keyBag: 'reading' } })
     readKeyBag(session.game).then(
-      (keys) => { const now = get().session; if (now?.entryId === session.entryId) set({ session: { ...now, keys, keyBag: 'read' } }) },
+      (keys) => {
+        const now = get().session
+        if (now?.entryId !== session.entryId) return
+        // No bag, or no key in it: a relay that did not answer, or a bag not yet up. Said, and asked again once you step out and back.
+        if (keys.length === 0) set({ session: { ...now, keyBag: 'failed' }, message: KEY_BAG_MISSING_MESSAGE })
+        else set({ session: { ...now, keys, keyBag: 'read' } })
+      },
       (err) => { const now = get().session; if (now?.entryId === session.entryId) set({ session: { ...now, keyBag: 'failed' }, message: `The key's place could not be read: ${err instanceof Error ? err.message : String(err)}` }) },
     )
   }
 
-  /** The door's room, read with its secret, landing only in the session it was opened in (lib/games/keyDoor.ts readRoom). */
+  /** The door's room, read with its secret, landing only in the session of the entry it was opened in (lib/games/keyDoor.ts readRoom). */
   const fillRoom = (session: GameSession, door: Hidden, secretHex: string): void => {
     readRoom(session.game, door, secretHex).then(
       (room) => {
@@ -245,12 +253,13 @@ export const useGame = create<GameState>((set, get) => {
     )
   }
 
-  /** A run that opened the door before a reload: its room read again with the key still held, if it is. */
+  /** A run that opened the door before a reload: its room read again with the key still held, or said that it cannot be. */
   const refillRoom = (session: GameSession): void => {
     if (!session.door || !session.progress.doorOpen || session.room) return
     const key = doorKey(session.door, useInventory.getState().items, me())
     const secret = key && doorSecretWith(session.door, key)
     if (secret) fillRoom(session, session.door, secret)
+    else set({ message: 'The room behind the gate could not be read: its key is not in your ITEMS.' })
   }
 
   /** After a move or a landing: a pad under a player who stands on it sends them on. */
@@ -267,7 +276,11 @@ export const useGame = create<GameState>((set, get) => {
       (world) => {
         const now = get().session
         if (now?.entryId !== session.entryId) return
-        const next: GameSession = { ...now, world: world.shards, door: world.door, at: now.at ?? now.resumeAt ?? world.entry, worldError: world.shards.length ? null : 'This game has no world yet.' }
+        // The gate kept open from this entry counts only for the gate it was opened on: progress kept from the other world
+        // (the world switched between a reload and the next) starts shut, so no gate stands open that its key did not open.
+        const progress = now.progress.doorOpen && (now.progress.doorId ?? null) !== (world.door?.eventId ?? null) ? { ...now.progress, doorOpen: false, doorId: undefined } : now.progress
+        const next: GameSession = { ...now, progress, world: world.shards, door: world.door, at: now.at ?? now.resumeAt ?? world.entry, worldError: world.shards.length ? null : 'This game has no world yet.' }
+        if (progress !== now.progress) saveProgress(next.entryId, progress)
         set({ session: next })
         reveal(next)
         refillRoom(next)
@@ -445,7 +458,7 @@ export const useGame = create<GameState>((set, get) => {
       const secret = doorSecretWith(door, key)
       if (!secret) { set({ message: 'That key does not open this gate.' }); return }
       // Open at once; the room comes after, so no relay holds up the gate (store/rooms.ts openDoorNow, the same order).
-      commit({ ...session, progress: { ...session.progress, doorOpen: true } })
+      commit({ ...session, progress: { ...session.progress, doorOpen: true, doorId: door.eventId } })
       fillRoom(session, door, secret)
     },
 

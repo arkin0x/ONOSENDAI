@@ -60,6 +60,7 @@ import { hexToBytes, type NostrEvent } from '../../lib/events'
 import { useCyberspace } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
 import { enterTutorialDungeon, useGame } from '../useGame'
+import { useInventory } from '../useInventory'
 import { TUTORIAL_DEV_PUBKEY, TUTORIAL_ENTRY, TUTORIAL_GAME, TUTORIAL_RELAY } from '../../lib/games/tutorialGame'
 import { gameLive } from '../../lib/games/flag'
 import { buildDungeon, piecesOf, unsignedWorld } from '../../lib/games/worldDeploy'
@@ -92,7 +93,7 @@ describe('the tutorial dungeon, live on the owner\'s key', () => {
 
   it('the world with a real key item and door, published over it, is the next entry\'s world', async () => {
     const sk = hexToBytes(OWNER_SK_HEX)
-    const built = await buildDungeon(TUTORIAL_GAME, sk, await piecesOf(fixture.events[0] as NostrEvent, TUTORIAL_DEV_PUBKEY, TUTORIAL_GAME), 1_800_000_100, 'references')
+    const built = await buildDungeon(TUTORIAL_GAME, (t) => finalizeEvent(t, sk) as NostrEvent, await piecesOf(fixture.events[0] as NostrEvent, TUTORIAL_DEV_PUBKEY, TUTORIAL_GAME), 1_800_000_100, 'references')
     for (const f of built.files) published.push(JSON.parse(JSON.stringify(finalizeEvent({ kind: f.event.kind, created_at: f.event.created_at, tags: f.event.tags, content: f.event.content }, sk))) as NostrEvent)
     expect(await useGame.getState().exit()).toBeNull()
     expect(await enterTutorialDungeon()).toBeNull()
@@ -100,7 +101,19 @@ describe('the tutorial dungeon, live on the owner\'s key', () => {
     const session = useGame.getState().session!
     expect(session.worldError).toBeNull()
     expect(session.world).toHaveLength(11)
-    expect(session.door?.chest?.door).toBe(6)
+    expect(session.door?.chest?.door).toBe(5)
     expect(session.at).toEqual(TUTORIAL_ENTRY)
+    // The key bag and the room from the relays, through the store: TAKE into ITEMS, OPEN, the finish tile.
+    const B = TUTORIAL_GAME.region.base
+    const at = (x: number, y: number, z: number) => ({ x: B.x + BigInt(x), y: B.y + BigInt(y), z: B.z + BigInt(z) })
+    const put = (p: ReturnType<typeof at>) => useGame.setState({ session: { ...useGame.getState().session!, at: p, arc: null, doubled: false } })
+    put(at(37, 27, 41))
+    useGame.getState().step('x', 1)
+    await vi.waitFor(() => { expect(useGame.getState().session!.keyBag).toBe('read') })
+    useGame.getState().take()
+    expect(Object.values(useInventory.getState().items).map((it) => it.name)).toContain('Dungeon Key')
+    put(at(40, 17, 33))
+    useGame.getState().open()
+    await vi.waitFor(() => { expect(useGame.getState().session!.room?.map((w) => w.shard.name)).toEqual(['Maze Kit: aerocarnival checkered tile 4']) })
   })
 })

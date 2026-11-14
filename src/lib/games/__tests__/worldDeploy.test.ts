@@ -38,7 +38,7 @@ import { HIDDEN_KIND, OBJECT_KIND } from '../../hidden'
 import { BAG_SAFE_BYTES, signedBytes } from '../../bagSize'
 import { heldFromFind } from '../../inventory'
 import { gameLive } from '../flag'
-import { GATE_AT, KEY_AT, TUTORIAL_DEV_PUBKEY, TUTORIAL_ENTRY, TUTORIAL_RELAY, tutorialGameFor } from '../tutorialGame'
+import { DOOR_AT, KEY_AT, TUTORIAL_DEV_PUBKEY, TUTORIAL_ENTRY, TUTORIAL_RELAY, tutorialGameFor } from '../tutorialGame'
 import { loadWorld } from '../world'
 import { buildDungeon, piecesOf, unsignedWorld } from '../worldDeploy'
 import { doorKey, doorSecretWith, readKeyBag, readRoom } from '../keyDoor'
@@ -51,6 +51,8 @@ const V1_GAME = { ...tutorialGameFor(TUTORIAL_DEV_PUBKEY), world: { kind: 'fixtu
 /** nak event --sec: the file's kind, created_at, tags and content, signed by its key. */
 const nakSign = (e: { kind: number; created_at: number; tags: string[][]; content: string }, key: Uint8Array): NostrEvent =>
   JSON.parse(JSON.stringify(finalizeEvent({ kind: e.kind, created_at: e.created_at, tags: e.tags, content: e.content }, key))) as NostrEvent
+/** The game key's signer, as the generator holds it. */
+const asGame = (key: Uint8Array) => (t: { kind: number; created_at: number; tags: string[][]; content: string }): NostrEvent => finalizeEvent(t, key) as NostrEvent
 const where = (w: { shards: { at: { x: bigint; y: bigint; z: bigint } }[] }) => w.shards.map((s) => `${s.at.x},${s.at.y},${s.at.z}`).sort()
 
 beforeEach(() => { published.length = 0 })
@@ -113,13 +115,13 @@ describe('the world with a real key item and door, published over the LEGACY one
   async function publishBoth(key: Uint8Array, upTo = Infinity): Promise<Awaited<ReturnType<typeof buildDungeon>>> {
     const live = tutorialGameFor(getPublicKey(key))
     for (const f of await unsignedWorld(live, source, TUTORIAL_DEV_PUBKEY, 1_800_000_000)) published.push(nakSign(f.event, key))
-    const built = await buildDungeon(live, key, await piecesOf(source, TUTORIAL_DEV_PUBKEY, live), 1_800_000_100, 'references')
+    const built = await buildDungeon(live, asGame(key), await piecesOf(source, TUTORIAL_DEV_PUBKEY, live), 1_800_000_100, 'references')
     for (const f of built.files.slice(0, upTo)) published.push(nakSign(f.event, key))
     return built
   }
 
   it('is four events: the key\'s public model, the key bag, the room, and the world bag last, all unsigned, nothing protected', async () => {
-    const built = await buildDungeon(tutorialGameFor(pk), sk, await piecesOf(source, TUTORIAL_DEV_PUBKEY, tutorialGameFor(pk)), 1_800_000_100, 'references')
+    const built = await buildDungeon(tutorialGameFor(pk), asGame(sk), await piecesOf(source, TUTORIAL_DEV_PUBKEY, tutorialGameFor(pk)), 1_800_000_100, 'references')
     expect(built.files.map((f) => f.name)).toEqual(['01-key-model-33331.json', '02-key-bag-33330.json', '03-room-bag-33330.json', '99-world-bag-33330.json'])
     expect(built.files.map((f) => f.event.kind)).toEqual([OBJECT_KIND, HIDDEN_KIND, HIDDEN_KIND, HIDDEN_KIND])
     for (const { event } of built.files) {
@@ -136,7 +138,7 @@ describe('the world with a real key item and door, published over the LEGACY one
     expect(built.keyItem.pubkey).toBe(pk)
     expect(built.door.pubkey).toBe(pk)
     expect(built.door.tags.find((t) => t[0] === 'lock')?.[1]).toBe(built.keyItem.tags.find((t) => t[0] === 'item')?.[1])
-    expect(built.door.tags.find((t) => t[0] === 'door')).toEqual(['door', '6'])
+    expect(built.door.tags.find((t) => t[0] === 'door')).toEqual(['door', '5'])
     expect(built.door.tags.filter((t) => t[0] === 'look').map((t) => t.length)).toEqual([2, 3])
     expect(signedBytes(built.files[3].event)).toBeLessThan(BAG_SAFE_BYTES / 4)
   })
@@ -150,11 +152,11 @@ describe('the world with a real key item and door, published over the LEGACY one
     expect(before.door).toBeNull()
     expect(before.shards).toHaveLength(15)
     // The world bag lands: the new world.
-    const built = await buildDungeon(live, own, await piecesOf(source, TUTORIAL_DEV_PUBKEY, live), 1_800_000_200, 'references')
+    const built = await buildDungeon(live, asGame(own), await piecesOf(source, TUTORIAL_DEV_PUBKEY, live), 1_800_000_200, 'references')
     for (const f of built.files) published.push(nakSign(f.event, own))
     const after = await loadWorld(live)
-    expect(after.door?.chest?.door).toBe(6)
-    expect(after.door?.at).toEqual(GATE_AT)
+    expect(after.door?.chest?.door).toBe(5)
+    expect(after.door?.at).toEqual(DOOR_AT)
     expect(after.entry).toEqual(TUTORIAL_ENTRY)
     expect(after.shards).toHaveLength(11)
     // The eleven pieces are the LEGACY world's own objects, at their places.
@@ -173,6 +175,6 @@ describe('the world with a real key item and door, published over the LEGACY one
 
   it('refuses the DEV key and a secret that is not the game key\'s', async () => {
     const pieces = await piecesOf(source, TUTORIAL_DEV_PUBKEY, tutorialGameFor(pk))
-    await expect(buildDungeon(tutorialGameFor(pk), generateSecretKey(), pieces, 1, 'references')).rejects.toThrow(/not the game key/)
+    await expect(buildDungeon(tutorialGameFor(pk), asGame(generateSecretKey()), pieces, 1, 'references')).rejects.toThrow(/not the game key/)
   })
 })

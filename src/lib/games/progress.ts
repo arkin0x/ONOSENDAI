@@ -33,6 +33,8 @@ export interface Progress {
   keyHeld: boolean
   /** The door is open: opened by OPEN in this run. */
   doorOpen: boolean
+  /** The DECK-0004 door it was opened on (its event id); absent for the LEGACY gate. A world whose door is another starts shut. */
+  doorId?: string
   /** The clear time, once the exit zone was reached. */
   clearedMs: number | null
 }

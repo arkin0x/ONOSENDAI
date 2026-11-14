@@ -54,7 +54,7 @@ if (typeof localStorage === 'undefined') {
 import { firstBreak, type NostrEvent } from '../../lib/events'
 import { GAME_CHOOSE_FIRST_MESSAGE, GAME_OTHER_BRACKET_MESSAGE, GAME_NEEDS_CHAIN_MESSAGE, GAME_NOT_OPEN_MESSAGE, IN_GAME_HERE_MESSAGE, GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
-import { GAMES_OFF_MESSAGE, GAME_ALREADY_MESSAGE, enterTutorialDungeon, loadProgress, offerFor, recordedPosition, useGame } from '../useGame'
+import { GAMES_OFF_MESSAGE, GAME_ALREADY_MESSAGE, KEY_BAG_MISSING_MESSAGE, enterTutorialDungeon, loadProgress, offerFor, recordedPosition, useGame } from '../useGame'
 import { useInventory } from '../useInventory'
 import type { GameDef } from '../../lib/games/types'
 import { TUTORIAL_ENTRY, TUTORIAL_GAME } from '../../lib/games/tutorialGame'
@@ -204,7 +204,7 @@ describe('in-game mode (useGame)', () => {
     expect(G().session!.at).toEqual(TUTORIAL_ENTRY)
     // Eleven pieces in the world bag: the entry marker, the arrival, the climb, the way out; the gate is the world's door.
     expect(G().session!.world).toHaveLength(11)
-    expect(G().session!.door?.chest?.door).toBe(6)
+    expect(G().session!.door?.chest?.door).toBe(5)
     expect(S().events.length).toBe(count + 1)
     // The base position stays where you entered from.
     expect(S().coordHex()).toBe(here)
@@ -414,6 +414,81 @@ describe('the tutorial dungeon: gravity, the key door and the clock (useGame)', 
     await worldLoaded()
     expect(G().session!.progress.doorOpen).toBe(true)
     await vi.waitFor(() => { expect(G().session!.room).not.toBeNull() })
+  })
+
+  it('a key bag that is not there yet is said, and looked for again once you step off the platform and back on', async () => {
+    // The world without its key bag: the fixture with that one event left out, then put back.
+    const all = (await (TUTORIAL_GAME.world as { load: () => Promise<NostrEvent[]> }).load())
+    let hide = true
+    const noKeyBag: GameDef = { ...TUTORIAL_GAME, world: { kind: 'fixture', load: async () => all.filter((e) => !(hide && e.tags.some((t) => t[0] === 'H' && t[1] === '3'))) } }
+    expect(await G().enter(noKeyBag)).toBeNull()
+    await worldLoaded()
+    put(at(37, 27, 41))
+    G().step('x', 1)
+    await vi.waitFor(() => { expect(G().session!.keyBag).toBe('failed') })
+    expect(G().message).toBe(KEY_BAG_MISSING_MESSAGE)
+    expect(offerFor(G().session!)).toBeNull()
+    // Still on the platform: not asked again.
+    G().step('x', 1)
+    expect(G().session!.keyBag).toBe('failed')
+    // The bag arrives; off the platform and back on, and it is read.
+    hide = false
+    put(at(37, 22, 36))
+    G().step('x', 1)
+    expect(G().session!.keyBag).toBe('unread')
+    put(at(37, 27, 41))
+    G().step('x', 1)
+    await vi.waitFor(() => { expect(G().session!.keyBag).toBe('read') })
+    expect(G().session!.keys).toHaveLength(1)
+  })
+
+  it('resumed on the top platform, the key bag is opened as the world lands', async () => {
+    await enterTutorialDungeon()
+    await worldLoaded()
+    const entryId = G().session!.entryId
+    useGame.setState({ session: null })
+    expect(G().resume()).toBe(true)
+    // Where the record would leave you, on the platform: set before the world lands.
+    useGame.setState({ session: { ...G().session!, resumeAt: at(38, 27, 42) } })
+    await worldLoaded()
+    expect(G().session!.entryId).toBe(entryId)
+    await vi.waitFor(() => { expect(G().session!.keyBag).toBe('read') })
+  })
+
+  it('a gate kept open from the other world (the world switched between reloads) starts shut', async () => {
+    await enterTutorialDungeon()
+    const entryId = G().session!.entryId
+    await worldLoaded()
+    // Progress the LEGACY gate left: open, with no door named.
+    localStorage.setItem(`onosendai:game:${entryId}`, JSON.stringify({ startedAt: Date.now(), keyHeld: false, doorOpen: true, clearedMs: null }))
+    useGame.setState({ session: null })
+    expect(G().resume()).toBe(true)
+    await worldLoaded()
+    expect(G().session!.progress.doorOpen).toBe(false)
+    expect(loadProgress(entryId)!.doorOpen).toBe(false)
+    put(at(40, 17, 33))
+    expect(offerFor(G().session!)).toBe('locked')
+  })
+
+  it('a room that could not be retrieved is said, and the shrine floor still clears', async () => {
+    const all = (await (TUTORIAL_GAME.world as { load: () => Promise<NostrEvent[]> }).load())
+    const noRoom: GameDef = { ...TUTORIAL_GAME, world: { kind: 'fixture', load: async () => all.filter((e) => !(e.kind === 33330 && !e.tags.some((t) => t[0] === 'H'))) } }
+    expect(await G().enter(noRoom)).toBeNull()
+    await worldLoaded()
+    put(at(37, 27, 41))
+    G().step('x', 1)
+    await vi.waitFor(() => { expect(G().session!.keyBag).toBe('read') })
+    G().take()
+    put(at(40, 17, 33))
+    G().open()
+    expect(G().session!.progress.doorOpen).toBe(true)
+    await vi.waitFor(() => { expect(G().message).toBe('The room behind the gate could not be retrieved.') })
+    expect(G().session!.room).toEqual([])
+    // No finish tile: the shrine's floor in its place is the exit zone.
+    put(at(40, 17, 11))
+    G().step('z', -1)
+    expect(G().session!.at).toEqual(at(40, 17, 10))
+    expect(G().session!.progress.clearedMs).not.toBeNull()
   })
 
   it('the LEGACY world (published 2026-11-13, no door): the game-only key into hand, nothing into ITEMS, the gate opened with it', async () => {

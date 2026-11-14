@@ -93,8 +93,16 @@ export const GATE_AT = at(40, 16, 32)
  */
 export const KEY_BAG = { at: KEY_AT, height: 3 }
 
-/** The gate door's height: its room is the whole dungeon region (DECK-0004 §3.7.1: no higher than the bag holding it). */
-export const GATE_DOOR_HEIGHT = 6
+/**
+ * The gate as a DECK-0004 door: its coordinate one gibson inside the hall's
+ * cell, so that its room, the region of height 5 holding it (offsets 32 to 63,
+ * 0 to 31, 0 to 31: the way out), holds the finish tile and nothing of the
+ * rest of the dungeon at its height. Every other piece is at height 6, in the
+ * world bag (DECK-0004 §3.7.4: a door locks its own height only). Its looks are
+ * shifted by the same gibson, so the gate stands exactly where it stood.
+ */
+export const DOOR_AT = at(40, 16, 31)
+export const GATE_DOOR_HEIGHT = 5
 
 /**
  * The way back in for a player who fell out of the dungeon (owner, 2026-11-13:

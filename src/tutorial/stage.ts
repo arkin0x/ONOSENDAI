@@ -38,12 +38,12 @@ import { getPublicKey } from 'nostr-tools/pure'
 import type { NostrEvent } from 'nostr-tools'
 import type { EventTemplate } from '../lib/events'
 import { localSigner } from '../lib/signers'
-import { fromPayload, type ShardModel, type ShardPayload } from 'sno-core/shards'
+import { fromPayload, neededExtent, ticksOf, vertexAt, type ShardModel, type ShardPayload } from 'sno-core/shards'
 import { DEFAULT_BAG_SETTINGS, HIDDEN_KIND, bagTemplate, chestInnerTemplate, messageInnerTemplate, rumorOf, shardInnerTemplate, type BagEntry, type ChestItem } from '../lib/hidden'
 import { sealEntries } from '../lib/chests'
 import { lockOf } from '../lib/locks'
 import type { Position } from '../lib/space'
-import { BOX_HEIGHT, chestCell, regionBase, toWorld, type TutorialLayout } from './layout'
+import { BOX_HEIGHT, chestCell, regionBase, toWorld, type Frame, type TutorialLayout } from './layout'
 import { BACK_STEP, CATCH_FLOOR, COURSE, FINISH_CHEST, PLOT, PLOT_AT, WALL_FAR, WALL_SIDE, courseToWorld, type CoursePart } from './course'
 import trophyPayload from './pieces/trophy.json'
 import platSquare6 from './pieces/plat-square-6.json'
@@ -85,7 +85,7 @@ const REGION_REQUIRES = 'the key of a place'
  * without it still plays the same, and a bump would hand a player a new,
  * unopened chest.
  */
-export const STAGE_VERSION = 8
+export const STAGE_VERSION = 9
 
 /** One player's stage, by pubkey. */
 export const STAGE_PREFIX = 'onosendai:tutorial:stage:'
@@ -183,6 +183,38 @@ export function pieceModel(payload: unknown, id: string): ShardModel {
   return model
 }
 
+/**
+ * A shard turned half a turn about its own up axis, through its origin: x and
+ * z both change sign, a proper turn, so its faces keep their winding and it
+ * reads as the same thing seen from behind.
+ */
+export function turnedHalf(model: ShardModel): ShardModel {
+  const vertices = model.vertices.map((v) => {
+    const [x, y, z] = ticksOf(v)
+    return vertexAt([-x, y, -z], v.c)
+  })
+  return { ...model, vertices, extent: Math.max(model.extent, neededExtent({ vertices })) }
+}
+
+/**
+ * Whether a checkered flag at course point `at` is turned half a turn, so its
+ * cloth points in toward the deck's middle and never through a side wall
+ * (owner, 2026-11-14: the right flag clipped the wall). A placed shard keeps
+ * its model's axes whichever way the layout faces (its x is the world's x),
+ * and the flag's cloth runs along its model's +x, so it points the course's
+ * +x when the layout's side is +1 and the course's -x when it is -1. It is
+ * turned when that is the way out: toward the side the flag stands on.
+ */
+export function flagTurned(frame: Frame, at: readonly [number, number, number]): boolean {
+  return Math.sign(at[0]) === frame.side
+}
+
+/** A course part's shard, as placed in this layout: a checkered flag turned so its cloth points in (flagTurned). */
+function courseModel(part: CoursePart, frame: Frame, id: string): ShardModel {
+  const model = pieceModel(PIECES[part.piece], id)
+  return part.piece === 'flag-checkered' && flagTurned(frame, part.at) ? turnedHalf(model) : model
+}
+
 /** A signer for templates as the guide (lib/signers.ts localSigner). */
 type Sign = (t: EventTemplate) => Promise<NostrEvent>
 
@@ -250,7 +282,7 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
   const finishChest = await chestOf(STAGE_TEXT.finishName, finishKey.key, finishAt, finishContents)
 
   const blueBox = await sign(shardInnerTemplate(boxModel(), boxMiddle, plane, createdAt))
-  const course = await Promise.all(COURSE.map((part, i) => sign(shardInnerTemplate(pieceModel(PIECES[part.piece], `tutorial-course-${i}`), courseToWorld(frame, part.at), plane, createdAt))))
+  const course = await Promise.all(COURSE.map((part, i) => sign(shardInnerTemplate(courseModel(part, frame, `tutorial-course-${i}`), courseToWorld(frame, part.at), plane, createdAt))))
   // The dirt plot (A5). The tutorial tree's DNA is in the welcome chest as
   // the owner signed it, never re-signed by the guide, since a DNA's id names
   // its signer; a seed names that event (TUTORIAL_DNA_ID).

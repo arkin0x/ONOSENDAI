@@ -39,7 +39,16 @@ export interface Progress {
   clearedMs: number | null
 }
 
-/** How near the key you must stand to take it, in gibsons along every axis from the gibson above it. */
+/**
+ * How near the key you must stand to take it, in gibsons along every axis
+ * from the gibson above it. That gibson is where a player stands by the
+ * LEGACY key, whose look stood on its place. A key item's model is centred on
+ * its place instead (DECK-0004 §2.5), so the tutorial's floats two above the
+ * platform (tutorialGame.ts KEY_ITEM_AT), and a player standing on the
+ * platform by it is exactly this far below that gibson: at the edge of the
+ * reach, by design (tutorialDungeon.test.ts takes it from there). Raising
+ * the key further would take it out of reach from the platform.
+ */
 export const KEY_REACH = 2
 /** How near the door you must stand to open it, in gibsons along every axis from the gibson above its sill. */
 export const DOOR_REACH = 3

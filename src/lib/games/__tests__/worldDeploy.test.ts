@@ -17,7 +17,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import type { Filter } from 'nostr-tools/filter'
-import type { NostrEvent } from '../../events'
+import { positionHex, type NostrEvent } from '../../events'
 
 const published = vi.hoisted(() => [] as NostrEvent[])
 vi.mock('../../relay', async (orig) => {
@@ -39,9 +39,9 @@ import { BAG_SAFE_BYTES, signedBytes } from '../../bagSize'
 import { addHeld, heldFromFind } from '../../inventory'
 import { parseHint } from '../../hint'
 import { gameLive } from '../flag'
-import { DOOR_AT, KEY_AT, KEY_BAG, TUTORIAL_DEV_PUBKEY, TUTORIAL_ENTRY, TUTORIAL_RELAY, tutorialGameFor } from '../tutorialGame'
+import { DOOR_AT, KEY_AT, KEY_BAG, KEY_ITEM_AT, TUTORIAL_DEV_PUBKEY, TUTORIAL_ENTRY, TUTORIAL_RELAY, tutorialGameFor } from '../tutorialGame'
 import { loadWorld } from '../world'
-import { buildDungeon, KEY_NAME, piecesOf, renamedKeyBag, unsignedWorld } from '../worldDeploy'
+import { buildDungeon, KEY_NAME, piecesOf, rebuiltKeyBag, unsignedWorld } from '../worldDeploy'
 import { doorKey, doorSecretWith, keyItemHeld, readKeyBag, readRoom } from '../keyDoor'
 import { regionBase } from '../../doors'
 import { regionKeyAt } from '../../shardCrypto'
@@ -169,7 +169,7 @@ describe('the world with a real key item and door, published over the LEGACY one
     const game = tutorialGameFor(pk)
     const built = await buildDungeon(game, asGame(sk), await piecesOf(source, TUTORIAL_DEV_PUBKEY, game), 1_800_000_100, 'references')
     expectSectorHint(built.files[3].event.tags, game.region.base, game.region.height)
-    expectSectorHint(built.files[1].event.tags, KEY_AT, 3)
+    expectSectorHint(built.files[1].event.tags, KEY_ITEM_AT, 3)
     expect(built.files[2].event.tags.some((t) => ['hint', 'X', 'Y', 'Z', 'S', 'H'].includes(t[0]))).toBe(false)
   })
 
@@ -194,7 +194,7 @@ describe('the world with a real key item and door, published over the LEGACY one
     for (const s of after.shards) expect(was.has(`${s.shard.name}@${s.at.x},${s.at.y},${s.at.z}`)).toBe(true)
     // The key bag, from the relays; the door opens with its key; the room holds the finish tile.
     const keys = await readKeyBag(live)
-    expect(keys.map((k) => k.at)).toEqual([KEY_AT])
+    expect(keys.map((k) => k.at)).toEqual([KEY_ITEM_AT])
     expect(keys[0].key?.model).toEqual({ address: `33331:${live.pubkey}:tutorial-dungeon-key`, relay: TUTORIAL_RELAY })
     const row = heldFromFind(ME, keys[0], 0)!
     const secret = doorSecretWith(after.door!, doorKey(after.door!, { [row.id]: row }, ME)!)!
@@ -209,37 +209,60 @@ describe('the world with a real key item and door, published over the LEGACY one
   })
 })
 
-describe('the key item renamed "Tutorial Dungeon Key" (owner, 2026-11-14; DEPLOY-v2.1.md)', () => {
+describe('the key item rebuilt in its bag: renamed "Tutorial Dungeon Key" (DEPLOY-v2.1.md), then raised off the platform (DEPLOY-v2.2.md)', () => {
   const ME = '34'.repeat(32)
   const T = 1_800_000_100
+  const SPOT = positionHex(KEY_AT, 1)
   /**
    * The world as published 2026-11-14: buildDungeon's, with its key item
-   * still titled "Dungeon Key" (re-signed under that title and resealed in its
-   * bag, as that day's generator wrote it), all signed and on the relay over
-   * the LEGACY world, whose objects it names.
+   * titled `title` and at `at` (re-signed so and resealed in its bag, as that
+   * day's generator wrote it), all signed and on the relay over the LEGACY
+   * world, whose objects it names. "Dungeon Key" at the key's spot is the
+   * first publish (v2); "Tutorial Dungeon Key" there is the rename (v2.1).
    */
-  async function publishedAsDungeonKey(key: Uint8Array): Promise<{ live: ReturnType<typeof tutorialGameFor>; built: Awaited<ReturnType<typeof buildDungeon>>; keyBag: NostrEvent; oldItem: NostrEvent }> {
+  async function publishedAs(key: Uint8Array, title: string, at = KEY_AT): Promise<{ live: ReturnType<typeof tutorialGameFor>; built: Awaited<ReturnType<typeof buildDungeon>>; keyBag: NostrEvent; oldItem: NostrEvent }> {
     const live = tutorialGameFor(getPublicKey(key))
     for (const f of await unsignedWorld(live, source, TUTORIAL_DEV_PUBKEY, T - 100)) published.push(nakSign(f.event, key))
     const built = await buildDungeon(live, asGame(key), await piecesOf(source, TUTORIAL_DEV_PUBKEY, live), T, 'references')
-    const oldItem = asGame(key)({ ...built.keyItem, tags: built.keyItem.tags.map((t) => t[0] === 'title' ? ['title', 'Dungeon Key'] : t) })
+    const place = positionHex(at, live.region.plane)
+    const oldItem = asGame(key)({ ...built.keyItem, tags: built.keyItem.tags.map((t) => t[0] === 'title' ? ['title', title] : t[0] === 'C' ? ['C', place] : t) })
     const kb = regionKeyAt(regionBase(KEY_BAG.at, KEY_BAG.height), KEY_BAG.height, 8)
-    const oldBag = await bagTemplate([oldItem as unknown as BagEntry], kb.key, kb.lookupId, KEY_BAG.height, T, HIDDEN_KIND, newBagSettings(KEY_BAG.height), { at: KEY_BAG.at, plane: live.region.plane })
+    const oldBag = await bagTemplate([oldItem as unknown as BagEntry], kb.key, kb.lookupId, KEY_BAG.height, T, HIDDEN_KIND, newBagSettings(KEY_BAG.height), { at, plane: live.region.plane })
     const signed = built.files.map((f) => nakSign(f.name.startsWith('02-') ? oldBag : f.event, key))
     published.push(...signed)
     return { live, built, keyBag: signed[1], oldItem }
   }
+  /** An item's kind, date, content and tags, with the tags named in `but` left out. */
+  const except = (e: NostrEvent, ...but: string[]) => JSON.stringify([e.kind, e.created_at, e.content, e.tags.filter((t) => !but.includes(t[0]))])
 
-  it('changes only the key item\'s title: the same secret, item key, place, model and date; the bag the same outside, newer', async () => {
+  it('stands the key item two above the key\'s spot: still in its bag\'s region, the LEGACY key where it was', () => {
+    expect([KEY_ITEM_AT.x - KEY_AT.x, KEY_ITEM_AT.y - KEY_AT.y, KEY_ITEM_AT.z - KEY_AT.z]).toEqual([0n, 2n, 0n])
+    expect(KEY_BAG.at).toEqual(KEY_ITEM_AT)
+    expect(regionBase(KEY_ITEM_AT, KEY_BAG.height)).toEqual(regionBase(KEY_AT, KEY_BAG.height))
+    expect(tutorialGameFor(pk).key?.at).toEqual(KEY_AT)
+  })
+
+  it('the rename (v2.1): the title changes, and the key rises to KEY_ITEM_AT; the same secret, item key, model and date', async () => {
     const own = generateSecretKey()
-    const { live, built, keyBag, oldItem } = await publishedAsDungeonKey(own)
-    const r = await renamedKeyBag(live, asGame(own), keyBag, T + 1)
+    const { built, live, keyBag, oldItem } = await publishedAs(own, 'Dungeon Key')
+    const r = await rebuiltKeyBag(live, asGame(own), keyBag, T + 1)
     expect(r.was.id).toBe(oldItem.id)
     expect(r.keyItem.tags.find((t) => t[0] === 'title')).toEqual(['title', KEY_NAME])
     expect(KEY_NAME).toBe('Tutorial Dungeon Key')
-    // Everything but the title, as published.
-    const untitled = (e: NostrEvent) => JSON.stringify([e.kind, e.created_at, e.content, e.tags.filter((t) => t[0] !== 'title')])
-    expect(untitled(r.keyItem)).toBe(untitled(oldItem))
+    expect(r.keyItem.tags.find((t) => t[0] === 'C')).toEqual(['C', positionHex(KEY_ITEM_AT, 1)])
+    expect(except(r.keyItem, 'title', 'C')).toBe(except(oldItem, 'title', 'C'))
+    expect(built.door.tags.find((t) => t[0] === 'lock')?.[1]).toBe(r.keyItem.tags.find((t) => t[0] === 'item')?.[1])
+  })
+
+  it('the raise (v2.2): only the key item\'s place changes; the bag the same outside, newer', async () => {
+    const own = generateSecretKey()
+    const { live, built, keyBag, oldItem } = await publishedAs(own, KEY_NAME)
+    expect(oldItem.tags.find((t) => t[0] === 'C')).toEqual(['C', SPOT])
+    const r = await rebuiltKeyBag(live, asGame(own), keyBag, T + 1)
+    expect(r.was.id).toBe(oldItem.id)
+    expect(r.keyItem.tags.find((t) => t[0] === 'C')).toEqual(['C', positionHex(KEY_ITEM_AT, 1)])
+    // Everything but the place, as published: the title, the secret, the item key, the model, the motions, the date.
+    expect(except(r.keyItem, 'C')).toBe(except(oldItem, 'C'))
     expect(r.keyItem.tags.find((t) => t[0] === 'secret')).toEqual(oldItem.tags.find((t) => t[0] === 'secret'))
     // The door's lock is still this item's public key.
     expect(built.door.tags.find((t) => t[0] === 'lock')?.[1]).toBe(r.keyItem.tags.find((t) => t[0] === 'item')?.[1])
@@ -252,15 +275,15 @@ describe('the key item renamed "Tutorial Dungeon Key" (owner, 2026-11-14; DEPLOY
     expect(r.file.name).toBe('02-key-bag-33330.json')
   })
 
-  it('published, the game reads the renamed key, the same door opens with it, and the room is the same', async () => {
+  it('published, the game reads the raised key at KEY_ITEM_AT, the same door opens with it, and the room is the same', async () => {
     const own = generateSecretKey()
-    const { live, built, keyBag } = await publishedAsDungeonKey(own)
-    expect((await readKeyBag(live)).map((k) => k.key?.name)).toEqual(['Dungeon Key'])
-    const r = await renamedKeyBag(live, asGame(own), keyBag, T + 1)
+    const { live, built, keyBag } = await publishedAs(own, KEY_NAME)
+    expect((await readKeyBag(live)).map((k) => k.at)).toEqual([KEY_AT])
+    const r = await rebuiltKeyBag(live, asGame(own), keyBag, T + 1)
     published.push(nakSign(r.file.event, own))
     const keys = await readKeyBag(live)
     expect(keys.map((k) => k.key?.name)).toEqual(['Tutorial Dungeon Key'])
-    expect(keys.map((k) => k.at)).toEqual([KEY_AT])
+    expect(keys.map((k) => k.at)).toEqual([KEY_ITEM_AT])
     const world = await loadWorld(live)
     expect(world.door?.eventId).toBe(built.door.id)
     const row = heldFromFind(ME, keys[0], 0)!
@@ -269,45 +292,48 @@ describe('the key item renamed "Tutorial Dungeon Key" (owner, 2026-11-14; DEPLOY
     expect((await readRoom(live, world.door!, secret!)).shards.map((s) => s.shard.name)).toEqual(['Maze Kit: aerocarnival checkered tile 4'])
   })
 
-  it('a player who took the old "Dungeon Key" holds it once: the renamed one reads as held, TAKE adds no second row, and the old one opens the door', async () => {
-    const own = generateSecretKey()
-    const { live, built, keyBag } = await publishedAsDungeonKey(own)
-    const [old] = await readKeyBag(live)
-    const oldRow = heldFromFind(ME, old, 0)!
-    const items = { [oldRow.id]: oldRow }
-    published.push(nakSign((await renamedKeyBag(live, asGame(own), keyBag, T + 1)).file.event, own))
-    const [renamed] = await readKeyBag(live)
-    expect(renamed.eventId).not.toBe(old.eventId)
-    expect(keyItemHeld(items, renamed)).toBe(true)
-    const again = addHeld(items, [heldFromFind(ME, renamed, 1)!])
-    expect(again.added).toHaveLength(0)
-    expect(Object.values(again.items).map((it) => it.name)).toEqual(['Dungeon Key'])
-    const world = await loadWorld(live)
-    expect(doorSecretWith(world.door!, doorKey(world.door!, again.items, ME)!)).toBe(built.doorSecret)
+  it('a player who took the key before holds it once: the rebuilt one reads as held, TAKE adds no second row, and the old one opens the door', async () => {
+    for (const title of ['Dungeon Key', KEY_NAME]) {
+      published.length = 0
+      const own = generateSecretKey()
+      const { live, built, keyBag } = await publishedAs(own, title)
+      const [old] = await readKeyBag(live)
+      const oldRow = heldFromFind(ME, old, 0)!
+      const items = { [oldRow.id]: oldRow }
+      published.push(nakSign((await rebuiltKeyBag(live, asGame(own), keyBag, T + 1)).file.event, own))
+      const [rebuilt] = await readKeyBag(live)
+      expect(rebuilt.eventId).not.toBe(old.eventId)
+      expect(keyItemHeld(items, rebuilt)).toBe(true)
+      const again = addHeld(items, [heldFromFind(ME, rebuilt, 1)!])
+      expect(again.added).toHaveLength(0)
+      expect(Object.values(again.items).map((it) => it.name)).toEqual([title])
+      const world = await loadWorld(live)
+      expect(doorSecretWith(world.door!, doorKey(world.door!, again.items, ME)!)).toBe(built.doorSecret)
+    }
   })
 
   it('refuses a bag that is not the game key\'s key bag, and a date not after the published one', async () => {
     const own = generateSecretKey()
-    const { live, built, keyBag } = await publishedAsDungeonKey(own)
-    await expect(renamedKeyBag(live, asGame(own), keyBag, keyBag.created_at)).rejects.toThrow(/newer/)
-    await expect(renamedKeyBag(live, asGame(own), nakSign(built.files[2].event, own), T + 1)).rejects.toThrow(/key bag/)
-    await expect(renamedKeyBag(tutorialGameFor(pk), asGame(sk), keyBag, T + 1)).rejects.toThrow(/key bag/)
-    await expect(renamedKeyBag(live, asGame(generateSecretKey()), keyBag, T + 1)).rejects.toThrow(/not the game key/)
+    const { live, built, keyBag } = await publishedAs(own, KEY_NAME)
+    await expect(rebuiltKeyBag(live, asGame(own), keyBag, keyBag.created_at)).rejects.toThrow(/newer/)
+    await expect(rebuiltKeyBag(live, asGame(own), nakSign(built.files[2].event, own), T + 1)).rejects.toThrow(/key bag/)
+    await expect(rebuiltKeyBag(tutorialGameFor(pk), asGame(sk), keyBag, T + 1)).rejects.toThrow(/key bag/)
+    await expect(rebuiltKeyBag(live, asGame(generateSecretKey()), keyBag, T + 1)).rejects.toThrow(/not the game key/)
     // A tampered bag (its signature no longer holds), read as the generator reads it, from JSON (nostr-tools marks a verified object, and a spread copy keeps the mark).
-    await expect(renamedKeyBag(live, asGame(own), JSON.parse(JSON.stringify({ ...keyBag, created_at: keyBag.created_at - 1 })) as NostrEvent, T + 1)).rejects.toThrow(/key bag/)
+    await expect(rebuiltKeyBag(live, asGame(own), JSON.parse(JSON.stringify({ ...keyBag, created_at: keyBag.created_at - 1 })) as NostrEvent, T + 1)).rejects.toThrow(/key bag/)
   })
 
-  it('refuses a key bag of two entries, a key item this builder would not write, and one already renamed', async () => {
+  it('refuses a key bag of two entries, a key item this builder would not write, and one already as it writes it', async () => {
     const own = generateSecretKey()
-    const { live, oldItem } = await publishedAsDungeonKey(own)
+    const { live, oldItem } = await publishedAs(own, KEY_NAME)
     const kb = regionKeyAt(regionBase(KEY_BAG.at, KEY_BAG.height), KEY_BAG.height, 8)
     const settings = newBagSettings(KEY_BAG.height)
     const place = { at: KEY_BAG.at, plane: live.region.plane }
     const bagOf = async (items: NostrEvent[]) => nakSign(await bagTemplate(items as unknown as BagEntry[], kb.key, kb.lookupId, KEY_BAG.height, T, HIDDEN_KIND, settings, place), own)
-    await expect(renamedKeyBag(live, asGame(own), await bagOf([oldItem, oldItem]), T + 1)).rejects.toThrow(/exactly one entry/)
+    await expect(rebuiltKeyBag(live, asGame(own), await bagOf([oldItem, oldItem]), T + 1)).rejects.toThrow(/exactly one entry/)
     const extra = asGame(own)({ ...oldItem, tags: [...oldItem.tags, ['extra', 'x']] })
-    await expect(renamedKeyBag(live, asGame(own), await bagOf([extra]), T + 1)).rejects.toThrow(/rename it by hand/)
-    const done = asGame(own)({ ...oldItem, tags: oldItem.tags.map((t) => t[0] === 'title' ? ['title', KEY_NAME] : t) })
-    await expect(renamedKeyBag(live, asGame(own), await bagOf([done]), T + 1)).rejects.toThrow(/already named/)
+    await expect(rebuiltKeyBag(live, asGame(own), await bagOf([extra]), T + 1)).rejects.toThrow(/by hand/)
+    const done = asGame(own)({ ...oldItem, tags: oldItem.tags.map((t) => t[0] === 'C' ? ['C', positionHex(KEY_ITEM_AT, 1)] : t) })
+    await expect(rebuiltKeyBag(live, asGame(own), await bagOf([done]), T + 1)).rejects.toThrow(/already as this builder writes it/)
   })
 })

@@ -85,10 +85,17 @@ function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind 
       const box = el.getBoundingClientRect()
       const top = el.querySelector('.ws__topbar')?.getBoundingClientRect().bottom ?? box.top
       const strip = el.querySelector('.ws__strip')?.getBoundingClientRect().top ?? box.bottom
-      const edge = (el.querySelector('.ws__sheet') ?? el.querySelector('.ws__guide'))?.getBoundingClientRect().top ?? strip
-      const insets = { top: Math.max(0, Math.round(top - box.top)), bottom: Math.max(0, Math.round(box.bottom - edge)), rest: Math.max(0, Math.round(box.bottom - strip)) }
+      // A sheet is a sheet over the bottom, or (landscape phone, desktop:
+      // phase 5) a column at the right, which covers the side and not the
+      // bottom: told apart by its shape and where it stands.
+      const sheetBox = el.querySelector('.ws__sheet')?.getBoundingClientRect()
+      const side = !!sheetBox && sheetBox.width < box.width * 0.7 && sheetBox.left > box.left + box.width * 0.3
+      const guide = el.querySelector('.ws__guide')?.getBoundingClientRect().top
+      const edge = (!side && sheetBox ? sheetBox.top : guide) ?? strip
+      const right = side && sheetBox ? Math.max(0, Math.round(box.right - sheetBox.left)) : 0
+      const insets = { top: Math.max(0, Math.round(top - box.top)), bottom: Math.max(0, Math.round(box.bottom - edge)), rest: Math.max(0, Math.round(box.bottom - strip)), right }
       const now = useBenchView.getState().insets
-      if (now.top !== insets.top || now.bottom !== insets.bottom || now.rest !== insets.rest) useBenchView.setState({ insets })
+      if (now.top !== insets.top || now.bottom !== insets.bottom || now.rest !== insets.rest || now.right !== insets.right) useBenchView.setState({ insets })
     }
     const ro = new ResizeObserver(measure)
     for (const sel of ['.ws__topbar', '.ws__bottom', '.ws__sheet', '.ws__guide']) { const n = el.querySelector(sel); if (n) ro.observe(n) }
@@ -97,7 +104,7 @@ function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind 
     return () => { ro.disconnect(); window.removeEventListener('resize', measure) }
   }, [root, sheet, open, guiding])
   // Shut, the bench frames nothing: the next opening starts from the middle.
-  useEffect(() => { if (!open) useBenchView.setState({ insets: { top: 0, bottom: 0, rest: 0 } }) }, [open])
+  useEffect(() => { if (!open) useBenchView.setState({ insets: { top: 0, bottom: 0, rest: 0, right: 0 } }) }, [open])
 }
 
 export function Workshop(): JSX.Element | null {
@@ -118,8 +125,9 @@ export function Workshop(): JSX.Element | null {
     setSheet(openPanel)
     useWorkshop.setState({ openPanel: null })
   }, [open, openPanel])
-  // Closed, nothing stays open for the next time but what the tutorial asks for.
-  useEffect(() => { if (!open) setSheet(null) }, [open])
+  // Closed, nothing stays open for the next time but what the tutorial asks
+  // for, and a guide put away with Esc may come back.
+  useEffect(() => { if (!open) { setSheet(null); useBeginner.getState().resume() } }, [open])
   // The beginner path (phase 4, decision 4): the first opening decides the
   // dock, four tools for someone new, six for anyone who has made something;
   // and a first visit starts the guide, unless the tutorial has the workshop.
@@ -128,7 +136,7 @@ export function Workshop(): JSX.Element | null {
     if (!open || tutorialActive) return
     const b = useBeginner.getState()
     if (b.tools === null) b.setTools(startingTools(guideDone(), useWorkshop.getState().shards))
-    if (!guideDone() && b.step === null) {
+    if (!guideDone() && b.step === null && !b.paused) {
       // "A new shard opens on an empty grid": the guide never starts on a
       // shard with something in it (one the tutorial copied in, say).
       const w = useWorkshop.getState()
@@ -192,6 +200,9 @@ export function Workshop(): JSX.Element | null {
     const ws = useWorkshop.getState()
     if (sheet !== null) setSheet(null)
     else if (viewOpen) setViewOpen(false)
+    // The first-visit guide, up: Esc puts it away for this opening only (it
+    // comes back next time, unless SKIP was tapped), and the workshop stays.
+    else if (useBeginner.getState().step !== null && !tutorialActive) useBeginner.getState().pause()
     else if (ws.selection.length || ws.partSel.length || ws.selectedFaces.length > 0 || ws.facePick.length) { ws.selectVertex(null); ws.clearFacePick() }
     else ws.closeWorkshop()
   })

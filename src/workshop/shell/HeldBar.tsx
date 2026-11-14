@@ -70,16 +70,16 @@ export function HeldBar({ onMore, moreBadge }: { onMore: () => void; moreBadge: 
         <span>{count.word}</span>
       </button>
       <button className="ws__heldbtn" disabled={!canMove} onClick={() => w().rotateSelected(-1)} title="A quarter turn left, in the working plane (Q)" aria-label="Turn left" {...noCallout}>
-        <RotateCcw size={18} strokeWidth={2} aria-hidden /><span>LEFT</span>
+        <RotateCcw size={18} strokeWidth={2} aria-hidden /><span>LEFT</span><kbd className="ws__key" aria-hidden>Q</kbd>
       </button>
       <button className="ws__heldbtn" disabled={!canMove} onClick={() => w().rotateSelected(1)} title="A quarter turn right (E)" aria-label="Turn right" {...noCallout}>
-        <RotateCw size={18} strokeWidth={2} aria-hidden /><span>RIGHT</span>
+        <RotateCw size={18} strokeWidth={2} aria-hidden /><span>RIGHT</span><kbd className="ws__key" aria-hidden>E</kbd>
       </button>
       <button className="ws__heldbtn" disabled={!canMove} onClick={() => w().copySelection()} title="Copy what you hold, and its faces; it stays where it is (Ctrl+C)" aria-label="Copy the selection" {...noCallout}>
-        <Copy size={18} strokeWidth={2} aria-hidden /><span>COPY</span>
+        <Copy size={18} strokeWidth={2} aria-hidden /><span>COPY</span><kbd className="ws__key" aria-hidden>^C</kbd>
       </button>
       <button className="ws__heldbtn ws__heldbtn--two" disabled={clip === null} onClick={() => setAsking((a) => (a === 'paste' ? null : 'paste'))} title={clip ? `Paste the ${held} held` : 'Nothing copied yet'} aria-label={clip ? `Paste the ${held} held` : 'Paste'} aria-haspopup="menu" aria-expanded={asking === 'paste'} {...noCallout}>
-        <ClipboardPaste size={18} strokeWidth={2} aria-hidden /><span>PASTE</span>
+        <ClipboardPaste size={18} strokeWidth={2} aria-hidden /><span>PASTE</span><kbd className="ws__key" aria-hidden>^V</kbd>
       </button>
       <button
         className={`ws__heldbtn${faceHeld ? ' ws__heldbtn--two' : ''}`}
@@ -91,10 +91,10 @@ export function HeldBar({ onMore, moreBadge }: { onMore: () => void; moreBadge: 
         aria-expanded={faceHeld ? asking === 'color' : undefined}
         {...noCallout}
       >
-        <PaintBucket size={18} strokeWidth={2} aria-hidden /><span>COLOR</span>
+        <PaintBucket size={18} strokeWidth={2} aria-hidden /><span>COLOR</span><kbd className="ws__key" aria-hidden>B</kbd>
       </button>
       <button className="ws__heldbtn ws__heldbtn--danger" onClick={() => { if (deletesFace) w().deleteSelectedFace(); else w().deleteSelected() }} title={deletesFace ? 'Remove the selected faces (Del)' : 'Delete what you hold (Del)'} aria-label={deletesFace ? 'Delete the face' : 'Delete selected'} {...noCallout}>
-        <Trash2 size={18} strokeWidth={2} aria-hidden /><span>DELETE</span>
+        <Trash2 size={18} strokeWidth={2} aria-hidden /><span>DELETE</span><kbd className="ws__key" aria-hidden>DEL</kbd>
       </button>
       <button className="ws__heldbtn" onClick={onMore} title="Everything rarer: JOINED, CUT, FILL, SUBDIVIDE, the move pad, exact numbers" aria-label="More" {...noCallout}>
         <Ellipsis size={18} strokeWidth={2} aria-hidden /><span>MORE</span>

@@ -53,6 +53,13 @@ interface Beginner {
   setStep: (s: GuideStep | null) => void
   /** The guide done or skipped: it never comes back, this session even where storage refuses the flag. */
   done: boolean
+  /**
+   * Put away with Esc for this opening only (phase 5): not done, so it comes
+   * back the next time the workshop opens, unless SKIP was tapped.
+   */
+  paused: boolean
+  pause: () => void
+  resume: () => void
   finish: () => void
   /** What glows: the real button the guide points at. */
   glow: Tool | 'deploy' | null
@@ -68,6 +75,9 @@ export const useBeginner = create<Beginner>((set, get) => ({
   step: null,
   setStep: (step) => set({ step }),
   done: read(GUIDE_KEY) !== null,
+  paused: false,
+  pause: () => set({ step: null, paused: true, glow: null }),
+  resume: () => set({ paused: false }),
   finish: () => { write(GUIDE_KEY, '1'); set({ step: null, done: true }) },
   glow: null,
   setGlow: (glow) => set({ glow }),

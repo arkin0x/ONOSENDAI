@@ -937,7 +937,7 @@ function Framer(): null {
   const camera = useThree((s) => s.camera) as PerspectiveCamera
   const size = useThree((s) => s.size)
   const invalidate = useThree((s) => s.invalidate)
-  const now = useRef({ top: 0, bottom: 0, rest: 0 })
+  const now = useRef({ top: 0, bottom: 0, rest: 0, right: 0 })
   const applied = useRef('')
   useEffect(() => useBenchView.subscribe((s, prev) => { if (s.insets !== prev.insets) invalidate() }), [invalidate])
   useEffect(() => () => { camera.clearViewOffset(); camera.zoom = 1; camera.updateProjectionMatrix() }, [camera])
@@ -949,10 +949,11 @@ function Framer(): null {
     n.top = ease(n.top, goal.top)
     n.bottom = ease(n.bottom, goal.bottom)
     n.rest = goal.rest ?? goal.bottom
+    n.right = ease(n.right, goal.right ?? 0)
     const o = frameOffset(size.width, size.height, n)
-    const zoom = frameZoom(size.height, o ? o.fullHeight : size.height, n)
+    const zoom = frameZoom(size.height, o ? o.fullHeight : size.height, n, size.width)
     // The aspect is in the key because R3F puts its own back on a resize.
-    const keyOf = (): string => `${o ? `${o.fullWidth}:${o.fullHeight}:${o.y}` : 'none'}:${zoom.toFixed(4)}:${camera.aspect}`
+    const keyOf = (): string => `${o ? `${o.fullWidth}:${o.fullHeight}:${o.x}:${o.y}` : 'none'}:${zoom.toFixed(4)}:${camera.aspect}`
     if (keyOf() !== applied.current) {
       camera.zoom = zoom
       if (o) camera.setViewOffset(o.fullWidth, o.fullHeight, o.x, o.y, o.width, o.height)
@@ -963,7 +964,7 @@ function Framer(): null {
       }
       applied.current = keyOf()
     }
-    if (n.top !== goal.top || n.bottom !== goal.bottom) invalidate()
+    if (n.top !== goal.top || n.bottom !== goal.bottom || n.right !== (goal.right ?? 0)) invalidate()
   })
   return null
 }

@@ -3,8 +3,9 @@
  *
  * arkinox, 2026-10-23: "on the bottom left corner it may make sense to bring
  * back the sphere we have in the workshop and use it to look". It stands
- * above the menu button, on the button's left edge, in the dock the route
- * overlay uses outside WALK (the overlay is never up in WALK). A drag on it
+ * in the bottom right column over JUMP and DOWN, where the pad stands
+ * outside WALK (owner, 2026-11-14: "Movement should be on the left, and
+ * look/jump should be on the right"; styles.css .orbsquare.walklook). A drag on it
  * turns your head the way a drag on the scene does (lib/walkLook.ts), but
  * further: a drag across the ball turns WALK_LOOK_SPHERE_DEG_PER_BALL on
  * every screen, so it is a real control and not only a sign that you can

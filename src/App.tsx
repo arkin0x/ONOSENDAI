@@ -445,13 +445,12 @@ export default function App(): JSX.Element {
             (arkinox, 2026-10-12), and placing moves no avatar, so there is
             no route to show. */}
         {showPad && !offerUp && !deploying && <RouteOverlay />}
-        {/* WALK's look ball, above the menu button (WalkLookSphere.tsx). Not
-            tied to the pad, which a tap on the scene folds; not while the
-            menu covers the scene or the deploy bar holds this corner. */}
+        {/* WALK's look ball, in the bottom right over JUMP and DOWN
+            (WalkLookSphere.tsx). Not tied to the pad, which a tap on the scene
+            folds; not while the menu covers the scene or while placing. */}
         {!crowded && !offerUp && !deploying && <WalkLookSphere />}
-        {/* VIEW's fly, forward and back, in the same dock above the menu
-            button (ViewFlyButtons.tsx); the LOOK ball is WALK's, so the two
-            never stand there together. */}
+        {/* VIEW's fly, forward and back, in the dock above the menu button
+            (ViewFlyButtons.tsx). */}
         {!crowded && !offerUp && !deploying && <ViewFlyButtons />}
       </div>
       {/* Off-head too: tapping a block hides the pad like any scene tap, and

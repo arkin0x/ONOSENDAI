@@ -2,12 +2,12 @@
  * SyncWarning.tsx: WALK has run too far ahead of its proofs.
  *
  * WALK shows every step the moment it is pressed and proves them behind you
- * (store/useWalk.ts). Two steps behind is a walk keeping up; from three the
- * view is promising more than the chain has, and this says so in the middle
- * of the screen (arkinox, 2026-10-13): red, WARNING: LOSING SYNC, and how far
- * behind the proof chain is. It fades in, and fades out faster than it came
- * in once the walk is back to two, so catching up reads as relief rather
- * than as another flash.
+ * (store/useWalk.ts). A few moves behind is a walk keeping up; from
+ * SYNC_WARN_AT (10, arkinox 2026-11-14; it was 3) the view is promising more
+ * than the chain has, and this says so in the middle of the screen (arkinox,
+ * 2026-10-13): red, WARNING: LOSING SYNC, and how far behind the proof chain
+ * is. It fades in, and fades out faster than it came in once the walk is
+ * back under it, so catching up reads as relief rather than another flash.
  *
  * Dressed as v1's derezz warning: a black panel in a red and black hazard
  * frame, the words in red Krypton (styles.css, .syncwarn).

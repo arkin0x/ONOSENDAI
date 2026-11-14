@@ -156,12 +156,12 @@ describe('WALK', () => {
     for (let i = 0; i < 6; i++) useWalk.getState().press('right')
     expect(useWalk.getState().behind).toBe(0)
     expect(losingSync(useWalk.getState().behind)).toBe(false)
-    useWalk.getState().press('up')
+    // Each turn closes a segment: nine behind is still quiet, the tenth warns (2026-11-14).
+    for (let i = 0; i < 9; i++) useWalk.getState().press(i % 2 === 0 ? 'up' : 'right')
+    expect(useWalk.getState().behind).toBe(9)
+    expect(losingSync(useWalk.getState().behind)).toBe(false)
     useWalk.getState().press('right')
-    useWalk.getState().press('up')
-    useWalk.getState().press('right')
-    // Four closed (the first one computing), one open.
-    expect(useWalk.getState().behind).toBe(4)
+    expect(useWalk.getState().behind).toBe(10)
     expect(losingSync(useWalk.getState().behind)).toBe(true)
   })
 
@@ -285,9 +285,10 @@ describe('WALK', () => {
   })
 
   it('warns from three steps behind and stands down at two', () => {
-    expect(SYNC_WARN_AT).toBe(3)
-    expect(losingSync(2)).toBe(false)
-    expect(losingSync(3)).toBe(true)
-    expect(losingSync(7)).toBe(true)
+    expect(SYNC_WARN_AT).toBe(10)
+    expect(losingSync(3)).toBe(false)
+    expect(losingSync(9)).toBe(false)
+    expect(losingSync(10)).toBe(true)
+    expect(losingSync(17)).toBe(true)
   })
 })

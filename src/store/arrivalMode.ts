@@ -44,7 +44,7 @@
 
 import { cycleMode, currentPadMode } from './padMode'
 import { samePosition, savedChainLoaded, useCyberspace } from './useCyberspace'
-import { useCoordRoute } from './useCoordRoute'
+import { linkRegionSeed } from './useCoordRoute'
 import { useRegion } from './useRegion'
 import { identitySettled, tutorialMayRun, tutorialStarts, useTutorial } from './useTutorial'
 import { noteArrivalModeAsked, tutorialAsked } from '../tutorial/gate'
@@ -86,10 +86,9 @@ export function applyArrivalMode(mode: ArrivalMode): boolean {
   const cs = useCyberspace.getState()
   if (!cs.viewing()) return false
   if (mode === 'view') return true
-  // A /C/ prefix link's view: its region, while that view is still the one up.
-  const route = useCoordRoute.getState()
-  const seed = route.region && route.label !== null && cs.focus?.label === route.label ? route.region.prefix : undefined
-  useRegion.getState().enter(seed)
+  // A /C/ prefix link's view: its region, while that view is still the one
+  // up, as the Region button starts it (useRegion toggleRegion).
+  useRegion.getState().enter(linkRegionSeed())
   return useRegion.getState().active
 }
 

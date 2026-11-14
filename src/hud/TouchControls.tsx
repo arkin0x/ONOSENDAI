@@ -80,7 +80,7 @@ import { buildHeld, cycleMode, enterWalk, leaveWalk, padMode, recall } from '../
 import type { WalkFrom } from '../store/useWalk'
 import { useCover } from '../hooks/useCover'
 import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
-import { regionAtOriginalSize, useRegion } from '../store/useRegion'
+import { regionAtOriginalSize, toggleRegion, useRegion } from '../store/useRegion'
 import { holdEnd, holdEndAll, holdStart } from '../store/walkHold'
 import { flyDir, useViewFly } from '../lib/viewFly'
 import { walkHeldDir, type HeldDir } from '../lib/walkKeys'
@@ -404,7 +404,9 @@ export function TouchControls(): JSX.Element {
             {/* Region (lucide scan): picks a speakeasy region, VIEW only, left
                 of the globe. On turns region mode on and opens the REGION chip
                 (store/useRegion.ts, hud/RegionChip.tsx). The pin cell is its
-                own: REMOVE PIN is gone with the cross marker (arkinox, 2026-11-11). */}
+                own: REMOVE PIN is gone with the cross marker (arkinox, 2026-11-11).
+                On a /C/ region link's view it starts on the link's region
+                (useRegion toggleRegion; owner, 2026-11-13). */}
             {viewing && !building && (
               <button
                 className={`touchpad__key touchpad__key--region${regionActive ? ' is-on' : ''}`}
@@ -412,7 +414,7 @@ export function TouchControls(): JSX.Element {
                 aria-label="Region selector"
                 aria-pressed={regionActive}
                 {...noCallout}
-                onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); const r = useRegion.getState(); if (r.active) r.exit(); else r.enter() }}
+                onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); toggleRegion() }}
               >
                 <Scan size={16} strokeWidth={2.25} aria-hidden />
               </button>

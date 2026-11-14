@@ -46,6 +46,7 @@ import { useFrame } from '@react-three/fiber'
 import { BufferGeometry, Color, Float32BufferAttribute, type LineSegments } from 'three'
 import type { Plane } from 'cyberspace-core'
 import { useCyberspace } from '../store/useCyberspace'
+import { useV1HopList } from '../hooks/useChainStop'
 import { useBuilder } from '../store/useBuilder'
 import { anchorCentre, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import { travelOffset } from '../lib/travel'
@@ -254,10 +255,20 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   const events = useCyberspace((s) => s.events)
   const published = useCyberspace((s) => s.published)
 
-  // Whose trail: the spectated avatar's chain, else your own.
+  // Whose trail: the spectated avatar's chain, else your own. A spectated
+  // chain a proof the relay's rules reject stops is drawn up to where they
+  // stand, every position from the stop on there, as your own positionHistory
+  // is (store focusStand; owner, 2026-11-13). The 5.13 list's arrival can
+  // settle that, so it reads the trail again.
+  const v1List = useV1HopList()
   const positionHistory = useMemo(
-    () => (spectate ? spectate.actions.map((a) => a.position) : ownHistory),
-    [spectate, ownHistory],
+    () => {
+      if (!spectate) return ownHistory
+      const s = useCyberspace.getState()
+      return spectate.actions.map((a, i) => s.focusStand(i)?.position ?? a.position)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [spectate, ownHistory, v1List],
   )
   const split = (placed ? scrub : exploreIndex) ?? positionHistory.length - 1
   // Which positions are only on this device: your own chain's actions whose

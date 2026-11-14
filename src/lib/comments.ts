@@ -266,8 +266,11 @@ export function threadComments(events: NostrEvent[], subject: Pick<CommentSubjec
  * The comments under one thing, threaded, whatever the root scope: `root` is
  * what the comments' `A` or `E` tag names, `itemId` (or `itemAddress`) what a
  * top-level comment answers. For an action (social.ts) both are its id.
+ * `rootKind`: an addressable thing's (a published shard), whose top-level
+ * comments may name any version of it by `e` alone: any parent of that kind
+ * under the root is the thing.
  */
-export function threadUnder(events: NostrEvent[], root: string, itemId: string, itemAddress?: string, opened: ReadonlyMap<string, string> = new Map(), sealedItem?: string): Comment[] {
+export function threadUnder(events: NostrEvent[], root: string, itemId: string, itemAddress?: string, opened: ReadonlyMap<string, string> = new Map(), sealedItem?: string, rootKind?: number): Comment[] {
   const address = root
   const byId = new Map<string, Comment & { parentKind: number; parentAddress: string | null }>()
   for (const ev of events) {
@@ -283,7 +286,7 @@ export function threadUnder(events: NostrEvent[], root: string, itemId: string, 
   const roots: Comment[] = []
   const ordered = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
   for (const c of ordered) {
-    if (c.parentKind !== COMMENT_KIND && ((!!itemId && c.parentId === itemId) || (!!itemAddress && c.parentAddress === itemAddress))) roots.push(c)
+    if (c.parentKind !== COMMENT_KIND && ((!!itemId && c.parentId === itemId) || (!!itemAddress && c.parentAddress === itemAddress) || (rootKind !== undefined && c.parentKind === rootKind))) roots.push(c)
     else if (c.parentKind === COMMENT_KIND) byId.get(c.parentId)?.replies.push(c)
   }
   const placed = new Set<string>()

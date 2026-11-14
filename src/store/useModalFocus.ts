@@ -17,7 +17,7 @@ import { create } from 'zustand'
 import type { LandOn } from '../lib/notifications'
 
 /** How long a landing waits for its comment or reactions to be drawn. */
-export const LAND_WAIT_MS = 20_000
+export const LAND_WAIT_MS = 12_000
 /** How long the landed-on thing glows. */
 export const LAND_GLOW_MS = 4000
 /**

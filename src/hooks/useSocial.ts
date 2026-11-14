@@ -142,6 +142,6 @@ export function useActionComments(action: SocialTarget | null): CommentsState {
   // A comment by someone blocked is not shown, nor others' replies under it; yours stay (store/useMutes).
   const muted = useMutes((s) => s.muted)
   const me = useCyberspace((s) => s.identity.pubkey)
-  const comments = id ? pruneThread(address ? threadUnder(events, address, id, address) : threadUnder(events, id, id), muted, me) : []
+  const comments = id ? pruneThread(address ? threadUnder(events, address, id, address, undefined, undefined, action?.kind) : threadUnder(events, id, id), muted, me) : []
   return { comments, loading, error, trouble, posting, post, refresh: () => setTick((t) => t + 1) }
 }

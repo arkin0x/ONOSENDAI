@@ -24,7 +24,8 @@
 
 import { takeIntoKeeping, you } from '../lib/carried'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Copy, CopyPlus, Move3d, PackagePlus, Pencil, Rotate3d, Target, TvMinimal } from 'lucide-react'
+import { Copy, CopyPlus, GitFork, Move3d, PackagePlus, Pencil, Rotate3d, Target, TvMinimal } from 'lucide-react'
+import type { FeedObject } from 'sno-core/feed'
 import { nip19 } from 'nostr-tools'
 import { regionLabel } from '../lib/loot'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
@@ -42,7 +43,7 @@ import { useInventory } from '../store/useInventory'
 import { addToRoom, editPlaced, movePlaced } from '../store/useBuilder'
 import { DeleteDoorCard, DoorOwnerBlock } from './DoorOwner'
 import { doorSecret } from '../store/doorSecrets'
-import { useStash } from './stash'
+import { openFeedObjectInWorkshop, useStash } from './stash'
 import { useWorkshop } from '../store/useWorkshop'
 import { Stacked, leaveModals, useModalStack } from './modalStack'
 import { usePublicShard, worldItemOfObject } from '../store/usePublicShard'
@@ -125,14 +126,15 @@ export function PublicShardModal(): JSX.Element | null {
   useEffect(() => { if (gone) close() }, [gone, close])
   useModalStack(item !== null && !gone, close)
   if (!item || gone) return null
-  return <Stacked><ItemCard item={item} onClose={close} published /></Stacked>
+  return <Stacked><ItemCard item={item} onClose={close} published={object ?? undefined} /></Stacked>
 }
 
 /**
  * The card itself, for a thing hidden in the world (SecretModal) or a
- * published shard (`published`, PublicShardModal).
+ * published shard (`object`, PublicShardModal).
  */
-export function ItemCard({ item, onClose, published = false }: { item: WorldItem; onClose: () => void; published?: boolean }): JSX.Element {
+export function ItemCard({ item, onClose, published: object }: { item: WorldItem; onClose: () => void; published?: FeedObject }): JSX.Element {
+  const published = object !== undefined
   const me = useCyberspace((s) => s.identity.pubkey)
   const targeted = useCyberspace((s) => (item.author ? !!s.targets[item.author] : false))
   const author = item.author ?? ''
@@ -343,7 +345,14 @@ export function ItemCard({ item, onClose, published = false }: { item: WorldItem
         <div className="secret__actions">
           {/* A published shard is at no place: nothing to fly to. */}
           {!published && <button className="secret__act" onClick={goTo} title="Go to it"><Rotate3d size={ICON} strokeWidth={2.25} aria-hidden />VIEW</button>}
-          {(item.type === 'shard' || item.type === 'message') && (!(coin || nft) || words) && (
+          {/* A published shard goes to the workshop as the Shard Feed sends it: yours under its own address, someone else's as a credited remix. */}
+          {object && (
+            <button className="secret__act" onClick={() => { leave(); openFeedObjectInWorkshop(object, me) }} title={mine ? 'Open it in your workshop under its own address, so PUBLISH edits it in place' : 'Copy it into your workshop as your own, still credited'}>
+              {mine ? <Pencil size={ICON} strokeWidth={2.25} aria-hidden /> : <GitFork size={ICON} strokeWidth={2.25} aria-hidden />}
+              {mine ? 'OPEN IN WORKSHOP' : 'REMIX'}
+            </button>
+          )}
+          {!object && (item.type === 'shard' || item.type === 'message') && (!(coin || nft) || words) && (
             <button className="secret__act" onClick={copy} title={item.type === 'shard' ? 'Copy this model into your workshop' : coin ? 'Copy the words around the token' : nft ? 'Copy the words around the NFT link' : 'Copy the text'}>
               {item.type === 'shard' ? <CopyPlus size={ICON} strokeWidth={2.25} aria-hidden /> : <Copy size={ICON} strokeWidth={2.25} aria-hidden />}
               {copied ? 'COPIED' : item.type === 'shard' ? 'COPY TO WORKSHOP' : 'COPY TEXT'}

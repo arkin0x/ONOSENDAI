@@ -262,6 +262,16 @@ export function publishedShardOnly(on: NotifOn, rows: readonly HiddenRowLike[], 
   return on.type === 'item' && onShard(on) && (on.address === undefined || authorOf(on.address) === me) && !hiddenRowFor(rows, on)
 }
 
+/**
+ * Whether an item notification is about someone else's published shard,
+ * hidden nowhere here: a comment on their shard's public thread that tags
+ * you, now that those threads count (ourRoot). Neither "your shard" nor
+ * "your hidden item".
+ */
+export function theirPublishedShard(on: NotifOn, rows: readonly HiddenRowLike[], me: string): boolean {
+  return on.type === 'item' && onShard(on) && on.address !== undefined && authorOf(on.address) !== me && !hiddenRowFor(rows, on)
+}
+
 /** VIEW's refusals on an item. */
 export const NOT_HIDDEN_HERE = 'That item is not one this device hid, so it cannot be opened from here.'
 export const SHARD_UNCHECKED = 'That shard could not be read from any relay. Try again later.'

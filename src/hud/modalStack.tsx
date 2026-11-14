@@ -24,6 +24,7 @@ import type { ReactNode } from 'react'
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useEscape } from '../hooks/useEscape'
+import { useModalFocus } from '../store/useModalFocus'
 
 /** The closers of the stacked modals that are open. */
 const open = new Set<{ close: () => void }>()
@@ -40,7 +41,9 @@ export function useModalStack(active: boolean, close: () => void): void {
     if (!active) return
     const entry = { close: () => latest.current() }
     open.add(entry)
-    return () => { open.delete(entry) }
+    // A landing VIEW asked for and this modal never drew (a muted comment,
+    // a card with no reactions) goes with it, so no later card jumps to it.
+    return () => { open.delete(entry); useModalFocus.getState().done() }
   }, [active])
 }
 

@@ -60,9 +60,10 @@ export function shardFilter(at: { address?: string; id: string | null }): Filter
 
 /**
  * Read a published shard from the feed's relays, yours and its author's
- * inbox, and open its card. Resolves to why not, or null once it is open.
+ * inbox, and open its card. Resolves to why not, or null once it is open
+ * (or no longer `wanted`: the player moved on while the relays answered).
  */
-export async function openPublishedShard(at: { address?: string; id: string | null }, me: string): Promise<string | null> {
+export async function openPublishedShard(at: { address?: string; id: string | null }, me: string, wanted: () => boolean = () => true): Promise<string | null> {
   const filter = shardFilter(at)
   if (!filter) return SHARD_NOT_FOUND
   const author = at.address?.split(':')[1]
@@ -75,6 +76,6 @@ export async function openPublishedShard(at: { address?: string; id: string | nu
   const object = objectFromEvent(newest)
   // Sealed to a place or for sale (an `encrypted` tag), or a payload this client cannot read.
   if (!object) return newest.tags.some((t) => t[0] === 'encrypted') ? SHARD_SEALED : SHARD_UNREADABLE
-  usePublicShard.getState().open(object)
+  if (wanted()) usePublicShard.getState().open(object)
   return null
 }

@@ -33,7 +33,7 @@ import { BackupTrouble, RelayTrouble } from './RelayTrouble'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AtSign, MessageCircle, MessageSquare } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
-import { itemToView, landingOf, publishedShardOnly, type Notification } from '../lib/notifications'
+import { itemToView, landingOf, publishedShardOnly, theirPublishedShard, type Notification } from '../lib/notifications'
 import { reactionGlyph } from '../lib/social'
 import { parseAction } from '../lib/events'
 import { COMMENT_KIND, PLACEHOLDER } from '../lib/comments'
@@ -82,9 +82,13 @@ function verbOf(n: Notification): string {
   if (n.what === 'mention') return 'tagged you in local chat'
   // A shard you published and never hid here is seen in other clients' feeds,
   // and reacted to there: it is your shard, not a hidden item (2026-11-02).
-  const shardOnly = publishedShardOnly(n.on, useShards.getState().mine, useCyberspace.getState().identity.pubkey)
+  const rows = useShards.getState().mine
+  const me = useCyberspace.getState().identity.pubkey
+  const shardOnly = publishedShardOnly(n.on, rows, me)
+  // Someone else's published shard, whose public thread tagged you (2026-11-14).
+  const theirs = theirPublishedShard(n.on, rows, me)
   // A target found nowhere is kept rather than missed, and said as a possibility.
-  const on = n.on.type === 'action' ? 'your move' : n.on.type === 'item' ? (shardOnly ? 'your shard' : n.guessed ? 'what may be your hidden message' : 'your hidden item') : 'your comment'
+  const on = n.on.type === 'action' ? 'your move' : n.on.type === 'item' ? (shardOnly ? 'your shard' : theirs ? 'a shard' : n.guessed ? 'what may be your hidden message' : 'your hidden item') : 'your comment'
   if (n.what === 'reaction') return `reacted to ${on}`
   return n.on.type === 'comment' ? 'replied to your comment' : `commented on ${on}`
 }
@@ -173,11 +177,12 @@ async function fetchById(id: string): Promise<{ kind: number; pubkey: string; ta
 }
 
 /** Open a move by its id: from the chain in hand when it is there, else from the relays. */
-async function openMove(id: string): Promise<string | null> {
+async function openMove(id: string, wanted: () => boolean = () => true): Promise<string | null> {
   const cs = useCyberspace.getState()
   const chain = cs.focusChain()
   const i = chain.findIndex((a) => a.id === id)
   if (i >= 0) {
+    if (!wanted()) return null
     walkChain(i === chain.length - 1 ? null : i)
     useSocialUi.getState().openAction(chain[i])
     return null
@@ -188,6 +193,7 @@ async function openMove(id: string): Promise<string | null> {
   // this client does not recognize, needs its chain around it to say what it is.
   if (!action && raw) return 'That action is not one this client can show on its own: it is a move inside a game, or an action this client does not recognize. Open the chain it is on in the chain explorer to see it in place.'
   if (!action) return 'That move could not be found on any relay.'
+  if (!wanted()) return null
   useSocialUi.getState().openAction(action)
   return null
 }
@@ -198,10 +204,11 @@ async function openMove(id: string): Promise<string | null> {
  * 2026-11-14: "when I click View Shard, it just says the shard is published
  * so there's nothing to see... that's horrible ux").
  */
-async function openItem(on: { id: string | null; lookupId?: string; address?: string; kind?: number }): Promise<string | null> {
+async function openItem(on: { id: string | null; lookupId?: string; address?: string; kind?: number }, wanted: () => boolean = () => true): Promise<string | null> {
   const got = await itemToView(() => useShards.getState().mine, on, fetchById)
   if ('why' in got) return got.why
-  if ('published' in got) return openPublishedShard(got.published, useCyberspace.getState().identity.pubkey)
+  if ('published' in got) return openPublishedShard(got.published, useCyberspace.getState().identity.pubkey, wanted)
+  if (!wanted()) return null
   goToDeployment(got.row)
   return null
 }
@@ -232,30 +239,42 @@ async function itemOfThread(comment: { kind: number; tags: string[][] }): Promis
 export async function view(n: Notification): Promise<string | null> {
   // A tag in local chat: the dock, scrolled to that line, with no modal over it.
   if (n.on.type === 'chat') { leaveModals(); useChat.getState().reveal(n.on.id); return null }
+  // Only the latest VIEW opens anything, and only while the list is up: a
+  // slow relay read that answers after the player moved on opens nothing.
+  const ticket = ++viewing
+  const wanted = (): boolean => ticket === viewing && useNotifications.getState().open
   useModalFocus.getState().land(landingOf(n))
-  const why = await openTarget(n)
-  if (why) useModalFocus.getState().done()
+  let why: string | null
+  try {
+    why = await openTarget(n, wanted)
+  } catch {
+    why = 'That could not be read from any relay. Try again later.'
+  }
+  if (why && ticket === viewing) useModalFocus.getState().done()
   return why
 }
 
-async function openTarget(n: Notification): Promise<string | null> {
-  if (n.on.type === 'action') return openMove(n.on.id)
-  if (n.on.type === 'item') return openItem(n.on)
+/** The latest VIEW, by count (view). */
+let viewing = 0
+
+async function openTarget(n: Notification, wanted: () => boolean): Promise<string | null> {
+  if (n.on.type === 'action') return openMove(n.on.id, wanted)
+  if (n.on.type === 'item') return openItem(n.on, wanted)
   // A reply or a reaction to your comment: open where that comment was made.
   const comment = await fetchById(n.on.id)
   if (!comment || comment.kind !== COMMENT_KIND) return 'That comment could not be found on any relay.'
   const rootKind = Number(comment.tags.find((t) => t[0] === 'K')?.[1])
   if (rootKind === 3333) {
     const root = comment.tags.find((t) => t[0] === 'E')?.[1]
-    return root ? openMove(root) : 'That comment names no move.'
+    return root ? openMove(root, wanted) : 'That comment names no move.'
   }
   if (rootKind === SNO_KIND) {
     const address = comment.tags.find((t) => t[0] === 'A')?.[1]
     const id = comment.tags.find((t) => t[0] === 'E')?.[1] ?? null
-    return openPublishedShard({ ...(address ? { address } : {}), id }, useCyberspace.getState().identity.pubkey)
+    return openPublishedShard({ ...(address ? { address } : {}), id }, useCyberspace.getState().identity.pubkey, wanted)
   }
   const bag = comment.tags.find((t) => t[0] === 'A')?.[1]
-  return openItem({ id: await itemOfThread(comment), lookupId: bag?.split(':')[2] })
+  return openItem({ id: await itemOfThread(comment), lookupId: bag?.split(':')[2] }, wanted)
 }
 
 function Row({ n, words }: { n: Notification; words?: string }): JSX.Element {

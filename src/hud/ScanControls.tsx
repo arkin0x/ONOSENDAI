@@ -16,7 +16,10 @@
  * says who computes it: this device, free, up to its benchmark; HOSAKA, with
  * the price, above it; a cube already held is only asked about again. While
  * a scan runs the orb is CANCEL and a line under the controls says how far
- * along it is; then what it found.
+ * along it is; then what it found. A HOSAKA height the Cloud compute mode
+ * asks about (ASK, or AUTO over its cap) takes two presses: the first arms
+ * CONFIRM with the price, the second pays (store/useScan.ts). A HOSAKA scan
+ * paid for has no CANCEL: it finishes, and the key is held as bought.
  */
 
 import { useEffect, useState } from 'react'
@@ -24,7 +27,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
 import { useSecrets } from '../store/useSecrets'
-import { scanPrice, useScan, type ScanJob, type ScanResult } from '../store/useScan'
+import { scanCancellable, scanPrice, useScan, type ScanJob, type ScanResult } from '../store/useScan'
 import { useCalibration } from '../lib/calibration'
 import { localKeyCeiling } from '../lib/deployPlan'
 import { heldCube, scanRange, SCAN_MIN_HEIGHT, type ScanRange } from '../lib/scanCube'
@@ -42,7 +45,8 @@ export function scanTag(height: number, range: ScanRange, held: boolean, price: 
 }
 
 /** The line under the controls while a scan runs, or after it. */
-export function scanLine(job: ScanJob | null, result: ScanResult | null, percent: number | null, elapsed: number, cloudStatus: CloudStatus, buyingStatus: 'submitting' | 'computing' | null): string | null {
+export function scanLine(job: ScanJob | null, result: ScanResult | null, percent: number | null, elapsed: number, cloudStatus: CloudStatus, buyingStatus: 'submitting' | 'computing' | null, confirmSats: number | null = null): string | null {
+  if (!job && confirmSats !== null) return `PRESS AGAIN TO PAY ${confirmSats} SATS`
   if (job) {
     if (job.asking) return 'ASKING RELAYS'
     if (job.route === 'cloud') {
@@ -55,7 +59,8 @@ export function scanLine(job: ScanJob | null, result: ScanResult | null, percent
   if (!result) return null
   if (result.kind === 'cancelled') return 'CANCELLED'
   if (result.kind === 'failed') return result.message
-  return result.count > 0 ? `FOUND ${result.count}` : 'NOTHING FOUND'
+  // Said with its height: a scan at 2^H opens what was hidden at H, not below it.
+  return result.count > 0 ? `FOUND ${result.count} AT 2^${result.height}` : `NOTHING AT 2^${result.height}`
 }
 
 /** A local scan's progress from the benchmark's estimate: never 100 until it is done. */
@@ -64,17 +69,27 @@ export function scanPercent(job: ScanJob | null, now: number): number | null {
   return Math.min(99, Math.floor(((now - job.startedAt) / 1000 / job.estSeconds) * 100))
 }
 
+/**
+ * Only in SCAN: a thin gate, so the controls' subscriptions (the cursor, the
+ * keys, the cloud) cost nothing in the other modes.
+ */
 export function ScanControls(): JSX.Element | null {
   const active = useScan((s) => s.active)
   const viewing = useCyberspace((s) => s.viewing())
   const building = useBuilder((s) => s.active)
+  return active && viewing && !building ? <ScanDock /> : null
+}
+
+function ScanDock(): JSX.Element {
   const height = useScan((s) => s.height)
   const job = useScan((s) => s.job)
   const result = useScan((s) => s.result)
+  const confirm = useScan((s) => s.confirm)
   const cloudOff = useCyberspace((s) => s.cloudPrefs.mode === 'off')
   const cloudCap = useCyberspace((s) => s.cloud.limits?.max_hop_height ?? null)
   const limitsKnown = useCyberspace((s) => s.cloud.limits !== null)
   const cloudStatus = useCyberspace((s) => s.cloud.status)
+  const cloudJob = useCyberspace((s) => s.cloud.job)
   const price = useCyberspace((s) => scanPrice(height, s))
   // The benchmark landing moves the local max (localKeyCeiling reads it).
   useCalibration((s) => s.hopHeight)
@@ -84,18 +99,17 @@ export function ScanControls(): JSX.Element | null {
   const keys = useSecrets((s) => s.keys)
   const held = heldCube(keys, cursor, plane, height) !== null
   const buying = useSecrets((s) => s.buying)
-  const shown = active && viewing && !building
   const bind = useRepeatable()
 
-  // HOSAKA's caps, asked once, as the HOSAKA card asks for them.
+  // HOSAKA's caps and prices, and only those (never a kept job resumed).
   useEffect(() => {
-    if (shown && !limitsKnown && !cloudOff) void useCyberspace.getState().resumeCloudJob()
-  }, [shown, limitsKnown, cloudOff])
+    if (!limitsKnown && !cloudOff) void useCyberspace.getState().fetchCloudLimits()
+  }, [limitsKnown, cloudOff])
 
   // A height past the range now (HOSAKA switched off): back to the top of it.
   useEffect(() => {
-    if (shown && !job && height > range.top) useScan.getState().setHeight(range.top)
-  }, [shown, job, height, range.top])
+    if (!job && height > range.top) useScan.getState().setHeight(range.top)
+  }, [job, height, range.top])
 
   // A local scan's clock, while it computes.
   const [now, setNow] = useState(() => Date.now())
@@ -106,14 +120,15 @@ export function ScanControls(): JSX.Element | null {
     return () => window.clearInterval(t)
   }, [ticking])
 
-  if (!shown) return null
-
   const cloud = !held && height > range.localMax
+  const route = held ? 'held' : cloud ? 'cloud' : 'local'
+  const armed = !job && confirm !== null && cloud && confirm.height === height && confirm.sats === price
+  const cancellable = scanCancellable(job, { status: cloudStatus, job: cloudJob })
   const percent = scanPercent(job, now)
   const elapsed = job ? Math.max(0, Math.floor((now - job.startedAt) / 1000)) : 0
-  const line = scanLine(job, result, percent, elapsed, cloudStatus, buying?.status ?? null)
-  const busyElsewhere = !job && cloud && buying !== null
-  const goDisabled = !job && cloud && (price === null || busyElsewhere)
+  const line = scanLine(job, result, percent, elapsed, cloudStatus, buying?.status ?? null, armed ? confirm.sats : null)
+  const goDisabled = job ? !cancellable : cloud && (price === null || buying !== null)
+  const word = job ? (cancellable ? 'CANCEL' : cloudStatus === 'quoting' || buying?.status === 'submitting' ? 'ASKING' : 'PAID') : armed ? 'CONFIRM' : 'SCAN'
   const s = useScan.getState
 
   return (
@@ -131,29 +146,32 @@ export function ScanControls(): JSX.Element | null {
             <ChevronDown size={18} strokeWidth={2.25} aria-hidden />
           </button>
         </div>
-        <div className="flyorb__row scanorbs__go">
+        <div className="scanorbs__go">
+          {/* A click, not a press: a touch that only starts on the orb never pays. */}
           <button
-            className={`flyorb scanorb${job ? ' is-busy' : ''}${cloud && !job ? ' is-hosaka' : ''}`}
+            className={`flyorb scanorb${job ? ' is-busy' : ''}${cloud && !job ? ' is-hosaka' : ''}${armed ? ' is-armed' : ''}`}
             disabled={goDisabled}
-            title={job ? 'Cancel the scan (X)'
+            title={job ? (cancellable ? 'Cancel the scan (X)' : 'HOSAKA is on it. The key lands in your keyring when it is done')
+              : armed ? `Press again to pay ${confirm.sats} sats to HOSAKA for this cube`
               : cloud ? (price === null ? 'HOSAKA has not given a price for this height yet' : `Scan the purple cube. HOSAKA computes it for ${price} sats`)
               : 'Scan the purple cube for hidden things (Space)'}
-            aria-label={job ? 'Cancel the scan' : cloud && price !== null ? `Scan for ${price} sats` : 'Scan'}
+            aria-label={job ? (cancellable ? 'Cancel the scan' : 'HOSAKA is scanning') : armed ? `Confirm: pay ${confirm.sats} sats` : cloud && price !== null ? `Scan for ${price} sats` : 'Scan'}
             {...noCallout}
-            onPointerDown={(e) => {
-              e.preventDefault(); e.stopPropagation()
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
               if (job) s().cancel()
-              else if (!goDisabled) void s().start()
+              else if (!goDisabled) void s().start({ route, sats: cloud ? price : undefined })
             }}
           >
-            <span className="scanorb__word">{job ? 'CANCEL' : 'SCAN'}</span>
+            <span className="scanorb__word">{word}</span>
             {cloud && !job && price !== null && <span className="scanorb__sats">{price} SATS</span>}
           </button>
           {!cloud && !job && <span className="flyorb__key" aria-hidden>SPACE</span>}
         </div>
       </div>
       {line && (
-        <div className={`scanorbs__line${result?.kind === 'failed' ? ' is-error' : ''}`} role="status">
+        <div className={`scanorbs__line${result?.kind === 'failed' && !job && !armed ? ' is-error' : ''}`} role="status">
           <span>{line}</span>
           {percent !== null && <span className="scanorbs__bar" aria-hidden><span style={{ width: `${percent}%` }} /></span>}
         </div>

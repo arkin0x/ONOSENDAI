@@ -57,14 +57,16 @@ export function scanBase(at: Position, height: number): Position {
 }
 
 /**
- * A key already held for exactly this cube: same height, same corner, same
- * plane, a cube and not a hop's box. Scanning it again is a relay question,
- * never another computation or another purchase.
+ * A key already held for exactly this cube: same height, same corner, a cube
+ * and not a hop's box. In either plane: a region key is the root of x, y and
+ * z alone (spec §7.2), so the same cube in the other plane has the same key
+ * and lookup id. Scanning it again is a relay question, never another
+ * computation or another purchase.
  */
-export function heldCube(keys: Record<string, HeldKey>, at: Position, plane: Plane, height: number): HeldKey | null {
+export function heldCube(keys: Record<string, HeldKey>, at: Position, _plane: Plane, height: number): HeldKey | null {
   const base = scanBase(at, height)
   for (const k of Object.values(keys)) {
-    if (k.height !== height || k.plane !== plane) continue
+    if (k.height !== height) continue
     if (k.heights && !(k.heights.x === height && k.heights.y === height && k.heights.z === height)) continue
     if (k.base.x === String(base.x) && k.base.y === String(base.y) && k.base.z === String(base.z)) return k
   }

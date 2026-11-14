@@ -1240,6 +1240,8 @@ export interface CyberspaceState {
    * its invoice expired. Also fetches the caps when cloud mode is on.
    */
   resumeCloudJob: () => Promise<void>
+  /** HOSAKA's caps and provider (its price ladders), fetched if not known, and nothing else: no kept job resumed, no deposit claimed. SCAN's stepper asks this. */
+  fetchCloudLimits: () => Promise<void>
   /** Collect the destination cubes of a staged hop whose move has already landed. */
   collectCloudKeys: () => Promise<void>
   /** Forget a kept job without finishing it. */
@@ -7028,6 +7030,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     } finally {
       collectingKeys.delete(owner)
     }
+  },
+
+  fetchCloudLimits: async () => {
+    if (get().cloudPrefs.mode === 'off') return
+    await ensureCloudLimits()
   },
 
   resumeCloudJob: async () => {

@@ -76,9 +76,11 @@ describe('Space and Shift fly the view in VIEW', () => {
   it('useKeyboard flies forward on Space and back on Shift in VIEW, moves the cursor on R and F, and lets go on keyup and blur', () => {
     const src = readFileSync('src/hooks/useKeyboard.ts', 'utf8')
     // Space in a free view flies forward, never commits there.
-    expect(src).toMatch(/if \(canFly\(store, building\)\) \{ useViewFly\.getState\(\)\.setKey\(1\); return \}/)
+    // SCAN rides VIEW's view and does not fly (store/useScan.ts): `flies` is canFly outside SCAN.
+    expect(src).toMatch(/const flies = canFly\(store, building\) && !scanning/)
+    expect(src).toMatch(/if \(flies\) \{ useViewFly\.getState\(\)\.setKey\(1\); return \}/)
     // Shift flies back in a free view, but not while a rotate key is held.
-    expect(src).toMatch(/ShiftLeft' \|\| event\.code === 'ShiftRight'\) && canFly\(store, building\) && rotateHeld\.size === 0\) \{\s*event\.preventDefault\(\)\s*useViewFly\.getState\(\)\.setKey\(-1\)/)
+    expect(src).toMatch(/ShiftLeft' \|\| event\.code === 'ShiftRight'\) && flies && rotateHeld\.size === 0\) \{\s*event\.preventDefault\(\)\s*useViewFly\.getState\(\)\.setKey\(-1\)/)
     // A rotate ends any backward fly, so steering by rotation does not drift.
     expect(src).toMatch(/if \(event\.shiftKey\) \{[\s\S]*?useViewFly\.getState\(\)\.setKey\(0\)\s*store\.rotate\(rotation\)/)
     // R and F just move the cursor, no fly branch.

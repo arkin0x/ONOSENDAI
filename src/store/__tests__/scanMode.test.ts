@@ -5,7 +5,7 @@
  * key it computes for it, held as SCAN's and asked about at once, HOSAKA's
  * heights through the keyring's purchase as it stands, CANCEL, and the cube
  * the purple box draws. What would fail silently without it: a scan holding
- * the key to the wrong cube (it opens nothing, and says NOTHING FOUND), a
+ * the key to the wrong cube (it opens nothing, and says NOTHING AT 2^H), a
  * HOSAKA height computed nowhere or bought without a price, a cube bought
  * twice, or a cancelled scan still landing.
  *
@@ -57,7 +57,7 @@ import { useBuilder } from '../useBuilder'
 import { useSecrets, type HeldKey } from '../useSecrets'
 import { SCAN_MAX_HEIGHT, useShards } from '../useShards'
 import { currentScanRange, scanCubeShown, scanRoute, setScanWorkerFactory, useScan } from '../useScan'
-import { currentPadMode, cycleMode } from '../padMode'
+import { currentPadMode, cycleMode, recall } from '../padMode'
 import { placeSpawn } from '../fixtures/placeSpawn'
 import { scanLine, scanPercent, scanTag } from '../../hud/ScanControls'
 import { drawnRegion } from '../../scene/DeployRegionBox'
@@ -80,10 +80,11 @@ const buy = vi.fn(async (at: { x: bigint; y: bigint; z: bigint }, plane: 0 | 1, 
   return { lookupId: 'b'.repeat(64), keyHex: 'c'.repeat(64), height, base: { x: String(base.x), y: String(base.y), z: String(base.z) }, plane, source: 'cloud', at: 1 }
 })
 
-function cloudOn(on = true): void {
+/** HOSAKA on, AUTO with a 100 sat cap unless said otherwise: a 21 sat cube goes without asking. */
+function cloudOn(on = true, mode: 'auto' | 'ask' = 'auto', autoMaxSats = 100): void {
   useCyberspace.setState({
-    cloud: { ...S().cloud, limits: on ? LIMITS : null, provider: on ? PROVIDER : null },
-    cloudPrefs: { ...S().cloudPrefs, mode: on ? 'ask' : 'off' },
+    cloud: { ...S().cloud, status: 'idle', job: null, limits: on ? LIMITS : null, provider: on ? PROVIDER : null },
+    cloudPrefs: { ...S().cloudPrefs, mode: on ? mode : 'off', autoMaxSats },
   })
 }
 
@@ -101,7 +102,7 @@ beforeEach(async () => {
   useCalibration.setState({ hopHeight: 16 })
   useSecrets.setState({ keys: {}, buy, buying: null, buyError: null })
   useShards.setState({ rescan, pending: null, placedLast: null })
-  useScan.setState({ height: SCAN_MIN_HEIGHT, result: null, job: null })
+  useScan.setState({ height: SCAN_MIN_HEIGHT, result: null, job: null, confirm: null })
   cloudOn(false)
 })
 
@@ -265,8 +266,10 @@ describe('a local scan', () => {
     expect(scanLine(job, null, 50, 5, 'idle', null)).toBe('SCANNING 2^18 · 50%')
     expect(scanLine(job, null, null, 5, 'idle', null)).toBe('SCANNING 2^18 · 5 S')
     expect(scanLine({ ...job, asking: true }, null, null, 5, 'idle', null)).toBe('ASKING RELAYS')
-    expect(scanLine(null, { kind: 'found', height: 18, count: 0 }, null, 0, 'idle', null)).toBe('NOTHING FOUND')
-    expect(scanLine(null, { kind: 'found', height: 18, count: 3 }, null, 0, 'idle', null)).toBe('FOUND 3')
+    // Said with its height: a scan at 2^18 opens what was hidden at 18, not below.
+    expect(scanLine(null, { kind: 'found', height: 18, count: 0 }, null, 0, 'idle', null)).toBe('NOTHING AT 2^18')
+    expect(scanLine(null, { kind: 'found', height: 18, count: 3 }, null, 0, 'idle', null)).toBe('FOUND 3 AT 2^18')
+    expect(scanLine(null, null, null, 0, 'idle', null, 21)).toBe('PRESS AGAIN TO PAY 21 SATS')
     expect(scanLine({ ...job, route: 'cloud' }, null, null, 0, 'awaiting_payment', 'computing')).toBe('PAY THE INVOICE')
   })
 })
@@ -277,14 +280,61 @@ describe('above the device\'s max', () => {
     SC().enter()
     SC().setHeight(22)
     const at = { ...S().cursor }
-    await SC().start()
+    await SC().start({ route: 'cloud', sats: 21 })
     expect(buy).toHaveBeenCalledTimes(1)
     expect(buy).toHaveBeenCalledWith(at, S().anchorPlane, 22)
     expect(rescan).toHaveBeenCalledWith('b'.repeat(64), 'c'.repeat(64))
     expect(SC().result).toEqual({ kind: 'found', height: 22, count: 2 })
   })
 
-  it('never buys without a price, over another purchase, or a cube already held', async () => {
+  it('asks first as the Cloud compute mode says: ASK, and AUTO over its cap (0 is always), two presses', async () => {
+    for (const [mode, cap] of [['ask', 100], ['auto', 0], ['auto', 20]] as const) {
+      buy.mockClear()
+      cloudOn(true, mode, cap)
+      SC().enter()
+      SC().setHeight(22)
+      await SC().start({ route: 'cloud', sats: 21 })
+      expect(buy, `${mode} ${cap}`).not.toHaveBeenCalled()
+      expect(SC().confirm).toMatchObject({ height: 22, sats: 21 })
+      expect(SC().job).toBeNull()
+      await SC().start({ route: 'cloud', sats: 21 })
+      expect(buy, `${mode} ${cap}`).toHaveBeenCalledTimes(1)
+      expect(SC().confirm).toBeNull()
+      SC().exit()
+    }
+  })
+
+  it('a move, a change of height or CANCEL disarms a CONFIRM, and the next press asks again', async () => {
+    cloudOn(true, 'ask')
+    SC().enter()
+    SC().setHeight(22)
+    await SC().start({ route: 'cloud', sats: 21 })
+    S().moveCursor({ axis: 'x', dir: 1 })
+    expect(SC().confirm).toBeNull()
+    await SC().start({ route: 'cloud', sats: 21 })
+    SC().stepHeight(1)
+    expect(SC().confirm).toBeNull()
+    SC().stepHeight(-1)
+    await SC().start({ route: 'cloud', sats: 21 })
+    SC().cancel()
+    expect(SC().confirm).toBeNull()
+    await SC().start({ route: 'cloud', sats: 21 })
+    expect(buy).not.toHaveBeenCalled()
+  })
+
+  it('never pays a price that was not on screen, nor for a height shown as free', async () => {
+    cloudOn()
+    SC().enter()
+    SC().setHeight(22)
+    await SC().start({ route: 'cloud', sats: 5 })
+    expect(buy).not.toHaveBeenCalled()
+    expect(SC().result).toEqual({ kind: 'failed', height: 22, message: 'The price changed. Check it and scan again.' })
+    // Shown free (the benchmark moved under the press), or Space's local route: no purchase.
+    await SC().start({ route: 'local' })
+    expect(buy).not.toHaveBeenCalled()
+  })
+
+  it('never buys without a price, over another purchase, or a cube already held, in either plane', async () => {
     cloudOn()
     useCyberspace.setState({ cloud: { ...S().cloud, provider: null } })
     SC().enter()
@@ -300,7 +350,9 @@ describe('above the device\'s max', () => {
 
     useSecrets.setState({ buying: null })
     const base = scanBase(S().cursor, 22)
-    useSecrets.getState().hold([{ lookupId: 'f'.repeat(64), keyHex: '1'.repeat(64), height: 22, base: { x: String(base.x), y: String(base.y), z: String(base.z) }, plane: S().anchorPlane, source: 'cloud', at: 1 }])
+    // Held from the other plane: a region key is x, y and z alone, the same in both.
+    const other = S().anchorPlane === 0 ? 1 : 0
+    useSecrets.getState().hold([{ lookupId: 'f'.repeat(64), keyHex: '1'.repeat(64), height: 22, base: { x: String(base.x), y: String(base.y), z: String(base.z) }, plane: other, source: 'cloud', at: 1 }])
     await SC().start()
     expect(buy).not.toHaveBeenCalled()
     expect(rescan).toHaveBeenCalledWith('f'.repeat(64), '1'.repeat(64))
@@ -315,15 +367,30 @@ describe('above the device\'s max', () => {
     expect(SC().result).toEqual({ kind: 'failed', height: 22, message: 'Finish or cancel the move in progress first.' })
   })
 
-  it('CANCEL stops HOSAKA\'s job the way the Cloud compute panel does', () => {
+  it('CANCEL abandons an unpaid invoice the Cloud compute panel\'s way, and never a paid job; RECALL and X leave it be', () => {
     cloudOn()
     const cancelCloud = vi.fn()
-    useCyberspace.setState({ cancelCloud })
+    const cancel = vi.fn()
+    useCyberspace.setState({ cancelCloud, cancel })
     buy.mockImplementationOnce(() => new Promise(() => {}))
     SC().enter()
     SC().setHeight(22)
     void SC().start()
     expect(SC().job?.route).toBe('cloud')
+    // Asking HOSAKA, then paid and computing: nothing to cancel that would not lose what was paid.
+    useCyberspace.setState({ cloud: { ...S().cloud, status: 'quoting' } })
+    SC().cancel()
+    useCyberspace.setState({ cloud: { ...S().cloud, status: 'computing' } })
+    SC().cancel()
+    expect(cancelCloud).not.toHaveBeenCalled()
+    expect(SC().job).not.toBeNull()
+    // RECALL in SCAN brings the cursor home and leaves the purchase running.
+    S().moveCursor({ axis: 'x', dir: 1 })
+    recall()
+    expect(cancel).not.toHaveBeenCalled()
+    expect(currentPadMode()).toBe('scan')
+    // An invoice waiting unpaid: CANCEL abandons it.
+    useCyberspace.setState({ cloud: { ...S().cloud, status: 'awaiting_payment', job: null } })
     SC().cancel()
     expect(cancelCloud).toHaveBeenCalledTimes(1)
     expect(SC().result).toEqual({ kind: 'cancelled', height: 22 })

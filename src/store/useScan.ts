@@ -20,19 +20,24 @@
  *   worker of its own, and costs nothing. Above it, up to HOSAKA's hop cap,
  *   SCAN buys the key through the keyring's purchase flow as it stands
  *   (useSecrets `buy`: quote, invoice, pay, the key checked and held as
- *   bought). With HOSAKA off or its limits unknown, the range stops at the
- *   local max.
+ *   bought), asked first as the Cloud compute panel's mode says, as a hide
+ *   above the ceiling is (lib/deployPlan.ts needsAsk): in ASK, or in AUTO
+ *   over its cap, the first press arms CONFIRM with the price and only a
+ *   second press on the same cube, height and price buys. With HOSAKA off
+ *   or its limits unknown, the range stops at the local max.
  * - One key per scan, the cube at the height chosen (lib/scanCube.ts says
  *   why not the ladder under it). It is held with source `scanmode` and asked
  *   about at once, so what it opens lands in the find chip and the Nearby
- *   list. A cube already held is only asked about again: never computed twice,
- *   never bought twice.
+ *   list. A cube already held (in either plane: a region key is the same in
+ *   both) is only asked about again: never computed twice, never bought twice.
  * - One scan at a time. Leaving SCAN leaves a scan running: a local one
  *   finishes in its worker and is held, a HOSAKA one is the cloud flow's, with
- *   its pulse and its invoice, as any purchase is. CANCEL (or X) stops it:
- *   the worker is terminated; a HOSAKA job is stopped the way the Cloud
- *   compute panel stops one (useCyberspace `cancelCloud`), which keeps a paid
- *   job claimable.
+ *   its pulse and its invoice, as any purchase is. CANCEL (or X) stops a
+ *   local scan (the worker is terminated) and a HOSAKA scan whose invoice is
+ *   still unpaid (useCyberspace `cancelCloud`). Once HOSAKA is asked and
+ *   paid there is nothing to cancel that would not lose what was paid for:
+ *   it finishes and the key is held as bought. RECALL in SCAN never stops it
+ *   either (store/padMode.ts recall).
  */
 
 import { create } from 'zustand'
@@ -41,7 +46,7 @@ import { useBuilder } from './useBuilder'
 import { useRegion } from './useRegion'
 import { useSecrets } from './useSecrets'
 import { useShards } from './useShards'
-import { localKeyCeiling, localKeySeconds, regionKeyQuote } from '../lib/deployPlan'
+import { localKeyCeiling, localKeySeconds, needsAsk, regionKeyQuote } from '../lib/deployPlan'
 import { useCalibration } from '../lib/calibration'
 import { alignedBase } from '../lib/secrets/base'
 import { clampScanHeight, computeCube, heldCube, scanRange, SCAN_MIN_HEIGHT, type CubeRun, type ScanRange, type WorkerFactory } from '../lib/scanCube'
@@ -72,6 +77,21 @@ export type ScanResult =
   | { kind: 'failed'; height: number; message: string }
   | { kind: 'cancelled'; height: number }
 
+/** What the controls showed when SCAN was pressed: the scan goes only if it still holds. */
+export interface ScanShown {
+  route: 'local' | 'cloud' | 'held'
+  /** The price on the button, for a HOSAKA height. */
+  sats?: number | null
+}
+
+/** A HOSAKA scan armed by a first press, waiting for the second (the Cloud compute mode asks). */
+export interface ScanConfirm {
+  height: number
+  sats: number
+  /** The cube's corner and plane, so a move or a change of height disarms it. */
+  cube: string
+}
+
 export interface ScanState {
   /** SCAN mode is on: the standard VIEW is SCAN's. */
   active: boolean
@@ -79,15 +99,20 @@ export interface ScanState {
   height: number
   job: ScanJob | null
   result: ScanResult | null
+  confirm: ScanConfirm | null
   /** SCAN at the cursor's view, or where you are looking: from HOP, VIEW, or BUILD's cursor. */
   enter: () => void
   /** SCAN off. The view goes with it unless `keepView`. A scan under way keeps running. */
   exit: (keepView?: boolean) => void
   setHeight: (height: number) => void
   stepHeight: (delta: number) => void
-  /** Scan the cube at the cursor at the chosen height. */
-  start: () => Promise<void>
-  /** Stop the scan under way. */
+  /**
+   * Scan the cube at the cursor at the chosen height. `shown` is what the
+   * controls said (free, held, or HOSAKA at a price): if that no longer holds
+   * nothing is scanned or bought. Space passes a free route only.
+   */
+  start: (shown?: ScanShown) => Promise<void>
+  /** Stop the scan under way, where that loses nothing paid for (scanCancellable). */
   cancel: () => void
 }
 
@@ -118,6 +143,28 @@ export function scanCubeShown(
   if (!scan.active || !cs.viewing || cs.building) return null
   if (scan.job && scan.job.plane === cs.anchorPlane) return { at: scan.job.at, height: scan.job.height }
   return { at: cs.cursor, height: scan.height }
+}
+
+/** A HOSAKA scan's purchase is under way: RECALL and X leave it be. */
+export function scanBuying(): boolean {
+  return useScan.getState().job?.route === 'cloud'
+}
+
+/**
+ * Whether CANCEL can stop the scan under way: a local one, or a HOSAKA one
+ * whose invoice waits unpaid. Asking HOSAKA (the request may already be
+ * charged to the balance), paid, or computing: no.
+ */
+export function scanCancellable(job: ScanJob | null, cloud: Pick<CyberspaceState['cloud'], 'status' | 'job'> = useCyberspace.getState().cloud): boolean {
+  if (!job) return false
+  if (job.route !== 'cloud') return true
+  return !job.asking && cloud.status === 'awaiting_payment' && (cloud.job === null || cloud.job.stage === 'awaiting_payment')
+}
+
+/** The cube a confirmation is for. */
+function cubeKey(at: Position, plane: Plane, height: number): string {
+  const h = BigInt(height)
+  return `${at.x >> h}:${at.y >> h}:${at.z >> h}:${plane}:${height}`
 }
 
 /** Where a scan aims: the view's cursor, in the plane the view shows. */
@@ -153,6 +200,7 @@ export const useScan = create<ScanState>((set, get) => ({
   height: SCAN_MIN_HEIGHT,
   job: null,
   result: null,
+  confirm: null,
 
   enter: () => {
     if (get().active) return
@@ -163,12 +211,13 @@ export const useScan = create<ScanState>((set, get) => ({
       cs.viewHere()
       if (!useCyberspace.getState().viewing()) return
     }
-    set({ active: true, result: null, height: clampScanHeight(get().height, currentScanRange()) })
+    // A scan that landed while SCAN was off keeps its answer on show.
+    set({ active: true, confirm: null, height: get().job ? get().height : clampScanHeight(get().height, currentScanRange()) })
   },
 
   exit: (keepView = false) => {
     if (!get().active) return
-    set({ active: false, result: null })
+    set({ active: false, confirm: null })
     if (keepView) return
     const cs = useCyberspace.getState()
     if (cs.focus?.drive) cs.clearFocus(true)
@@ -176,24 +225,40 @@ export const useScan = create<ScanState>((set, get) => ({
 
   setHeight: (height) => {
     if (get().job) return
-    set({ height: clampScanHeight(height, currentScanRange()), result: null })
+    set({ height: clampScanHeight(height, currentScanRange()), result: null, confirm: null })
   },
 
   stepHeight: (delta) => get().setHeight(get().height + delta),
 
-  start: async () => {
+  start: async (shown) => {
     if (!get().active || get().job) return
     const range = currentScanRange()
     const height = clampScanHeight(get().height, range)
     const { at, plane } = aim()
     const held = heldCube(useSecrets.getState().keys, at, plane, height)
     const route = held ? 'held' : scanRoute(height, range)
+    const price = scanPrice(height)
+    const fail = (message: string): void => set({ confirm: null, result: { kind: 'failed', height, message } })
+    // What was on screen when SCAN was pressed must still hold: never a
+    // purchase for a height shown as free, nor at a price not shown.
+    if (shown && route !== 'held' && (shown.route !== route || (route === 'cloud' && shown.sats !== price))) {
+      fail(route === 'cloud' ? 'The price changed. Check it and scan again.' : 'Check the height and scan again.')
+      return
+    }
     if (route === 'cloud') {
       // Never a purchase without its price on the button, nor over another one.
-      const why = scanPrice(height) === null ? 'No price from HOSAKA yet. Try again in a moment.'
-        : useSecrets.getState().buying ? 'HOSAKA is already computing a key for you.' : null
-      if (why) { set({ result: { kind: 'failed', height, message: why } }); return }
+      if (price === null) { fail('No price from HOSAKA yet. Try again in a moment.'); return }
+      if (useSecrets.getState().buying) { fail('HOSAKA is already computing a key for you.'); return }
+      // Asked first as the Cloud compute panel's mode says, as a hide is.
+      const prefs = useCyberspace.getState().cloudPrefs
+      const cube = cubeKey(at, plane, height)
+      const armed = get().confirm
+      if (needsAsk(prefs.mode, price, prefs.autoMaxSats) && !(armed && armed.cube === cube && armed.height === height && armed.sats === price)) {
+        set({ confirm: { height, sats: price, cube }, result: null })
+        return
+      }
     }
+    set({ confirm: null })
     const id = ++serial
     const estSeconds = route === 'local' ? localKeySeconds(height, useCalibration.getState().cantorMsByHeight) : route === 'cloud' ? regionKeyQuote(height, useCyberspace.getState().cloud.provider)?.seconds ?? null : null
     set({ result: null, job: { at, plane, height, route, startedAt: Date.now(), estSeconds, asking: route === 'held' } })
@@ -232,10 +297,11 @@ export const useScan = create<ScanState>((set, get) => ({
 
   cancel: () => {
     const job = get().job
-    if (!job) return
+    if (!job) { if (get().confirm) set({ confirm: null }); return }
+    if (!scanCancellable(job)) return
     serial++
     if (run) { run.cancel(); run = null }
-    // A HOSAKA job stops the way the Cloud compute panel stops one.
+    // An unpaid invoice is abandoned the way the Cloud compute panel abandons one.
     if (job.route === 'cloud') useCyberspace.getState().cancelCloud()
     set({ job: null, result: { kind: 'cancelled', height: job.height } })
   },
@@ -247,7 +313,12 @@ export const useScan = create<ScanState>((set, get) => ({
 useCyberspace.subscribe((s, prev) => {
   const scan = useScan.getState()
   if (scan.active && !s.viewing()) { scan.exit(true); return }
-  if (scan.result && s.cursor !== prev.cursor) useScan.setState({ result: null })
+  if ((scan.result || scan.confirm) && (s.cursor !== prev.cursor || s.anchorPlane !== prev.anchorPlane)) useScan.setState({ result: null, confirm: null })
+})
+
+// Region mode is VIEW's tool: turned on in SCAN (a /C/ region link arriving), SCAN gives way to VIEW.
+useRegion.subscribe((r, prev) => {
+  if (r.active && !prev.active && useScan.getState().active) useScan.getState().exit(true)
 })
 
 // BUILD coming on (B, a DEPLOY) ends SCAN, keeping the view BUILD starts from.

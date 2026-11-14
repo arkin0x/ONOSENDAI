@@ -37,7 +37,7 @@ import { addWalkInputCloser, setWalkMenuCovering, walkMenuCovering } from '../st
 import { canFly, useViewFly } from '../lib/viewFly'
 import { useRegion } from '../store/useRegion'
 import { buildToScan, leaveWalk, scanToHop, viewToAvatar } from '../store/padMode'
-import { currentScanRange, scanRoute, useScan } from '../store/useScan'
+import { currentScanRange, scanBuying, scanRoute, useScan } from '../store/useScan'
 import { heldCube } from '../lib/scanCube'
 import { useSecrets } from '../store/useSecrets'
 
@@ -227,7 +227,9 @@ export function useKeyboard(): void {
         if (store.walking) return
         if (scanning) scanToHop()
         else if (building) buildToScan()
-        else useScan.getState().enter()
+        // From HOP only where the mode button stands: nothing lined up, placing or proving.
+        else if (store.viewing() || (store.atHead() && store.plan === null && store.proof.status !== 'computing'
+          && !useShards.getState().pending && store.cursor.x === store.position.x && store.cursor.y === store.position.y && store.cursor.z === store.position.z)) useScan.getState().enter()
         return
       }
 
@@ -289,10 +291,12 @@ export function useKeyboard(): void {
         // In SCAN, Space scans the purple cube: on this device, or a cube
         // already held. A HOSAKA height is the SCAN button's, which shows the price.
         if (scanning) {
+          // Held down, Space does not scan again and again.
+          if (event.repeat) return
           const scan = useScan.getState()
-          const free = scanRoute(scan.height, currentScanRange()) === 'local'
-            || heldCube(useSecrets.getState().keys, store.cursor, store.anchorPlane, scan.height) !== null
-          if (!scan.job && free) void scan.start()
+          const held = heldCube(useSecrets.getState().keys, store.cursor, store.anchorPlane, scan.height) !== null
+          const free = held || scanRoute(scan.height, currentScanRange()) === 'local'
+          if (!scan.job && free) void scan.start({ route: held ? 'held' : 'local' })
           return
         }
         // Building never moves you: with nothing to place, Space does nothing.
@@ -321,8 +325,9 @@ export function useKeyboard(): void {
         // (store/useRegion.ts; arkinox, 2026-11-11).
         if (useRegion.getState().active) { useRegion.getState().collapseToEntry(); return }
         // In SCAN, X stops a scan under way first, as STOP stops a proof.
-        if (scanning && useScan.getState().job) { useScan.getState().cancel(); return }
-        const idle = store.proof.status !== 'computing' && store.cloud.status === 'idle' && store.plan === null
+        if (scanning && (useScan.getState().job || useScan.getState().confirm)) { useScan.getState().cancel(); return }
+        // A SCAN's HOSAKA purchase is no move: X leaves it to finish (store/useScan.ts).
+        const idle = store.proof.status !== 'computing' && (store.cloud.status === 'idle' || scanBuying()) && store.plan === null
         if (building && idle) useBuilder.getState().toAvatar()
         else if (idle && store.viewing()) viewToAvatar()
         else store.cancel()

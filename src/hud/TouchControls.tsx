@@ -89,7 +89,7 @@ import { regionAtOriginalSize, toggleRegion, useRegion } from '../store/useRegio
 import { holdEnd, holdEndAll, holdStart } from '../store/walkHold'
 import { flyDir, useViewFly } from '../lib/viewFly'
 import { walkHeldDir, type HeldDir } from '../lib/walkKeys'
-import { useScan } from '../store/useScan'
+import { scanBuying, useScan } from '../store/useScan'
 
 /**
  * arkinox's wording, kept exactly as he wrote it, bullet shapes and blank
@@ -497,6 +497,7 @@ export function TouchControls(): JSX.Element {
           className="touchops__cancel"
           title={walking ? 'Stop the walk where the chain is now (X)'
             : computing ? 'Cancel proof (X)'
+            : !resting && scanning && scanBuying() ? 'Recall the cursor and the view to your avatar, still in SCAN. HOSAKA keeps scanning (X)'
             : !resting ? 'Cancel the route or the HOSAKA job (X)'
             : regionActive && regionGrown ? 'Reset the region to its size when region mode started (RECALL)'
             : building ? 'Bring the build cursor back to your avatar, still in BUILD (X)'

@@ -34,7 +34,7 @@ import { regionAtOriginalSize, useRegion } from './useRegion'
 import { resetDoorReturn } from '../lib/doorReturn'
 import { landFly } from '../lib/viewFly'
 import { buildPlane, placedCursor } from '../lib/buildCursor'
-import { SCAN_FOCUS_LABEL, useScan } from './useScan'
+import { SCAN_FOCUS_LABEL, scanBuying, useScan } from './useScan'
 
 export type PadMode = 'hop' | 'view' | 'walk' | 'build' | 'scan'
 
@@ -194,7 +194,8 @@ export function viewToAvatar(): void {
 
 /**
  * RECALL on the pad, outside WALK. A proof, a route or a cloud job is
- * stopped first (useCyberspace `cancel`), as the STOP on the button says.
+ * stopped first (useCyberspace `cancel`), as the STOP on the button says;
+ * not a SCAN's HOSAKA purchase, which is no move and finishes (useScan).
  * A grown region is RESET (useRegion `resetSize`). Otherwise the cursor comes home and the mode stays: BUILD's
  * build cursor (`toAvatar`), VIEW's (viewToAvatar), HOP's (`cancel`). In
  * region mode, as X: the cursor back to where region mode started
@@ -204,7 +205,9 @@ export function viewToAvatar(): void {
 export function recall(): void {
   const cs = useCyberspace.getState()
   const region = useRegion.getState()
-  if (cs.proof.status === 'computing' || cs.cloud.status !== 'idle' || cs.plan !== null) { cs.cancel(); return }
+  // A SCAN's HOSAKA purchase is not a move: RECALL leaves it to finish (store/useScan.ts).
+  const cloudBusy = cs.cloud.status !== 'idle' && !scanBuying()
+  if (cs.proof.status === 'computing' || cloudBusy || cs.plan !== null) { cs.cancel(); return }
   if (region.active && !regionAtOriginalSize(region)) { region.resetSize(); return }
   if (useBuilder.getState().active) { useBuilder.getState().toAvatar(); return }
   if (cs.viewing()) {

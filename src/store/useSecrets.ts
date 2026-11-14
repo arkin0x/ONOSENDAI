@@ -390,7 +390,8 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   setSort: (sort) => set({ sort }),
 
   buy: async (at, plane, height, expect) => {
-    if (get().buying) return null
+    // One purchase at a time (a SCAN's may be under way while a hide asks): said, not a stale error.
+    if (get().buying) { set({ buyError: 'HOSAKA is already computing a key for you. Try again when it is done.' }); return null }
     const cs = useCyberspace.getState()
     set({ buying: { height, status: 'submitting', costMsats: 0, estSeconds: null, startedAt: Date.now() }, buyError: null })
     // The store's job driver: a short balance gets the job's own invoice in

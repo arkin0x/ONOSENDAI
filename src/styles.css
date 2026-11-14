@@ -10711,12 +10711,15 @@ a.feed__act { text-decoration: none; }
    workshop rail's up, value and down (.ws__railbtn, .ws__level-value), and
    to its right a fly orb in purple that says SCAN. */
 .flyorbs.scanorbs { flex-direction: column; align-items: flex-start; gap: 4px; }
+:root { --scanorbs-w: 172px; }
 .scanorbs__row { display: flex; align-items: center; gap: 8px; }
+.scanorbs__go { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .scanorbs__stepper {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  min-width: 108px;
 }
 .scanorbs__step {
   width: 44px;
@@ -10765,6 +10768,12 @@ a.feed__act { text-decoration: none; }
 }
 .flyorb.scanorb:disabled { opacity: 0.4; cursor: not-allowed; }
 .flyorb.scanorb.is-hosaka { border-color: rgba(0, 229, 255, 0.6); }
+/* Armed by a first press: the second pays. HOSAKA's blue, lit. */
+.flyorb.scanorb.is-armed {
+  border-color: var(--accent);
+  background: radial-gradient(circle at 36% 32%, rgba(0, 229, 255, 0.5), rgba(6, 14, 22, 0.7) 62%, rgba(6, 14, 22, 0.88));
+  color: #e8fbff;
+}
 .flyorb.scanorb.is-busy { animation: scanorb-busy 1.2s ease-in-out infinite; }
 @keyframes scanorb-busy {
   0%, 100% { box-shadow: 0 0 8px rgba(var(--scan-rgb), 0.2), inset 0 0 16px rgba(0, 0, 0, 0.45); }
@@ -10792,6 +10801,18 @@ a.feed__act { text-decoration: none; }
 /* A phone on its side: the dock is a row beside the menu button there. */
 @media (max-height: 520px) {
   .flyorbs.scanorbs { flex-direction: row; align-items: flex-end; }
+}
+/* The open chat (z-index 101) starts past SCAN's dock, which is wider than
+   the fly buttons' column, as it starts past theirs (review of #592): on a
+   desktop or a tablet, on a phone upright, and on a phone on its side. */
+@media (min-width: 641px) {
+  .app:has(.scanorbs) .chatdock { left: calc(var(--menu-left) + var(--scanorbs-w) + 16px); }
+}
+@media (max-width: 640px) and (min-height: 521px) {
+  .app:has(.scanorbs) .chatdock { left: calc(var(--menu-left) + var(--scanorbs-w) + var(--routeov-gap)); }
+}
+@media (max-height: 520px) and (min-width: 641px) {
+  .app:has(.scanorbs) .chatdock { left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap) + var(--scanorbs-w) + 16px); }
 }
 
 /* ---------- LOSING SYNC ----------

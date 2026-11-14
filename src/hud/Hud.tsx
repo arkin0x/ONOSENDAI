@@ -538,6 +538,7 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build' | 'scan', { title: str
       ['X', 'recall cursor and view to your avatar, still in VIEW (region mode: reset the cursor, collapse the region)'],
       ['Q / E', 'scale step out / in (zoom)'],
       ['Shift + W A S D', 'rotate view 90°'],
+      ['N', 'scan mode in / out'],
     ],
     hint: 'VIEW is a free look from your head: the cursor moves without lining up a hop. Space and Shift fly the view forward and back the way the camera faces; R and F are FAR and NEAR, a cell at a time. X, or RECALL on the pad, brings the cursor home and VIEW stays; Esc ends VIEW. The Region button picks a region for a private speakeasy.',
   },
@@ -550,7 +551,7 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build' | 'scan', { title: str
       ['Z', 'gravity on / off'],
       ['X', 'stop the walk, or leave WALK for the mode you came from'],
     ],
-    hint: 'WALK is first person: every press is a step, proved behind you. W A S D walk, Space jumps, C goes down, and Z switches gravity. X stops the steps still to prove, or leaves WALK for HOP, VIEW or BUILD, whichever you came from; on the pad, so do WALK and the dim mode button.',
+    hint: 'WALK is first person: every press is a step, proved behind you. W A S D walk, Space jumps, C goes down, and Z switches gravity. X stops the steps still to prove, or leaves WALK for HOP, VIEW, BUILD or SCAN, whichever you came from; on the pad, so do WALK and the dim mode button.',
   },
   build: {
     title: 'Controls · BUILD',
@@ -561,6 +562,7 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build' | 'scan', { title: str
       ['Space', 'place what is lined up'],
       ['X', 'recall the build cursor to your avatar'],
       ['B', 'leave build mode'],
+      ['N', 'scan mode, where the build cursor is'],
     ],
     hint: 'BUILD places things at a build cursor and never moves you. The movement keys and zoom move that cursor; , and . change the step it places at; Space places. X, or RECALL on the pad, brings the build cursor home and BUILD stays; B leaves.',
   },
@@ -573,9 +575,10 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build' | 'scan', { title: str
       ['Space', 'scan the purple cube'],
       ['X', 'cancel the scan, or recall the cursor'],
       ['Q / E', 'scale step out / in (zoom)'],
-      ['N', 'scan mode in / out'],
+      ['Shift + W A S D', 'rotate view 90°'],
+      ['N', 'scan mode out, back to HOP'],
     ],
-    hint: 'SCAN looks for hidden things in the purple cube at the cursor. Up to your device limit it is free; above it HOSAKA computes it for the price shown, and only the SCAN button buys.',
+    hint: 'SCAN looks for things hidden at the scan height in the purple cube at the cursor. Up to your device limit it is free; above it HOSAKA computes it for the price shown, and only the SCAN button pays.',
   },
 }
 

@@ -114,7 +114,7 @@ export function HeldBar({ onMore, moreBadge }: { onMore: () => void; moreBadge: 
           {asking === 'color' && faceHeld && (
             <div className="benchpaste ws__ask ws__ask--color" role="menu" aria-label="How to color the selected faces">
               <button className="workshop__btn" role="menuitem" title="The color onto the corners of every selected face; it blends across the edges they share, and a face with a seam takes the color flat" onClick={() => { setAsking(null); w().colorSelected(w().color) }}>BLEND</button>
-              <button className="workshop__btn" role="menuitem" title="The color onto every selected face as a hard edge, not blended from its corners" onClick={() => { setAsking(null); w().colorFaces(selectedFaces, w().color) }}>EDGE</button>
+              <button className="workshop__btn" role="menuitem" title="The color onto every selected face as a hard edge, not blended from its corners" onClick={() => { setAsking(null); w().colorFaces(selectedFaces, w().color, true) }}>EDGE</button>
             </div>
           )}
         </>

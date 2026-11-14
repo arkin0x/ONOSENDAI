@@ -118,13 +118,6 @@ function SelectOptions({ tiles, setTiles }: { tiles: boolean; setTiles: (on: boo
   const counts = useWorkshop((s) => { const c = s.current(); return { points: c?.vertices.length ?? 0, faces: c?.faces.length ?? 0, objects: c?.parts?.length ?? 0 } }, (a, b) => a.points === b.points && a.faces === b.faces && a.objects === b.objects)
   const w = useWorkshop.getState
   const on = KINDS.find((k) => k.kind === kind) ?? KINDS[0]
-  const all = (): void => {
-    const c = w().current()
-    if (!c) return
-    if (kind === 'objects') { w().setPartSelection([...Array(c.parts?.length ?? 0).keys()]); return }
-    if (kind === 'faces') { useWorkshop.setState({ selectedFaces: [...Array(c.faces.length).keys()], selection: [...new Set(c.faces.flat())] }); return }
-    w().setSelection([...Array(c.vertices.length).keys()])
-  }
   return (
     <>
       <button className="ws__stripbtn ws__shapechip is-on" onClick={() => setTiles(!tiles)} aria-haspopup="menu" aria-expanded={tiles} aria-label={`Takes ${on.label}. Tap to change.`} title="What a tap or a box takes">
@@ -134,12 +127,12 @@ function SelectOptions({ tiles, setTiles }: { tiles: boolean; setTiles: (on: boo
       </button>
       <div className="ws__seg" role="group" aria-label="A tap or a box">
         <button className={`ws__stripbtn${!invert ? ' is-on' : ''}`} aria-pressed={!invert} onClick={() => w().setInvert(false)} title="Taps and boxes add" {...noCallout}>ADD</button>
-        <button className={`ws__stripbtn${invert ? ' is-on' : ''}`} aria-pressed={invert} onClick={() => w().setInvert(true)} aria-label="Remove: taps and boxes take points out" title="Taps and boxes take out" {...noCallout}>REMOVE</button>
+        <button className={`ws__stripbtn${invert ? ' is-on' : ''}`} aria-pressed={invert} onClick={() => w().setInvert(true)} aria-label="Remove: taps and boxes take out" title="Taps and boxes take out" {...noCallout}>REMOVE</button>
       </div>
       <button className={`ws__stripbtn ws__stripbtn--tall${box ? ' is-on' : ''}`} aria-pressed={box} onClick={() => w().setBoxSelect(!box)} title="On: a one-finger drag draws a box. Off: it turns the view" aria-label="Box: a drag draws a box" {...noCallout}>
         <SquareDashedMousePointer size={16} strokeWidth={2.25} aria-hidden /><span>BOX</span>
       </button>
-      <button className="ws__stripbtn ws__stripbtn--tall ws__strip-all" disabled={counts[kind] === 0} onClick={all} title={`Every one of the ${on.label.toLowerCase()}`} aria-label="Select everything" {...noCallout}>
+      <button className="ws__stripbtn ws__stripbtn--tall ws__strip-all" disabled={counts[kind] === 0} onClick={() => w().selectAll()} title={`Every one of the ${on.label.toLowerCase()}`} aria-label="Select everything" {...noCallout}>
         <Waypoints size={16} strokeWidth={2.25} aria-hidden /><span>ALL</span>
       </button>
       {tiles && (
@@ -168,6 +161,8 @@ function SelectOptions({ tiles, setTiles }: { tiles: boolean; setTiles: (on: boo
 function PaintOptions(): JSX.Element {
   const mode = useWorkshop((s) => s.paintMode)
   const edge = useWorkshop((s) => s.paintEdge)
+  const take = useWorkshop((s) => s.paintTake)
+  useEscape('modal', take, () => useWorkshop.getState().setPaintTake(false))
   const w = useWorkshop.getState
   const MODES: Array<{ mode: PaintMode; label: string; title: string }> = [
     { mode: 'point', label: 'POINT', title: 'A tap paints the point' },
@@ -186,6 +181,8 @@ function PaintOptions(): JSX.Element {
         <button className={`ws__stripbtn${!edge ? ' is-on' : ''}`} disabled={mode !== 'face'} aria-pressed={!edge} onClick={() => w().setPaintEdge(false)} title="The face's corners take the color, blending into the faces beside it" {...noCallout}>BLEND</button>
         <button className={`ws__stripbtn${edge ? ' is-on' : ''}`} disabled={mode !== 'face'} aria-pressed={edge} onClick={() => w().setPaintEdge(true)} title="The face takes the color flat, with a hard edge" {...noCallout}>EDGE</button>
       </div>
+      {/* The dropper, armed from the palette's header or MORE: the next tap takes a color. A tap here, or Esc, puts it away. */}
+      {take && <div className="ws__hint ws__hint--take" role="status" onClick={() => w().setPaintTake(false)}>Tap a point or a face to take its color.</div>}
     </>
   )
 }

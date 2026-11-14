@@ -368,9 +368,13 @@ function Handles(): JSX.Element | null {
     }
     e.stopPropagation()
     if (tool === 'paint') {
-      // FACE paints faces only: the face under the tap, however near a corner.
-      const onFace = face !== null && (w.paintMode === 'face' || faceWins())
-      w.paintTap(onFace ? { face: face as number } : { vertex: first })
+      // POINT paints the point it met, however wide the hit; FACE paints the
+      // face under the tap, however near a corner; the rest go by which the
+      // tap was nearer to, the dot or the face.
+      const onFace = face !== null && w.paintMode !== 'point' && (w.paintMode === 'face' || faceWins())
+      const hit = onFace ? { face: face as number } : { vertex: first }
+      // The dropper, armed: this tap takes a color instead, once.
+      if (w.paintTake) { w.takeColorAt(hit); w.setPaintTake(false) } else w.paintTap(hit)
       return
     }
     // FACE only makes faces (phase 3, decision 3): a tap picks a corner.
@@ -643,8 +647,8 @@ function Marquee(): null {
         const set = new Set(within)
         const facesIn = shard.faces.map((f, k) => (f.every((v) => set.has(v)) ? k : -1)).filter((k) => k >= 0)
         const faces = nextSelection(baseFaces, facesIn, invert)
-        const corners = [...new Set(faces.flatMap((k) => shard.faces[k] ?? []))]
-        if (!same(faces, w.selectedFaces)) useWorkshop.setState({ selectedFaces: faces, selection: corners })
+        // Held with every vertex on their corners' points, as a tapped face is.
+        if (!same(faces, w.selectedFaces)) w.holdFaces(faces)
         return
       }
       const points = nextSelection(base, within, invert)
@@ -1168,7 +1172,7 @@ function BenchImpl(): JSX.Element {
     if (e.delta > tapSlop() || multiPress()) return
     e.stopPropagation()
     const w = useWorkshop.getState()
-    if (w.tool === 'paint') w.paintTap({ face })
+    if (w.tool === 'paint') { if (w.paintTake) { w.takeColorAt({ face }); w.setPaintTake(false) } else w.paintTap({ face }) }
     else if (w.tool === 'select' && w.selectKind === 'faces') w.selectFace(face)
   }
 

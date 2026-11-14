@@ -255,7 +255,7 @@ export function Workshop(): JSX.Element | null {
         )}
         {sheet === 'more' && (
           <Sheet name="More" title="MORE" sub={shard?.name} onClose={closeSheet}>
-            <MoreBody />
+            <MoreBody onClose={closeSheet} />
           </Sheet>
         )}
         {sheet === 'palette' && <PaletteModal onClose={closeSheet} foldAsk={foldAsk} />}

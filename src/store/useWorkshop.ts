@@ -421,6 +421,13 @@ export interface WorkshopState {
   paintTap: (hit: { vertex?: number; face?: number }) => void
   /** The dropper on a tap: the color of the point or face it met, into hand. What is held stays held. */
   takeColorAt: (hit: { vertex?: number; face?: number }) => void
+  /** PAINT's dropper, armed: the next tap takes a color instead of painting, then it is off again. */
+  paintTake: boolean
+  setPaintTake: (on: boolean) => void
+  /** Hold these faces, each with every vertex on its corners' points, as a tapped face is held. */
+  holdFaces: (faces: readonly number[]) => void
+  /** ALL in SELECT: every point, every face, or every placed object, as its switch says. */
+  selectAll: () => void
   /** STAMP places a built-in shape, or a published object by reference (DECK-0003 §1.10). */
   stampMode: 'shape' | 'object'
   /** The object OBJECT stamps, chosen in the picker. */
@@ -531,7 +538,7 @@ export interface WorkshopState {
   /** The colour onto one face as a hard seam, not onto its corners. */
   colorFace: (index: number, c: [number, number, number]) => void
   /** The colour onto several faces as hard seams, in one undoable step: SEAM with faces in hand. */
-  colorFaces: (indices: readonly number[], c: [number, number, number]) => void
+  colorFaces: (indices: readonly number[], c: [number, number, number], quiet?: boolean) => void
   /** Give every face back to its corners: the object interpolates again. */
   clearFaceColors: () => void
   /** Put a color at the front of the palette (moving it there if it is already in). */
@@ -1012,6 +1019,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     selectKind: 'points',
     paintMode: 'face',
     paintEdge: false,
+    paintTake: false,
     facePick: [],
     selectedFaces: [],
     clip: null,
@@ -1104,12 +1112,36 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     // it and the tool looked broken. Taking the tool clears the selection.
     // INVERT goes off with the tool too: it is a mode of SELECT and FACE, and
     // the key that shows it is only drawn there.
-    setTool: (tool) => set({ tool, facePick: [], selectedFaces: [], aim: null, invert: false, ...(tool === 'face' || tool === 'paint' ? { selection: [], partSel: [] } : {}) }),
+    // The tool already in hand, tapped again, changes nothing: a face held in
+    // SELECT FACES stays a face. A held face's corners go with the face, so
+    // another tool never inherits them as bare points.
+    setTool: (tool) => {
+      const st = get()
+      if (tool === st.tool) return
+      const letGo = tool === 'face' || tool === 'paint' || st.selectedFaces.length > 0
+      set({ tool, facePick: [], selectedFaces: [], aim: null, invert: false, paintTake: false, ...(letGo ? { selection: [], partSel: [] } : {}) })
+    },
     setInvert: (on) => set({ invert: on }),
     setBoxSelect: (on) => set({ boxSelect: on }),
     setSelectKind: (kind) => { if (kind !== get().selectKind) set({ selectKind: kind, selection: [], partSel: [], selectedFaces: [], facePick: [] }) },
     setPaintMode: (mode) => set({ paintMode: mode }),
     setPaintEdge: (edge) => set({ paintEdge: edge }),
+    setPaintTake: (on) => set({ paintTake: on }),
+    holdFaces: (faces) => {
+      const s = get().current()
+      if (!s) return
+      const on = faces.filter((k) => s.faces[k])
+      set({ selectedFaces: on, selection: [...new Set(on.flatMap((k) => s.faces[k].flatMap((v) => group(s, v))))] })
+    },
+    selectAll: () => {
+      const st = get()
+      const s = st.current()
+      if (!s) return
+      if (st.tool === 'select' && st.selectKind === 'objects') { set({ partSel: [...Array(s.parts?.length ?? 0).keys()] }); return }
+      if (st.tool === 'select' && st.selectKind === 'faces') { st.holdFaces([...Array(s.faces.length).keys()]); return }
+      // Points, and outside SELECT every placed object with them, as ALL always took.
+      set({ selection: [...Array(s.vertices.length).keys()], selectedFaces: [], partSel: st.tool === 'select' ? [] : [...Array(s.parts?.length ?? 0).keys()] })
+    },
     paintTap: (hit) => {
       const st = get()
       const s = st.current()
@@ -1121,9 +1153,11 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (st.paintMode === 'all') { if (corners.length) st.colorAll(c); return }
       if (st.paintMode === 'face') {
         if (hit.face === undefined || !face) return
-        if (st.paintEdge) { st.colorFaces([hit.face], c); return }
-        // BLEND: the face's corners take the color, as COLOR does for a face held.
-        set({ selection: [], selectedFaces: [hit.face] })
+        // EDGE: a hard seam, quietly: a tap that paints needs no line saying so.
+        if (st.paintEdge) { st.colorFaces([hit.face], c, true); return }
+        // BLEND: every vertex on the face's corners takes the color, as COLOR
+        // does for a face held, so a point stacked on a corner goes with it.
+        set({ selection: corners, selectedFaces: [hit.face] })
         get().colorSelected(c)
         set(keep)
         return
@@ -1363,8 +1397,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
      */
     colorFace: (index, c) => { get().colorFaces([index], c) },
 
-    colorFaces: (indices, c) => {
+    colorFaces: (indices, c, quiet = false) => {
       set({ color: clampColor(c) })
+      get().rememberColor(rgbToHex(clampColor(c)))
       edit((s) => {
         const on = indices.filter((k) => s.faces[k])
         if (on.length === 0) return null
@@ -1380,7 +1415,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         const facecolors = current.slice()
         for (const k of on) facecolors[k] = clampColor(c)
         return { ...s, facecolors }
-      }, indices.length === 1 ? 'That face keeps its own color now.' : `${indices.length} faces keep their own colors now.`)
+      }, quiet ? null : indices.length === 1 ? 'That face keeps its own color now.' : `${indices.length} faces keep their own colors now.`)
     },
 
     clearFaceColors: () => {

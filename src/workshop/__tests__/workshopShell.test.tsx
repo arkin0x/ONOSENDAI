@@ -708,3 +708,56 @@ describe('PAINT, and FACE only making faces (phase 3)', () => {
     await m.unmount()
   })
 })
+
+describe('phase 3 review fixes', () => {
+  it('arms the dropper in PAINT from MORE, so the next tap takes a color, once', async () => {
+    useWorkshop.getState().setTool('paint')
+    const m = await mount(<Workshop />)
+    await m.press('MORE')
+    const take = m.all().find((h) => h.props['aria-label'] === 'Take a color with the next tap')!
+    ;(take.props.onClick as () => void)()
+    await new Promise((r) => setTimeout(r, 5))
+    expect(useWorkshop.getState().paintTake).toBe(true)
+    expect(m.all().some((h) => h.props['aria-label'] === 'More')).toBe(true) // the sheet closed: MORE is the strip's button again
+    expect(textOf(byClass(m.all(), 'ws__hint')[0])).toBe('Tap a point or a face to take its color.')
+    const bench = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
+    expect(bench).toContain('if (w.paintTake) { w.takeColorAt(hit); w.setPaintTake(false) } else w.paintTap(hit)')
+    // POINT paints the point it met, never a face behind it.
+    expect(bench).toContain("w.paintMode !== 'point' && (w.paintMode === 'face' || faceWins())")
+    await m.unmount()
+  })
+
+  it('holds faces with every vertex on their corners, from ALL and the box alike, and BLEND paints them all', () => {
+    const w = useWorkshop.getState
+    const s = w().current()!
+    // A fifth vertex stacked on corner 0.
+    useWorkshop.setState({ shards: [{ ...s, vertices: [...s.vertices, { ...s.vertices[0] }] }], tool: 'select', selectKind: 'faces' })
+    w().selectAll()
+    expect(w().selectedFaces).toEqual([0, 1])
+    expect(w().selection).toContain(4)
+    w().selectVertex(null)
+    useWorkshop.setState({ tool: 'paint', paintMode: 'face', paintEdge: false, color: [1, 0, 0] })
+    w().paintTap({ face: 0 })
+    expect(w().current()!.vertices[4].c).toEqual([1, 0, 0])
+  })
+
+  it('keeps a held face a face when its own tool is tapped again, and lets it go whole for another tool', () => {
+    const w = useWorkshop.getState
+    w().setTool('select')
+    w().setSelectKind('faces')
+    w().selectFace(0)
+    w().setTool('select')
+    expect(w().selectedFaces).toEqual([0])
+    w().setTool('view')
+    expect(w().selectedFaces).toEqual([])
+    expect(w().selection).toEqual([])
+  })
+
+  it('paints an EDGE quietly, and remembers its color among the recent', () => {
+    const w = useWorkshop.getState
+    useWorkshop.setState({ tool: 'paint', paintMode: 'face', paintEdge: true, color: [0, 1, 0], notice: null })
+    w().paintTap({ face: 1 })
+    expect(w().notice).toBeNull()
+    expect(w().palette[0]).toBe('#00ff00')
+  })
+})

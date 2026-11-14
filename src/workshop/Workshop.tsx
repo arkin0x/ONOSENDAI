@@ -12,7 +12,7 @@
  * row; UNDO and REDO float beside them. Bottom left, TOOLS (STAMP, ADD,
  * SELECT, FACE and each tool's options). Top right, DEPLOY and the way out. Bottom right,
  * the CONTROLS pad, present only while points are selected: the main pad's
- * shape, nudging the selection in screen directions, with CONNECT and DELETE
+ * shape, nudging the selection in screen directions, with JOINED and DELETE
  * in its corners; and below it COLOR, folded to a swatch of the current
  * color until tapped, shut again by a tap anywhere else, and held open while
  * SELECT is the tool; gone while FACE is the tool with no face in hand, back
@@ -26,7 +26,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { Box, ChevronDown, ChevronUp, ClipboardCopy, ClipboardPaste, Copy, CopyPlus, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Hash, Link, type LucideIcon, Menu, Merge, MousePointer2, Orbit, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, Undo2, VenetianMask, WandSparkles, Waypoints, X } from 'lucide-react'
+import { Box, ChevronDown, ChevronUp, ClipboardCopy, ClipboardPaste, Copy, CopyPlus, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Hash, Link, Menu, Merge, MousePointer2, Orbit, PaintBucket, Pickaxe, Pipette, Plus, Puzzle, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, VenetianMask, WandSparkles, Waypoints, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
@@ -91,7 +91,7 @@ const DELETE_CONTENTS: DeleteContents = {
 
 /** One line under the tool row. */
 const TOOL_HELP: Partial<Record<Tool, string>> = {
-  view: 'Look around: one finger orbits, two pan, pinch zooms. The compass turns the view a quarter at a time. Pick a tool to build.',
+  view: 'Look around: one finger orbits, two pan, pinch zooms. Tap the compass to tip or roll the grid a quarter, so the next points go on another plane. Pick a tool to build.',
   stamp: 'Tap the grid to place the shape where the ghost shows. Q turns it.',
   add: 'Tap the grid to place a vertex at the current level.',
   select: 'Tap points, or drag boxes, to gather them. INVERT makes taps and boxes take points out; DESELECT lets go. Drag the ORBIT ball to turn the view.',
@@ -102,7 +102,7 @@ type Panel = 'menu' | 'tools' | 'grid' | 'shard' | 'motion' | 'avatar'
 
 const INTRO_KEY = 'onosendai:workshop-intro'
 
-function Intro(): JSX.Element | null {
+export function Intro(): JSX.Element | null {
   const [show, setShow] = useState<boolean>(() => { try { return !localStorage.getItem(INTRO_KEY) } catch { return false } })
   // Held back while the tutorial runs, without burning the one-time flag, so
   // entering the workshop from the tutorial never interrupts it (feedback
@@ -114,8 +114,8 @@ function Intro(): JSX.Element | null {
     <div className="workshop__intro" role="note" aria-label="How to make an object">
       <h3 className="workshop__intro-title">MAKE A SHARD</h3>
       <ol className="workshop__intro-steps">
-        <li><b>STAMP</b> a shape: pick one under TOOLS, tap the grid where the ghost shows.</li>
-        <li>One finger <b>orbits</b>, or drag the <b>ORBIT</b> ball (in SELECT and FACE one finger draws a box); two fingers <b>pan</b>. GRID raises the level to stack things.</li>
+        <li><b>STAMP</b> a shape: tap VIEW at the bottom left, pick STAMP, tap the grid where the ghost shows.</li>
+        <li>One finger <b>orbits</b>, or drag the <b>ORBIT</b> ball (in SELECT one finger draws a box); two fingers <b>pan</b>. GRID raises the level to stack things.</li>
         <li><b>DEPLOY</b> hides it in the world at a place you choose.</li>
       </ol>
       <button className="workshop__btn workshop__intro-ok" onClick={done}>GOT IT</button>
@@ -150,7 +150,7 @@ function StorageWarning(): JSX.Element | null {
 /**
  * The CONTROLS pad: the main pad's nine cells, for the selection. Arrows move
  * it a unit in screen directions (the sub-label says which world axis that is
- * right now), the corners CONNECT and DELETE, the hub counts the points and
+ * right now), the corners JOINED and DELETE, the hub counts the points and
  * clears them.
  */
 /**
@@ -479,9 +479,9 @@ function SelectRow({ inHand }: { inHand: boolean }): JSX.Element {
         <span className="touchpad__sub">INVERT</span>
       </button>
       {inHand && (
-        <button className="touchpad__key" title="Let everything go (Esc)" aria-label="Deselect everything" {...noCallout} onClick={() => { w().selectVertex(null); w().clearFacePick() }}>
+        <button className="touchpad__key touchpad__key--long" title="Let everything go (Esc)" aria-label="Deselect everything" {...noCallout} onClick={() => { w().selectVertex(null); w().clearFacePick() }}>
           <X size={15} strokeWidth={2.25} aria-hidden />
-          <span className="touchpad__sub">DESELECT</span>
+          <span className="touchpad__sub">DE<wbr />SELECT</span>
         </button>
       )}
     </div>
@@ -542,7 +542,7 @@ function ActionRow({ points, verts, parts, tool, face, picks, faces }: { points:
       {showSub && (
         <button className="touchpad__key touchpad__key--long" title="Cut each fully selected face into four, or a selected edge in two" aria-label="Subdivide the selection" {...noCallout} onClick={() => w().subdivideSelection()}>
           <Grid2x2Plus size={15} strokeWidth={2.25} aria-hidden />
-          <span className="touchpad__sub">SUBDIVIDE</span>
+          <span className="touchpad__sub">SUB<wbr />DIVIDE</span>
         </button>
       )}
       {showAuto && (
@@ -1059,9 +1059,9 @@ export function Workshop(): JSX.Element | null {
               An object is colored points on a grid of whole units, drawn SOLID (faces, colors blending
               across them), POINTS (every point a light) or LINES (one line through the points in the
               order they were made). STAMP places a whole shape; ADD one point; SELECT points, by tap
-              or by dragging a box, to move, color or delete them together, and CONNECT takes everything
+              or by dragging a box, to move, color or delete them together, and JOINED takes everything
               faces join to them; FACE picks corners and FILL joins them, and a tap on a face selects it
-              for DELETE FACE. The chip at the bottom right opens all 256 colors, with the ones you
+              to move, color, flip or delete. The chip at the bottom right opens all 256 colors, with the ones you
               used most recently on top; the buttons over it put the color on the whole object, the
               connected piece or the selected points, and the dropper takes a point's or face's color. Stamps keep their own corners even where they touch, so a red block against a
               blue one keeps a crisp edge. Under GRID, LEVEL is the height the placing tools work at,
@@ -1070,7 +1070,7 @@ export function Workshop(): JSX.Element | null {
               the object at true size before you place it. Under SHARD, PUBLISH puts the shard on your relays as a
               public object: the Shard Feed lists it, anyone can place it, and PUBLISH AGAIN replaces it under the same
               address; RETRACT asks the relays to drop it. That is separate from hiding, which seals a copy at a place.
-              Keys: 1 2 3 4 tools, Q turns a stamp, WASD and
+              Keys: 1 VIEW, 2 STAMP, 3 ADD, 4 SELECT, 5 FACE, Q turns a stamp, WASD and
               RF or the arrows nudge the selection in screen directions, C selects what faces join, Del
               deletes, Enter fills, [ ] change the level, Ctrl+Z undoes, Esc closes a panel, then
               clears, then closes the workshop.
@@ -1480,7 +1480,7 @@ export function Workshop(): JSX.Element | null {
             </button>
             {selection.length > 0 && (
               <button className="workshop__color ws__act" onClick={() => w().colorConnected(w().color)} title="The color onto these points and everything joined to them by faces" aria-label="Color the connected piece" style={{ borderColor: hex }} {...noCallout}>
-                <Waypoints size={17} strokeWidth={2.25} aria-hidden />
+                <Puzzle size={17} strokeWidth={2.25} aria-hidden />
               </button>
             )}
             {/* The bucket: the color onto the points in hand. With faces in

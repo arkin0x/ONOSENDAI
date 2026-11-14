@@ -200,3 +200,32 @@ let asked = 0
 export function requestView(ask: ViewAsk): void {
   useBenchView.setState({ request: { ...ask, id: ++asked } })
 }
+
+/**
+ * Where the move handles stand on screen (workshop redesign, phase 2,
+ * decision 2): the middle of what is held, and for each model axis the
+ * screen pixels one unit along it covers, in canvas pixels. Model +Z is
+ * render -Z, which the bench folds in before it reports. Null while nothing
+ * is held or nothing held is in front of the camera.
+ */
+export interface HandleFrame { center: [number, number]; perUnit: [[number, number], [number, number], [number, number]] }
+
+type HandleSink = (frame: HandleFrame | null) => void
+let handleSink: HandleSink | null = null
+/** The move handles listen here (shell/MoveHandles); the bench reports every frame it draws with something held. */
+export function setHandleSink(sink: HandleSink | null): void { handleSink = sink }
+/** The bench's report (Bench HandleProjector). */
+export function reportHandles(frame: HandleFrame | null): void { handleSink?.(frame) }
+
+/**
+ * Grid steps a drag of `dx`, `dy` CSS pixels moves along an axis whose unit
+ * covers `perUnit` pixels on screen: the drag's share along the axis, in
+ * units, then in ticks, rounded to whole steps of `step` ticks. An axis seen
+ * end on (under a pixel a unit) moves nothing rather than leaping. Pure.
+ */
+export function handleSteps(dx: number, dy: number, perUnit: readonly [number, number], ticksPerUnit: number, step: number): number {
+  const len2 = perUnit[0] * perUnit[0] + perUnit[1] * perUnit[1]
+  if (len2 < 1 || step <= 0) return 0
+  const units = (dx * perUnit[0] + dy * perUnit[1]) / len2
+  return Math.round((units * ticksPerUnit) / step)
+}

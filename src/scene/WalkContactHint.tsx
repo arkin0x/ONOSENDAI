@@ -21,12 +21,13 @@ import { OVERLAY_ORDER } from './shardFaces'
 
 /** The hint for the world shard `shardKey`, while it is live. */
 export function WalkContactHint({ shardKey, shard, scale, clip, pose }: { shardKey: string; shard: ShardModel; scale: number; clip?: Box; pose?: Pose }): JSX.Element | null {
-  const at = useWallHint((s) => (s.key === shardKey ? s.at : null))
-  if (at === null) return null
-  return <HintOutline key={at} at={at} shard={shard} scale={scale} clip={clip} pose={pose} />
+  // Mounted while this wall holds the hint; a new stop on it moves the time on (read each frame), never a remount.
+  const mine = useWallHint((s) => s.key === shardKey)
+  if (!mine) return null
+  return <HintOutline shard={shard} scale={scale} clip={clip} pose={pose} />
 }
 
-function HintOutline({ at, shard, scale, clip, pose }: { at: number; shard: ShardModel; scale: number; clip?: Box; pose?: Pose }): JSX.Element | null {
+function HintOutline({ shard, scale, clip, pose }: { shard: ShardModel; scale: number; clip?: Box; pose?: Pose }): JSX.Element | null {
   const geometry = useMemo(() => {
     const { positions, faces } = shardGeometry(expandFaceColors(shard), clip, pose)
     const idx = faces.length ? faceEdges(faces) : []
@@ -41,7 +42,7 @@ function HintOutline({ at, shard, scale, clip, pose }: { at: number; shard: Shar
   useFrame(() => {
     const m = material.current
     if (!m) return
-    const elapsed = performance.now() - at
+    const elapsed = performance.now() - useWallHint.getState().at
     m.opacity = WALL_HINT_OPACITY * wallHintShare(elapsed, reducedMotionNow())
     m.visible = elapsed < WALL_HINT_MS
   })

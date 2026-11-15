@@ -10,7 +10,9 @@
  * hide, into a new bag or one already out, an edit or a move alike
  * (arkinox, 2026-11-15; store/deployHintPrefs.ts). The sector hint is off
  * where the height is too large for it and back on below, which never
- * changes the saved choice.
+ * changes the saved choice. Money is said only with its own switch on,
+ * OFF for a player who never touched it and shown whenever cashu is inside
+ * (arkinox, 2026-11-15: "money off by default").
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -44,7 +46,7 @@ vi.mock('../../lib/relay', () => ({
 }))
 
 import { useCyberspace } from '../useCyberspace'
-import { ownBagIn, regionOf, useShards } from '../useShards'
+import { moneyAsSaved, moneyRowShown, ownBagIn, regionOf, useShards } from '../useShards'
 import { HIDDEN_KIND, bagTemplate, newBagSettings, type BagSettings } from '../../lib/hidden'
 import { SECTOR_HINT, hintTags, isHintTag } from '../../lib/hint'
 import { HINT_PREFS_KEY, loadHintPrefs } from '../deployHintPrefs'
@@ -52,6 +54,7 @@ import { deployPoint } from '../../lib/space'
 import { hexToBytes, type NostrEvent } from '../../lib/events'
 
 const HEIGHT = 6
+const TOKEN = 'cashuBo2FteBtodHRwczovL21pbnQubWluaWJpdHMuY2FzaC9CaXRjb2luYXVjc2F0YXSBomFpSABQBVDwSUFGYXCBpGFhAmFzeEAzZjNlYTU2YTk3ZjE3MDAxMjZkZjVlZDNlNDNmYjU2NjAzMmQ0YWQyNTNkNmNiODEyZGI0N2E1OTA0MjZmNDVjYWNYIQKr8zhNlxrJ0lMVMXKkXy9Ww7GjPU2LaH3sz5Y1HlgLv2Fko2FlWCCa5DHXKlbV8GLuXtnZsc2vJ8fsoTHpp6W3t3q0B2-ZomFzWCCTJGYFX4d0fwWhP6rgrgIX1xZpCCr0K0jj4Z3vKYIhR2FyWCBqvA'
 const CEILING = useShards.getState().deployCeiling
 const lastBag = () => [...sent].reverse().find((e) => e.kind === HIDDEN_KIND) as unknown as NostrEvent
 const tagNames = (ev: NostrEvent): string[] => ev.tags.map((t) => t[0])
@@ -354,7 +357,122 @@ describe('the three hint switches: ON for a new player, then what they set (arki
     expect(S().deployBag.hint).toBeNull()
     S().setDeployHeight(20)
     expect(S().deployBag.hint).toEqual(SECTOR_HINT)
-    expect(loadHintPrefs()).toEqual({ height: true, sector: true, contents: false })
+    expect(loadHintPrefs()).toEqual({ height: true, sector: true, contents: false, money: false })
+  })
+})
+
+describe('money off by default (arkinox, 2026-11-15)', () => {
+  const S = () => useShards.getState()
+  const contentsRows = (ev: NostrEvent): string[][] => ev.tags.filter((t) => t[0] === 'contents')
+  /** Every public word of the bag: its tags and its riddle. */
+  const saysCashu = (ev: NostrEvent): boolean => /cashu/i.test(JSON.stringify(ev.tags.filter((t) => t[0] !== 'encrypted'))) || /cashu/i.test(ev.content)
+
+  it('a fresh player hiding cashu: the money switch is off and the bag says nothing of money', async () => {
+    S().startDeployMessage(`for you ${TOKEN}`)
+    expect(S().deployBag).toMatchObject({ contents: true, money: false })
+    await hide(`for you ${TOKEN}`)
+    const bag = lastBag()
+    expect(contentsRows(bag)).toEqual([['contents', 'message', '1']])
+    expect(saysCashu(bag)).toBe(false)
+    expect(S().mine[0].bag).toMatchObject({ contents: true, money: false })
+  })
+
+  it('the same bag says exactly what it would with no token in it: no count or total gives money away', async () => {
+    await hide(`for you ${TOKEN}`)
+    const rich = contentsRows(lastBag())
+    useShards.setState({ mine: [] })
+    sent.length = 0
+    await hide('for you')
+    expect(contentsRows(lastBag())).toEqual(rich)
+  })
+
+  it('turned on, the bag counts the cashu, and the choice is kept for the next hide', async () => {
+    await hide(`for you ${TOKEN}`, { money: true })
+    expect(contentsRows(lastBag())).toEqual([['contents', 'message', '1'], ['contents', 'cashu', '1']])
+    expect(loadHintPrefs()).toMatchObject({ money: true })
+    S().startDeployMessage(`more ${TOKEN}`)
+    expect(S().deployBag.money).toBe(true)
+  })
+
+  it('contents off and money on: only that money is inside, with no count', async () => {
+    await hide(`for you ${TOKEN}`, { contents: false, money: true })
+    expect(contentsRows(lastBag())).toEqual([['contents', 'cashu']])
+  })
+
+  it('contents off and money off: nothing at all', async () => {
+    await hide(`for you ${TOKEN}`, { contents: false })
+    expect(contentsRows(lastBag())).toEqual([])
+    expect(saysCashu(lastBag())).toBe(false)
+  })
+
+  it('a bag that said money before keeps saying it until you hide into it again, then follows the switch', async () => {
+    await hide(`for you ${TOKEN}`, { money: true })
+    expect(contentsRows(lastBag())).toContainEqual(['contents', 'cashu', '1'])
+    relayBags = [lastBag()]
+    await hide('b')
+    relayBags = [lastBag()]
+    // The second hide went out as the bar showed it: money still on for this player.
+    expect(contentsRows(lastBag())).toContainEqual(['contents', 'cashu', '1'])
+    // A fresh device: the switch is off, and nothing is rewritten until a hide.
+    // A rewrite that is not a hide (a DELETE of another item) keeps what the bag said.
+    localStorage.clear()
+    sent.length = 0
+    await useShards.getState().deleteInstance(S().mine.find((d) => d.text === 'b')!.eventId)
+    expect(contentsRows(lastBag())).toEqual([['contents', 'message', '1'], ['contents', 'cashu', '1']])
+    relayBags = [lastBag()]
+    await hide('c')
+    expect(contentsRows(lastBag())).toEqual([['contents', 'message', '2']])
+    expect(saysCashu(lastBag())).toBe(false)
+  })
+
+  it('a bag this device does not know, which said money, stops when hidden into with the switch off', async () => {
+    await hide(`for you ${TOKEN}`, { money: true })
+    const first = lastBag()
+    useShards.setState({ mine: [] })
+    localStorage.clear()
+    relayBags = [first]
+    await hide('second')
+    // It still holds the token: two messages, and nothing said of money.
+    expect(contentsRows(lastBag())).toEqual([['contents', 'message', '2']])
+    expect(saysCashu(lastBag())).toBe(false)
+  })
+
+  it('a switch saved ON never speaks for a bag whose cashu this device does not list: no row, no money', async () => {
+    await hide(`for you ${TOKEN}`, { money: true })
+    const first = lastBag()
+    expect(loadHintPrefs().money).toBe(true)
+    // Another device's view: the bag holds the token, this device lists none of it.
+    useShards.setState({ mine: [] })
+    relayBags = [first]
+    S().startDeployMessage('plain')
+    const cs = useCyberspace.getState()
+    expect(moneyRowShown(S().pending, ownBagIn(S().mine, regionOf(deployPoint(cs.cursor, cs.scaleExp, HEIGHT), cs.plane, HEIGHT)))).toBe(false)
+    expect(S().deployBag.money).toBe(true)
+    S().cancelDeploy()
+    await hide('plain')
+    expect(contentsRows(lastBag())).toEqual([['contents', 'message', '2']])
+    expect(saysCashu(lastBag())).toBe(false)
+    // The saved switch is untouched: the next cashu hide, with the row shown, says it.
+    expect(loadHintPrefs().money).toBe(true)
+  })
+
+  it('the row shows for a cashu message being hidden, or your bag listing one; not otherwise', () => {
+    expect(moneyRowShown({ type: 'message', text: `x ${TOKEN}` }, null)).toBe(true)
+    expect(moneyRowShown({ type: 'message', text: 'x' }, null)).toBe(false)
+    expect(moneyRowShown({ type: 'message', text: 'x' }, { cashu: true })).toBe(true)
+    expect(moneyRowShown({ type: 'key' }, { cashu: false })).toBe(false)
+    expect(moneyRowShown(null, null)).toBe(false)
+  })
+
+  it('a write that adds cashu without the bar (HIDE AGAIN, a room moving out) keeps money only with the saved switch ON, and never turns it on', () => {
+    const said = { ...newBagSettings(HEIGHT), contents: true, money: true }
+    expect(moneyAsSaved(said, true).money).toBe(false)
+    expect(moneyAsSaved(said, false).money).toBe(true)
+    expect(moneyAsSaved({ ...said, money: false }, true).money).toBe(false)
+    S().startDeployMessage(`x ${TOKEN}`)
+    S().setDeployBag({ money: true })
+    expect(moneyAsSaved(said, true).money).toBe(true)
+    expect(moneyAsSaved({ ...said, money: false }, true).money).toBe(false)
   })
 })
 
@@ -366,7 +484,7 @@ describe('what the client forces never overwrites the saved switches', () => {
     S().startDeployMessage('high')
     S().setDeployHeight(35)
     expect(S().deployBag.hint).toBeNull()
-    expect(loadHintPrefs()).toEqual({ height: true, sector: true, contents: true })
+    expect(loadHintPrefs()).toEqual({ height: true, sector: true, contents: true, money: false })
     S().cancelDeploy()
     S().startDeployMessage('low')
     S().setDeployHeight(HEIGHT)
@@ -377,7 +495,7 @@ describe('what the client forces never overwrites the saved switches', () => {
     S().startDeployMessage('x')
     S().setDeployBag({ heightTag: false, hint: null, contents: false })
     expect(newBagSettings(HEIGHT)).toMatchObject({ heightTag: true, hint: SECTOR_HINT })
-    expect(loadHintPrefs()).toEqual({ height: false, sector: false, contents: false })
+    expect(loadHintPrefs()).toEqual({ height: false, sector: false, contents: false, money: false })
   })
 })
 

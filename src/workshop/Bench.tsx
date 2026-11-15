@@ -53,6 +53,9 @@ import { Hold, multiPress, noteGesture, noteMultiTouch, slopFor, tapSlop } from 
 import { HandleDots, HandleHalos, HandleHits, PressMemory, dotCapacity, type Halo } from './handleDots'
 import { keepPrograms } from '../lib/keepPrograms'
 import { useBeginner } from './beginner'
+import { BenchLookRig, BenchShard } from './benchLook'
+import { isLook } from './lookTool'
+import { BenchBloom } from './benchBloom'
 
 type P3 = [number, number, number]
 
@@ -287,13 +290,13 @@ function ScreenScale({ position, children }: { position: [number, number, number
  * minute after opening it"). A corner picked for a face keeps its ring, as
  * its own object: a face has few corners.
  */
-function Handles(): JSX.Element | null {
+export function Handles(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
   const selection = useWorkshop((s) => s.selection)
   const facePick = useWorkshop((s) => s.facePick)
   const tool = useWorkshop((s) => s.tool)
   const previewing = useAnimPreview((s) => s.on)
-  const moving = tool === 'view' || previewing
+  const moving = previewing
   const invalidate = useThree((s) => s.invalidate)
   const chosen = useMemo(() => new Set(selection), [selection])
   const groups = useMemo(() => {
@@ -335,7 +338,9 @@ function Handles(): JSX.Element | null {
   })
   const pressed = useMemo(() => new PressMemory(), [])
   if (!shard) return null
-  // On VIEW a shard with `anim` is drawn moving (ShardMesh \`still\`): handles at its rest pose would hang in the air beside it.
+  // LOOK shows the shard as the world does, with no handles (benchLook.tsx).
+  if (isLook(tool)) return null
+  // In the motion preview a shard with `anim` is drawn moving (ShardMesh \`still\`): handles at its rest pose would hang in the air beside it.
   if (moving && hasAnim(shard)) return null
 
   const onPress = (e: ThreeEvent<PointerEvent>): void => { pressed.press(e.nativeEvent, e.index) }
@@ -359,8 +364,6 @@ function Handles(): JSX.Element | null {
       const cam = e.camera as PerspectiveCamera
       return e.ray.distanceToPoint(centre) > DOT_ON_R * hits.pixelAt(e.index as number, cam.position, cam.fov)
     }
-    // LOOK only looks (workshop redesign, phase 3): a tap does nothing.
-    if (tool === 'view') return
     // SELECT takes what its switch says: a point here, a face under the tap,
     // or nothing, so a placed object under the dot gets the tap.
     if (tool === 'select' && w.selectKind !== 'points') {
@@ -406,6 +409,7 @@ function Handles(): JSX.Element | null {
 function PickLoop(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
   const facePick = useWorkshop((s) => s.facePick)
+  const look = useWorkshop((s) => isLook(s.tool))
   const line = useMemo(() => {
     if (!shard || facePick.length < 2) return null
     const pts = facePick.map((i) => shard.vertices[i]).filter((v) => !!v).map((v) => UP(ticksOf(v)))
@@ -418,7 +422,7 @@ function PickLoop(): JSX.Element | null {
     return l
   }, [shard, facePick])
   useEffect(() => () => { line?.geometry.dispose(); line?.material.dispose() }, [line])
-  return line ? <primitive object={line} /> : null
+  return line && !look ? <primitive object={line} /> : null
 }
 
 /**
@@ -427,9 +431,10 @@ function PickLoop(): JSX.Element | null {
  * 2026-10-31). One fill and one set of outlines however many there are: made
  * when the faces in hand or the shard change, never per frame.
  */
-function FaceHighlight(): JSX.Element | null {
+export function FaceHighlight(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
   const faces = useWorkshop((s) => s.selectedFaces)
+  const look = useWorkshop((s) => isLook(s.tool))
   const lit = useMemo(() => {
     if (!shard || faces.length === 0) return null
     const fill: number[] = []
@@ -449,7 +454,7 @@ function FaceHighlight(): JSX.Element | null {
     return { g, e }
   }, [shard, faces])
   useEffect(() => () => { lit?.g.dispose(); lit?.e.dispose() }, [lit])
-  if (!lit) return null
+  if (!lit || look) return null
   // Transparent, at OVERLAY_ORDER, the fill and the outlines alike: both draw
   // after a see-through shard's faces (order 1), or a face blends over them
   // and the highlight vanishes on a see-through shard (shardFaces.ts).
@@ -734,12 +739,13 @@ function HandleProjector(): null {
   const shard = useWorkshop((s) => s.current())
   const selection = useWorkshop((s) => s.selection)
   const partSel = useWorkshop((s) => s.partSel)
-  // A shard drawn moving (LOOK, or the motion preview) has no rest pose on screen to hang handles from, as Handles has none.
-  const tool = useWorkshop((s) => s.tool)
+  // LOOK has no move handles (benchLook.tsx). A shard drawn moving (the
+  // motion preview) has no rest pose on screen to hang them from, as Handles has none.
+  const look = useWorkshop((s) => isLook(s.tool))
   const previewing = useAnimPreview((s) => s.on)
-  const moving = (tool === 'view' || previewing) && !!shard && hasAnim(shard)
+  const moving = previewing && !!shard && hasAnim(shard)
   const center = useMemo(() => {
-    if (!shard || moving || (selection.length === 0 && partSel.length === 0)) return null
+    if (!shard || look || moving || (selection.length === 0 && partSel.length === 0)) return null
     const seen = new Set<string>()
     let x = 0, y = 0, z = 0, n = 0
     for (const i of selection) {
@@ -757,7 +763,7 @@ function HandleProjector(): null {
       const r = UP(q.at); x += r[0]; y += r[1]; z += r[2]; n++
     }
     return n ? new Vector3(x / n, y / n, z / n) : null
-  }, [shard, moving, selection, partSel])
+  }, [shard, look, moving, selection, partSel])
   // Held, or let go: a frame, so the handles come or go even on a still bench.
   useEffect(() => { if (!center) reportHandles(null); invalidate() }, [center, invalidate])
   useEffect(() => () => reportHandles(null), [])
@@ -815,15 +821,17 @@ function Keys(): null {
         ArrowUp: 'up', ArrowDown: 'down', KeyW: 'up', KeyS: 'down',
         KeyR: 'away', KeyF: 'toward',
       }
-      if (nudge[e.code]) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.step()); return }
-      if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (w.selectedFaces.length > 0) w.deleteSelectedFace(); else w.deleteSelected(); return }
-      if (e.code === 'Enter') { e.preventDefault(); if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
+      // LOOK only looks: what is held is out of sight there, so its keys leave it alone (benchLook.tsx).
+      const look = isLook(w.tool)
+      if (nudge[e.code]) { e.preventDefault(); if (look) return; const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.step()); return }
+      if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (look) return; if (w.selectedFaces.length > 0) w.deleteSelectedFace(); else w.deleteSelected(); return }
+      if (e.code === 'Enter') { e.preventDefault(); if (look) return; if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
       // Escape is not here: it goes through the Escape stack (useEscape), so
       // the palette sheet and the confirmations over the bench close before
       // the bench does. Workshop registers what it clears and closes.
-      if (e.code === 'KeyC') { w.selectConnected(); return }
+      if (e.code === 'KeyC') { if (!look) w.selectConnected(); return }
       // B, the held bar's COLOR: the color in hand onto what is held (points, or a face's corners).
-      if (e.code === 'KeyB') { if (w.selection.length) w.colorSelected(w.color); return }
+      if (e.code === 'KeyB') { if (w.selection.length && !look) w.colorSelected(w.color); return }
       // The keys run 1 to 6 along the dock, left to right (Dock.tsx DOCK).
       if (e.code === 'Digit1') w.setTool('view')
       if (e.code === 'Digit2') w.setTool('stamp')
@@ -834,8 +842,8 @@ function Keys(): null {
       if (e.code === 'Digit5') w.setTool('add')
       if (e.code === 'Digit6') w.setTool('face')
       // Q and E turn the selection a quarter turn while SELECT holds one; Q turns the stamp otherwise.
-      if (e.code === 'KeyQ') { if ((w.tool === 'select' || w.tool === 'view') && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else w.turnStamp() }
-      if (e.code === 'KeyE') { if ((w.tool === 'select' || w.tool === 'view') && (w.selection.length || w.partSel.length)) w.rotateSelected(1) }
+      if (e.code === 'KeyQ') { if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else if (!look) w.turnStamp() }
+      if (e.code === 'KeyE') { if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(1) }
       if (e.code === 'BracketRight') w.setLevel(w.level + w.step())
       if (e.code === 'BracketLeft') w.setLevel(w.level - w.step())
     }
@@ -1077,8 +1085,8 @@ export function benchClock(shared: ClockReading): ClockReading {
 }
 
 /**
- * A path's points on the bench while its motion shows (VIEW, or the editor's
- * preview): a dot for each and the loop through them, where the object's
+ * A path's points on the bench while the motion editor previews it (not in
+ * LOOK, which shows only what the world shows): a dot for each and the loop through them, where the object's
  * origin travels, the point being edited larger. The field's frame is the
  * render frame (lib/anim.ts), so a point is drawn at its ticks over 120.
  */
@@ -1145,12 +1153,11 @@ function BenchImpl(): JSX.Element {
   const shard = useWorkshop((s) => s.current())
   const tool = useWorkshop((s) => s.tool)
   const boxSelect = useWorkshop((s) => s.boxSelect)
-  const selectKind = useWorkshop((s) => s.selectKind)
-  // The motion editor's preview draws the motion whatever the tool (store/animPreview.ts).
+  const look = isLook(tool)
+  // The motion editor's preview, with its path marks, whatever the tool (store/animPreview.ts).
   const previewing = useAnimPreview((s) => s.on)
   const extent = shard?.extent ?? GRID_HALF
   const showAvatar = useWorkshop((s) => s.showAvatar)
-  const partSel = useWorkshop((s) => s.partSel)
   // What the shard on the bench draws, round: Reach measures it, the home view fits it.
   const sphere = useRef<Sphere | null>(null)
   const first = useRef(true)
@@ -1229,8 +1236,11 @@ function BenchImpl(): JSX.Element {
       <BenchAxes reach={extent + 1} />
       <Grid />
       {showAvatar && <ScaleAvatar />}
-      {shard && <AnimClock.Provider value={benchClock}><ShardMesh shard={shard} lit still={tool !== 'view' && !previewing} onFaceClick={tool === 'paint' || (tool === 'select' && selectKind === 'faces') ? onFace : undefined} onPartClick={tool === 'select' || tool === 'face' || tool === 'paint' ? onPart : undefined} selectedParts={partSel} /></AnimClock.Provider>}
-      <PathMarks show={tool === 'view' || previewing} />
+      {/* The shard: as the world draws it in LOOK, under the world's bloom; lit, with handles, in every other tool (benchLook.tsx). */}
+      <AnimClock.Provider value={benchClock}><BenchShard onFace={onFace} onPart={onPart} /></AnimClock.Provider>
+      {look && <BenchLookRig />}
+      {look && <BenchBloom />}
+      <PathMarks show={previewing} />
       <Ghost />
       <PickLoop />
       <FaceHighlight />

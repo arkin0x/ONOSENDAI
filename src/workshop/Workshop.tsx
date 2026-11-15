@@ -50,6 +50,7 @@ import { PaletteModal } from './PaletteModal'
 import { ZipImport } from './ZipImport'
 import { Dock } from './shell/Dock'
 import { MoveHandles } from './shell/MoveHandles'
+import { isLook } from './lookTool'
 import { Rail } from './shell/Rail'
 import { Sheet } from './shell/Sheet'
 import { Strip } from './shell/Strip'
@@ -205,7 +206,8 @@ export function Workshop(): JSX.Element | null {
     // The first-visit guide, up: Esc puts it away for this opening only (it
     // comes back next time, unless SKIP was tapped), and the workshop stays.
     else if (useBeginner.getState().step !== null && !useBeginner.getState().paused && !tutorialActive) useBeginner.getState().pause()
-    else if (ws.selection.length || ws.partSel.length || ws.selectedFaces.length > 0 || ws.facePick.length) { ws.selectVertex(null); ws.clearFacePick() }
+    // Not in LOOK, where what is held is out of sight and stays held (benchLook.tsx): Esc goes on to close.
+    else if (!isLook(ws.tool) && (ws.selection.length || ws.partSel.length || ws.selectedFaces.length > 0 || ws.facePick.length)) { ws.selectVertex(null); ws.clearFacePick() }
     else ws.closeWorkshop()
   })
 

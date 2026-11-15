@@ -88,6 +88,7 @@ const TOUCHED = [
   'hud/InventoryPanel.tsx',
   'hud/InvoiceModal.tsx',
   'hud/ItemFeedPicker.tsx',
+  'hud/ItemRows.tsx',
   'hud/LoginModal.tsx',
   'hud/LookPicker.tsx',
   'hud/LootDetail.tsx',

@@ -216,7 +216,7 @@ describe('the loot layout in DISCOVERED NEARBY (owner, 2026-11-15)', () => {
     useShards.setState({ discovered: { [h.eventId]: h } })
     const item = { key: h.eventId, type: 'key', keyItem: lock, event: ev, at: AT, plane: 1, height: 3, mine: false, author: ev.pubkey, createdAt: T, distance: 0n, lookupId: h.lookupId, bagId: h.bagId } as unknown as NearbyItem
     const r = await mount(<ul><Row item={item} me={me()} onView={() => undefined} /></ul>)
-    expect(actions(r)).toEqual(['TAKE', 'VIEW'])
+    expect(actions(r)).toEqual(['TAKE', 'COMMENT', 'VIEW'])
     const line = r.all().find((x) => x.props.className === 'keyline')!
     expect(flat(line).some((x) => x.type === 'button')).toBe(false)
     expect(r.all().some((x) => String(x.props.className ?? '').split(' ').includes('chamfer'))).toBe(true)

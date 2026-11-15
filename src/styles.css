@@ -11910,7 +11910,7 @@ html.tv-broadcast body { overflow: hidden; }
 }
 .chest__row--thumb > .chamfer { grid-column: 1; grid-row: 1 / span 2; }
 .chest__row--thumb > .item__line, .chest__row--thumb > .chest { grid-column: 2; grid-row: 1; min-width: 0; }
-.chest__row--thumb > .chest__act--take { grid-column: 2; grid-row: 2; align-self: end; justify-self: end; }
+.chest__row--thumb > .chest__row-acts { grid-column: 2; grid-row: 2; align-self: end; justify-self: end; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 /* An OTHER LOOT chest's contents, across the whole row under its words and ACTIONS. */
 .held__row--loot > .held__contents { grid-column: 1 / -1; min-width: 0; }
 .held__contents:empty { display: none; }

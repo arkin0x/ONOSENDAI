@@ -10832,13 +10832,17 @@ a.feed__act { text-decoration: none; }
   min-height: 30px;
   justify-content: center;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 3px #000;
+  text-shadow: var(--scanorbs-edge);
   white-space: nowrap;
 }
-.scanorbs__value b { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: var(--scan); }
-.scanorbs__tag { font-size: 8.5px; letter-spacing: 0.1em; color: var(--dim); }
-/* A HOSAKA height: HOSAKA's blue, so the price never reads as free. */
-.scanorbs__tag.is-hosaka { color: var(--accent); }
+/* White with a dark edge (arkinox, 2026-11-15: "I can't read this text. Make
+   it white instead."): purple and grey vanished over a pale lavender scene.
+   The edge is a tight dark outline and a soft dark halo, so the words read
+   over the brightest cube and still sit lightly over a dark one. */
+:root { --scanorbs-edge: 0 0 1px #000, 0 0 2px rgba(0, 0, 0, 0.95), 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.6); }
+.scanorbs__value b { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #fff; }
+/* How long a scan at this height takes; under it, on a line of its own, HOSAKA's price or DEVICE MAX. */
+.scanorbs__tag { font-size: 9px; font-weight: 600; letter-spacing: 0.08em; color: #fff; }
 .flyorb.scanorb {
   flex-direction: column;
   border-color: rgba(var(--scan-rgb), 0.55);
@@ -10866,7 +10870,7 @@ a.feed__act { text-decoration: none; }
 @media (prefers-reduced-motion: reduce) { .flyorb.scanorb.is-busy { animation: none; } }
 .scanorb__word { position: relative; z-index: 1; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
 .scanorb__sats { position: relative; z-index: 1; font-size: 7.5px; letter-spacing: 0.06em; color: var(--accent); }
-.scanorbs .flyorb__key { color: var(--scan); }
+.scanorbs .flyorb__key { color: #fff; opacity: 1; text-shadow: var(--scanorbs-edge); }
 /* How far along a scan is, then what it found. */
 .scanorbs__line {
   display: flex;
@@ -10876,8 +10880,8 @@ a.feed__act { text-decoration: none; }
   font-size: 9px;
   letter-spacing: 0.08em;
   font-weight: 700;
-  color: var(--scan);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  color: #fff;
+  text-shadow: var(--scanorbs-edge);
 }
 .scanorbs__line.is-error { color: var(--warn); font-weight: 600; letter-spacing: 0.02em; }
 .scanorbs__bar { display: block; width: 120px; height: 3px; border-radius: 2px; background: rgba(var(--scan-rgb), 0.2); overflow: hidden; }

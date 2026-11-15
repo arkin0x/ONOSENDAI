@@ -12,9 +12,14 @@
  * rule that moves them moves these too: the HOSAKA mark, a phone on its
  * side, the chat): the workshop rail's up, value and down (workshop/shell/
  * Rail.tsx), reading SCAN HEIGHT and the height, and to their right a glass
- * orb like the fly buttons, in purple, that says SCAN. Under the height a tag
- * says who computes it: this device, free, up to its benchmark; HOSAKA, with
- * the price, above it; a cube already held is only asked about again. While
+ * orb like the fly buttons, in purple, that says SCAN. Under the height a line
+ * says how long a scan at that height takes (arkinox, 2026-11-15: "Can you
+ * make them say a time estimate in white text for how long that height will
+ * take to scan?"): from this device's benchmark up to its max, HOSAKA's own
+ * estimate and its price above it, INSTANT for a cube already held, which is
+ * only asked about again (store/useScan.ts scanSeconds). Both lines are white
+ * with a dark edge, readable over the brightest scene; the price, or DEVICE
+ * MAX, on a line of its own, so the dock never widens. While
  * a scan runs the orb is CANCEL and a line under the controls says how far
  * along it is; then what it found. A HOSAKA height the Cloud compute mode
  * asks about (ASK, or AUTO over its cap) takes two presses: the first arms
@@ -27,21 +32,52 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
 import { useSecrets } from '../store/useSecrets'
-import { scanCancellable, scanPrice, useScan, type ScanJob, type ScanResult } from '../store/useScan'
+import { scanCancellable, scanPrice, scanSeconds, useScan, type ScanJob, type ScanResult } from '../store/useScan'
 import { useCalibration } from '../lib/calibration'
+import { ratioOf, useExperience } from '../lib/experience'
 import { localKeyCeiling } from '../lib/deployPlan'
 import { heldCube, scanRange, SCAN_MIN_HEIGHT, type ScanRange } from '../lib/scanCube'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import type { CloudStatus } from '../store/useCyberspace'
 
-/** The tag under the height: who computes it, and for what. */
-export function scanTag(height: number, range: ScanRange, held: boolean, price: number | null, cloudOff: boolean): string {
-  if (held) return 'HELD · FREE'
+/**
+ * A wait in plain words, rounded the way a person would say it: under a
+ * second, seconds to 10 then fives, minutes to 10 then fives, hours to 10
+ * then fives, days.
+ */
+export function scanTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return 'TIME UNKNOWN'
+  if (seconds < 1) return 'UNDER 1 SEC'
+  const say = (n: number, unit: string): string => `ABOUT ${n} ${unit}`
+  // Fives past 10, and a count that would round up to the next unit says that unit.
+  const round = (n: number): number => (n < 9.5 ? Math.max(1, Math.round(n)) : Math.round(n / 5) * 5)
+  if (seconds < 57.5) return say(round(seconds), 'SEC')
+  const minutes = seconds / 60
+  if (minutes < 57.5) return say(round(minutes), 'MIN')
+  const hours = minutes / 60
+  if (hours < 22.5) return say(round(hours), 'HR')
+  const days = Math.round(hours / 24)
+  return days > 99 ? 'OVER 99 DAYS' : say(days, days === 1 ? 'DAY' : 'DAYS')
+}
+
+/**
+ * The words under the height, a line each: how long a scan there takes. A
+ * cube already held is INSTANT (only the relays are asked); a HOSAKA height
+ * says its price too, always; the device max with nothing past it says so.
+ */
+export function scanTagLines(height: number, range: ScanRange, held: boolean, price: number | null, seconds: number | null): string[] {
+  if (held) return ['INSTANT']
+  const time = seconds === null ? null : scanTime(seconds)
   if (height <= range.localMax) {
-    if (height === range.top && !range.cloud) return cloudOff ? 'DEVICE MAX · HOSAKA OFF' : 'DEVICE MAX'
-    return 'ON DEVICE · FREE'
+    const local = time ?? 'TIME UNKNOWN'
+    return height === range.top && !range.cloud ? [local, 'DEVICE MAX'] : [local]
   }
-  return price === null ? 'HOSAKA · NO PRICE YET' : `HOSAKA · ${price} SATS`
+  return [time ?? 'HOSAKA', price === null ? 'NO PRICE YET' : `${price} SATS`]
+}
+
+/** The same words on one line: the tooltip, and what the tests read. */
+export function scanTag(height: number, range: ScanRange, held: boolean, price: number | null, seconds: number | null): string {
+  return scanTagLines(height, range, held, price, seconds).join(' · ')
 }
 
 /** The line under the controls while a scan runs, or after it. */
@@ -91,8 +127,11 @@ function ScanDock(): JSX.Element {
   const cloudStatus = useCyberspace((s) => s.cloud.status)
   const cloudJob = useCyberspace((s) => s.cloud.job)
   const price = useCyberspace((s) => scanPrice(height, s))
-  // The benchmark landing moves the local max (localKeyCeiling reads it).
-  useCalibration((s) => s.hopHeight)
+  // The benchmark landing moves the local max (localKeyCeiling reads it) and the time.
+  const hopHeight = useCalibration((s) => s.hopHeight)
+  const cantorMsByHeight = useCalibration((s) => s.cantorMsByHeight)
+  const provider = useCyberspace((s) => s.cloud.provider)
+  const experience = useExperience((s) => ratioOf(s.samples))
   const range = scanRange(localKeyCeiling(), !cloudOff, cloudCap)
   const cursor = useCyberspace((s) => s.cursor)
   const plane = useCyberspace((s) => s.anchorPlane)
@@ -126,6 +165,7 @@ function ScanDock(): JSX.Element {
   const cancellable = scanCancellable(job, { status: cloudStatus, job: cloudJob })
   const percent = scanPercent(job, now)
   const elapsed = job ? Math.max(0, Math.floor((now - job.startedAt) / 1000)) : 0
+  const seconds = scanSeconds(height, route, { cantorMsByHeight, hopHeight, provider, experience })
   const line = scanLine(job, result, percent, elapsed, cloudStatus, buying?.status ?? null, armed ? confirm.sats : null)
   const goDisabled = job ? !cancellable : cloud && (price === null || buying !== null)
   const word = job ? (cancellable ? 'CANCEL' : cloudStatus === 'quoting' || buying?.status === 'submitting' ? 'ASKING' : 'PAID') : armed ? 'CONFIRM' : 'SCAN'
@@ -138,9 +178,12 @@ function ScanDock(): JSX.Element {
           <button className="scanorbs__step" {...bind(() => s().stepHeight(1))} disabled={job !== null || height >= range.top} title="Raise the scan height (.)" aria-label="Raise the scan height">
             <ChevronUp size={18} strokeWidth={2.25} aria-hidden />
           </button>
-          <span className="scanorbs__value">
+          <span className="scanorbs__value" title={scanTag(height, range, held, price, seconds)}>
             <b>SCAN HEIGHT {height}</b>
-            <span className={`scanorbs__tag${cloud ? ' is-hosaka' : ''}`}>{scanTag(height, range, held, price, cloudOff)}</span>
+            {/* A line each, so the dock stays as narrow as SCAN HEIGHT and the orb never moves. */}
+            {scanTagLines(height, range, held, price, seconds).map((words) => (
+              <span key={words} className="scanorbs__tag">{words}</span>
+            ))}
           </span>
           <button className="scanorbs__step" {...bind(() => s().stepHeight(-1))} disabled={job !== null || height <= SCAN_MIN_HEIGHT} title="Lower the scan height (,)" aria-label="Lower the scan height">
             <ChevronDown size={18} strokeWidth={2.25} aria-hidden />

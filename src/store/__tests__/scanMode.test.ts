@@ -56,10 +56,10 @@ import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { useSecrets, type HeldKey } from '../useSecrets'
 import { SCAN_MAX_HEIGHT, useShards } from '../useShards'
-import { currentScanRange, scanCubeShown, scanRoute, setScanWorkerFactory, useScan } from '../useScan'
+import { currentScanRange, SCAN_KEY_AXES, scanCubeShown, scanPrice, scanRoute, scanSeconds, setScanWorkerFactory, useScan, type ScanClock } from '../useScan'
 import { currentPadMode, cycleMode, recall } from '../padMode'
 import { placeSpawn } from '../fixtures/placeSpawn'
-import { scanLine, scanPercent, scanTag } from '../../hud/ScanControls'
+import { scanLine, scanPercent, scanTag, scanTagLines, scanTime } from '../../hud/ScanControls'
 import { drawnRegion } from '../../scene/DeployRegionBox'
 
 const S = () => useCyberspace.getState()
@@ -99,7 +99,7 @@ beforeEach(async () => {
   await placeSpawn()
   S().cancel()
   useCyberspace.setState({ scaleExp: 0 })
-  useCalibration.setState({ hopHeight: 16 })
+  useCalibration.setState({ hopHeight: 16, cantorMsByHeight: undefined })
   useSecrets.setState({ keys: {}, buy, buying: null, buyError: null })
   useShards.setState({ rescan, pending: null, placedLast: null })
   useScan.setState({ height: SCAN_MIN_HEIGHT, result: null, job: null, confirm: null })
@@ -168,16 +168,115 @@ describe('the height', () => {
     expect(clampScanHeight(31, scanRange(16, true, 30))).toBe(30)
   })
 
-  it('says who computes it, and for what', () => {
+  it('says how long a scan there takes: INSTANT when held, the price with a HOSAKA height, DEVICE MAX at the top', () => {
     const local = scanRange(16, false, null)
-    expect(scanTag(13, local, false, null, true)).toBe('ON DEVICE · FREE')
-    expect(scanTag(16, local, false, null, true)).toBe('DEVICE MAX · HOSAKA OFF')
-    expect(scanTag(16, local, false, null, false)).toBe('DEVICE MAX')
+    expect(scanTag(13, local, false, null, 2)).toBe('ABOUT 2 SEC')
+    expect(scanTag(16, local, false, null, 40)).toBe('ABOUT 40 SEC · DEVICE MAX')
     const cloud = scanRange(16, true, 30)
-    expect(scanTag(16, cloud, false, 21, false)).toBe('ON DEVICE · FREE')
-    expect(scanTag(17, cloud, false, 21, false)).toBe('HOSAKA · 21 SATS')
-    expect(scanTag(17, cloud, false, null, false)).toBe('HOSAKA · NO PRICE YET')
-    expect(scanTag(17, cloud, true, 21, false)).toBe('HELD · FREE')
+    expect(scanTag(16, cloud, false, 21, 40)).toBe('ABOUT 40 SEC')
+    expect(scanTag(17, cloud, false, 21, 60)).toBe('ABOUT 1 MIN · 21 SATS')
+    expect(scanTag(17, cloud, false, null, 60)).toBe('ABOUT 1 MIN · NO PRICE YET')
+    // No time from HOSAKA: the price still shows, never hidden.
+    expect(scanTag(17, cloud, false, 21, null)).toBe('HOSAKA · 21 SATS')
+    // Already held: only the relays are asked, at any height, free or HOSAKA's.
+    expect(scanTag(13, cloud, true, null, 0)).toBe('INSTANT')
+    expect(scanTag(17, cloud, true, 21, 60)).toBe('INSTANT')
+    // No old words: nothing says FREE or HELD any more.
+    for (const h of [12, 16, 17, 30]) for (const held of [false, true]) {
+      expect(scanTag(h, cloud, held, 21, 5)).not.toMatch(/FREE|HELD|ON DEVICE/)
+    }
+  })
+})
+
+describe('the time estimate', () => {
+  /** A benchmark: 10 ms an axis at 12, 40 at 14 (twice per height), so 2.5 a height past it. */
+  const BENCH = { 12: 10, 14: 40 }
+  const clock = (over: Partial<ScanClock> = {}): ScanClock => ({ cantorMsByHeight: BENCH, hopHeight: 16, provider: PROVIDER, experience: 1, ...over })
+
+  it('rounds the way a person says it', () => {
+    expect(scanTime(0.03)).toBe('UNDER 1 SEC')
+    expect(scanTime(1.6)).toBe('ABOUT 2 SEC')
+    expect(scanTime(9.4)).toBe('ABOUT 9 SEC')
+    expect(scanTime(12)).toBe('ABOUT 10 SEC')
+    expect(scanTime(41)).toBe('ABOUT 40 SEC')
+    expect(scanTime(58)).toBe('ABOUT 1 MIN')
+    expect(scanTime(88)).toBe('ABOUT 1 MIN')
+    expect(scanTime(6 * 60 + 10)).toBe('ABOUT 6 MIN')
+    expect(scanTime(14 * 60)).toBe('ABOUT 15 MIN')
+    expect(scanTime(58 * 60)).toBe('ABOUT 1 HR')
+    expect(scanTime(1.9 * 3600)).toBe('ABOUT 2 HR')
+    expect(scanTime(3 * 3600)).toBe('ABOUT 3 HR')
+    expect(scanTime(17 * 3600)).toBe('ABOUT 15 HR')
+    expect(scanTime(30 * 3600)).toBe('ABOUT 1 DAY')
+    expect(scanTime(80 * 3600)).toBe('ABOUT 3 DAYS')
+    expect(scanTime(1e30)).toBe('OVER 99 DAYS')
+    expect(scanTime(NaN)).toBe('TIME UNKNOWN')
+  })
+
+  it('is the key\'s axis trees\' worth at the benchmark\'s time for the height, and grows with it', () => {
+    expect(SCAN_KEY_AXES).toBe(4.5)
+    // Measured heights as measured.
+    expect(scanSeconds(12, 'local', clock())).toBeCloseTo(0.045)
+    expect(scanSeconds(14, 'local', clock())).toBeCloseTo(0.18)
+    // Above the top measurement: the fitted growth, floored at 2.5 a height.
+    expect(scanSeconds(15, 'local', clock())).toBeCloseTo(0.45)
+    expect(scanSeconds(18, 'local', clock())).toBeCloseTo(0.18 * 2.5 ** 4)
+    // Never shrinks as the height goes up.
+    let last = 0
+    for (let h = 12; h <= 20; h++) {
+      const s = scanSeconds(h, 'local', clock())!
+      expect(s).toBeGreaterThan(last)
+      last = s
+    }
+    // A bigger benchmark, a bigger estimate at the same height (the formatting of minutes;
+    // the app's own device max keeps a local scan to seconds, since one axis fits 5 s there).
+    expect(scanTag(20, scanRange(20, false, null), false, null, scanSeconds(20, 'local', clock({ cantorMsByHeight: { 12: 400, 14: 2500 } })))).toBe('ABOUT 45 MIN · DEVICE MAX')
+  })
+
+  it('before the benchmark has run, takes the device max to be one axis at the hop budget', () => {
+    const unmeasured = clock({ cantorMsByHeight: undefined, hopHeight: 17 })
+    expect(scanSeconds(17, 'local', unmeasured)).toBeCloseTo(22.5)
+    expect(scanSeconds(16, 'local', unmeasured)).toBeCloseTo(9)
+    expect(scanSeconds(17, 'local', clock({ cantorMsByHeight: {}, hopHeight: 17 }))).toBeCloseTo(22.5)
+  })
+
+  it('is HOSAKA\'s own estimate above the device max, corrected by its record here, and keeps its price', () => {
+    expect(scanSeconds(20, 'cloud', clock())).toBe(60)
+    expect(scanSeconds(28, 'cloud', clock())).toBe(600)
+    expect(scanSeconds(20, 'cloud', clock({ experience: 2 }))).toBe(120)
+    expect(scanSeconds(20, 'cloud', clock({ provider: null }))).toBeNull()
+    cloudOn()
+    expect(scanTag(20, currentScanRange(), false, scanPrice(20), scanSeconds(20, 'cloud', clock()))).toBe('ABOUT 1 MIN · 21 SATS')
+    expect(scanTag(28, currentScanRange(), false, scanPrice(28), scanSeconds(28, 'cloud', clock()))).toBe('ABOUT 10 MIN · 900 SATS')
+  })
+
+  it('is INSTANT for a cube already held: nothing to compute', () => {
+    expect(scanSeconds(18, 'held', clock())).toBe(0)
+    expect(scanTag(18, scanRange(16, true, 30), true, 21, scanSeconds(18, 'held', clock()))).toBe('INSTANT')
+  })
+
+  it('is what a local scan\'s progress is measured against', async () => {
+    useCalibration.setState({ cantorMsByHeight: BENCH })
+    SC().enter()
+    SC().setHeight(14)
+    const started = SC().start({ route: 'local' })
+    expect(SC().job?.estSeconds).toBeCloseTo(0.18)
+    await started
+  })
+
+  it('gives a local scan no progress bar before the benchmark has run: the time is only a guess then', async () => {
+    SC().enter()
+    SC().setHeight(13)
+    const started = SC().start({ route: 'local' })
+    expect(SC().job?.estSeconds).toBeNull()
+    expect(scanPercent(SC().job, Date.now() + 1000)).toBeNull()
+    await started
+  })
+
+  it('puts the price, or DEVICE MAX, on a line of its own', () => {
+    expect(scanTagLines(22, scanRange(16, true, 30), false, 32, 108)).toEqual(['ABOUT 2 MIN', '32 SATS'])
+    expect(scanTagLines(16, scanRange(16, false, null), false, null, 15)).toEqual(['ABOUT 15 SEC', 'DEVICE MAX'])
+    expect(scanTagLines(13, scanRange(16, true, 30), false, null, 0.2)).toEqual(['UNDER 1 SEC'])
   })
 })
 

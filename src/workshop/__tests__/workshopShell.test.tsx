@@ -93,7 +93,7 @@ function places(all: Host[]) {
   }
 }
 
-const TOP = ['Close the workshop', 'MENU', 'SHARD', 'GRID', 'AVATAR', 'MOTION', 'DEPLOY']
+const TOP = ['Close the workshop', 'MENU', 'SHARD', 'MOTION', 'AVATAR', 'GRID', 'DEPLOY']
 const RAIL = ['Undo', 'Redo', 'Raise the grid floor', 'Lower the grid floor']
 const DOCK = ['LOOK', 'STAMP', 'SELECT', 'PAINT', 'ADD', 'FACE', 'COLOR']
 

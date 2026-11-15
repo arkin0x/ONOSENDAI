@@ -1,7 +1,8 @@
 /**
  * TopBar.tsx - the top bar, one of the workshop's five fixed places (workshop
  * redesign, phase 1): the way out, then the top-level areas MENU, SHARD,
- * GRID, AVATAR and MOTION, each opening its own sheet, then DEPLOY. One row
+ * MOTION, AVATAR and GRID (arkinox, 2026-11-15), each opening its own sheet,
+ * then DEPLOY. One row
  * that never wraps and never hides, in that order on every tool and every
  * state; a button is greyed out rather than taken away.
  *
@@ -22,9 +23,9 @@ import { MOTION_READY, type Area } from '../sheets/areas'
 const AREAS: Array<{ area: Area; label: string; icon: LucideIcon }> = [
   { area: 'menu', label: 'MENU', icon: Menu },
   { area: 'shard', label: 'SHARD', icon: Box },
-  { area: 'grid', label: 'GRID', icon: Grid3x3 },
-  { area: 'avatar', label: 'AVATAR', icon: VenetianMask },
   { area: 'motion', label: 'MOTION', icon: Orbit },
+  { area: 'avatar', label: 'AVATAR', icon: VenetianMask },
+  { area: 'grid', label: 'GRID', icon: Grid3x3 },
 ]
 
 export function TopBar({ open, onArea }: { open: Area | null; onArea: (a: Area) => void }): JSX.Element {

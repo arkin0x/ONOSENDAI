@@ -40,8 +40,26 @@ import type { Position, ViewAxes } from './space'
  * origin) over 2^unit, flipped when the axis points the other way. In render
  * space the walls fall where the region cages draw them: the item's place
  * plus (edge minus at minus half a gibson) is the edge's own place.
+ *
+ * The box is cut `margin` gibsons outside the walls, half a gibson unless a
+ * caller asks for the walls themselves (0). An object stands on the centre of
+ * its gibson, so a shape built on whole units (a 64 tile, a 16 room) ends on a
+ * half gibson, never on a wall, which falls between two gibsons. Cut at the
+ * wall itself, such a shape always left a strip half a gibson wide where a
+ * region met the next: arkinox's 2^12 bridge, cut where its region began,
+ * stood half a gibson off a Landscape Kit meadow whose edge stopped half a
+ * gibson short of the same wall (2026-11-15). Half a gibson out on every side
+ * moves each cut onto the plane where such shapes end, on both sides of a
+ * wall, so a run of tiles crossing it meets with no strip whichever region
+ * holds the tile that crosses, and a face lying on that plane is drawn (the
+ * clipper keeps a point on a wall). It is the same on all six walls, so a
+ * shape centred in its region is cut evenly, and every gibson's centre stays
+ * one whole gibson inside the cut. Neighbours' cuts overlap by one gibson,
+ * which only shows where two regions' shapes both reach into that slab.
  */
-export function regionBox(at: Position, height: number, unit: number, axes: ViewAxes): Box {
+export const REGION_CUT_MARGIN = 0.5
+
+export function regionBox(at: Position, height: number, unit: number, axes: ViewAxes, margin: number = REGION_CUT_MARGIN): Box {
   const h = BigInt(height)
   const perUnit = 2 ** unit
   const min: [number, number, number] = [0, 0, 0]
@@ -49,8 +67,8 @@ export function regionBox(at: Position, height: number, unit: number, axes: View
   ;[axes.right, axes.up, axes.out].forEach((a, i) => {
     const v = at[a.axis]
     const base = (v >> h) << h
-    const lo = (Number(base - v) - 0.5) / perUnit
-    const hi = (Number(base + (1n << h) - v) - 0.5) / perUnit
+    const lo = (Number(base - v) - 0.5 - margin) / perUnit
+    const hi = (Number(base + (1n << h) - v) - 0.5 + margin) / perUnit
     if (a.dir >= 0) { min[i] = lo; max[i] = hi } else { min[i] = -hi; max[i] = -lo }
   })
   return { min, max }

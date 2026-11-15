@@ -237,11 +237,17 @@ describe('a door written with look tags', () => {
   })
 
   it('is cut at its region\u2019s walls, as it is drawn: past them a walker is held by nothing', () => {
-    // A height-1 bag: a 2-gibson region, and the door 3 tall in it. Two gibsons up is out of the region.
-    const high: Position = { x: AT.x, y: AT.y + 2n, z: AT.z + 3n }
+    // A height-1 bag: a 2-gibson region, and the door 3 tall in it, from half a
+    // gibson above the region's floor. The cut runs half a gibson outside the
+    // region (lib/clip.ts REGION_CUT_MARGIN), so the door is drawn up to 2.5
+    // above the floor: through the centre of the gibson two up, which it
+    // holds, and not to the one three up, which it no longer reaches.
+    const high: Position = { x: AT.x, y: AT.y + 3n, z: AT.z + 3n }
     useShards.setState({ mine: [], discovered: { [DOOR]: { ...chest(DOOR, [['door', '1'], ...TAGS]), height: 1 } } })
     expect(wallItems(1)[0].uncut).toBe(false)
     expect(stepLimit(high, 'z', -1, 10n, wallItemsAt(1, high)).reach).toBe(10n)
+    const onCut: Position = { x: AT.x, y: AT.y + 2n, z: AT.z + 3n }
+    expect(stepLimit(onCut, 'z', -1, 10n, wallItemsAt(1, onCut)).reach).toBeLessThan(10n)
     // Inside the region, the same wall holds: the cut is what let it through.
     const low: Position = { x: AT.x, y: AT.y + 1n, z: AT.z + 3n }
     expect(stepLimit(low, 'z', -1, 10n, wallItemsAt(1, low)).reach).toBeLessThan(10n)

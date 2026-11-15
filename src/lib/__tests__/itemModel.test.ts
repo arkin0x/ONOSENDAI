@@ -167,17 +167,18 @@ describe('the box', () => {
   })
 
   it('is cut at the walls of its region, and says when it was', () => {
-    // A 2^2 region holding a point one gibson in from its low corner: walls at -1.5 and +2.5 about the item's place.
+    // A 2^2 region holding a point one gibson in from its low corner: walls at
+    // -1.5 and +2.5 about the item's place, cut half a gibson outside them.
     const region = regionBox({ x: 1n, y: 1n, z: 1n }, 2, 0, { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } })
-    expect(region).toEqual({ min: [-1.5, -1.5, -1.5], max: [2.5, 2.5, 2.5] })
+    expect(region).toEqual({ min: [-2, -2, -2], max: [3, 3, 3] })
     const small = boxInRegion([2, 1, 1], region, 0)
     expect(small.clipped).toBe(false)
     expect(small.box).toEqual({ min: [-1, -0.5, -0.5], max: [1, 0.5, 0.5] })
     const big = boxInRegion([8, 1, 1], region, 0)
     expect(big.clipped).toBe(true)
-    expect(big.box).toEqual({ min: [-1.5, -0.5, -0.5], max: [2.5, 0.5, 0.5] })
+    expect(big.box).toEqual({ min: [-2, -0.5, -0.5], max: [3, 0.5, 0.5] })
     // In model units at unit 1: half the gibsons.
-    expect(boxInRegion([8, 1, 1], region, 1).box).toEqual({ min: [-0.75, -0.25, -0.25], max: [1.25, 0.25, 0.25] })
+    expect(boxInRegion([8, 1, 1], region, 1).box).toEqual({ min: [-1, -0.25, -0.25], max: [1.5, 0.25, 0.25] })
   })
 
   it('carries a region into the model frame through a view turn, which only swaps and flips axes', () => {

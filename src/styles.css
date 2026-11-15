@@ -10903,9 +10903,11 @@ a.feed__act { text-decoration: none; }
    keyboard hints in the Controls pad"): . in up, , in down, SPACE in the
    orb. Kept in place while the key does nothing, unseen. */
 .scanorbs .touchpad__keyhint.is-off { visibility: hidden; }
-/* A lone . or , at the pad's 6px is a one-pixel speck where a letter reads:
-   twice the size, so the mark carries a letter's ink. Nothing else differs. */
-.scanorbs .touchpad__keyhint.is-mark { font-size: 12px; }
+/* A lone . or , at the pad's 6px is a one-pixel speck where a letter reads
+   (a mark is about a tenth of its size in ink): three times the size and
+   bold, so it reads as a key at all. Its box grows up from the same bottom
+   edge, so the mark sits where the pad's letters sit. Nothing else differs. */
+.scanorbs .touchpad__keyhint.is-mark { font-size: 18px; font-weight: 700; }
 /* How far along a scan is, then what it found. Always there and always one
    height, the longest line's (three lines; a scan's line and its bar are
    less), empty or not: it showing or going never moves the row above it

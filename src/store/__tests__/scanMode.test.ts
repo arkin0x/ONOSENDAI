@@ -241,6 +241,11 @@ describe('the height', () => {
     const orb = button(out, /^Scan for/)
     expect(orb).toMatch(/scanorb__word[^>]*>SCAN<.*scanorb__sats[^>]*>21 SATS<.*>SPACE</)
     expect(hint(orb)).toEqual({ cls: 'touchpad__keyhint', key: 'SPACE' })
+    // No price yet: the orb is disabled and Space does nothing, so SPACE is unseen.
+    const limits = S().cloud
+    useCyberspace.setState({ cloud: { ...limits, provider: null } })
+    expect(hint(button(html(), /^Scan$/))?.cls).toBe('touchpad__keyhint is-off')
+    useCyberspace.setState({ cloud: limits })
     expect(out).not.toMatch(/>(DEVICE|HOSAKA) MAX</)
     // At the top: why up stops, on the label's last line; up's . unseen.
     SC().setHeight(30)
@@ -287,11 +292,22 @@ describe('the height', () => {
     SC().setHeight(22)
     useScan.setState({ job: { at: S().cursor, plane: 0, height: 22, route: 'cloud', startedAt: Date.now(), estSeconds: 108, asking: false } })
     states.hosaka = html()
+    // A scan under way at the top of HOSAKA's range: no MAX line, and Space does nothing.
+    SC().setHeight(30)
+    useScan.setState({ job: { ...SC().job!, height: 30 } })
+    const atTop = html()
+    expect(atTop).toMatch(/<span class="scanorbs__max"><\/span>/)
+    SC().setHeight(22)
+    useScan.setState({ job: { ...SC().job!, height: 22 } })
     useScan.setState({ job: null, result: { kind: 'found', height: 13, count: 2 } })
     states.result = html()
     useScan.setState({ result: { kind: 'failed', height: 13, message: 'HOSAKA could not take the job right now because its queue is full. Try again in a few minutes or scan a lower height here.' } })
     states.error = html()
     useScan.setState({ result: null })
+    // While a scan runs, Space does nothing (X cancels): SPACE in the orb is unseen; idle and armed, seen.
+    const orbHint = (out: string): string => /<button[^>]*class="flyorb scanorb[^"]*"[^>]*>.*?<span class="(touchpad__keyhint[^"]*)"/.exec(out)?.[1] ?? ''
+    for (const k of ['scanning', 'asking', 'hosaka']) expect(orbHint(states[k])).toBe('touchpad__keyhint is-off')
+    for (const k of ['idle', 'confirm', 'result']) expect(orbHint(states[k])).toBe('touchpad__keyhint')
     // One slot in every state, the same element, empty or not.
     for (const out of Object.values(states)) expect(slot(out).count).toBe(1)
     expect(slot(states.idle).text).toBe('')
@@ -356,7 +372,7 @@ describe('the height', () => {
     const scanHintRules = [...css.matchAll(/\n([^{}\n]*touchpad__keyhint[^{}\n]*)\{([^}]*)\}/g)].filter(([, sel]) => /scan/.test(sel))
     expect(scanHintRules.map(([, sel, body]) => [sel.trim(), body.trim()])).toEqual([
       ['.scanorbs .touchpad__keyhint.is-off', 'visibility: hidden;'],
-      ['.scanorbs .touchpad__keyhint.is-mark', 'font-size: 12px;'],
+      ['.scanorbs .touchpad__keyhint.is-mark', 'font-size: 18px; font-weight: 700;'],
     ])
     // The buttons hold them as the pad's keys do: positioned, so the hint sits at their bottom edge.
     expect(css).toMatch(/\n\.scanorbs__step \{[^}]*position:\s*relative/)

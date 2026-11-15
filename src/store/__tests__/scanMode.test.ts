@@ -258,6 +258,11 @@ describe('the height', () => {
     SC().setHeight(13)
     useScan.setState({ job: { at: S().cursor, plane: 0, height: 13, route: 'local', startedAt: Date.now(), estSeconds: 10, asking: false } })
     states.scanning = html()
+    useScan.setState({ job: { ...SC().job!, asking: true } })
+    states.asking = html()
+    SC().setHeight(22)
+    useScan.setState({ job: { at: S().cursor, plane: 0, height: 22, route: 'cloud', startedAt: Date.now(), estSeconds: 108, asking: false } })
+    states.hosaka = html()
     useScan.setState({ job: null, result: { kind: 'found', height: 13, count: 2 } })
     states.result = html()
     useScan.setState({ result: { kind: 'failed', height: 13, message: 'HOSAKA could not take the job right now because its queue is full. Try again in a few minutes or scan a lower height here.' } })
@@ -269,6 +274,9 @@ describe('the height', () => {
     expect(slot(states.confirm).text).toBe('PRESS AGAIN TO PAY')
     expect(slot(states.scanning).text).toMatch(/^SCANNING 2\^13/)
     expect(slot(states.scanning).cls).toContain('has-bar')
+    expect(slot(states.asking).text).toBe('ASKING RELAYS')
+    expect(slot(states.asking).cls).not.toContain('has-bar')
+    expect(slot(states.hosaka).text).toBe('HOSAKA SCANNING 2^22')
     expect(slot(states.result).text).toBe('FOUND 2 AT 2^13')
     expect(slot(states.error).cls).toContain('is-error')
     // The controls before it are the same elements in every state.
@@ -281,14 +289,20 @@ describe('the height', () => {
     const line = rule('.scanorbs__line')
     expect(line).toMatch(/\bheight:\s*var\(--scanorbs-line-h\)/)
     expect(line).not.toMatch(/min-height|max-height/)
-    expect(line).toMatch(/overflow:\s*hidden/)
     expect(line).toMatch(/flex:\s*0 0 auto/)
     const lineH = Number(/line-height:\s*(\d+)px/.exec(line)?.[1])
     expect(px('scanorbs-line-h')).toBe(3 * lineH)
     expect(css).toMatch(/\.scanorbs__line > span:first-child \{[^}]*line-clamp: 3/)
     // Two lines over the bar: two lines, the gap and the bar fit the same room.
     expect(css).toMatch(/\.scanorbs__line\.has-bar > span:first-child \{[^}]*line-clamp: 2/)
-    expect(2 * lineH + 3 + 3).toBeLessThanOrEqual(px('scanorbs-line-h'))
+    const gap = Number(/\bgap:\s*(\d+)px/.exec(line)?.[1])
+    const bar = Number(/\.scanorbs__bar \{[^}]*\bheight:\s*(\d+)px/.exec(css)?.[1])
+    expect(gap).toBeGreaterThan(0)
+    expect(bar).toBeGreaterThan(0)
+    expect(2 * lineH + gap + bar).toBeLessThanOrEqual(px('scanorbs-line-h'))
+    // The empty room takes no taps: they reach the scene, as before it was kept.
+    expect(css).toMatch(/\.flyorbs\.scanorbs \{ pointer-events: none; \}/)
+    expect(css).toMatch(/\.scanorbs__line:not\(:empty\)[^{]*\{ pointer-events: auto; \}/)
     const value = rule('.scanorbs__value')
     expect(value).toMatch(/\bheight:\s*var\(--scanorbs-value-h\)/)
     expect(value).not.toMatch(/min-height/)
@@ -297,7 +311,8 @@ describe('the height', () => {
     const tagLine = Number(/\.scanorbs__tag \{[^}]*line-height:\s*(\d+)px/.exec(css)?.[1])
     expect(bLine + 2 * tagLine).toBeLessThanOrEqual(px('scanorbs-value-h'))
     // The open chat starts past the dock's own width, read from the same numbers.
-    expect(css).toMatch(/--scanorbs-w:\s*calc\(var\(--scanorbs-col\) \+ var\(--scanorbs-gap\) \+ var\(--menu-size\)\)/)
+    const width = /--scanorbs-w:\s*calc\(([^;]*)\);/.exec(css)?.[1] ?? ''
+    for (const part of ['--scanorbs-col', '--scanorbs-gap', '--menu-size']) expect(width).toContain(`var(${part})`)
   })
 
   it('keeps the old words out of SCAN\'s code, and its hints white with the labels\' edge', () => {

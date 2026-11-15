@@ -10795,6 +10795,11 @@ a.feed__act { text-decoration: none; }
    workshop rail's up, value and down (.ws__railbtn, .ws__level-value), and
    to its right a fly orb in purple that says SCAN. */
 .flyorbs.scanorbs { flex-direction: column; align-items: flex-start; gap: 4px; }
+/* The empty room kept for the status line is not a wall: a tap there, or on
+   the dock between its controls' columns as before, reaches the scene; only
+   the controls and a line that says something take one. */
+.flyorbs.scanorbs { pointer-events: none; }
+.scanorbs__row > *, .scanorbs__line:not(:empty) { pointer-events: auto; }
 /* The dock's width: the stepper's column, the gap, the orb. The open chat
    starts past it (below), so the two read the same numbers. */
 :root { --scanorbs-gap: 8px; --scanorbs-w: calc(var(--scanorbs-col) + var(--scanorbs-gap) + var(--menu-size)); }
@@ -10909,7 +10914,6 @@ a.feed__act { text-decoration: none; }
   gap: 3px;
   flex: 0 0 auto;
   height: var(--scanorbs-line-h);
-  overflow: hidden;
   /* Under the stepper and centred on the same line as SCAN HEIGHT; a long one wraps. */
   width: var(--scanorbs-col);
   line-height: 12px;

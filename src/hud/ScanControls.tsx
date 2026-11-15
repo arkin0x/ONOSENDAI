@@ -22,11 +22,15 @@
  * their buttons: . and , under up and down, SPACE under SCAN. All white with
  * a dark edge, readable over the brightest scene. While a scan runs the orb
  * is CANCEL and a line centred under the height says how far along it is;
- * then what it found. A HOSAKA height the Cloud compute mode asks about
- * (ASK, or AUTO over its cap) takes two taps, and always two presses of
- * Space: the first arms CONFIRM with the price, the second pays
- * (store/useScan.ts scanSpace). A HOSAKA scan
- * paid for has no CANCEL: it finishes, and the key is held as bought.
+ * then what it found. That line has its room kept in every state, as tall as
+ * its longest (three lines), so it showing or going never moves a button
+ * (arkinox, 2026-11-15: "I don't like the layout jump here. 'press again to
+ * pay' text shifts the buttons up."). A HOSAKA height the Cloud compute mode
+ * asks about (ASK, or AUTO over its cap) takes two taps, and always two
+ * presses of Space: the first arms CONFIRM with the price, the second pays
+ * (store/useScan.ts scanSpace); the line says only PRESS AGAIN TO PAY, the
+ * price being on the button already. A HOSAKA scan paid for has no CANCEL:
+ * it finishes, and the key is held as bought.
  */
 
 import { useEffect, useState } from 'react'
@@ -85,9 +89,12 @@ export function scanOrbSats(cloud: boolean, busy: boolean, price: number | null)
   return price === null ? 'NO PRICE' : `${price} SATS`
 }
 
-/** The line under the controls while a scan runs, or after it. */
-export function scanLine(job: ScanJob | null, result: ScanResult | null, percent: number | null, elapsed: number, cloudStatus: CloudStatus, buyingStatus: 'submitting' | 'computing' | null, confirmSats: number | null = null): string | null {
-  if (!job && confirmSats !== null) return `PRESS AGAIN TO PAY ${confirmSats} SATS`
+/**
+ * The line under the controls while a scan runs, or after it. Armed, only
+ * what to do: the price is on the CONFIRM button above it.
+ */
+export function scanLine(job: ScanJob | null, result: ScanResult | null, percent: number | null, elapsed: number, cloudStatus: CloudStatus, buyingStatus: 'submitting' | 'computing' | null, armed = false): string | null {
+  if (!job && armed) return 'PRESS AGAIN TO PAY'
   if (job) {
     if (job.asking) return 'ASKING RELAYS'
     if (job.route === 'cloud') {
@@ -171,7 +178,7 @@ function ScanDock(): JSX.Element {
   const percent = scanPercent(job, now)
   const elapsed = job ? Math.max(0, Math.floor((now - job.startedAt) / 1000)) : 0
   const seconds = scanSeconds(height, route, { cantorMsByHeight, hopHeight, provider, experience })
-  const line = scanLine(job, result, percent, elapsed, cloudStatus, buying?.status ?? null, armed ? confirm.sats : null)
+  const line = scanLine(job, result, percent, elapsed, cloudStatus, buying?.status ?? null, armed)
   const goDisabled = job ? !cancellable : cloud && (price === null || buying !== null)
   const word = job ? (cancellable ? 'CANCEL' : cloudStatus === 'quoting' || buying?.status === 'submitting' ? 'ASKING' : 'PAID') : armed ? 'CONFIRM' : 'SCAN'
   const orbSats = scanOrbSats(cloud, job !== null, price)
@@ -235,12 +242,11 @@ function ScanDock(): JSX.Element {
           <span className={`flyorb__key${job || goDisabled ? ' is-off' : ''}`} aria-hidden>SPACE</span>
         </div>
       </div>
-      {line && (
-        <div className={`scanorbs__line${result?.kind === 'failed' && !job && !armed ? ' is-error' : ''}`} role="status" title={line}>
-          <span>{line}</span>
-          {percent !== null && <span className="scanorbs__bar" aria-hidden><span style={{ width: `${percent}%` }} /></span>}
-        </div>
-      )}
+      {/* Always here, at one height (the longest line's), empty or not: the row above never moves. */}
+      <div className={`scanorbs__line${line && result?.kind === 'failed' && !job && !armed ? ' is-error' : ''}${line && percent !== null ? ' has-bar' : ''}`} role="status" title={line ?? undefined}>
+        {line && <span>{line}</span>}
+        {line && percent !== null && <span className="scanorbs__bar" aria-hidden><span style={{ width: `${percent}%` }} /></span>}
+      </div>
     </div>
   )
 }

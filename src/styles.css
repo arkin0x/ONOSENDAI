@@ -10795,8 +10795,10 @@ a.feed__act { text-decoration: none; }
    workshop rail's up, value and down (.ws__railbtn, .ws__level-value), and
    to its right a fly orb in purple that says SCAN. */
 .flyorbs.scanorbs { flex-direction: column; align-items: flex-start; gap: 4px; }
-:root { --scanorbs-w: 176px; }
-.scanorbs__row { display: flex; align-items: center; gap: 8px; }
+/* The dock's width: the stepper's column, the gap, the orb. The open chat
+   starts past it (below), so the two read the same numbers. */
+:root { --scanorbs-gap: 8px; --scanorbs-w: calc(var(--scanorbs-col) + var(--scanorbs-gap) + var(--menu-size)); }
+.scanorbs__row { display: flex; align-items: center; gap: var(--scanorbs-gap); }
 .scanorbs__go { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .scanorbs__stepper {
   display: flex;
@@ -10831,8 +10833,11 @@ a.feed__act { text-decoration: none; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-height: 30px;
-  justify-content: center;
+  /* One height for one tag line or two (UNKNOWN and the time), so a change
+     of height never moves the down button or the orb: SCAN HEIGHT stays
+     at the top and the tags hang under it. */
+  height: var(--scanorbs-value-h);
+  justify-content: flex-start;
   font-variant-numeric: tabular-nums;
   text-shadow: var(--scanorbs-edge);
   white-space: nowrap;
@@ -10842,9 +10847,10 @@ a.feed__act { text-decoration: none; }
    The edge is a tight dark outline and a soft dark halo, so the words read
    over the brightest cube and still sit lightly over a dark one. */
 :root { --scanorbs-edge: 0 0 1px #000, 0 0 2px rgba(0, 0, 0, 0.95), 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.6); }
-.scanorbs__value b { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #fff; }
+:root { --scanorbs-value-h: 38px; }
+.scanorbs__value b { font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.08em; color: #fff; }
 /* UNKNOWN and how long it takes here, COMPLETE, or HOSAKA (its price is on the SCAN button). */
-.scanorbs__tag { font-size: 9px; font-weight: 600; letter-spacing: 0.08em; color: #fff; }
+.scanorbs__tag { font-size: 9px; line-height: 12px; font-weight: 600; letter-spacing: 0.08em; color: #fff; }
 .flyorb.scanorb {
   flex-direction: column;
   border-color: rgba(var(--scan-rgb), 0.55);
@@ -10890,14 +10896,23 @@ a.feed__act { text-decoration: none; }
 .scanorbs__hint { font-size: 15px; line-height: 10px; }
 /* At the top of the range, in the . key's place: why up stops. */
 .scanorbs__max { font-size: 8px; line-height: 10px; white-space: nowrap; }
-/* How far along a scan is, then what it found. */
+/* How far along a scan is, then what it found. Always there and always one
+   height, the longest line's (three lines; a scan's line and its bar are
+   less), empty or not: it showing or going never moves the row above it
+   (arkinox, 2026-11-15: "I don't like the layout jump here."). */
+:root { --scanorbs-line-h: 36px; }
 .scanorbs__line {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-start;
   gap: 3px;
+  flex: 0 0 auto;
+  height: var(--scanorbs-line-h);
+  overflow: hidden;
   /* Under the stepper and centred on the same line as SCAN HEIGHT; a long one wraps. */
   width: var(--scanorbs-col);
+  line-height: 12px;
   text-align: center;
   text-wrap: balance;
   font-size: 9px;
@@ -10907,15 +10922,17 @@ a.feed__act { text-decoration: none; }
   text-shadow: var(--scanorbs-edge);
 }
 .scanorbs__line.is-error { color: var(--warn); font-weight: 600; letter-spacing: 0.02em; }
-/* A long failure stays three lines in the column; the whole of it is the tooltip. */
-.scanorbs__line.is-error > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+/* A long line stays three lines in the column (two over the bar), inside
+   its room; the whole of it is the tooltip. */
+.scanorbs__line > span:first-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+.scanorbs__line.has-bar > span:first-child { -webkit-line-clamp: 2; line-clamp: 2; }
 .scanorbs__bar { display: block; width: 100%; height: 3px; border-radius: 2px; background: rgba(var(--scan-rgb), 0.2); overflow: hidden; }
 .scanorbs__bar > span { display: block; height: 100%; background: var(--scan); }
 /* A phone on its side: the dock is a row beside the menu button there. */
 @media (max-height: 520px) {
   .flyorbs.scanorbs { flex-direction: row; align-items: flex-end; }
   /* Not beside the orb: over the stepper, on SCAN HEIGHT's centre line, where there is room. */
-  .scanorbs__line { position: absolute; left: 0; bottom: calc(100% + 4px); }
+  .scanorbs__line { position: absolute; left: 0; bottom: calc(100% + 4px); justify-content: flex-end; }
 }
 /* The open chat (z-index 101) starts past SCAN's dock, which is wider than
    the fly buttons' column, as it starts past theirs (review of #592): on a

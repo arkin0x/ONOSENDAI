@@ -233,6 +233,73 @@ describe('the height', () => {
     }
   })
 
+  it('keeps the status line\'s room in every state, one fixed height, so no button ever moves (arkinox, 2026-11-15: "I don\'t like the layout jump")', async () => {
+    const html = (): string => renderToString(createElement(ScanControls))
+    /** The status slot: its class and what it says, or '' when empty. */
+    const slot = (out: string): { count: number; cls: string; text: string } => {
+      const all = [...out.matchAll(/<div class="(scanorbs__line[^"]*)" role="status"[^>]*>(.*?)<\/div>/g)]
+      return { count: all.length, cls: all[0]?.[1] ?? '', text: (all[0]?.[2] ?? '').replace(/<[^>]*>/g, '') }
+    }
+    /** Everything before the slot: the up and down buttons, the height, the orb's place. */
+    const row = (out: string): string => out.slice(0, out.indexOf('<div class="scanorbs__line'))
+      // What changes inside them (the words, the disabled state, the orb's own look) is not where they are.
+      .replace(/>[^<]*</g, '><').replace(/ (disabled|title|aria-label)="[^"]*"/g, '').replace(/ disabled=""/g, '')
+      .replace(/class="flyorb scanorb[^"]*"/g, 'class="flyorb scanorb"').replace(/ is-off/g, '')
+      .replace(/<span class="scanorbs__tag"><\/span>/g, '').replace(/<span class="scanorb__sats"><\/span>/g, '')
+    SC().enter()
+    cloudOn(true, 'ask')
+    SC().setHeight(22)
+    const states: Record<string, string> = {}
+    states.idle = html()
+    scanSpace(false)
+    await flush()
+    expect(SC().confirm).not.toBeNull()
+    states.confirm = html()
+    SC().setHeight(13)
+    useScan.setState({ job: { at: S().cursor, plane: 0, height: 13, route: 'local', startedAt: Date.now(), estSeconds: 10, asking: false } })
+    states.scanning = html()
+    useScan.setState({ job: null, result: { kind: 'found', height: 13, count: 2 } })
+    states.result = html()
+    useScan.setState({ result: { kind: 'failed', height: 13, message: 'HOSAKA could not take the job right now because its queue is full. Try again in a few minutes or scan a lower height here.' } })
+    states.error = html()
+    useScan.setState({ result: null })
+    // One slot in every state, the same element, empty or not.
+    for (const out of Object.values(states)) expect(slot(out).count).toBe(1)
+    expect(slot(states.idle).text).toBe('')
+    expect(slot(states.confirm).text).toBe('PRESS AGAIN TO PAY')
+    expect(slot(states.scanning).text).toMatch(/^SCANNING 2\^13/)
+    expect(slot(states.scanning).cls).toContain('has-bar')
+    expect(slot(states.result).text).toBe('FOUND 2 AT 2^13')
+    expect(slot(states.error).cls).toContain('is-error')
+    // The controls before it are the same elements in every state.
+    const shape = row(states.idle)
+    for (const out of Object.values(states)) expect(row(out)).toBe(shape)
+    // The slot and the height label are one fixed height (never min-height), the longest line's three.
+    const css = readFileSync(join(process.cwd(), 'src/styles.css'), 'utf8')
+    const rule = (sel: string): string => new RegExp(`\\n${sel.replace(/\./g, '\\.')} \\{([^}]*)\\}`).exec(css)?.[1] ?? ''
+    const px = (name: string): number => Number(new RegExp(`--${name}:\\s*(\\d+)px`).exec(css)?.[1])
+    const line = rule('.scanorbs__line')
+    expect(line).toMatch(/\bheight:\s*var\(--scanorbs-line-h\)/)
+    expect(line).not.toMatch(/min-height|max-height/)
+    expect(line).toMatch(/overflow:\s*hidden/)
+    expect(line).toMatch(/flex:\s*0 0 auto/)
+    const lineH = Number(/line-height:\s*(\d+)px/.exec(line)?.[1])
+    expect(px('scanorbs-line-h')).toBe(3 * lineH)
+    expect(css).toMatch(/\.scanorbs__line > span:first-child \{[^}]*line-clamp: 3/)
+    // Two lines over the bar: two lines, the gap and the bar fit the same room.
+    expect(css).toMatch(/\.scanorbs__line\.has-bar > span:first-child \{[^}]*line-clamp: 2/)
+    expect(2 * lineH + 3 + 3).toBeLessThanOrEqual(px('scanorbs-line-h'))
+    const value = rule('.scanorbs__value')
+    expect(value).toMatch(/\bheight:\s*var\(--scanorbs-value-h\)/)
+    expect(value).not.toMatch(/min-height/)
+    // SCAN HEIGHT and two tag lines fit the label's room.
+    const bLine = Number(/\.scanorbs__value b \{[^}]*line-height:\s*(\d+)px/.exec(css)?.[1])
+    const tagLine = Number(/\.scanorbs__tag \{[^}]*line-height:\s*(\d+)px/.exec(css)?.[1])
+    expect(bLine + 2 * tagLine).toBeLessThanOrEqual(px('scanorbs-value-h'))
+    // The open chat starts past the dock's own width, read from the same numbers.
+    expect(css).toMatch(/--scanorbs-w:\s*calc\(var\(--scanorbs-col\) \+ var\(--scanorbs-gap\) \+ var\(--menu-size\)\)/)
+  })
+
   it('keeps the old words out of SCAN\'s code, and its hints white with the labels\' edge', () => {
     const src = readFileSync(join(process.cwd(), 'src/hud/ScanControls.tsx'), 'utf8')
     // The code, its comments left out (they quote the owner's words about the old ones).
@@ -431,7 +498,9 @@ describe('a local scan', () => {
     // Said with its height: a scan at 2^18 opens what was hidden at 18, not below.
     expect(scanLine(null, { kind: 'found', height: 18, count: 0 }, null, 0, 'idle', null)).toBe('NOTHING AT 2^18')
     expect(scanLine(null, { kind: 'found', height: 18, count: 3 }, null, 0, 'idle', null)).toBe('FOUND 3 AT 2^18')
-    expect(scanLine(null, null, null, 0, 'idle', null, 21)).toBe('PRESS AGAIN TO PAY 21 SATS')
+    // Armed: only what to do; the price is on the CONFIRM button above it, never said twice.
+    expect(scanLine(null, null, null, 0, 'idle', null, true)).toBe('PRESS AGAIN TO PAY')
+    expect(scanLine(null, null, null, 0, 'idle', null, false)).toBeNull()
     expect(scanLine({ ...job, route: 'cloud' }, null, null, 0, 'awaiting_payment', 'computing')).toBe('PAY THE INVOICE')
   })
 })

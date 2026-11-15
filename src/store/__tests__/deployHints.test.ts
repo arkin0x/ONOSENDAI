@@ -46,7 +46,7 @@ vi.mock('../../lib/relay', () => ({
 }))
 
 import { useCyberspace } from '../useCyberspace'
-import { ownBagIn, regionOf, useShards } from '../useShards'
+import { moneyAsSaved, moneyRowShown, ownBagIn, regionOf, useShards } from '../useShards'
 import { HIDDEN_KIND, bagTemplate, newBagSettings, type BagSettings } from '../../lib/hidden'
 import { SECTOR_HINT, hintTags, isHintTag } from '../../lib/hint'
 import { HINT_PREFS_KEY, loadHintPrefs } from '../deployHintPrefs'
@@ -408,13 +408,13 @@ describe('money off by default (arkinox, 2026-11-15)', () => {
   it('a bag that said money before keeps saying it until you hide into it again, then follows the switch', async () => {
     await hide(`for you ${TOKEN}`, { money: true })
     expect(contentsRows(lastBag())).toContainEqual(['contents', 'cashu', '1'])
-    // A rewrite that is not a hide (a DELETE of another item) keeps what the bag said.
     relayBags = [lastBag()]
     await hide('b')
     relayBags = [lastBag()]
     // The second hide went out as the bar showed it: money still on for this player.
     expect(contentsRows(lastBag())).toContainEqual(['contents', 'cashu', '1'])
     // A fresh device: the switch is off, and nothing is rewritten until a hide.
+    // A rewrite that is not a hide (a DELETE of another item) keeps what the bag said.
     localStorage.clear()
     sent.length = 0
     await useShards.getState().deleteInstance(S().mine.find((d) => d.text === 'b')!.eventId)
@@ -435,6 +435,44 @@ describe('money off by default (arkinox, 2026-11-15)', () => {
     // It still holds the token: two messages, and nothing said of money.
     expect(contentsRows(lastBag())).toEqual([['contents', 'message', '2']])
     expect(saysCashu(lastBag())).toBe(false)
+  })
+
+  it('a switch saved ON never speaks for a bag whose cashu this device does not list: no row, no money', async () => {
+    await hide(`for you ${TOKEN}`, { money: true })
+    const first = lastBag()
+    expect(loadHintPrefs().money).toBe(true)
+    // Another device's view: the bag holds the token, this device lists none of it.
+    useShards.setState({ mine: [] })
+    relayBags = [first]
+    S().startDeployMessage('plain')
+    const cs = useCyberspace.getState()
+    expect(moneyRowShown(S().pending, ownBagIn(S().mine, regionOf(deployPoint(cs.cursor, cs.scaleExp, HEIGHT), cs.plane, HEIGHT)))).toBe(false)
+    expect(S().deployBag.money).toBe(true)
+    S().cancelDeploy()
+    await hide('plain')
+    expect(contentsRows(lastBag())).toEqual([['contents', 'message', '2']])
+    expect(saysCashu(lastBag())).toBe(false)
+    // The saved switch is untouched: the next cashu hide, with the row shown, says it.
+    expect(loadHintPrefs().money).toBe(true)
+  })
+
+  it('the row shows for a cashu message being hidden, or your bag listing one; not otherwise', () => {
+    expect(moneyRowShown({ type: 'message', text: `x ${TOKEN}` }, null)).toBe(true)
+    expect(moneyRowShown({ type: 'message', text: 'x' }, null)).toBe(false)
+    expect(moneyRowShown({ type: 'message', text: 'x' }, { cashu: true })).toBe(true)
+    expect(moneyRowShown({ type: 'key' }, { cashu: false })).toBe(false)
+    expect(moneyRowShown(null, null)).toBe(false)
+  })
+
+  it('a write that adds cashu without the bar (HIDE AGAIN, a room moving out) keeps money only with the saved switch ON, and never turns it on', () => {
+    const said = { ...newBagSettings(HEIGHT), contents: true, money: true }
+    expect(moneyAsSaved(said, true).money).toBe(false)
+    expect(moneyAsSaved(said, false).money).toBe(true)
+    expect(moneyAsSaved({ ...said, money: false }, true).money).toBe(false)
+    S().startDeployMessage(`x ${TOKEN}`)
+    S().setDeployBag({ money: true })
+    expect(moneyAsSaved(said, true).money).toBe(true)
+    expect(moneyAsSaved({ ...said, money: false }, true).money).toBe(false)
   })
 })
 

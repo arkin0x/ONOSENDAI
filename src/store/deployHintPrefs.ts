@@ -29,6 +29,8 @@
  * worldDeploy, tutorial/stage.ts), which never read these.
  *
  * Nothing was kept before this, so there is no older saved value to migrate.
+ * A value saved before the money switch names only the three: money reads
+ * OFF, and nothing is rewritten.
  */
 
 import type { BagSettings } from '../lib/hidden'

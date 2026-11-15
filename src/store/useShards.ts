@@ -133,7 +133,7 @@ import { turnShard, type Turns } from '../lib/turn'
 import { SECTOR_HINT, alignedBase, hintFits, type HintHeights } from '../lib/hint'
 import { hidesThing, type Muted } from '../lib/muteList'
 import { useMutes } from './useMutes'
-import { asShown, hintPrefsOf, saveHintPrefs, withHintPrefs } from './deployHintPrefs'
+import { asShown, hintPrefsOf, loadHintPrefs, saveHintPrefs, withHintPrefs } from './deployHintPrefs'
 import { CONSTRAIN_DEFAULT, authoredConstrain, authoredConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 
 /** A workshop model's WALK setting as it publishes, by id; the default for one that never chose or is not there (DECK-0003 §1.12). */
@@ -1311,6 +1311,35 @@ export function ownBagIn(mine: MyDeployment[], region: string): OwnBag | null {
   if (items.length === 0) return null
   const newest = items.reduce((a, b) => (b.createdAt > a.createdAt ? b : a))
   return { region, settings: { ...DEFAULT_BAG_SETTINGS, ...(newest.bag ?? {}) }, count: items.length, cashu: items.some((d) => d.inner.kind === MESSAGE_KIND && findCashuToken(d.inner.content) !== null) }
+}
+
+/**
+ * Whether the deploy bar shows PUBLISH THAT MONEY IS INSIDE: the message being
+ * hidden holds a cashu token, or your bag in the region does as far as this
+ * device knows (ownBagIn). The deploy reads the same answer, and a bag goes
+ * out saying money only when the row was there to see and was ON (arkinox,
+ * 2026-11-15: "money off by default"), so a switch saved ON for one bag
+ * never speaks for another whose cashu this device does not list.
+ */
+export function moneyRowShown(pending: Pick<NonNullable<ShardsState['pending']>, 'type'> & { text?: string } | null, bag: Pick<OwnBag, 'cashu'> | null): boolean {
+  return (pending?.type === 'message' && typeof pending.text === 'string' && findCashuToken(pending.text) !== null) || (bag?.cashu ?? false)
+}
+
+/**
+ * The bag settings for a write that ADDS a cashu token without the deploy
+ * bar (HIDE AGAIN, a room's entries moving out to an ordinary bag): money
+ * stays said only while this device's saved switch is ON as well, so such a
+ * write never says money the player would have seen OFF, and never turns
+ * it on. A write that adds no token keeps what the bag says until you hide
+ * into it again (deployHintPrefs.ts).
+ */
+export function moneyAsSaved(settings: BagSettings, addsCashu: boolean): BagSettings {
+  return addsCashu && settings.money && !loadHintPrefs().money ? { ...settings, money: false } : settings
+}
+
+/** Whether any of these items is a message holding a cashu token. */
+function holdsCashu(items: readonly Pick<NostrEvent, 'kind' | 'content'>[]): boolean {
+  return items.some((e) => e.kind === MESSAGE_KIND && findCashuToken(e.content) !== null)
 }
 
 /** How long the upload of PLACE AGAIN's fresh audio copy waits on the signer: a person reads the prompt. */
@@ -3317,7 +3346,7 @@ export const useShards = create<ShardsState>((set, get) => {
     // that does not fit, before anything is signed. A resealed object keeps
     // its reference entry (the same address), so it is measured as it is.
     const target = await gatherInners(to.lookupId, to.key, targetLive, to.height, me)
-    const settings = to.room ? ROOM_BAG_SETTINGS : target.settings ?? DEFAULT_BAG_SETTINGS
+    const settings = to.room ? ROOM_BAG_SETTINGS : moneyAsSaved(target.settings ?? DEFAULT_BAG_SETTINGS, holdsCashu(rows.map((r) => r.inner)))
     const place = { at: positionOf(src), plane: src.plane }
     // An item in a sealed entry goes sealed again into the target, under the
     // target's key and a fresh `d` (spec §7.6 The key: a sealed entry belongs
@@ -3542,7 +3571,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const rumor = d.type === 'message' || d.type === 'audio'
       const key = hexToBytes(d.keyHex)
       const existing = await gatherInners(d.lookupId, key, true, d.height, owner)
-      const settings = d.room ? ROOM_BAG_SETTINGS : existing.settings ?? d.bag ?? DEFAULT_BAG_SETTINGS
+      const settings = d.room ? ROOM_BAG_SETTINGS : moneyAsSaved(existing.settings ?? d.bag ?? DEFAULT_BAG_SETTINGS, holdsCashu([template]))
       // Whether the copy fits inline, before it is signed: a shard goes by
       // reference when the bag would not hold it inline (lib/bagFit.ts), and
       // a bag that cannot hold it either way refuses it now, in words.
@@ -4794,8 +4823,10 @@ export const useShards = create<ShardsState>((set, get) => {
         // names this region.
         const region = regionOf(at, plane, deployHeight)
         const seeded = deployBagFrom?.region === region ? deployBagFrom.settings : newBagSettings(deployHeight)
-        // The hint and money switches go out as the bar shows them (asShown).
-        const settingsOf = (current: BagSettings | null): BagSettings => (into ? ROOM_BAG_SETTINGS : asShown(resolveBagSettings(deployBag, seeded, current, deployHeight), deployBag, deployHeight))
+        // The hint and money switches go out as the bar shows them (asShown):
+        // money OFF where the bar showed no money row (moneyRowShown).
+        const shown = moneyRowShown(pending, ownBagIn(get().mine, region)) ? deployBag : { ...deployBag, money: false }
+        const settingsOf = (current: BagSettings | null): BagSettings => (into ? ROOM_BAG_SETTINGS : asShown(resolveBagSettings(deployBag, seeded, current, deployHeight), shown, deployHeight))
         let settings: BagSettings = settingsOf(existing.settings)
         // A large shard is hidden by reference (spec §7.6, DECK-0003 §3.2): it
         // becomes its own kind 33331 object sealed with the same key, and the

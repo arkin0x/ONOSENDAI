@@ -991,6 +991,7 @@ export function resolveBagSettings(chosen: BagSettings, seed: BagSettings, curre
     hint: hint && hintFits(hint, height) ? hint : null,
     riddle: (chosen.riddle !== seed.riddle ? chosen.riddle : now.riddle).trim().slice(0, MAX_RIDDLE_LENGTH),
     contents: chosen.contents !== seed.contents ? chosen.contents : now.contents,
+    // A hide then sends money as the deploy bar shows it (store/deployHintPrefs.ts asShown).
     money: chosen.money !== seed.money ? chosen.money : now.money,
   }
 }

@@ -8,7 +8,7 @@ import { Object3D, PerspectiveCamera, Vector3 } from 'three'
 import { GLOW_HYSTERESIS_DOUBLINGS, GLOW_LIMITS, allocateGlow, clearGlowPools, haloKey, joinGlow, spendGlow, type GlowDemand, type GlowLimits, type HaloEntry } from '../glowBudget'
 
 const LIMITS: GlowLimits = { halos: 1000, strangerShare: 0.3, strangerObject: 200, screens: 100, largestHalo: 0.25, smallestHaloPx: 2, pointMinPx: 1.5, pointMaxPx: 64 }
-const d = (key: number, over: Partial<GlowDemand> = {}): GlowDemand => ({ key, trusted: true, count: 400, distance: 1, area: 0, ...over })
+const d = (key: number, over: Partial<GlowDemand> = {}): GlowDemand => ({ key, trusted: true, count: 400, distance: 1, area: 1e-6, ...over })
 
 describe('spending order', () => {
   it('trusted before strangers, whatever the distance', () => {
@@ -38,8 +38,15 @@ describe('caps', () => {
     expect(got.get(2)).toBe(20)
     expect(got.get(1)).toBe(10)
   })
-  it('halos too small to see cost no area', () => {
-    expect(allocateGlow([d(1, { area: 0 })], { ...LIMITS, screens: 0 }).get(1)).toBe(400)
+  it('an object whose halos cover nothing on screen (behind the camera, or all under the smallest) takes none', () => {
+    expect(allocateGlow([d(1, { area: 0 }), d(2, { distance: 9 })], LIMITS).get(1)).toBe(0)
+  })
+  it('writes into the map it is given and sorts in place, so a frame allocates nothing', () => {
+    const out = new Map([[99, 5]])
+    const list = [d(1, { distance: 5 }), d(2, { distance: 1 })]
+    expect(allocateGlow(list, LIMITS, new Map(), out)).toBe(out)
+    expect(out.has(99)).toBe(false)
+    expect(list.map((x) => x.key)).toEqual([2, 1])
   })
   it('defaults for phone are tighter than desktop', () => {
     expect(GLOW_LIMITS.phone.halos).toBeLessThan(GLOW_LIMITS.desktop.halos)
@@ -89,6 +96,13 @@ describe('spendGlow, once a frame per canvas', () => {
     near.kept = -5
     spendGlow(canvas, 1, camera, 400, 400, { ...LIMITS, screens: 2 })
     expect(near.kept).toBe(-5)
+    // Measured at the near edge: the same object, its points reaching toward the camera, covers more and keeps fewer.
+    const wide = entry(0)
+    wide.reach = 8
+    const leaveWide = joinGlow(canvas, wide)
+    spendGlow(canvas, 5, camera, 400, 400, { ...LIMITS, screens: 2 })
+    expect(wide.kept).toBeLessThan(near.kept)
+    leaveWide()
     leaveNear()
     spendGlow(canvas, 2, camera, 400, 400, { ...LIMITS, screens: 2 })
     expect(far.kept).toBe(100)

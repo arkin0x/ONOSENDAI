@@ -47,11 +47,22 @@ describe('the flash', () => {
     expect(wallHintShare(1, true)).toBe(1)
     expect(wallHintShare(WALL_HINT_MS, true)).toBe(0)
   })
-  it('a held key keeps one flash going rather than restarting it every step', () => {
+  it('a held key keeps one flash going: it carries on fading in, then holds at full strength, never popping', () => {
     noteWallContact({ key: 'b', shard: wall({ opacity: 0 }) }, 1000)
     noteWallContact({ key: 'b', shard: wall({ opacity: 0 }) }, 1100)
     expect(useWallHint.getState().at).toBe(1000)
-    noteWallContact({ key: 'b', shard: wall({ opacity: 0 }) }, 1000 + WALL_HINT_MS)
-    expect(useWallHint.getState().at).toBe(1000 + WALL_HINT_MS)
+    // Fading out at 1500: back to full strength, not to nothing.
+    noteWallContact({ key: 'b', shard: wall({ opacity: 0 }) }, 1500)
+    expect(useWallHint.getState().at).toBe(1500 - WALL_HINT_IN_MS)
+    expect(wallHintShare(1500 - useWallHint.getState().at)).toBe(1)
+    // Long gone: a new flash.
+    noteWallContact({ key: 'b', shard: wall({ opacity: 0 }) }, 5000)
+    expect(useWallHint.getState().at).toBe(5000)
+  })
+  it('the walls\' word on the face that stopped the step wins: an unseen part of a visible object flashes, a visible part of an unseen one does not', () => {
+    expect(noteWallContact({ key: 'frame', shard: wall() }, 1000, true)).toBe(true)
+    useWallHint.setState({ key: null, at: 0 })
+    expect(noteWallContact({ key: 'ghost', shard: wall({ opacity: 0 }) }, 1000, false)).toBe(false)
+    expect(useWallHint.getState().key).toBeNull()
   })
 })

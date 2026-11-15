@@ -49,6 +49,7 @@ import { doorDepth, ownDoors, placedDoorHeight, sealingDoor, useShards, type MyD
 import { ClipWalls, type ClipFace } from './ClipWalls'
 import { drawnRegion, type DrawnRegion } from './DeployRegionBox'
 import { GRID_SPAN_CELLS, UNIT_BOX, WALL_RENDER_ORDER, gridMaterial, setGrid, tickWallClock } from './Rooms'
+import { useDrawReach } from './buildZoom'
 
 /** The red of a lock. */
 export const ROOM_RED = '#ff3b4e'
@@ -229,14 +230,16 @@ export interface RoomBox extends DrawnRegion {
  * The rooms as drawn in the render frame anchored at `origin`, seen by a
  * viewer at `viewer`: each clipped about the viewer while the viewer stands
  * in it, else about its door; those too small or too far left out; the grid
- * on the walls nearest the viewer (see the file's comment).
+ * on the walls nearest the viewer (see the file's comment). Drawn out to
+ * `reach` (REACH, or the layers' shared reach when the orbit has pulled back
+ * further, buildZoom.ts).
  */
-export function roomBoxes(rooms: readonly RoomSpec[], viewer: Position, origin: Position, scaleExp: number, axes: ViewAxes): RoomBox[] {
+export function roomBoxes(rooms: readonly RoomSpec[], viewer: Position, origin: Position, scaleExp: number, axes: ViewAxes, reach = REACH): RoomBox[] {
   const drawn: Array<{ spec: RoomSpec; region: DrawnRegion; inside: boolean }> = []
   for (const spec of rooms) {
     const inside = inRoom(viewer, spec.at, spec.height)
     const region = drawnRegion(spec.at, origin, spec.height, scaleExp, axes, MAX_CELLS, inside ? viewer : spec.at)
-    if (region && Math.hypot(...region.centre) <= REACH) drawn.push({ spec, region, inside })
+    if (region && Math.hypot(...region.centre) <= reach) drawn.push({ spec, region, inside })
   }
   // The walls nearest you (see the file's comment). Only a room that can
   // carry a grid takes it from another: a room smaller than a cell has none.
@@ -285,6 +288,8 @@ export function DoorRooms({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const geometry = useMemo(() => new EdgesGeometry(new BoxGeometry(1, 1, 1)), [])
   useEffect(() => () => geometry.dispose(), [geometry])
 
+  // Further out as the orbit pulls back, so the fog never shows a room popping in (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const boxes = useMemo(() => {
     let place: { at: Position; height: number; depth: number } | null = null
     if (building && placing) {
@@ -294,8 +299,8 @@ export function DoorRooms({ axes }: { axes: ViewAxes }): JSX.Element | null {
       const outer = into ? mine.find((m) => m.eventId === into.eventId) : undefined
       place = { at, height: placedDoorHeight({ deployHeight: height, deployDoorHeight: chosenRoom, deployRoomSnap: snap }), depth: outer ? doorDepth(mine, outer) + 1 : 1 }
     }
-    return roomBoxes(doorRooms(mine, me, building, plane, place), cursor, alignedOrigin(anchor, scaleExp), scaleExp, axes)
-  }, [mine, me, building, plane, anchor, scaleExp, axes, placing, cursor, step, height, chosenRoom, leaveOut, snap, pending])
+    return roomBoxes(doorRooms(mine, me, building, plane, place), cursor, alignedOrigin(anchor, scaleExp), scaleExp, axes, reach)
+  }, [mine, me, building, plane, anchor, scaleExp, axes, placing, cursor, step, height, chosenRoom, leaveOut, snap, pending, reach])
 
   // The grids breathe on the walls' shared clock (Rooms.tsx).
   const anyGrid = boxes.some((b) => b.grid)

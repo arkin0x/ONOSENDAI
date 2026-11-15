@@ -21,6 +21,7 @@
  */
 
 import { Canvas, useThree } from '@react-three/fiber'
+import { GlowWorldCanvas } from './PointBillboards'
 import { OrbitControls } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { BlendFunction, Effect, type BloomEffect, type EffectComposer as PostComposer } from 'postprocessing'
@@ -106,12 +107,13 @@ import { Travel } from './Travel'
 import { TvLayer } from './TvLayer'
 import { TvScreenEffect } from './TvScreenEffect'
 import { useTv } from '../store/useTv'
-import { CAMERA_NEAR, FOV, ORBIT_MIN_DISTANCE } from './camera'
+import { CAMERA_FAR, CAMERA_NEAR, FOV, ORBIT_MAX_DISTANCE, ORBIT_MIN_DISTANCE } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
 import { lineFade } from './nearFade'
 import { canvasPixels, composerSamples } from './composerBudget'
 import './radialFog'
-import { fogFarStep, FOG_FAR, FOG_NEAR, FOG_START_SHARE, VIEW_FOG_SCALE } from './fog'
+import { CULL_REACH, fogFar, fogFarStep, FOG_FAR, FOG_NEAR, FOG_START_SHARE, VIEW_FOG_SCALE } from './fog'
+import { cameraNear, nextAim, nextReach, orbitMaxDistance, reachNeed, stepOrbitLimit, useDrawReach } from './buildZoom'
 import { flyGesture, panGesture, sceneMouse, steerToSpend, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
 import { StartLock } from '../lib/viewCamera'
 
@@ -131,7 +133,7 @@ const START_DISTANCE = 26
  */
 function startDistance(hasSphere: boolean): number {
   if (!hasSphere) return START_DISTANCE
-  return Math.min(GRID_RADIUS * 4, sphereFrameDistance(FOV))
+  return Math.min(ORBIT_MAX_DISTANCE, sphereFrameDistance(FOV))
 }
 
 /**
@@ -396,6 +398,9 @@ function SceneFog(): JSX.Element {
   const fog = useRef<Fog>(null)
   // The mode the last frame's fog was for (TV or WALK, or a third-person view); null before the first.
   const mode = useRef<boolean | null>(null)
+  // The reach the fog is aimed inside (buildZoom.ts nextAim); the layers' own is useDrawReach.
+  const aim = useRef(CULL_REACH)
+  const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
   useLayoutEffect(() => {
     // The browser harness reads and sets it, as it reads __rig.
     if (import.meta.env.DEV) (window as unknown as { __fog?: unknown }).__fog = fog.current
@@ -406,12 +411,24 @@ function SceneFog(): JSX.Element {
     // The browser harness can pin the fog, to shoot the old one against the new.
     if (import.meta.env.DEV) { const pin = (window as unknown as { __fogFixed?: [number, number] }).__fogFixed; if (pin) { f.near = pin[0]; f.far = pin[1]; return } }
     const base = useTv.getState().on || useCyberspace.getState().walking
+    const fromOrigin = state.camera.position.length()
+    // The fog never darkens what the camera looks at: as the orbit pulls back
+    // the layers' reach doubles ahead of it and the fog's end goes out with it
+    // (buildZoom.ts). At the usual orbit the reach is CULL_REACH and the fog
+    // is as it was.
+    const distance = controls ? state.camera.position.distanceTo(controls.target) : 0
+    aim.current = nextAim(aim.current, reachNeed(distance, fromOrigin))
     // Eased within a mode: a re-anchor moves the camera's distance from the
     // origin in one frame, and the distant scene must not step darker with it
     // (review S2a). The first frame and a change of mode jump there (N10).
-    f.far = fogFarStep(f.far, mode.current, base, state.camera.position.length(), dt)
+    f.far = fogFarStep(f.far, mode.current, base, fromOrigin, dt, aim.current, distance)
     mode.current = base
     f.near = f.far * FOG_START_SHARE
+    // The layers draw out to the aim at once, and back in only once the fog is black inside it.
+    const was = useDrawReach.getState().reach
+    const settled = Math.abs(f.far - fogFar(base, fromOrigin, aim.current, distance)) < 0.5
+    const reach = nextReach(was, aim.current, f.far + fromOrigin, settled)
+    if (reach !== was) useDrawReach.setState({ reach })
   }, HEADLAMP_PRIORITY)
   return <fog ref={fog} attach="fog" args={[0x000000, FOG_NEAR * VIEW_FOG_SCALE, FOG_FAR * VIEW_FOG_SCALE]} />
 }
@@ -427,13 +444,13 @@ function HeadlampRig(): null {
   const on = useLayers((s) => s.headlamp)
   // In the commit, before any frame is drawn: a switch saved off never shows one frame on.
   useLayoutEffect(() => { headlampUniforms.uHeadlamp.value = on ? 1 : 0 }, [on])
-  const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
+  const controls = useThree((s) => s.controls) as unknown as { target: Vector3; maxDistance: number } | null
   useFrame((state) => {
     // Lines fade out right at the eye, except in WALK, where the eye is on the avatar and that is how far anything is (scene/nearFade.ts).
     lineFade.on.value = useCyberspace.getState().walking ? 0 : 1
     if (!controls) return
     // A stopped VIEW fly brings the target in close; the reach fades in after it rather than stepping (ViewFly.ts reachOwed).
-    headlampUniforms.uHeadlampReach.value = headlampReach(state.camera.position.distanceTo(controls.target) + viewRig.reachOwed)
+    headlampUniforms.uHeadlampReach.value = headlampReach(state.camera.position.distanceTo(controls.target) + viewRig.reachOwed, controls.maxDistance)
   }, HEADLAMP_PRIORITY)
   return null
 }
@@ -620,6 +637,7 @@ function Rig(): JSX.Element {
     target: Vector3
     update: () => void
     minDistance: number
+    maxDistance: number
     enableZoom: boolean
     enableRotate: boolean
     autoRotate: boolean
@@ -1115,7 +1133,9 @@ function Rig(): JSX.Element {
       const from = c.object.position.distanceTo(smooth.current)
       // A stopped VIEW fly's orbit is ORBIT_MIN_DISTANCE to within rounding: a real orbit, not a collapsed one.
       if (s.walking) outTo.current = from >= ORBIT_MIN_DISTANCE - 1e-6 ? from : START_DISTANCE
-      eye.current = { from, to: s.walking ? WALK_EYE : outTo.current, t0: performance.now() }
+      // Back out no further than the orbit may now go: BUILD left during WALK takes its far limit with it.
+      const outLimit = orbitMaxDistance(!(useTv.getState().on || isBroadcast()) && useBuilder.getState().active, s.scaleExp)
+      eye.current = { from, to: s.walking ? WALK_EYE : Math.min(outTo.current, outLimit), t0: performance.now() }
       c.enableZoom = !s.walking
       c.enableRotate = !s.walking
       clearWalkLook()
@@ -1163,7 +1183,7 @@ function Rig(): JSX.Element {
         along.set(comp[axes.right.axis] * axes.right.dir, comp[axes.up.axis] * axes.up.dir, comp[axes.out.axis] * axes.out.dir)
       }
       if (along.lengthSq() === 0) along.set(0, 0, 1)
-      c.object.position.copy(c.target).addScaledVector(along.normalize(), Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, want.distance)))
+      c.object.position.copy(c.target).addScaledVector(along.normalize(), Math.min(ORBIT_MAX_DISTANCE, Math.max(ORBIT_MIN_DISTANCE, want.distance)))
       lastOffset.current.copy(c.object.position).sub(c.target)
     }
     // The tutorial eases the orbit in to a close distance after a HOP onto the
@@ -1201,7 +1221,7 @@ function Rig(): JSX.Element {
         const cur = off.length()
         if (cur < 1e-4) off.set(0, 0, 1)
         off.normalize()
-        const target = Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, tutorialZoom))
+        const target = Math.min(ORBIT_MAX_DISTANCE, Math.max(ORBIT_MIN_DISTANCE, tutorialZoom))
         const k = 1 - Math.exp(-dt / 0.4)
         const nd = cur < 1e-4 ? target : cur + (target - cur) * k
         let turned = true
@@ -1231,6 +1251,23 @@ function Rig(): JSX.Element {
     if (viewRig.restoreOrbit(c.object.position, c.target, dt, s.walking || pressed() > 0 || tutorialZoom !== null || frame !== null || want !== null || eye.current !== null)) {
       lastOffset.current.copy(c.object.position).sub(c.target)
     }
+    // How far the orbit pulls back: 96 cells, or in BUILD BUILD_MAX_GIBSONS at
+    // this zoom (buildZoom.ts; arkinox, 2026-11-15: "when building the
+    // landscape tiles i feel like i can't zoom out far enough"). A camera left
+    // outside a limit that came in under it eases in rather than jumping.
+    const tvOn = useTv.getState().on || isBroadcast()
+    const limit = orbitMaxDistance(!tvOn && useBuilder.getState().active && !s.walking, s.scaleExp)
+    const orbit = c.object.position.distanceTo(c.target)
+    c.maxDistance = stepOrbitLimit(orbit, limit, dt, c.maxDistance)
+    // The near plane steps back past 96 cells, so the depth buffer keeps its
+    // grain (buildZoom.ts cameraNear); set again only on a change of 5%.
+    // Exactly CAMERA_NEAR again at the usual orbit, and in TV, whose shots are its own.
+    const near = cameraNear(tvOn ? 0 : orbit)
+    const rigCamera = state.camera as PerspectiveCamera
+    if (rigCamera.isPerspectiveCamera && rigCamera.near !== near && (near === CAMERA_NEAR || Math.abs(rigCamera.near - near) > near * 0.05)) {
+      rigCamera.near = near
+      rigCamera.updateProjectionMatrix()
+    }
     // The controls' own turn this frame (their damping), in place in flight too.
     viewRig.mark(c.object.position, c.target)
     c.update()
@@ -1244,7 +1281,7 @@ function Rig(): JSX.Element {
       makeDefault
       enablePan={false}
       minDistance={ORBIT_MIN_DISTANCE}
-      maxDistance={GRID_RADIUS * 4}
+      maxDistance={ORBIT_MAX_DISTANCE}
       dampingFactor={0.12}
       autoRotate={tutorialSpin}
       autoRotateSpeed={0.6}
@@ -1372,7 +1409,7 @@ export const Scene = memo(function Scene(): JSX.Element {
   const bloom = useMemo(() => <><WorldBloom /><TvScreenEffect /></>, [])
   return (
     <Canvas
-      camera={{ fov: FOV, position: [0, 0, START_DISTANCE], near: CAMERA_NEAR, far: 6000 }}
+      camera={{ fov: FOV, position: [0, 0, START_DISTANCE], near: CAMERA_NEAR, far: CAMERA_FAR }}
       // The stream draws at the capture's ratio, 1 to 1.5 (lib/tv/broadcast): a predictable picture and cost.
       dpr={isBroadcast() ? broadcastDpr() : [1, 2]}
       // high-performance: ask for the discrete GPU and against power-save
@@ -1402,7 +1439,8 @@ export const Scene = memo(function Scene(): JSX.Element {
       {isPortraitBroadcast() && <PortraitLens />}
       <CellMetric />
       <ScreenAxes />
-      <World />
+      {/* Glow halos here keep the bloom's tag, follow the Settings switch, and are strangers' unless a shard is trusted (scene/PointBillboards.tsx). */}
+      <GlowWorldCanvas><World /></GlowWorldCanvas>
       {/* Camera-pinned, so it lives outside the world group: hyperspace is a
           state, not a place. Mounts only while riding, or while Cyberspace
           TV shows a hyperjump's ride (its warp). */}

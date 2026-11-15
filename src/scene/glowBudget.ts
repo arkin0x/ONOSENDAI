@@ -95,23 +95,35 @@ export interface GlowDemand {
   area: number
 }
 
+/** The hysteresis held for the sort below: module state, so the comparator is made once (spendGlow runs every frame). */
+let heldNow: ReadonlyMap<number, number> = new Map()
+function nearness(d: GlowDemand): number {
+  return d.distance - ((heldNow.get(d.key) ?? 0) > 0 ? GLOW_HYSTERESIS_DOUBLINGS : 0)
+}
+function byTrustThenNear(a: GlowDemand, b: GlowDemand): number {
+  return a.trusted === b.trusted ? nearness(a) - nearness(b) : a.trusted ? -1 : 1
+}
+
 /**
  * How many halos each object draws: trusted first, then nearest, each taking
  * what is left of the count, the area and (a stranger) its own and the
- * strangers' share. `held`, what each drew at the last allocation, gives the
- * hysteresis.
+ * strangers' share. An object whose halos cover nothing on screen (behind
+ * the camera, or every halo under the smallest drawn) takes none. `held`,
+ * what each drew at the last allocation, gives the hysteresis. Sorts
+ * `demands` in place and writes into `out` (cleared first), so a frame
+ * allocates nothing.
  */
-export function allocateGlow(demands: readonly GlowDemand[], limits: GlowLimits, held: ReadonlyMap<number, number> = new Map()): Map<number, number> {
-  const out = new Map<number, number>()
-  const near = (d: GlowDemand): number => d.distance - ((held.get(d.key) ?? 0) > 0 ? GLOW_HYSTERESIS_DOUBLINGS : 0)
-  const order = [...demands].sort((a, b) => (a.trusted === b.trusted ? near(a) - near(b) : a.trusted ? -1 : 1))
+export function allocateGlow(demands: GlowDemand[], limits: GlowLimits, held: ReadonlyMap<number, number> = new Map(), out: Map<number, number> = new Map()): Map<number, number> {
+  out.clear()
+  heldNow = held
+  demands.sort(byTrustThenNear)
+  heldNow = EMPTY
   let halos = limits.halos
   let strangers = Math.floor(limits.halos * limits.strangerShare)
   let area = limits.screens
-  for (const d of order) {
-    let give = Math.min(d.count, halos)
+  for (const d of demands) {
+    let give = d.area > 0 ? Math.min(d.count, halos, Math.floor(area / d.area)) : 0
     if (!d.trusted) give = Math.min(give, limits.strangerObject, strangers)
-    if (d.area > 0) give = Math.min(give, Math.floor(area / d.area))
     give = Math.max(0, give)
     out.set(d.key, give)
     halos -= give
@@ -120,6 +132,7 @@ export function allocateGlow(demands: readonly GlowDemand[], limits: GlowLimits,
   }
   return out
 }
+const EMPTY: ReadonlyMap<number, number> = new Map()
 
 /** One object's halos in a canvas's pool. */
 export interface HaloEntry {
@@ -137,7 +150,8 @@ export interface HaloEntry {
   kept: number
 }
 
-interface Pool { entries: Set<HaloEntry>; frame: number; held: Map<number, number> }
+/** A canvas's pool: its entries, the frame it last spent, what each drew then, and the reused working arrays. */
+interface Pool { entries: Set<HaloEntry>; frame: number; held: Map<number, number>; next: Map<number, number>; demands: GlowDemand[] }
 const pools = new WeakMap<object, Pool>()
 let nextKey = 1
 
@@ -149,7 +163,7 @@ export function haloKey(): number {
 /** Join `canvas`'s pool (the renderer is the key); returns the leave. */
 export function joinGlow(canvas: object, entry: HaloEntry): () => void {
   let pool = pools.get(canvas)
-  if (!pool) pools.set(canvas, (pool = { entries: new Set(), frame: -1, held: new Map() }))
+  if (!pool) pools.set(canvas, (pool = { entries: new Set(), frame: -1, held: new Map(), next: new Map(), demands: [] }))
   pool.entries.add(entry)
   const p = pool
   return () => { p.entries.delete(entry); p.held.delete(entry.key) }
@@ -174,20 +188,29 @@ export function spendGlow(canvas: object, frame: number, camera: Camera, width: 
   const screen = Math.max(1, width * height)
   camera.getWorldPosition(eye)
   inverse.copy(camera.matrixWorld).invert()
-  const demands: GlowDemand[] = []
+  const demands = pool.demands
+  let n = 0
   for (const e of pool.entries) {
     const m = e.object.matrixWorld.elements
     const k = Math.hypot(m[0], m[1], m[2]) || 1
     at.copy(e.centre).applyMatrix4(e.object.matrixWorld)
     const dist = at.distanceTo(eye)
     const depth = -view.copy(at).applyMatrix4(inverse).z
-    const behind = depth < -e.reach * k
-    const px = (e.radius * k * height * proj * 0.5) / Math.max(depth, 1e-4)
+    const reach = e.reach * k
+    const behind = depth < -reach
+    // Measured at the near edge of its points (no nearer than a quarter of the centre's depth), not the centre:
+    // a big object near the camera covers far more than its middle says.
+    const near = Math.max(depth - reach, depth * 0.25, 1e-4)
+    const px = (e.radius * k * height * proj * 0.5) / near
     const shown = Math.min(px, cap)
     const area = behind || px < limits.smallestHaloPx ? 0 : (Math.PI * shown * shown) / screen
-    demands.push({ key: e.key, trusted: e.trusted, count: e.count, distance: Math.log2(1 + dist), area })
+    const d = demands[n] ?? (demands[n] = { key: 0, trusted: false, count: 0, distance: 0, area: 0 })
+    d.key = e.key; d.trusted = e.trusted; d.count = e.count; d.distance = Math.log2(1 + dist); d.area = area
+    n++
   }
-  const next = allocateGlow(demands, limits, pool.held)
+  demands.length = n
+  const next = allocateGlow(demands, limits, pool.held, pool.next)
+  pool.next = pool.held
   pool.held = next
   for (const e of pool.entries) e.kept = next.get(e.key) ?? 0
 }

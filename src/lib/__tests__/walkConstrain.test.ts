@@ -210,6 +210,20 @@ describe('placed objects keep their own setting (§1.10)', () => {
   })
   const host = (c: Constrain): ShardModel => withConstrain({ ...newShard('Room'), mode: 'solid', vertices: [], faces: [], refs: [['a', `33331:${'a'.repeat(64)}:w`]], parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }] }, c)
 
+  it('says whether the face that stopped a step is of an object no one can see: the part, not its parent', () => {
+    const who = { bounce: 0 as const, unseen: undefined as boolean | undefined }
+    // An invisible pane (0%, ALL) placed by a visible host.
+    expect(firstHit(wallMesh(host('off'), [part(wall({ opacity: 0 }, 'all'))]), [0, 0, 0], 0, 1, 10, 1e-6, undefined, who)).toBeCloseTo(3, 12)
+    expect(who.unseen).toBe(true)
+    // A visible part of an invisible host: the part stopped you.
+    const ghostHost = { ...host('off'), opacity: 0 }
+    firstHit(wallMesh(ghostHost, [part(wall({}, 'all'))]), [0, 0, 0], 0, 1, 10, 1e-6, undefined, who)
+    expect(who.unseen).toBe(false)
+    // The shard's own invisible face.
+    firstHit(wallMesh(wall({ opacity: 0 }, 'all'), []), [0, 0, 0], 0, 1, 10, 1e-6, undefined, who)
+    expect(who.unseen).toBe(true)
+  })
+
   it('a part set to ALL holds you though its parent is off', () => {
     const m = wallMesh(host('off'), [part(wall({}, 'all'))])
     expect(m.own).toBe(0)

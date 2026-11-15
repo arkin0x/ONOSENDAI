@@ -208,25 +208,54 @@ describe('the height', () => {
     expect(scanOrbSats(true, true, 32)).toBeNull()
   })
 
-  it('renders the keys under their buttons (. up, , down, SPACE under SCAN, HOSAKA\'s range too) and the status words', () => {
+  it('renders the keys inside their buttons in the Controls pad\'s style (. up, , down, SPACE in SCAN, HOSAKA\'s range too) and the status words (arkinox, 2026-11-15: "i wanted them like the keyboard hints in the Controls pad")', () => {
     const html = (): string => renderToString(createElement(ScanControls))
+    /** Each button's inner HTML, by its aria-label's start, and the key hint inside it. */
+    const button = (out: string, label: RegExp): string => {
+      const m = [...out.matchAll(/<button([^>]*)>(.*?)<\/button>/g)].find(([, attrs]) => label.test(/aria-label="([^"]*)"/.exec(attrs)?.[1] ?? ''))
+      return m?.[2] ?? ''
+    }
+    const hint = (inner: string): { cls: string; key: string } | null => {
+      const m = /<span class="(touchpad__keyhint[^"]*)" aria-hidden="true">([^<]*)<\/span>/.exec(inner)
+      return m ? { cls: m[1], key: m[2] } : null
+    }
     SC().enter()
     SC().setHeight(13)
     let out = html()
-    expect(out).toMatch(/scanorbs__hint[^"]*"[^>]*>\.<\/span>/)
-    expect(out).toMatch(/scanorbs__hint[^"]*"[^>]*>,<\/span>/)
-    expect(out).toMatch(/class="flyorb__key"[^>]*>SPACE<\/span>/)
+    expect(hint(button(out, /^Raise/))).toEqual({ cls: 'touchpad__keyhint is-mark', key: '.' })
+    expect(hint(button(out, /^Lower/))).toEqual({ cls: 'touchpad__keyhint is-mark', key: ',' })
+    expect(hint(button(out, /^Scan$/))).toEqual({ cls: 'touchpad__keyhint', key: 'SPACE' })
+    // One hint each, all inside a button: the old labels outside them are gone.
+    expect(out.match(/touchpad__keyhint/g)).toHaveLength(3)
+    expect(out.replace(/<button[^>]*>.*?<\/button>/g, '')).not.toContain('touchpad__keyhint')
+    expect(out).not.toMatch(/flyorb__key|scanorbs__hint/)
     expect(out).toContain('>UNKNOWN<')
-    // A HOSAKA height: HOSAKA under the height, the price on the button, SPACE still there.
+    // At the bottom, down does nothing: its hint stays in place, unseen.
+    SC().setHeight(SCAN_MIN_HEIGHT)
+    expect(hint(button(html(), /^Lower/))?.cls).toBe('touchpad__keyhint is-mark is-off')
+    // A HOSAKA height: HOSAKA under the height, the price on the button with SPACE under it in the orb.
     cloudOn()
     SC().setHeight(22)
     out = html()
     expect(out).toContain('>HOSAKA<')
-    expect(out).toMatch(/scanorb__sats[^>]*>21 SATS</)
-    expect(out).toMatch(/class="flyorb__key"[^>]*>SPACE<\/span>/)
-    // At the top: why up stops, where the . key was.
+    const orb = button(out, /^Scan for/)
+    expect(orb).toMatch(/scanorb__word[^>]*>SCAN<.*scanorb__sats[^>]*>21 SATS<.*>SPACE</)
+    expect(hint(orb)).toEqual({ cls: 'touchpad__keyhint', key: 'SPACE' })
+    // No price yet: the orb is disabled and Space does nothing, so SPACE is unseen.
+    const limits = S().cloud
+    useCyberspace.setState({ cloud: { ...limits, provider: null } })
+    expect(hint(button(html(), /^Scan$/))?.cls).toBe('touchpad__keyhint is-off')
+    useCyberspace.setState({ cloud: limits })
+    expect(out).not.toMatch(/>(DEVICE|HOSAKA) MAX</)
+    // At the top: why up stops, on the label's last line; up's . unseen.
     SC().setHeight(30)
-    expect(html()).toContain('>HOSAKA MAX<')
+    out = html()
+    expect(out).toMatch(/<span class="scanorbs__max">HOSAKA MAX<\/span><\/span>/)
+    expect(hint(button(out, /^Raise/))?.cls).toBe('touchpad__keyhint is-mark is-off')
+    cloudOn(false)
+    SC().setHeight(99)
+    expect(html()).toMatch(/<span class="scanorbs__max">DEVICE MAX<\/span>/)
+    cloudOn()
     for (const h of [12, 16, 22, 30]) {
       SC().setHeight(h)
       expect(html()).not.toMatch(/\b(FREE|HELD|INSTANT)\b/)
@@ -263,11 +292,22 @@ describe('the height', () => {
     SC().setHeight(22)
     useScan.setState({ job: { at: S().cursor, plane: 0, height: 22, route: 'cloud', startedAt: Date.now(), estSeconds: 108, asking: false } })
     states.hosaka = html()
+    // A scan under way at the top of HOSAKA's range: no MAX line, and Space does nothing.
+    SC().setHeight(30)
+    useScan.setState({ job: { ...SC().job!, height: 30 } })
+    const atTop = html()
+    expect(atTop).toMatch(/<span class="scanorbs__max"><\/span>/)
+    SC().setHeight(22)
+    useScan.setState({ job: { ...SC().job!, height: 22 } })
     useScan.setState({ job: null, result: { kind: 'found', height: 13, count: 2 } })
     states.result = html()
     useScan.setState({ result: { kind: 'failed', height: 13, message: 'HOSAKA could not take the job right now because its queue is full. Try again in a few minutes or scan a lower height here.' } })
     states.error = html()
     useScan.setState({ result: null })
+    // While a scan runs, Space does nothing (X cancels): SPACE in the orb is unseen; idle and armed, seen.
+    const orbHint = (out: string): string => /<button[^>]*class="flyorb scanorb[^"]*"[^>]*>.*?<span class="(touchpad__keyhint[^"]*)"/.exec(out)?.[1] ?? ''
+    for (const k of ['scanning', 'asking', 'hosaka']) expect(orbHint(states[k])).toBe('touchpad__keyhint is-off')
+    for (const k of ['idle', 'confirm', 'result']) expect(orbHint(states[k])).toBe('touchpad__keyhint')
     // One slot in every state, the same element, empty or not.
     for (const out of Object.values(states)) expect(slot(out).count).toBe(1)
     expect(slot(states.idle).text).toBe('')
@@ -306,24 +346,38 @@ describe('the height', () => {
     const value = rule('.scanorbs__value')
     expect(value).toMatch(/\bheight:\s*var\(--scanorbs-value-h\)/)
     expect(value).not.toMatch(/min-height/)
-    // SCAN HEIGHT and two tag lines fit the label's room.
+    // SCAN HEIGHT, two tag lines and the max line fit the label's room.
     const bLine = Number(/\.scanorbs__value b \{[^}]*line-height:\s*(\d+)px/.exec(css)?.[1])
     const tagLine = Number(/\.scanorbs__tag \{[^}]*line-height:\s*(\d+)px/.exec(css)?.[1])
-    expect(bLine + 2 * tagLine).toBeLessThanOrEqual(px('scanorbs-value-h'))
+    const maxRule = rule('.scanorbs__max')
+    const maxLine = Number(/\bheight:\s*(\d+)px/.exec(maxRule)?.[1])
+    expect(maxLine).toBeGreaterThan(0)
+    expect(maxRule).toMatch(/margin-top:\s*auto/)
+    expect(bLine + 2 * tagLine + maxLine).toBeLessThanOrEqual(px('scanorbs-value-h'))
+    // The max line is always there, empty or not, the last thing in the label.
+    for (const out of Object.values(states)) expect(out.match(/<span class="scanorbs__max">[^<]*<\/span><\/span>/g)).toHaveLength(1)
     // The open chat starts past the dock's own width, read from the same numbers.
     const width = /--scanorbs-w:\s*calc\(([^;]*)\);/.exec(css)?.[1] ?? ''
     for (const part of ['--scanorbs-col', '--scanorbs-gap', '--menu-size']) expect(width).toContain(`var(${part})`)
   })
 
-  it('keeps the old words out of SCAN\'s code, and its hints white with the labels\' edge', () => {
+  it('keeps the old words out of SCAN\'s code, and its key hints the pad\'s own, restyled nowhere', () => {
     const src = readFileSync(join(process.cwd(), 'src/hud/ScanControls.tsx'), 'utf8')
     // The code, its comments left out (they quote the owner's words about the old ones).
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
     expect(code).not.toMatch(/\b(FREE|HELD|INSTANT)\b/)
     const css = readFileSync(join(process.cwd(), 'src/styles.css'), 'utf8')
-    const rule = /\.scanorbs \.flyorb__key \{([^}]*)\}/.exec(css)?.[1] ?? ''
-    expect(rule).toMatch(/color:\s*#fff/)
-    expect(rule).toMatch(/text-shadow:\s*var\(--scanorbs-edge\)/)
+    // SCAN only hides a hint whose key does nothing, and sizes up a lone . or , (a speck at 6px):
+    // font, colour, opacity and place are the pad's, and SPACE's size too.
+    const scanHintRules = [...css.matchAll(/\n([^{}\n]*touchpad__keyhint[^{}\n]*)\{([^}]*)\}/g)].filter(([, sel]) => /scan/.test(sel))
+    expect(scanHintRules.map(([, sel, body]) => [sel.trim(), body.trim()])).toEqual([
+      ['.scanorbs .touchpad__keyhint.is-off', 'visibility: hidden;'],
+      ['.scanorbs .touchpad__keyhint.is-mark', 'font-size: 18px; font-weight: 700;'],
+    ])
+    // The buttons hold them as the pad's keys do: positioned, so the hint sits at their bottom edge.
+    expect(css).toMatch(/\n\.scanorbs__step \{[^}]*position:\s*relative/)
+    expect(css).toMatch(/\n\.flyorb \{[^}]*position:\s*relative/)
+    expect(css).not.toMatch(/scanorbs__hint|\.scanorbs \.flyorb__key/)
   })
 })
 

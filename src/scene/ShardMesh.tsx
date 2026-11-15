@@ -49,7 +49,7 @@ import { DOTS_ORDER, GHOST_OPACITY, basicFaceProps, benchOrders, lineProps, litF
 import { HEADLAMP_FACES, HEADLAMP_LINES } from './headlamp'
 import { holdPlaced, placedBuffers, type PlacedBuffers } from './placedBuffers'
 import { animOf, type Motion } from '../lib/anim'
-import { AnimGroups, clipWalls } from './animMotion'
+import { AnimClock, AnimGroups, clipWalls } from './animMotion'
 import { drawPlan, haloFade, pointLookOf } from '../lib/pointLook'
 import { GlowHalos, GlowTrust, PointCores, useGlowAllowed } from './PointBillboards'
 
@@ -390,8 +390,17 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   // STRENGTH is never multiplied by the object's opacity, only by the
   // client's own fade (a ghost's share, `dim`).
   const look = useMemo(() => pointLookOf(given, { avatar: ignoreOpacity }), [given, ignoreOpacity])
-  const glowAllowed = useGlowAllowed(world)
+  const glowAllowed = useGlowAllowed()
   const plan = drawPlan(given.mode, look, { cull, glowAllowed })
+  // On the workshop's bench while editing (the only canvas with its own anim
+  // clock, scene/animMotion.ts AnimClock), an object no one can see (opacity
+  // 0, or POINTS at point size 0 with no glow) shows faint dots so its author
+  // can find and select it (DECK-0003 §1.11, §1.15). Never in the world, the
+  // feed or the pictures.
+  const onBench = useContext(AnimClock) !== null
+  const benchFaint = onBench && still && !cull && (look.hidden || (given.mode === 'points' && look.pointSize === 0 && !look.glow))
+  const faintMaterial = useMemo(() => (benchFaint ? createDiscMaterial(SHARD_POINTS, BENCH_FAINT_OPACITY, false) : null), [benchFaint])
+  useEffect(() => () => { faintMaterial?.dispose() }, [faintMaterial])
   const trustedAbove = useContext(GlowTrust)
   const glowTrusted = budget ? budget.trusted : trustedAbove
   // The objects this one places, fetched once for the whole app; a part's own
@@ -481,7 +490,9 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
     if (!wantsBillboards || !(given.facecolors?.length)) return null
     const g = shardGeometry({ ...given, faces: [], facecolors: undefined }, clip, pose)
     return plainGeometry(new BufferAttribute(g.positions, 3), new BufferAttribute(g.colors, 3))
-  }, [wantsBillboards, given, clip, pose])
+    // Keyed on what it reads, so a fresh copy of the same object does not rebuild it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsBillboards, given.vertices, given.facecolors, clip, pose])
   useEffect(() => () => { ownPoints?.dispose() }, [ownPoints])
   const pointsPlain = ownPoints ?? plain
 
@@ -600,6 +611,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   useFrame((state) => {
     // The disc is sized in pixels, so it needs the canvas it is drawn on.
     sizeDisc(pointMaterial, state.gl.getPixelRatio(), state.size.height)
+    if (faintMaterial) sizeDisc(faintMaterial, state.gl.getPixelRatio(), state.size.height)
     if (dissolve !== undefined && away !== null) {
       if (done.current) return
       const t = dissolveShare(performance.now() - dissolve)
@@ -706,17 +718,21 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
       {/* Nothing of its own drawn (opacity 0, or POINTS at point size 0): an invisible copy still answers taps and picks, and is never drawn, so it hides and occludes nothing. */}
       {!cull && (look.hidden || plan.points === 'none') && (shard.mode === 'solid' && index.length > 0 && look.hidden
         ? <mesh name="shard-hit" visible={false} geometry={indexed} material={HIT_MATERIAL} frustumCulled={false} {...pick} />
-        : <points name="shard-hit" visible={false} geometry={plain} material={pointMaterial} frustumCulled={false} />)}
+        : !faintMaterial && <points name="shard-hit" visible={false} geometry={plain} material={pointMaterial} frustumCulled={false} />)}
+      {faintMaterial && <points name="shard-faint" geometry={plain} material={faintMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} />}
       {plan.points === 'billboard' && look.pointSize !== undefined && (
-        <PointCores plain={pointsPlain} size={look.pointSize} opacity={opacity} glow={SHARD_POINTS.glow} headlamp={headlamp && !lit} clipPlanes={clipPlanes} />
+        <PointCores plain={pointsPlain} size={look.pointSize} opacity={opacity} glow={SHARD_POINTS.glow} headlamp={headlamp && !lit} clipPlanes={clipPlanes} walls={clip} />
       )}
       {plan.halos && look.glow && (
-        <GlowHalos plain={pointsPlain} glow={look.glow} radius={look.glowRadius} strength={look.glowStrength} core={plan.points === 'billboard' ? look.pointSize : 0} fade={haloFade({ ghostShare: ghost ? GHOST_OPACITY : 1, dim })} world={world} trusted={glowTrusted} clipPlanes={clipPlanes} walls={clip} birth={birth} dissolve={dissolve} />
+        <GlowHalos plain={pointsPlain} glow={look.glow} radius={look.glowRadius} strength={look.glowStrength} core={plan.points === 'billboard' ? look.pointSize : 0} fade={haloFade({ ghostShare: ghost ? GHOST_OPACITY : 1, dim })} trusted={glowTrusted} clipPlanes={clipPlanes} walls={clip} birth={birth} dissolve={dissolve} />
       )}
       </>)}
     </group>
   )
 }
+
+/** How strong the bench's dots for an object no one can see are drawn: faint, but there. */
+export const BENCH_FAINT_OPACITY = 0.35
 
 /** The material of an invisible hit copy (never drawn: it only lets a ray find the faces). */
 const HIT_MATERIAL = new MeshBasicMaterial()

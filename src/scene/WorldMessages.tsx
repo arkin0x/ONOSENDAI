@@ -81,6 +81,7 @@ import { useMutes } from '../store/useMutes'
 import { MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
 import { headlampUniforms } from './headlamp'
 import { basicFaceProps, TRANSLUCENT_ORDER } from './shardFaces'
+import { useDrawReach } from './buildZoom'
 
 /** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
 const TAP_PX = 44
@@ -220,6 +221,8 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
   const itemsRead = useInventory((s) => s.owner === me && s.storage !== 'loading')
   const vanishing = useTakeVanish((s) => s.playing)
 
+  // Further out while BUILD is pulled back (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const placed = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
     // Notes are not drawn past MESSAGE_SCALE_MAX (markShown). Coins stay in
@@ -249,10 +252,10 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         coin: w.type === 'message' && findCashuToken(w.text!) !== null,
         centre: itemCentre(w.at, origin, scaleExp, axes),
       }))
-      .filter((w) => (w.coin || notesShown) && Math.hypot(...w.centre) <= REACH)
+      .filter((w) => (w.coin || notesShown) && Math.hypot(...w.centre) <= reach)
     // mine and discovered are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted])
+  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted, reach])
 
   if (placed.length === 0) return null
 

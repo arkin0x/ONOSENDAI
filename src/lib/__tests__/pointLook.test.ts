@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { ShardModel } from 'sno-core/shards'
-import { drawPlan, drawsAnything, gibsonsLabel, haloFade, pointLookOf, ticksToGibsons, ticksToUnits } from '../pointLook'
+import { drawPlan, drawsAnything, gibsonsLabel, glowReachDoublings, haloFade, pointLookOf, ticksToGibsons, ticksToUnits, unseenObject } from '../pointLook'
 
 function model(mode: ShardModel['mode'], extra?: Record<string, unknown>, opacity?: number): ShardModel {
   return {
@@ -110,5 +110,20 @@ describe('drawsAnything', () => {
     expect(drawsAnything(model('points', { glow: ['light', 120, 50] }, 0))).toBe(true)
     expect(drawsAnything(model('points', { pointsize: 0 }))).toBe(false)
     expect(drawsAnything(model('solid', { pointsize: 0 }))).toBe(true)
+  })
+})
+
+describe('unseenObject and the glow cull', () => {
+  it('no one can see opacity 0, or bare POINTS at point size 0 with no glow', () => {
+    expect(unseenObject(model('solid', undefined, 0))).toBe(true)
+    expect(unseenObject(model('points', { pointsize: 0 }))).toBe(true)
+    expect(unseenObject(model('points', { pointsize: 0, glow: ['fog', 120, 20] }))).toBe(false)
+    expect(unseenObject(model('solid', { pointsize: 0 }))).toBe(false)
+    expect(unseenObject(model('points'))).toBe(false)
+  })
+  it('a glow widens the far cull by log2(1 + its radius in units)', () => {
+    expect(glowReachDoublings(model('points'))).toBe(0)
+    expect(glowReachDoublings(model('points', { glow: ['light', 7680, 50] }))).toBeCloseTo(Math.log2(65))
+    expect(glowReachDoublings(model('solid', { glow: ['light', 7680, 50] }))).toBe(0)
   })
 })

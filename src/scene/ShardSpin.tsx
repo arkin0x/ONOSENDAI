@@ -16,6 +16,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Group } from 'three'
 import type { ShardModel } from 'sno-core/shards'
+import { GlowFollowsSetting } from './PointBillboards'
 import { ShardMesh } from './ShardMesh'
 import { ShardLights } from './shardLight'
 import { keepPrograms } from '../lib/keepPrograms'
@@ -54,7 +55,8 @@ function Spinning({ shard, ignoreOpacity, onDrawn }: { shard: ShardModel | null;
     <group ref={turn}>
       <group position={[-frame.centre[0], -frame.centre[1], -frame.centre[2]]}>
         {/* ignoreOpacity marks an avatar's preview, and an avatar ignores `anim` (DECK-0003 §1.14): drawn still. */}
-        <ShardMesh shard={shard} lit ignoreOpacity={ignoreOpacity} still={ignoreOpacity} />
+        {/* A card spins every frame: its glow follows the Settings switch (scene/PointBillboards.tsx). */}
+        <GlowFollowsSetting><ShardMesh shard={shard} lit ignoreOpacity={ignoreOpacity} still={ignoreOpacity} /></GlowFollowsSetting>
       </group>
     </group>
   )

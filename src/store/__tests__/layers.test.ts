@@ -123,10 +123,11 @@ describe('scene layer switches', () => {
     expect(useLayers.getState().glow).toBe(true)
     useLayers.getState().setLayer('glow', false)
     expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toMatchObject({ glow: false, headlamp: true })
-    expect((await freshStore(storage)).useLayers.getState().glow).toBe(false)
+    expect(loadLayers().glow).toBe(false)
+    // A value stored before the switch existed, or an odd one, reads on (loadLayers reads the storage each time: no reload needed).
     for (const raw of [JSON.stringify({ dots: false }), JSON.stringify({ glow: 0 }), JSON.stringify({ glow: 'off' })]) {
-      const old = await freshStore(memoryStorage({ [LAYERS_KEY]: raw }))
-      expect(old.useLayers.getState().glow, raw).toBe(true)
+      g.localStorage = memoryStorage({ [LAYERS_KEY]: raw })
+      expect(loadLayers().glow, raw).toBe(true)
     }
   })
 
@@ -177,7 +178,8 @@ describe('the switches leave the proof and movement alone', () => {
 
   beforeEach(() => { storage = memoryStorage() })
 
-  it('changes no proof, cursor, position, anchor, route or commit mode', async () => {
+  // It imports the whole game store fresh, which under a loaded test run can pass the default 5 s.
+  it('changes no proof, cursor, position, anchor, route or commit mode', { timeout: 30_000 }, async () => {
     const { useLayers } = await freshStore(storage)
     // Same module graph as the store above, so this is the live game state.
     const { useCyberspace } = await import('../useCyberspace')

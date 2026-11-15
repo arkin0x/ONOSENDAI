@@ -114,7 +114,7 @@ import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { standing, walkStep, type WalkStep } from './walkStep'
 import { planWalkMove, walkHeading, type Stepper, type WalkHeading } from '../lib/walkSlide'
-import { anyBounce, floorPad, stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
+import { anyBounce, floorPad, lastStopUnseen, stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
 import { DOUBLE_JUMP_SPEED, JUMP_HEIGHT, JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, launchSpeed, loadGravity, reachedHeight, saveGravity } from './walkGravity'
 import { launchHeight } from '../lib/walkBounce'
 import { walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
@@ -483,7 +483,7 @@ function closeOpen(): void {
 /** The WALL chip, one per wall: a held key's repeats do not churn the one toast slot. */
 function wallChip(by: WallItem): void {
   // A wall you cannot see (opacity 0, or bare points) flashes its outline (store/wallHint.ts).
-  noteWallContact(by)
+  noteWallContact(by, performance.now(), lastStopUnseen(by.key))
   const shown = useToast.getState().toast
   if (!(shown?.label === 'WALL' && shown.meta === by.shard.name)) useToast.getState().show({ label: 'WALL', meta: by.shard.name, mark: 'walk', ms: BRIEF_TOAST_MS })
 }

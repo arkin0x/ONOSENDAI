@@ -11038,6 +11038,8 @@ a.feed__act { text-decoration: none; }
   .demo-pulse { animation: none; box-shadow: 0 0 0 3px rgba(0, 229, 255, 0.85); }
 }
 .demo--min { flex-direction: row; align-items: center; padding: 6px 8px; gap: 6px; overflow: hidden; }
+/* At the foot while the top would cover the menu panel a tutorial step points at (tutorial/coachPlace.ts); TutorialCoach sets how far up. */
+.demo.demo--bottom { top: auto; }
 .demo__head { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.08em; }
 .demo__tag { color: var(--bg); background: var(--accent); border-radius: 3px; padding: 1px 6px; font-weight: 700; letter-spacing: 0.12em; font-size: 9px; }
 .demo__chapter { color: var(--accent); text-transform: uppercase; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }

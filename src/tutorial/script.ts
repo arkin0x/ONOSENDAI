@@ -113,12 +113,16 @@ export const BUD: TutorialStep = {
   image: { src: TUTORIAL_BUD_PICTURE, alt: `The ${TUTORIAL_DNA.name} as it starts to bud` },
 }
 
-/** The items you hold: open the menu, ITEMS at the top of it (feedback item 2). */
+/**
+ * The items you hold: the menu opens, ITEMS right under IDENTITY by default
+ * (feedback item 2; owner, 2026-11-15), and the caption panel keeps clear of
+ * it (tutorial/coachPlace.ts).
+ */
 export const INVENTORY: TutorialStep = {
   id: 'inventory',
   title: 'Your items',
   caption: "Whatever you take from chests appears in ITEMS in the menu. That's your stuff.",
-  hint: 'Look in ITEMS at the top of the menu: KEY ITEMS and OTHER LOOT.',
+  hint: 'Look in ITEMS in the menu: KEY ITEMS and OTHER LOOT.',
   explain: 'A shard in ITEMS can be placed in the world, built with, or changed in the workshop.',
   // The ITEMS panel by its slot id (its two buttons, KEY ITEMS and OTHER LOOT): DISCOVERED shares the .panel--loot class.
   scene: { target: 'keep', highlight: '[data-panel-id="items"]' },
@@ -324,7 +328,8 @@ export const BUILD_PLACE: TutorialStep = {
   caption: 'Move a shard from ITEMS to your workshop, then place it in BUILD.',
   hint: 'ITEMS: OTHER LOOT, ACTIONS, MOVE TO WORKSHOP. Then BUILD, OBJECT, pick it, PLACE.',
   explain: 'BUILD puts what you hold into the world where the cursor is. The workshop is where you change or make a shard; it will not interrupt this.',
-  scene: { target: 'keep', highlight: '.hamburger-menu' },
+  // The hamburger while the menu is shut, then ITEMS, which the caption panel keeps clear of (owner, 2026-11-15).
+  scene: { target: 'keep', highlight: `${MENU_SHUT}, [data-panel-id="items"]` },
   effect: 'teach-build',
   branch: true,
 }

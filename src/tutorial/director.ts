@@ -58,7 +58,6 @@ import type { Stage } from './stage'
 import { HOP_FRAME_MS, setTutorialFrame, setTutorialSpin, setTutorialZoom, useTutorialCam, type HopFrame } from '../store/useTutorialCam'
 import { afterHop, holdGlide } from '../lib/hopStage'
 import { setMenuOpen } from '../hooks/useMenuOpen'
-import { usePanelLayout } from '../store/usePanelLayout'
 import { assignToFolder, createFolderPath } from '../store/useShardFolders'
 import type { ShardModel } from 'sno-core/shards'
 
@@ -74,13 +73,6 @@ const COURSE_ZOOM = 12
  * avatar's shoulder, the chest just past it in view (owner, 2026-11-12).
  */
 const SHOULDER_ZOOM = 6
-
-/** Lift the ITEMS panel to the top of the left menu column (feedback items 2 and 11b). */
-function itemsToTop(): void {
-  const { order, move } = usePanelLayout.getState()
-  const first = order.left.find((id) => id !== 'items') ?? null
-  move('items', first, 'left')
-}
 
 interface StageState {
   /** What is staged for the run on screen, once it is. */
@@ -515,8 +507,14 @@ registerTutorialEffect('to-course', () => {
   return () => { for (const off of offs.splice(0)) off(); letGo() }
 })
 
-/** The inventory step opens the menu and lifts ITEMS to the top of it (feedback item 2). */
-registerTutorialEffect('teach-inventory', () => { setMenuOpen(true); itemsToTop() })
+/**
+ * The inventory step opens the menu (feedback item 2). It no longer moves
+ * ITEMS: from 2026-11-11 it lifted ITEMS above IDENTITY and saved that as the
+ * player's order, where the caption panel covered it (owner, 2026-11-15).
+ * ITEMS is right under IDENTITY by default, and the coach scrolls it into view
+ * and keeps out of its way (hud/TutorialCoach.tsx, tutorial/coachPlace.ts).
+ */
+registerTutorialEffect('teach-inventory', () => { setMenuOpen(true) })
 
 /** NEXT on the inventory step closes the menu again, as the hamburger does (feedback 2026-11-12, item 15). */
 registerTutorialEffect('close-menu', () => { setMenuOpen(false) })
@@ -527,8 +525,8 @@ registerTutorialEffect('add-friend', () => {
   try { useCyberspace.getState().addTarget(OWNER_PUBKEY, 'arkinox') } catch (err) { console.warn('[tutorial] add friend failed:', err) }
 })
 
-/** The build step opens the menu with ITEMS at the top, to place a shard from (feedback item 11b). */
-registerTutorialEffect('teach-build', () => { setMenuOpen(true); itemsToTop() })
+/** The build step opens the menu, ITEMS in it to place a shard from (feedback item 11b); the order is the player's. */
+registerTutorialEffect('teach-build', () => { setMenuOpen(true) })
 
 /**
  * The workshop opened, and closed again: the player has been in it (the next

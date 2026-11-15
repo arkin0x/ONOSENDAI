@@ -219,7 +219,7 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
   it('lays the columns out in the saved order, with the brand, the license and the build where they were', () => {
     usePanelLayout.setState({ order: moveBefore(moveBefore(defaultOrder(), 'relays', 'identity', 'left'), 'hidden', null, 'right') })
     const { left, right } = columns()
-    expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'AgentsPanel', 'AvatarsPanel', 'InventoryPanel', 'GamesPanel', 'ShardsPanel', 'DiscoveredPanel', 'TargetsPanel', 'LinksPanel'])
+    expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'InventoryPanel', 'GamesPanel', 'AgentsPanel', 'AvatarsPanel', 'ShardsPanel', 'DiscoveredPanel', 'TargetsPanel', 'LinksPanel'])
     // TUTORIAL is drawn for everyone since the tutorial went on by default (2026-11-13).
     expect(right).toEqual(['ScalePanel', 'PositionPanel', 'ViewAtPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'Controls', 'DerezzPanel', 'TutorialPanel', 'HiddenPanel'])
   })
@@ -247,7 +247,8 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
   it('AGENTS is drawn for everyone, with no agent, in its saved place (arkinox, 2026-10-13)', () => {
     useMyAgentsAnswer.setState({ me: useCyberspace.getState().identity.pubkey, agents: [], status: 'ready' })
     try {
-      expect(columns().left.slice(0, 4)).toEqual(['Brand', 'IdentityPanel', 'AgentsPanel', 'AvatarsPanel'])
+      // IDENTITY, then ITEMS right under it, GAMES under that (owner, 2026-11-15), then AGENTS.
+      expect(columns().left.slice(0, 5)).toEqual(['Brand', 'IdentityPanel', 'InventoryPanel', 'GamesPanel', 'AgentsPanel'])
       usePanelLayout.setState({ order: moveBefore(defaultOrder(), 'agents', null, 'right') })
       expect(columns().left).not.toContain('AgentsPanel')
       expect(columns().right.at(-1)).toBe('AgentsPanel')

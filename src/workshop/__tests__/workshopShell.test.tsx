@@ -58,6 +58,7 @@ const { useBeginner, startingTools, HINT_USES, TUTORIAL_SHARD_PREFIX, useViewTur
 const { useTutorial } = await import('../../store/useTutorial')
 const { notePose } = await import('../benchAxes')
 const { hintFor } = await import('../shell/ToolHint')
+const { DOCK: DOCK_SLOTS } = await import('../shell/Dock')
 const { benchPose } = await import('../benchAxes')
 
 const CSS = readFileSync(join(__dirname, '..', '..', 'styles.css'), 'utf8')
@@ -618,9 +619,9 @@ describe('PAINT, and FACE only making faces (phase 3)', () => {
   const RED: [number, number, number] = [1, 0, 0]
   const colors = (): string[] => useWorkshop.getState().current()!.vertices.map((v) => v.c.join(','))
 
-  it('is the dock\'s fourth tool, key 6, with POINT, FACE, PIECE, ALL and BLEND or EDGE in the strip', async () => {
+  it('is the dock\'s fourth tool, key 4, with POINT, FACE, PIECE, ALL and BLEND or EDGE in the strip', async () => {
     const bench = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
-    expect(bench).toContain("if (e.code === 'Digit6') w.setTool('paint')")
+    expect(bench).toContain("if (e.code === 'Digit4') w.setTool('paint')")
     useWorkshop.getState().setTool('paint')
     const m = await mount(<Workshop />)
     const strip = byClass(m.all(), 'ws__strip')[0]
@@ -818,7 +819,8 @@ describe('the beginner path (phase 4)', () => {
     expect(dockWords(m)).toContain('FACE')
     await m.unmount()
     const bench = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
-    expect(bench).toContain("if ((e.code === 'Digit3' || e.code === 'Digit5') && useBeginner.getState().tools === 'four') useBeginner.getState().setTools('all')")
+    expect(bench).toContain("if ((e.code === 'Digit5' || e.code === 'Digit6') && useBeginner.getState().tools === 'four') useBeginner.getState().setTools('all')")
+    expect(bench).not.toContain("e.code === 'Digit3' || e.code === 'Digit5'")
   })
 
   it('guides a first visit on the real buttons: stamp a block, turn the view, paint a face, then DEPLOY lights up', async () => {
@@ -985,12 +987,32 @@ describe('phone sideways and desktop (phase 5)', () => {
   it('prints each key on its button: the tools, and the held bar\'s', async () => {
     const m = await mount(<Workshop />)
     const keys = (c: string): string[] => byClass(m.all(), c).map((b) => { const k = b.children.find((x): x is Host => typeof x !== 'string' && x.type === 'kbd'); return k ? keyText(k) : '' })
-    expect(keys('ws__dockbtn')).toEqual(['1', '2', '4', '6', '3', '5'])
+    expect(keys('ws__dockbtn')).toEqual(['1', '2', '3', '4', '5', '6'])
     useWorkshop.getState().setTool('select')
     useWorkshop.getState().setSelection([0])
     await new Promise((r) => setTimeout(r, 5))
     expect(keys('ws__heldbtn').filter(Boolean)).toEqual(['Q', 'E', '^C', '^V', 'B', 'DEL'])
     await m.unmount()
+  })
+
+  it('prints the dock\'s keys 1 to 6 left to right, each key the one Bench.tsx binds to that tool, and a beginner\'s four read 1 to 4', async () => {
+    const bench = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
+    const dock = async (): Promise<{ label: string; key: string; title: string }[]> => {
+      const m = await mount(<Workshop />)
+      const out = byClass(m.all(), 'ws__dockbtn').filter((b) => b.children.some((x) => typeof x !== 'string' && x.type === 'kbd')).map((b) => {
+        const k = b.children.find((x): x is Host => typeof x !== 'string' && x.type === 'kbd')!
+        return { label: textOf(b), key: keyText(k), title: String(b.props.title) }
+      })
+      await m.unmount()
+      return out
+    }
+    const all = await dock()
+    expect(all.map((d) => `${d.key} ${d.label}`)).toEqual(['1 LOOK', '2 STAMP', '3 SELECT', '4 PAINT', '5 ADD', '6 FACE'])
+    for (const d of all) expect(d.title).toBe(`${d.label} (${d.key})`)
+    for (const s of DOCK_SLOTS) expect(bench).toContain(`if (e.code === 'Digit${s.key}') w.setTool('${s.tool}')`)
+    useBeginner.setState({ tools: 'four' })
+    useWorkshop.getState().setTool('view')
+    expect((await dock()).map((d) => `${d.key} ${d.label}`)).toEqual(['1 LOOK', '2 STAMP', '3 SELECT', '4 PAINT'])
   })
 
   it('keeps the guide\'s step when Esc puts it away, and makes no new shard on the way back', async () => {

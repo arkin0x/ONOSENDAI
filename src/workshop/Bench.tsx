@@ -824,14 +824,15 @@ function Keys(): null {
       if (e.code === 'KeyC') { w.selectConnected(); return }
       // B, the held bar's COLOR: the color in hand onto what is held (points, or a face's corners).
       if (e.code === 'KeyB') { if (w.selection.length) w.colorSelected(w.color); return }
+      // The keys run 1 to 6 along the dock, left to right (Dock.tsx DOCK).
       if (e.code === 'Digit1') w.setTool('view')
       if (e.code === 'Digit2') w.setTool('stamp')
+      if (e.code === 'Digit3') w.setTool('select')
+      if (e.code === 'Digit4') w.setTool('paint')
       // ADD and FACE by key bring them onto a beginner's dock (phase 4).
-      if ((e.code === 'Digit3' || e.code === 'Digit5') && useBeginner.getState().tools === 'four') useBeginner.getState().setTools('all')
-      if (e.code === 'Digit3') w.setTool('add')
-      if (e.code === 'Digit4') w.setTool('select')
-      if (e.code === 'Digit5') w.setTool('face')
-      if (e.code === 'Digit6') w.setTool('paint')
+      if ((e.code === 'Digit5' || e.code === 'Digit6') && useBeginner.getState().tools === 'four') useBeginner.getState().setTools('all')
+      if (e.code === 'Digit5') w.setTool('add')
+      if (e.code === 'Digit6') w.setTool('face')
       // Q and E turn the selection a quarter turn while SELECT holds one; Q turns the stamp otherwise.
       if (e.code === 'KeyQ') { if ((w.tool === 'select' || w.tool === 'view') && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else w.turnStamp() }
       if (e.code === 'KeyE') { if ((w.tool === 'select' || w.tool === 'view') && (w.selection.length || w.partSel.length)) w.rotateSelected(1) }

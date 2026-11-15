@@ -160,7 +160,7 @@ export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, s
           the object at true size before you place it. Under SHARD, PUBLISH puts the shard on your relays as a
           public object: the Shard Feed lists it, anyone can place it, and PUBLISH AGAIN replaces it under the same
           address; RETRACT asks the relays to drop it. That is separate from hiding, which seals a copy at a place.
-          Keys: 1 LOOK, 2 STAMP, 3 ADD, 4 SELECT, 5 FACE, 6 PAINT, Q turns a stamp, WASD and
+          Keys: 1 LOOK, 2 STAMP, 3 SELECT, 4 PAINT, 5 ADD, 6 FACE, Q turns a stamp, WASD and
           RF or the arrows nudge the selection in screen directions, C selects what faces join, Del
           deletes, Enter fills, [ ] change the level, Ctrl+Z undoes, Esc closes a sheet, then
           clears, then closes the workshop.

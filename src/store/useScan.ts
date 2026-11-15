@@ -46,8 +46,10 @@ import { useBuilder } from './useBuilder'
 import { useRegion } from './useRegion'
 import { useSecrets } from './useSecrets'
 import { useShards } from './useShards'
-import { localKeyCeiling, localKeySeconds, needsAsk, regionKeyQuote } from '../lib/deployPlan'
-import { useCalibration } from '../lib/calibration'
+import { localKeyCeiling, needsAsk, regionKeyQuote } from '../lib/deployPlan'
+import { HOP_AXIS_BUDGET_MS, projectCantorMs, useCalibration } from '../lib/calibration'
+import { ratioOf, useExperience } from '../lib/experience'
+import type { HosakaProvider } from '../lib/hosaka'
 import { alignedBase } from '../lib/secrets/base'
 import { clampScanHeight, computeCube, heldCube, scanRange, SCAN_MIN_HEIGHT, type CubeRun, type ScanRange, type WorkerFactory } from '../lib/scanCube'
 import type { Position } from '../lib/space'
@@ -82,6 +84,8 @@ export interface ScanShown {
   route: 'local' | 'cloud' | 'held'
   /** The price on the button, for a HOSAKA height. */
   sats?: number | null
+  /** Arm CONFIRM first whatever the Cloud compute mode says: Space never pays on one press. */
+  confirmFirst?: boolean
 }
 
 /** A HOSAKA scan armed by a first press, waiting for the second (the Cloud compute mode asks). */
@@ -131,6 +135,69 @@ export function scanPrice(height: number, s: Pick<CyberspaceState, 'cloud'> = us
   return regionKeyQuote(height, s.cloud.provider)?.sats ?? null
 }
 
+/** What a scan's time is estimated from: this device's benchmark, and HOSAKA's ladder. */
+export interface ScanClock {
+  /** The benchmark's milliseconds per Cantor axis tree, by height; absent until it has run. */
+  cantorMsByHeight?: Record<number, number>
+  /** This device's hop ceiling, the device max (localKeyCeiling reads it). */
+  hopHeight: number
+  provider: Pick<HosakaProvider, 'pricing'> | null | undefined
+  /** How HOSAKA's estimates have compared with its clock here (lib/experience.ts). */
+  experience: number
+}
+
+/** What the stores know now, for scanSeconds. */
+export function currentScanClock(): ScanClock {
+  const cal = useCalibration.getState()
+  return {
+    cantorMsByHeight: cal.cantorMsByHeight,
+    hopHeight: cal.hopHeight,
+    provider: useCyberspace.getState().cloud.provider,
+    experience: ratioOf(useExperience.getState().samples),
+  }
+}
+
+/**
+ * A scan's key in axis trees' worth of work. The key is three Cantor axis
+ * trees of 2^height leaves, then two pairings of their roots, then two hashes
+ * (cyberspace-core deriveRegionN and deriveRegionKeys, run by
+ * lib/scanCube.ts computeCube). The roots are huge numbers (a Cantor pair
+ * doubles its inputs' size), so the two pairings are not free: timed against
+ * the benchmark's one axis (2026-11-15, node and the browser), the whole key
+ * took 3.5 to 5 axes, more at the low heights; 4.5 sits in that, and keeps a
+ * scan from often outrunning its estimate and its bar from waiting at 99.
+ * The pairings grow with the roots, as the trees do, so it stays a multiple.
+ */
+export const SCAN_KEY_AXES = 4.5
+
+/**
+ * How long a scan at `height` takes, in seconds; null when nobody can say.
+ *
+ * On this device: SCAN_KEY_AXES times the benchmark's time for one axis tree
+ * at that height (lib/calibration.ts, the same benchmark that sets the device
+ * max), measured, or projected from the measurements at their fitted growth
+ * per height, never under 2.5 times a height (projectCantorMs: twice the
+ * leaves, and wider numbers). Before the benchmark has run, the device max
+ * stands for what it is chosen by: one axis at the hop budget
+ * (HOP_AXIS_BUDGET_MS), the heights under it projected down from there; an
+ * upper bound, not a measurement (`measured` false).
+ *
+ * HOSAKA: its region key ladder's estimate for the height, corrected by what
+ * its jobs have taken here (lib/deployPlan.ts regionKeyQuote). A cube already
+ * held is only a question to the relays: no computing at all, 0.
+ */
+export function scanSeconds(height: number, route: 'local' | 'cloud' | 'held', clock: ScanClock = currentScanClock()): number | null {
+  if (route === 'held') return 0
+  if (route === 'cloud') return regionKeyQuote(height, clock.provider, clock.experience)?.seconds ?? null
+  const ms = projectCantorMs(benchmarked(clock) ? clock.cantorMsByHeight! : { [clock.hopHeight]: HOP_AXIS_BUDGET_MS }, height)
+  return Number.isFinite(ms) ? (SCAN_KEY_AXES * ms) / 1000 : null
+}
+
+/** This device's benchmark has landed. */
+function benchmarked(clock: Pick<ScanClock, 'cantorMsByHeight'>): boolean {
+  return clock.cantorMsByHeight !== undefined && Object.keys(clock.cantorMsByHeight).length > 0
+}
+
 /**
  * The cube the purple box draws (scene/ScanRegionBox.tsx): only in SCAN; the
  * cube being scanned while a scan in this plane runs, so what is being looked
@@ -143,6 +210,29 @@ export function scanCubeShown(
   if (!scan.active || !cs.viewing || cs.building) return null
   if (scan.job && scan.job.plane === cs.anchorPlane) return { at: scan.job.at, height: scan.job.height }
   return { at: cs.cursor, height: scan.height }
+}
+
+/**
+ * Space in SCAN (hooks/useKeyboard.ts): what a tap of the SCAN button does,
+ * for what the button shows now. On a HOSAKA height it always takes two
+ * presses (arkinox, 2026-11-15): the first arms CONFIRM with the price, the
+ * second pays, whatever the Cloud compute mode would let a tap do, so one
+ * press never pays. Held down it does nothing more; nothing while a scan
+ * runs, nor where the button is disabled (no price yet, a purchase under way).
+ */
+export function scanSpace(repeat: boolean): void {
+  if (repeat) return
+  const scan = useScan.getState()
+  if (!scan.active || scan.job) return
+  const cs = useCyberspace.getState()
+  const range = currentScanRange()
+  const height = clampScanHeight(scan.height, range)
+  const held = heldCube(useSecrets.getState().keys, cs.cursor, cs.anchorPlane, height) !== null
+  const route = held ? 'held' : scanRoute(height, range)
+  if (route !== 'cloud') { void scan.start({ route }); return }
+  const sats = scanPrice(height)
+  if (sats === null || useSecrets.getState().buying) return
+  void scan.start({ route, sats, confirmFirst: true })
 }
 
 /** A HOSAKA scan's purchase is under way: RECALL and X leave it be. */
@@ -253,14 +343,17 @@ export const useScan = create<ScanState>((set, get) => ({
       const prefs = useCyberspace.getState().cloudPrefs
       const cube = cubeKey(at, plane, height)
       const armed = get().confirm
-      if (needsAsk(prefs.mode, price, prefs.autoMaxSats) && !(armed && armed.cube === cube && armed.height === height && armed.sats === price)) {
+      if ((needsAsk(prefs.mode, price, prefs.autoMaxSats) || shown?.confirmFirst) && !(armed && armed.cube === cube && armed.height === height && armed.sats === price)) {
         set({ confirm: { height, sats: price, cube }, result: null })
         return
       }
     }
     set({ confirm: null })
     const id = ++serial
-    const estSeconds = route === 'local' ? localKeySeconds(height, useCalibration.getState().cantorMsByHeight) : route === 'cloud' ? regionKeyQuote(height, useCyberspace.getState().cloud.provider)?.seconds ?? null : null
+    // The same estimate the tag under the height shows, so the bar and the tag
+    // agree; no bar for a local scan before the benchmark (only a guess then).
+    const clock = currentScanClock()
+    const estSeconds = route === 'held' || (route === 'local' && !benchmarked(clock)) ? null : scanSeconds(height, route, clock)
     set({ result: null, job: { at, plane, height, route, startedAt: Date.now(), estSeconds, asking: route === 'held' } })
 
     if (held) {

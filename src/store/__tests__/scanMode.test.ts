@@ -47,6 +47,17 @@ vi.mock('../../lib/relay', () => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
+// A server render reads a zustand store's initial state; here each hook reads
+// the live state, as a mounted component does (as hud/__tests__/walkPad.test.tsx).
+vi.mock('zustand', async (importOriginal) => {
+  const real = await importOriginal<typeof import('zustand')>()
+  const live = (init: Parameters<typeof real.create>[0]) => {
+    const hook = real.create(init)
+    return Object.assign((sel: (s: unknown) => unknown = (x) => x) => sel(hook.getState()), hook)
+  }
+  return { ...real, create: (init?: Parameters<typeof real.create>[0]) => (init === undefined ? live : live(init)) }
+})
+
 import { useCalibration } from '../../lib/calibration'
 import type { HosakaLimits, HosakaProvider } from '../../lib/hosaka'
 import { regionKeyAt } from '../../lib/shardCrypto'
@@ -56,13 +67,17 @@ import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { useSecrets, type HeldKey } from '../useSecrets'
 import { SCAN_MAX_HEIGHT, useShards } from '../useShards'
-import { currentScanRange, scanCubeShown, scanRoute, setScanWorkerFactory, useScan } from '../useScan'
+import { currentScanRange, SCAN_KEY_AXES, scanCubeShown, scanPrice, scanRoute, scanSeconds, scanSpace, setScanWorkerFactory, useScan, type ScanClock } from '../useScan'
 import { currentPadMode, cycleMode, recall } from '../padMode'
 import { placeSpawn } from '../fixtures/placeSpawn'
-import { scanLine, scanPercent, scanTag } from '../../hud/ScanControls'
+import { ScanControls, scanLine, scanOrbSats, scanPercent, scanTag, scanTagLines, scanTime } from '../../hud/ScanControls'
+import { createElement } from 'react'
+import { renderToString } from 'react-dom/server'
 import { drawnRegion } from '../../scene/DeployRegionBox'
 
 const S = () => useCyberspace.getState()
+/** Lets the promises a press started settle. */
+const flush = () => new Promise((r) => setTimeout(r, 0))
 const SC = () => useScan.getState()
 
 const LIMITS: HosakaLimits = {
@@ -99,7 +114,7 @@ beforeEach(async () => {
   await placeSpawn()
   S().cancel()
   useCyberspace.setState({ scaleExp: 0 })
-  useCalibration.setState({ hopHeight: 16 })
+  useCalibration.setState({ hopHeight: 16, cantorMsByHeight: undefined })
   useSecrets.setState({ keys: {}, buy, buying: null, buyError: null })
   useShards.setState({ rescan, pending: null, placedLast: null })
   useScan.setState({ height: SCAN_MIN_HEIGHT, result: null, job: null, confirm: null })
@@ -168,17 +183,152 @@ describe('the height', () => {
     expect(clampScanHeight(31, scanRange(16, true, 30))).toBe(30)
   })
 
-  it('says who computes it, and for what', () => {
+  it('says UNKNOWN and the time here, COMPLETE when held, HOSAKA above the device max: never FREE or HELD', () => {
     const local = scanRange(16, false, null)
-    expect(scanTag(13, local, false, null, true)).toBe('ON DEVICE · FREE')
-    expect(scanTag(16, local, false, null, true)).toBe('DEVICE MAX · HOSAKA OFF')
-    expect(scanTag(16, local, false, null, false)).toBe('DEVICE MAX')
+    expect(scanTagLines(13, local, false, 2)).toEqual(['UNKNOWN', 'ABOUT 2 SEC'])
+    expect(scanTag(16, local, false, 40)).toBe('UNKNOWN · ABOUT 40 SEC')
     const cloud = scanRange(16, true, 30)
-    expect(scanTag(16, cloud, false, 21, false)).toBe('ON DEVICE · FREE')
-    expect(scanTag(17, cloud, false, 21, false)).toBe('HOSAKA · 21 SATS')
-    expect(scanTag(17, cloud, false, null, false)).toBe('HOSAKA · NO PRICE YET')
-    expect(scanTag(17, cloud, true, 21, false)).toBe('HELD · FREE')
+    expect(scanTag(16, cloud, false, 7)).toBe('UNKNOWN · ABOUT 7 SEC')
+    // HOSAKA's heights: just HOSAKA, whatever the time; the price is the button's.
+    expect(scanTagLines(17, cloud, false, 60)).toEqual(['HOSAKA'])
+    expect(scanTagLines(17, cloud, false, null)).toEqual(['HOSAKA'])
+    // Already held, at any height: COMPLETE (SCAN only asks the relays again).
+    expect(scanTagLines(13, cloud, true, 0)).toEqual(['COMPLETE'])
+    expect(scanTagLines(17, cloud, true, 0)).toEqual(['COMPLETE'])
+    // None of the old words, anywhere.
+    for (const h of [12, 16, 17, 30]) for (const held of [false, true]) for (const r of [local, cloud]) {
+      expect(scanTag(h, r, held, 5)).not.toMatch(/FREE|HELD|INSTANT|ON DEVICE/)
+    }
   })
+
+  it('puts a HOSAKA height\'s price on the SCAN button, always, and nothing on a height computed here', () => {
+    expect(scanOrbSats(true, false, 32)).toBe('32 SATS')
+    expect(scanOrbSats(true, false, null)).toBe('NO PRICE')
+    expect(scanOrbSats(false, false, 32)).toBeNull()
+    expect(scanOrbSats(true, true, 32)).toBeNull()
+  })
+
+  it('renders the keys under their buttons (. up, , down, SPACE under SCAN, HOSAKA\'s range too) and the status words', () => {
+    const html = (): string => renderToString(createElement(ScanControls))
+    SC().enter()
+    SC().setHeight(13)
+    let out = html()
+    expect(out).toMatch(/scanorbs__hint[^"]*"[^>]*>\.<\/span>/)
+    expect(out).toMatch(/scanorbs__hint[^"]*"[^>]*>,<\/span>/)
+    expect(out).toMatch(/class="flyorb__key"[^>]*>SPACE<\/span>/)
+    expect(out).toContain('>UNKNOWN<')
+    // A HOSAKA height: HOSAKA under the height, the price on the button, SPACE still there.
+    cloudOn()
+    SC().setHeight(22)
+    out = html()
+    expect(out).toContain('>HOSAKA<')
+    expect(out).toMatch(/scanorb__sats[^>]*>21 SATS</)
+    expect(out).toMatch(/class="flyorb__key"[^>]*>SPACE<\/span>/)
+    // At the top: why up stops, where the . key was.
+    SC().setHeight(30)
+    expect(html()).toContain('>HOSAKA MAX<')
+    for (const h of [12, 16, 22, 30]) {
+      SC().setHeight(h)
+      expect(html()).not.toMatch(/\b(FREE|HELD|INSTANT)\b/)
+    }
+  })
+
+  it('keeps the old words out of SCAN\'s code, and its hints white with the labels\' edge', () => {
+    const src = readFileSync(join(process.cwd(), 'src/hud/ScanControls.tsx'), 'utf8')
+    // The code, its comments left out (they quote the owner's words about the old ones).
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+    expect(code).not.toMatch(/\b(FREE|HELD|INSTANT)\b/)
+    const css = readFileSync(join(process.cwd(), 'src/styles.css'), 'utf8')
+    const rule = /\.scanorbs \.flyorb__key \{([^}]*)\}/.exec(css)?.[1] ?? ''
+    expect(rule).toMatch(/color:\s*#fff/)
+    expect(rule).toMatch(/text-shadow:\s*var\(--scanorbs-edge\)/)
+  })
+})
+
+describe('the time estimate', () => {
+  /** A benchmark: 10 ms an axis at 12, 40 at 14 (twice per height), so 2.5 a height past it. */
+  const BENCH = { 12: 10, 14: 40 }
+  const clock = (over: Partial<ScanClock> = {}): ScanClock => ({ cantorMsByHeight: BENCH, hopHeight: 16, provider: PROVIDER, experience: 1, ...over })
+
+  it('rounds the way a person says it', () => {
+    expect(scanTime(0.03)).toBe('UNDER 1 SEC')
+    expect(scanTime(1.6)).toBe('ABOUT 2 SEC')
+    expect(scanTime(9.4)).toBe('ABOUT 9 SEC')
+    expect(scanTime(12)).toBe('ABOUT 10 SEC')
+    expect(scanTime(41)).toBe('ABOUT 40 SEC')
+    expect(scanTime(58)).toBe('ABOUT 1 MIN')
+    expect(scanTime(88)).toBe('ABOUT 1 MIN')
+    expect(scanTime(6 * 60 + 10)).toBe('ABOUT 6 MIN')
+    expect(scanTime(14 * 60)).toBe('ABOUT 15 MIN')
+    expect(scanTime(58 * 60)).toBe('ABOUT 1 HR')
+    expect(scanTime(1.9 * 3600)).toBe('ABOUT 2 HR')
+    expect(scanTime(3 * 3600)).toBe('ABOUT 3 HR')
+    expect(scanTime(17 * 3600)).toBe('ABOUT 15 HR')
+    expect(scanTime(30 * 3600)).toBe('ABOUT 1 DAY')
+    expect(scanTime(80 * 3600)).toBe('ABOUT 3 DAYS')
+    expect(scanTime(1e30)).toBe('OVER 99 DAYS')
+    expect(scanTime(NaN)).toBe('TIME UNKNOWN')
+  })
+
+  it('is the key\'s axis trees\' worth at the benchmark\'s time for the height, and grows with it', () => {
+    expect(SCAN_KEY_AXES).toBe(4.5)
+    // Measured heights as measured.
+    expect(scanSeconds(12, 'local', clock())).toBeCloseTo(0.045)
+    expect(scanSeconds(14, 'local', clock())).toBeCloseTo(0.18)
+    // Above the top measurement: the fitted growth, floored at 2.5 a height.
+    expect(scanSeconds(15, 'local', clock())).toBeCloseTo(0.45)
+    expect(scanSeconds(18, 'local', clock())).toBeCloseTo(0.18 * 2.5 ** 4)
+    // Never shrinks as the height goes up.
+    let last = 0
+    for (let h = 12; h <= 20; h++) {
+      const s = scanSeconds(h, 'local', clock())!
+      expect(s).toBeGreaterThan(last)
+      last = s
+    }
+    // A bigger benchmark, a bigger estimate at the same height (the formatting of minutes;
+    // the app's own device max keeps a local scan to seconds, since one axis fits 5 s there).
+    expect(scanTag(20, scanRange(20, false, null), false, scanSeconds(20, 'local', clock({ cantorMsByHeight: { 12: 400, 14: 2500 } })))).toBe('UNKNOWN · ABOUT 45 MIN')
+  })
+
+  it('before the benchmark has run, takes the device max to be one axis at the hop budget', () => {
+    const unmeasured = clock({ cantorMsByHeight: undefined, hopHeight: 17 })
+    expect(scanSeconds(17, 'local', unmeasured)).toBeCloseTo(22.5)
+    expect(scanSeconds(16, 'local', unmeasured)).toBeCloseTo(9)
+    expect(scanSeconds(17, 'local', clock({ cantorMsByHeight: {}, hopHeight: 17 }))).toBeCloseTo(22.5)
+  })
+
+  it('is HOSAKA\'s own estimate above the device max, corrected by its record here (the SCAN button\'s tooltip)', () => {
+    expect(scanSeconds(20, 'cloud', clock())).toBe(60)
+    expect(scanSeconds(28, 'cloud', clock())).toBe(600)
+    expect(scanSeconds(20, 'cloud', clock({ experience: 2 }))).toBe(120)
+    expect(scanSeconds(20, 'cloud', clock({ provider: null }))).toBeNull()
+    cloudOn()
+    expect(scanOrbSats(true, false, scanPrice(28))).toBe('900 SATS')
+  })
+
+  it('is nothing for a cube already held, which says COMPLETE', () => {
+    expect(scanSeconds(18, 'held', clock())).toBe(0)
+    expect(scanTag(18, scanRange(16, true, 30), true, scanSeconds(18, 'held', clock()))).toBe('COMPLETE')
+  })
+
+  it('is what a local scan\'s progress is measured against', async () => {
+    useCalibration.setState({ cantorMsByHeight: BENCH })
+    SC().enter()
+    SC().setHeight(14)
+    const started = SC().start({ route: 'local' })
+    expect(SC().job?.estSeconds).toBeCloseTo(0.18)
+    await started
+  })
+
+  it('gives a local scan no progress bar before the benchmark has run: the time is only a guess then', async () => {
+    SC().enter()
+    SC().setHeight(13)
+    const started = SC().start({ route: 'local' })
+    expect(SC().job?.estSeconds).toBeNull()
+    expect(scanPercent(SC().job, Date.now() + 1000)).toBeNull()
+    await started
+  })
+
 })
 
 describe('a local scan', () => {
@@ -201,6 +351,18 @@ describe('a local scan', () => {
     expect(SC().job).toBeNull()
     expect(SC().result).toEqual({ kind: 'found', height: 12, count: 2 })
     expect(buy).not.toHaveBeenCalled()
+  })
+
+  it('Space on a height computed here, or a cube held, scans at once, as a tap does', async () => {
+    SC().enter()
+    scanSpace(false)
+    expect(SC().job?.route).toBe('local')
+    await vi.waitFor(() => expect(SC().job).toBeNull())
+    expect(rescan).toHaveBeenCalledTimes(1)
+    scanSpace(false)
+    expect(SC().job?.route).toBe('held')
+    await vi.waitFor(() => expect(SC().job).toBeNull())
+    expect(rescan).toHaveBeenCalledTimes(2)
   })
 
   it('asks again with a cube already held, and computes nothing', async () => {
@@ -302,6 +464,60 @@ describe('above the device\'s max', () => {
       expect(SC().confirm).toBeNull()
       SC().exit()
     }
+  })
+
+  it('Space on a HOSAKA height takes two presses in every mode: CONFIRM with the price, then pay; held down, never', async () => {
+    for (const [mode, cap] of [['auto', 100], ['ask', 100], ['auto', 0]] as const) {
+      buy.mockClear()
+      cloudOn(true, mode, cap)
+      SC().enter()
+      SC().setHeight(22)
+      scanSpace(false)
+      await flush()
+      expect(buy, `${mode} ${cap}`).not.toHaveBeenCalled()
+      expect(SC().confirm).toMatchObject({ height: 22, sats: 21 })
+      // Held down: the repeats do nothing, never the second press.
+      scanSpace(true)
+      scanSpace(true)
+      await flush()
+      expect(buy, `${mode} ${cap}`).not.toHaveBeenCalled()
+      scanSpace(false)
+      await flush()
+      expect(buy, `${mode} ${cap}`).toHaveBeenCalledTimes(1)
+      await vi.waitFor(() => expect(SC().job).toBeNull())
+      SC().exit()
+    }
+  })
+
+  it('Space never pays a price that changed after CONFIRM, nor with no price or over another purchase', async () => {
+    cloudOn(true, 'auto', 100)
+    SC().enter()
+    SC().setHeight(22)
+    scanSpace(false)
+    await flush()
+    expect(SC().confirm).toMatchObject({ sats: 21 })
+    // The price moves under the armed CONFIRM: the next press arms again at the new price.
+    useCyberspace.setState({ cloud: { ...S().cloud, provider: { ...PROVIDER, pricing: { hop: [], region_key: [{ max_height: 24, sats: 34, est_seconds: 60, est_time: '' }] } } as HosakaProvider } })
+    scanSpace(false)
+    await flush()
+    expect(buy).not.toHaveBeenCalled()
+    expect(SC().confirm).toMatchObject({ sats: 34 })
+    SC().cancel()
+    // No price: as the disabled button, nothing.
+    useCyberspace.setState({ cloud: { ...S().cloud, provider: null } })
+    scanSpace(false)
+    scanSpace(false)
+    await flush()
+    expect(SC().confirm).toBeNull()
+    expect(buy).not.toHaveBeenCalled()
+    // Another purchase under way: nothing.
+    cloudOn(true, 'auto', 100)
+    useSecrets.setState({ buying: { height: 20, status: 'computing', costMsats: 0, estSeconds: null, startedAt: 0 } })
+    scanSpace(false)
+    scanSpace(false)
+    await flush()
+    expect(SC().confirm).toBeNull()
+    expect(buy).not.toHaveBeenCalled()
   })
 
   it('a move, a change of height or CANCEL disarms a CONFIRM, and the next press asks again', async () => {

@@ -14,7 +14,7 @@ import { ModalClose } from '../../hud/ui/ModalClose'
 const SWIPE_CLOSE_PX = 56
 
 interface SheetProps {
-  /** The region's accessible name: Menu, Shard, Grid, Avatar, Motion. */
+  /** The region's accessible name: Menu, Shard, Motion, Avatar, Grid. */
   name: string
   /** The words in the header. */
   title: string

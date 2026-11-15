@@ -11772,9 +11772,18 @@ html.tv-broadcast body { overflow: hidden; }
 .items-modal .held__views { align-items: center; }
 .held__tabs { display: flex; gap: 6px; flex-wrap: wrap; }
 /* FEED: who listed it, their picture and name one tap to their profile; NOT FOUND in the warning colour. */
+/* "listed by" and the lister side by side, the lister's name cut first, so a narrow card (OPENS WITH in a door's card) never hides it behind an ellipsis. */
+.items-feed__src { display: flex; align-items: center; gap: 0.6ch; min-width: 0; }
+.items-feed__src > span:first-child { flex: none; }
 .items-feed__who { max-width: 100%; min-width: 0; display: inline-flex; align-items: center; gap: 3px; padding: 0; font: inherit; color: inherit; background: none; border: 0; cursor: pointer; vertical-align: middle; }
 .items-feed__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .items-feed__unfound { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.items-feed__held { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+/* OPENS WITH: the listed key item a locked door or chest is sealed to, its row as the FEED draws it. */
+.lockkey { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-top: 4px; }
+.lockkey__label { margin-bottom: 0; }
+.lockkey__list { max-height: none; overflow: visible; flex: 0 0 auto; }
+.lockkey__list > .held__row { padding: 4px 0; }
 
 /* A picture's frame with its top-left and bottom-right corners cut at 45
    degrees (ui/Chamfer.tsx; owner, 2026-11-15: "the pictures should maybe

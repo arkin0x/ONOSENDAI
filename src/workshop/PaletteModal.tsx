@@ -16,13 +16,14 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Download, Pipette, Plus, Trash2, Upload, X } from 'lucide-react'
+import { Check, Download, Pipette, Plus, Trash2, Upload } from 'lucide-react'
 import { BUILT_IN, BUILT_IN_NAME, explainPasteProblem, hexAt, parsePaletteText, type Palette } from 'sno-core/snoPalette'
 import { rgbToHex } from 'sno-core/shards'
 import { paletteNevent, usePaletteNet } from '../store/usePaletteNet'
 import { useWorkshop, type NamedPalette } from '../store/useWorkshop'
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { useEscape } from '../hooks/useEscape'
+import { ModalClose } from '../hud/ui/ModalClose'
 
 /** How the built-in is laid out, so the sheet can be read rather than scanned. */
 const BANDS = [
@@ -307,7 +308,7 @@ export function PaletteModal({ onClose, foldAsk = 0 }: { onClose: () => void; fo
           {/* The dropper, in the palette's header (workshop redesign, phase 2):
               the held point's or face's color into hand, as MORE's TAKE COLOR. */}
           <button className="chip ws__icon" disabled={!canSample && !painting} onClick={() => { if (canSample) w().sampleColor(); else { w().setPaintTake(true); fold() } }} title={canSample ? 'Take the color of the point or face you hold' : 'The next tap takes the color of the point or face it meets'} aria-label="Take the selected color"><Pipette size={16} strokeWidth={2.25} /></button>
-          <button className="chip ws__icon" onClick={fold} aria-label="Close"><X size={16} strokeWidth={2.25} /></button>
+          <ModalClose onClose={fold} />
         </span>
       </div>
 

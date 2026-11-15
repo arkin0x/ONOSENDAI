@@ -92,7 +92,7 @@ describe('a seed row', () => {
     const html = row(bigItem, planter)
     expect(html).toContain('fiddlehead')
     expect(html).toContain('Dataspace, height 6 · day 12 of 41')
-    expect(html).toMatch(/<span>you<\/span>/)
+    expect(html).toMatch(/<span class="nearby__who">you<\/span>/)
     expect(html).toContain('away')
     expect(html).toContain('VIEW')
   })

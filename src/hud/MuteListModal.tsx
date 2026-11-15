@@ -19,6 +19,7 @@ import { useMutes, type EditResult } from '../store/useMutes'
 import { useToast } from '../store/useToast'
 import { mutedBy, type Tag } from '../lib/muteList'
 import { shortHex } from '../lib/time'
+import { ModalClose } from './ui/ModalClose'
 
 /** The pubkeys and item ids one half names, in the order written. */
 function entries(tags: readonly Tag[], self: string): { pubkeys: string[]; items: string[] } {
@@ -54,7 +55,7 @@ export function MuteListModal({ onClose }: { onClose: () => void }): JSX.Element
         <header className="panel__head secrets__head">
           <h2>Mute list</h2>
           <span className="tag" title="Kind 10000, the list every nostr client reads">{loaded ? `${people.length} BLOCKED` : 'READING…'}</span>
-          <button className="targets__remove secrets__close" onClick={onClose} aria-label="Close" title="Close">✕</button>
+          <ModalClose onClose={onClose} />
         </header>
 
         {locked && (

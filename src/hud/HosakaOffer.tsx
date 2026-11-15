@@ -18,6 +18,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useOffer, useOfferView } from '../store/useOffer'
 import { CheckPaymentButton } from './InvoiceModal'
 import { useEscape } from '../hooks/useEscape'
+import { ModalClose } from './ui/ModalClose'
 
 const MODES: CloudMode[] = ['auto', 'ask', 'off']
 
@@ -77,7 +78,11 @@ export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Eleme
         {/* ™ on the name's first appearance here, never on every mention
             (arkinox, 2026-10-21: "add the TM to hosaka as well"). Seen, not
             read aloud: the heading's name stays HOSAKA. */}
-        <h2 className="offer__title">HOSAKA<sup className="offer__tm" aria-hidden="true">{'™'}</sup></h2>
+        <div className="offer__head">
+          <h2 className="offer__title">HOSAKA<sup className="offer__tm" aria-hidden="true">{'™'}</sup></h2>
+          {/* The ✕ is NOT NOW, as Escape is, and only while NOT NOW is offered: never with an estimate, a quote or a payment under way. */}
+          {!paying && <ModalClose onClose={() => dismiss(cursorKey)} label="Not now" disabled={!settled} />}
+        </div>
         <p className="offer__tagline">High-availability Offload Service for Advanced Kinematic Actions</p>
         <p className="offer__lead">
           Your machine does not have the capacity to calculate this action. HOSAKA can help.

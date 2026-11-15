@@ -1842,19 +1842,6 @@ select.avatars__input option:checked {
   font-weight: 700;
 }
 
-.secret__close {
-  margin-left: auto;
-  font-family: inherit;
-  font-size: 12px;
-  width: 26px;
-  height: 26px;
-  border-radius: 4px;
-  color: var(--dim);
-  background: transparent;
-  border: 1px solid rgba(200, 245, 255, 0.2);
-  cursor: pointer;
-}
-
 /* A long message scrolls in place instead of growing the card past every
    control that could close it. */
 .secret__message {
@@ -3493,7 +3480,7 @@ select.avatars__input option:checked {
    later in the sheet at equal specificity, so it won, and a 34px box with 12px
    of side padding left the icon about 10px of room (arkinox, 2026-09-15).
    38px square with a 16px mark, which is the touchpad key, so every round icon
-   button in the app is one size. The palette's close and the TV's off wear it. */
+   button in the app is one size. The TV's off wears it; the palette's close is the shared ✕ (ui/ModalClose). */
 .chip.ws__icon {
   width: 38px;
   height: 38px;
@@ -3957,7 +3944,7 @@ select.avatars__input option:checked {
 .ws__handle--x { color: #ff6b6b; }
 .ws__handle--y { color: #5cff7a; }
 .ws__handle--z { color: #6aa3ff; }
-.palettes__headkeys { display: inline-flex; gap: 6px; flex: none; }
+.palettes__headkeys { display: inline-flex; align-items: center; gap: 10px; flex: none; }
 /* The beginner path (workshop redesign, phase 4). */
 /* MORE TOOLS: a dashed slot after the four, as wide as two of them. */
 .ws__dockbtn.ws__dockbtn--more { flex: 1.6 1 0; color: var(--dim); border: 1px dashed var(--border); }
@@ -4168,21 +4155,6 @@ select.avatars__input option:checked {
 }
 .ws__sheet-title { margin: 0; font-size: 11px; letter-spacing: 0.18em; color: var(--accent); font-weight: 700; }
 .ws__sheet-sub { flex: 1; min-width: 0; font-size: 10px; letter-spacing: 0.1em; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; }
-.ws__sheet-x {
-  flex: none;
-  margin-left: auto;
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  color: var(--fg);
-  background: none;
-  border: 1px solid var(--border);
-  cursor: pointer;
-}
 .ws__sheet-body {
   flex: 1;
   min-height: 0;
@@ -7833,8 +7805,6 @@ select.avatars__input option:checked {
   gap: 8px;
 }
 
-.secrets__close { margin-left: auto; }
-
 .secrets__gap { flex: 1 1 auto; }
 
 .secrets__forget-all {
@@ -8692,7 +8662,7 @@ select.avatars__input option:checked {
 .nearby__lock--closed { color: var(--fg); }
 /* A fingertip on a phone; the buttons keep their look. */
 @media (max-width: 640px) {
-  .nearby__row .chest__act, .nearby__row .nearby__view, .secrets__box .secrets__close { min-height: 44px; min-width: 44px; }
+  .nearby__row .chest__act, .nearby__row .nearby__view { min-height: 44px; min-width: 44px; }
 }
 /* A key item's buttons in ITEMS are the OTHER LOOT rows' small ones, at every
  * width (arkinox, 2026-11-09: "the buttons on the Items are way too large.
@@ -9877,21 +9847,12 @@ select.avatars__input option:checked {
 }
 button.feed__pick { cursor: pointer; }
 button.feed__pick:hover .feed__name { color: var(--accent); }
-.feed__thumb {
-  flex: none;
-  width: 80px;
-  height: 80px;
-  border-radius: 5px;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
+/* The tile's picture is a .chamfer (ui/Chamfer.tsx): 80px, its frame and fill there. */
 .feed__thumb img {
-  width: 80px;
-  height: 80px;
+  width: 100%;
+  height: 100%;
   display: block;
+  object-fit: contain;
 }
 .feed__thumb-wait {
   width: 18px;
@@ -10314,18 +10275,40 @@ a.feed__act { text-decoration: none; }
 .held__acts { display: flex; gap: 4px; align-items: center; }
 .held__views { display: flex; gap: 6px; margin: 4px 0 6px; }
 .held__views .tag--tap.is-on { color: var(--accent); border-color: var(--accent); }
-/* A key item and an OTHER LOOT row, laid out alike (arkinox, 2026-11-09):
- * the picture, the name, and the small buttons on the right, beside the name
- * when they fit and on the line under it when they do not, wrapping there on
- * a narrow phone, the X with them, so nothing runs off the panel at 320px.
- * The name keeps at least 120px, so buttons never squeeze it to "Si..."
- * (arkinox, 2026-11-03). DETAILS and a refusal open under all of it. */
-.held__row--item, .held__row--loot { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 4px; }
-.held__row--item > .chest__glyph, .held__row--loot > .chest__glyph, .held__row--loot > .shardthumb { flex: none; }
-.held__row--item > .item__line, .held__row--loot > .item__line, .held__row--loot > .chest { flex: 1 1 120px; }
-.held__row--item > .held__acts, .held__row--loot > .held__acts { flex: 0 1 auto; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+/* A key item and an OTHER LOOT row, laid out alike (owner, 2026-11-15:
+ * "Can you figure out a better layout for the other loot?"): the chamfered
+ * picture at the Shard Feed's size on the left, over two rows; the words
+ * beside it (name, where and when, chips), and ACTIONS under the words on
+ * the right, so it never squeezes the name (arkinox, 2026-11-03: never
+ * "Si..."). What ACTIONS opens, DETAILS and a refusal take the whole width
+ * under all of it. Nothing runs off the modal at 320px. */
+.held__row--item, .held__row--loot {
+  display: grid;
+  grid-template-columns: var(--chamfer-size, 80px) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  column-gap: 10px;
+  row-gap: 6px;
+  align-items: start;
+}
+.items-modal .held__list > .held__row { padding: 8px 0; }
+.held__row--item > .chamfer, .held__row--loot > .chamfer { grid-column: 1; grid-row: 1 / span 2; }
+.held__row--item > .item__line, .held__row--loot > .item__line, .held__row--loot > .chest { grid-column: 2; grid-row: 1; }
+.held__row--loot > .chest { min-width: 0; }
+.held__row--item > .held__acts, .held__row--loot > .held__acts { grid-column: 2; grid-row: 2; align-self: end; justify-self: end; flex-wrap: wrap; justify-content: flex-end; }
 .held__row--item > .held__refusal, .held__row--item > .held__details, .held__row--item > .held__menu,
-.held__row--loot > .held__refusal, .held__row--loot > .held__details, .held__row--loot > .held__menu { flex: 1 1 100%; }
+.held__row--loot > .held__refusal, .held__row--loot > .held__details, .held__row--loot > .held__menu { grid-column: 1 / -1; }
+/* The words: the name on one line, then where and when on one line, the
+ * source cut before the age is, then the chips. */
+.held__line { gap: 4px; padding-top: 2px; }
+.held__line > .item__name { font-size: 12px; }
+.held__meta { display: flex; min-width: 0; font-size: 10px; white-space: nowrap; }
+.held__src { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.held__age { flex: none; }
+.held__chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.held__chips:empty { display: none; }
+.held__chips > * { display: inline-block; max-width: 100%; height: 16px; padding: 0 5px; font-size: 8px; letter-spacing: 0.12em; line-height: 14px; white-space: nowrap; border: 1px solid currentColor; border-radius: 2px; overflow: hidden; text-overflow: ellipsis; }
+.held__chips > .item__chip--dim { color: var(--dim); }
+.held__chips > .tag { margin: 0; }
 /* What ACTIONS opens: the row's actions on a line of their own under it,
  * on the right where ACTIONS is, wrapping on a narrow phone (arkinox, 2026-11-12). */
 .held__menu { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; justify-content: flex-end; min-width: 0; }
@@ -10434,7 +10417,7 @@ a.feed__act { text-decoration: none; }
 /* Reactions under a message, and CLEAR HISTORY in the head (arkinox, 2026-10-12). */
 .talk__reacts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .talk__react { display: inline-flex; align-items: center; padding: 1px 6px; font-size: 11px; line-height: 1.4; background: rgba(200, 245, 255, 0.06); border: 1px solid rgba(200, 245, 255, 0.18); border-radius: 9px; cursor: default; }
-.talk__clear { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; margin-right: 6px; white-space: nowrap; }
+.talk__clear { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; margin-right: 10px; white-space: nowrap; }
 /* COPY and SPEAK under an agent's message (arkinox, 2026-10-11). */
 .talk__acts { display: flex; gap: 6px; margin-top: 4px; }
 .talk__act { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; font-family: inherit; font-size: 8px; letter-spacing: 0.14em; color: var(--accent); background: rgba(0, 229, 255, 0.06); border: 1px solid rgba(0, 229, 255, 0.4); border-radius: 4px; cursor: pointer; }
@@ -11748,3 +11731,129 @@ html.tv-broadcast body { overflow: hidden; }
 .items-feed__who { max-width: 100%; min-width: 0; display: inline-flex; align-items: center; gap: 3px; padding: 0; font: inherit; color: inherit; background: none; border: 0; cursor: pointer; vertical-align: middle; }
 .items-feed__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .items-feed__unfound { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+
+/* A picture's frame with its top-left and bottom-right corners cut at 45
+   degrees (ui/Chamfer.tsx; owner, 2026-11-15: "the pictures should maybe
+   have a border ... corners cut (chamfered) to give it a cyberpunk vibe").
+   The outer box is the line, the inner one the fill, inset by the line's
+   width with its cut moved in by (2 - sqrt 2) of that width, so the cut
+   corners are outlined as thick as the straight sides. */
+.chamfer {
+  --chamfer-cut: 14px;
+  --chamfer-line-w: 1px;
+  --chamfer-line: rgba(0, 229, 255, 0.45);
+  --chamfer-fill: #04090f;
+  position: relative;
+  flex: none;
+  display: block;
+  width: var(--chamfer-size, 80px);
+  height: var(--chamfer-size, 80px);
+  background: var(--chamfer-line);
+  clip-path: polygon(var(--chamfer-cut) 0, 100% 0, 100% calc(100% - var(--chamfer-cut)), calc(100% - var(--chamfer-cut)) 100%, 0 100%, 0 var(--chamfer-cut));
+}
+.chamfer__in {
+  --in-cut: calc(var(--chamfer-cut) - var(--chamfer-line-w) * 0.5858);
+  position: absolute;
+  inset: var(--chamfer-line-w);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--chamfer-fill);
+  clip-path: polygon(var(--in-cut) 0, 100% 0, 100% calc(100% - var(--in-cut)), calc(100% - var(--in-cut)) 100%, 0 100%, 0 var(--in-cut));
+}
+/* A shard's picture inside it fills it: no box of its own. */
+.chamfer__in > .shardthumb { width: 100% !important; height: 100% !important; border-radius: 0; background: none; }
+/* ITEMS (ItemThumb): a kind's icon large in its colour, an item's own picture as pixel art filling the frame. */
+.itemthumb__pic { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+.itemthumb__icon { color: var(--accent); }
+.itemthumb__icon--key { color: #e8c547; }
+.itemthumb__icon--message { color: #ffd27d; }
+.itemthumb__icon--cashu { color: #f7931a; }
+.itemthumb__icon--audio { color: #9fd0ff; }
+.itemthumb__icon--dna, .itemthumb__icon--seed { color: #6fe08a; }
+
+/* The one ✕ every modal closes with (ui/ModalClose.tsx; owner, 2026-11-15:
+   "i want the modals to have consistent close buttons"): the Shard Feed's
+   and the avatar card's, a 26px square with a thin border, at the right end
+   of the title's line. Its fingertip is 44px, an invisible margin around it,
+   so a phone hits it without the box growing. */
+.modal-close {
+  position: relative;
+  flex: none;
+  margin-left: auto;
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid rgba(200, 245, 255, 0.2);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.modal-close::before { content: ''; position: absolute; inset: -9px; }
+.modal-close:hover, .modal-close:focus-visible { color: var(--fg); border-color: rgba(200, 245, 255, 0.45); }
+.modal-close:disabled { opacity: 0.35; cursor: default; }
+/* A title line of a modal that has no flex head of its own: the title, then the ✕ at the right. */
+.modal__head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.zipimport > .modal__head { margin: 0; }
+.modal__head > .modal__title { margin: 0; min-width: 0; flex: 1 1 auto; }
+/* In a panel's head (the AVATARS list, the KEY ITEMS and OTHER LOOT modals): the title takes the room, so a tag stays beside the ✕. */
+.panel__head:has(> .modal-close) > h2 { margin-right: auto; }
+.panel__head > .modal-close { margin-left: 0; align-self: center; }
+.talk__clear + .modal-close { margin-left: 0; }
+/* Beside the tour's or tutorial's fold button: the ✕'s fingertip margin never covers it. */
+.demo__head > .modal-close { margin-left: 2px; }
+/* HOSAKA's offer: its ✕ (NOT NOW) at the right of the name, the name's line still drawn under both. */
+.offer__head { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--cloud, #ffd27d); }
+.offer__head > .offer__title { flex: 1 1 auto; min-width: 0; border-bottom: none; }
+
+/* DISCOVERED NEARBY, laid out as ITEMS (owner, 2026-11-15: "the same
+   treatment in the DISCOVERED NEARBY modal"): the chamfered picture over two
+   rows on the left; the name on one line, where, who and how far, the lock
+   as a chip; TAKE, OPEN or CLOSE and VIEW under the words on the right; an
+   open chest's contents across the whole row under all of it. */
+.nearby__row {
+  grid-template-columns: var(--chamfer-size, 80px) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  column-gap: 10px;
+  row-gap: 6px;
+  align-items: start;
+  padding: 8px 0;
+}
+.nearby__row > .chamfer { grid-column: 1; grid-row: 1 / span 2; }
+.nearby__row > .nearby__body { grid-column: 2; grid-row: 1; gap: 4px; padding-top: 2px; }
+.nearby__row > .nearby__acts { grid-column: 2; grid-row: 2; align-self: end; justify-self: end; }
+.nearby__row > .nearby__contents { grid-column: 1 / -1; min-width: 0; }
+.nearby__contents:empty { display: none; }
+.nearby__row .nearby__label, .nearby__row .item__name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.nearby__row .nearby__where { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
+.nearby__row .nearby__meta { display: flex; min-width: 0; font-size: 10px; white-space: nowrap; }
+.nearby__who { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.nearby__far { flex: none; }
+.nearby__row .chest__head > .item__line { min-width: 0; }
+
+/* What an opened chest holds, a row each laid out as ITEMS: the picture,
+   the name, TAKE under the name on the right (ItemRows ContentRow). */
+.chest__row--thumb {
+  display: grid;
+  grid-template-columns: var(--chamfer-size, 80px) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  column-gap: 10px;
+  row-gap: 6px;
+  align-items: start;
+}
+.chest__row--thumb > .chamfer { grid-column: 1; grid-row: 1 / span 2; }
+.chest__row--thumb > .item__line, .chest__row--thumb > .chest { grid-column: 2; grid-row: 1; min-width: 0; }
+.chest__row--thumb > .chest__act--take { grid-column: 2; grid-row: 2; align-self: end; justify-self: end; }
+/* An OTHER LOOT chest's contents, across the whole row under its words and ACTIONS. */
+.held__row--loot > .held__contents { grid-column: 1 / -1; min-width: 0; }
+.held__contents:empty { display: none; }
+/* DISCOVERED NEARBY's buttons wrap under the words on a narrow phone, right-aligned, rather than run past the row. */
+.nearby__row > .nearby__acts { display: flex; flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
+.nearby__row > .nearby__acts > .nearby__door { display: contents; }

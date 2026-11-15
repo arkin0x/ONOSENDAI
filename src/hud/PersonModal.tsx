@@ -41,6 +41,7 @@ import { useSecrets } from '../store/useSecrets'
 import { setTalking } from '../store/useAgentDms'
 import { EventData } from './EventData'
 import { BlockButton } from './BlockButton'
+import { ModalClose } from './ui/ModalClose'
 
 /** How long COPIED stays on a button, as on a hidden item's card. */
 const COPIED_MS = 1400
@@ -125,7 +126,7 @@ export function PersonCard({ pubkey, shard, event = null, onClose, Preview = Car
           <span className="secret__badge">AVATAR</span>
           {profile?.bot && <span className="person__bot" title="This profile says it is a bot (NIP-24)"><Bot size={11} strokeWidth={2.25} aria-hidden />AGENT</span>}
           {mine && <span className="secret__mine">YOU</span>}
-          <button className="secret__close" onClick={onClose} aria-label="Close">✕</button>
+          <ModalClose onClose={onClose} />
         </div>
 
         <div className="secret__creator">

@@ -27,13 +27,14 @@ import { useFeed } from '../store/useFeed'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { ShardThumb } from './ShardThumb'
+import { Chamfer, THUMB_PX } from './ui/Chamfer'
 import { useMutes } from '../store/useMutes'
 import { useCyberspace } from '../store/useCyberspace'
 import { withoutMuted } from '../lib/muteList'
 
-/** A tile's picture, at the size a listing's GIF is shown. */
+/** A tile's picture, at the size a listing's GIF is shown, in the chamfered frame every row picture has (owner, 2026-11-15). */
 function FeedThumb({ object }: { object: FeedObject }): JSX.Element {
-  return <div className="feed__thumb"><ShardThumb shard={object.shard} size={80} /></div>
+  return <Chamfer className="feed__thumb"><ShardThumb shard={object.shard} size={THUMB_PX} /></Chamfer>
 }
 
 /** Who made it: their name from the profile cache, or their npub, shortened. */
@@ -75,11 +76,11 @@ function ListingPic({ listing }: { listing: FeedListing }): JSX.Element {
   const [tried, setTried] = useState(0)
   const src = pictures[tried]
   return (
-    <div className="feed__thumb">
+    <Chamfer className="feed__thumb" decorative={false}>
       {src
-        ? <img src={src} alt={listing.alt ?? ''} width={80} height={80} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setTried((n) => n + 1)} />
+        ? <img src={src} alt={listing.alt ?? ''} width={THUMB_PX} height={THUMB_PX} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setTried((n) => n + 1)} />
         : <LockKeyhole size={22} strokeWidth={2} className="feed__lock" aria-hidden />}
-    </div>
+    </Chamfer>
   )
 }
 

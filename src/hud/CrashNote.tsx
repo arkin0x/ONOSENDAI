@@ -14,6 +14,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { useLootView } from '../store/useLootView'
 import { useShards } from '../store/useShards'
+import { ModalClose } from './ui/ModalClose'
 
 interface Props {
   /** Which part of the screen this guards, for the note's title. */
@@ -76,6 +77,7 @@ export class CrashNote extends Component<Props, State> {
           <header className="panel__head">
             <h2>Crashed</h2>
             <span className="tag tag--warn">{this.props.where}</span>
+            <ModalClose onClose={this.close} />
           </header>
           <p className="crash__message">{error.name}: {error.message}</p>
           <pre className="crash__stack">{lines}</pre>

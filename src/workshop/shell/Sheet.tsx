@@ -8,7 +8,7 @@
  */
 
 import { useRef, type ReactNode, type Ref } from 'react'
-import { X } from 'lucide-react'
+import { ModalClose } from '../../hud/ui/ModalClose'
 
 /** How far down a swipe on the header must travel, in CSS pixels, to put the sheet away. */
 const SWIPE_CLOSE_PX = 56
@@ -47,9 +47,7 @@ export function Sheet({ name, title, sub, onClose, tall = false, bodyRef, classN
         <span className="ws__sheet-grab" aria-hidden />
         <h2 className="ws__sheet-title">{title}</h2>
         {sub !== undefined && <span className="ws__sheet-sub">{sub}</span>}
-        <button className="ws__sheet-x" onClick={onClose} aria-label={`Close ${title}`} title={`Close ${title} (Esc)`}>
-          <X size={18} strokeWidth={2.25} aria-hidden />
-        </button>
+        <ModalClose onClose={onClose} label={`Close ${title}`} title={`Close ${title} (Esc)`} />
       </div>
       <div className="ws__sheet-body" ref={bodyRef}>
         {children}

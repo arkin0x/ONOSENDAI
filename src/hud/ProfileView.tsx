@@ -28,6 +28,7 @@ import { useProfileView } from '../store/useProfileView'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { EventData } from './EventData'
 import { BlockButton } from './BlockButton'
+import { ModalClose } from './ui/ModalClose'
 
 /** How long to wait on the relays for the kind 0, as the editor does. */
 const FETCH_WAIT_MS = 5000
@@ -102,7 +103,7 @@ function ProfileCard({ pubkey, onClose }: { pubkey: string; onClose: () => void 
           <span className="secret__badge">PROFILE</span>
           {bot && <span className="person__bot" title="This profile says it is a bot (NIP-24)"><Bot size={11} strokeWidth={2.25} aria-hidden />AGENT</span>}
           {mine && <span className="secret__mine">YOU</span>}
-          <button className="secret__close" onClick={onClose} aria-label="Close">✕</button>
+          <ModalClose onClose={onClose} />
         </div>
 
         {showBanner && (

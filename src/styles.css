@@ -10867,7 +10867,21 @@ a.feed__act { text-decoration: none; }
 @media (prefers-reduced-motion: reduce) { .flyorb.scanorb.is-busy { animation: none; } }
 .scanorb__word { position: relative; z-index: 1; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
 .scanorb__sats { position: relative; z-index: 1; font-size: 7.5px; letter-spacing: 0.06em; color: var(--accent); }
-.scanorbs .flyorb__key { color: var(--scan); }
+/* The orb's watermark (owner, 2026-11-15): nested wireframe cubes, faint on
+   the purple glass, in place of the fly orbs' rotation ovals, so the word on
+   it still reads first. */
+.flyorb.scanorb::before {
+  inset: 13%;
+  border: none;
+  border-radius: 0;
+  transform: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50.0 6.0L88.1 28.0L88.1 72.0L50.0 94.0L11.9 72.0L11.9 28.0ZM50.0 50.0L50.0 94.0M50.0 50.0L11.9 28.0M50.0 50.0L88.1 28.0M50.0 20.0L76.0 35.0L76.0 65.0L50.0 80.0L24.0 65.0L24.0 35.0ZM50.0 50.0L50.0 80.0M50.0 50.0L24.0 35.0M50.0 50.0L76.0 35.0M50.0 34.0L63.9 42.0L63.9 58.0L50.0 66.0L36.1 58.0L36.1 42.0ZM50.0 50.0L50.0 66.0M50.0 50.0L36.1 42.0M50.0 50.0L63.9 42.0' fill='none' stroke='rgb%28214,200,255%29' stroke-opacity='0.2' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.flyorb.scanorb::after { display: none; }
+/* Every key hint in SCAN (SPACE, and "." and "," under the height's buttons):
+   white and readable, with the value's shadow. */
+.scanorbs .flyorb__key { color: #fff; opacity: 1; text-shadow: 0 1px 3px #000; }
+.scanorbs__stepper .scanorbs__key { margin: -1px 0 1px; line-height: 1; font-size: 11px; }
 /* How far along a scan is, then what it found: under the height, in the
    stepper's column and on its centre line, white with the value's shadow
    (owner, 2026-11-15). The line takes the column's width without widening

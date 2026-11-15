@@ -109,9 +109,12 @@ export interface ScanState {
   /**
    * Scan the cube at the cursor at the chosen height. `shown` is what the
    * controls said (free, held, or HOSAKA at a price): if that no longer holds
-   * nothing is scanned or bought. Space passes a free route only.
+   * nothing is scanned or bought. `confirmFirst`: a HOSAKA height always
+   * takes two presses, the first arming CONFIRM with the price, whatever the
+   * Cloud compute mode says: what Space passes (owner, 2026-11-15: Space
+   * never pays on a single press).
    */
-  start: (shown?: ScanShown) => Promise<void>
+  start: (shown?: ScanShown, opts?: { confirmFirst?: boolean }) => Promise<void>
   /** Stop the scan under way, where that loses nothing paid for (scanCancellable). */
   cancel: () => void
 }
@@ -173,6 +176,22 @@ function aim(): { at: Position; plane: Plane } {
   return { at: { ...cs.cursor }, plane: cs.anchorPlane }
 }
 
+/**
+ * Space in SCAN: a tap on the SCAN button (owner, 2026-11-15). On this device,
+ * or a cube already held, it scans; at a HOSAKA height the first press shows
+ * CONFIRM with the price on the button, and only a second press on the same
+ * cube at the same price pays, whatever the Cloud compute mode: never one
+ * press. A held-down Space (`repeat`) does nothing, and nothing while a scan runs.
+ */
+export function spaceScan(repeat = false): void {
+  const scan = useScan.getState()
+  if (repeat || scan.job || !scan.active) return
+  const { at, plane } = aim()
+  const held = heldCube(useSecrets.getState().keys, at, plane, scan.height) !== null
+  if (held || scanRoute(scan.height, currentScanRange()) === 'local') void scan.start({ route: held ? 'held' : 'local' })
+  else void scan.start({ route: 'cloud', sats: scanPrice(scan.height) }, { confirmFirst: true })
+}
+
 /** The local scan's worker, so CANCEL can stop it. */
 let run: CubeRun | null = null
 /** Each scan's number: an answer for an older one is dropped. */
@@ -230,7 +249,7 @@ export const useScan = create<ScanState>((set, get) => ({
 
   stepHeight: (delta) => get().setHeight(get().height + delta),
 
-  start: async (shown) => {
+  start: async (shown, opts) => {
     if (!get().active || get().job) return
     const range = currentScanRange()
     const height = clampScanHeight(get().height, range)
@@ -253,7 +272,7 @@ export const useScan = create<ScanState>((set, get) => ({
       const prefs = useCyberspace.getState().cloudPrefs
       const cube = cubeKey(at, plane, height)
       const armed = get().confirm
-      if (needsAsk(prefs.mode, price, prefs.autoMaxSats) && !(armed && armed.cube === cube && armed.height === height && armed.sats === price)) {
+      if ((opts?.confirmFirst || needsAsk(prefs.mode, price, prefs.autoMaxSats)) && !(armed && armed.cube === cube && armed.height === height && armed.sats === price)) {
         set({ confirm: { height, sats: price, cube }, result: null })
         return
       }

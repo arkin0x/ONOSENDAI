@@ -12,14 +12,19 @@
  * rule that moves them moves these too: the HOSAKA mark, a phone on its
  * side, the chat): the workshop rail's up, value and down (workshop/shell/
  * Rail.tsx), reading SCAN HEIGHT and the height, and to their right a glass
- * orb like the fly buttons, in purple, that says SCAN. Under the height a tag
- * says who computes it: this device, free, up to its benchmark; HOSAKA, with
- * the price, above it; a cube already held is only asked about again. While
- * a scan runs the orb is CANCEL and a line under the height, centred in its
- * column as SCAN HEIGHT is, says how far along it is; then what it found. A HOSAKA height the Cloud compute mode
- * asks about (ASK, or AUTO over its cap) takes two presses: the first arms
- * CONFIRM with the price, the second pays (store/useScan.ts). A HOSAKA scan
- * paid for has no CANCEL: it finishes, and the key is held as bought.
+ * orb like the fly buttons, in purple, that says SCAN, with a faint
+ * watermark of nested cubes. Under the height a tag says where the cube
+ * stands (owner, 2026-11-15): UNKNOWN and this device's time for it, up to
+ * its benchmark; COMPLETE for a cube whose key is held, which SCAN only asks
+ * the relays about again; HOSAKA above the benchmark, where the orb itself
+ * carries the price in sats. "." under the up button and "," under the down
+ * one are their keys, as SPACE beside the orb is. While a scan runs the orb
+ * is CANCEL and a line under the height, centred in its column as SCAN HEIGHT
+ * is, says how far along it is; then what it found. A HOSAKA height the Cloud
+ * compute mode asks about (ASK, or AUTO over its cap) takes two presses: the
+ * first arms CONFIRM with the price, the second pays (store/useScan.ts).
+ * Space always takes two there, whatever the mode. A HOSAKA scan paid for has
+ * no CANCEL: it finishes, and the key is held as bought.
  */
 
 import { useEffect, useState } from 'react'
@@ -29,19 +34,30 @@ import { useBuilder } from '../store/useBuilder'
 import { useSecrets } from '../store/useSecrets'
 import { scanCancellable, scanPrice, useScan, type ScanJob, type ScanResult } from '../store/useScan'
 import { useCalibration } from '../lib/calibration'
-import { localKeyCeiling } from '../lib/deployPlan'
+import { localKeyCeiling, localKeySeconds } from '../lib/deployPlan'
 import { heldCube, scanRange, SCAN_MIN_HEIGHT, type ScanRange } from '../lib/scanCube'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import type { CloudStatus } from '../store/useCyberspace'
 
-/** The tag under the height: who computes it, and for what. */
-export function scanTag(height: number, range: ScanRange, held: boolean, price: number | null, cloudOff: boolean): string {
-  if (held) return 'HELD · FREE'
-  if (height <= range.localMax) {
-    if (height === range.top && !range.cloud) return cloudOff ? 'DEVICE MAX · HOSAKA OFF' : 'DEVICE MAX'
-    return 'ON DEVICE · FREE'
-  }
-  return price === null ? 'HOSAKA · NO PRICE YET' : `HOSAKA · ${price} SATS`
+/** A scan's time as the tag says it: "ABOUT 40 SEC", "ABOUT 3 MIN", "ABOUT 2 HR". */
+export function aboutTime(seconds: number): string {
+  if (seconds < 1) return 'UNDER 1 SEC'
+  if (seconds < 90) return `ABOUT ${Math.round(seconds)} SEC`
+  if (seconds < 90 * 60) return `ABOUT ${Math.round(seconds / 60)} MIN`
+  if (seconds < 48 * 3600) return `ABOUT ${Math.round(seconds / 3600)} HR`
+  return `ABOUT ${Math.round(seconds / 86_400)} DAYS`
+}
+
+/**
+ * The tag under the height (owner, 2026-11-15): COMPLETE when the cube's key
+ * is held already (SCAN still asks the relays again); UNKNOWN and this
+ * device's time for it when it is not; HOSAKA above the device's range, whose
+ * price is on the SCAN button. Never FREE or HELD.
+ */
+export function scanTag(height: number, range: ScanRange, held: boolean, seconds: number | null): string {
+  if (held) return 'COMPLETE'
+  if (height > range.localMax) return 'HOSAKA'
+  return seconds === null ? 'UNKNOWN' : `UNKNOWN · ${aboutTime(seconds)}`
 }
 
 /** The line under the controls while a scan runs, or after it. */
@@ -80,7 +96,8 @@ export function ScanControls(): JSX.Element | null {
   return active && viewing && !building ? <ScanDock /> : null
 }
 
-function ScanDock(): JSX.Element {
+/** The dock itself (exported for its tests). */
+export function ScanDock(): JSX.Element {
   const height = useScan((s) => s.height)
   const job = useScan((s) => s.job)
   const result = useScan((s) => s.result)
@@ -91,8 +108,9 @@ function ScanDock(): JSX.Element {
   const cloudStatus = useCyberspace((s) => s.cloud.status)
   const cloudJob = useCyberspace((s) => s.cloud.job)
   const price = useCyberspace((s) => scanPrice(height, s))
-  // The benchmark landing moves the local max (localKeyCeiling reads it).
+  // The benchmark landing moves the local max (localKeyCeiling reads it) and the time.
   useCalibration((s) => s.hopHeight)
+  const cantorMs = useCalibration((s) => s.cantorMsByHeight)
   const range = scanRange(localKeyCeiling(), !cloudOff, cloudCap)
   const cursor = useCyberspace((s) => s.cursor)
   const plane = useCyberspace((s) => s.anchorPlane)
@@ -128,7 +146,11 @@ function ScanDock(): JSX.Element {
   const elapsed = job ? Math.max(0, Math.floor((now - job.startedAt) / 1000)) : 0
   const line = scanLine(job, result, percent, elapsed, cloudStatus, buying?.status ?? null, armed ? confirm.sats : null)
   const goDisabled = job ? !cancellable : cloud && (price === null || buying !== null)
-  const word = job ? (cancellable ? 'CANCEL' : cloudStatus === 'quoting' || buying?.status === 'submitting' ? 'ASKING' : 'PAID') : armed ? 'CONFIRM' : 'SCAN'
+  // Above the device's range the button carries HOSAKA's price itself (owner,
+  // 2026-11-15), then CONFIRM over it; the price is never hidden.
+  const priceWord = price === null ? 'NO PRICE' : `${price} SATS`
+  const word = job ? (cancellable ? 'CANCEL' : cloudStatus === 'quoting' || buying?.status === 'submitting' ? 'ASKING' : 'PAID') : armed ? 'CONFIRM' : cloud ? priceWord : 'SCAN'
+  const satsUnder = cloud && price !== null && word !== priceWord
   const s = useScan.getState
 
   return (
@@ -138,13 +160,15 @@ function ScanDock(): JSX.Element {
           <button className="scanorbs__step" {...bind(() => s().stepHeight(1))} disabled={job !== null || height >= range.top} title="Raise the scan height (.)" aria-label="Raise the scan height">
             <ChevronUp size={18} strokeWidth={2.25} aria-hidden />
           </button>
+          <span className="flyorb__key scanorbs__key" aria-hidden>.</span>
           <span className="scanorbs__value">
             <b>SCAN HEIGHT {height}</b>
-            <span className={`scanorbs__tag${cloud ? ' is-hosaka' : ''}`}>{scanTag(height, range, held, price, cloudOff)}</span>
+            <span className={`scanorbs__tag${cloud ? ' is-hosaka' : ''}`}>{scanTag(height, range, held, localKeySeconds(height, cantorMs))}</span>
           </span>
           <button className="scanorbs__step" {...bind(() => s().stepHeight(-1))} disabled={job !== null || height <= SCAN_MIN_HEIGHT} title="Lower the scan height (,)" aria-label="Lower the scan height">
             <ChevronDown size={18} strokeWidth={2.25} aria-hidden />
           </button>
+          <span className="flyorb__key scanorbs__key" aria-hidden>,</span>
         </div>
         <div className="scanorbs__go">
           {/* A click, not a press: a touch that only starts on the orb never pays. */}
@@ -153,7 +177,7 @@ function ScanDock(): JSX.Element {
             disabled={goDisabled}
             title={job ? (cancellable ? 'Cancel the scan (X)' : 'HOSAKA is on it. The key lands in your keyring when it is done')
               : armed ? `Press again to pay ${confirm.sats} sats to HOSAKA for this cube`
-              : cloud ? (price === null ? 'HOSAKA has not given a price for this height yet' : `Scan the purple cube. HOSAKA computes it for ${price} sats`)
+              : cloud ? (price === null ? 'HOSAKA has not given a price for this height yet' : `Scan the purple cube. HOSAKA computes it for ${price} sats (Space twice)`)
               : 'Scan the purple cube for hidden things (Space)'}
             aria-label={job ? (cancellable ? 'Cancel the scan' : 'HOSAKA is scanning') : armed ? `Confirm: pay ${confirm.sats} sats` : cloud && price !== null ? `Scan for ${price} sats` : 'Scan'}
             {...noCallout}
@@ -165,9 +189,10 @@ function ScanDock(): JSX.Element {
             }}
           >
             <span className="scanorb__word">{word}</span>
-            {cloud && !job && price !== null && <span className="scanorb__sats">{price} SATS</span>}
+            {satsUnder && <span className="scanorb__sats">{`${price} SATS`}</span>}
           </button>
-          {!cloud && !job && <span className="flyorb__key" aria-hidden>SPACE</span>}
+          {/* Space is a tap here, in HOSAKA's range too: there the first press shows CONFIRM, the second pays (hooks/useKeyboard). */}
+          {!job && <span className="flyorb__key scanorbs__key" aria-hidden>SPACE</span>}
         </div>
         {/* Under the height, in its column and on its centre line, as SCAN HEIGHT is (owner, 2026-11-15). */}
         {line && (

@@ -60,6 +60,7 @@ import { useProfiles } from '../store/useProfiles'
 import { previewText } from '../lib/mentions'
 import { useMutes } from '../store/useMutes'
 import { hidesThing, type Muted } from '../lib/muteList'
+import { ModalClose } from './ui/ModalClose'
 
 /**
  * The glyph a notification leads with: the reaction itself, or for words the
@@ -357,7 +358,7 @@ export function NotificationsModal(): JSX.Element | null {
       <div className="modal__card secret notif" onPointerDown={(e) => e.stopPropagation()}>
         <div className="secret__head">
           <span className="secret__label notif__title">NOTIFICATIONS</span>
-          <button className="secret__close" onClick={close} aria-label="Close">✕</button>
+          <ModalClose onClose={close} />
         </div>
         <div className="notif__scroll" ref={list}>
           {trouble && !loading && <RelayTrouble trouble={trouble} onRetry={() => void useNotifications.getState().poll()} />}

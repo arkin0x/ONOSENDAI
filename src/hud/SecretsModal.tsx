@@ -43,6 +43,7 @@ import { ConfirmModal } from './ConfirmModal'
 import { useRoomKeys } from '../store/useKeyring'
 import { Explanation } from './Explanation'
 import { useEscape } from '../hooks/useEscape'
+import { ModalClose } from './ui/ModalClose'
 
 const SORTS: Array<[SecretsSort, string]> = [['recent', 'MOST RECENT'], ['volume', 'LARGEST']]
 
@@ -186,7 +187,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
         <header className="panel__head secrets__head">
           <h2><ItemIcon type="key" size={14} /> Keyring</h2>
           <span className="tag">{list.length + roomCount === 0 ? 'NO KEYS' : [list.length > 0 ? `${list.length} REGION${list.length === 1 ? '' : 'S'}` : '', roomCount > 0 ? `${roomCount} ROOM${roomCount === 1 ? '' : 'S'}` : ''].filter(Boolean).join(' · ')}</span>
-          <button className="targets__remove secrets__close" onClick={onClose} aria-label="Close" title="Close">✕</button>
+          <ModalClose onClose={onClose} />
         </header>
 
         <div className="secrets__summary">

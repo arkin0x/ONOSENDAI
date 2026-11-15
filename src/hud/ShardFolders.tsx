@@ -30,6 +30,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useEscape } from '../hooks/useEscape'
 import { ConfirmModal } from './ConfirmModal'
 import { Field, Switch } from './ui/Switch'
+import { ModalClose } from './ui/ModalClose'
 
 /** The drag payload's type, so a file dragged onto the workshop is never read as a shard. */
 const DRAG_TYPE = 'application/x-onosendai-folder-item'
@@ -489,7 +490,7 @@ function FolderChooser({ tree, moving, current, onPick, onClose }: {
       <div className="modal__card sfold__chooser" onPointerDown={(e) => e.stopPropagation()}>
         <div className="login__head">
           <h2 className="modal__title">Move &quot;{moving.label}&quot;</h2>
-          <button className="secret__close" onClick={onClose} aria-label="Close">✕</button>
+          <ModalClose onClose={onClose} />
         </div>
         <ul className="sfold__choices">
           <li>

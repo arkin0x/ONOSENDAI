@@ -28,6 +28,7 @@ import { ProfilePic } from './ProfileBadge'
 import { useCyberspace } from '../store/useCyberspace'
 import { useProfiles } from '../store/useProfiles'
 import { useEscape } from '../hooks/useEscape'
+import { ModalClose } from './ui/ModalClose'
 
 /** How long to wait on the general relays for the current kind 0 and server list. */
 const FETCH_WAIT_MS = 5000
@@ -179,7 +180,7 @@ export function ProfileModal({ onClose }: { onClose: () => void }): JSX.Element 
       <div className="modal__card login profile" onPointerDown={(e) => e.stopPropagation()}>
         <div className="login__head">
           <h2 className="modal__title">Profile</h2>
-          <button className="secret__close" onClick={onClose} aria-label="Close">✕</button>
+          <ModalClose onClose={onClose} />
         </div>
 
         <div className={`profile__banner${banner ? '' : ' profile__banner--empty'}`} style={banner ? { backgroundImage: `url("${banner}")` } : undefined} aria-hidden="true">

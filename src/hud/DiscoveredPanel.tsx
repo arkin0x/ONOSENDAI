@@ -45,6 +45,7 @@ import { ItemIcon, distinctKinds, type ItemKind } from './ItemIcon'
 import { useNearbyLoot } from '../hooks/useNearbyLoot'
 import { useEscape } from '../hooks/useEscape'
 import { everyWhileVisible } from '../lib/whileVisible'
+import { ModalClose } from './ui/ModalClose'
 
 /** Rows a panel shows before VIEW MORE takes over. */
 const SHOWN = 4
@@ -268,11 +269,10 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
             <header className="panel__head">
               <h2>{title}</h2>
               <span className="tag" title={countTitle}>{count}</span>
+              {/* The ✕ on the title's line, as every modal has it; no CLOSE at the bottom (owner, 2026-11-15). */}
+              <ModalClose onClose={() => setMore(false)} />
             </header>
             <ul className="avatars__list avatars__list--all loot__list">{grouped(shown)}</ul>
-            <div className="modal__row">
-              <button className="modal__cancel" onClick={() => setMore(false)}>CLOSE</button>
-            </div>
           </div>
         </div>,
         document.body,

@@ -58,8 +58,8 @@ import { Key, Sparkles, type LucideIcon } from 'lucide-react'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { hasNftLink } from '../lib/nftLink'
-import { ItemFace, ItemIcon } from './ItemIcon'
-import { ShardThumb } from './ShardThumb'
+import { ItemThumb } from './ItemThumb'
+import { ModalClose } from './ui/ModalClose'
 import { chestsOpenedBy, isKeyItem, keyText, splitPanels, type HeldItem } from '../lib/inventory'
 import { regionLabel } from '../lib/loot'
 import { provenanceOf } from '../lib/provenance'
@@ -286,6 +286,27 @@ function useRowActions(id: string, name: string, shown = true): { button: JSX.El
   }
 }
 
+/**
+ * The words of a row in KEY ITEMS or OTHER LOOT, beside its picture (owner,
+ * 2026-11-15: "Can you figure out a better layout for the other loot?"):
+ * the name on one line, cut with an ellipsis; where it came from and how
+ * long ago on the second, the source cut before the age is; what it is now
+ * (REDEEMED, LISTED, opens 2 chests, ARCHIVED, UNSIGNED) as small chips on
+ * the third. A long name never pushes anything off the row.
+ */
+function HeldRowLine({ name, title, source, how, at, chips }: { name: string; title?: string; source: ReactNode; how?: string; at: number; chips?: ReactNode }): JSX.Element {
+  return (
+    <span className="item__line held__line">
+      <span className="item__name" title={title ?? name}>{name}</span>
+      <span className="item__meta held__meta">
+        <span className="held__src">{source}</span>
+        <span className="held__age">{'\u00a0· '}{how ? `${how} ` : ''}<span title={formatStamp(at)}>{formatAgo(at)}</span></span>
+      </span>
+      {chips && <span className="held__chips">{chips}</span>}
+    </span>
+  )
+}
+
 /** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, and ACTIONS: DETAILS, COPY, PLACE, PUBLISH, ARCHIVE, and DELETE once archived. */
 function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
@@ -316,20 +337,24 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
     if (why) setRefusal(why)
   }
   return (
-    // Laid out as an OTHER LOOT row, with its small buttons (arkinox,
-    // 2026-11-09): on the right, beside the name when they fit, under it when
-    // they do not, so they never squeeze the name to "Si..." (2026-11-03).
+    // Laid out as an OTHER LOOT row (HeldRowLine): the picture at the Shard
+    // Feed's size, the name on its own line, where and when under it, what
+    // it opens and LISTED as chips, ACTIONS under the words on the right, so
+    // it never squeezes the name (owner, 2026-11-15).
     <li className="secrets__row held__row held__row--item" data-actions-row={item.id}>
-      <ItemFace className="chest__glyph chest__glyph--key" type="key" image={item.key?.image} />
-      <span className="item__line">
-        <span className="item__name" title={item.name}>{item.name}</span>
-        <span className="item__meta">
-          {item.source === 'forged' ? 'forged by you' : `forged by ${who}`} · {item.source === 'forged' ? 'hidden' : SOURCE[item.source]} <span title={formatStamp(item.at)}>{formatAgo(item.at)}</span>
-          {opens > 0 && <> · <span className="secrets__found" title="Discovered chests whose lock is this item">opens {opens} chest{opens === 1 ? '' : 's'}</span></>}
-          {listed && <> · <span className="secrets__found" title="Listed in the ITEM FEED: anyone can seal a chest to it">LISTED</span></>}
-          {!item.verified && <> · <Unsigned /></>}
-        </span>
-      </span>
+      <ItemThumb type="key" image={item.key?.image} model={item.key?.model} />
+      <HeldRowLine
+        name={item.name}
+        source={item.source === 'forged' ? 'forged by you' : `forged by ${who}`}
+        how={item.source === 'forged' ? 'hidden' : SOURCE[item.source]}
+        at={item.at}
+        chips={<>
+          {opens > 0 && <span className="item__chip secrets__found" title="Discovered chests whose lock is this item">opens {opens} chest{opens === 1 ? '' : 's'}</span>}
+          {listed && <span className="item__chip secrets__found" title="Listed in the ITEM FEED: anyone can seal a chest to it">LISTED</span>}
+          {item.archived && <span className="item__chip item__chip--dim" title="Filed away under ARCHIVED. It still opens what it opens">ARCHIVED</span>}
+          {!item.verified && <Unsigned />}
+        </>}
+      />
       <span className="held__acts">{actions.button}</span>
       {actions.group(
         <>
@@ -435,6 +460,8 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const label = coin ? (token ? cashuLabel(token) : 'cashu token') : item.name
   // Never open behind MOVED INTO WORKSHOP, so Escape is not spent on it.
   const actions = useRowActions(item.id, label, !moved)
+  // A chest's contents are listed across the whole row, under its words and ACTIONS, as DISCOVERED NEARBY lists them (ChestBlock contentsIn).
+  const [contents, setContents] = useState<HTMLElement | null>(null)
   const moveToWorkshop = (): void => {
     if (!item.shard || moved) return
     actions.close()
@@ -452,20 +479,22 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
     )
   }
   return (
-    // Laid out as a key item row: its buttons wrap under the name on a narrow phone (arkinox, 2026-11-09).
+    // Laid out as a key item row (HeldRowLine), the same picture size for every kind (owner, 2026-11-15).
     <li className="secrets__row held__row held__row--loot" data-actions-row={item.id}>
-      {item.type === 'shard' && item.shard ? <ShardThumb shard={item.shard} /> : <ItemIcon className={`chest__glyph chest__glyph--${coin ? 'cashu' : item.type}`} type={item.type} coin={coin} />}
+      <ItemThumb type={item.type} coin={coin} shard={item.type === 'shard' ? item.shard : undefined} />
       {item.type === 'chest' && item.chest
-        ? <ChestBlock id={item.id} chest={item.chest} author={item.author} verified={item.verified} place={item.place} sealer={item.verified ? item.event.pubkey : undefined} />
+        ? <ChestBlock id={item.id} chest={item.chest} author={item.author} verified={item.verified} place={item.place} sealer={item.verified ? item.event.pubkey : undefined} contentsIn={contents} />
         : (
-          <span className="item__line">
-            <span className="item__name" title={label}>{label}</span>
-            <span className="item__meta">
-              {item.from ? `from “${item.from.chestName}”` : SOURCE[item.source]} · <span title={formatStamp(item.at)}>{formatAgo(item.at)}</span>
-              {coin && <> · <span className={`shards__cashu shards__cashu--${cashu.state}`}>{cashuStateLabel(cashu.state)}</span></>}
-              {!item.verified && <> · <Unsigned /></>}
-            </span>
-          </span>
+          <HeldRowLine
+            name={label}
+            source={item.from ? `from “${item.from.chestName}”` : SOURCE[item.source]}
+            at={item.at}
+            chips={<>
+              {coin && <span className={`item__chip shards__cashu shards__cashu--${cashu.state}`}>{cashuStateLabel(cashu.state)}</span>}
+              {item.archived && <span className="item__chip item__chip--dim" title="Filed away under ARCHIVED">ARCHIVED</span>}
+              {!item.verified && <Unsigned />}
+            </>}
+          />
         )}
       <span className="held__acts">{actions.button}</span>
       {actions.group(
@@ -501,6 +530,7 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
           <MessageText text={item.text ?? ''} tags={item.event?.tags} words={(t) => <blockquote className="secret__message">{t}</blockquote>} />
         </div>
       )}
+      {item.type === 'chest' && item.chest && <div className="held__contents" ref={setContents} />}
     </li>
   )
 }
@@ -526,15 +556,15 @@ function FeedRow({ listing }: { listing: ItemListing }): JSX.Element {
   const [open, setOpen] = useState(false)
   return (
     <li className="secrets__row held__row held__row--item">
-      <ItemFace className="chest__glyph chest__glyph--key" type="key" image={listing.image} />
-      <span className="item__line">
-        <span className="item__name" title={listing.about || listing.name}>{listing.name}</span>
-        <span className="item__meta">
-          listed by <ProfileTap pubkey={listing.lister} className="items-feed__who" title={who}><ProfilePic pubkey={listing.lister} size={12} /><span className="items-feed__name">{who}</span></ProfileTap> · <span title={formatStamp(listing.createdAt)}>{formatAgo(listing.createdAt)}</span>
-        </span>
-      </span>
+      <ItemThumb type="key" image={listing.image} />
+      <HeldRowLine
+        name={listing.name}
+        title={listing.about || listing.name}
+        source={<>listed by <ProfileTap pubkey={listing.lister} className="items-feed__who" title={who}><ProfilePic pubkey={listing.lister} size={12} /><span className="items-feed__name">{who}</span></ProfileTap></>}
+        at={listing.createdAt}
+        chips={<span className="item__chip tag items-feed__unfound" title="You have not found this item. Find it to hold it">NOT FOUND</span>}
+      />
       <span className="held__acts">
-        <span className="tag items-feed__unfound" title="You have not found this item. Find it to hold it">NOT FOUND</span>
         <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>DETAILS</button>
       </span>
       {open && (
@@ -659,7 +689,7 @@ function ItemsModal({ kind }: { kind: ItemsKind }): JSX.Element {
         <div className="modal__card secrets__box items-modal__card" onPointerDown={(e) => e.stopPropagation()}>
           <header className="panel__head secrets__head">
             <h2 className="items-modal__title"><Icon className="items-modal__icon" size={14} strokeWidth={2.5} aria-hidden />{title}</h2>
-            <button className="targets__remove secrets__close" onClick={close} aria-label="Close" title="Close">✕</button>
+            <ModalClose onClose={close} />
           </header>
           {(kind === 'keys' || archivedHere.length > 0) && (
             <div className="held__views">

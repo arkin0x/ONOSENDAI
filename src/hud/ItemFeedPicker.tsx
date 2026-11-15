@@ -22,6 +22,7 @@ import { ItemFace } from './ItemIcon'
 import { useMutes } from '../store/useMutes'
 import { hidesThing } from '../lib/muteList'
 import { useCyberspace } from '../store/useCyberspace'
+import { ModalClose } from './ui/ModalClose'
 
 function Row({ listing, onPick }: { listing: ItemListing; onPick: (l: ItemListing) => void }): JSX.Element {
   const profile = useProfile(listing.lister)
@@ -59,7 +60,7 @@ export function ItemFeedPicker({ onPick, onClose }: { onPick: (l: ItemListing) =
         <header className="panel__head secrets__head">
           <h2>Item feed</h2>
           <span className="tag">{loading && listings.length === 0 ? 'READING…' : `${listings.length} LISTED`}</span>
-          <button className="targets__remove secrets__close" onClick={onClose} aria-label="Close" title="Close">✕</button>
+          <ModalClose onClose={onClose} />
         </header>
         <input className="avatars__input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search items by name" aria-label="Search items" autoFocus />
         {trouble && !loading && <RelayTrouble trouble={trouble} onRetry={() => void useItemFeed.getState().load()} />}

@@ -28,6 +28,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { Explanation } from './Explanation'
 import { useEscape } from '../hooks/useEscape'
 import { everyWhileVisible } from '../lib/whileVisible'
+import { ModalClose } from './ui/ModalClose'
 
 /** Rows the panel shows before VIEW MORE takes over. */
 const SHOWN = 5
@@ -130,11 +131,10 @@ export function AvatarsPanel(): JSX.Element {
             <header className="panel__head">
               <h2>Avatars</h2>
               <span className="tag">{avatars.length} SEEN</span>
+              {/* The ✕ on the title's line, as every modal has it; no CLOSE at the bottom (owner, 2026-11-15). */}
+              <ModalClose onClose={() => setMore(false)} />
             </header>
             <ul className="avatars__list avatars__list--all">{avatars.map(row)}</ul>
-            <div className="modal__row">
-              <button className="modal__cancel" onClick={() => setMore(false)}>CLOSE</button>
-            </div>
           </div>
         </div>,
         document.body,

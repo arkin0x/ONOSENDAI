@@ -66,6 +66,7 @@ import { Metadata } from './Metadata'
 import { AudioCard } from './AudioCard'
 import { BlockButton, MuteItemButton } from './BlockButton'
 import { useMutes } from '../store/useMutes'
+import { ModalClose } from './ui/ModalClose'
 
 const ICON = 12
 
@@ -246,7 +247,7 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
           {mine && <span className="secret__mine">YOURS</span>}
           {/* A published shard, or a LIVE LINK to one: anyone can see the object (arkinox, 2026-11-14). */}
           {(published || item.target?.public) && <span className="secret__mine secret__public" title={published ? 'Published: anyone can see it, in any client' : 'A published object: anyone can see it, in any client'}>PUBLIC</span>}
-          <button className="secret__close" onClick={close} aria-label="Close">✕</button>
+          <ModalClose onClose={close} />
         </div>
 
         {item.type === 'message' ? (

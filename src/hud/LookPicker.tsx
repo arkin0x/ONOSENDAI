@@ -28,6 +28,7 @@ import type { LookChoice } from '../store/useShards'
 import { FeedList } from './FeedList'
 import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst } from './ShardFolders'
 import { ShardThumb } from './ShardThumb'
+import { ModalClose } from './ui/ModalClose'
 
 /** Why a workshop model cannot be worn yet: it places a piece of yours that was never published. Null when it can. */
 export function unpublishedPieces(model: Pick<ShardModel, 'refs'>, me: string, published: (d: string) => boolean): string | null {
@@ -52,7 +53,7 @@ export function LookPicker({ onPick, onClose }: { onPick: (look: LookChoice) => 
       <div className="modal__card login stash-modal" onPointerDown={(e) => e.stopPropagation()}>
         <header className="panel__head secrets__head">
           <h2 className="modal__title">Model</h2>
-          <button className="targets__remove secrets__close" onClick={onClose} aria-label="Close" title="Close">✕</button>
+          <ModalClose onClose={onClose} />
         </header>
         <div className="objpick__tabs" role="tablist">
           {(['mine', 'feed'] as const).map((id) => (

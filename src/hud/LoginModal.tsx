@@ -16,6 +16,7 @@ import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { useEscape } from '../hooks/useEscape'
+import { ModalClose } from './ui/ModalClose'
 
 const KIND_LABEL: Record<string, string> = {
   local: 'Local key',
@@ -153,7 +154,7 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
       <div className="modal__card login" onPointerDown={(event) => event.stopPropagation()}>
         <div className="login__head">
           <h2 className="modal__title">{view === 'qr' ? 'Nostr Connect' : 'Change Identity'}</h2>
-          <button className="secret__close" onClick={close} aria-label="Close">✕</button>
+          <ModalClose onClose={close} />
         </div>
 
         {view === 'login' && (

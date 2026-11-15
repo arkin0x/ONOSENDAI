@@ -19,12 +19,12 @@
  * draw its edge on. Lifted half a cell so it is never buried in the
  * graticule where the two cross.
  *
- * Out of the fog: the scene fades to black from about 37 cells to 166 at the
- * usual orbit (21.6 to 96 in TV and WALK; scene/fog.ts), and the ring is 32
- * cells out and framed from about 69 (Scene.startDistance), where the fog
- * would have taken some of it. Everything else keeps the fog as its
- * depth cue; the boundary is the one line that has to read at the distance
- * it is drawn from.
+ * Out of the fog: the scene fades to black from about 141 cells to 166 at
+ * the usual orbit (81.6 to 96 in TV and WALK; scene/fog.ts; it began at 37
+ * before 2026-11-15), and the ring is 32 cells out and framed from about 69
+ * (Scene.startDistance), where the old fog took some of it and a far orbit
+ * still can. Everything else keeps the fog as its edge; the boundary is the
+ * one line that has to read at the distance it is drawn from.
  */
 
 import { useEffect, useMemo } from 'react'

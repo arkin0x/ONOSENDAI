@@ -15,7 +15,8 @@ const WORKSHOP = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
 
 describe('WELD', () => {
   it('is a key in MORE while points are stacked, with the count, folding the selection or the whole shard', () => {
-    expect(MORE).toContain('{stacked.spots > 0 && (')
+    // Not as a fold of the held points in LOOK, where they are out of sight (workshop/benchLook.tsx).
+    expect(MORE).toContain('{stacked.spots > 0 && !(look && selection.length >= 2) && (')
     expect(MORE).toContain('label={`WELD ${stacked.spots}`}')
     expect(MORE).toContain("aria={selection.length >= 2 ? 'Weld the selected stacked points' : 'Weld every stacked point'}")
     expect(MORE).toContain('onClick={() => w().weld()}')

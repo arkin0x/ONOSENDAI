@@ -569,7 +569,11 @@ export const useTutorial = create<TutorialState>((set, get) => {
 /**
  * Whether the tutorial's card is up and guiding: a run going, its card not
  * folded to the one-line bar. A modal card (the welcome, "Where next?") is up
- * whatever the fold says, since it is drawn over everything.
+ * whatever the fold says, since it is drawn over everything. The workshop,
+ * which hides the coach while open, still counts as guided: the workshop step
+ * sends the player there, and nothing it signs is a tagged kind. A game
+ * cannot be entered from GAMES mid-run (GamesPanel TUTORIAL_MESSAGE), and the
+ * tutorial's DUNGEON choice ends the run.
  */
 export function tutorialCardUp(s: Pick<TutorialState, 'active' | 'minimized' | 'index' | 'script'> = useTutorial.getState()): boolean {
   return s.active && (!s.minimized || s.script.steps[s.index]?.modal === true)

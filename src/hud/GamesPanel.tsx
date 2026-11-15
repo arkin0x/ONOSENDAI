@@ -8,8 +8,8 @@
  * enter-virtual from wherever you stand, since entering puts you at the
  * game's entry point (owner's ruling, 2026-11-13: "You can enter a game from
  * anywhere"), and your place in cyberspace is held until you leave. It is
- * greyed out while no game can be entered (useGame enterBlocked, and the
- * tour), and for a game entered only from somewhere else (discovered.ts
+ * greyed out while no game can be entered (useGame enterBlocked, the tour,
+ * and a tutorial run), and for a game entered only from somewhere else (discovered.ts
  * enterFromRefusal, the seam for the draft enter-from requirement), whose
  * words then show under its name.
  */
@@ -22,6 +22,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useDemo } from '../store/useDemo'
 import { enterBlocked, useGame } from '../store/useGame'
 import { useShards } from '../store/useShards'
+import { useTutorial } from '../store/useTutorial'
 import { useTv } from '../store/useTv'
 import { useWalk } from '../store/useWalk'
 import { useWorkshop } from '../store/useWorkshop'
@@ -30,11 +31,20 @@ import { Explanation } from './Explanation'
 
 /** Why ENTER is greyed out during the tour (/demo), which a game would sit under. */
 export const TOUR_MESSAGE = 'Leave the tour first.'
+/**
+ * Why ENTER is greyed out while a tutorial run is going: the dungeon is
+ * listed for everyone from the first step (owner, 2026-11-14), but entered
+ * mid-run it would hold the chain the run's steps move, and cover the card.
+ * The tutorial's own DUNGEON choice enters it and ends the run.
+ */
+export const TUTORIAL_MESSAGE = 'Finish or close the tutorial first.'
 export const NO_GAMES_LINE = 'No games found yet.'
 
-/** Why no game can be entered now, or null: the tour, else useGame enterBlocked. */
+/** Why no game can be entered from here now, or null: the tour, a tutorial run, else useGame enterBlocked. */
 export function whyNoEnter(): string | null {
-  return useDemo.getState().active ? TOUR_MESSAGE : enterBlocked()
+  if (useDemo.getState().active) return TOUR_MESSAGE
+  if (useTutorial.getState().active) return TUTORIAL_MESSAGE
+  return enterBlocked()
 }
 
 export function GamesPanel(): JSX.Element {
@@ -47,6 +57,7 @@ export function GamesPanel(): JSX.Element {
   const busy = useGame((s) => s.busy)
   // Drawn again whenever anything enterBlocked reads changes.
   useDemo((s) => s.active)
+  useTutorial((s) => s.active)
   useTv((s) => s.on)
   useWorkshop((s) => s.open)
   useWalk((s) => s.queue.length + (s.open ? 1 : 0) + (s.running ? 1 : 0) + (s.falling ? 1 : 0))

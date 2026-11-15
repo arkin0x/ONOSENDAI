@@ -81,7 +81,8 @@ export const HELD_BATCH = 100
 /**
  * How long a tagged spawn's chain is asked after, s: two weeks, NEW ARRIVALS'
  * window and the week before it. A key that has done nothing untagged by
- * then (left during the tutorial) is not asked after again, and so is never
+ * then (left during the tutorial without a move made with its card folded,
+ * which goes out untagged) is not asked after again, and so is never
  * counted, unless it spawns again untagged.
  */
 export const HELD_MAX_AGE_S = 14 * 24 * 60 * 60

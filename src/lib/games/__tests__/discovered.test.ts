@@ -22,11 +22,17 @@ const mem = vi.hoisted(() => {
 })
 
 // The registry as each test asks: the real one (the DEV dungeon, src/test/noNetwork.ts), or the live dungeon under its real key.
-const reg = vi.hoisted(() => ({ live: false }))
+// 'starterOff': the starter's key, but its world a bundled fixture, so not live.
+const reg = vi.hoisted(() => ({ live: false, starterOff: false }))
 vi.mock('../registry', async (orig) => {
   const real = await orig<typeof import('../registry')>()
-  const { tutorialGameFor, TUTORIAL_PUBKEY } = await import('../tutorialGame')
-  return { ...real, implementedGames: () => (reg.live ? [tutorialGameFor(TUTORIAL_PUBKEY)] : real.implementedGames()) }
+  const { tutorialGameFor, TUTORIAL_PUBKEY, TUTORIAL_FIXTURE_WORLD } = await import('../tutorialGame')
+  return {
+    ...real,
+    implementedGames: () => (reg.live
+      ? [tutorialGameFor(TUTORIAL_PUBKEY)]
+      : reg.starterOff ? [{ ...tutorialGameFor(TUTORIAL_PUBKEY), world: TUTORIAL_FIXTURE_WORLD }] : real.implementedGames()),
+  }
 })
 
 import type { ActionEvent } from '../../events'
@@ -50,6 +56,7 @@ beforeEach(() => {
   // The DEV dungeon every test plays (src/test/noNetwork.ts) is on by this device's switch.
   mem.set('onosendai:games', '1')
   reg.live = false
+  reg.starterOff = false
 })
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 
@@ -103,7 +110,11 @@ describe('the starter game: the live tutorial dungeon, listed for everyone (owne
     expect(found([TUTORIAL_PUBKEY], [enter(TUTORIAL_PUBKEY)])).toEqual([TUTORIAL_PUBKEY])
   })
 
-  it('only while live: the DEV placeholder a device switched on still needs finding', () => {
+  it('only while live: the starter under a world that is not live, or the DEV placeholder, still needs finding', () => {
+    reg.starterOff = true
+    expect(found()).toEqual([])
+    expect(found([TUTORIAL_PUBKEY])).toEqual([TUTORIAL_PUBKEY])
+    reg.starterOff = false
     expect(found()).toEqual([])
     expect(found([DUNGEON])).toEqual([DUNGEON])
   })

@@ -50,7 +50,7 @@ vi.mock('zustand', async (importOriginal) => {
   return { ...real, create: (init?: Parameters<typeof real.create>[0]) => (init === undefined ? live : live(init)) }
 })
 
-import { GamesPanel, NO_GAMES_LINE, TOUR_MESSAGE } from '../GamesPanel'
+import { GamesPanel, NO_GAMES_LINE, TOUR_MESSAGE, TUTORIAL_MESSAGE } from '../GamesPanel'
 import { GAME_AT_HEAD_MESSAGE, GAME_BUSY_MESSAGE, GAME_CHOOSE_FIRST_MESSAGE, GAME_HOLDS_MESSAGE, GAME_IN_TRANSIT_MESSAGE, GAME_NEEDS_CHAIN_MESSAGE, useCyberspace } from '../../store/useCyberspace'
 import { COVERED_MESSAGE, GAME_ALREADY_MESSAGE, WALK_BUSY_MESSAGE, useGame } from '../../store/useGame'
 import { useWalk } from '../../store/useWalk'
@@ -198,6 +198,8 @@ describe('the GAMES panel', () => {
       [GAME_IN_TRANSIT_MESSAGE, () => useCyberspace.setState({ transit: { stage: 'boarded' } as never }), () => useCyberspace.setState({ transit: null })],
       [COVERED_MESSAGE, () => useTv.setState({ on: true }), () => useTv.setState({ on: false })],
       [TOUR_MESSAGE, () => useDemo.setState({ active: true }), () => useDemo.setState({ active: false })],
+      // Listed for everyone from the first step (owner, 2026-11-14), but never entered from here mid-run.
+      [TUTORIAL_MESSAGE, () => useTutorial.setState({ active: true }), () => useTutorial.setState({ active: false })],
       [GAME_ALREADY_MESSAGE, () => useGame.setState({ busy: 'entering' }), () => useGame.setState({ busy: null })],
       [COVERED_MESSAGE, () => useWorkshop.setState({ open: true }), () => useWorkshop.setState({ open: false })],
       [WALK_BUSY_MESSAGE, () => useWalk.setState({ falling: true }), () => useWalk.setState({ falling: false })],

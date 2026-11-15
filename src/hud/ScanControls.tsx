@@ -15,8 +15,8 @@
  * orb like the fly buttons, in purple, that says SCAN. Under the height a tag
  * says who computes it: this device, free, up to its benchmark; HOSAKA, with
  * the price, above it; a cube already held is only asked about again. While
- * a scan runs the orb is CANCEL and a line under the controls says how far
- * along it is; then what it found. A HOSAKA height the Cloud compute mode
+ * a scan runs the orb is CANCEL and a line under the height, centred in its
+ * column as SCAN HEIGHT is, says how far along it is; then what it found. A HOSAKA height the Cloud compute mode
  * asks about (ASK, or AUTO over its cap) takes two presses: the first arms
  * CONFIRM with the price, the second pays (store/useScan.ts). A HOSAKA scan
  * paid for has no CANCEL: it finishes, and the key is held as bought.
@@ -169,13 +169,14 @@ function ScanDock(): JSX.Element {
           </button>
           {!cloud && !job && <span className="flyorb__key" aria-hidden>SPACE</span>}
         </div>
+        {/* Under the height, in its column and on its centre line, as SCAN HEIGHT is (owner, 2026-11-15). */}
+        {line && (
+          <div className={`scanorbs__line${result?.kind === 'failed' && !job && !armed ? ' is-error' : ''}`} role="status">
+            <span className="scanorbs__words">{line}</span>
+            {percent !== null && <span className="scanorbs__bar" aria-hidden><span style={{ width: `${percent}%` }} /></span>}
+          </div>
+        )}
       </div>
-      {line && (
-        <div className={`scanorbs__line${result?.kind === 'failed' && !job && !armed ? ' is-error' : ''}`} role="status">
-          <span>{line}</span>
-          {percent !== null && <span className="scanorbs__bar" aria-hidden><span style={{ width: `${percent}%` }} /></span>}
-        </div>
-      )}
     </div>
   )
 }

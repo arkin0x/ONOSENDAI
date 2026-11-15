@@ -10813,7 +10813,8 @@ a.feed__act { text-decoration: none; }
    to its right a fly orb in purple that says SCAN. */
 .flyorbs.scanorbs { flex-direction: column; align-items: flex-start; gap: 4px; }
 :root { --scanorbs-w: 172px; }
-.scanorbs__row { display: flex; align-items: center; gap: 8px; }
+/* A grid, so the status line sits under the stepper in its column (.scanorbs__line) and the orb stays centred on the stepper alone. */
+.scanorbs__row { display: grid; grid-template-columns: auto auto; align-items: center; column-gap: 8px; row-gap: 4px; }
 .scanorbs__go { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .scanorbs__stepper {
   display: flex;
@@ -10884,20 +10885,29 @@ a.feed__act { text-decoration: none; }
 .scanorb__word { position: relative; z-index: 1; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
 .scanorb__sats { position: relative; z-index: 1; font-size: 7.5px; letter-spacing: 0.06em; color: var(--accent); }
 .scanorbs .flyorb__key { color: var(--scan); }
-/* How far along a scan is, then what it found. */
+/* How far along a scan is, then what it found: under the height, in the
+   stepper's column and on its centre line, white with the value's shadow
+   (owner, 2026-11-15). The line takes the column's width without widening
+   it (width 0, min-width 100%), so the SCAN orb never moves; a longer line
+   reaches a little past both edges, centred, and wraps past that. */
 .scanorbs__line {
+  grid-column: 1;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 3px;
-  max-width: 170px;
+  width: 0;
+  min-width: 100%;
   font-size: 9px;
   letter-spacing: 0.08em;
   font-weight: 700;
-  color: var(--scan);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  color: #fff;
+  text-align: center;
+  text-shadow: 0 1px 3px #000;
 }
+.scanorbs__words { width: max-content; max-width: calc(100% + 24px); }
 .scanorbs__line.is-error { color: var(--warn); font-weight: 600; letter-spacing: 0.02em; }
-.scanorbs__bar { display: block; width: 120px; height: 3px; border-radius: 2px; background: rgba(var(--scan-rgb), 0.2); overflow: hidden; }
+.scanorbs__bar { display: block; width: 100%; height: 3px; border-radius: 2px; background: rgba(var(--scan-rgb), 0.2); overflow: hidden; }
 .scanorbs__bar > span { display: block; height: 100%; background: var(--scan); }
 /* A phone on its side: the dock is a row beside the menu button there. */
 @media (max-height: 520px) {

@@ -86,7 +86,8 @@ export const useItemFeed = create<ItemFeedState>((set, get) => ({
     const { readAt, loading } = get()
     if (readAt > 0 || loading || Date.now() - ensuredAt < ENSURE_RETRY_MS) return
     ensuredAt = Date.now()
-    void get().load()
+    // A card drawing a lock never fails for want of the feed: load says what went wrong in `trouble`.
+    get().load().catch(() => {})
   },
 
   publish: async (key) => {

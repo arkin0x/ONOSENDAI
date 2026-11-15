@@ -54,9 +54,10 @@ import { useItemFeed } from '../../store/useItemFeed'
 import { useMutes } from '../../store/useMutes'
 import { useShards } from '../../store/useShards'
 import { rememberOpened } from '../../store/useOpenedChests'
+import { doorSecret, keepDoorSecret } from '../../store/doorSecrets'
 import { NOTHING_MUTED } from '../../lib/muteList'
 import { ChestBlock } from '../ItemRows'
-import { IN_YOUR_ITEMS, NOT_FOUND, OPENS_WITH } from '../KeyListingRow'
+import { IN_YOUR_ITEMS, NOT_FOUND, OPENS_WITH, YOU_HAVE_IT } from '../KeyListingRow'
 
 const at = { x: 1n, y: 2n, z: 3n }
 const place = { lookupId: 'l', bagId: 'b', at: { x: '1', y: '2', z: '3' }, plane: 0 as const, height: 4 }
@@ -175,13 +176,37 @@ describe('OPENS WITH', () => {
     useItemFeed.setState({ listings: [listing(moon, 'Moon Key', getPublicKey(generateSecretKey()))] })
     hold(moon)
     const door = chestFor(moon, 'the moon key', 4)
+    // Found where it stands, so ChestBlock reads it as a door (its `door` tag), not a chest.
+    useShards.getState().addDiscovered([{ eventId: door.id, inner: door.event, keyHex: 'aa'.repeat(32), bagId: 'b', lookupId: 'l', author: door.event.pubkey, at, plane: 0, height: 4, createdAt: 1, type: 'chest', chest: chestItemOf(door.event)! }])
+    expect(useShards.getState().discovered[door.id]?.inner?.tags.some((t) => t[0] === 'door')).toBe(true)
     const m = await mount(block(door))
     expect(textOf(lockRows(m.all())[0])).toContain('Moon Key')
     await m.press(/^DETAILS$/)
     const drawn = everything(m.all())
     expect(drawn).not.toContain(moon.secretHex)
-    // What the lock is sealed around never shows: its payload and sender key stay in the event.
+    // What the lock is sealed around never shows: its payload stays in the event.
     expect(drawn).not.toContain(chestItemOf(door.event)!.payload.slice(0, 32))
+    await m.unmount()
+    // Opened here with its secret kept on this device: CLOSE, and no OPENS WITH; the secret is never drawn.
+    const secret = 'cd'.repeat(32)
+    keepDoorSecret(me, door.id, secret)
+    rememberOpened(me, door.id, moon.itemPubkey, [])
+    await vi.waitFor(() => expect(doorSecret(me, door.id)).toBe(secret))
+    const n = await mount(block(door))
+    expect(n.buttons(/^CLOSE$/)).toHaveLength(1)
+    expect(lockRows(n.all())).toHaveLength(0)
+    expect(everything(n.all())).not.toContain(secret)
+    await n.unmount()
+  })
+
+  it('says YOU HAVE IT, never NOT FOUND, when what opens it is not a key item in ITEMS (a lock to your own identity that was listed)', async () => {
+    const self = { name: 'me', about: '', itemPubkey: me, secretHex: '' } as KeyItem
+    useItemFeed.setState({ listings: [listing(self, 'My Sigil', me)] })
+    const m = await mount(block(chestFor(self, '')))
+    const words = textOf(lockRows(m.all())[0])
+    expect(words).toContain(YOU_HAVE_IT)
+    expect(words).not.toContain(NOT_FOUND)
+    expect(m.buttons(/^OPEN$/)).toHaveLength(1)
     await m.unmount()
   })
 

@@ -24,7 +24,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useProfile } from '../hooks/useProfile'
 import { listingForLock, type ItemListing } from '../lib/itemListing'
-import { heldKeypairs } from '../lib/inventory'
+import { holdsKeypair } from '../lib/inventory'
 import { hidesThing } from '../lib/muteList'
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
@@ -42,13 +42,19 @@ export const OPENS_WITH = 'OPENS WITH'
 export const NOT_FOUND = 'NOT FOUND'
 /** The chip on one you hold (the word a found key's line says once taken, ItemRows KeyLine). */
 export const IN_YOUR_ITEMS = 'IN YOUR ITEMS'
+/**
+ * The chip when what opens it is not a key item in ITEMS but you have it all
+ * the same: a region or room key you carry, or your own identity, that
+ * someone listed (DECK-0004 §3.8 locks). Rare; never NOT FOUND beside OPEN.
+ */
+export const YOU_HAVE_IT = 'YOU HAVE IT'
 
 /**
  * A published key item as a row: its picture, name, who listed it and when,
  * NOT FOUND or IN YOUR ITEMS, and DETAILS. `size` is the picture's side, for
  * a narrow column (a bag's list, a chest inside a chest).
  */
-export function KeyListingRow({ listing, held, size }: { listing: ItemListing; held: boolean; size?: number }): JSX.Element {
+export function KeyListingRow({ listing, held, size }: { listing: ItemListing; held: boolean | 'other'; size?: number }): JSX.Element {
   const profile = useProfile(listing.lister)
   const who = profileLabel(profile, safeNpub(listing.lister))
   const [open, setOpen] = useState(false)
@@ -60,7 +66,9 @@ export function KeyListingRow({ listing, held, size }: { listing: ItemListing; h
         title={listing.about || listing.name}
         source={<span className="items-feed__src"><span>listed by</span><ProfileTap pubkey={listing.lister} className="items-feed__who" title={who}><ProfilePic pubkey={listing.lister} size={12} /><span className="items-feed__name">{who}</span></ProfileTap></span>}
         at={listing.createdAt}
-        chips={held
+        chips={held === 'other'
+          ? <span className="item__chip tag items-feed__held" title="Something you have opens it">{YOU_HAVE_IT}</span>
+          : held
           ? <span className="item__chip tag items-feed__held" title="It is in your ITEMS">{IN_YOUR_ITEMS}</span>
           : <span className="item__chip tag items-feed__unfound" title="You have not found this item. Find it to hold it">{NOT_FOUND}</span>}
       />
@@ -96,12 +104,15 @@ export function useLockListing(lock: string): ItemListing | null {
 
 /**
  * OPENS WITH over the listed key item a locked door or chest is sealed to,
- * with whether you hold it. Nothing when its key is not listed.
+ * with whether you hold it. `opens`: something you have opens it (ChestBlock's
+ * opener), which may be a carried region key or your identity rather than a
+ * key item. Nothing when its key is not listed.
  */
-export function OpensWith({ lock, size }: { lock: string; size?: number }): JSX.Element | null {
+export function OpensWith({ lock, opens = false, size }: { lock: string; opens?: boolean; size?: number }): JSX.Element | null {
   const listing = useLockListing(lock)
-  const held = useInventory((s) => heldKeypairs(s.items).has(lock))
+  const inItems = useInventory((s) => holdsKeypair(s.items, lock))
   if (!listing) return null
+  const held = inItems ? true : opens ? 'other' : false
   return (
     <div className="lockkey">
       <span className="legend__label lockkey__label">{OPENS_WITH}</span>

@@ -395,8 +395,8 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
       {/* Locked: the listed key item its lock is sealed to, if anyone listed it (KeyListingRow OpensWith).
           Across a DISCOVERED NEARBY or OTHER LOOT row's whole width (contentsIn), where an open one lists its contents. */}
       {locked && (contentsIn !== undefined
-        ? contentsIn && createPortal(<OpensWith lock={chest.lockPubkey} />, contentsIn)
-        : <OpensWith lock={chest.lockPubkey} size={inChest || !actsBelow ? CHEST_INLINE_PX : undefined} />)}
+        ? contentsIn && createPortal(<OpensWith lock={chest.lockPubkey} opens={!!opener} />, contentsIn)
+        : <OpensWith lock={chest.lockPubkey} opens={!!opener} size={inChest || !actsBelow ? CHEST_INLINE_PX : undefined} />)}
       {offerOpen && !closedHere && carried && <span className="chest__fits">A key you carry fits: {carriedLabel(carried, useCyberspace.getState().position)}</span>}
       {status && <span className="chest__status" role="status">{status}</span>}
       {actsBelow && (offerOpen || canClose) && <div className="chest__below">{acts}</div>}

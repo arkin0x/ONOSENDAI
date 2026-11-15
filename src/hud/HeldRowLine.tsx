@@ -39,7 +39,7 @@ export function HeldRowLine({ name, title, source, how, at, chips }: { name: str
       <span className="item__name" title={title ?? name}>{name}</span>
       <span className="item__meta held__meta">
         <span className="held__src">{source}</span>
-        <span className="held__age">{' · '}{how ? `${how} ` : ''}<span title={formatStamp(at)}>{formatAgo(at)}</span></span>
+        <span className="held__age">{'\u00a0· '}{how ? `${how} ` : ''}<span title={formatStamp(at)}>{formatAgo(at)}</span></span>
       </span>
       {chips && <span className="held__chips">{chips}</span>}
     </span>

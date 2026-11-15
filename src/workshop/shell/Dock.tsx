@@ -3,9 +3,9 @@
  * places (workshop redesign, phase 1): the tools in a fixed order, each an
  * icon and a word, then the color in hand, always last. The tool in hand is
  * lit. It replaces the TOOLS chip and panel and the put-down X: LOOK is the
- * tool that builds nothing, a tap away like the rest. The keys stay as they
- * were (1 LOOK, 2 STAMP, 3 ADD, 4 SELECT, 5 FACE), and PAINT, the sixth
- * tool (phase 3), is 6.
+ * tool that builds nothing, a tap away like the rest. The keys run 1 to 6
+ * along the dock, left to right: 1 LOOK, 2 STAMP, 3 SELECT, 4 PAINT, 5 ADD,
+ * 6 FACE (owner ruling, 2026-11-15).
  */
 
 import { Eye, MousePointer2, Paintbrush, Plus, Stamp, Triangle, type LucideIcon } from 'lucide-react'
@@ -18,15 +18,16 @@ export interface ToolSlot { tool: Tool; label: string; icon: LucideIcon; key: st
 
 /**
  * The order the dock shows them, which never changes: the proposal's order,
- * LOOK, STAMP, SELECT, PAINT (a beginner's four), then ADD and FACE.
+ * LOOK, STAMP, SELECT, PAINT (a beginner's four), then ADD and FACE. The keys
+ * follow the same order, 1 to 6.
  */
 export const DOCK: ToolSlot[] = [
   { tool: 'view', label: 'LOOK', icon: Eye, key: '1' },
   { tool: 'stamp', label: 'STAMP', icon: Stamp, key: '2' },
-  { tool: 'select', label: 'SELECT', icon: MousePointer2, key: '4' },
-  { tool: 'paint', label: 'PAINT', icon: Paintbrush, key: '6' },
-  { tool: 'add', label: 'ADD', icon: Plus, key: '3' },
-  { tool: 'face', label: 'FACE', icon: Triangle, key: '5' },
+  { tool: 'select', label: 'SELECT', icon: MousePointer2, key: '3' },
+  { tool: 'paint', label: 'PAINT', icon: Paintbrush, key: '4' },
+  { tool: 'add', label: 'ADD', icon: Plus, key: '5' },
+  { tool: 'face', label: 'FACE', icon: Triangle, key: '6' },
 ]
 
 /** A tool's slot by its id. */

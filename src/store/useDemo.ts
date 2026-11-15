@@ -139,7 +139,7 @@ function takeSession(): TourSession {
   const l = useLayers.getState()
   return {
     scaleExp: cs.scaleExp,
-    layers: { dots: l.dots, boxes: l.boxes, walkAvatarHidden: l.walkAvatarHidden, walkLookSphere: l.walkLookSphere, headlamp: l.headlamp, audioSpheres: l.audioSpheres },
+    layers: { dots: l.dots, boxes: l.boxes, walkAvatarHidden: l.walkAvatarHidden, walkLookSphere: l.walkLookSphere, headlamp: l.headlamp, audioSpheres: l.audioSpheres, glow: l.glow },
     chatOpen: useChat.getState().open,
     hadHops: hasHop(cs.events),
     spectate: cs.spectate?.pubkey ?? null,

@@ -50,6 +50,7 @@ export function ViewPanel(): JSX.Element {
   const walkLookSphere = useLayers((s) => s.walkLookSphere)
   const headlamp = useLayers((s) => s.headlamp)
   const audioSpheres = useLayers((s) => s.audioSpheres)
+  const glow = useLayers((s) => s.glow)
   const gravity = useWalk((s) => s.gravity)
   const showTrail = useCyberspace((s) => s.showTrail)
   const showSecrets = useCyberspace((s) => s.showSecrets)
@@ -141,6 +142,16 @@ export function ViewPanel(): JSX.Element {
       on: audioSpheres,
       set: (v) => useLayers.getState().setLayer('audioSpheres', v),
     },
+    // The halos round a POINTS object's points, LIGHT or FOG (DECK-0003
+    // §1.16; scene/PointBillboards.tsx). On by default; off for a slow phone.
+    // The workshop's bench draws them either way, so an author sees them.
+    {
+      id: 'view-glow',
+      title: 'Glow',
+      hint: 'Draw object glow.',
+      on: glow,
+      set: (v) => useLayers.getState().setLayer('glow', v),
+    },
     // Your list of hidden things, saved to the relay encrypted to you, so every
     // device signed in as you lists it (store/hidesSync.ts; owner ruling,
     // 2026-11-15). On by default; off keeps the list on this device.
@@ -183,6 +194,8 @@ export function ViewPanel(): JSX.Element {
         exactly its own color. Sound spheres are blue rings around each hidden
         sound you have found or placed: inside one it plays at full volume, and
         it fades to silence at its region's walls.
+        Glow draws the light or fog some objects cast around their points;
+        turn it off if a slow phone struggles. The workshop shows it either way.
         Sync hidden list is the one switch here that reaches the relay. Your
         list of hidden things is saved to the relay, encrypted so only you can
         read it. Any device signed in as you shows the same list and can open

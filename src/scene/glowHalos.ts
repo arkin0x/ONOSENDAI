@@ -186,7 +186,7 @@ export function haloNoise(): DataTexture {
 // ---- the halo ----------------------------------------------------------------------
 
 /** How much the noise shapes a halo: 0 a plain glow, 1 all cloud. Subtle. */
-export const HALO_NOISE = 0.45
+export const HALO_NOISE = 0.3
 /** The gaussian's steepness: the share of GLOW STRENGTH left halfway out is about (e^-0.75k - e^-k) / (1 - e^-k). */
 export const HALO_FALLOFF = 3
 
@@ -220,6 +220,7 @@ const haloVertex = /* glsl */ `
 
   #include <clipping_planes_pars_vertex>
 
+  // The scene's fog as a share, by straight-line distance as the scene fogs (scene/radialFog.ts): a halo fades out into it.
   float fogShare(float depth) {
     #ifdef USE_FOG
       #ifdef FOG_EXP2
@@ -254,7 +255,7 @@ const haloVertex = /* glsl */ `
     float fade = keep
       * smoothstep(uMinPx * uDpr, 1.5 * uMinPx * uDpr, px)
       * smoothstep(0.5 * shown, shown, length(mv.xyz))
-      * (1.0 - fogShare(depth));
+      * (1.0 - fogShare(length(mv.xyz)));
     vFade = fade;
     // The point's own disc, as a share of the halo drawn: the halo leaves it clear, so the point shows on top of its own glow.
     float corePx = uCore > 0.0 ? clamp(uCore * k * att, uCoreMinPx * uDpr, uCoreMaxPx * uDpr) * 0.5 : 0.0;
@@ -396,6 +397,7 @@ const coreVertex = /* glsl */ `
   varying float vHeadlampDistance;
 
   #include <clipping_planes_pars_vertex>
+  #include <fog_pars_vertex>
 
   void main() {
     vColor = aColor;
@@ -410,6 +412,8 @@ const coreVertex = /* glsl */ `
     #include <clipping_planes_vertex>
     gl_Position = projectionMatrix * mv;
     vHeadlampDistance = length(mv.xyz);
+    // Into the scene's fog as the GL point discs go (pointDisc.ts).
+    #include <fog_vertex>
   }
 `
 
@@ -424,6 +428,7 @@ const coreFragment = /* glsl */ `
   varying float vHeadlampDistance;
 ${HEADLAMP_DISTANCE_GLSL}
   #include <clipping_planes_pars_fragment>
+  #include <fog_pars_fragment>
 
   void main() {
     #include <clipping_planes_fragment>
@@ -436,6 +441,7 @@ ${HEADLAMP_DISTANCE_GLSL}
     vec3 color = vColor * (1.0 + uGlow * (1.0 - smoothstep(0.0, 0.8, d)));
     if (uHeadlamp > 0.5) color *= headlampDistance(vHeadlampDistance);
     gl_FragColor = vec4(color, alpha);
+    #include <fog_fragment>
   }
 `
 
@@ -449,10 +455,10 @@ ${HEADLAMP_DISTANCE_GLSL}
  * See-through, it blends and writes no depth, as the GL points do.
  */
 export function createCoreMaterial(size: number, glow: number, opacity: number, headlamp: boolean): ShaderMaterial {
-  return new ShaderMaterial({
+  const m = new ShaderMaterial({
     vertexShader: coreVertex,
     fragmentShader: coreFragment,
-    uniforms: {
+    uniforms: UniformsUtils.merge([UniformsLib.fog, {
       uSize: { value: size },
       uMinPx: { value: 1.5 },
       uMaxPx: { value: 64 },
@@ -461,13 +467,16 @@ export function createCoreMaterial(size: number, glow: number, opacity: number, 
       uHard: { value: opacity >= 1 ? 1 : 0 },
       uDpr: { value: 1 },
       uBufferHeight: { value: 1000 },
-      uHeadlamp: headlamp ? headlampUniforms.uHeadlamp : HEADLAMP_NEVER,
-      uHeadlampReach: headlampUniforms.uHeadlampReach,
-    },
+    }]),
     side: DoubleSide,
     transparent: true,
     forceSinglePass: true,
     depthWrite: opacity >= 1,
+    fog: true,
     clipping: true,
   })
+  // Shared by reference with every headlamp material (scene/headlamp.ts): merged uniforms are copies, so set after.
+  m.uniforms.uHeadlamp = headlamp ? headlampUniforms.uHeadlamp : HEADLAMP_NEVER
+  m.uniforms.uHeadlampReach = headlampUniforms.uHeadlampReach
+  return m
 }

@@ -844,10 +844,11 @@ export interface BagSettings {
 export const DEFAULT_BAG_SETTINGS: BagSettings = { heightTag: true, hint: null, riddle: '', contents: false, money: false }
 
 /**
- * Where the deploy bar's controls start for a NEW bag (owner ruling
- * 2026-11-13: "by default sector hints should be ON for all bags"): the
- * defaults with the sector hint on, where a sector can contain a region of
- * `height`. A hint must be at least the bag's height (spec §7.7) and a sector
+ * A NEW bag's settings with the sector hint on (owner ruling 2026-11-13: "by
+ * default sector hints should be ON for all bags"), where a sector can
+ * contain a region of `height`. The game and tutorial bags take these as
+ * they are; the deploy bar lays the player's saved hint switches over them
+ * (store/deployHintPrefs.ts, all ON until touched). A hint must be at least the bag's height (spec §7.7) and a sector
  * is 30 on every axis, so above height 30 it starts off. DEFAULT_BAG_SETTINGS
  * stays what a bag that names no settings means, so a bag already out, a
  * room's bag (lib/doors.ts ROOM_BAG_SETTINGS) and a chat envelope keep theirs.

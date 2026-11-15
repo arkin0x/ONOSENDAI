@@ -19,8 +19,8 @@
  *   orbits, held between REACH_MIN and REACH_MAX, so the falloff keeps its
  *   shape at every zoom (render coordinates are cells at the current 2^N) and
  *   every dolly, and WALK, whose eye sits on the avatar, gets REACH_MIN. It
- *   only dims gently: the fog takes things to black at the edge of the
- *   world's reach (scene/fog.ts).
+ *   only dims gently: the fog takes things to black far off, its distances
+ *   following the zoom (scene/fog.ts).
  *
  * Lines and points have no face to turn, so they take the distance only.
  *

@@ -4,20 +4,21 @@
  * darkness by a lot. maybe 10% of this.").
  *
  * Three things darkened a world face: the headlamp's facing (FACE_FLOOR), its
- * distance (DISTANCE_FLOOR), and the black fog's start (FOG_START_SHARE). The
+ * distance (DISTANCE_FLOOR), and the black fog (fog.ts). The
  * lights, tone mapping and bloom never touch a world face (unlit, not tone
  * mapped, read as dark by the bloom). A shard's vertex dots never fogged at
  * all, so far off they were all that showed; they take the fog now.
  *
- * Nearer than the fog's edge the darkening is about a tenth of the old (an
- * eighth to a seventh for ground seen near edge on, which keeps a little
- * shade for its shapes). The edge itself stays, to hide the cull line, so
- * over everything up to the fog's end it is about a fifth.
+ * Nearer than where the fog begins the darkening is about a tenth of the old
+ * (a little more for ground seen near edge on, which keeps a little shade for
+ * its shapes). The fog keeps the old one's long fade (it was a thin band at
+ * the draw edge for a while, #769, and the owner liked the old one better)
+ * but begins twice as far off and ends half as far again.
  */
 
 import { describe, expect, it } from 'vitest'
 import { DISTANCE_FLOOR, FACE_FLOOR, HEADLAMP_DISTANCE_GLSL, distanceShare, facingShare, patchHeadlamp } from '../headlamp'
-import { CULL_REACH, FOG_FAR, FOG_NEAR, FOG_START_SHARE, fogFar } from '../fog'
+import { FOG_FAR, FOG_NEAR, fogFar, fogNear } from '../fog'
 import { ShaderLib } from 'three'
 import { SHARD_DOTS, createDiscMaterial } from '../pointDisc'
 
@@ -25,16 +26,19 @@ import { SHARD_DOTS, createDiscMaterial } from '../pointDisc'
 const fogFactor = (d: number, near: number, far: number): number => Math.min(1, Math.max(0, (d - near) / (far - near)))
 
 /** What share of its colour a world face keeps, as the shaders take it. */
-function kept(d: number, nz: number, reach: number, far: number, share: number, face = facingShare(nz), dist = distanceShare(d, reach)): number {
-  return face * dist * (1 - fogFactor(d, far * share, far))
+function kept(d: number, nz: number, reach: number, near: number, far: number, face = facingShare(nz), dist = distanceShare(d, reach)): number {
+  return face * dist * (1 - fogFactor(d, near, far))
 }
 
+/** As the scene shades it now, for a third-person camera 26 cells from its target (the usual orbit). */
+const keptNow = (d: number, nz: number): number => kept(d, nz, 26, fogNear(false, 26), fogFar(false, 26))
+
 /** The old shading, as it stood before 2026-11-15, for the comparison. */
-function keptBefore(d: number, nz: number, reach: number, far: number): number {
+function keptBefore(d: number, nz: number, reach: number, far = 166): number {
   const face = 0.4 + 0.6 * Math.min(1, Math.abs(nz))
   const past = Math.max(0, d - reach * 0.75) / (reach * 1.6)
   const dist = 0.3 + 0.7 * Math.exp(-past)
-  return kept(d, nz, reach, far, 0.225, face, dist)
+  return kept(d, nz, reach, far * 0.225, far, face, dist)
 }
 
 /** The mean share of colour lost from `from` to `to` cells. */
@@ -46,11 +50,10 @@ function meanLoss(f: (d: number) => number, from: number, to: number): number {
 }
 
 describe('the darkening, cut to about a tenth', () => {
-  it('has the new values: faces keep 0.9 edge on, far things 0.93, the fog starts at 0.85 of its end', () => {
+  it('has the new values: faces keep 0.9 edge on, far things 0.93; TV\'s and WALK\'s fog fades from 48 to 96', () => {
     expect(FACE_FLOOR).toBe(0.9)
     expect(DISTANCE_FLOOR).toBe(0.93)
-    expect(FOG_START_SHARE).toBe(0.85)
-    expect(FOG_NEAR).toBeCloseTo(81.6, 9)
+    expect(FOG_NEAR).toBe(48)
     expect(FOG_FAR).toBe(96)
     expect(facingShare(0)).toBe(0.9)
     expect(distanceShare(1e6, 26)).toBeCloseTo(0.93, 6)
@@ -63,44 +66,44 @@ describe('the darkening, cut to about a tenth', () => {
     expect(shader.fragmentShader).toContain('return 0.9000 + 0.1000 * min(nz, 1.0);')
   })
 
-  it('loses about a tenth of what it lost nearer than the fog\'s edge, a fifth up to its end', () => {
-    // The usual orbit: 26 cells out, the fog black at 166, its edge from 141.1.
-    const reach = 26
-    const far = fogFar(false, 26)
-    expect(far).toBe(166)
-    const edge = far * FOG_START_SHARE
-    const ratio = (nz: number, to: number): number =>
-      meanLoss((d) => kept(d, nz, reach, far, FOG_START_SHARE), 5, to) / meanLoss((d) => keptBefore(d, nz, reach, far), 5, to)
+  it('loses about a tenth of what it lost nearer than where the fog begins, and much less out to the old fog\'s end', () => {
+    // The usual orbit: 26 cells out, the fog from 79 to 251 (it was 37.4 to 166).
+    const near = fogNear(false, 26)
+    expect([near, fogFar(false, 26)]).toEqual([79, 251])
+    const ratio = (nz: number, to: number): number => meanLoss((d) => keptNow(d, nz), 5, to) / meanLoss((d) => keptBefore(d, nz, 26), 5, to)
     // Facing the camera, a tenth or less; ground near edge on (nz 0.3) keeps a little more, for its shapes.
-    expect(ratio(1, edge)).toBeLessThan(0.1)
-    expect(ratio(0.6, edge)).toBeLessThan(0.14)
-    expect(ratio(0.3, edge)).toBeLessThan(0.17)
-    // The edge that hides the cull line is all that is left past it.
-    for (const nz of [0.3, 0.6, 1]) {
-      expect(ratio(nz, far), `nz ${nz}`).toBeLessThan(0.26)
-      expect(ratio(nz, far), `nz ${nz}`).toBeGreaterThan(0.15)
-    }
+    expect(ratio(1, near)).toBeLessThan(0.1)
+    expect(ratio(0.6, near)).toBeLessThan(0.14)
+    expect(ratio(0.3, near)).toBeLessThan(0.2)
+    // Out to where the old fog was black, the long fade takes about a third of what the old took.
+    for (const nz of [0.3, 0.6, 1]) expect(ratio(nz, 166), `nz ${nz}`).toBeLessThan(0.4)
   })
 
   it('keeps a tile 100 cells off coloured: most of its colour, where it kept a fifth or less', () => {
-    const far = fogFar(false, 26)
-    expect(keptBefore(100, 0.3, 26, far)).toBeLessThan(0.15)
-    expect(keptBefore(100, 1, 26, far)).toBeLessThan(0.25)
-    expect(kept(100, 0.3, 26, far, FOG_START_SHARE)).toBeGreaterThan(0.85)
-    expect(kept(100, 1, 26, far, FOG_START_SHARE)).toBeGreaterThan(0.9)
+    expect(keptBefore(100, 0.3, 26)).toBeLessThan(0.15)
+    expect(keptBefore(100, 1, 26)).toBeLessThan(0.25)
+    expect(keptNow(100, 0.3)).toBeGreaterThan(0.7)
+    expect(keptNow(100, 1)).toBeGreaterThan(0.8)
+    // And one 166 off, where the old fog was black, about half.
+    expect(keptBefore(166, 1, 26)).toBe(0)
+    expect(keptNow(166, 1)).toBeGreaterThan(0.4)
   })
 
-  it('still fades to black at the fog\'s end, so nothing pops where the layers stop drawing', () => {
-    for (const fromOrigin of [0, 26, 60, 96]) {
-      const far = fogFar(false, fromOrigin)
-      expect(far + fromOrigin).toBeLessThanOrEqual(CULL_REACH + 1e-9)
-      expect(kept(far, 1, 26, far, FOG_START_SHARE)).toBe(0)
-      // A soft edge, not a wall: the fade spans 15% of the distance.
-      expect(kept(far * 0.925, 1, 26, far, FOG_START_SHARE)).toBeGreaterThan(0.4)
-      expect(kept(far * 0.925, 1, 26, far, FOG_START_SHARE)).toBeLessThan(0.6)
+  it('fades to black gently over a long way, not at a thin band at the edge', () => {
+    for (const d of [2, 26, 60, 96, 400, 1280]) {
+      const near = fogNear(false, d)
+      const far = fogFar(false, d)
+      expect(kept(far, 1, d, near, far)).toBe(0)
+      // The fade is longer than the clear range before it is shorter than it: at least 2.3 times its start.
+      expect(far / near).toBeGreaterThanOrEqual(2.3)
+      // Half way through it, about half the colour.
+      const mid = kept((near + far) / 2, 1, d, near, far)
+      expect(mid).toBeGreaterThan(0.4)
+      expect(mid).toBeLessThan(0.55)
     }
     // TV's and WALK's own end.
-    expect(kept(96, 1, 8, fogFar(true, 0), FOG_START_SHARE)).toBe(0)
+    expect(kept(96, 1, 8, fogNear(true, 0), fogFar(true, 0))).toBe(0)
+    expect(fogFar(true, 0) / fogNear(true, 0)).toBe(2)
   })
 
   it('fogs a shard\'s vertex dots with its faces, so far off they no longer show alone or pop at the cull line', () => {

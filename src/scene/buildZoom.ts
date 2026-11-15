@@ -15,15 +15,14 @@
  *
  * And in every view the fog never darkens what the camera looks at (arkinox,
  * the same day, in HOP near its 96-cell limit: "the darkness is obscuring my
- * avatar at near the maximum zoom-out"): the layers' reach (the sphere about
- * the render origin past which nothing is drawn) doubles as far as the orbit
- * needs, one step at a time, and the fog's end goes out with the reach
- * (fog.ts fogFar), at least TARGET_FOG_SHARE times the orbit's distance. At
- * the usual orbit (26 cells) nothing changes: reach 192, fog 141 to 166.
+ * avatar at near the maximum zoom-out"): the fog's distances follow the
+ * orbit's (fog.ts), and the layers' reach (the sphere about the render origin
+ * past which nothing is drawn) doubles as far as the fog's end needs, one
+ * step at a time, always beyond it (nextReach), so a step is never seen.
  */
 
 import { create } from 'zustand'
-import { CULL_REACH, TARGET_FOG_SHARE } from './fog'
+import { CULL_REACH } from './fog'
 import { CAMERA_NEAR, ORBIT_MAX_DISTANCE } from './camera'
 
 /**
@@ -84,64 +83,30 @@ export function reachStep(need: number): number {
   return r
 }
 
-/** A smaller reach is aimed at only once the need is this share of it or less, so a zoom held near a step does not flip it. */
+/** A smaller reach is taken only once the need is this share of it or less, so a zoom or a re-anchor held near a step does not flip it. */
 export const SHRINK_SLACK = 0.8
 
 /**
- * The reach the fog is aimed inside: up at once to the step `need` asks for;
- * down only to a step the need is well inside (SHRINK_SLACK).
+ * The reach the layers draw to, from the `reach` now and how far from the
+ * render origin the fog's end now reaches (`need`: its end plus the camera's
+ * distance from the origin; radial fog, radialFog.ts, so a thing on the cull
+ * sphere is at least the reach less that distance from the camera). Up at
+ * once to the step the need asks for, in the same frame, so nothing past the
+ * old reach is seen before it is drawn; down only to a step the need is well
+ * inside (SHRINK_SLACK), where the fog is already black. The fog never looks
+ * at the reach, so a step changes only what is drawn in the black.
  */
-export function nextAim(aim: number, need: number): number {
+export function nextReach(reach: number, need: number): number {
   const up = reachStep(need)
-  if (up >= aim) return up
+  if (up >= reach) return up
   const down = reachStep(need / SHRINK_SLACK)
-  return down < aim ? down : aim
-}
-
-/**
- * How far past the layers' reach the fog may be left while it eases in, in
- * render cells: a re-anchor moves the camera up to a field's half-width
- * (GRID_RADIUS) in each axis in one frame, and the fog eases after it (fog.ts
- * FOG_TAU) as it always has. Inside this slack the reach is left be, so a
- * re-anchor never mounts and drops a ring of shards.
- */
-export const LAG_SLACK = 48
-
-/**
- * The reach the layers draw to, from the `reach` now, the `aim` and how far
- * from the render origin the fog now reaches (`fogReach`: its end plus the
- * camera's distance from the origin); `settled` when the fog has reached
- * where it is going. Up to the aim at once (the fog eases
- * out after it, so nothing is seen before it is drawn). Also up far enough
- * to cover a fog still easing in behind a fast pull-back, beyond
- * LAG_SLACK: a wheel zoom 1000 cells out moves the camera 50 cells in a
- * frame. Down only once the fog is black inside the smaller reach (to a cell),
- * so nothing seen is dropped, or once the fog has settled: held at its 96-cell
- * floor by a camera far from the origin it can never come inside, and the
- * reach would otherwise stay wide for good.
- */
-export function nextReach(reach: number, aim: number, fogReach: number, settled = false): number {
-  // A settled fog is where the aim put it: nothing easing to cover.
-  const want = settled ? aim : Math.max(aim, reachStep(fogReach - LAG_SLACK))
-  if (want >= reach) return want
-  return fogReach <= want + 1 || settled ? want : reach
-}
-
-/**
- * How far from the render origin the layers must draw for a camera
- * `distance` from its target and `fromOrigin` from the origin: the fog's
- * least end (fog.ts TARGET_FOG_SHARE) plus the camera's own distance out.
- * At the usual orbit that is well inside CULL_REACH; HOP and VIEW pulled
- * back to 96 need 384, BUILD at its 1280-cell limit 6144.
- */
-export function reachNeed(distance: number, fromOrigin: number): number {
-  return (Number.isFinite(distance) ? distance : 0) * TARGET_FOG_SHARE + fromOrigin
+  return down < reach ? down : reach
 }
 
 /**
  * The reach every culled layer draws to this frame (WorldShards, WorldMessages,
  * the avatars, the seeds, the chests ...), in render cells from the render
- * origin. CULL_REACH at the usual orbit, further as the orbit pulls back; set
- * by the scene's fog (Scene.tsx SceneFog), which is black inside it.
+ * origin. Set by the scene's fog (Scene.tsx SceneFog) beyond its end:
+ * 384 at the usual orbit, 768 at HOP's 96-cell limit, 6144 at BUILD's 1280.
  */
 export const useDrawReach = create<{ reach: number }>(() => ({ reach: CULL_REACH }))

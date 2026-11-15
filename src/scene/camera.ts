@@ -13,9 +13,9 @@ export const FOV = 55
 export const CAMERA_NEAR = 0.05
 
 /**
- * The far clipping plane, in render cells. The fog is black well inside it:
- * 192 at most in HOP and VIEW, about 4840 at BUILD's farthest pull-back
- * (buildZoom.ts).
+ * The far clipping plane, in render cells. The fog is black well inside it
+ * (fog.ts FOG_FAR_MAX): 496 at HOP's and VIEW's 96-cell limit, 4640 at
+ * BUILD's farthest pull-back (buildZoom.ts).
  */
 export const CAMERA_FAR = 6000
 

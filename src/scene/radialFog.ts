@@ -8,15 +8,15 @@
  * by straight-line distance (a sphere of CULL_REACH about the render origin,
  * scene/fog.ts), so at the edges a thing on the cull sphere was still a fifth
  * to a quarter visible when it popped. Fogging by the same distance makes the
- * bound exact (fogFar) and keeps the fog still while the camera turns.
+ * bound exact (buildZoom.ts nextReach) and keeps the fog still while the camera turns.
  *
  * One chunk, replaced on import, before any material compiles: main.tsx
  * imports this first, and Scene.tsx imports it too. Every fogged material in
  * the scene is one of three's own (the headlamp's patch keeps three's fog
  * includes), so all of them take it, and so do the shards' point discs
  * (pointDisc.ts includes three's fog chunks); the other custom shaders (the
- * point field, the walls) do not fog at all. Cyberspace TV's and WALK's fog distances are the
- * same numbers as before, now measured straight out.
+ * point field, the walls) do not fog at all. Every view's fog distances
+ * (fog.ts) are measured straight out.
  */
 
 import { ShaderChunk } from 'three'

@@ -1,8 +1,9 @@
 /**
- * sceneFog.test.ts - the default fog further off (arkinox, 2026-11-09: "can we
- * also make the default fog more distant? things turn black when they are
- * still pretty close"): twice the distances in the third-person views, the
- * old ones in Cyberspace TV and WALK, one Fog moved in place.
+ * sceneFog.test.ts - the scene fog: one Fog moved in place, its distances
+ * following the camera's distance from what it looks at (fog.ts), further off
+ * in the third-person views than in Cyberspace TV and WALK, measured straight
+ * out, and black before the layers stop drawing. How it follows the zoom is
+ * fogFollowsZoom.test.ts.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -14,85 +15,76 @@ const src = readFileSync('src/scene/Scene.tsx', 'utf8')
 const fogBody = src.slice(src.indexOf('function SceneFog()'), src.indexOf('\n}\n', src.indexOf('function SceneFog()')))
 
 describe('the scene fog', () => {
-  it('is VIEW_FOG_SCALE = 2 times TV\'s and WALK\'s 96 cells in the third-person views, starting at FOG_START_SHARE of its end', () => {
+  it('is TV\'s and WALK\'s 96 cells with a long fade from 48, and in the third-person views 40 + 1.5 d to 160 + 3.5 d', async () => {
     const fog = readFileSync('src/scene/fog.ts', 'utf8')
-    expect(fog).toMatch(/export const VIEW_FOG_SCALE = 2\n/)
-    expect(fog).toMatch(/export const FOG_START_SHARE = 0\.85\n/)
-    expect(fog).toMatch(/export const FOG_NEAR = FOG_FAR \* FOG_START_SHARE\n/)
     expect(fog).toMatch(/export const FOG_FAR = GRID_RADIUS \* 4\n/)
+    expect(fog).toMatch(/export const FOG_NEAR = FOG_FAR \/ 2\n/)
+    const { fogNear, fogFar, FOG_NEAR, FOG_FAR } = await import('../fog')
+    expect([FOG_NEAR, FOG_FAR]).toEqual([48, 96])
+    expect(fogNear(true, 0)).toBe(48)
+    expect(fogFar(true, 0)).toBe(96)
+    expect(fogNear(false, 26)).toBe(79)
+    expect(fogFar(false, 26)).toBe(251)
     expect(src).toMatch(/<SceneFog \/>/)
-    expect(src).not.toMatch(/<fog attach="fog" args=\{\[0x000000, GRID_RADIUS \* 0\.9, GRID_RADIUS \* 4\]\} \/>/)
+    // The thin band at the draw edge is gone.
+    expect(fog).not.toMatch(/FOG_START_SHARE/)
   })
 
-  it('keeps the old distances in TV and WALK, and eases one Fog in place every frame rather than making a new one', () => {
+  it('moves one Fog in place every frame, from the camera\'s distance to its target, rather than making a new one', () => {
     expect(fogBody).toMatch(/const base = useTv\.getState\(\)\.on \|\| useCyberspace\.getState\(\)\.walking\n/)
-    expect(fogBody).toMatch(/const fromOrigin = state\.camera\.position\.length\(\)\n/)
-    // Within the layers' reach, which BUILD pulled back widens (buildZoom.test.ts).
-    expect(fogBody).toMatch(/f\.far = fogFarStep\(f\.far, mode\.current, base, fromOrigin, dt, aim\.current, distance\)\n\s*mode\.current = base\n/)
+    expect(fogBody).toMatch(/const distance = controls \? state\.camera\.position\.distanceTo\(controls\.target\) : 0\n/)
+    expect(fogBody).toMatch(/from\.current = fogDistanceStep\(from\.current, mode\.current, base, distance, dt\)\n\s*mode\.current = base\n/)
     expect(fogBody).toMatch(/const mode = useRef<boolean \| null>\(null\)/)
-    expect(fogBody).toMatch(/f\.near = f\.far \* FOG_START_SHARE/)
+    expect(fogBody).toMatch(/f\.near = fogNear\(base, from\.current\)\n\s*f\.far = fogFar\(base, from\.current\)\n/)
+    // The camera's distance from the render origin never moves the fog (a re-anchor), only the reach.
+    expect(fogBody).toMatch(/nextReach\(was, f\.far \+ state\.camera\.position\.length\(\)\)/)
+    expect(fogBody).not.toMatch(/fromOrigin/)
     // The args are the Fog's first and only construction.
-    expect(fogBody).toMatch(/args=\{\[0x000000, FOG_NEAR \* VIEW_FOG_SCALE, FOG_FAR \* VIEW_FOG_SCALE\]\}/)
+    expect(fogBody).toMatch(/args=\{\[0x000000, fogNear\(false, 0\), fogFar\(false, 0\)\]\}/)
   })
 
-  it('S2a: a re-anchor\'s jump in the target is eased, the same at any frame rate, never a step', async () => {
-    const { easeFog, FOG_TAU } = await import('../fog')
-    // The reviewer's measured jump: 190.8 to 166.3 in one frame.
-    const run = (fps: number, seconds: number): { far: number; worst: number } => {
-      let far = 190.8
+  it('a jump in the camera\'s distance within a view glides, the same at any frame rate, never a step', async () => {
+    const { easeFog, fogDistanceStep, fogFar, FOG_TAU } = await import('../fog')
+    // A VIEW fly stopping: the view's centre comes in from 50 cells to 2 in one frame.
+    const run = (fps: number, seconds: number): { d: number; worst: number } => {
+      let d = 50
       let worst = 0
       for (let i = 0; i < Math.round(fps * seconds); i++) {
-        const next = easeFog(far, 166.3, 1 / fps)
-        worst = Math.max(worst, Math.abs(next - far))
-        far = next
+        const next = fogDistanceStep(d, false, false, 2, 1 / fps)
+        worst = Math.max(worst, Math.abs(fogFar(false, next) - fogFar(false, d)))
+        d = next
       }
-      return { far, worst }
+      return { d, worst }
     }
     const a = run(30, 1)
     const b = run(60, 1)
     const c = run(144, 1)
-    expect(a.far).toBeCloseTo(b.far, 9)
-    expect(b.far).toBeCloseTo(c.far, 9)
+    expect(a.d).toBeCloseTo(b.d, 9)
+    expect(b.d).toBeCloseTo(c.d, 9)
     // One time constant takes 1 - 1/e of the way.
-    expect(easeFog(190.8, 166.3, FOG_TAU)).toBeCloseTo(166.3 + 24.5 / Math.E, 9)
-    // At 60 fps no frame moves the end by more than 1.1 cells (it was 24.5 in one).
-    expect(b.worst).toBeLessThan(1.1)
+    expect(easeFog(50, 2, FOG_TAU)).toBeCloseTo(2 + 48 / Math.E, 9)
+    // At 60 fps no frame moves the end by more than 11 cells, where it fell 168 in one.
+    expect(b.worst).toBeLessThan(11)
+    expect(fogFar(false, 50) - fogFar(false, 2)).toBe(168)
     expect(easeFog(100, 150, 0)).toBe(100)
   })
 
-  it('N10: the first frame jumps straight to the target, in any mode, from the Fog\'s first distances', async () => {
-    const { fogFarStep, fogFar, FOG_FAR, VIEW_FOG_SCALE } = await import('../fog')
-    // The 24/7 broadcast page: TV on from the first frame, the Fog built at 192.
-    expect(fogFarStep(FOG_FAR * VIEW_FOG_SCALE, null, true, 40, 1 / 60)).toBe(96)
-    // A third-person view 26 out: 166 at once, not eased down from 192.
-    expect(fogFarStep(FOG_FAR * VIEW_FOG_SCALE, null, false, 26, 1 / 60)).toBe(fogFar(false, 26))
-    // Even with no time passed.
-    expect(fogFarStep(FOG_FAR * VIEW_FOG_SCALE, null, true, 0, 0)).toBe(96)
-  })
-
-  it('N10: TV or WALK on or off jumps to the new mode\'s fog; within a mode a re-anchor still eases', async () => {
-    const { fogFarStep, easeFog, fogFar } = await import('../fog')
-    // Entering TV or WALK from the usual orbit: 166 to 96 in one frame.
-    expect(fogFarStep(166, false, true, 26, 1 / 60)).toBe(96)
-    // Leaving: 96 to the third-person 166 in one frame.
-    expect(fogFarStep(96, true, false, 26, 1 / 60)).toBe(166)
-    // A re-anchor within a third-person view: eased, exactly as before.
-    expect(fogFarStep(190.8, false, false, 192 - 166.3, 1 / 60)).toBe(easeFog(190.8, 166.3, 1 / 60))
-    expect(fogFarStep(190.8, false, false, 192 - 166.3, 1 / 60)).toBeGreaterThan(189)
-    // And a frame run as SceneFog runs it: orbit, TV on, a TV cut far off, TV off.
-    let far = 192
-    let mode: boolean | null = null
-    const frame = (base: boolean, d: number): number => { far = fogFarStep(far, mode, base, d, 1 / 60); mode = base; return far }
-    expect(frame(false, 26)).toBe(166)
-    expect(frame(false, 26)).toBe(166)
-    expect(frame(true, 26)).toBe(96)
-    // In TV the end is 96 wherever the camera is: nothing to ease.
-    expect(frame(true, 300)).toBe(96)
-    expect(frame(false, 26)).toBe(166)
-    // A re-anchor after: eased from 166 toward the new target, not jumped.
-    const next = frame(false, 60)
-    expect(next).toBeLessThan(166)
-    expect(next).toBeGreaterThan(fogFar(false, 60))
+  it('N10: the first frame, and TV or WALK on or off, take the camera\'s distance at once', async () => {
+    const { fogDistanceStep, fogFar } = await import('../fog')
+    // The 24/7 broadcast page: TV on from the first frame.
+    expect(fogFar(true, fogDistanceStep(0, null, true, 12, 1 / 60))).toBe(96)
+    // A third-person view 26 out: 251 at once, not eased from the Fog's first distances.
+    expect(fogDistanceStep(0, null, false, 26, 1 / 60)).toBe(26)
+    expect(fogDistanceStep(0, null, true, 26, 0)).toBe(26)
+    // Entering TV from the orbit, leaving WALK for it: at once.
+    expect(fogDistanceStep(26, false, true, 8, 1 / 60)).toBe(8)
+    expect(fogDistanceStep(0.001, true, false, 30, 1 / 60)).toBe(30)
+    // Within a mode it glides.
+    expect(fogDistanceStep(26, false, false, 40, 1 / 60)).toBeGreaterThan(26)
+    expect(fogDistanceStep(26, false, false, 40, 1 / 60)).toBeLessThan(40)
+    // Not a number is no distance.
+    expect(fogDistanceStep(Number.NaN, false, false, 26, 1 / 60)).toBe(26)
+    expect(fogDistanceStep(26, false, false, Number.NaN, 10)).toBeCloseTo(0, 6)
   })
 
   it('S2b: three fogs by straight-line distance, so the bound below is exact at every screen edge', async () => {
@@ -114,23 +106,20 @@ describe('the scene fog', () => {
     }
   })
 
-  it('S2: the fog is black before the cull line: at most CULL_REACH less the camera\'s distance from the origin, never nearer than the old 96, 192 at most', async () => {
-    // Radial fog (S2b): a thing on the cull sphere is at least CULL_REACH - d from a camera d from
+  it('S2: the fog is black before the cull line: the layers draw at least as far as its end plus the camera\'s distance from the origin', async () => {
+    // Radial fog (S2b): a thing on the cull sphere is at least reach - o from a camera o from
     // the origin, straight-line, in every direction; fogged by that same distance, it is black.
-    const { fogFar, CULL_REACH, VIEW_FOG_SCALE } = await import('../fog')
+    const { fogFar, CULL_REACH } = await import('../fog')
+    const { nextReach } = await import('../buildZoom')
     expect(CULL_REACH).toBe(192)
-    expect(fogFar(true, 0)).toBe(96)
-    expect(fogFar(true, 500)).toBe(96)
-    expect(fogFar(false, 0)).toBe(96 * VIEW_FOG_SCALE)
-    // The usual orbit, 26 out over the cursor at the origin: black at 166, no further.
-    expect(fogFar(false, 26)).toBe(166)
-    for (let d = 0; d <= 96; d += 0.5) {
-      const far = fogFar(false, d)
-      expect(far + d).toBeLessThanOrEqual(CULL_REACH + 1e-9)
-      expect(far).toBeGreaterThanOrEqual(96)
+    for (const base of [true, false]) {
+      for (let d = 0; d <= 96; d += 0.5) {
+        for (const o of [0, d, d + 24 * Math.sqrt(3), 300]) {
+          const far = fogFar(base, d)
+          for (const was of [192, 384, 768, 1536]) expect(far + o, `${base} ${d} ${o} ${was}`).toBeLessThanOrEqual(nextReach(was, far + o))
+        }
+      }
     }
-    // Past the orbit's own 96-cell limit it keeps the old end, as before.
-    expect(fogFar(false, 150)).toBe(96)
   })
 
   it('S2: every culled layer in the scene reaches at least CULL_REACH, SecretRegions included', () => {

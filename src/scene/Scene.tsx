@@ -111,8 +111,8 @@ import { headlampReach, headlampUniforms } from './headlamp'
 import { lineFade } from './nearFade'
 import { canvasPixels, composerSamples } from './composerBudget'
 import './radialFog'
-import { CULL_REACH, fogFar, fogFarStep, FOG_FAR, FOG_NEAR, FOG_START_SHARE, VIEW_FOG_SCALE } from './fog'
-import { cameraNear, nextAim, nextReach, orbitMaxDistance, reachNeed, stepOrbitLimit, useDrawReach } from './buildZoom'
+import { fogDistanceStep, fogFar, fogNear } from './fog'
+import { cameraNear, nextReach, orbitMaxDistance, stepOrbitLimit, useDrawReach } from './buildZoom'
 import { flyGesture, panGesture, sceneMouse, steerToSpend, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
 import { StartLock } from '../lib/viewCamera'
 
@@ -385,20 +385,19 @@ function CellMetric(): null {
 const HEADLAMP_PRIORITY = 0.75
 
 /**
- * The scene's fog, further off in the third-person views (VIEW_FOG_SCALE),
- * its end held inside the layers' reach (CULL_REACH) as the camera moves.
- * One Fog for the page, its distances moved in place every frame (eased
- * within a mode, straight to the target on the first frame and on a change
- * of mode, fog.ts fogFarStep): a new Fog
- * object would send every fogged material back for its program (three
- * compares the fog by identity), where the distances are uniforms.
+ * The scene's fog, its start and end following the camera's distance from
+ * what it looks at (fog.ts fogNear, fogFar), smoothly, never stepping, and
+ * the layers' reach set beyond its end (buildZoom.ts nextReach). One Fog for
+ * the page, its distances moved in place every frame: a new Fog object would
+ * send every fogged material back for its program (three compares the fog by
+ * identity), where the distances are uniforms.
  */
 function SceneFog(): JSX.Element {
   const fog = useRef<Fog>(null)
   // The mode the last frame's fog was for (TV or WALK, or a third-person view); null before the first.
   const mode = useRef<boolean | null>(null)
-  // The reach the fog is aimed inside (buildZoom.ts nextAim); the layers' own is useDrawReach.
-  const aim = useRef(CULL_REACH)
+  // The camera's distance from its target the fog is set from, gliding after the real one (fog.ts fogDistanceStep).
+  const from = useRef(0)
   const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
   useLayoutEffect(() => {
     // The browser harness reads and sets it, as it reads __rig.
@@ -410,26 +409,18 @@ function SceneFog(): JSX.Element {
     // The browser harness can pin the fog, to shoot the old one against the new.
     if (import.meta.env.DEV) { const pin = (window as unknown as { __fogFixed?: [number, number] }).__fogFixed; if (pin) { f.near = pin[0]; f.far = pin[1]; return } }
     const base = useTv.getState().on || useCyberspace.getState().walking
-    const fromOrigin = state.camera.position.length()
-    // The fog never darkens what the camera looks at: as the orbit pulls back
-    // the layers' reach doubles ahead of it and the fog's end goes out with it
-    // (buildZoom.ts). At the usual orbit the reach is CULL_REACH and the fog
-    // is as it was.
     const distance = controls ? state.camera.position.distanceTo(controls.target) : 0
-    aim.current = nextAim(aim.current, reachNeed(distance, fromOrigin))
-    // Eased within a mode: a re-anchor moves the camera's distance from the
-    // origin in one frame, and the distant scene must not step darker with it
-    // (review S2a). The first frame and a change of mode jump there (N10).
-    f.far = fogFarStep(f.far, mode.current, base, fromOrigin, dt, aim.current, distance)
+    from.current = fogDistanceStep(from.current, mode.current, base, distance, dt)
     mode.current = base
-    f.near = f.far * FOG_START_SHARE
-    // The layers draw out to the aim at once, and back in only once the fog is black inside it.
+    f.near = fogNear(base, from.current)
+    f.far = fogFar(base, from.current)
+    // The layers draw at least as far as the fog's end can be seen from the
+    // camera, out at once and in only well inside it: a step is in the black.
     const was = useDrawReach.getState().reach
-    const settled = Math.abs(f.far - fogFar(base, fromOrigin, aim.current, distance)) < 0.5
-    const reach = nextReach(was, aim.current, f.far + fromOrigin, settled)
+    const reach = nextReach(was, f.far + state.camera.position.length())
     if (reach !== was) useDrawReach.setState({ reach })
   }, HEADLAMP_PRIORITY)
-  return <fog ref={fog} attach="fog" args={[0x000000, FOG_NEAR * VIEW_FOG_SCALE, FOG_FAR * VIEW_FOG_SCALE]} />
+  return <fog ref={fog} attach="fog" args={[0x000000, fogNear(false, 0), fogFar(false, 0)]} />
 }
 
 /**

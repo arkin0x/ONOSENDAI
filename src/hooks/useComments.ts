@@ -60,7 +60,8 @@ export function useComments(subject: CommentSubject | null): CommentsState {
   // subject that does not carry it (a key item in ITEMS, a thing out of a
   // chest) looks for one held here that fits the bag (store/bagKeys).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const looked = useMemo(() => (subject && !subject.bagKeyHex ? bagKeyFor(subject.lookupId) : undefined), [key, subject?.bagKeyHex])
+  // Looked for again on REFRESH, so a key that came after the card opened is picked up.
+  const looked = useMemo(() => (subject && !subject.bagKeyHex ? bagKeyFor(subject.lookupId) : undefined), [key, subject?.bagKeyHex, tick])
   const heldHex = subject?.bagKeyHex ?? looked
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const held = useMemo(() => (heldHex ? hexToBytes(heldHex) : null), [key, heldHex])

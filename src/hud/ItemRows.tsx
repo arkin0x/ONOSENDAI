@@ -185,7 +185,8 @@ export async function openChestHere(c: { id: string; chest: ChestItem; author: s
   const contents = readContents(raw, c.sealer)
   if (c.place) {
     // The room behind the door is drawn where the door stands.
-    const door = { eventId: c.id, bagId: c.place.bagId, lookupId: c.place.lookupId, author: c.author, at: positionOf(c.place), plane: c.place.plane, height: c.place.height }
+    // Its contents are in the bag the place names, by that bag's author when the place says it, even out of a chest inside a chest (lib/commentSubjects).
+    const door = { eventId: c.id, bagId: c.place.bagId, lookupId: c.place.lookupId, author: c.place.author ?? c.author, at: positionOf(c.place), plane: c.place.plane, height: c.place.height }
     const revealed = revealedIn(door, contents)
     useShards.getState().addDiscovered(revealed)
     // Behind a door, what is there appears as a scan's finds do, each settling
@@ -263,10 +264,11 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
   const [busy, setBusy] = useState(false)
   const who = useWho(author)
   const from: HeldFrom = { chestId: id, chestName: chest.name }
-  // What is taken out of it keeps who this chest names as its contents' author,
-  // as OPEN reveals them (openChestHere `author`), so a key item taken from it
+  // What is taken out of it keeps who OPEN names as its contents' author
+  // (openChestHere: the bag's author), so a key item taken from it
   // opens the same comment thread in ITEMS as here (lib/commentSubjects).
-  const contentPlace = useMemo(() => (place ? { ...place, author } : null), [place, author])
+  // The bag's author when the place says it (a chest inside a chest is still in that bag; its own signer may be a claim), else this chest's hider.
+  const contentPlace = useMemo(() => (place ? { ...place, author: place.author ?? author } : null), [place, author])
   // What the mute list hides is neither listed nor held (store/useMutes); never in a chest of yours.
   const muted = useMutes((s) => s.muted)
   const shownOf = (list: ChestEntry[], m: Muted): ChestEntry[] => list.filter((e) => !hidesThing(m, { authors: [author, e.event.pubkey], ids: [e.id] }, me))

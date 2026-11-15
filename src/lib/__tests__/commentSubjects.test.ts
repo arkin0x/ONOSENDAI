@@ -148,6 +148,22 @@ describe('no thread', () => {
     expect(isGuideKey(HIDER)).toBe(false)
   })
 
+  it('for a key taken out of a guide-sealed chest, said at TAKE: it holds after the guide key is gone or replaced', () => {
+    const guide = guideKey()
+    const entry: ChestEntry = { id: keyEv.id, event: keyEv, verified: true, body: { type: 'key', key: lock } }
+    const held = heldFromEntry(ME, entry, { chestId: 'chest-g', chestName: 'Tutorial welcome chest' }, { ...placeOf({ lookupId: LOOKUP, bagId: 'bag-g', at: AT, plane: 0, height: 3 }), author: guide.pubkey }, T)
+    expect(held.place?.guide).toBe(true)
+    // The guide key forgotten, and another one made: the row still has no thread.
+    localStorage.removeItem(GUIDE_KEY)
+    localStorage.setItem(GUIDE_KEY, bytesToHex(generateSecretKey()))
+    expect(isGuideKey(guide.pubkey)).toBe(false)
+    expect(subjectOfHeld(held, heldBagAuthor(held, { discovered: {}, mine: [], me: ME }))).toBeNull()
+    // A key from anyone else's chest is not marked.
+    const other = heldFromEntry(ME, entry, { chestId: 'chest-1', chestName: 'Box' }, { ...placeOf({ lookupId: LOOKUP, bagId: 'bag-1', at: AT, plane: 0, height: 4 }), author: HIDER }, T)
+    expect(other.place?.guide).toBeUndefined()
+    expect(subjectOfHeld(other, HIDER)).not.toBeNull()
+  })
+
   it('for something that is not a key item', () => {
     const held = { ...heldFromFind(ME, found, T)!, type: 'message' as const }
     expect(subjectOfHeld(held, HIDER)).toBeNull()

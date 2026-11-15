@@ -77,7 +77,7 @@ import { AudioCard } from './AudioCard'
 import { itemLineage } from '../lib/hidden'
 import { Explanation } from './Explanation'
 import { ChestBlock, KeyComments, Unsigned } from './ItemRows'
-import { heldBagAuthor, subjectOfHeld } from '../lib/commentSubjects'
+import { heldBagAuthor, subjectOfHeld, subjectOfWorldItem } from '../lib/commentSubjects'
 import { useCashu, cashuStateLabel } from './useCashu'
 import { useMutes } from '../store/useMutes'
 import { hidesThing } from '../lib/muteList'
@@ -295,8 +295,14 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
   const [refusal, setRefusal] = useState<string | null>(null)
   const actions = useRowActions(item.id, item.name)
   // COMMENT opens the thread of the bag it was found in, the one its card there opens (lib/commentSubjects).
+  // The very item standing in the world here (yours, or found here) names its card's thread itself.
   const bagAuthor = useShards((s) => heldBagAuthor(item, { discovered: s.discovered, mine: s.mine, me }))
-  const commentSubject = useMemo(() => subjectOfHeld(item, bagAuthor), [item, bagAuthor])
+  const standing = useShards((s) => !!s.discovered[item.id] || s.mine.some((d) => d.eventId === item.id))
+  const commentSubject = useMemo(() => {
+    if (item.place?.guide) return null
+    const world = standing ? useShards.getState().secretByEvent(item.id) : null
+    return world ? subjectOfWorldItem(world) : subjectOfHeld(item, bagAuthor)
+  }, [item, bagAuthor, standing])
   const list = async (): Promise<void> => {
     if (!item.key) return
     setRefusal(null)

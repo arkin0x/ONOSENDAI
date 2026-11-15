@@ -117,11 +117,12 @@ export function heldBagAuthor(item: Pick<HeldItem, 'place' | 'from' | 'source' |
  * The thread of a key item held in ITEMS, the same as its card's where it
  * was found (subjectOfWorldItem): its bag, and its lineage. Null for anything
  * but a key item, one pasted from another device (no place), one whose bag's
- * author cannot be told, and one a tutorial guide sealed.
+ * author cannot be told, and one a tutorial guide sealed (said at TAKE, or
+ * told now).
  */
 export function subjectOfHeld(item: Pick<HeldItem, 'id' | 'type' | 'event' | 'place'>, bagAuthor: string | null): CommentSubject | null {
   const place = item.place
-  if (item.type !== 'key' || !place?.lookupId || !bagAuthor) return null
+  if (item.type !== 'key' || !place?.lookupId || place.guide || !bagAuthor) return null
   const at = positionOfPlace(place.at)
   if (!at) return null
   return subjectOfWorldItem({

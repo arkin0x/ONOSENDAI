@@ -84,6 +84,8 @@ export interface ScanShown {
   route: 'local' | 'cloud' | 'held'
   /** The price on the button, for a HOSAKA height. */
   sats?: number | null
+  /** Arm CONFIRM first whatever the Cloud compute mode says: Space never pays on one press. */
+  confirmFirst?: boolean
 }
 
 /** A HOSAKA scan armed by a first press, waiting for the second (the Cloud compute mode asks). */
@@ -210,6 +212,29 @@ export function scanCubeShown(
   return { at: cs.cursor, height: scan.height }
 }
 
+/**
+ * Space in SCAN (hooks/useKeyboard.ts): what a tap of the SCAN button does,
+ * for what the button shows now. On a HOSAKA height it always takes two
+ * presses (arkinox, 2026-11-15): the first arms CONFIRM with the price, the
+ * second pays, whatever the Cloud compute mode would let a tap do, so one
+ * press never pays. Held down it does nothing more; nothing while a scan
+ * runs, nor where the button is disabled (no price yet, a purchase under way).
+ */
+export function scanSpace(repeat: boolean): void {
+  if (repeat) return
+  const scan = useScan.getState()
+  if (!scan.active || scan.job) return
+  const cs = useCyberspace.getState()
+  const range = currentScanRange()
+  const height = clampScanHeight(scan.height, range)
+  const held = heldCube(useSecrets.getState().keys, cs.cursor, cs.anchorPlane, height) !== null
+  const route = held ? 'held' : scanRoute(height, range)
+  if (route !== 'cloud') { void scan.start({ route }); return }
+  const sats = scanPrice(height)
+  if (sats === null || useSecrets.getState().buying) return
+  void scan.start({ route, sats, confirmFirst: true })
+}
+
 /** A HOSAKA scan's purchase is under way: RECALL and X leave it be. */
 export function scanBuying(): boolean {
   return useScan.getState().job?.route === 'cloud'
@@ -318,7 +343,7 @@ export const useScan = create<ScanState>((set, get) => ({
       const prefs = useCyberspace.getState().cloudPrefs
       const cube = cubeKey(at, plane, height)
       const armed = get().confirm
-      if (needsAsk(prefs.mode, price, prefs.autoMaxSats) && !(armed && armed.cube === cube && armed.height === height && armed.sats === price)) {
+      if ((needsAsk(prefs.mode, price, prefs.autoMaxSats) || shown?.confirmFirst) && !(armed && armed.cube === cube && armed.height === height && armed.sats === price)) {
         set({ confirm: { height, sats: price, cube }, result: null })
         return
       }

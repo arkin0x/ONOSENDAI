@@ -42,7 +42,7 @@ import { useCyberspace } from '../../store/useCyberspace'
 import { runTutorialEffect, useTutorial, watchFirstArrival } from '../../store/useTutorial'
 import { spawnPlace } from '../../store/useDemo'
 import { noteLanding, setTutorialSwitch } from '../gate'
-import { usePanelLayout } from '../../store/usePanelLayout'
+import { PANEL_LAYOUT_KEY, defaultOrder, usePanelLayout, type PanelId } from '../../store/usePanelLayout'
 import { useShards } from '../../store/useShards'
 import { useOpenedChests, openedKey } from '../../store/useOpenedChests'
 import { useInventory } from '../../store/useInventory'
@@ -924,17 +924,25 @@ describe('a run laid out where the player stands (/tutorial and RESTART, owner 2
   })
 })
 
-describe('the inventory step puts ITEMS at the top of the menu, whatever the order (feedback item 2)', () => {
-  it('under the default order, and under one with other panels first (#677\'s), ITEMS comes first', () => {
+describe('the inventory and build steps leave the menu order alone (owner, 2026-11-15)', () => {
+  it('open the menu, IDENTITY still first and ITEMS under it, a custom order untouched, nothing saved', () => {
     const was = usePanelLayout.getState().order
-    for (const left of [
-      ['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'],
-      ['identity', 'agents', 'avatars', 'items', 'create', 'hidden', 'discovered', 'targets', 'links'],
-    ] as const) {
-      usePanelLayout.setState({ order: { left: [...left], right: [...was.right] } })
+    const custom = { left: ['links', 'agents', 'items', 'identity'] as PanelId[], right: [...was.right] }
+    try {
+      for (const order of [defaultOrder(), custom]) {
+        usePanelLayout.setState({ order })
+        for (const effect of ['teach-inventory', 'teach-build']) {
+          localStorage.removeItem(PANEL_LAYOUT_KEY)
+          runTutorialEffect(effect)
+          expect(usePanelLayout.getState().order).toBe(order)
+          expect(localStorage.getItem(PANEL_LAYOUT_KEY)).toBeNull()
+        }
+      }
+      usePanelLayout.setState({ order: defaultOrder() })
       runTutorialEffect('teach-inventory')
-      expect(usePanelLayout.getState().order.left[0]).toBe('items')
+      expect(usePanelLayout.getState().order.left.slice(0, 2)).toEqual(['identity', 'items'])
+    } finally {
+      usePanelLayout.setState({ order: was })
     }
-    usePanelLayout.setState({ order: was })
   })
 })

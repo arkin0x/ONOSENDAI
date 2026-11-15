@@ -2,14 +2,15 @@
  * TutorialCoach.tsx: the first-arrival tutorial's caption panel
  * (store/useTutorial.ts; first-arrival tutorial design, 2026-11-10, T2).
  *
- * The /demo coach's look (styles.css .demo) at the top of the screen, with a
- * line or two and what to do, or a centered card for a step that is a modal
+ * The /demo coach's look (styles.css .demo) at the top of the screen (at the
+ * foot instead while that would cover the menu panel a step points at:
+ * tutorial/coachPlace.ts), with a line or two and what to do, or a centered card for a step that is a modal
  * (the welcome). A longer explanation waits behind an EXPLAIN pill. NEXT
  * reads SKIP while a step waits, and the X is SKIP TUTORIAL, on every step.
  * No keys of its own: the player's keys are the scene's (WASD, Space).
  */
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Coffee, Earth, Gamepad2, Target, Wrench, type LucideIcon } from 'lucide-react'
 import { choiceOffered, runTutorialEffect, useTutorial } from '../store/useTutorial'
@@ -19,6 +20,7 @@ import { useCover } from '../hooks/useCover'
 import { useEscape } from '../hooks/useEscape'
 import { CaptionText, useCoachOffsets } from './DemoCoach'
 import { useTutorialStage } from '../tutorial/director'
+import { placeCoach, type Box, type CoachSide } from '../tutorial/coachPlace'
 import { ProfilePic } from './ProfileBadge'
 import { StraylightIdentity } from './StraylightIdentity'
 import { ModalClose } from './ui/ModalClose'
@@ -48,6 +50,33 @@ export const CHOICE_ICONS: Readonly<Record<string, LucideIcon>> = {
   build: Wrench,
 }
 
+/** The room kept between the coach and the panel it keeps clear of, and from the screen's edges, px. */
+const COACH_GAP = 8
+
+/** Where the coach is drawn: its side, and at the foot how far up it sits (clear of the menu button). */
+interface CoachSpot { side: CoachSide; bottom: number }
+const AT_TOP: CoachSpot = { side: 'top', bottom: COACH_GAP }
+
+/** The box around every box given, or null for none. */
+function around(boxes: readonly Box[]): Box | null {
+  if (boxes.length === 0) return null
+  return {
+    top: Math.min(...boxes.map((b) => b.top)),
+    bottom: Math.max(...boxes.map((b) => b.bottom)),
+    left: Math.min(...boxes.map((b) => b.left)),
+    right: Math.max(...boxes.map((b) => b.right)),
+  }
+}
+
+/** The nearest ancestor of `el` that scrolls it up and down: a phone's menu (.hud), a desktop column (.hud__col). */
+function scrollerOf(el: Element): Element | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const y = getComputedStyle(p).overflowY
+    if ((y === 'auto' || y === 'scroll') && p.scrollHeight > p.clientHeight) return p
+  }
+  return null
+}
+
 export function TutorialCoach(): JSX.Element | null {
   const active = useTutorial((s) => s.active)
   const index = useTutorial((s) => s.index)
@@ -68,9 +97,15 @@ export function TutorialCoach(): JSX.Element | null {
   const modal = step?.modal === true
   const shown = active && !touring && !workshop && !!step
   const ref = useRef<HTMLDivElement | null>(null)
-  const coverRef = useCover('top', shown && !modal && !minimized)
+  // Top, or the foot while the top would cover the menu panel the step points at (below).
+  const [spot, setSpot] = useState<CoachSpot>(AT_TOP)
+  const atTop = spot.side === 'top'
+  const spotRef = useRef(spot)
+  spotRef.current = spot
+  const coverRef = useCover(spot.side, shown && !modal && !minimized)
   const panelRef = useCallback((el: HTMLDivElement | null) => { ref.current = el; coverRef(el) }, [coverRef])
-  useCoachOffsets(ref, shown && !modal, minimized)
+  // The instruments make room under the coach only while it is at the top.
+  useCoachOffsets(ref, shown && !modal && atTop, minimized)
   // The welcome is a modal like any other: Escape answers it (FIND IT), the
   // pad steps aside while it is up (useModalUp), and its button has the
   // focus, so Space presses it rather than committing a first move behind it.
@@ -93,21 +128,65 @@ export function TutorialCoach(): JSX.Element | null {
   // A step with no wait points for as long as it is up; one that waits, until it is done.
   const highlight = shown && (!done || !step?.wait) ? stepHighlight ?? step?.scene?.highlight : undefined
   useEffect(() => {
-    if (!highlight) return
+    if (!highlight) { setSpot(AT_TOP); return }
     let marked: Element[] = []
     const mark = (): void => {
       for (const el of marked) el.classList.remove('demo-pulse')
       marked = Array.from(document.querySelectorAll(highlight))
       for (const el of marked) el.classList.add('demo-pulse')
     }
-    mark()
+    // Keeping clear of a menu panel the step points at (owner, 2026-11-15:
+    // the "Your items" box covered ITEMS). Only what sits in a menu panel
+    // counts: the pad, the chips and the hamburger have their own places,
+    // which the coach at the top was laid out around. The menu is scrolled at
+    // most once a step, the first time the panel needs it, so the player can
+    // scroll it themselves afterwards; the side follows the panel as it moves.
+    let scrolled = false
+    let topInset = COACH_GAP
+    const place = (): void => {
+      const coach = ref.current
+      const inPanel = marked.filter((el) => el.closest('[data-panel-id]'))
+      const target = around(inPanel.map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0))
+      if (!coach || !target) { setSpot((s) => s.side === 'top' ? s : AT_TOP); return }
+      const c = coach.getBoundingClientRect()
+      const vh = window.innerHeight
+      // Where the top is, measured while the coach is there (the safe area and its margin).
+      if (spotRef.current.side === 'top') topInset = c.top
+      // At the foot, clear of the menu button when it is under the coach (a phone's, bottom left).
+      const menu = document.querySelector('.hamburger-menu')?.getBoundingClientRect()
+      const bottomInset = menu && menu.width > 0 && menu.left < c.right && c.left < menu.right ? Math.max(COACH_GAP, vh - menu.top + COACH_GAP) : COACH_GAP
+      const at = placeCoach({ target, coachHeight: c.height, coachLeft: c.left, coachRight: c.right, viewportHeight: vh, topInset, bottomInset, gap: COACH_GAP })
+      if (at.scroll !== 0 && !scrolled) {
+        scrolled = true
+        scrollerOf(inPanel[0])?.scrollBy({ top: at.scroll })
+      }
+      setSpot((s) => s.side === at.side && s.bottom === bottomInset ? s : { side: at.side, bottom: bottomInset })
+    }
     // The control may come and go (a chip appears once something is found):
-    // looked for again after the page changes, at most once a frame.
+    // looked for again after the page changes, at most once a frame; the
+    // coach's place too, and after a scroll, a resize or a change in its size.
     let frame = 0
-    const mo = new MutationObserver(() => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; mark() }) })
+    const update = (): void => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; mark(); place() }) }
+    mark()
+    place()
+    const mo = new MutationObserver(update)
     mo.observe(document.body, { childList: true, subtree: true })
-    return () => { mo.disconnect(); if (frame) cancelAnimationFrame(frame); for (const el of marked) el.classList.remove('demo-pulse') }
-  }, [highlight])
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+    if (ref.current) ro?.observe(ref.current)
+    window.addEventListener('resize', update)
+    document.addEventListener('scroll', update, { capture: true, passive: true })
+    return () => {
+      mo.disconnect()
+      ro?.disconnect()
+      window.removeEventListener('resize', update)
+      document.removeEventListener('scroll', update, { capture: true })
+      if (frame) cancelAnimationFrame(frame)
+      for (const el of marked) el.classList.remove('demo-pulse')
+    }
+  }, [highlight, minimized])
+
+  const spotClass = atTop ? '' : ' demo--bottom'
+  const spotStyle = atTop ? undefined : { bottom: `${spot.bottom}px` }
 
   if (!shown || !step) return null
   const t = useTutorial.getState()
@@ -158,7 +237,7 @@ export function TutorialCoach(): JSX.Element | null {
 
   if (minimized) {
     return (
-      <div className="demo demo--min tutorial" ref={ref} role="region" aria-label="Tutorial">
+      <div className={`demo demo--min tutorial${spotClass}`} style={spotStyle} ref={ref} role="region" aria-label="Tutorial">
         <button className="demo__bar" onClick={() => t.setMinimized(false)} title="Show the caption">
           <span className="demo__tag">TUTORIAL</span>
           <span className="demo__bartitle">{step.title}</span>
@@ -170,7 +249,7 @@ export function TutorialCoach(): JSX.Element | null {
   }
 
   return (
-    <div className="demo tutorial" ref={panelRef} role="region" aria-label="Tutorial">
+    <div className={`demo tutorial${spotClass}`} style={spotStyle} ref={panelRef} role="region" aria-label="Tutorial">
       <div className="demo__head">
         <span className="demo__tag">TUTORIAL</span>
         <span className="demo__chapter" />

@@ -114,7 +114,7 @@ import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { standing, walkStep, type WalkStep } from './walkStep'
 import { planWalkMove, walkHeading, type Stepper, type WalkHeading } from '../lib/walkSlide'
-import { anyBounce, floorPad, lastStopUnseen, stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
+import { anyBounce, floorPad, stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
 import { DOUBLE_JUMP_SPEED, JUMP_HEIGHT, JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, launchSpeed, loadGravity, reachedHeight, saveGravity } from './walkGravity'
 import { launchHeight } from '../lib/walkBounce'
 import { walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
@@ -464,11 +464,16 @@ function facingHeading(name: MoveName, up: AxisName, strafe: -1 | 0 | 1): WalkHe
  * with its stairs and walls, its floors under gravity `g`. Against the axis
  * wall: nowhere to step.
  */
-function stepperFor(items: readonly WallItem[], gravity: boolean, g: AxisDirection): Stepper<WallItem> {
-  return (at: Position, axis: AxisName, sign: 1 | -1, want: bigint): WalkStep => {
+/** What held a step: the wall, and whether the face it met is of an object no one can see, from that same stop. */
+interface WallContact { item: WallItem; unseen?: boolean }
+
+function stepperFor(items: readonly WallItem[], gravity: boolean, g: AxisDirection): Stepper<WallContact> {
+  return (at: Position, axis: AxisName, sign: 1 | -1, want: bigint) => {
     const edge = clampAxis(at[axis] + want * BigInt(sign))
     const n = sign > 0 ? edge - at[axis] : at[axis] - edge
-    return n === 0n ? { to: at, by: null } : walkStep(at, axis, sign, n, items, gravity, g)
+    if (n === 0n) return { to: at, by: null }
+    const s: WalkStep = walkStep(at, axis, sign, n, items, gravity, g)
+    return { to: s.to, by: s.by ? { item: s.by, ...(s.unseen !== undefined ? { unseen: s.unseen } : {}) } : null }
   }
 }
 
@@ -481,9 +486,10 @@ function closeOpen(): void {
 }
 
 /** The WALL chip, one per wall: a held key's repeats do not churn the one toast slot. */
-function wallChip(by: WallItem): void {
-  // A wall you cannot see (opacity 0, or bare points) flashes its outline (store/wallHint.ts).
-  noteWallContact(by, performance.now(), lastStopUnseen(by.key))
+function wallChip(contact: WallContact): void {
+  const by = contact.item
+  // A wall you cannot see (opacity 0, or bare points) flashes its outline (store/wallHint.ts), judged by the face this stop met.
+  noteWallContact(by, performance.now(), contact.unseen)
   const shown = useToast.getState().toast
   if (!(shown?.label === 'WALL' && shown.meta === by.shard.name)) useToast.getState().show({ label: 'WALL', meta: by.shard.name, mark: 'walk', ms: BRIEF_TOAST_MS })
 }
@@ -634,8 +640,8 @@ function jump(from: Position): void {
   if (waitedForWalls(() => jump(from))) return
   if (!stands) return
   const afford = affordIn(cs.plane)
-  const { rise, by } = jumpRise(from, items, afford, JUMP_HEIGHT, g)
-  if (rise === 0n) { if (by) wallChip(by); return }
+  const { rise, by, unseen } = jumpRise(from, items, afford, JUMP_HEIGHT, g)
+  if (rise === 0n) { if (by) wallChip({ item: by, unseen }); return }
   const limit = fallLimit(from, items, afford, g)
   if (waitedForWalls(() => jump(from))) return
   beginFall(from, JUMP_SPEED, rise, -limit.drop, limit.lands, items, cs.plane, g)
@@ -933,9 +939,9 @@ function airJump(f: Fall, now: number): boolean {
   const h0 = f.h0 + BigInt(base)
   const from: Position = atHeight(f.anchor, f.down, h0)
   takeWallWait()
-  const { rise, by } = jumpRise(from, f.items, affordIn(f.plane), Math.ceil(arcApex(v0) - 1e-6), f.down)
+  const { rise, by, unseen } = jumpRise(from, f.items, affordIn(f.plane), Math.ceil(arcApex(v0) - 1e-6), f.down)
   if (takeWallWait()) return false
-  if (rise === 0n) { if (by) wallChip(by); return false }
+  if (rise === 0n) { if (by) wallChip({ item: by, unseen }); return false }
   f.bottom = f.h0 + f.bottom - h0
   f.h0 = h0
   f.t0 = t0

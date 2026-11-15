@@ -683,23 +683,19 @@ export function clearWalls(): void {
 /** What firstHit says of the face it found, reused by every step (stepLimit). */
 const hitWho: { bounce: Bounce; springboard?: boolean; unseen?: boolean } = { bounce: 0, unseen: false }
 
-/** The wall the last stopped step met, and whether the face was of an object no one can see (a part or the shard). */
-let lastStop: { key: string; unseen: boolean } | null = null
-/**
- * Whether the face that last stopped a step on the wall `key` belongs to an
- * object no one can see: the shard itself or the part it places that the
- * step met (store/wallHint.ts). Undefined when no step has stopped on it.
- */
-export function lastStopUnseen(key: string): boolean | undefined {
-  return lastStop && lastStop.key === key ? lastStop.unseen : undefined
-}
-
 /** Why a step stopped short: the shard it met, and how far it may go. */
 export interface WallStop {
   /** Whole gibsons the step may take, from 0 (not at all) to its full length. */
   reach: bigint
   /** The shard whose face is in the way, or null when nothing is. */
   by: WallItem | null
+  /**
+   * Whether that face belongs to an object no one can see, the shard itself
+   * or the part it places that the step met (lib/pointLook.ts unseenObject;
+   * store/wallHint.ts). Absent when nothing is in the way, or for a door slab
+   * held from inside.
+   */
+  unseen?: boolean
 }
 
 /** A distance short of a gibson, in gibsons: a face this near the start is the one you stand on. */
@@ -757,7 +753,7 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   /** The nearest middle of a door slab holding the walker that this step would cross (WallItem `inside`). */
   let middle: WallStop | null = null
   /** The faces in the walker's own plane, held back until the space above it is known to be open. */
-  const planes: Array<{ w: WallItem; tol: number }> = []
+  const planes: Array<{ w: WallItem; tol: number; unseen: boolean }> = []
   const i = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
   const gravity = stand === true ? WORLD_DOWN : stand || null
   // GRAVITY's question: this step goes down.
@@ -807,7 +803,7 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
       // past it, as if it were not there, until the space above you is known.
       t = firstHit(e.mesh, o, i, s, maxT, -hair / g, e.clip, hitWho)
       if (t !== null && t * g <= hair) {
-        planes.push({ w, tol })
+        planes.push({ w, tol, unseen: hitWho.unseen === true })
         t = firstHit(e.mesh, o, i, s, maxT, hair / g, e.clip, hitWho)
       }
     } else {
@@ -818,7 +814,7 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     if (best === null || gib < best) { best = gib; bestTol = tol; by = w; bestUnseen = hitWho.unseen === true }
   }
   // A face in your own plane holds you when the space a hair above you is open.
-  if (planes.length > 0 && openAbove(from, items, { axis, dir: dir < 0 ? 1 : -1 })) { best = 0; bestTol = planes[0].tol; by = planes[0].w; bestUnseen = false }
+  if (planes.length > 0 && openAbove(from, items, { axis, dir: dir < 0 ? 1 : -1 })) { best = 0; bestTol = planes[0].tol; by = planes[0].w; bestUnseen = planes[0].unseen }
   // Shards no longer in the world: what their builds held of this WALK's pools comes back.
   const back = new Set<Pool>()
   for (const [k, gone] of entries) if (!keep.has(k)) { entries.delete(k); for (const p of release(gone.spend)) back.add(p) }
@@ -829,8 +825,7 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   let stop: WallStop = { reach: length, by: null }
   if (best !== null) {
     const k = Math.max(0, Math.ceil(best - bestTol) - 1)
-    stop = { reach: BigInt(k) < length ? BigInt(k) : length, by }
-    if (by) lastStop = { key: by.key, unseen: bestUnseen }
+    stop = { reach: BigInt(k) < length ? BigInt(k) : length, by, ...(by ? { unseen: bestUnseen } : {}) }
   }
   return middle && middle.reach < stop.reach ? middle : stop
 }

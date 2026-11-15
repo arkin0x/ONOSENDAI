@@ -392,13 +392,15 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   const look = useMemo(() => pointLookOf(given, { avatar: ignoreOpacity }), [given, ignoreOpacity])
   const glowAllowed = useGlowAllowed()
   const plan = drawPlan(given.mode, look, { cull, glowAllowed })
-  // On the workshop's bench while editing (the only canvas with its own anim
-  // clock, scene/animMotion.ts AnimClock), an object no one can see (opacity
-  // 0, or POINTS at point size 0 with no glow) shows faint dots so its author
-  // can find and select it (DECK-0003 §1.11, §1.15). Never in the world, the
-  // feed or the pictures.
+  // On the workshop's bench (the only canvas with its own anim clock,
+  // scene/animMotion.ts AnimClock), an object no one can see (opacity 0, or
+  // POINTS at point size 0 with no glow) must stay findable (DECK-0003 §1.11,
+  // §1.15). The bench's own vertex handles already mark every vertex in every
+  // tool, except while an object with `anim` is drawn moving (VIEW or the
+  // preview), when they are hidden (Bench.tsx Handles). Only then does it show
+  // faint dots, which move with it. Never in the world, the feed or the pictures.
   const onBench = useContext(AnimClock) !== null
-  const benchFaint = onBench && still && !cull && (look.hidden || (given.mode === 'points' && look.pointSize === 0 && !look.glow))
+  const benchFaint = onBench && moving && !cull && (look.hidden || (given.mode === 'points' && look.pointSize === 0 && !look.glow))
   const faintMaterial = useMemo(() => (benchFaint ? createDiscMaterial(SHARD_POINTS, BENCH_FAINT_OPACITY, false) : null), [benchFaint])
   useEffect(() => () => { faintMaterial?.dispose() }, [faintMaterial])
   const trustedAbove = useContext(GlowTrust)

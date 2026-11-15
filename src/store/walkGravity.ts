@@ -182,14 +182,15 @@ export function fallLimit(from: Position, items: readonly WallItem[], affordable
  * underside (a face in your plane with the solid just above you,
  * underSolid) it does not rise at all. Up is against `down`.
  */
-export function jumpRise(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean, height: number = JUMP_HEIGHT, down: AxisDirection = WORLD_DOWN): { rise: bigint; by: WallItem | null } {
+export function jumpRise(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean, height: number = JUMP_HEIGHT, down: AxisDirection = WORLD_DOWN): { rise: bigint; by: WallItem | null; unseen?: boolean } {
   const lid = underSolid(from, items, down)
   if (lid) return { rise: 0n, by: lid }
   const want = BigInt(height)
   const rise = upOf(down)
   const up = stepLimit(from, rise.axis, rise.dir, want, items)
   const afford = affordableAlong(from, rise, up.reach, affordable)
-  return { rise: afford, by: up.reach < want ? up.by : null }
+  // The ceiling's `unseen` comes with it, from the same stop (store/wallHint.ts).
+  return up.reach < want && up.by ? { rise: afford, by: up.by, ...(up.unseen !== undefined ? { unseen: up.unseen } : {}) } : { rise: afford, by: null }
 }
 
 // ---------------------------------------------------------------------------

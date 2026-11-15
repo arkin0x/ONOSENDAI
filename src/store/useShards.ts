@@ -1486,9 +1486,9 @@ interface ShardsState {
    * hint, the riddle (lib/hidden.ts BagSettings). The three hint switches
    * (`H`, the sector hint, the contents) start as this device's player last
    * set them, all ON until they touch one (deployHintPrefs.ts, arkinox
-   * 2026-11-15); the riddle and the money switch start at your existing
-   * bag's when the cursor's region holds one (seedDeployBag) and empty and
-   * off when it does not.
+   * 2026-11-15), and so does the money switch, OFF until they touch it
+   * ("money off by default"); the riddle starts at your existing bag's when
+   * the cursor's region holds one (seedDeployBag) and empty when it does not.
    */
   deployBag: BagSettings
   /**
@@ -1505,13 +1505,14 @@ interface ShardsState {
    * you chose with this to tell a change you made from a value you never
    * touched, so a riddle written from another device since is carried
    * forward rather than overwritten (resolveBagSettings). The three hint
-   * switches always go out as shown (deployHintPrefs.ts asShown).
+   * switches and the money switch always go out as shown (deployHintPrefs.ts
+   * asShown).
    */
   deployBagFrom: OwnBag | null
   /** Change some of the bag settings. */
   setDeployBag: (patch: Partial<BagSettings>) => void
   /**
-   * Start the controls at this bag's riddle and money switch, with the hint
+   * Start the controls at this bag's riddle, with the hint and money
    * switches as you last set them, when the region under the cursor changes
    * to one that holds your bag, or back at a new bag's when it moves from one
    * that did to one that does not. Moving between regions with no bag keeps
@@ -2964,8 +2965,8 @@ export const useShards = create<ShardsState>((set, get) => {
   /**
    * The controls for a bag with these `settings` at `height`: the three hint
    * switches as this device's player last set them (deployHintPrefs.ts; all
-   * ON until they touch one, arkinox 2026-11-15), the riddle and the money
-   * switch the bag's own. The sector hint ON where a sector is too small for
+   * ON until they touch one, arkinox 2026-11-15; money OFF until they touch
+   * it), the riddle the bag's own. The sector hint ON where a sector is too small for
    * the region is held, to come back on lower down.
    */
   const bagStart = (settings: BagSettings, height: number): Pick<ShardsState, 'deployBag' | 'deployHintHeld'> => {
@@ -4786,14 +4787,14 @@ export const useShards = create<ShardsState>((set, get) => {
         // Its entry as the bag holds it: inline, by reference, or in a sealed entry (standsFor).
         const gone = replaced && replaced.lookupId === rk.lookupId ? replaced : null
         const standing = gone ? existing.entries.filter((e) => !standsFor(e, gone)) : existing.entries
-        // The riddle and the money switch: what you changed in the deploy bar
+        // The riddle: what you changed in the deploy bar
         // wins; what you left as it was takes the bag's current value, which
         // may be newer than what the bar showed (resolveBagSettings). The
         // controls were seeded from this region's bag only if `deployBagFrom`
         // names this region.
         const region = regionOf(at, plane, deployHeight)
         const seeded = deployBagFrom?.region === region ? deployBagFrom.settings : newBagSettings(deployHeight)
-        // The hint switches go out as the bar shows them (asShown).
+        // The hint and money switches go out as the bar shows them (asShown).
         const settingsOf = (current: BagSettings | null): BagSettings => (into ? ROOM_BAG_SETTINGS : asShown(resolveBagSettings(deployBag, seeded, current, deployHeight), deployBag, deployHeight))
         let settings: BagSettings = settingsOf(existing.settings)
         // A large shard is hidden by reference (spec §7.6, DECK-0003 §3.2): it

@@ -834,9 +834,13 @@ export interface BagSettings {
   heightTag: boolean
   hint: HintHeights | null
   riddle: string
-  /** Publish what is inside, by kind and count (`contents` tags; bagContentsTags). */
+  /** Publish what is inside, by kind and count, money left out unless `money` (`contents` tags; bagContentsTags). */
   contents: boolean
-  /** Publish that money is inside, when a cashu token is (a `contents` tag for cashu alone). */
+  /**
+   * Publish that money is inside, when a cashu token is: its count with
+   * `contents`, the cashu row alone without (bagContentsTags). Off unless the
+   * hider turns it on (arkinox, 2026-11-15: "money off by default").
+   */
   money: boolean
 }
 
@@ -910,15 +914,22 @@ export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft
  * "a hint type that indicates money is hidden" and "an optional contents
  * hint toggle that advertises what is in the bag"). Worked out from what is
  * in the bag each time it is sealed, so they are never stale: with
- * `contents`, one `["contents", kind, count]` per kind present, cashu
- * tokens and NFTs included (arkinox, 2026-10-22: an `nft` count, as the
- * `cashu` one); with `money` alone, `["contents", "cashu"]` while a
- * token is inside, and nothing once none is. Spec §7.7 "Contents" (#75).
+ * `contents`, one `["contents", kind, count]` per kind present, NFTs
+ * included (arkinox, 2026-10-22: an `nft` count, as the `cashu` one);
+ * with `money` alone, `["contents", "cashu"]` while a token is inside,
+ * and nothing once none is. Spec §7.7 "Contents" (#75).
+ *
+ * Money is said only with `money` on (arkinox, 2026-11-15: "money off by
+ * default"). With `contents` on and `money` off, the cashu row is left out
+ * entirely, count and all, and no row says money another way: there is no
+ * total, and a message that holds a token counts as a message, as any other
+ * does (spec §7.7). With both on, cashu is counted beside the rest. Money is
+ * cashu alone: an NFT is not money (spec §7.7), so it stays with `contents`.
  */
 export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], settings: Pick<BagSettings, 'contents' | 'money'>, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): string[][] {
   if (!settings.contents && !settings.money) return []
   const c = bagContents(inners, held)
-  if (settings.contents) return CONTENTS_KINDS.filter((k) => c[k] > 0).map((k) => ['contents', k, String(c[k])])
+  if (settings.contents) return CONTENTS_KINDS.filter((k) => c[k] > 0 && (k !== 'cashu' || settings.money)).map((k) => ['contents', k, String(c[k])])
   return c.cashu > 0 ? [['contents', 'cashu']] : []
 }
 
@@ -937,8 +948,8 @@ export type ContentsCounts = Partial<Record<keyof BagContents, string>>
  * row of a kind this client does not know is ignored, and so is a row whose
  * count is there but is not a count (CONTENTS_COUNT). What is left: whether
  * money is inside (a counted cashu row, or the cashu row with no count, the
- * one form that says only that), whether the money-alone form was chosen
- * (for the bag's settings), whether an NFT is (a counted nft row; there is
+ * one form that says only that), whether the money-alone form was written,
+ * whether an NFT is (a counted nft row; there is
  * no NFT-alone form), and the counts when given. A claim, for display only:
  * what the bag holds is its plaintext.
  */
@@ -995,10 +1006,13 @@ export function bagSettingsOf(ev: NostrEvent, height: number): BagSettings {
   const h = heightHint(ev)
   const hint = parseHint(ev.tags, h ?? height)
   const said = readBagContents(ev.tags)
-  // Money as a setting only in its own form: a counted cashu row is the
-  // contents hint speaking, and reading it as money left a bag announcing
-  // cashu after contents was turned off (review of #378).
-  return { heightTag: h !== null, hint: hint ? hint.heights : null, riddle: ev.content.slice(0, MAX_RIDDLE_LENGTH), contents: said.counts !== null, money: said.moneyAlone }
+  // Money in either form: since money is its own switch (arkinox,
+  // 2026-11-15), a counted cashu row says the hider turned money on, so a
+  // rewrite that is not a hide (a DELETE, a broadcast) keeps saying it, as
+  // a bag already out keeps its hints until you hide into it again. A hide
+  // sends money as the deploy bar shows it (store/deployHintPrefs.ts asShown),
+  // so turning contents off no longer leaves money said (review of #378).
+  return { heightTag: h !== null, hint: hint ? hint.heights : null, riddle: ev.content.slice(0, MAX_RIDDLE_LENGTH), contents: said.counts !== null, money: said.money }
 }
 
 /** Where a bag's region is, for a hint's base: any point inside the region will do (lib/hint.ts). */

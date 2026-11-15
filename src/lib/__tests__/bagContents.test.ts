@@ -1,7 +1,9 @@
 /**
  * bagContents.test.ts: a bag's contents and money hints are worked out from
  * what is inside each time it is sealed, so they are never stale (arkinox,
- * 2026-10-18), and read back as they were written.
+ * 2026-10-18), and read back as they were written. Money is said only
+ * with its own switch on (arkinox, 2026-11-15: "money off by default"):
+ * contents on and money off leaves cashu out entirely.
  */
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_BAG_SETTINGS, bagContents, bagContentsTags, bagSettingsOf, readBagContents, resolveBagSettings, type BagEntry } from '../hidden'
@@ -44,15 +46,30 @@ describe('bagContentsTags', () => {
   it('writes nothing unless asked', () => {
     expect(bagContentsTags(inners, DEFAULT_BAG_SETTINGS)).toEqual([])
   })
-  it('with contents, a count for every kind inside, cashu included', () => {
-    expect(bagContentsTags(inners, { contents: true, money: false })).toEqual([['contents', 'shard', '3'], ['contents', 'message', '1'], ['contents', 'cashu', '1']])
+  it('with contents and money off, every kind inside but cashu, and no row says money', () => {
+    expect(bagContentsTags(inners, { contents: true, money: false })).toEqual([['contents', 'shard', '3'], ['contents', 'message', '1']])
+  })
+  it('with contents and money on, cashu counted beside the rest', () => {
+    expect(bagContentsTags(inners, { contents: true, money: true })).toEqual([['contents', 'shard', '3'], ['contents', 'message', '1'], ['contents', 'cashu', '1']])
+  })
+  it('money off: a bag with tokens says exactly what the same bag without them says, so no count or total gives money away', () => {
+    const plain = [ev(3330), ev(3330), ev(3330), ev(1, 'no token here')]
+    const rich = [ev(3330), ev(3330), ev(3330), ev(1, `for you ${TOKEN}`)]
+    expect(bagContents(rich).cashu).toBeGreaterThan(0)
+    expect(bagContentsTags(rich, { contents: true, money: false })).toEqual(bagContentsTags(plain, { contents: true, money: false }))
+    expect(bagContentsTags(rich, { contents: false, money: false })).toEqual([])
+    // Every row is a kind and its own count: nothing sums the kinds.
+    for (const t of bagContentsTags(rich, { contents: true, money: false })) expect(t[1]).not.toBe('cashu')
   })
   it('with money alone, only that money is inside, and only while it is', () => {
     expect(bagContentsTags(inners, { contents: false, money: true })).toEqual([['contents', 'cashu']])
     expect(bagContentsTags([ev(3330), ev(1, 'no token here')], { contents: false, money: true })).toEqual([])
   })
   it('with contents, an nft count after cashu, as the cashu count is written', () => {
-    expect(bagContentsTags([...inners, ev(1, `for you ${LINK}`)], { contents: true, money: false })).toEqual([['contents', 'shard', '3'], ['contents', 'message', '2'], ['contents', 'cashu', '1'], ['contents', 'nft', '1']])
+    expect(bagContentsTags([...inners, ev(1, `for you ${LINK}`)], { contents: true, money: true })).toEqual([['contents', 'shard', '3'], ['contents', 'message', '2'], ['contents', 'cashu', '1'], ['contents', 'nft', '1']])
+  })
+  it('an NFT is not money (spec 7.7): with money off it is still counted with the contents', () => {
+    expect(bagContentsTags([...inners, ev(1, `for you ${LINK}`)], { contents: true, money: false })).toEqual([['contents', 'shard', '3'], ['contents', 'message', '2'], ['contents', 'nft', '1']])
   })
   it('money alone never says an NFT is inside, and an NFT is not money', () => {
     expect(bagContentsTags([ev(1, LINK)], { contents: false, money: true })).toEqual([])
@@ -110,14 +127,28 @@ describe('readBagContents', () => {
     expect(settingsOf([['contents', 'shard', '03']])).toMatchObject({ contents: false, money: false })
     expect(settingsOf([['contents', 'cashu', '0']])).toMatchObject({ contents: false, money: false })
     expect(settingsOf([['contents', 'cashu']])).toMatchObject({ contents: false, money: true })
+    // A counted cashu row says money was turned on, so a rewrite that is not a hide keeps it.
+    expect(settingsOf([['contents', 'message', '1'], ['contents', 'cashu', '1']])).toMatchObject({ contents: true, money: true })
+    expect(settingsOf([['contents', 'message', '1']])).toMatchObject({ contents: true, money: false })
+  })
+
+  it('round trips: each switch pair reads back as written', () => {
+    const inners = [ev(3330), ev(1, TOKEN)]
+    for (const contents of [false, true]) {
+      for (const money of [false, true]) {
+        const bag = { ...ev(33330), tags: [['d', 'x'], ...bagContentsTags(inners, { contents, money })] }
+        expect(bagSettingsOf(bag, 3), JSON.stringify({ contents, money })).toMatchObject({ contents, money })
+      }
+    }
   })
 })
 
 describe('turning contents off', () => {
   it('does not leave the bag announcing money nobody chose (review of #378)', () => {
     const inners = [ev(3330), ev(1, TOKEN)]
-    // Published with contents on: a counted cashu row among the others.
+    // Published with contents on and money off: no cashu row at all.
     const published = { ...ev(33330), tags: [['d', 'x'], ...bagContentsTags(inners, { contents: true, money: false })] }
+    expect(published.tags.some((t) => t[1] === 'cashu')).toBe(false)
     const current = bagSettingsOf(published, 3)
     expect(current).toMatchObject({ contents: true, money: false })
     // The hider turns contents off; money was never chosen.

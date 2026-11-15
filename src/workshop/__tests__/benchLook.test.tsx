@@ -202,4 +202,18 @@ describe('the editing marks', () => {
     expect(lineFade.range.value.x).toBe(LINE_FADE_FROM)
     expect(lineFade.range.value.y).toBe(LINE_FADE_TO)
   })
+
+  it('LOOK\'s rig puts back the headlamp reach and the fade switch it found', async () => {
+    headlampUniforms.uHeadlampReach.value = 31
+    lineFade.on.value = 0
+    open(square(), 'view')
+    const m = await mount(createElement(BenchLookRig))
+    // What the bench writes while LOOK is up (its frame callback, stood in for here).
+    headlampUniforms.uHeadlampReach.value = 8
+    lineFade.on.value = 1
+    await m.unmount()
+    expect(headlampUniforms.uHeadlampReach.value).toBe(31)
+    expect(lineFade.on.value).toBe(0)
+    lineFade.on.value = 1
+  })
 })

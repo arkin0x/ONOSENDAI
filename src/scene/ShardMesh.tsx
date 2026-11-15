@@ -73,7 +73,7 @@ interface Props {
    * everything lit back onto the frame, and across a filled face that is
    * several times the face's own colour, so faces came out white with a
    * tint. Out there the faces write their colour with alpha 0, a tag the
-   * scene's bloom is blind to (Scene.tsx WorldBloom), so they draw at their
+   * scene's bloom is blind to (worldBloom.tsx WorldBloom), so they draw at their
    * own colours, as on the bench; points and lines are untagged and glow as
    * they always did. Not for a ghost, whose translucency needs real alpha.
    */

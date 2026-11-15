@@ -32,7 +32,7 @@
  * skips the multiply on a uniform, so the picture is exactly the unlit one
  * and nothing compiles again when the switch is turned.
  *
- * The bloom does not see a face's colour at all (Scene.tsx WorldBloom reads a
+ * The bloom does not see a face's colour at all (worldBloom.tsx WorldBloom reads a
  * tagged face as dark), so shading a face cannot make it flare or go dull
  * there; the points and lines it does see only ever get dimmer.
  */

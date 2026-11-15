@@ -109,7 +109,7 @@ import { useTv } from '../store/useTv'
 import { CAMERA_FAR, CAMERA_NEAR, FOV, ORBIT_MAX_DISTANCE, ORBIT_MIN_DISTANCE } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
 import { lineFade } from './nearFade'
-import { canvasPixels, composerSamples } from './composerBudget'
+import { COMPOSER_SAMPLES } from './composerBudget'
 import './radialFog'
 import { CULL_REACH, fogFar, fogFarStep, FOG_FAR, FOG_NEAR, FOG_START_SHARE, VIEW_FOG_SCALE } from './fog'
 import { cameraNear, nextAim, nextReach, orbitMaxDistance, reachNeed, stepOrbitLimit, useDrawReach } from './buildZoom'
@@ -1288,9 +1288,6 @@ function Rig(): JSX.Element {
     />
   )
 }
-
-/** The composer's samples, fixed for the page: a new count would make a new composer (composerBudget.ts). */
-const COMPOSER_SAMPLES = typeof window === 'undefined' ? 4 : composerSamples(canvasPixels(window))
 
 /**
  * The canvas, rendered only when what it reads changes (memo): it takes no

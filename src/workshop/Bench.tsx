@@ -296,7 +296,7 @@ export function Handles(): JSX.Element | null {
   const facePick = useWorkshop((s) => s.facePick)
   const tool = useWorkshop((s) => s.tool)
   const previewing = useAnimPreview((s) => s.on)
-  const moving = isLook(tool) || previewing
+  const moving = previewing
   const invalidate = useThree((s) => s.invalidate)
   const chosen = useMemo(() => new Set(selection), [selection])
   const groups = useMemo(() => {
@@ -842,7 +842,7 @@ function Keys(): null {
       if (e.code === 'Digit5') w.setTool('add')
       if (e.code === 'Digit6') w.setTool('face')
       // Q and E turn the selection a quarter turn while SELECT holds one; Q turns the stamp otherwise.
-      if (e.code === 'KeyQ') { if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else w.turnStamp() }
+      if (e.code === 'KeyQ') { if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else if (!look) w.turnStamp() }
       if (e.code === 'KeyE') { if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(1) }
       if (e.code === 'BracketRight') w.setLevel(w.level + w.step())
       if (e.code === 'BracketLeft') w.setLevel(w.level - w.step())

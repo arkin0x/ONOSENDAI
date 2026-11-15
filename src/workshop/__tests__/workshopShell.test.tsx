@@ -457,6 +457,26 @@ describe('the strip', () => {
     await m.unmount()
   })
 
+  it('in LOOK, MORE leaves what is held alone and takes no more: no HELD keys, no ALL; Esc does not let go', async () => {
+    useWorkshop.getState().setTool('select')
+    useWorkshop.getState().setSelection([0, 1])
+    useWorkshop.getState().setTool('view')
+    const m = await mount(<Workshop />)
+    await m.press('MORE')
+    const sheet = m.all().find((h) => h.props['aria-label'] === 'More')!
+    const words = buttonsIn(sheet).map(textOf)
+    for (const w of ['JOINED', 'CUT', 'DUPLICATE', 'FILL', 'SUBDIVIDE', 'PIECE', 'ALL']) expect(words, w).not.toContain(w)
+    expect(words).toContain('COLOR ALL')
+    expect(buttonsIn(sheet).filter((b) => String(b.props['aria-label'] ?? '').startsWith('Move ')).length).toBe(0)
+    // Esc closes the sheet, then goes on past the held points (out of sight in LOOK) to close the workshop.
+    escapeTop()
+    await tick()
+    escapeTop()
+    await tick()
+    expect(useWorkshop.getState().open).toBe(false)
+    await m.unmount()
+  })
+
   it('opens MORE: what is held, the exact place, the move pad, and the whole shard', async () => {
     useWorkshop.getState().setTool('select')
     useWorkshop.getState().setSelection([1])
@@ -714,7 +734,6 @@ describe('PAINT, and FACE only making faces (phase 3)', () => {
     expect(shardOnBench).toContain("onFaceClick={tool === 'paint' || (tool === 'select' && selectKind === 'faces') ? onFace : undefined}")
     expect(bench).toContain("if (tool === 'face') w.pickForFace(first)")
     // LOOK draws no handles at all, so a tap there meets none (benchLook.test.tsx).
-    expect(bench).toContain("if (isLook(tool)) return null")
     expect(bench).toContain("if (w.tool === 'select' && w.selectKind === 'objects') w.togglePart(part)")
     // A box takes what the switch says.
     expect(bench).toContain("kind = w.selectKind")

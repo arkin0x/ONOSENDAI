@@ -23,9 +23,10 @@
  *   screen carries the same dots in both.
  * - The headlamp's reach and the lines' near fade are in render cells too
  *   (scene/headlamp.ts, scene/nearFade.ts). LOOK writes them in bench units
- *   (BenchLookRig) while it is up, and puts the fade back when it goes. The
- *   world's own canvas is paused under the workshop (scene/frameDriver.ts)
- *   and writes its reach again on its first frame back.
+ *   (BenchLookRig) while it is up, and puts back what it found when it goes
+ *   (the reach, the fade and its switch), so the world's canvas, paused
+ *   under the workshop (scene/frameDriver.tsx), comes back to its own
+ *   numbers even before its HeadlampRig writes them again.
  *
  * In LOOK the editing marks go: the handles and their halos, the selected
  * faces' fill, the corners being joined, a placed object's selection box,
@@ -34,7 +35,7 @@
  * it alone (Bench Keys): a true preview, with nothing to move by accident.
  */
 
-import { useEffect, useLayoutEffect } from 'react'
+import { useLayoutEffect } from 'react'
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import type { Vector3 } from 'three'
 import { ShardMesh } from '../scene/ShardMesh'
@@ -92,8 +93,18 @@ export function BenchLookRig(): null {
     lineFade.range.value.set(LINE_FADE_FROM / k, LINE_FADE_TO / k)
     invalidate()
   }, [k, invalidate])
-  // The world's own numbers back when LOOK goes; it reads them again only when it draws.
-  useEffect(() => () => { lineFade.range.value.set(LINE_FADE_FROM, LINE_FADE_TO) }, [])
+  // The world's own numbers back when LOOK goes: what was there when it came, read before
+  // the frame callback below first writes. Things in the world that read them on the CPU
+  // (ItemModel, ItemVanish, SpawnMarker) run ahead of the world's HeadlampRig.
+  useLayoutEffect(() => {
+    const reach = headlampUniforms.uHeadlampReach.value
+    const on = lineFade.on.value
+    return () => {
+      headlampUniforms.uHeadlampReach.value = reach
+      lineFade.on.value = on
+      lineFade.range.value.set(LINE_FADE_FROM, LINE_FADE_TO)
+    }
+  }, [])
   useFrame((state) => {
     // An orbiting camera, as the world's is outside WALK: the near fade on.
     lineFade.on.value = 1

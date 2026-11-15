@@ -6,7 +6,7 @@
  * material props are spread onto the JSX materials there.
  *
  * Opaque faces in the world write their colour with alpha 0, a tag the bloom
- * is blind to (Scene.tsx WorldBloom), and mark the stencil so overlays can
+ * is blind to (worldBloom.tsx WorldBloom), and mark the stencil so overlays can
  * keep that tag (CoveringBox, ClipWalls OVER_FACES). Nothing about them
  * changes here.
  *

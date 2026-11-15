@@ -5,9 +5,9 @@
  * chain trail toggle, not buttons. Each on its own row, each with a title and
  * short subtitle in gray", then moved together into a View panel).
  *
- * Ten Field rows with a Switch each: Terrain dots, hX boxes, Hide avatar in
+ * Eleven Field rows with a Switch each: Terrain dots, hX boxes, Hide avatar in
  * WALK, Look sphere in WALK, Gravity in WALK, Chain trail, Region keys,
- * Headlamp, Sound spheres and Sync hidden list. Each
+ * Headlamp, Sound spheres, Glow and Sync hidden list. Each
  * drives the flag its old control drove and is remembered
  * the same way. The old controls are gone: no chips under Movement proof, no
  * trail switch in Proof chain, no checkbox in the Region keys list.
@@ -98,11 +98,12 @@ const ROWS: Array<[string, string, string]> = [
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
   ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
   ['view-audio-spheres', 'Sound spheres', 'Blue rings where a hidden sound plays at full volume.'],
+  ['view-glow', 'Glow', 'Draw object glow.'],
   ['view-hides-sync', 'Sync hidden list', 'Your hidden things on every device signed in as you.'],
 ]
 
 describe('the Settings panel', () => {
-  it('is a panel titled Settings with ten switches, one to a row, each a title and a gray subtitle, in order', () => {
+  it('is a panel titled Settings with eleven switches, one to a row, each a title and a gray subtitle, in order', () => {
     const html = view()
     expect(html).toMatch(/^<section class="panel panel--view">/)
     expect(html).toContain('<h2>Settings</h2>')
@@ -171,6 +172,16 @@ describe('the Settings panel', () => {
     viewSwitch('view-headlamp').props.onCheckedChange(true)
     expect(useLayers.getState().headlamp).toBe(true)
     expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ headlamp: true })
+  })
+
+  it('Glow starts on and drives the layer store, remembered on this device', () => {
+    expect(useLayers.getState().glow).toBe(true)
+    expect(switchTag(view(), 'view-glow')).toContain('aria-checked="true"')
+    viewSwitch('view-glow').props.onCheckedChange(false)
+    expect(useLayers.getState().glow).toBe(false)
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ glow: false })
+    viewSwitch('view-glow').props.onCheckedChange(true)
+    expect(useLayers.getState().glow).toBe(true)
   })
 
   it('Gravity in WALK says no key in its subtitle (arkinox, 2026-11-02: no trailing Z)', () => {

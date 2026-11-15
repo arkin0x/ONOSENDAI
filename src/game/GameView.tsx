@@ -39,6 +39,7 @@ import type { HeldItem } from '../lib/inventory'
 import type { Box } from '../lib/clip'
 import { placeShard } from '../scene/WorldShards'
 import { ShardMesh } from '../scene/ShardMesh'
+import { GlowFollowsSetting } from '../scene/PointBillboards'
 import { itemCentre, type AxisName, type Position, type ViewAxes } from '../lib/space'
 import { BG, GAME } from '../lib/palette'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
@@ -74,14 +75,15 @@ export function stepFor(yaw: number, press: 'forward' | 'back' | 'left' | 'right
 
 function Shards({ game, world }: { game: GameDef; world: WorldShard[] }): JSX.Element {
   const placed = useMemo(() => world.map((w) => placeShard({ key: w.key, at: w.at, height: w.height, plane: game.region.plane, shard: w.shard }, game.region.base, 0, AXES)), [game, world])
+  // Glow halos follow the Settings switch here, as in the world (scene/PointBillboards.tsx).
   return (
-    <>
+    <GlowFollowsSetting>
       {placed.map((p) => (
         <group key={p.key} position={p.centre}>
           <ShardMesh shard={p.shard} scale={p.scale} clip={p.clip} pose={p.pose} lit />
         </group>
       ))}
-    </>
+    </GlowFollowsSetting>
   )
 }
 

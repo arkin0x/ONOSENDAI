@@ -119,6 +119,7 @@ import { DOUBLE_JUMP_SPEED, JUMP_HEIGHT, JUMP_SPEED, WALK_GRAVITY, arcApex, arcH
 import { launchHeight } from '../lib/walkBounce'
 import { walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
 import { heldNow, holdReleaseAll } from './walkHold'
+import { noteWallContact } from './wallHint'
 
 /**
  * What the LOSING SYNC warning waits for: this many moves not yet proven.
@@ -481,6 +482,8 @@ function closeOpen(): void {
 
 /** The WALL chip, one per wall: a held key's repeats do not churn the one toast slot. */
 function wallChip(by: WallItem): void {
+  // A wall you cannot see (opacity 0, or bare points) flashes its outline (store/wallHint.ts).
+  noteWallContact(by)
   const shown = useToast.getState().toast
   if (!(shown?.label === 'WALL' && shown.meta === by.shard.name)) useToast.getState().show({ label: 'WALL', meta: by.shard.name, mark: 'walk', ms: BRIEF_TOAST_MS })
 }

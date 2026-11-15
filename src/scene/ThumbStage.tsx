@@ -22,6 +22,7 @@ import { keepPrograms } from '../lib/keepPrograms'
 import { ShardMeshBody } from './ShardMesh'
 import { ShardLights } from './shardLight'
 import { useThumbs, type ThumbJob } from '../store/useThumbs'
+import { drawsAnything } from '../lib/pointLook'
 
 /** The picture's size in pixels; tiles show it at about half that, so it stays sharp on a phone. */
 export const THUMB_PX = 160
@@ -133,7 +134,8 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
     // frame counts only when the context is there and something was drawn
     // in it; until then the job waits, and the watchdog (ThumbHost) makes the
     // stage again.
-    if (gl.getContext().isContextLost() || gl.info.render.calls === 0) return
+    // An object that draws nothing by design (opacity 0 with no glow, POINTS at point size 0) is rightly blank (lib/pointLook.ts).
+    if (gl.getContext().isContextLost() || (gl.info.render.calls === 0 && drawsAnything(job.shard))) return
     frames.current += 1
     if (frames.current < wait || taken.current) return
     taken.current = true

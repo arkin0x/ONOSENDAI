@@ -14,7 +14,7 @@
  * with an ease-out, jittering less as they land. Decryption made visible.
  */
 
-import { Component, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
+import { Component, useContext, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import {
   FrontSide,
@@ -43,12 +43,14 @@ import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
 import { faceEdges } from 'sno-core/outline'
 import { BACK_SHADE_COLOR, SHARD_FACES_TONE_MAPPED } from './shardLight'
 import { SHARD_DOTS, SHARD_POINTS, createDiscMaterial, sizeDisc, withDiscColors } from './pointDisc'
-import { DOTS_ORDER, basicFaceProps, benchOrders, lineProps, litFaceProps, shardOpacity, shardOrder } from './shardFaces'
+import { DOTS_ORDER, GHOST_OPACITY, basicFaceProps, benchOrders, lineProps, litFaceProps, shardOpacity, shardOrder } from './shardFaces'
 
 import { HEADLAMP_FACES, HEADLAMP_LINES } from './headlamp'
 import { holdPlaced, placedBuffers, type PlacedBuffers } from './placedBuffers'
 import { animOf, type Motion } from '../lib/anim'
 import { AnimGroups, clipWalls } from './animMotion'
+import { drawPlan, haloFade, pointLookOf } from '../lib/pointLook'
+import { GlowHalos, GlowTrust, PointCores, useGlowAllowed } from './PointBillboards'
 
 export { FACE_TAG_STENCIL } from './shardFaces'
 
@@ -156,6 +158,7 @@ interface Props {
    * §3.3). Proof of work prices an avatar's size and detail, not how hard it
    * is to see, and a near-invisible body is a stealth tool. Carried to its
    * placed objects too, so no part of an avatar is see-through either.
+   * An avatar ignores its point size and glow too (§1.15, §1.16, §3.3).
    */
   ignoreOpacity?: boolean
   /**
@@ -368,7 +371,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   const clipPlanes = useMemo(() => (walls && givenPlanes ? [...walls.world, ...givenPlanes] : walls?.world ?? givenPlanes), [walls, givenPlanes])
   const motion = (node: ReactNode): ReactNode => (moving ? <AnimGroups motions={motions} pose={poseTurn} walls={walls}>{node}</AnimGroups> : node)
   // What everything below is drawn at: the object's own opacity (DECK-0003
-  // §1.11, with its 10% floor), times a ghost's; an avatar ignores its own.
+  // §1.11, 0 to 100 with no floor), times a ghost's; an avatar ignores its own.
   // A placed object reaches here with its own model, so it never takes its
   // parent's (§1.10). See shardFaces.ts for how see-through faces blend.
   const opacity = shardOpacity(given, { ghost, ignoreOpacity }) * dim
@@ -380,6 +383,16 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   const own = shardOpacity(given, { ignoreOpacity }) * dim
   const order = shardOrder(opacity, ghost)
   const bench = benchOrders(opacity, ghost)
+  // Point size and glow (DECK-0003 §1.15, §1.16; lib/pointLook.ts): POINTS
+  // only, never an avatar, the object's own (never a parent's). At opacity
+  // 0 the object draws nothing of its own, and its glow still shows: GLOW
+  // STRENGTH is never multiplied by the object's opacity, only by the
+  // client's own fade (a ghost's share, `dim`).
+  const look = useMemo(() => pointLookOf(given, { avatar: ignoreOpacity }), [given, ignoreOpacity])
+  const glowAllowed = useGlowAllowed(world)
+  const plan = drawPlan(given.mode, look, { cull, glowAllowed })
+  const trustedAbove = useContext(GlowTrust)
+  const glowTrusted = budget ? budget.trusted : trustedAbove
   // The objects this one places, fetched once for the whole app; a part's own
   // parts come resolved from its parent instead. In the world's scene, what it
   // reads is charged to the read pool of its trust (lib/readPools.ts).
@@ -458,6 +471,18 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   }, [colAttr, colors, invalidate])
 
   const plain = useMemo(() => shared?.plain ?? plainGeometry(posAttr!, colAttr!), [posAttr, colAttr, shared])
+  // The points a POINT SIZE or a glow draws at, one per vertex: face colours
+  // give each face its own corners (expandFaceColors), which would stack a
+  // halo per face on every corner, so those are drawn from the vertices as
+  // written. Anything else uses the points' own geometry, decode and all.
+  const wantsBillboards = look.glow !== undefined || (look.pointSize ?? 0) > 0
+  const ownPoints = useMemo(() => {
+    if (!wantsBillboards || !(given.facecolors?.length)) return null
+    const g = shardGeometry({ ...given, faces: [], facecolors: undefined }, clip, pose)
+    return plainGeometry(new BufferAttribute(g.positions, 3), new BufferAttribute(g.colors, 3))
+  }, [wantsBillboards, given, clip, pose])
+  useEffect(() => () => { ownPoints?.dispose() }, [ownPoints])
+  const pointsPlain = ownPoints ?? plain
 
   // Made with the buffer at its final positions: a birth's scramble writes them only from the next frame (settleBounds).
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -615,9 +640,11 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
     if (t >= 1) done.current = true
   })
 
-  const placements = (given.parts?.length ?? 0) > 0
+  const placed$ = (given.parts?.length ?? 0) > 0
     ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} dim={dim} allowance={allowance} near={near} rootTrusted={trusted} still={still} />
     : null
+  // What a world shard places is its trust's to budget, glow included.
+  const placements = placed$ && budget ? <GlowTrust.Provider value={budget.trusted}>{placed$}</GlowTrust.Provider> : placed$
   // An object may be nothing but the arrangement of others (§1.9 rule 13).
   if (shard.vertices.length === 0) return placements ? <group scale={scale}>{motion(placements)}</group> : null
   // The nearest hit is on whichever side faces the tap; it answers and stops it there.
@@ -627,7 +654,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
     <group scale={scale}>
       {motion(<>
       {placements}
-      {shard.mode === 'solid' && index.length > 0 && (
+      {plan.faces && index.length > 0 && (
         <group>
           <mesh name="shard-faces" geometry={indexed} frustumCulled={false} renderOrder={lit ? bench.front : order} {...pick}>
             {/* forceSinglePass: three draws a transparent DoubleSide material
@@ -664,14 +691,26 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
           are drawn. The points and lines have no back to cull: every vertex
           dot and edge of your own body would sit across the view, which is
           what arkinox still saw with the backs culled (2026-10-13). */}
-      {shard.mode === 'lines' && outline && !cull && (
+      {plan.lines && outline && (
         <lineSegments geometry={outline} frustumCulled={false} renderOrder={order}>
           <lineBasicMaterial vertexColors toneMapped={false} {...lineProps(opacity, ghost)} {...lampLines} userData-share={own} {...cut} />
         </lineSegments>
       )}
-      {shard.mode === 'lines' && !outline && !cull && shard.vertices.length > 1 && <primitive object={line} />}
-      {!cull && (shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (
+      {plan.lines && !outline && shard.vertices.length > 1 && <primitive object={line} />}
+      {/* The client's own points, as always, unless a POINT SIZE says otherwise (always absent under SOLID and LINES). */}
+      {plan.points === 'disc' && (shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (
         <points geometry={plain} material={pointMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} />
+      )}
+      {/* At a POINT SIZE: billboards, since a GPU caps a GL point's size. 0 draws no points. */}
+      {/* Nothing of its own drawn (opacity 0, or POINTS at point size 0): an invisible copy still answers taps and picks, and is never drawn, so it hides and occludes nothing. */}
+      {!cull && (look.hidden || plan.points === 'none') && (shard.mode === 'solid' && index.length > 0 && look.hidden
+        ? <mesh name="shard-hit" visible={false} geometry={indexed} frustumCulled={false} {...pick}><meshBasicMaterial /></mesh>
+        : <points name="shard-hit" visible={false} geometry={plain} material={pointMaterial} frustumCulled={false} />)}
+      {plan.points === 'billboard' && look.pointSize !== undefined && (
+        <PointCores plain={pointsPlain} size={look.pointSize} opacity={opacity} glow={SHARD_POINTS.glow} headlamp={headlamp && !lit} clipPlanes={clipPlanes} />
+      )}
+      {plan.halos && look.glow && (
+        <GlowHalos plain={pointsPlain} glow={look.glow} radius={look.glowRadius} strength={look.glowStrength} fade={haloFade({ ghostShare: ghost ? GHOST_OPACITY : 1, dim })} world={world} trusted={glowTrusted} clipPlanes={clipPlanes} walls={clip} birth={birth} dissolve={dissolve} />
       )}
       </>)}
     </group>

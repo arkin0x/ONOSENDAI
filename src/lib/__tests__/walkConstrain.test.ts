@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { PAYLOAD_FIELDS, fromPayload, newShard, normalizeStored, toPayload, type ShardModel } from 'sno-core/shards'
 import type { Placed } from 'sno-core/parts'
-import { CONSTRAIN_DEFAULT, authoredConstrain, authoredConstrainOf, blocks, constrainOf, enclosed, firstHit, readConstrain, seeThrough, solidsOf, wallMesh, wallsOf, withAuthoredConstrain, withConstrain, type Constrain } from '../walkConstrain'
+import { CONSTRAIN_DEFAULT, ZERO_OPACITY_STOPS_WALKERS, authoredConstrain, authoredConstrainOf, blocks, constrainOf, enclosed, firstHit, readConstrain, seeThrough, solidsOf, wallMesh, wallsOf, withAuthoredConstrain, withConstrain, type Constrain } from '../walkConstrain'
 import { avatarTemplate } from '../avatar'
 import { objectTemplate } from '../hidden'
 import { decryptForRegion } from '../shardCrypto'
@@ -322,5 +322,20 @@ describe('closed solids, for the space above a walker (store/walkWalls.ts stepLi
     const m = wallMesh(holder, placed)
     expect(enclosed(m, [0, 10 + 1e-6, 0])).toBe(true)
     expect(enclosed(m, [0, 1e-6, 0])).toBe(false)
+  })
+})
+
+describe('an object at opacity 0 (owner ruling 2026-11-15: it still holds a walker by its constrain)', () => {
+  it('the switch is on: ALL stops a walker at 0, OPAQUE never does (0 is not opaque)', () => {
+    expect(ZERO_OPACITY_STOPS_WALKERS).toBe(true)
+    expect(blocks(wall({ opacity: 0 }, 'all'))).toBe(true)
+    expect(blocks(wall({ opacity: 0 }, 'opaque'))).toBe(false)
+    expect(seeThrough(wall({ opacity: 0 }))).toBe(true)
+  })
+  it('flipped off, an object at 0 stops nothing whatever its constrain; any other opacity is untouched', () => {
+    expect(blocks(wall({ opacity: 0 }, 'all'), false)).toBe(false)
+    expect(blocks(wall({ opacity: 0 }, 'opaque'), false)).toBe(false)
+    expect(blocks(wall({ opacity: 1 }, 'all'), false)).toBe(true)
+    expect(blocks(wall({}, 'opaque'), false)).toBe(true)
   })
 })

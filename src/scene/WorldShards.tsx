@@ -17,6 +17,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
 import { editingId, useShards, type WorldItem } from '../store/useShards'
 import { WALL_BREATH_SECONDS } from './Rooms'
+import { WalkContactHint } from './WalkContactHint'
 import { ShardMesh } from './ShardMesh'
 import { GHOST_OPACITY } from './shardFaces'
 import { regionBox, type Box } from '../lib/clip'
@@ -273,6 +274,8 @@ export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRe
       <group ref={setDrawn}>
         <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} clip={w.clip} pose={w.pose} budget={budget} dim={moving ? 1 : dim} />
       </group>
+      {/* A wall you cannot see, outlined for a moment after it stopped your walk (store/wallHint.ts). */}
+      <WalkContactHint shardKey={w.key} shard={w.shard} scale={w.scale} clip={w.clip} pose={w.pose} />
       {/* Not tappable while it moves: the ghost is the one being aimed. */}
       {/* Dimmed in build mode, a tap passes through it (BuildOccluders tapsPassThrough). */}
       {!moving && tappable && !passesTaps(w.key) && <TapTarget measure={drawn} occluder={occludes ? w.key : undefined} onTap={() => useShards.getState().selectSecret(w.key)} />}

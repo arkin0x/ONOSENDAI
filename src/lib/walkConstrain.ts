@@ -135,8 +135,20 @@ export function seeThrough(s: Pick<ShardModel, 'mode' | 'opacity'>): boolean {
   return readOpacity(s.opacity) !== undefined || s.mode !== 'solid'
 }
 
-/** Whether this object's own faces stop a walker. */
-export function blocks(s: Pick<ShardModel, 'mode' | 'opacity' | 'extra'>): boolean {
+/**
+ * Whether an object at opacity 0 still stops a walker by its `constrain`.
+ * Ruled 2026-11-15 (owner): yes, 0% plus `constrain` blocks, since invisible
+ * walls and floors are a building tool. So `all` stops a walker at every
+ * opacity, and `opaque` never stops at 0, which is not opaque. Kept as one
+ * switch: false would make an object at 0 stop nothing, whatever its
+ * `constrain`. A walker stopped by a wall it cannot see is shown a brief
+ * outline of it (scene/WalkContactHint.tsx).
+ */
+export const ZERO_OPACITY_STOPS_WALKERS = true
+
+/** Whether this object's own faces stop a walker. `zeroStops`: ZERO_OPACITY_STOPS_WALKERS, a parameter so a test can flip it. */
+export function blocks(s: Pick<ShardModel, 'mode' | 'opacity' | 'extra'>, zeroStops: boolean = ZERO_OPACITY_STOPS_WALKERS): boolean {
+  if (!zeroStops && readOpacity(s.opacity) === 0) return false
   const c = constrainOf(s)
   return c === 'all' || (c === 'opaque' && !seeThrough(s))
 }

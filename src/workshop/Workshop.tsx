@@ -4,7 +4,7 @@
  * phase 1; arkinox, 2026-11-14: "the new workbench looks amazing. ship it").
  *
  *   1. The top bar (shell/TopBar): the way out, the top-level areas MENU,
- *      SHARD, GRID, AVATAR and MOTION, then DEPLOY. One row, never wrapped,
+ *      SHARD, MOTION, AVATAR and GRID, then DEPLOY. One row, never wrapped,
  *      never hidden.
  *   2. The rail (shell/Rail), left under the top bar: UNDO, REDO, and the
  *      grid LEVEL up, its value, and down. Never hidden.

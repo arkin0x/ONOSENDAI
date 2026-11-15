@@ -5,9 +5,9 @@
  * chain trail toggle, not buttons. Each on its own row, each with a title and
  * short subtitle in gray", then moved together into a View panel).
  *
- * Nine Field rows with a Switch each: Terrain dots, hX boxes, Hide avatar in
+ * Ten Field rows with a Switch each: Terrain dots, hX boxes, Hide avatar in
  * WALK, Look sphere in WALK, Gravity in WALK, Chain trail, Region keys,
- * Headlamp and Sound spheres. Each
+ * Headlamp, Sound spheres and Sync hidden list. Each
  * drives the flag its old control drove and is remembered
  * the same way. The old controls are gone: no chips under Movement proof, no
  * trail switch in Proof chain, no checkbox in the Region keys list.
@@ -98,10 +98,11 @@ const ROWS: Array<[string, string, string]> = [
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
   ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
   ['view-audio-spheres', 'Sound spheres', 'Blue rings where a hidden sound plays at full volume.'],
+  ['view-hides-sync', 'Sync hidden list', 'Your hidden things on every device signed in as you.'],
 ]
 
 describe('the Settings panel', () => {
-  it('is a panel titled Settings with nine switches, one to a row, each a title and a gray subtitle, in order', () => {
+  it('is a panel titled Settings with ten switches, one to a row, each a title and a gray subtitle, in order', () => {
     const html = view()
     expect(html).toMatch(/^<section class="panel panel--view">/)
     expect(html).toContain('<h2>Settings</h2>')
@@ -285,5 +286,33 @@ describe('the tutorial is not in Settings (owner, 2026-11-13: moved into the men
       expect(view()).not.toContain('TUTORIAL')
     }
     useTutorialSwitch.setState({ value: null })
+  })
+})
+
+describe('Sync hidden list (owner ruling, 2026-11-15)', () => {
+  it('starts on, turns off and on, is remembered on this device, and says what it does in EXPLAIN', async () => {
+    const { useHidesSync } = await import('../../store/hidesSync')
+    expect(useHidesSync.getState().enabled).toBe(true)
+    expect(switchTag(view(), 'view-hides-sync')).toContain('aria-checked="true"')
+    viewSwitch('view-hides-sync').props.onCheckedChange(false)
+    expect(useHidesSync.getState().enabled).toBe(false)
+    expect(localStorage.getItem('onosendai:hides-sync')).toBe('0')
+    expect(switchTag(view(), 'view-hides-sync')).toContain('aria-checked="false"')
+    viewSwitch('view-hides-sync').props.onCheckedChange(true)
+    expect(localStorage.getItem('onosendai:hides-sync')).toBe('1')
+    // EXPLAIN is folded until tapped: its words, from the panel's element tree.
+    const words = (n: ReactNode): string => (typeof n === 'string' ? n : Array.isArray(n) ? n.map(words).join('') : isValidElement(n) ? words((n.props as { children?: ReactNode }).children) : '')
+    const explain = words((ViewPanel() as ReactElement<{ children: ReactNode }>).props.children).replace(/\s+/g, ' ')
+    expect(explain).toContain('Your list of hidden things is saved to the relay, encrypted so only you can read it.')
+    expect(explain).toContain('Any device signed in as you shows the same list')
+    expect(explain).toContain('no NIP-44')
+    expect(explain).not.toContain('—')
+  })
+
+  it('a signer with no NIP-44 says so under the switch', async () => {
+    const { useHidesSync } = await import('../../store/hidesSync')
+    useHidesSync.setState({ enabled: true, status: 'unsupported', note: 'Your signer has no NIP-44 encryption, so your list of hidden things stays on this device.' })
+    expect(view()).toContain('Your signer has no NIP-44 encryption')
+    useHidesSync.setState({ status: 'idle', note: null })
   })
 })

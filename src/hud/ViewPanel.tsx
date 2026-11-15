@@ -19,6 +19,9 @@
  * showTrail and showSecrets for the other two). It is a view preference
  * only: nothing here changes a proof, a move, the cursor or the chain.
  *
+ * One row reaches the relay: Sync hidden list, your list of hidden things
+ * saved encrypted to you (store/hidesSync.ts; owner ruling, 2026-11-15).
+ *
  * The first-arrival tutorial's switch was a row here until the owner moved it,
  * with RESTART TUTORIAL, into the menu's Tutorial panel (2026-11-13,
  * hud/TutorialPanel.tsx).
@@ -28,6 +31,7 @@ import type { ReactNode } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
 import { useWalk } from '../store/useWalk'
+import { useHidesSync } from '../store/hidesSync'
 import { Field, Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
 
@@ -49,6 +53,9 @@ export function ViewPanel(): JSX.Element {
   const gravity = useWalk((s) => s.gravity)
   const showTrail = useCyberspace((s) => s.showTrail)
   const showSecrets = useCyberspace((s) => s.showSecrets)
+  const hidesSync = useHidesSync((s) => s.enabled)
+  const hidesStatus = useHidesSync((s) => s.status)
+  const hidesNote = useHidesSync((s) => s.note)
 
   const rows: ViewRow[] = [
     // A dot's color is the terrain K of its cell, the height of the temporal
@@ -134,6 +141,16 @@ export function ViewPanel(): JSX.Element {
       on: audioSpheres,
       set: (v) => useLayers.getState().setLayer('audioSpheres', v),
     },
+    // Your list of hidden things, saved to the relay encrypted to you, so every
+    // device signed in as you lists it (store/hidesSync.ts; owner ruling,
+    // 2026-11-15). On by default; off keeps the list on this device.
+    {
+      id: 'view-hides-sync',
+      title: 'Sync hidden list',
+      hint: hidesSync && (hidesStatus === 'unsupported' || hidesStatus === 'error') && hidesNote ? hidesNote : 'Your hidden things on every device signed in as you.',
+      on: hidesSync,
+      set: (v) => useHidesSync.getState().setEnabled(v),
+    },
   ]
 
   return (
@@ -166,6 +183,12 @@ export function ViewPanel(): JSX.Element {
         exactly its own color. Sound spheres are blue rings around each hidden
         sound you have found or placed: inside one it plays at full volume, and
         it fades to silence at its region's walls.
+        Sync hidden list is the one switch here that reaches the relay. Your
+        list of hidden things is saved to the relay, encrypted so only you can
+        read it. Any device signed in as you shows the same list and can open
+        what is in it. Nothing is saved while you are LOCAL. If your signer
+        cannot encrypt for you (it has no NIP-44), the list stays on this
+        device. Turn it off to keep the list on this device only.
       </Explanation>
     </section>
   )

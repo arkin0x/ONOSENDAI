@@ -152,6 +152,12 @@ describe('the setters', () => {
     expect(extra()).toEqual({ glow: ['fog', 120, 40] })
   })
 
+  it('rounds to whole ticks and whole percent, since sno-core clears a fractional value', () => {
+    w().setPointSize(30.4)
+    w().setGlow({ style: 'light', radius: 99.6, strength: 12.2 })
+    expect(extra()).toEqual({ pointsize: 30, glow: ['light', 100, 12] })
+  })
+
   it('keeps other extra fields, and never writes a malformed glow', () => {
     load(shard('points', { anim: [['turn', 1, 60]] }))
     w().setGlow({ style: 'light' })

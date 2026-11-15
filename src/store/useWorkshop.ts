@@ -1125,7 +1125,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     setMode: (mode) => edit((s) => ({ ...s, mode })),
     setOpacity: (percent) => edit((s) => withOpacity(s, percent)),
     // Already so: the same object back, so no edit and no empty undo step.
-    setPointSize: (ticks) => edit((s) => { const n = withPointSize(s, ticks); return n.extra?.pointsize === s.extra?.pointsize ? null : n }),
+    setPointSize: (ticks) => edit((s) => { const n = withPointSize(s, ticks === undefined ? undefined : Math.round(ticks)); return n.extra?.pointsize === s.extra?.pointsize ? null : n }),
     setGlow: (patch) => {
       const { glowLast, color } = get()
       let wrote: Glow | undefined
@@ -1133,6 +1133,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         const had = readGlow(s.extra?.glow)
         if (patch === null) return s.extra?.glow === undefined ? null : withGlow(s, undefined)
         const g: Glow = { ...(had ?? { style: suggestedGlowStyle(s, color), ...glowLast }), ...patch }
+        // sno-core clears the field on a fractional value: whole ticks and whole percent only.
+        g.radius = Math.round(g.radius)
+        g.strength = Math.round(g.strength)
         const n = withGlow(s, g)
         wrote = readGlow(n.extra?.glow)
         return had && wrote && had.style === wrote.style && had.radius === wrote.radius && had.strength === wrote.strength ? null : n

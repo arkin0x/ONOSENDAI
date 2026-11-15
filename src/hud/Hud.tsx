@@ -465,11 +465,11 @@ function ScalePanel(): JSX.Element {
 
 const OFFICIAL: Array<{ href: string; name: string; what: string }> = [
   { href: 'https://github.com/arkin0x/cyberspace', name: 'Cyberspace v2 Specification', what: 'the core protocol documentation' },
-  { href: STRAYLIGHT_INVITE, name: 'Straylight Cafe', what: 'the cyberspace community, on Armada' },
+  { href: STRAYLIGHT_INVITE, name: 'Straylight Cafe', what: 'the cyberspace community on Armada' },
   { href: 'https://cyberspace.international', name: 'cyberspace.international', what: 'education, proliferation, adoption of cyberspace' },
   { href: 'https://snocrash.art', name: 'SnoCrash', what: 'SNO format 3D model builder' },
-  { href: 'https://github.com/arkin0x/ONOSENDAI/tree/v2', name: 'ONOSENDAI v2 Codebase', what: 'this client, on GitHub' },
-  { href: 'https://www.youtube.com/@onosendaitv', name: 'Cyberspace TV', what: 'the 24/7 stream, live' },
+  { href: 'https://github.com/arkin0x/ONOSENDAI/tree/v2', name: 'ONOSENDAI v2 Codebase', what: 'this client on GitHub' },
+  { href: 'https://www.youtube.com/@onosendaitv', name: 'Cyberspace TV', what: 'the 24/7 live stream' },
 ]
 
 function LinksPanel(): JSX.Element {

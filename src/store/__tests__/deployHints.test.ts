@@ -5,9 +5,12 @@
  * keeps the first bag's settings; a riddle written from another device is
  * carried forward; rewrites by broadcast and delete keep them; the sector hint
  * goes off above height 30; and a bag without `h` is still read at its height.
- * The sector hint is ON by default for every new bag (owner ruling
- * 2026-11-13), off by hand per bag, off where the height is too large for it
- * and back on below, and an edit keeps its bag's own choice.
+ * The three hint switches (height, sector, contents) are ON for a player who
+ * never touched them and stay what they set them after that, on every later
+ * hide, into a new bag or one already out, an edit or a move alike
+ * (arkinox, 2026-11-15; store/deployHintPrefs.ts). The sector hint is off
+ * where the height is too large for it and back on below, which never
+ * changes the saved choice.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -44,6 +47,7 @@ import { useCyberspace } from '../useCyberspace'
 import { ownBagIn, regionOf, useShards } from '../useShards'
 import { HIDDEN_KIND, bagTemplate, newBagSettings, type BagSettings } from '../../lib/hidden'
 import { SECTOR_HINT, hintTags, isHintTag } from '../../lib/hint'
+import { HINT_PREFS_KEY, loadHintPrefs } from '../deployHintPrefs'
 import { deployPoint } from '../../lib/space'
 import { hexToBytes, type NostrEvent } from '../../lib/events'
 
@@ -76,10 +80,11 @@ beforeEach(() => {
 })
 
 describe('the deploy writes the bag settings', () => {
-  it('defaults: H and the sector hint (owner ruling 2026-11-13), no riddle', async () => {
+  it('defaults: H, the sector hint and the contents (arkinox, 2026-11-15), no riddle', async () => {
     await hide('one')
     const bag = lastBag()
-    expect(tagNames(bag)).toEqual(['d', 'encrypted', 'version', 'H', 'hint', 'X', 'Y', 'Z', 'S', 'client'])
+    expect(tagNames(bag)).toEqual(['d', 'encrypted', 'version', 'H', 'hint', 'X', 'Y', 'Z', 'S', 'contents', 'client'])
+    expect(bag.tags).toContainEqual(['contents', 'message', '1'])
     expect(bag.tags).toContainEqual(['H', String(HEIGHT)])
     expect(bag.tags.some((t) => t[0] === 'h')).toBe(false)
     expect(bag.content).toBe('')
@@ -185,7 +190,7 @@ describe('the sector hint and the height', () => {
   })
 })
 
-describe('the sector hint is ON by default for every new bag (owner ruling 2026-11-13)', () => {
+describe('the three hint switches: ON for a new player, then what they set (arkinox, 2026-11-15)', () => {
   const S = () => useShards.getState()
   const starts: [string, () => void][] = [
     ['a shard', () => S().startDeployShard('some-shard')],
@@ -197,32 +202,81 @@ describe('the sector hint is ON by default for every new bag (owner ruling 2026-
     ['a chest', () => S().startDeployChest({ name: 'c', lock: null, requires: '', contents: [] } as never)],
     ['a door', () => S().startPlaceDoor()],
   ]
-  it.each(starts)('%s starts with it on, whatever the last deploy chose', (_, start) => {
-    S().setDeployBag({ hint: null })
+  const shown = () => ({ height: S().deployBag.heightTag, sector: S().deployBag.hint !== null, contents: S().deployBag.contents })
+
+  it.each(starts)('%s starts with all three on for a player who never touched them', (_, start) => {
+    expect(localStorage.getItem(HINT_PREFS_KEY)).toBeNull()
     start()
+    expect(shown()).toEqual({ height: true, sector: true, contents: true })
     expect(S().deployBag.hint).toEqual(SECTOR_HINT)
     expect(S().deployBagFrom).toBeNull()
   })
 
-  it('turned off, the bag goes out with no hint or sector tag; the next new bag starts on again', async () => {
+  it.each(starts)('%s starts with what the player last set', (_, start) => {
+    S().startDeployMessage('set')
+    S().setDeployBag({ heightTag: false })
+    S().setDeployBag({ hint: null })
+    S().setDeployBag({ contents: false })
+    S().cancelDeploy()
+    start()
+    expect(shown()).toEqual({ height: false, sector: false, contents: false })
+  })
+
+  it('one switch changed keeps the other two as they were', () => {
+    S().startDeployMessage('x')
+    S().setDeployBag({ contents: false })
+    S().startDeployKey({ name: 'k' } as never)
+    expect(shown()).toEqual({ height: true, sector: true, contents: false })
+  })
+
+  it('a riddle typed is not a switch: it saves nothing', () => {
+    S().startDeployMessage('x')
+    S().setDeployBag({ riddle: 'a clue' })
+    expect(localStorage.getItem(HINT_PREFS_KEY)).toBeNull()
+  })
+
+  it('turned off, the bag goes out with no hint or sector tag, and so does the next, in a new region or the same', async () => {
     await hide('off', { hint: null })
     expect(lastBag().tags.some(isHintTag)).toBe(false)
     expect(useShards.getState().mine[0].bag?.hint).toBeNull()
     S().startDeployMessage('next')
-    expect(S().deployBag.hint).toEqual(SECTOR_HINT)
-    // Into the same region, the controls are that bag's: off, as it was chosen.
+    expect(S().deployBag.hint).toBeNull()
     const cs = useCyberspace.getState()
     S().seedDeployBag(ownBagIn(S().mine, regionOf(deployPoint(cs.cursor, cs.scaleExp, HEIGHT), cs.plane, HEIGHT)))
     expect(S().deployBag.hint).toBeNull()
   })
 
-  it('left untouched, never puts a hint on a bag already out without one', async () => {
+  it('your bag already out with all three off: the bar shows your switches, ON, and the bag goes out with them', async () => {
+    await hide('first', { heightTag: false, hint: null, contents: false, riddle: 'kept' })
+    relayBags = [lastBag()]
+    // Back on by hand on some other hide: the switches are the player's, not the bag's.
+    S().startDeployMessage('elsewhere')
+    S().setDeployBag({ heightTag: true, hint: SECTOR_HINT, contents: true })
+    S().cancelDeploy()
+    S().startDeployMessage('second')
+    S().setDeployHeight(HEIGHT)
+    const cs = useCyberspace.getState()
+    S().seedDeployBag(ownBagIn(S().mine, regionOf(deployPoint(cs.cursor, cs.scaleExp, HEIGHT), cs.plane, HEIGHT)))
+    expect(S().deployBag).toEqual({ heightTag: true, hint: SECTOR_HINT, riddle: 'kept', contents: true, money: false })
+    await S().deploy()
+    expect(tagNames(lastBag())).toEqual(['d', 'encrypted', 'version', 'H', 'hint', 'X', 'Y', 'Z', 'S', 'contents', 'client'])
+    expect(lastBag().content).toBe('kept')
+  })
+
+  it('a bag this device does not know goes out as the bar shows: on puts the hint on, off takes it off', async () => {
     await hide('first', { hint: null })
     const first = lastBag()
-    // Another device's bag: this one does not know it, so the controls start as a new bag's.
+    // Another device's bag: this one does not know it, so the controls start from the saved switches.
     useShards.setState({ mine: [] })
     relayBags = [first]
+    S().startDeployMessage('on again')
+    S().setDeployBag({ hint: SECTOR_HINT })
+    S().cancelDeploy()
     await hide('second')
+    expect(lastBag().tags.some(isHintTag)).toBe(true)
+    useShards.setState({ mine: [] })
+    relayBags = [lastBag()]
+    await hide('third', { hint: null })
     expect(lastBag().tags.some(isHintTag)).toBe(false)
   })
 
@@ -258,7 +312,7 @@ describe('the sector hint is ON by default for every new bag (owner ruling 2026-
     expect(S().deployHintHeld).toEqual(SECTOR_HINT)
   })
 
-  it('a move keeps its bag\'s own choice, off or on', async () => {
+  it('a move shows the switches as last set, off or on', async () => {
     await hide('kept off', { hint: null })
     relayBags = [lastBag()]
     S().startMoveItem(S().mine[0].eventId)
@@ -273,6 +327,57 @@ describe('the sector hint is ON by default for every new bag (owner ruling 2026-
     const on = S().mine.find((d) => d.text === 'on')!
     S().startMoveItem(on.eventId)
     expect(S().deployBag.hint).toEqual(SECTOR_HINT)
+  })
+
+  it('a move of an item whose bag is off, with the switch since turned on: on, and the bag goes out with the hint', async () => {
+    await hide('was off', { hint: null })
+    relayBags = [lastBag()]
+    S().startDeployMessage('elsewhere')
+    S().setDeployBag({ hint: SECTOR_HINT })
+    S().cancelDeploy()
+    S().startMoveItem(S().mine[0].eventId)
+    expect(S().deployBag.hint).toEqual(SECTOR_HINT)
+    sent.length = 0
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    expect(lastBag().tags.some(isHintTag)).toBe(true)
+  })
+
+  it('after a deploy, the next placement lined up keeps the saved switches, and the sector hint goes off above 30 and comes back', async () => {
+    // Above 30 a deploy needs cloud compute, which this test has not got; the held hint after one is withHintPrefs (deployHintPrefs.test.ts).
+    await hide('first', { contents: false })
+    expect(S().pending).not.toBeNull()
+    expect(S().deployBag).toMatchObject({ heightTag: true, hint: SECTOR_HINT, contents: false })
+    expect(S().deployHintHeld).toBeNull()
+    useShards.setState({ deployCeiling: () => 40 })
+    S().setDeployHeight(35)
+    expect(S().deployBag.hint).toBeNull()
+    S().setDeployHeight(20)
+    expect(S().deployBag.hint).toEqual(SECTOR_HINT)
+    expect(loadHintPrefs()).toEqual({ height: true, sector: true, contents: false })
+  })
+})
+
+describe('what the client forces never overwrites the saved switches', () => {
+  const S = () => useShards.getState()
+
+  it('the sector hint going off above height 30 and back on lower down', () => {
+    useShards.setState({ deployCeiling: () => 40 })
+    S().startDeployMessage('high')
+    S().setDeployHeight(35)
+    expect(S().deployBag.hint).toBeNull()
+    expect(loadHintPrefs()).toEqual({ height: true, sector: true, contents: true })
+    S().cancelDeploy()
+    S().startDeployMessage('low')
+    S().setDeployHeight(HEIGHT)
+    expect(S().deployBag.hint).toEqual(SECTOR_HINT)
+  })
+
+  it('newBagSettings, which the game and tutorial dungeon bags take as they are, ignores the saved switches (worldDeploy.test.ts builds the dungeon itself)', () => {
+    S().startDeployMessage('x')
+    S().setDeployBag({ heightTag: false, hint: null, contents: false })
+    expect(newBagSettings(HEIGHT)).toMatchObject({ heightTag: true, hint: SECTOR_HINT })
+    expect(loadHintPrefs()).toEqual({ height: false, sector: false, contents: false })
   })
 })
 

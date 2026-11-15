@@ -21,8 +21,8 @@
  *    (spec §7.6: a door stays inline), sealed to the key item, wearing the
  *    hall gate as its looks, and the rest of the dungeon.
  *
- * The key bag and the world bag carry the sector hint (spec §7.7), as every new
- * bag ONOSENDAI hides; the room bag carries no hint, no sector tag and no
+ * The key bag and the world bag carry the sector hint (spec §7.7), as a new bag
+ * ONOSENDAI hides does by default; the room bag carries no hint, no sector tag and no
  * height, as DECK-0004 §3.7.2 requires of every room bag.
  *
  * The rest of the dungeon comes in one of two forms. `references`, the owner's
@@ -180,7 +180,7 @@ export async function buildDungeon(game: Pick<GameDef, 'pubkey' | 'relayHint' | 
   const key: KeyItem = { ...forged, secretHex, itemPubkey: getPublicKey(hexToBytes(secretHex)), model: { address, ...(game.relayHint ? { relay: game.relayHint } : {}) }, animation: ['bob', 'spin-y'] }
   const keyItem = sign(keyInnerTemplate(key, KEY_BAG.at, plane, createdAt))
   const kb = regionKeyAt(regionBase(KEY_BAG.at, KEY_BAG.height), KEY_BAG.height, 8)
-  // With the sector hint, as every new bag ONOSENDAI hides (owner, 2026-11-13 and 2026-11-14; spec §7.7).
+  // With the sector hint, as a new bag ONOSENDAI hides has by default (owner, 2026-11-13 and 2026-11-14; spec §7.7).
   file(`02-key-bag-${HIDDEN_KIND}.json`, await bagTemplate([keyItem as unknown as BagEntry], kb.key, kb.lookupId, KEY_BAG.height, createdAt, HIDDEN_KIND, newBagSettings(KEY_BAG.height), { at: KEY_BAG.at, plane }))
 
   // 3. The door, sealed to the key item, and its room holding the finish tile (DECK-0004 §3.7).

@@ -46,6 +46,7 @@ import { doorKey, doorSecretWith, keyItemHeld, readKeyBag, readRoom } from '../k
 import { regionBase } from '../../doors'
 import { regionKeyAt } from '../../shardCrypto'
 import fixture from './tutorialDungeon.v1.fixture.json'
+import { DEFAULT_HINT_PREFS, saveHintPrefs } from '../../../store/deployHintPrefs'
 
 const sk = generateSecretKey()
 const pk = getPublicKey(sk)
@@ -171,6 +172,20 @@ describe('the world with a real key item and door, published over the LEGACY one
     expectSectorHint(built.files[3].event.tags, game.region.base, game.region.height)
     expectSectorHint(built.files[1].event.tags, KEY_ITEM_AT, 3)
     expect(built.files[2].event.tags.some((t) => ['hint', 'X', 'Y', 'Z', 'S', 'H'].includes(t[0]))).toBe(false)
+  })
+
+  it('the player\'s saved deploy bar switches, all off on this device, change nothing the game writes (arkinox, 2026-11-15)', async () => {
+    const game = tutorialGameFor(pk)
+    const build = async () => (await buildDungeon(game, asGame(sk), await piecesOf(source, TUTORIAL_DEV_PUBKEY, game), 1_800_000_100, 'references')).files.map((f) => f.event.tags.filter((t) => t[0] !== 'encrypted' && t[0] !== 'd'))
+    const before = await build()
+    saveHintPrefs({ height: false, sector: false, contents: false })
+    try {
+      const after = await build()
+      expect(after).toEqual(before)
+      expectSectorHint(after[1].map((t) => [...t]), KEY_ITEM_AT, 3)
+    } finally {
+      saveHintPrefs(DEFAULT_HINT_PREFS)
+    }
   })
 
   it('the LEGACY world plays until the new world bag lands, then the new one: the door, its key bag, its room', async () => {

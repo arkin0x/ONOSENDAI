@@ -195,6 +195,8 @@ export function GlowHalos({ plain, glow, radius, strength, core = 0, fade, trust
   entry.reach = extent.reach
   useEffect(() => {
     if (!mesh.current) return
+    // Its world matrix up to date before the budget first prices it: still the identity, it would be priced at the origin.
+    mesh.current.updateWorldMatrix(true, false)
     entry.object = mesh.current
     return joinGlow(gl, entry)
   }, [gl, entry])

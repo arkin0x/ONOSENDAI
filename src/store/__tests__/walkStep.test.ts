@@ -205,9 +205,10 @@ describe('step-down', () => {
 })
 
 /** The plain step: what WALK did before step-up. */
-function stepOf(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: WallItem[]): { to: Position; by: WallItem | null } {
+function stepOf(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: WallItem[]): { to: Position; by: WallItem | null; unseen?: boolean } {
   const w = stepLimit(from, axis, dir, length, items)
-  return { to: { ...from, [axis]: from[axis] + BigInt(dir) * w.reach }, by: w.by }
+  // With what the walls said of the face that stopped it, as walkStep carries it.
+  return { to: { ...from, [axis]: from[axis] + BigInt(dir) * w.reach }, by: w.by, ...(w.by && w.unseen !== undefined ? { unseen: w.unseen } : {}) }
 }
 
 describe('everything else is the plain step', () => {
@@ -335,5 +336,26 @@ describe('never into geometry', () => {
     }
     // The walks did meet risers to climb.
     expect(total).toBeGreaterThan(50)
+  })
+})
+
+describe('the stop says whether the face it met can be seen (store/wallHint.ts)', () => {
+  it('carried with the stop that names the wall, from stepLimit through walkStep', () => {
+    clearWalls()
+    const floor = item(boxes('Floor', 'all', [FLOOR]))
+    const pane = item(boxes('Pane', 'all', [[[-10, 0, 2], [10, 8, 3]]], { opacity: 0 }))
+    const items = [floor, pane]
+    const wall = stepLimit(rel(0, 1, 1), 'z', 1, 4n, items)
+    expect(wall.by?.shard.name).toBe('Pane')
+    expect(wall.unseen).toBe(true)
+    const s = walkStep(rel(0, 1, 1), 'z', 1, 1n, items)
+    expect(s.by?.shard.name).toBe('Pane')
+    expect(s.unseen).toBe(true)
+    // A later probe (standing on the visible floor) cannot change what this stop said.
+    expect(standing(rel(0, 1, 1), items)).toBe(true)
+    expect(s.unseen).toBe(true)
+    clearWalls()
+    const seen = walkStep(rel(0, 1, 1), 'z', 1, 1n, [floor, item(boxes('Wall', 'all', [[[-10, 0, 2], [10, 8, 3]]]))])
+    expect(seen.unseen).toBe(false)
   })
 })

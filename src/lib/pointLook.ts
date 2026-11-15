@@ -86,6 +86,11 @@ export function pointLookOf(s: Looked, { avatar = false }: { avatar?: boolean } 
  */
 export function drawsAnything(s: Looked, opts: { avatar?: boolean } = {}): boolean {
   if ((s.parts?.length ?? 0) > 0) return true
+  return drawsItself(s, opts)
+}
+
+/** Whether an object draws anything of its own, leaving aside what it places (scene/ThumbStage.tsx knownBlank). */
+export function drawsItself(s: Looked, opts: { avatar?: boolean } = {}): boolean {
   if (s.vertices.length === 0) return false
   const look = pointLookOf(s, opts)
   if (look.glow) return true

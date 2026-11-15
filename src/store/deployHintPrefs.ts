@@ -1,5 +1,5 @@
 /**
- * deployHintPrefs.ts - the deploy bar's three hint switches as this device's
+ * deployHintPrefs.ts - the deploy bar's hint switches as this device's
  * player last set them (arkinox, 2026-11-15: "i think these 3 hint settings
  * (toggles) should stay what you set them after the initial defaults of all 3
  * being turned on").
@@ -7,7 +7,10 @@
  * The three are PUBLISH HEIGHT HINT (the bag's `H` tag, spec §8.6), PUBLISH
  * SECTOR HINT (the sector hint, spec §7.7, §10) and PUBLISH CONTENTS (what is
  * inside, by kind and count; lib/hidden.ts bagContentsTags). All three start
- * ON for a player who never touched them. A switch flipped by hand in the
+ * ON for a player who never touched them. A fourth, PUBLISH THAT MONEY IS
+ * INSIDE, starts OFF (arkinox, 2026-11-15: "money off by default"): money is
+ * said only when the player turns it on, whatever PUBLISH CONTENTS says
+ * (lib/hidden.ts bagContentsTags). A switch flipped by hand in the
  * deploy bar (useShards `setDeployBag`) is saved here and every later hide
  * starts from it: a new bag, your bag already in the region, an EDIT or a
  * MOVE alike, across hides, reloads and sessions. What the switches show is
@@ -26,6 +29,8 @@
  * worldDeploy, tutorial/stage.ts), which never read these.
  *
  * Nothing was kept before this, so there is no older saved value to migrate.
+ * A value saved before the money switch names only the three: money reads
+ * OFF, and nothing is rewritten.
  */
 
 import type { BagSettings } from '../lib/hidden'
@@ -38,16 +43,19 @@ export interface HintPrefs {
   height: boolean
   /** PUBLISH SECTOR HINT. */
   sector: boolean
-  /** PUBLISH CONTENTS. */
+  /** PUBLISH CONTENTS: every kind inside but money. */
   contents: boolean
+  /** PUBLISH THAT MONEY IS INSIDE: cashu, said only with this on. */
+  money: boolean
 }
 
-export const DEFAULT_HINT_PREFS: HintPrefs = { height: true, sector: true, contents: true }
+/** Three ON, money OFF (arkinox, 2026-11-15: "money off by default"). */
+export const DEFAULT_HINT_PREFS: HintPrefs = { height: true, sector: true, contents: true, money: false }
 
 /** This visit's choice when storage would not take it (blocked, private mode, quota): read before storage. */
 let visit: HintPrefs | null = null
 
-/** The saved choice, or all three ON when there is none or it cannot be read. */
+/** The saved choice, or the defaults (three ON, money OFF) where there is none or it cannot be read. */
 export function loadHintPrefs(): HintPrefs {
   if (visit) return visit
   let raw: string | null
@@ -60,7 +68,8 @@ export function loadHintPrefs(): HintPrefs {
   try {
     const p = JSON.parse(raw) as Partial<Record<keyof HintPrefs, unknown>>
     const pick = (k: keyof HintPrefs): boolean => (typeof p?.[k] === 'boolean' ? p[k] as boolean : DEFAULT_HINT_PREFS[k])
-    return { height: pick('height'), sector: pick('sector'), contents: pick('contents') }
+    // A choice saved before the money switch was kept names no `money`: OFF.
+    return { height: pick('height'), sector: pick('sector'), contents: pick('contents'), money: pick('money') }
   } catch {
     return DEFAULT_HINT_PREFS
   }
@@ -78,40 +87,45 @@ export function saveHintPrefs(patch: Partial<HintPrefs>): void {
   }
 }
 
-/** What a change to the bag settings says about the three switches, if anything. */
+/** What a change to the bag settings says about the four switches, if anything. */
 export function hintPrefsOf(patch: Partial<BagSettings>): Partial<HintPrefs> {
   return {
     ...('heightTag' in patch && patch.heightTag !== undefined ? { height: patch.heightTag } : {}),
     ...('hint' in patch && patch.hint !== undefined ? { sector: patch.hint !== null } : {}),
     ...('contents' in patch && patch.contents !== undefined ? { contents: patch.contents } : {}),
+    ...('money' in patch && patch.money !== undefined ? { money: patch.money } : {}),
   }
 }
 
 /**
- * `settings` with the three switches as saved, for a bag at `height`. The
+ * `settings` with the four switches as saved, for a bag at `height`. The
  * sector hint ON keeps a finer hint box another client wrote on the bag
  * (the switch's "on keeps it as it is"), and is the sector hint otherwise,
  * where a sector can contain the region; `held` says it is ON but too small
  * here, so it comes back on lower down (useShards `deployHintHeld`). OFF is
- * no hint, never held. The riddle and the money switch stay the bag's.
+ * no hint, never held. The riddle stays the bag's. Money is the saved
+ * switch, not the bag's: a bag that announced money before stops when you
+ * hide into it again with the switch off.
  */
 export function withHintPrefs(settings: BagSettings, height: number, prefs: HintPrefs = loadHintPrefs()): { bag: BagSettings; held: boolean } {
   const kept = settings.hint && !isSectorHint(settings.hint) && hintFits(settings.hint, height) ? settings.hint : null
   const hint = !prefs.sector ? null : kept ?? (hintFits(SECTOR_HINT, height) ? SECTOR_HINT : null)
-  return { bag: { ...settings, heightTag: prefs.height, hint, contents: prefs.contents }, held: prefs.sector && hint === null }
+  return { bag: { ...settings, heightTag: prefs.height, hint, contents: prefs.contents, money: prefs.money }, held: prefs.sector && hint === null }
 }
 
 /**
  * The settings a deploy's bag goes out with, from what resolveBagSettings
- * made of the bar and the bag's current copy: the three switches exactly as
+ * made of the bar and the bag's current copy: the four switches exactly as
  * the bar shows them, so a bag never goes out with a hint the bar showed off
  * or without one it showed on, even when this device did not know the bag
  * or another device rewrote it since. ON keeps whatever hint box the bag
  * already carries, which may be a finer box another client or device wrote
  * rather than the sector the bar describes: ON never widens or drops a
- * hint already out. The riddle and the money switch stay as resolved.
+ * hint already out. The riddle stays as resolved. Money goes out only as
+ * the bar shows it, so no copy of the bag, older or from another device,
+ * says money the bar showed off.
  */
 export function asShown(resolved: BagSettings, shown: BagSettings, height: number): BagSettings {
   const hint = shown.hint === null ? null : resolved.hint ?? (hintFits(shown.hint, height) ? shown.hint : null)
-  return { ...resolved, heightTag: shown.heightTag, hint, contents: shown.contents }
+  return { ...resolved, heightTag: shown.heightTag, hint, contents: shown.contents, money: shown.money }
 }

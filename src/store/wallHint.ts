@@ -12,7 +12,7 @@
  * are), or POINTS mode at point size 0 with no glow (lib/pointLook.ts
  * unseenObject). Judged on the object whose face stopped the step: the
  * walls say whether it was the shard itself or one of the parts it places
- * (store/walkWalls.ts lastStopUnseen), so an invisible pane in a visible
+ * (WallStop `unseen`, carried with the stop to the WALL chip), so an invisible pane in a visible
  * frame flashes, and an invisible root does not flash for a visible part.
  */
 
@@ -57,7 +57,7 @@ export const useWallHint = create<WallHintState>(() => ({ key: null, at: 0 }))
 /**
  * A WALK step was stopped by `by`: flash it if the face it met cannot be
  * seen. `unseen` is the walls' word on that face (a part's or the shard's,
- * store/walkWalls.ts lastStopUnseen); without it, the shard is judged.
+ * WallStop `unseen` from the same stop); without it, the shard is judged.
  * Returns whether it flashes.
  */
 export function noteWallContact(by: { key: string; shard: Parameters<typeof unseenWall>[0] }, now = performance.now(), unseen?: boolean): boolean {

@@ -198,12 +198,15 @@ export function spendGlow(canvas: object, frame: number, camera: Camera, width: 
     const depth = -view.copy(at).applyMatrix4(inverse).z
     const reach = e.reach * k
     const behind = depth < -reach
-    // Measured at the near edge of its points (no nearer than a quarter of the centre's depth), not the centre:
-    // a big object near the camera covers far more than its middle says.
-    const near = Math.max(depth - reach, depth * 0.25, 1e-4)
+    // Measured at the near edge of its points, not the centre: a big object near the camera covers far more than
+    // its middle says. The smallest-halo test reads the edge itself; the area estimate keeps a floor of a quarter
+    // of the centre's depth, so a camera inside the object does not price every halo at the largest size.
+    const edge = Math.max(depth - reach, 1e-4)
+    const pxEdge = (e.radius * k * height * proj * 0.5) / edge
+    const near = Math.max(edge, depth * 0.25)
     const px = (e.radius * k * height * proj * 0.5) / near
     const shown = Math.min(px, cap)
-    const area = behind || px < limits.smallestHaloPx ? 0 : (Math.PI * shown * shown) / screen
+    const area = behind || pxEdge < limits.smallestHaloPx ? 0 : (Math.PI * shown * shown) / screen
     const d = demands[n] ?? (demands[n] = { key: 0, trusted: false, count: 0, distance: 0, area: 0 })
     d.key = e.key; d.trusted = e.trusted; d.count = e.count; d.distance = Math.log2(1 + dist); d.area = area
     n++

@@ -10,14 +10,14 @@ export const FOG_FAR = GRID_RADIUS * 4
 /**
  * Where the fog starts, as a share of where it ends: 81.6 of 96, 141.1 of
  * 166 at the usual orbit. It was 0.225 (21.6 of 96, 37.4 of 166), a fade
- * across most of what the camera can see, and the darkest thing in the
- * scene: a tile 100 cells off kept about half its colour and the far ones
- * went black with only their dots showing (arkinox, 2026-11-15: "we need to
- * reduce the darkness by a lot. maybe 10% of this."). The fog is kept for
- * what it is for, a soft edge where the layers stop drawing (CULL_REACH
- * below), so nothing pops at the line; across the rest of the view it no
- * longer darkens anything. Averaged over what is in front of the camera,
- * its darkening is about a tenth of the old (7.5% of a colour, from 39%).
+ * across most of what the camera can see: by the fog alone a tile 100
+ * cells off kept about half its colour, and the far ones went black with
+ * only their dots showing (arkinox, 2026-11-15: "we need to reduce the
+ * darkness by a lot. maybe 10% of this."). The fog is kept for what it is
+ * for, a soft edge where the layers stop drawing (CULL_REACH below), so
+ * nothing pops at the line; nearer than 85% of its end it no longer darkens
+ * anything. Averaged over everything nearer than its end, its darkening is
+ * a fifth of the old (7.5% of a colour, from 39%), all of it in that edge.
  */
 export const FOG_START_SHARE = 0.85
 /** Where the scene's fog begins, in render cells: TV's and WALK's. */

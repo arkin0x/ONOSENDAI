@@ -15,7 +15,7 @@
  * something to catch, which is the glow around a gibson.
  */
 
-import { ShaderMaterial, type BufferAttribute, type BufferGeometry } from 'three'
+import { ShaderMaterial, UniformsLib, UniformsUtils, type BufferAttribute, type BufferGeometry } from 'three'
 import { HEADLAMP_DISTANCE_GLSL, HEADLAMP_NEVER, headlampUniforms } from './headlamp'
 
 /** How a family of points looks. Sizes are diameters: world units, then CSS pixels. */
@@ -51,6 +51,7 @@ const vertexShader = /* glsl */ `
   varying float vHeadlampDistance;
 
   #include <clipping_planes_pars_vertex>
+  #include <fog_pars_vertex>
 
   void main() {
     vColor = aColor;
@@ -69,6 +70,8 @@ const vertexShader = /* glsl */ `
     gl_PointSize = vPx;
     gl_Position = projectionMatrix * mv;
     vHeadlampDistance = length(mv.xyz);
+    // The scene's fog, by straight-line distance (scene/radialFog.ts reads mvPosition).
+    #include <fog_vertex>
   }
 `
 
@@ -81,6 +84,7 @@ const fragmentShader = /* glsl */ `
   varying float vHeadlampDistance;
 ${HEADLAMP_DISTANCE_GLSL}
   #include <clipping_planes_pars_fragment>
+  #include <fog_pars_fragment>
 
   void main() {
     #include <clipping_planes_fragment>
@@ -101,6 +105,11 @@ ${HEADLAMP_DISTANCE_GLSL}
     if (uHeadlamp > 0.5) color *= headlampDistance(vHeadlampDistance);
 
     gl_FragColor = vec4(color, alpha);
+    // Into the scene's fog with the faces they sit on, so a shard's dots are
+    // black by the fog's end as its faces are and never pop at the cull line
+    // (scene/fog.ts). A canvas with no fog (the bench, thumbnails) compiles
+    // this to nothing.
+    #include <fog_fragment>
   }
 `
 
@@ -110,6 +119,9 @@ ${HEADLAMP_DISTANCE_GLSL}
  * With `headlamp`, the points dim with distance as the world's faces do
  * (scene/headlamp.ts), through the uniforms every headlamp material shares;
  * without it (the bench, the thumbnails) the same program, never dimmed.
+ * Either way they take the scene's fog where there is one, as faces do.
+ * They did not until 2026-11-15: past the fog's end a shard's faces were
+ * black and its dots still showed, the "only the dots" look far off.
  */
 export function createDiscMaterial(profile: DiscProfile, opacity: number, headlamp = false): ShaderMaterial {
   return new ShaderMaterial({
@@ -125,7 +137,10 @@ export function createDiscMaterial(profile: DiscProfile, opacity: number, headla
       uBufferHeight: { value: 1000 },
       uHeadlamp: headlamp ? headlampUniforms.uHeadlamp : HEADLAMP_NEVER,
       uHeadlampReach: headlampUniforms.uHeadlampReach,
+      // three fills these from the scene's fog every frame (material.fog).
+      ...UniformsUtils.clone(UniformsLib.fog),
     },
+    fog: true,
     transparent: true,
     depthWrite: false,
     // Cut at a region's walls when a caller gives it planes (an item's

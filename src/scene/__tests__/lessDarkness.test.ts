@@ -6,13 +6,20 @@
  * Three things darkened a world face: the headlamp's facing (FACE_FLOOR), its
  * distance (DISTANCE_FLOOR), and the black fog's start (FOG_START_SHARE). The
  * lights, tone mapping and bloom never touch a world face (unlit, not tone
- * mapped, read as dark by the bloom), so these three are all of it.
+ * mapped, read as dark by the bloom). A shard's vertex dots never fogged at
+ * all, so far off they were all that showed; they take the fog now.
+ *
+ * Nearer than the fog's edge the darkening is about a tenth of the old (an
+ * eighth to a seventh for ground seen near edge on, which keeps a little
+ * shade for its shapes). The edge itself stays, to hide the cull line, so
+ * over everything up to the fog's end it is about a fifth.
  */
 
 import { describe, expect, it } from 'vitest'
 import { DISTANCE_FLOOR, FACE_FLOOR, HEADLAMP_DISTANCE_GLSL, distanceShare, facingShare, patchHeadlamp } from '../headlamp'
 import { CULL_REACH, FOG_FAR, FOG_NEAR, FOG_START_SHARE, fogFar } from '../fog'
 import { ShaderLib } from 'three'
+import { SHARD_DOTS, createDiscMaterial } from '../pointDisc'
 
 /** three's linear fog factor: 0 before `near`, 1 at `far`. */
 const fogFactor = (d: number, near: number, far: number): number => Math.min(1, Math.max(0, (d - near) / (far - near)))
@@ -56,17 +63,22 @@ describe('the darkening, cut to about a tenth', () => {
     expect(shader.fragmentShader).toContain('return 0.9000 + 0.1000 * min(nz, 1.0);')
   })
 
-  it('loses about a tenth of what it lost, over what the usual orbit sees', () => {
-    // The usual orbit: 26 cells out, the fog black at 166.
+  it('loses about a tenth of what it lost nearer than the fog\'s edge, a fifth up to its end', () => {
+    // The usual orbit: 26 cells out, the fog black at 166, its edge from 141.1.
     const reach = 26
     const far = fogFar(false, 26)
     expect(far).toBe(166)
+    const edge = far * FOG_START_SHARE
+    const ratio = (nz: number, to: number): number =>
+      meanLoss((d) => kept(d, nz, reach, far, FOG_START_SHARE), 5, to) / meanLoss((d) => keptBefore(d, nz, reach, far), 5, to)
+    // Facing the camera, a tenth or less; ground near edge on (nz 0.3) keeps a little more, for its shapes.
+    expect(ratio(1, edge)).toBeLessThan(0.1)
+    expect(ratio(0.6, edge)).toBeLessThan(0.14)
+    expect(ratio(0.3, edge)).toBeLessThan(0.17)
+    // The edge that hides the cull line is all that is left past it.
     for (const nz of [0.3, 0.6, 1]) {
-      const before = meanLoss((d) => keptBefore(d, nz, reach, far), 5, 150)
-      const after = meanLoss((d) => kept(d, nz, reach, far, FOG_START_SHARE), 5, 150)
-      // Ground near edge on (nz 0.3) keeps a little more of its shade than the rest, for the shapes.
-      expect(after / before, `nz ${nz}`).toBeLessThan(0.17)
-      expect(after / before, `nz ${nz}`).toBeGreaterThan(0.05)
+      expect(ratio(nz, far), `nz ${nz}`).toBeLessThan(0.26)
+      expect(ratio(nz, far), `nz ${nz}`).toBeGreaterThan(0.15)
     }
   })
 
@@ -89,6 +101,28 @@ describe('the darkening, cut to about a tenth', () => {
     }
     // TV's and WALK's own end.
     expect(kept(96, 1, 8, fogFar(true, 0), FOG_START_SHARE)).toBe(0)
+  })
+
+  it('fogs a shard\'s vertex dots with its faces, so far off they no longer show alone or pop at the cull line', () => {
+    for (const headlamp of [true, false]) {
+      const m = createDiscMaterial(SHARD_DOTS, 1, headlamp)
+      expect(m.fog).toBe(true)
+      for (const u of ['fogColor', 'fogNear', 'fogFar']) expect(m.uniforms[u], u).toBeDefined()
+      expect(m.vertexShader).toContain('#include <fog_pars_vertex>')
+      expect(m.vertexShader).toContain('#include <fog_vertex>')
+      // fog_vertex reads mvPosition: radialFog's straight-line distance.
+      expect(m.vertexShader.indexOf('vec4 mvPosition = mv;')).toBeLessThan(m.vertexShader.indexOf('#include <fog_vertex>'))
+      expect(m.fragmentShader).toContain('#include <fog_pars_fragment>')
+      // After the colour is final, as three's own materials do it.
+      expect(m.fragmentShader.indexOf('#include <fog_fragment>')).toBeGreaterThan(m.fragmentShader.indexOf('gl_FragColor = vec4(color, alpha);'))
+      m.dispose()
+    }
+    // Each material its own fog uniforms (three writes them in place).
+    const a = createDiscMaterial(SHARD_DOTS, 1, true)
+    const b = createDiscMaterial(SHARD_DOTS, 1, true)
+    expect(a.uniforms.fogNear).not.toBe(b.uniforms.fogNear)
+    a.dispose()
+    b.dispose()
   })
 
   it('still shades two faces of one colour at different angles apart, a little', () => {

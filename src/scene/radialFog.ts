@@ -13,8 +13,9 @@
  * One chunk, replaced on import, before any material compiles: main.tsx
  * imports this first, and Scene.tsx imports it too. Every fogged material in
  * the scene is one of three's own (the headlamp's patch keeps three's fog
- * includes), so all of them take it; the custom shaders (the point field, the
- * walls) do not fog at all. Cyberspace TV's and WALK's fog distances are the
+ * includes), so all of them take it, and so do the shards' point discs
+ * (pointDisc.ts includes three's fog chunks); the other custom shaders (the
+ * point field, the walls) do not fog at all. Cyberspace TV's and WALK's fog distances are the
  * same numbers as before, now measured straight out.
  */
 

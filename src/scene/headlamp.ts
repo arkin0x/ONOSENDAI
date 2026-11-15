@@ -9,11 +9,11 @@
  * other, and XOR's town at block 101, all one tan, read as a tan mess. The
  * headlamp lights them from the eye, like a flashlight:
  *
- * - FACING. A face square to the view shows its full colour, and darkens a
- *   little as it turns away, down to FACE_FLOOR at edge on. The normal is the face's own,
- *   flat, taken from the screen-space derivatives of its position, and it is
- *   compared with the view axis rather than the ray to each pixel, so a flat
- *   face is one shade. Both sides shade alike (the world draws both).
+ * - FACING. A face square to the view shows its full colour, and darkens
+ *   a little as it turns away, down to FACE_FLOOR at edge on. The normal is
+ *   the face's own, flat, taken from the screen-space derivatives of its
+ *   position, and it is compared with the view axis rather than the ray to
+ *   each pixel, so a flat face is one shade. Both sides shade alike (the world draws both).
  * - DISTANCE. Full colour out to NEAR_SHARE of the reach, then an easy fall
  *   toward DISTANCE_FLOOR. The reach is the camera's distance from what it
  *   orbits, held between REACH_MIN and REACH_MAX, so the falloff keeps its
@@ -46,10 +46,13 @@ import { lineFade, patchNearFade } from './nearFade'
  * It was 0.4 (arkinox, 2026-11-15, of a Landscape Kit plains tile at 2^0:
  * "we need to reduce the darkness by a lot. maybe 10% of this."). The
  * ground under a third-person camera is close to edge on, so 0.4 took
- * nearly half of every tile's colour right in front of the camera. 0.9
- * keeps a gentle shade between two faces of one colour at different angles,
- * which is why the facing exists (the drain coil's walls, XOR's town), at a
- * sixth of the old darkening (0.1 of a face's colour at most, from 0.6).
+ * nearly half of every tile's colour right in front of the camera. 0.9 is
+ * a sixth of the old darkening (0.1 of a face's colour at most, from 0.6).
+ * The facing exists to tell two faces of one colour at different angles
+ * apart (the drain coil's walls, XOR's town), and a little of that stays,
+ * but it is faint: the multiply is in linear colour, so edge on is about 5%
+ * darker to the eye (it was about a third). Lower it toward 0.75 if shapes
+ * of one colour merge again.
  */
 export const FACE_FLOOR = 0.9
 /**

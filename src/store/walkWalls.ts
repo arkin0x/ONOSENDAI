@@ -681,7 +681,7 @@ export function clearWalls(): void {
 }
 
 /** What firstHit says of the face it found, reused by every step (stepLimit). */
-const hitWho: { bounce: Bounce; springboard?: boolean; unseen?: boolean } = { bounce: 0 }
+const hitWho: { bounce: Bounce; springboard?: boolean; unseen?: boolean } = { bounce: 0, unseen: false }
 
 /** The wall the last stopped step met, and whether the face was of an object no one can see (a part or the shard). */
 let lastStop: { key: string; unseen: boolean } | null = null

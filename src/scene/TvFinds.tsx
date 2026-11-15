@@ -183,7 +183,7 @@ export function aimRays(eyePos: Vector3, body: Sphere, turn: Quaternion): boolea
 
 const meshes: Mesh[] = []
 // A billboard (glow halos, points at a POINT SIZE: scene/glowHalos.ts) is no face, so it never frames a shot.
-function collectMesh(o: Object3D): void { if ((o as Mesh).isMesh && o.visible && !(o as Mesh).geometry?.isInstancedBufferGeometry) meshes.push(o as Mesh) }
+function collectMesh(o: Object3D): void { if ((o as Mesh).isMesh && o.visible && !((o as Mesh).geometry as { isInstancedBufferGeometry?: boolean } | undefined)?.isInstancedBufferGeometry) meshes.push(o as Mesh) }
 
 /** Whether any of the rays meets a face of this shard before the avatar. */
 export function shardInTheWay(drawn: Object3D): boolean {

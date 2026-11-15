@@ -516,7 +516,7 @@ export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i
     ownerUnseen = p.unseen ?? false
     for (let n = 0; n < tris.length; n += 3) test(scratch, tris[n] * 3, tris[n + 1] * 3, tris[n + 2] * 3, false)
   }
-  if (who) { who.bounce = best === null ? 0 : bestBounce; who.springboard = best !== null && bestSpring; who.unseen = best !== null && bestUnseen }
+  if (who) { who.bounce = best === null ? 0 : bestBounce; who.springboard = best !== null && bestSpring; if ('unseen' in who) who.unseen = best !== null && bestUnseen }
   return best
 }
 

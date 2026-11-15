@@ -153,35 +153,77 @@ export function toggleCollapsed(collapsed: PanelLayout['collapsed'], id: PanelId
 /**
  * The layout's version, written with every save. A layout with none was
  * saved before 2026-11-15, by code whose tutorial could have written ITEMS
- * to the top of the menu (tutorialWrote).
+ * to the top of the menu (tutorialWrote); one with 2 or more never was.
  */
 export const LAYOUT_VERSION = 2
+const FIXED_IN = 2
 
 /**
  * The left column's default order each day the tutorial's inventory step ran
  * (from 2026-11-11, #674, until 2026-11-15): before #677 moved AVATARS and
  * ITEMS up, after it, and after GAMES came (#726).
  */
-const TUTORIAL_ERA_LEFT: readonly (readonly PanelId[])[] = [
+const TUTORIAL_ERA_DEFAULTS: readonly (readonly PanelId[])[] = [
   ['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'],
   ['identity', 'agents', 'avatars', 'items', 'create', 'hidden', 'discovered', 'targets', 'links'],
   ['identity', 'agents', 'avatars', 'items', 'games', 'create', 'hidden', 'discovered', 'targets', 'links'],
 ]
 
 /**
+ * What a device could have held, untouched, as the tutorial ran: nothing (a
+ * day's default), a layout a fold saved under an earlier default (back to
+ * the first saved layouts, before AGENTS, 2026-10-10), or one of those days.
+ */
+const UNTOUCHED_LEFT: readonly (readonly PanelId[])[] = [
+  ['identity', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'],
+  ...TUTORIAL_ERA_DEFAULTS,
+]
+
+/** `left` merged under a left default `defaults` (the right column plays no part in where a left panel goes). */
+function mergeLeft(left: readonly PanelId[], defaults: readonly PanelId[]): PanelId[] {
+  return mergeOrder({ left, right: [] }, { left: [...defaults], right: [...DEFAULT_ORDER.right] }).left
+}
+
+let tutorialShapes: PanelId[][] | null = null
+
+/**
+ * Every left column the tutorial could have saved, as a load merges it now:
+ * an untouched column, merged under the default of a day the tutorial ran,
+ * with ITEMS lifted to the top, then merged under that day's or a later
+ * day's default (a reload, and a fold saving it), then under today's.
+ */
+function tutorialShapesNow(): PanelId[][] {
+  if (tutorialShapes) return tutorialShapes
+  const out: PanelId[][] = []
+  const seen = new Set<string>()
+  TUTORIAL_ERA_DEFAULTS.forEach((day, d) => {
+    for (const held of UNTOUCHED_LEFT) {
+      const inMemory = mergeLeft(held, day)
+      const lifted = ['items' as PanelId, ...inMemory.filter((id) => id !== 'items')]
+      for (const later of TUTORIAL_ERA_DEFAULTS.slice(d)) {
+        const now = mergeOrder({ left: mergeLeft(lifted, later), right: [] }).left
+        const key = now.join()
+        if (!seen.has(key)) { seen.add(key); out.push(now) }
+      }
+    }
+  })
+  return (tutorialShapes = out)
+}
+
+/**
  * Whether a left column (already merged) is the one the tutorial wrote from
  * 2026-11-11 to 2026-11-15. Its inventory and build steps moved ITEMS to the
  * top of the menu and saved that as if it were the player's order, so a
  * fresh key on that device showed ITEMS over IDENTITY ever after. What it
- * wrote is exact: ITEMS first and every other left panel in that day's
- * default order, merged as a load merges it. A player who dragged anything
- * else in the left column has a different column, and keeps it. The one
- * order this cannot tell apart is a player who dragged ITEMS to the top and
- * touched nothing else in that column; the version mark keeps this from ever
+ * wrote is exact: ITEMS first and every other left panel in an untouched
+ * default order (tutorialShapesNow). A player who dragged anything else in
+ * the left column has a different column, and keeps it. The one order this
+ * cannot tell apart is a player who dragged ITEMS to the top and touched
+ * nothing else in that column; the version mark keeps this from ever
  * applying to a layout saved after the fix.
  */
 export function tutorialWrote(left: readonly PanelId[]): boolean {
-  return TUTORIAL_ERA_LEFT.some((day) => same(left, mergeOrder({ left: ['items', ...day.filter((id) => id !== 'items')], right: [] }).left))
+  return tutorialShapesNow().some((shape) => same(left, shape))
 }
 
 /** Whatever was saved, made into a layout: the order merged with the defaults, the folds kept for known panels only. */
@@ -195,7 +237,8 @@ export function normalizeLayout(saved: unknown): PanelLayout {
   }
   const order = mergeOrder(s.order)
   // The order the tutorial wrote is the default's, not the player's: the left column goes back to the default.
-  if (s.v !== LAYOUT_VERSION && tutorialWrote(order.left)) order.left = defaultOrder().left
+  const fixed = typeof s.v === 'number' && s.v >= FIXED_IN
+  if (!fixed && tutorialWrote(order.left)) order.left = defaultOrder().left
   return { order, collapsed }
 }
 

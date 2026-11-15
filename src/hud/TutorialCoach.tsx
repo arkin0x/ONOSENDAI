@@ -68,6 +68,24 @@ function around(boxes: readonly Box[]): Box | null {
   }
 }
 
+/**
+ * What is docked at the foot of the screen, which the coach at the foot sits
+ * above: the menu button, the pad and its row of buttons, the deploy bar
+ * (the ones that register as covering the bottom, hooks/useCover), the chat.
+ */
+const DOCKED_AT_FOOT = '.hamburger-menu, .touchpad, .touchops, .deploybar, .chatdock'
+
+/** The safe area's top and bottom, px (a notch, a home indicator), read off a probe the size of them. */
+function safeArea(): { top: number; bottom: number } {
+  const probe = document.createElement('div')
+  probe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)'
+  document.body.appendChild(probe)
+  const cs = getComputedStyle(probe)
+  const area = { top: parseFloat(cs.paddingTop) || 0, bottom: parseFloat(cs.paddingBottom) || 0 }
+  probe.remove()
+  return area
+}
+
 /** The nearest ancestor of `el` that scrolls it up and down: a phone's menu (.hud), a desktop column (.hud__col). */
 function scrollerOf(el: Element): Element | null {
   for (let p = el.parentElement; p; p = p.parentElement) {
@@ -100,8 +118,8 @@ export function TutorialCoach(): JSX.Element | null {
   // Top, or the foot while the top would cover the menu panel the step points at (below).
   const [spot, setSpot] = useState<CoachSpot>(AT_TOP)
   const atTop = spot.side === 'top'
-  const spotRef = useRef(spot)
-  spotRef.current = spot
+  // The step the menu was last scrolled for: once a step, so the player can scroll it afterwards.
+  const scrolledFor = useRef(-1)
   const coverRef = useCover(spot.side, shown && !modal && !minimized)
   const panelRef = useCallback((el: HTMLDivElement | null) => { ref.current = el; coverRef(el) }, [coverRef])
   // The instruments make room under the coach only while it is at the top.
@@ -141,24 +159,33 @@ export function TutorialCoach(): JSX.Element | null {
     // which the coach at the top was laid out around. The menu is scrolled at
     // most once a step, the first time the panel needs it, so the player can
     // scroll it themselves afterwards; the side follows the panel as it moves.
-    let scrolled = false
-    let topInset = COACH_GAP
+    let safe = safeArea()
     const place = (): void => {
       const coach = ref.current
       const inPanel = marked.filter((el) => el.closest('[data-panel-id]'))
       const target = around(inPanel.map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0))
       if (!coach || !target) { setSpot((s) => s.side === 'top' ? s : AT_TOP); return }
+      for (const el of inPanel) ro?.observe(el)
       const c = coach.getBoundingClientRect()
       const vh = window.innerHeight
-      // Where the top is, measured while the coach is there (the safe area and its margin).
-      if (spotRef.current.side === 'top') topInset = c.top
-      // At the foot, clear of the menu button when it is under the coach (a phone's, bottom left).
-      const menu = document.querySelector('.hamburger-menu')?.getBoundingClientRect()
-      const bottomInset = menu && menu.width > 0 && menu.left < c.right && c.left < menu.right ? Math.max(COACH_GAP, vh - menu.top + COACH_GAP) : COACH_GAP
-      const at = placeCoach({ target, coachHeight: c.height, coachLeft: c.left, coachRight: c.right, viewportHeight: vh, topInset, bottomInset, gap: COACH_GAP })
-      if (at.scroll !== 0 && !scrolled) {
-        scrolled = true
-        scrollerOf(inPanel[0])?.scrollBy({ top: at.scroll })
+      // At the foot: above the safe area, and above whatever is docked there under the coach.
+      let bottomInset = COACH_GAP + safe.bottom
+      for (const el of document.querySelectorAll(DOCKED_AT_FOOT)) {
+        const r = el.getBoundingClientRect()
+        if (r.width > 0 && r.height > 0 && r.bottom > vh / 2 && r.left < c.right && c.left < r.right) bottomInset = Math.max(bottomInset, vh - r.top + COACH_GAP)
+      }
+      const scroller = scrollerOf(inPanel[0])
+      const index = useTutorial.getState().index
+      const canScroll = scroller !== null && scrolledFor.current !== index
+      const at = placeCoach({
+        target, coachHeight: c.height, coachLeft: c.left, coachRight: c.right, viewportHeight: vh,
+        topInset: COACH_GAP + safe.top, bottomInset, gap: COACH_GAP,
+        canScrollUp: canScroll ? scroller.scrollTop : 0,
+        canScrollDown: canScroll ? scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop : 0,
+      })
+      if (canScroll && at.scroll !== 0) {
+        scrolledFor.current = index
+        scroller.scrollBy({ top: at.scroll })
       }
       setSpot((s) => s.side === at.side && s.bottom === bottomInset ? s : { side: at.side, bottom: bottomInset })
     }
@@ -167,18 +194,21 @@ export function TutorialCoach(): JSX.Element | null {
     // coach's place too, and after a scroll, a resize or a change in its size.
     let frame = 0
     const update = (): void => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; mark(); place() }) }
+    // The coach and the highlighted panels (place adds them) changing size, as an image loads or a panel folds.
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+    if (ref.current) ro?.observe(ref.current)
     mark()
     place()
     const mo = new MutationObserver(update)
     mo.observe(document.body, { childList: true, subtree: true })
-    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
-    if (ref.current) ro?.observe(ref.current)
-    window.addEventListener('resize', update)
+    // A turn of the phone changes the safe area: read again (outside place, whose probe the observer would see).
+    const resized = (): void => { safe = safeArea(); update() }
+    window.addEventListener('resize', resized)
     document.addEventListener('scroll', update, { capture: true, passive: true })
     return () => {
       mo.disconnect()
       ro?.disconnect()
-      window.removeEventListener('resize', update)
+      window.removeEventListener('resize', resized)
       document.removeEventListener('scroll', update, { capture: true })
       if (frame) cancelAnimationFrame(frame)
       for (const el of marked) el.classList.remove('demo-pulse')

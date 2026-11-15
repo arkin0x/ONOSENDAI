@@ -452,6 +452,15 @@ describe('the order the tutorial wrote (2026-11-11 to 2026-11-15)', () => {
     expect(tutorialWrote(defaultOrder().left)).toBe(false)
   })
 
+  it('is told on a device that saved an older order before the tutorial ran under a later default', () => {
+    // Saved before #677 (a fold), the tutorial run after GAMES came: GAMES went in after ITEMS, then ITEMS was lifted.
+    expect(tutorialWrote(mergeOrder({ left: ['items', 'identity', 'agents', 'hidden', 'discovered', 'games', 'create', 'avatars', 'targets', 'links'], right: right() }).left)).toBe(true)
+    // Saved before AGENTS (2026-10-10), the tutorial run on 2026-11-12: AGENTS went in after IDENTITY, then ITEMS was lifted.
+    expect(tutorialWrote(mergeOrder({ left: ['items', 'identity', 'agents', 'hidden', 'discovered', 'create', 'avatars', 'targets', 'links'], right: right() }).left)).toBe(true)
+    // The first run's order, a reload under GAMES (GAMES after ITEMS) and a fold saving it.
+    expect(tutorialWrote(mergeOrder({ left: ['items', 'games', 'identity', 'agents', 'hidden', 'discovered', 'create', 'avatars', 'targets', 'links'], right: right() }).left)).toBe(true)
+  })
+
   it('goes back to the default on load (IDENTITY first, ITEMS second), folds and the right column kept', async () => {
     for (const day of days) {
       const customRight = moveBefore({ left: [], right: right() }, 'relays', 'scale', 'right').right
@@ -484,6 +493,11 @@ describe('the order the tutorial wrote (2026-11-11 to 2026-11-15)', () => {
   it('a saved order from the old default (a fold saved it, nothing moved) is kept as it was', async () => {
     mem.set(PANEL_LAYOUT_KEY, JSON.stringify({ order: { left: days[2], right: right() }, collapsed: { hidden: true } }))
     expect((await load()).getState().order.left).toEqual(days[2])
+  })
+
+  it('a layout saved by any later version is the player\'s too', async () => {
+    mem.set(PANEL_LAYOUT_KEY, JSON.stringify({ v: LAYOUT_VERSION + 1, order: { left: wrote(days[2]), right: right() }, collapsed: {} }))
+    expect((await load()).getState().order.left).toEqual(wrote(days[2]))
   })
 
   it('a layout saved since the fix is the player\'s, ITEMS first or not', async () => {

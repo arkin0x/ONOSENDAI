@@ -116,7 +116,8 @@ describe('the tutorial\'s front panel', () => {
     usePanelLayout.getState().setFront('hyperspace')
     usePanelLayout.getState().toggle('scale')
     const written = JSON.parse(localStorage.getItem(PANEL_LAYOUT_KEY) ?? '{}') as Record<string, unknown>
-    expect(Object.keys(written).sort()).toEqual(['collapsed', 'order'])
+    // The version mark (2026-11-15) beside the order and folds; no front.
+    expect(Object.keys(written).sort()).toEqual(['collapsed', 'order', 'v'])
     usePanelLayout.getState().toggle('scale')
   })
 })

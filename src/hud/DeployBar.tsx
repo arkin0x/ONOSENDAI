@@ -776,7 +776,7 @@ function Pow({ e }: { e: number }): JSX.Element {
  */
 function BagControls({ height, bag, existing, cashu }: { height: number; bag: ReturnType<typeof useShards.getState>['deployBag']; existing: number; cashu: boolean }): JSX.Element {
   const set = (patch: Partial<typeof bag>): void => useShards.getState().setDeployBag(patch)
-  // A new bag's sector hint this height took off, to come back on lower down.
+  // The sector hint your saved switch has ON, which this height took off, to come back on lower down.
   const held = useShards((s) => s.deployHintHeld !== null)
   // A hint must be at least the bag's height (spec §7.7); a sector is 2^30.
   const sectorFits = height <= SECTOR_HEIGHT

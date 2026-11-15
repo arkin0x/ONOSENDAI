@@ -202,10 +202,13 @@ describe('what is placed in its room (R1, height-specific)', () => {
   })
 
   it('a room\u2019s bag carries none of the hint switches, and the player\u2019s saved switches stay as set (arkinox, 2026-11-15)', async () => {
+    // Contents turned off by hand on an ordinary hide first: the bar shows no bag rows inside a room.
+    S().startDeployMessage('elsewhere')
+    S().setDeployBag({ contents: false })
+    S().cancelDeploy()
     const d = await sealDoor()
     S().startDeployMessage('behind it')
     S().setDeployHeight(HEIGHT)
-    S().setDeployBag({ contents: false })
     expect(S().deployBag).toMatchObject({ heightTag: true, hint: SECTOR_HINT, contents: false })
     await S().deploy()
     expect(S().deployError).toBeNull()

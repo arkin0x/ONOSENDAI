@@ -44,16 +44,17 @@ export interface HintPrefs {
 
 export const DEFAULT_HINT_PREFS: HintPrefs = { height: true, sector: true, contents: true }
 
-/** This visit's choice when storage cannot be read at all (private mode, an odd embedding). */
+/** This visit's choice when storage would not take it (blocked, private mode, quota): read before storage. */
 let visit: HintPrefs | null = null
 
 /** The saved choice, or all three ON when there is none or it cannot be read. */
 export function loadHintPrefs(): HintPrefs {
+  if (visit) return visit
   let raw: string | null
   try {
     raw = localStorage.getItem(HINT_PREFS_KEY)
   } catch {
-    return visit ?? DEFAULT_HINT_PREFS
+    return DEFAULT_HINT_PREFS
   }
   if (raw === null) return DEFAULT_HINT_PREFS
   try {
@@ -69,15 +70,19 @@ export function loadHintPrefs(): HintPrefs {
 export function saveHintPrefs(patch: Partial<HintPrefs>): void {
   if (Object.keys(patch).length === 0) return
   const next = { ...loadHintPrefs(), ...patch }
-  visit = next
-  try { localStorage.setItem(HINT_PREFS_KEY, JSON.stringify(next)) } catch { /* storage blocked: kept for this visit */ }
+  try {
+    localStorage.setItem(HINT_PREFS_KEY, JSON.stringify(next))
+    visit = null
+  } catch {
+    visit = next // storage blocked: kept for this visit
+  }
 }
 
 /** What a change to the bag settings says about the three switches, if anything. */
 export function hintPrefsOf(patch: Partial<BagSettings>): Partial<HintPrefs> {
   return {
     ...('heightTag' in patch && patch.heightTag !== undefined ? { height: patch.heightTag } : {}),
-    ...('hint' in patch ? { sector: patch.hint != null } : {}),
+    ...('hint' in patch && patch.hint !== undefined ? { sector: patch.hint !== null } : {}),
     ...('contents' in patch && patch.contents !== undefined ? { contents: patch.contents } : {}),
   }
 }
@@ -102,7 +107,9 @@ export function withHintPrefs(settings: BagSettings, height: number, prefs: Hint
  * the bar shows them, so a bag never goes out with a hint the bar showed off
  * or without one it showed on, even when this device did not know the bag
  * or another device rewrote it since. ON keeps whatever hint box the bag
- * already carries; the riddle and the money switch stay as resolved.
+ * already carries, which may be a finer box another client or device wrote
+ * rather than the sector the bar describes: ON never widens or drops a
+ * hint already out. The riddle and the money switch stay as resolved.
  */
 export function asShown(resolved: BagSettings, shown: BagSettings, height: number): BagSettings {
   const hint = shown.hint === null ? null : resolved.hint ?? (hintFits(shown.hint, height) ? shown.hint : null)

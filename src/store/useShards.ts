@@ -1493,26 +1493,29 @@ interface ShardsState {
   deployBag: BagSettings
   /**
    * The hint a height too large for it took off the bag (heightPatch), put
-   * back when the height fits it again: a new bag's sector hint, off above
-   * height 30, is on again at 30 or lower. Cleared whenever you set the hint
-   * yourself (setDeployBag), so an OFF you chose stays off.
+   * back when the height fits it again: the sector hint, ON in your saved
+   * switches but off above height 30, is on again at 30 or lower. Cleared
+   * whenever you set the hint yourself (setDeployBag), so an OFF you chose
+   * stays off.
    */
   deployHintHeld: HintHeights | null
   /**
    * The bag the controls were seeded from: its region and the settings it had
    * then, or null when they start from the defaults. deploy() compares what
    * you chose with this to tell a change you made from a value you never
-   * touched, so a riddle or hint written from another device since is carried
-   * forward rather than overwritten (resolveBagSettings).
+   * touched, so a riddle written from another device since is carried
+   * forward rather than overwritten (resolveBagSettings). The three hint
+   * switches always go out as shown (deployHintPrefs.ts asShown).
    */
   deployBagFrom: OwnBag | null
   /** Change some of the bag settings. */
   setDeployBag: (patch: Partial<BagSettings>) => void
   /**
-   * Start the controls at this bag's settings when the region under the cursor
-   * changes to one that holds your bag, or back at the defaults when it moves
-   * from one that did to one that does not. Moving between regions with no bag
-   * keeps what you set.
+   * Start the controls at this bag's riddle and money switch, with the hint
+   * switches as you last set them, when the region under the cursor changes
+   * to one that holds your bag, or back at a new bag's when it moves from one
+   * that did to one that does not. Moving between regions with no bag keeps
+   * what you set.
    */
   seedDeployBag: (bag: OwnBag | null) => void
   deployStatus: DeployStatus
@@ -2936,8 +2939,8 @@ export const useShards = create<ShardsState>((set, get) => {
    * than lying in wait. A hint smaller than the region cannot contain it (spec
    * §7.7): the sector hint goes off above height 30 the way the snap goes off
    * below its own height. Unlike the snap it is held (`deployHintHeld`) and
-   * comes back on at 30 or lower, because it is on by default (owner ruling
-   * 2026-11-13). Only an OFF you chose stays off: it is never held.
+   * comes back on at 30 or lower while your saved switch has it ON
+   * (deployHintPrefs.ts). Only an OFF you chose stays off: it is never held.
    */
   const heightPatch = (height: number): Partial<ShardsState> => {
     const offered = snapHere(height)
@@ -3710,8 +3713,7 @@ export const useShards = create<ShardsState>((set, get) => {
     deployFollow: false,
     deployConstrain: CONSTRAIN_DEFAULT,
     deployLink: false,
-    deployBag: newBagSettings(0),
-    deployHintHeld: null,
+    ...freshBag(0),
     deployBagFrom: null,
     deployStatus: 'idle',
     placedLast: null,
@@ -3719,8 +3721,8 @@ export const useShards = create<ShardsState>((set, get) => {
       const s = get()
       const last = s.placedLast
       if (!last || s.pending || s.deployStatus === 'working' || againName(s) === null) return false
-      // The bag controls start at the defaults and are seeded from the bag
-      // under the cursor, as for any new deploy: they are that bag's.
+      // The bag controls start as a new bag's, with your saved hint switches,
+      // and take the riddle of your bag under the cursor, as for any new deploy.
       set({ pending: last.pending, ...last.settings, deployTurn: [...last.settings.deployTurn] as Turns, ...freshBag(last.settings.deployHeight), deployBagFrom: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null })
       cyber().setBuildStep(last.step)
       return true
@@ -3779,7 +3781,8 @@ export const useShards = create<ShardsState>((set, get) => {
     }),
     // A move starts exactly as the shard stands: its height (held, not
     // fitted, so the shard stays in its bag and keeps its comments unless
-    // you change it), its size, its pose and its bag's settings.
+    // you change it), its size, its pose and its bag's riddle, with the hint
+    // switches as you last set them.
     startEditShard: (eventId) => {
       const d = get().mine.find((m) => m.eventId === eventId)
       if (!d?.shard || !editable(d, cyber().identity.pubkey) || get().deployStatus === 'working') return
@@ -4783,10 +4786,11 @@ export const useShards = create<ShardsState>((set, get) => {
         // Its entry as the bag holds it: inline, by reference, or in a sealed entry (standsFor).
         const gone = replaced && replaced.lookupId === rk.lookupId ? replaced : null
         const standing = gone ? existing.entries.filter((e) => !standsFor(e, gone)) : existing.entries
-        // What you changed in the deploy bar wins; what you left as it was
-        // takes the bag's current value, which may be newer than what the
-        // bar showed (resolveBagSettings). The controls were seeded from
-        // this region's bag only if `deployBagFrom` names this region.
+        // The riddle and the money switch: what you changed in the deploy bar
+        // wins; what you left as it was takes the bag's current value, which
+        // may be newer than what the bar showed (resolveBagSettings). The
+        // controls were seeded from this region's bag only if `deployBagFrom`
+        // names this region.
         const region = regionOf(at, plane, deployHeight)
         const seeded = deployBagFrom?.region === region ? deployBagFrom.settings : newBagSettings(deployHeight)
         // The hint switches go out as the bar shows them (asShown).

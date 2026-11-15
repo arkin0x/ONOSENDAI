@@ -328,6 +328,34 @@ describe('the three hint switches: ON for a new player, then what they set (arki
     S().startMoveItem(on.eventId)
     expect(S().deployBag.hint).toEqual(SECTOR_HINT)
   })
+
+  it('a move of an item whose bag is off, with the switch since turned on: on, and the bag goes out with the hint', async () => {
+    await hide('was off', { hint: null })
+    relayBags = [lastBag()]
+    S().startDeployMessage('elsewhere')
+    S().setDeployBag({ hint: SECTOR_HINT })
+    S().cancelDeploy()
+    S().startMoveItem(S().mine[0].eventId)
+    expect(S().deployBag.hint).toEqual(SECTOR_HINT)
+    sent.length = 0
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    expect(lastBag().tags.some(isHintTag)).toBe(true)
+  })
+
+  it('after a deploy, the next placement lined up keeps the saved switches, and the sector hint goes off above 30 and comes back', async () => {
+    // Above 30 a deploy needs cloud compute, which this test has not got; the held hint after one is withHintPrefs (deployHintPrefs.test.ts).
+    await hide('first', { contents: false })
+    expect(S().pending).not.toBeNull()
+    expect(S().deployBag).toMatchObject({ heightTag: true, hint: SECTOR_HINT, contents: false })
+    expect(S().deployHintHeld).toBeNull()
+    useShards.setState({ deployCeiling: () => 40 })
+    S().setDeployHeight(35)
+    expect(S().deployBag.hint).toBeNull()
+    S().setDeployHeight(20)
+    expect(S().deployBag.hint).toEqual(SECTOR_HINT)
+    expect(loadHintPrefs()).toEqual({ height: true, sector: true, contents: false })
+  })
 })
 
 describe('what the client forces never overwrites the saved switches', () => {
@@ -345,10 +373,9 @@ describe('what the client forces never overwrites the saved switches', () => {
     expect(S().deployBag.hint).toEqual(SECTOR_HINT)
   })
 
-  it('a game\'s or the tutorial dungeon\'s own bags keep their hints whatever the player saved', () => {
+  it('newBagSettings, which the game and tutorial dungeon bags take as they are, ignores the saved switches (worldDeploy.test.ts builds the dungeon itself)', () => {
     S().startDeployMessage('x')
     S().setDeployBag({ heightTag: false, hint: null, contents: false })
-    // lib/games/worldDeploy.ts writes the dungeon's key and world bags from newBagSettings.
     expect(newBagSettings(HEIGHT)).toMatchObject({ heightTag: true, hint: SECTOR_HINT })
     expect(loadHintPrefs()).toEqual({ height: false, sector: false, contents: false })
   })

@@ -140,3 +140,15 @@ export function searchListings(list: readonly ItemListing[], q: string): ItemLis
 export function lockFromListing(l: Pick<ItemListing, 'itemPubkey' | 'name'>): { pubkey: string; label: string } {
   return { pubkey: l.itemPubkey, label: l.name }
 }
+
+/**
+ * The listing of the key item a lock is sealed to, if anyone listed it: the
+ * same match KEY ITEMS > FEED makes, by the item's public key, so a copy
+ * renamed or listed under another name is still found. Null when the lock's
+ * key is not listed (or its listing is one `hidden` leaves out, a muted
+ * lister's): then nothing about the lock is shown that was not shown before.
+ */
+export function listingForLock(list: readonly ItemListing[], lockPubkey: string, hidden?: (l: ItemListing) => boolean): ItemListing | null {
+  if (!HEX_64.test(lockPubkey)) return null
+  return list.find((l) => l.itemPubkey === lockPubkey && !hidden?.(l)) ?? null
+}

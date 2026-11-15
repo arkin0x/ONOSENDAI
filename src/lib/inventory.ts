@@ -454,6 +454,20 @@ const newestFirst = <T extends { at: number }>(a: T, b: T): number => b.at - a.a
 export const isKeyItem = (it: Pick<HeldItem, 'type'>): boolean => it.type === 'key'
 
 /**
+ * The public keys of every key item held, archived ones too: KEY ITEMS
+ * > FEED leaves these out, and a lock shown with its key item says IN YOUR
+ * ITEMS for them. Matched by keypair, so a renamed copy is the same key.
+ */
+export function heldKeypairs(items: Record<string, Pick<HeldItem, 'type' | 'key' | 'cleared'>>): Set<string> {
+  return new Set(Object.values(items).flatMap((it) => (isKeyItem(it) && it.key && !it.cleared ? [it.key.itemPubkey] : [])))
+}
+
+/** Whether a key item with this public key is held (heldKeypairs), for one lock. */
+export function holdsKeypair(items: Record<string, Pick<HeldItem, 'type' | 'key' | 'cleared'>>, itemPubkey: string): boolean {
+  return Object.values(items).some((it) => isKeyItem(it) && !it.cleared && it.key?.itemPubkey === itemPubkey)
+}
+
+/**
  * The three-panel model's two local panels, as one pure split (B1 ruling 14):
  * DISCOVERED is everything opened where it stands, grouped by the bag it was
  * in and newest first; LOOT is what is held, keys apart from the rest. A key

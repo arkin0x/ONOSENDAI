@@ -111,7 +111,10 @@ export function ShardsPanel(): JSX.Element {
         Make 3D objects in the workshop. BUILD places objects, messages, audio,
         items, chests and doors, encrypted at a location in cyberspace for
         others to find. Everything you hide at one place travels together as
-        one bag.
+        one bag. Your list of hidden things is saved to the relay, encrypted so
+        only you can read it. Any device signed in as you shows the same list.
+        Nothing is saved while you are LOCAL, or if your signer has no NIP-44
+        to encrypt it with. Settings has the switch to keep it on this device.
       </Explanation>
     </section>
   )

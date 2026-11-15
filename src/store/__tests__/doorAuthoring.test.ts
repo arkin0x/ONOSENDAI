@@ -215,7 +215,7 @@ describe('what is placed in its room (R1, height-specific)', () => {
     const inside = S().mine.find((m) => m.text === 'behind it')!
     expect(inside.room).toEqual({ doorId: d.eventId })
     expect(inside.bag).toEqual(ROOM_BAG_SETTINGS)
-    expect(loadHintPrefs()).toEqual({ height: true, sector: true, contents: false })
+    expect(loadHintPrefs()).toEqual({ height: true, sector: true, contents: false, money: false })
     expect({ heightTag: S().deployBag.heightTag, contents: S().deployBag.contents }).toEqual({ heightTag: true, contents: false })
   })
 

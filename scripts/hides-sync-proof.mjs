@@ -155,7 +155,7 @@ for (let i = 0; i < 3; i++) { await B.page.keyboard.press('Escape'); await sleep
 if (await B.page.locator('.panel--shards').count()) { await B.page.locator('.hamburger-menu').click(); await sleep(600) }
 await B.mod('/src/store/useScan.ts', `async (m) => { const s = m.useScan.getState(); s.enter(); }`)
 await sleep(1500)
-await B.mod('/src/store/useScan.ts', `async (m) => { const s = m.useScan.getState(); s.setHeight(4); void s.start({ route: 'local' }) }`)
+await B.mod('/src/store/useScan.ts', `async (m) => { const s = m.useScan.getState(); s.setHeight(s.height + 2); void s.start({ route: 'local' }) }`)
 await sleep(300)
 await B.page.locator('.scanorbs').screenshot({ path: path.join(out, 'B-8-scan-status-running.png'), timeout: 120_000 }).catch((e) => console.log('scan shot', e.message))
 await waitFor(async () => !(await B.page.evaluate(async () => (await import('/src/store/useScan.ts')).useScan.getState().job)), 60_000)

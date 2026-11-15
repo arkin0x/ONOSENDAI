@@ -153,6 +153,26 @@ describe('one record, encrypted to you', () => {
     expect(b.decrypts).toBe(1)
   })
 
+  it('adopting another device\'s bags rewrites nothing: no signature, no write', async () => {
+    const r1 = row('adopt-a', me)
+    const r2 = row('adopt-b', me)
+    hidden(r1, r2)
+    const a = device([r1, r2])
+    as(a)
+    await syncHides()
+    const n = relay.events.map((e) => e.id).join()
+    const b = device()
+    resetHidesSync(); as(b)
+    clock += 30
+    await syncHides()
+    // As the live store does: the list changed, and the change is noted.
+    noteListChange(me, [], b.rows)
+    await syncHides()
+    expect(b.rows).toHaveLength(2)
+    expect(b.signs).toBe(0)
+    expect(relay.events.map((e) => e.id).join()).toBe(n)
+  })
+
   it('a bag kept LOCAL is not in the record: no other device could open it', () => {
     const rows = [row('out', me), row('kept', me, { published: false }), row('gone', me, { goneFrom: 1 })]
     expect(Object.keys(entriesOf(rows))).toEqual([rows[0].lookupId])

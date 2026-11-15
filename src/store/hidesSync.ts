@@ -33,7 +33,8 @@
  * TOMBSTONES. A bag that leaves this device's list in this session (DELETE,
  * FORGET, a move to another region, a door's room emptied) is tombstoned with
  * the time, kept on this device until a write carries it. A bag that comes
- * back to the list afterwards is newer than its tombstone (seenAt). A change
+ * back to the list after this device tombstoned it is newer than its
+ * tombstone (seenAt); a bag adopted from the record keeps its own time. A change
  * that takes most of the list away at once is not read as deletions (a list
  * that failed to load is not a list emptied).
  */
@@ -75,6 +76,8 @@ const MAX_VERIFY = 3
 const SETTING_KEY = 'onosendai:hides-sync'
 const goneKey = (me: string): string => `onosendai:hides-gone:${me}`
 const seenKey = (me: string): string => `onosendai:hides-seen:${me}`
+/** The bags this device tombstoned, and when: only one of those coming back needs to be newer than a tombstone. */
+const tombedKey = (me: string): string => `onosendai:hides-tombed:${me}`
 
 /** Signer's self-to-self NIP-44, as useCyberspace selfCrypto gives it. */
 export interface SelfNip44 {
@@ -213,14 +216,19 @@ export function noteListChange(me: string, prev: readonly MyDeployment[], next: 
   const now = deps.now()
   const gone = pendingGone(me)
   const seen = seenAt(me)
+  const tombed = readJson<Record<string, number>>(tombedKey(me), {})
   const massDrop = before.size > 3 && left.length * 2 > before.size
-  if (!massDrop) for (const l of left) { gone[l] = now; delete seen[l] }
+  if (!massDrop) for (const l of left) { gone[l] = now; tombed[l] = now; delete seen[l] }
   for (const l of came) {
-    // Back on the list, whatever left it: newer than any tombstone of it so far.
     if (gone[l] !== undefined) delete gone[l]
-    seen[l] = now
+    // Back on the list after this device tombstoned it: newer than that
+    // tombstone, which may be on the relay already. A bag merely adopted
+    // (another device's, from the record) keeps its own time, so adopting
+    // never rewrites the record.
+    if (tombed[l] !== undefined) { seen[l] = now; delete tombed[l] }
   }
   writeJson(goneKey(me), pruneGone(gone, now))
+  writeJson(tombedKey(me), pruneGone(tombed, now))
   // Only bags still on the list need a seen time.
   for (const l of Object.keys(seen)) if (!after.has(l)) delete seen[l]
   writeJson(seenKey(me), seen)

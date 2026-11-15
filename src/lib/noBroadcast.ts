@@ -8,12 +8,13 @@
  * purpose, do not broadcast tag. And on a Sendai CyberSpace TV will simply
  * not broadcast any event carrying that tag").
  *
- * Writing: while the first-arrival tutorial runs for the identity on screen
- * (store/useTutorial.ts registers that test here), every public Cyberspace
- * event this client signs carries the tag, added in one place, the store's
- * signEvent (withNoBroadcast), so no action can forget it. Once the run ends,
- * pauses or closes, new events go out without it; an event already signed
- * keeps the tag it was signed with. Never on:
+ * Writing: while the first-arrival tutorial's card is up and guiding for the
+ * identity on screen (store/useTutorial.ts registers that test here), every
+ * public Cyberspace event this client signs carries the tag, added in one
+ * place, the store's signEvent (withNoBroadcast), so no action can forget it.
+ * While the card is folded to its bar, or once the run ends, pauses or
+ * closes, new events go out without it (owner, 2026-11-14); an event already
+ * signed keeps the tag it was signed with. Never on:
  * - a sealed entry (33335): spec §7.6 forbids any other tag there, and the
  *   kind is not in TAGGED_KINDS;
  * - an item inside a bag (3330, 1, 3340, 3341, 1063, a seed 3351), nor an
@@ -54,8 +55,8 @@ export function noBroadcast(e: { tags: string[][] }): boolean {
 
 /**
  * What says whether an event signed now by `signer` (a pubkey; the identity
- * on screen when not given) is to carry the tag: the tutorial running for
- * that player.
+ * on screen when not given) is to carry the tag: the tutorial's card up and
+ * guiding for that player.
  */
 type Hold = (signer?: string) => boolean
 let holding: Hold = () => false

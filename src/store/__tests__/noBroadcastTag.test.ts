@@ -1,9 +1,11 @@
 /**
  * noBroadcastTag.test.ts - the no-broadcast tag (spec §8.13) on what this
  * client signs: while the first-arrival tutorial runs for the identity on
- * screen, every public Cyberspace event carries `["no-broadcast"]`; never a
- * sealed entry, an item, a list, a DM, an auth or a mined template; and once
- * the run is finished, skipped or paused, nothing new carries it.
+ * screen and its card is up, every public Cyberspace event carries
+ * `["no-broadcast"]`; never a sealed entry, an item, a list, a DM, an auth or
+ * a mined template; while the card is folded, or once the run is finished,
+ * skipped or paused, nothing new carries it (owner, 2026-11-14), and it comes
+ * back when the card is unfolded or the run resumed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -20,7 +22,7 @@ vi.hoisted(() => {
 })
 
 import { useCyberspace } from '../useCyberspace'
-import { useTutorial } from '../useTutorial'
+import { tutorialCardUp, tutorialRunFor, useTutorial } from '../useTutorial'
 import { TUTORIAL_SCRIPT } from '../../tutorial/script'
 import { PROGRESS_PREFIX } from '../../tutorial/gate'
 import { NO_BROADCAST, TAGGED_KINDS, holdBroadcastWhile, noBroadcast, withNoBroadcast } from '../../lib/noBroadcast'
@@ -150,9 +152,38 @@ describe('the store signs with it while the tutorial runs (store signEvent)', ()
     expect(noBroadcast(await sign(PUBLIC[0]))).toBe(false)
   })
 
-  it('a minimized run is still a run: its events stay tagged', async () => {
-    startRun()
+  it('folding the card pauses the tag; unfolding it brings it back (owner, 2026-11-14)', async () => {
+    // A step that is not a modal, so the fold hides the card.
+    const step = TUTORIAL_SCRIPT.steps.find((st) => !st.modal && !st.choices)!
+    useTutorial.setState({ script: { steps: [step] } })
+    useTutorial.getState().start()
+    expect(useTutorial.getState().active).toBe(true)
+    expect(tutorialCardUp()).toBe(true)
+    expect(noBroadcast(await sign(PUBLIC[0]))).toBe(true)
     useTutorial.getState().setMinimized(true)
+    expect(tutorialCardUp()).toBe(false)
+    // Still the player's run, folded: only the tag pauses.
+    expect(tutorialRunFor(pubkey())).toBe(true)
+    for (const t of PUBLIC) expect(noBroadcast(await sign(t)), `kind ${t.kind}`).toBe(false)
+    useTutorial.getState().setMinimized(false)
+    expect(noBroadcast(await sign(PUBLIC[0]))).toBe(true)
+  })
+
+  it('a modal card is up whatever the fold says: its events stay tagged', async () => {
+    const modal = TUTORIAL_SCRIPT.steps.find((st) => st.modal)!
+    useTutorial.setState({ script: { steps: [modal] } })
+    useTutorial.getState().start()
+    useTutorial.getState().setMinimized(true)
+    expect(tutorialCardUp()).toBe(true)
+    expect(noBroadcast(await sign(PUBLIC[0]))).toBe(true)
+  })
+
+  it('left (paused) signs untagged; RESUME TUTORIAL tags again', async () => {
+    startRun()
+    useTutorial.getState().pause()
+    expect(noBroadcast(await sign(PUBLIC[0]))).toBe(false)
+    useTutorial.getState().start({ at: TUTORIAL_SCRIPT.steps[0].id })
+    expect(useTutorial.getState().active).toBe(true)
     expect(noBroadcast(await sign(PUBLIC[0]))).toBe(true)
   })
 })

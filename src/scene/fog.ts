@@ -5,9 +5,23 @@
 
 import { GRID_RADIUS } from '../lib/space'
 
-/** Where the scene's fog begins and where it is black, in render cells: TV's and WALK's. */
-export const FOG_NEAR = GRID_RADIUS * 0.9
+/** Where the scene's fog is black, in render cells: TV's and WALK's. */
 export const FOG_FAR = GRID_RADIUS * 4
+/**
+ * Where the fog starts, as a share of where it ends: 81.6 of 96, 141.1 of
+ * 166 at the usual orbit. It was 0.225 (21.6 of 96, 37.4 of 166), a fade
+ * across most of what the camera can see, and the darkest thing in the
+ * scene: a tile 100 cells off kept about half its colour and the far ones
+ * went black with only their dots showing (arkinox, 2026-11-15: "we need to
+ * reduce the darkness by a lot. maybe 10% of this."). The fog is kept for
+ * what it is for, a soft edge where the layers stop drawing (CULL_REACH
+ * below), so nothing pops at the line; across the rest of the view it no
+ * longer darkens anything. Averaged over what is in front of the camera,
+ * its darkening is about a tenth of the old (7.5% of a colour, from 39%).
+ */
+export const FOG_START_SHARE = 0.85
+/** Where the scene's fog begins, in render cells: TV's and WALK's. */
+export const FOG_NEAR = FOG_FAR * FOG_START_SHARE
 /**
  * How far from the render origin the scene's layers draw anything: the REACH
  * every culled layer shares (WorldShards, StopField, Avatar, StopCubes,
@@ -22,9 +36,11 @@ export const CULL_REACH = GRID_RADIUS * 8
  * default fog more distant? things turn black when they are still pretty
  * close." The camera orbits 26 cells out, so the fog began before the cursor
  * (21.6) and took more than a third of a shard 50 cells away; at twice the
- * distances it begins at 43.2 and is black at 192. The headlamp only dims,
- * to DISTANCE_FLOOR at worst (headlamp.ts); the black was the fog's.
- * Cyberspace TV's shots and WALK's eye keep the fog they were tuned with.
+ * distances it was black at 192. The headlamp only dims, to DISTANCE_FLOOR
+ * at worst (headlamp.ts); the black was the fog's. (Its start is now
+ * FOG_START_SHARE of its end, 2026-11-15.)
+ * Cyberspace TV's shots and WALK's eye keep the end they were tuned with,
+ * 96; their start is the same share of it (81.6).
  *
  * The far end is also held inside the layers' reach: black by CULL_REACH
  * less the camera's distance from the render origin, so nothing at the cull
@@ -33,9 +49,6 @@ export const CULL_REACH = GRID_RADIUS * 8
  * limit, about 96, as the fog always was there.
  */
 export const VIEW_FOG_SCALE = 2
-
-/** Where the fog starts, as a share of where it ends: 21.6 of 96, 43.2 of 192. */
-export const FOG_START_SHARE = FOG_NEAR / FOG_FAR
 
 /**
  * Where the fog is black: TV's and WALK's own end (`base`), or the

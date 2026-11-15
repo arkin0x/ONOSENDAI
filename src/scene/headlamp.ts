@@ -9,8 +9,8 @@
  * other, and XOR's town at block 101, all one tan, read as a tan mess. The
  * headlamp lights them from the eye, like a flashlight:
  *
- * - FACING. A face square to the view shows its full colour, and darkens as it
- *   turns away, down to FACE_FLOOR at edge on. The normal is the face's own,
+ * - FACING. A face square to the view shows its full colour, and darkens a
+ *   little as it turns away, down to FACE_FLOOR at edge on. The normal is the face's own,
  *   flat, taken from the screen-space derivatives of its position, and it is
  *   compared with the view axis rather than the ray to each pixel, so a flat
  *   face is one shade. Both sides shade alike (the world draws both).
@@ -19,7 +19,8 @@
  *   orbits, held between REACH_MIN and REACH_MAX, so the falloff keeps its
  *   shape at every zoom (render coordinates are cells at the current 2^N) and
  *   every dolly, and WALK, whose eye sits on the avatar, gets REACH_MIN. It
- *   dims toward black, as the scene's fog already does further out.
+ *   only dims gently: the fog takes things to black at the edge of the
+ *   world's reach (scene/fog.ts).
  *
  * Lines and points have no face to turn, so they take the distance only.
  *
@@ -40,10 +41,24 @@ import type { WebGLProgramParametersWithUniforms } from 'three'
 import { GRID_RADIUS } from '../lib/space'
 import { lineFade, patchNearFade } from './nearFade'
 
-/** The share of its colour a face keeps edge on to the view: never black. */
-export const FACE_FLOOR = 0.4
-/** The share of its colour anything keeps far off, before the fog takes it. */
-export const DISTANCE_FLOOR = 0.3
+/**
+ * The share of its colour a face keeps edge on to the view: never black.
+ * It was 0.4 (arkinox, 2026-11-15, of a Landscape Kit plains tile at 2^0:
+ * "we need to reduce the darkness by a lot. maybe 10% of this."). The
+ * ground under a third-person camera is close to edge on, so 0.4 took
+ * nearly half of every tile's colour right in front of the camera. 0.9
+ * keeps a gentle shade between two faces of one colour at different angles,
+ * which is why the facing exists (the drain coil's walls, XOR's town), at a
+ * sixth of the old darkening (0.1 of a face's colour at most, from 0.6).
+ */
+export const FACE_FLOOR = 0.9
+/**
+ * The share of its colour anything keeps far off, before the fog takes it.
+ * It was 0.3, a fall of 0.7 (the same request): far faces read as black
+ * well before the fog's end. A fall of 0.07, a tenth, keeps a gentle cue
+ * of distance and leaves the colour.
+ */
+export const DISTANCE_FLOOR = 0.93
 /** Full colour out to this share of the reach. */
 export const NEAR_SHARE = 0.75
 /** Past NEAR_SHARE, the colour's step toward DISTANCE_FLOOR falls by e every FALL_SHARE of the reach. */

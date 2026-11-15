@@ -14,10 +14,11 @@ const src = readFileSync('src/scene/Scene.tsx', 'utf8')
 const fogBody = src.slice(src.indexOf('function SceneFog()'), src.indexOf('\n}\n', src.indexOf('function SceneFog()')))
 
 describe('the scene fog', () => {
-  it('is VIEW_FOG_SCALE = 2 times the old 21.6 to 96 cells in the third-person views', () => {
+  it('is VIEW_FOG_SCALE = 2 times TV\'s and WALK\'s 96 cells in the third-person views, starting at FOG_START_SHARE of its end', () => {
     const fog = readFileSync('src/scene/fog.ts', 'utf8')
     expect(fog).toMatch(/export const VIEW_FOG_SCALE = 2\n/)
-    expect(fog).toMatch(/export const FOG_NEAR = GRID_RADIUS \* 0\.9\n/)
+    expect(fog).toMatch(/export const FOG_START_SHARE = 0\.85\n/)
+    expect(fog).toMatch(/export const FOG_NEAR = FOG_FAR \* FOG_START_SHARE\n/)
     expect(fog).toMatch(/export const FOG_FAR = GRID_RADIUS \* 4\n/)
     expect(src).toMatch(/<SceneFog \/>/)
     expect(src).not.toMatch(/<fog attach="fog" args=\{\[0x000000, GRID_RADIUS \* 0\.9, GRID_RADIUS \* 4\]\} \/>/)

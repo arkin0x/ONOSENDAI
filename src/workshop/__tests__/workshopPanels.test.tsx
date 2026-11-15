@@ -136,28 +136,28 @@ describe('OPACITY in SHARD', () => {
     useWorkshop.setState({ shards: [s], currentId: s.id, past: [], future: [] })
   })
 
-  it('is a slider from the floor to 100 with the value, the steppers and #', () => {
+  it('is a slider from 0 to 100 with the value, the steppers and #', () => {
     const s = shard(40)
     useWorkshop.setState({ shards: [s], currentId: s.id })
     const html = renderToStaticMarkup(<OpacityRow />)
     expect(html).toContain('role="slider"')
-    expect(html).toContain('aria-valuemin="10"')
+    expect(html).toContain('aria-valuemin="0"')
     expect(html).toContain('aria-valuemax="100"')
     expect(html).toContain('aria-valuenow="40"')
     expect(html).toContain('40%')
-    // (40 - 10) / 90 of the way along.
-    expect(html).toContain('left:33.33')
+    // 40 / 100 of the way along.
+    expect(html).toContain('left:40')
     expect(html).toContain('aria-label="More see-through"')
     expect(html).toContain('aria-label="More solid"')
     expect(html).toContain('aria-label="Type an opacity percent"')
     expect(html).toContain('linescrub__hash')
   })
 
-  it('reads solid with no opacity, and a stored 5 as the floor', () => {
+  it('reads solid with no opacity, and a stored 5 as 5 (no floor)', () => {
     expect(renderToStaticMarkup(<OpacityRow />)).toContain('aria-valuenow="100"')
     const s = shard(5)
     useWorkshop.setState({ shards: [s], currentId: s.id })
-    expect(renderToStaticMarkup(<OpacityRow />)).toContain('aria-valuenow="10"')
+    expect(renderToStaticMarkup(<OpacityRow />)).toContain('aria-valuenow="5"')
   })
 
   it('undoes a whole drag in one step', () => {

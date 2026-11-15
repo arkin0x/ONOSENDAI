@@ -41,9 +41,11 @@ describe('OPACITY', () => {
     expect(cur()).not.toHaveProperty('opacity')
   })
 
-  it('keeps the floor', () => {
+  it('has no floor: 3 is 3 and 0 is 0', () => {
     w().setOpacity(3)
-    expect(cur().opacity).toBe(10)
+    expect(cur().opacity).toBe(3)
+    w().setOpacity(0)
+    expect(cur().opacity).toBe(0)
   })
 
   it('is what the published payload carries, and reads back', () => {

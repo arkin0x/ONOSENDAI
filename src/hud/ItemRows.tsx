@@ -57,6 +57,12 @@ import { prefersReducedMotion } from '../hooks/useReducedMotion'
 import { profileLabel } from '../store/useProfiles'
 import { useMutes } from '../store/useMutes'
 import { hidesThing, type Muted } from '../lib/muteList'
+import type { CommentSubject } from '../lib/comments'
+import { subjectOfHidden } from '../lib/commentSubjects'
+import { Comments } from './Comments'
+import { ItemFace } from './ItemIcon'
+import { ModalClose } from './ui/ModalClose'
+import { Stacked, useModalStack } from './modalStack'
 
 /** The mark on an item that carries no signature: its author is a claim, never a fact (spec §7.6). */
 export function Unsigned(): JSX.Element {
@@ -101,6 +107,43 @@ export function KeyLine({ id, name, author, actionsIn }: { id?: string; name: st
   )
 }
 
+/**
+ * COMMENT on a key item, and the thread it opens (owner, 2026-11-15: "we
+ * should be able to comment on key items we find and take"): the item card's
+ * own comment section (Comments), in a card over the list it was opened from,
+ * which is there again when it closes (modalStack). `subject` is the thread
+ * every surface names for this item (lib/commentSubjects), so a comment from
+ * KEY ITEMS > MINE and one from the bag it was found in are one thread.
+ */
+export function KeyComments({ subject, name, author, image }: { subject: CommentSubject; name: string; author: string; image?: string }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen(true)} title="Read the comments on it and add your own">COMMENT</button>
+      {open && <KeyCommentsCard subject={subject} name={name} author={author} image={image} onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
+/** The card COMMENT opens: the item's badge and name, then its comments. Closed by ✕, a tap outside or Escape. */
+function KeyCommentsCard({ subject, name, author, image, onClose }: { subject: CommentSubject; name: string; author: string; image?: string; onClose: () => void }): JSX.Element {
+  useModalStack(true, onClose)
+  return (
+    <Stacked>
+      {/* Its pointer stays here: the list under it must not read a tap on this card as a tap outside itself. */}
+      <div className="modal modal--top" role="dialog" aria-modal="true" aria-label={`Comments on ${name}`} onPointerDown={(e) => { e.stopPropagation(); onClose() }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal__card secret" onPointerDown={(e) => e.stopPropagation()}>
+          <div className="secret__head">
+            <span className="secret__badge secret__badge--key"><ItemFace type="key" image={image} size={11} />ITEM</span>
+            <ModalClose onClose={onClose} />
+          </div>
+          <div className="secret__shard"><KeyLine name={name} author={author} /></div>
+          <Comments subject={subject} />
+        </div>
+      </div>
+    </Stacked>
+  )
+}
 
 /**
  * Whether this identity has a chest open here, by its id, under the lock it
@@ -220,6 +263,10 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
   const [busy, setBusy] = useState(false)
   const who = useWho(author)
   const from: HeldFrom = { chestId: id, chestName: chest.name }
+  // What is taken out of it keeps who this chest names as its contents' author,
+  // as OPEN reveals them (openChestHere `author`), so a key item taken from it
+  // opens the same comment thread in ITEMS as here (lib/commentSubjects).
+  const contentPlace = useMemo(() => (place ? { ...place, author } : null), [place, author])
   // What the mute list hides is neither listed nor held (store/useMutes); never in a chest of yours.
   const muted = useMutes((s) => s.muted)
   const shownOf = (list: ChestEntry[], m: Muted): ChestEntry[] => list.filter((e) => !hidesThing(m, { authors: [author, e.event.pubkey], ids: [e.id] }, me))
@@ -403,8 +450,8 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
       {/* A DISCOVERED NEARBY row draws what is inside across its whole width, under its words and VIEW (contentsIn). */}
       {/* Inline in a narrow column (a bag's list, a chest inside a chest) its rows' pictures are smaller, so the names keep their room. */}
       {shown && shown.length > 0 && (contentsIn !== undefined
-        ? contentsIn && createPortal(<ChestContents entries={shown} from={from} place={place} />, contentsIn)
-        : <ChestContents entries={shown} from={from} place={place} size={inChest || !actsBelow ? CHEST_INLINE_PX : undefined} />)}
+        ? contentsIn && createPortal(<ChestContents entries={shown} from={from} place={contentPlace} />, contentsIn)
+        : <ChestContents entries={shown} from={from} place={contentPlace} size={inChest || !actsBelow ? CHEST_INLINE_PX : undefined} />)}
     </div>
   )
 }
@@ -452,6 +499,9 @@ function ContentRow({ entry, from, place, size }: { entry: ChestEntry; from: Hel
   const { label, coin } = entryLabel(entry)
   const type = entry.body.type
   const take = (): void => { useInventory.getState().take([entry], from, place) }
+  // A key item's thread, as its card names it once OPEN revealed it here (lib/commentSubjects).
+  const found = useShards((s) => (type === 'key' ? s.discovered[entry.id] : undefined))
+  const subject = useMemo(() => (found ? subjectOfHidden(found) : null), [found])
   return (
     <li className="chest__row chest__row--thumb" style={size ? ({ '--chamfer-size': `${size}px` } as CSSProperties) : undefined}>
       <ItemThumb type={type} coin={coin} shard={type === 'shard' ? entry.body.shard : undefined} image={entry.body.key?.image} model={entry.body.key?.model} size={size} />
@@ -463,7 +513,10 @@ function ContentRow({ entry, from, place, size }: { entry: ChestEntry; from: Hel
             {!entry.verified && <span className="held__chips"><Unsigned /></span>}
           </span>
         )}
-      <button className={`chest__act chest__act--take ${held ? 'is-on' : ''}`} onClick={take} disabled={held} title={held ? 'Already in your ITEMS' : 'Copy it into your ITEMS'}>{held ? 'TAKEN' : 'TAKE'}</button>
+      <span className="chest__row-acts">
+        {subject && entry.body.key && <KeyComments subject={subject} name={entry.body.key.name} author={entry.event.pubkey} image={entry.body.key.image} />}
+        <button className={`chest__act chest__act--take ${held ? 'is-on' : ''}`} onClick={take} disabled={held} title={held ? 'Already in your ITEMS' : 'Copy it into your ITEMS'}>{held ? 'TAKEN' : 'TAKE'}</button>
+      </span>
     </li>
   )
 }

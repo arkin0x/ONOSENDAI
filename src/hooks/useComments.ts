@@ -5,11 +5,14 @@
  * bag, threaded to this item), opened with the key that opened the bag: the
  * bag's region key, or in a room the room key (DECK-0006). Every bag this
  * device hid or found holds that key (`bagKeyHex`), so nothing is computed.
- * Only a subject without it has the region key derived from where the bag
- * is, in the region worker and never during render (a key at height 20
- * froze the page for seconds; above 20 cyberspace-core refuses and the card
- * crashed, 2026-11-09), and only up to this machine's limit: above it the
- * section says COMMENTS UNAVAILABLE.
+ * A subject without it takes a key held here that fits the bag (its lookup
+ * id is sha256 of the key: store/bagKeys); only one with none has the region
+ * key derived from where the bag is, used only when it fits the bag (a
+ * thing in a room never gets the region key around it). Derived in the
+ * region worker and never during render (a key at height 20 froze the page
+ * for seconds; above 20 cyberspace-core refuses and the card crashed,
+ * 2026-11-09), and only up to this machine's limit: above it, or when no key
+ * fits, the section says COMMENTS UNAVAILABLE.
  * Posted by sealing the words under that key, signing the kind 1111 with the
  * active signer and publishing it to the same relays. A posted comment is
  * shown at once; a failed publish says so and keeps the text.
@@ -24,6 +27,7 @@ import { localKeyCeiling } from '../lib/deployPlan'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useMutes } from '../store/useMutes'
 import { pruneThread } from '../lib/muteList'
+import { bagKeyFor } from '../store/bagKeys'
 
 export interface CommentsState {
   comments: Comment[]
@@ -52,8 +56,12 @@ export function useComments(subject: CommentSubject | null): CommentsState {
   const [tick, setTick] = useState(0)
   const key = subject ? `${subject.author}:${subject.lookupId}:${subject.itemId}` : null
   // The key that opened the bag, held by every bag hidden or found here
-  // (the region key, or in a room the room key): read, never computed.
-  const heldHex = subject?.bagKeyHex
+  // (the region key, or in a room the room key): read, never computed. A
+  // subject that does not carry it (a key item in ITEMS, a thing out of a
+  // chest) looks for one held here that fits the bag (store/bagKeys).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const looked = useMemo(() => (subject && !subject.bagKeyHex ? bagKeyFor(subject.lookupId) : undefined), [key, subject?.bagKeyHex])
+  const heldHex = subject?.bagKeyHex ?? looked
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const held = useMemo(() => (heldHex ? hexToBytes(heldHex) : null), [key, heldHex])
   // Not held, and above what this machine computes: no key to be had. Cheap to
@@ -67,7 +75,10 @@ export function useComments(subject: CommentSubject | null): CommentsState {
     // A refusal thrown before the promise (no Worker, computed inline) reads as a rejection.
     Promise.resolve()
       .then(() => regionKeyOffThread(subject.at, subject.height, MAX_COMPUTE_HEIGHT))
-      .then((rk) => { if (alive) setDerived({ key: key!, regionKey: rk.key }) })
+      // Only a key that fits the bag (its lookup id is sha256 of the key): a
+      // thing in a room is sealed to the room key, and the region key around
+      // it must never seal or open its comments (DECK-0006). No fit, no key.
+      .then((rk) => { if (alive) setDerived({ key: key!, regionKey: rk.key && rk.lookupId?.toLowerCase() === subject.lookupId.toLowerCase() ? rk.key : null }) })
       .catch(() => { if (alive) setDerived({ key: key!, regionKey: null }) })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps

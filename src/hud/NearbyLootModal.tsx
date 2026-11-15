@@ -31,7 +31,8 @@ import { profileLabel } from '../store/useProfiles'
 import { useShards } from '../store/useShards'
 import { rememberNearbyReturn } from '../lib/nearbyReturn'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
-import { ChestBlock, KeyLine, listedOnce, useChestOpen } from './ItemRows'
+import { ChestBlock, KeyComments, KeyLine, listedOnce, useChestOpen } from './ItemRows'
+import { subjectOfWorldItem } from '../lib/commentSubjects'
 import { useEscape } from '../hooks/useEscape'
 import { NEARBY_TABS, byTab, firstFilledTab, type NearbyTab } from '../lib/nearbyTabs'
 import { lockWord, useOpenedChests } from '../store/useOpenedChests'
@@ -43,7 +44,7 @@ import { ModalClose } from './ui/ModalClose'
 
 /** Where a nearby item was found, for what is taken out of a chest here. */
 function placeOf(item: NearbyItem): HeldPlace {
-  return { lookupId: item.lookupId ?? '', bagId: item.bagId ?? '', at: { x: item.at.x.toString(), y: item.at.y.toString(), z: item.at.z.toString() }, plane: item.plane, height: item.height }
+  return { lookupId: item.lookupId ?? '', bagId: item.bagId ?? '', at: { x: item.at.x.toString(), y: item.at.y.toString(), z: item.at.z.toString() }, plane: item.plane, height: item.height, ...(item.author ? { author: item.author } : {}) }
 }
 
 /** A seed row's seed, read once per event (the list re-renders as blooms grow). */
@@ -97,6 +98,8 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
   const chest = item.type === 'chest' && !!item.chest
   const key = item.type === 'key' && !!item.keyItem
   const coin = item.type === 'message' && findCashuToken(item.text) !== null
+  // A key item's COMMENT, before and after TAKE: the thread its card opens (lib/commentSubjects).
+  const commentSubject = useMemo(() => (key ? subjectOfWorldItem(item) : null), [key, item])
   return (
     <li className="secrets__row nearby__row">
       <ItemThumb type={item.type} coin={coin} shard={item.type === 'shard' ? item.shard : undefined} image={item.keyItem?.image} model={item.keyItem?.model} />
@@ -116,6 +119,7 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
       </div>
       <span className="nearby__acts">
         {(chest || key) && <span className="nearby__door" ref={setActs} />}
+        {commentSubject && item.keyItem && <KeyComments subject={commentSubject} name={item.keyItem.name} author={author} image={item.keyItem.image} />}
         <button className="avatars__go nearby__view" onClick={() => onView(item)} title="Fly to it">VIEW<GoArrow /></button>
       </span>
       {chest && <div className="nearby__contents" ref={setContents} />}

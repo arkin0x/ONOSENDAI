@@ -76,7 +76,8 @@ import { MessageText } from './CashuCard'
 import { AudioCard } from './AudioCard'
 import { itemLineage } from '../lib/hidden'
 import { Explanation } from './Explanation'
-import { ChestBlock, Unsigned } from './ItemRows'
+import { ChestBlock, KeyComments, Unsigned } from './ItemRows'
+import { heldBagAuthor, subjectOfHeld } from '../lib/commentSubjects'
 import { useCashu, cashuStateLabel } from './useCashu'
 import { useMutes } from '../store/useMutes'
 import { hidesThing } from '../lib/muteList'
@@ -271,7 +272,7 @@ function useRowActions(id: string, name: string, shown = true): { button: JSX.El
   }
 }
 
-/** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, and ACTIONS: DETAILS, COPY, PLACE, PUBLISH, ARCHIVE, and DELETE once archived. */
+/** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, and ACTIONS: DETAILS, COMMENT, COPY, PLACE, PUBLISH, ARCHIVE, and DELETE once archived. */
 function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
   const profile = useProfile(item.author || null)
@@ -293,6 +294,9 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
   const [confirming, setConfirming] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
   const actions = useRowActions(item.id, item.name)
+  // COMMENT opens the thread of the bag it was found in, the one its card there opens (lib/commentSubjects).
+  const bagAuthor = useShards((s) => heldBagAuthor(item, { discovered: s.discovered, mine: s.mine, me }))
+  const commentSubject = useMemo(() => subjectOfHeld(item, bagAuthor), [item, bagAuthor])
   const list = async (): Promise<void> => {
     if (!item.key) return
     setRefusal(null)
@@ -323,6 +327,7 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
       {actions.group(
         <>
           <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>DETAILS</button>
+          {commentSubject && <KeyComments subject={commentSubject} name={item.name} author={item.author} image={item.key?.image} />}
           <button className={`chest__act ${copied ? 'is-on' : ''}`} onClick={copy} title="Copy the item as text, to paste into ITEMS on another device">{copied ? 'COPIED' : 'COPY'}</button>
           <PlaceButton item={item} onRefused={setRefusal} />
           {mine && !listed && (

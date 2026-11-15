@@ -38,6 +38,7 @@ import { useResolved, type Resolved } from '../lib/parts'
 import { dropDemand, provisional, setDemand, useAllowance, type Allowance } from './meshBudget'
 import { followsVersion, onFollows, trustedAuthor } from '../lib/trust'
 import { ACCENT, WARN } from '../lib/palette'
+import { scaledDisc, useDotScale } from './dotScale'
 import { renderPose, type Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
 import { faceEdges } from 'sno-core/outline'
@@ -477,9 +478,12 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
 
   // The points, drawn as the terrain field draws its gibsons: a feathered disc
   // with a bright core for the bloom, sized in pixels between a floor and a cap.
+  // At the canvas's own dot scale (scene/dotScale.ts): 1, the world's, except on the workshop's LOOK.
+  const dotScale = useDotScale()
   const pointMaterial = useMemo(() => {
-    return createDiscMaterial(shard.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, shard.mode === 'points' ? opacity : opacity * 0.55, headlamp && !lit)
-  }, [shard.mode, opacity, headlamp, lit])
+    const profile = scaledDisc(shard.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, dotScale)
+    return createDiscMaterial(profile, shard.mode === 'points' ? opacity : opacity * 0.55, headlamp && !lit)
+  }, [shard.mode, opacity, headlamp, lit, dotScale])
   useEffect(() => () => pointMaterial.dispose(), [pointMaterial])
   useEffect(() => { pointMaterial.clippingPlanes = clipPlanes ?? null }, [pointMaterial, clipPlanes])
 

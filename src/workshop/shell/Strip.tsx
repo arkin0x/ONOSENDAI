@@ -14,8 +14,9 @@
  *   PAINT:  POINT, FACE, PIECE or ALL (what a tap paints), BLEND or EDGE.
  *   FACE:   the corners so far, then FILL, BACK, CANCEL, AUTO, always in
  *           that order, greyed out until they apply.
- * With anything held, in any tool, it is the held bar (HeldBar), whose slots
- * never move. FACE's corner picking is not holding: its strip stays.
+ * With anything held, in any tool but LOOK, it is the held bar (HeldBar),
+ * whose slots never move; LOOK shows the shard as the world does, so what is
+ * held stays out of sight there (workshop/benchLook.tsx). FACE's corner picking is not holding: its strip stays.
  */
 
 import { useEffect, useState } from 'react'
@@ -27,10 +28,11 @@ import { useWorkshop, type PaintMode, type SelectKind, type Tool } from '../../s
 import { requestView } from '../benchAxes'
 import { slotOf } from './Dock'
 import { HeldBar, useHolding } from './HeldBar'
+import { isLook } from '../lookTool'
 
 /** What a tap does with each tool, behind the strip's ?. */
 export const TOOL_HELP: Record<Tool, string> = {
-  view: 'Look around: one finger orbits, two pan, pinch zooms. Tap the view ball for views, or to tip or roll the grid a quarter so the next points go on another plane. Pick a tool to build.',
+  view: 'See it as it looks in cyberspace. One finger orbits, two pan, pinch zooms. Tap the view ball for views, or to tip or roll the grid a quarter so the next points go on another plane. Pick a tool to build.',
   stamp: 'Tap the grid to place the shape where the ghost shows. Q turns it.',
   add: 'Tap the grid to place a vertex at the current level.',
   select: 'Tap to gather points, faces or objects, as the first chip says. BOX makes a drag draw a box; REMOVE makes taps and boxes take out. The count in the bar lets go.',
@@ -238,7 +240,8 @@ export function Strip({ onPickObject, onMore, moreBadge }: { onPickObject: () =>
   useEffect(() => { setHelp(false); setTiles(false) }, [tool, holding])
   useEscape('modal', help, () => setHelp(false))
   useEscape('modal', tiles, () => setTiles(false))
-  if (holding) {
+  // Not in LOOK, which shows the shard as the world does: what is held stays held, out of sight until an editing tool (workshop/benchLook.tsx).
+  if (holding && !isLook(tool)) {
     return (
       <div className="ws__strip ws__strip--held">
         <HeldBar onMore={onMore} moreBadge={moreBadge} />

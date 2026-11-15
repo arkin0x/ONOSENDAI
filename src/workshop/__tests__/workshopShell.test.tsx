@@ -352,11 +352,11 @@ describe('the strip', () => {
     await m.unmount()
   })
 
-  it('becomes the held bar, with the same slots in the same order, whatever is held in whatever tool', async () => {
+  it('becomes the held bar, with the same slots in the same order, whatever is held in whatever editing tool', async () => {
     const SLOTS = ['PT', 'LEFT', 'RIGHT', 'COPY', 'PASTE', 'COLOR', 'DELETE', 'MORE']
     const m = await mount(<Workshop />)
     const cases: Array<[string, () => void]> = [
-      ['LOOK, one point', () => { useWorkshop.getState().setTool('view'); useWorkshop.getState().setSelection([0]) }],
+      ['SELECT, one point', () => { useWorkshop.getState().setTool('select'); useWorkshop.getState().setSelection([0]) }],
       ['SELECT, three points', () => { useWorkshop.getState().setTool('select'); useWorkshop.getState().setSelection([0, 1, 2]) }],
       ['STAMP, two points', () => { useWorkshop.getState().setTool('stamp'); useWorkshop.getState().setSelection([0, 1]) }],
       ['SELECT FACES, a face', () => { useWorkshop.getState().setTool('select'); useWorkshop.getState().setSelectKind('faces'); useWorkshop.getState().selectFace(0) }],
@@ -382,6 +382,23 @@ describe('the strip', () => {
     await tick()
     expect(useWorkshop.getState().selection).toEqual([])
     expect(slots(m)).toEqual([])
+    await m.unmount()
+  })
+
+  it('LOOK keeps its own strip with something held, a true preview; the held bar comes back with an editing tool', async () => {
+    useWorkshop.getState().setTool('select')
+    useWorkshop.getState().setSelection([0, 1])
+    const m = await mount(<Workshop />)
+    expect(slots(m).length).toBeGreaterThan(0)
+    useWorkshop.getState().setTool('view')
+    await tick()
+    expect(slots(m)).toEqual([])
+    expect(buttonsIn(strip(m)).map(textOf)).toEqual(['LOOK', 'HOME', 'FIT', 'MORE'])
+    // Still held, out of sight.
+    expect(useWorkshop.getState().selection).toEqual([0, 1])
+    useWorkshop.getState().setTool('stamp')
+    await tick()
+    expect(slots(m).slice(1)).toEqual(['LEFT', 'RIGHT', 'COPY', 'PASTE', 'COLOR', 'DELETE', 'MORE'])
     await m.unmount()
   })
 
@@ -693,9 +710,11 @@ describe('PAINT, and FACE only making faces (phase 3)', () => {
 
   it('FACE taps pick corners only; faces are held from SELECT FACES; LOOK taps nothing', () => {
     const bench = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
-    expect(bench).toContain("onFaceClick={tool === 'paint' || (tool === 'select' && selectKind === 'faces') ? onFace : undefined}")
+    const shardOnBench = readFileSync(join(__dirname, '..', 'benchLook.tsx'), 'utf8')
+    expect(shardOnBench).toContain("onFaceClick={tool === 'paint' || (tool === 'select' && selectKind === 'faces') ? onFace : undefined}")
     expect(bench).toContain("if (tool === 'face') w.pickForFace(first)")
-    expect(bench).toContain("if (tool === 'view') return")
+    // LOOK draws no handles at all, so a tap there meets none (benchLook.test.tsx).
+    expect(bench).toContain("if (isLook(tool)) return null")
     expect(bench).toContain("if (w.tool === 'select' && w.selectKind === 'objects') w.togglePart(part)")
     // A box takes what the switch says.
     expect(bench).toContain("kind = w.selectKind")

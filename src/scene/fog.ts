@@ -27,7 +27,9 @@ export const FOG_NEAR = FOG_FAR * FOG_START_SHARE
  * every culled layer shares (WorldShards, StopField, Avatar, StopCubes,
  * SecretRegions, Earth ...: GRID_RADIUS * 8). Past it a thing is simply not
  * drawn, so the fog must be black before the camera can see that far, or
- * things pop at the line as the camera moves (review of #635, S2).
+ * things pop at the line as the camera moves (review of #635, S2). It is
+ * the least reach: while BUILD is pulled back the layers draw further, in
+ * doublings of it (buildZoom.ts useDrawReach), and the fog follows.
  */
 export const CULL_REACH = GRID_RADIUS * 8
 /**
@@ -51,14 +53,20 @@ export const CULL_REACH = GRID_RADIUS * 8
 export const VIEW_FOG_SCALE = 2
 
 /**
- * Where the fog is black: TV's and WALK's own end (`base`), or the
- * third-person views' VIEW_FOG_SCALE times further, but no further than
- * CULL_REACH less the camera's distance `fromOrigin` from the render origin,
- * and never nearer than the old end. The start is FOG_START_SHARE of it.
+ * Where the fog is black: TV's and WALK's own end (`base`), or in the
+ * third-person views as far as the layers' `reach` allows: that reach less
+ * the camera's distance `fromOrigin` from the render origin, so nothing at
+ * the cull line is ever seen, never nearer than the old end. The start is
+ * FOG_START_SHARE of it.
+ *
+ * With the usual reach, CULL_REACH = FOG_FAR * VIEW_FOG_SCALE, that is the
+ * 192 at most it always was (166 at the usual orbit). While BUILD is pulled
+ * back the reach doubles ahead of the orbit (buildZoom.ts), and the fog's
+ * end goes out with it, so what is being built keeps its colour.
  */
-export function fogFar(base: boolean, fromOrigin: number): number {
+export function fogFar(base: boolean, fromOrigin: number, reach = CULL_REACH): number {
   if (base) return FOG_FAR
-  return Math.max(FOG_FAR, Math.min(FOG_FAR * VIEW_FOG_SCALE, CULL_REACH - fromOrigin))
+  return Math.max(FOG_FAR, Math.min(FOG_FAR * VIEW_FOG_SCALE * (reach / CULL_REACH), reach - fromOrigin))
 }
 
 /**
@@ -83,9 +91,9 @@ export function easeFog(current: number, target: number, dt: number): number {
  * jump straight to the target: the fog belongs to the view, and easing from
  * the third-person fog to TV's 96 took a second on entering, and the 24/7
  * broadcast page one or two to settle from the Fog's first distances
- * (review of #635, N10).
+ * (review of #635, N10). `reach` as fogFar takes it.
  */
-export function fogFarStep(current: number, was: boolean | null, base: boolean, fromOrigin: number, dt: number): number {
-  const target = fogFar(base, fromOrigin)
+export function fogFarStep(current: number, was: boolean | null, base: boolean, fromOrigin: number, dt: number, reach = CULL_REACH): number {
+  const target = fogFar(base, fromOrigin, reach)
   return was === base ? easeFog(current, target, dt) : target
 }

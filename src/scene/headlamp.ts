@@ -68,7 +68,7 @@ export const NEAR_SHARE = 0.75
 export const FALL_SHARE = 1.6
 /** The least reach, in render cells: WALK's eye is on the avatar, a reach of nothing. */
 export const REACH_MIN = 8
-/** The most reach: the orbit's own limit (Scene.tsx). */
+/** The most reach outside BUILD: the orbit's usual limit (Scene.tsx). BUILD pulled back passes its own (buildZoom.ts). */
 export const REACH_MAX = GRID_RADIUS * 4
 
 /**
@@ -83,9 +83,14 @@ export const headlampUniforms = {
 /** Off for whatever does not wear the headlamp: the bench's and thumbnails' point discs. */
 export const HEADLAMP_NEVER = { value: 0 }
 
-/** The reach for a camera `distance` cells from what it looks at. */
-export function headlampReach(distance: number): number {
-  return Math.min(REACH_MAX, Math.max(REACH_MIN, Number.isFinite(distance) ? distance : REACH_MIN))
+/**
+ * The reach for a camera `distance` cells from what it looks at, held under
+ * `max`: the orbit's own limit, so in BUILD pulled back (up to 1024 cells at
+ * 2^0, buildZoom.ts) what the camera looks at keeps full colour as it does
+ * at the usual orbit, rather than sitting ten reaches out on the floor.
+ */
+export function headlampReach(distance: number, max = REACH_MAX): number {
+  return Math.min(Math.max(REACH_MAX, max), Math.max(REACH_MIN, Number.isFinite(distance) ? distance : REACH_MIN))
 }
 
 /** The share of its colour a face keeps when its normal's view-space z (toward the camera) is `nz`. Mirrors the shader. */

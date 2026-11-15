@@ -26,7 +26,9 @@ describe('the scene fog', () => {
 
   it('keeps the old distances in TV and WALK, and eases one Fog in place every frame rather than making a new one', () => {
     expect(fogBody).toMatch(/const base = useTv\.getState\(\)\.on \|\| useCyberspace\.getState\(\)\.walking\n/)
-    expect(fogBody).toMatch(/f\.far = fogFarStep\(f\.far, mode\.current, base, state\.camera\.position\.length\(\), dt\)\n\s*mode\.current = base\n/)
+    expect(fogBody).toMatch(/const fromOrigin = state\.camera\.position\.length\(\)\n/)
+    // Within the layers' reach, which BUILD pulled back widens (buildZoom.test.ts).
+    expect(fogBody).toMatch(/f\.far = fogFarStep\(f\.far, mode\.current, base, fromOrigin, dt, aim\.current\)\n\s*mode\.current = base\n/)
     expect(fogBody).toMatch(/const mode = useRef<boolean \| null>\(null\)/)
     expect(fogBody).toMatch(/f\.near = f\.far \* FOG_START_SHARE/)
     // The args are the Fog's first and only construction.
@@ -139,7 +141,8 @@ describe('the scene fog', () => {
       for (const m of text.matchAll(/(?:REACH|PIN_REACH|STAR_REACH) = GRID_RADIUS \* (\d+)/g)) { seen++; expect(Number(m[1]), f).toBeGreaterThanOrEqual(8) }
     }
     expect(seen).toBeGreaterThan(10)
-    expect(readFileSync('src/scene/SecretRegions.tsx', 'utf8')).toMatch(/if \(far > GRID_RADIUS \* 8\) continue/)
+    // Never less than CULL_REACH; further while BUILD is pulled back (buildZoom.ts).
+    expect(readFileSync('src/scene/SecretRegions.tsx', 'utf8')).toMatch(/if \(far > Math\.max\(GRID_RADIUS \* 8, reach\)\) continue/)
   })
 
   it('the headlamp only dims, never to black: the black near the camera was the fog\'s', () => {

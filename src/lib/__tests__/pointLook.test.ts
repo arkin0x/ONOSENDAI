@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { ShardModel } from 'sno-core/shards'
-import { drawPlan, drawsAnything, gibsonsLabel, glowReachDoublings, haloFade, pointLookOf, ticksToGibsons, ticksToUnits, unseenObject } from '../pointLook'
+import { benchFaintDots, drawPlan, drawsAnything, gibsonsLabel, glowReachDoublings, haloFade, pointLookOf, ticksToGibsons, ticksToUnits, unseenObject } from '../pointLook'
 
 function model(mode: ShardModel['mode'], extra?: Record<string, unknown>, opacity?: number): ShardModel {
   return {
@@ -125,5 +125,25 @@ describe('unseenObject and the glow cull', () => {
     expect(glowReachDoublings(model('points'))).toBe(0)
     expect(glowReachDoublings(model('points', { glow: ['light', 7680, 50] }))).toBeCloseTo(Math.log2(65))
     expect(glowReachDoublings(model('solid', { glow: ['light', 7680, 50] }))).toBe(0)
+  })
+})
+
+describe('the bench\'s faint dots for an object no one can see', () => {
+  const hidden = model('points', { pointsize: 0 })
+  const at = (o: Partial<{ onBench: boolean; moving: boolean; cull: boolean; world: boolean }>) => benchFaintDots(hidden, pointLookOf(hidden), { onBench: true, moving: true, world: false, ...o })
+  it('show only on the bench, where its handles are hidden (an object drawn moving)', () => {
+    expect(at({})).toBe(true)
+    expect(at({ moving: false })).toBe(false)
+    expect(at({ onBench: false })).toBe(false)
+    expect(at({ cull: true })).toBe(false)
+  })
+  it('skip LOOK, which shows the world as it is (#778)', () => {
+    expect(at({ world: true })).toBe(false)
+  })
+  it('only for an object no one can see', () => {
+    const seen = model('points')
+    expect(benchFaintDots(seen, pointLookOf(seen), { onBench: true, moving: true, world: false })).toBe(false)
+    const zero = model('solid', undefined, 0)
+    expect(benchFaintDots(zero, pointLookOf(zero), { onBench: true, moving: true, world: false })).toBe(true)
   })
 })

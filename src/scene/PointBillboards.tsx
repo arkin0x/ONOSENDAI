@@ -63,6 +63,17 @@ export function GlowWorldCanvas({ children }: { children: ReactNode }): JSX.Elem
   )
 }
 
+/**
+ * Whether halos keep the world bloom's face tag (glowHalos haloBlend): in the
+ * world's canvas, whatever the shard (the placing ghost, an item's model), and
+ * wherever a shard is drawn as the world draws it under a world bloom (the
+ * workshop's LOOK, workshop/benchBloom.tsx). Elsewhere (the editing tools,
+ * games, pictures) there is no bloom and the alpha accumulates.
+ */
+export function haloKeepsTag(canvasWorld: boolean, drawnWorld: boolean): boolean {
+  return canvasWorld || drawnWorld
+}
+
 /** Whether halos draw here: always, unless this draw follows the switch and it is off. */
 export function useGlowAllowed(): boolean {
   const gated = useContext(GlowGate)
@@ -157,6 +168,12 @@ interface HaloProps {
   strength: number
   /** The diameter its points are drawn at as billboards (model units), or 0: the halo leaves that disc clear. */
   core?: number
+  /**
+   * Drawn as the world draws (ShardMesh `world`): with the canvas, whether
+   * its halos keep the bloom's tag (haloKeepsTag). The workshop's LOOK draws
+   * its shard so, under its own world bloom.
+   */
+  drawnWorld?: boolean
   /** The client's own fade of the whole object (a ghost's share, `dim`); never the object's opacity. */
   fade: number
   /** Whose object, for the budget. */
@@ -170,8 +187,8 @@ interface HaloProps {
 }
 
 /** The glow round each point. */
-export function GlowHalos({ plain, glow, radius, strength, core = 0, fade, trusted, clipPlanes, walls, birth, dissolve }: HaloProps): JSX.Element {
-  const world = useContext(GlowWorld)
+export function GlowHalos({ plain, glow, radius, strength, core = 0, drawnWorld = false, fade, trusted, clipPlanes, walls, birth, dissolve }: HaloProps): JSX.Element {
+  const world = haloKeepsTag(useContext(GlowWorld), drawnWorld)
   const gl = useThree((s) => s.gl)
   const geometry = useMemo(() => billboardsOf(plain), [plain]) as InstancedBufferGeometry
   const material = useMemo(() => createHaloMaterial(glow.style, world), [glow.style, world])

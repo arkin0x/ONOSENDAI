@@ -18,6 +18,7 @@ import { useProfile } from '../hooks/useProfile'
 import { avatarTurn } from '../lib/facing'
 import { OtherAvatar } from './OtherAvatar'
 import { useMutes } from '../store/useMutes'
+import { useDrawReach } from './buildZoom'
 
 const REACH = GRID_RADIUS * 8
 const AVATAR_SCALE_LIMIT = 10
@@ -54,12 +55,14 @@ export function PresenceAvatars({ axes }: { axes: ViewAxes }): JSX.Element | nul
     return (p: Present['position']) => placeCentre(p, origin, scaleExp, axes)
   }, [anchor, scaleExp, axes])
 
+  // Further out while BUILD is pulled back (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const near = useMemo(() => {
     if (scaleExp >= AVATAR_SCALE_LIMIT) return []
     return presenceDrawn(people, { me, focus, targets, plane: anchorPlane, muted: blocked })
       .map((p) => ({ ...p, centre: place(p.position) }))
-      .filter((p) => Math.hypot(...p.centre) <= REACH)
-  }, [people, targets, me, focus, anchorPlane, scaleExp, place, blocked])
+      .filter((p) => Math.hypot(...p.centre) <= reach)
+  }, [people, targets, me, focus, anchorPlane, scaleExp, place, blocked, reach])
 
   // Turned with the view like every shard and your own avatar, so a compass
   // turn that puts the world upside down puts them upside down with it.

@@ -18,9 +18,16 @@
  * to scan?", then: never FREE or HELD): UNKNOWN and how long this device
  * takes, from its benchmark (store/useScan.ts scanSeconds); COMPLETE for a
  * cube already held, which SCAN only asks the relays about again; HOSAKA
- * above the device max, the price on the SCAN button. The keys sit under
- * their buttons: . and , under up and down, SPACE under SCAN. All white with
- * a dark edge, readable over the brightest scene. While a scan runs the orb
+ * above the device max, the price on the SCAN button. At the top of the
+ * range, DEVICE MAX or HOSAKA MAX on a line of its own under those, kept
+ * when empty, so it coming never moves a thing. The words are white with a
+ * dark edge, readable over the brightest scene. The keys are inside their
+ * buttons as the Controls pad prints them (arkinox, 2026-11-15: "the scan
+ * keyboard hints - i wanted them like the keyboard hints in the Controls
+ * pad"): the pad's own `.touchpad__keyhint` (TouchControls.tsx), tiny and
+ * dim at the bottom centre, . in up, , in down (a size up, or a lone mark
+ * is a speck), SPACE in the SCAN orb (the word the pad prints for WALK's
+ * jump), and unseen while the key does nothing. While a scan runs the orb
  * is CANCEL and a line centred under the height says how far along it is;
  * then what it found. That line has its room kept in every state, as tall as
  * its longest (three lines), so it showing or going never moves a button
@@ -118,6 +125,17 @@ export function scanPercent(job: ScanJob | null, now: number): number | null {
 }
 
 /**
+ * A button's keyboard key, the Controls pad's way (TouchControls.tsx
+ * PadKey.keyHint): its class, so the two are one style. Kept in place,
+ * unseen, while the key does nothing.
+ */
+function KeyHint({ keyName, off }: { keyName: string; off: boolean }): JSX.Element {
+  // A lone . or , a size up (styles.css): at the pad's size it is a speck.
+  const mark = keyName === '.' || keyName === ','
+  return <span className={`touchpad__keyhint${mark ? ' is-mark' : ''}${off ? ' is-off' : ''}`} aria-hidden>{keyName}</span>
+}
+
+/**
  * Only in SCAN: a thin gate, so the controls' subscriptions (the cursor, the
  * keys, the cloud) cost nothing in the other modes.
  */
@@ -190,23 +208,21 @@ function ScanDock(): JSX.Element {
         <div className="scanorbs__stepper" role="group" aria-label="Scan height">
           <button className="scanorbs__step" {...bind(() => s().stepHeight(1))} disabled={job !== null || height >= range.top} title={height < range.top ? 'Raise the scan height (.)' : range.cloud ? 'The highest height HOSAKA scans' : 'This device\'s max. Turn HOSAKA on to scan higher'} aria-label="Raise the scan height">
             <ChevronUp size={18} strokeWidth={2.25} aria-hidden />
+            <KeyHint keyName="." off={job !== null || height >= range.top} />
           </button>
-          {/* The keys, as SPACE is under the SCAN button: kept in place while a scan runs, so nothing moves. */}
-          {/* At the top, why up stops: the max, where its key would be. */}
-          {height >= range.top
-            ? <span className={`flyorb__key scanorbs__max${job ? ' is-off' : ''}`}>{range.cloud ? 'HOSAKA MAX' : 'DEVICE MAX'}</span>
-            : <span className={`flyorb__key scanorbs__hint${job ? ' is-off' : ''}`} aria-hidden>.</span>}
           <span className="scanorbs__value" title={scanTag(height, range, held, seconds)}>
             <b>SCAN HEIGHT {height}</b>
             {/* A line each, so the dock stays as narrow as SCAN HEIGHT and the orb never moves. */}
             {scanTagLines(height, range, held, seconds).map((words) => (
               <span key={words} className="scanorbs__tag">{words}</span>
             ))}
+            {/* At the top, why up stops. Its line is kept when empty, so it coming never moves a thing. */}
+            <span className="scanorbs__max">{height >= range.top && !job ? (range.cloud ? 'HOSAKA MAX' : 'DEVICE MAX') : ''}</span>
           </span>
           <button className="scanorbs__step" {...bind(() => s().stepHeight(-1))} disabled={job !== null || height <= SCAN_MIN_HEIGHT} title="Lower the scan height (,)" aria-label="Lower the scan height">
             <ChevronDown size={18} strokeWidth={2.25} aria-hidden />
+            <KeyHint keyName="," off={job !== null || height <= SCAN_MIN_HEIGHT} />
           </button>
-          <span className={`flyorb__key scanorbs__hint${job || height <= SCAN_MIN_HEIGHT ? ' is-off' : ''}`} aria-hidden>,</span>
         </div>
         <div className="scanorbs__go">
           {/* A click, not a press: a touch that only starts on the orb never pays. */}
@@ -238,8 +254,9 @@ function ScanDock(): JSX.Element {
           >
             <span className="scanorb__word">{word}</span>
             {orbSats && <span className="scanorb__sats">{orbSats}</span>}
+            {/* Space does nothing while a scan runs (X cancels) or where the orb is disabled. */}
+            <KeyHint keyName="SPACE" off={job !== null || goDisabled} />
           </button>
-          <span className={`flyorb__key${job || goDisabled ? ' is-off' : ''}`} aria-hidden>SPACE</span>
         </div>
       </div>
       {/* Always here, at one height (the longest line's), empty or not: the row above never moves. */}

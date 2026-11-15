@@ -29,6 +29,7 @@ import { standBloom } from '../lib/seeds/orientation'
 import type { ShardModel } from 'sno-core/shards'
 import { PlacedShard, placeShard, useSteadied, type PlacedShardDraw } from './WorldShards'
 import type { Box } from '../lib/clip'
+import { useDrawReach } from './buildZoom'
 
 const REACH = GRID_RADIUS * 8
 /** A box that holds everything: a bloom is drawn whole, past its bag's cube (owner ruling 2026-11-10). */
@@ -67,6 +68,8 @@ export function WorldSeeds({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const births = useCeremony((s) => s.births)
   const views = useBlooms((s) => s.views)
 
+  // Further out while BUILD is pulled back (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   // The seeds in this plane and in reach, read with every check before their DNA (§8.2).
   const near = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
@@ -75,12 +78,12 @@ export function WorldSeeds({ axes }: { axes: ViewAxes }): JSX.Element | null {
       const seed = w.event ? seedOfEvent(w.event) : null
       if (!seed) continue
       const placed = placeShard({ ...w, shard: markFor(seed.scale) }, origin, scaleExp, axes)
-      if (Number.isFinite(placed.scale) && Math.hypot(...placed.centre) <= REACH) out.push({ w, seed })
+      if (Number.isFinite(placed.scale) && Math.hypot(...placed.centre) <= reach) out.push({ w, seed })
     }
     return out
     // mine, discovered, curated and muted are what drawnItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted])
+  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted, reach])
 
   useEffect(() => { wantSeeds(near.map((n) => n.seed)) }, [near])
 

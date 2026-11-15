@@ -16,6 +16,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { avatarTurn } from '../lib/facing'
 import { OtherAvatar } from './OtherAvatar'
 import { useMutes } from '../store/useMutes'
+import { useDrawReach } from './buildZoom'
 
 /** Same cull as Earth and the spawn marker. */
 const REACH = GRID_RADIUS * 8
@@ -47,6 +48,8 @@ export function TargetAvatars({ axes }: Props): JSX.Element | null {
   }, [anchor, scaleExp, axes])
 
   const blocked = useMutes((s) => s.muted.pubkeys)
+  // Further out while BUILD is pulled back (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const near = useMemo(() => {
     if (scaleExp >= AVATAR_SCALE_LIMIT) return []
     const list = useCyberspace.getState().targetList()
@@ -55,10 +58,10 @@ export function TargetAvatars({ axes }: Props): JSX.Element | null {
       // Nor a target you blocked (store/useMutes).
       .filter((t) => t.id !== focus && targets[t.id]?.plane === anchorPlane && !blocked.has(t.id))
       .map((t) => ({ ...t, centre: place(t.at) }))
-      .filter((t) => Math.hypot(...t.centre) <= REACH)
+      .filter((t) => Math.hypot(...t.centre) <= reach)
     // targets is what targetList reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targets, anchorPlane, scaleExp, focus, place, blocked])
+  }, [targets, anchorPlane, scaleExp, focus, place, blocked, reach])
 
   // Turned with the view like every shard and your own avatar, so a compass
   // turn that puts the world upside down puts them upside down with it.

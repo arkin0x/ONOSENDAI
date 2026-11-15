@@ -38,6 +38,7 @@ import { useTutorial } from '../store/useTutorial'
 import { useTutorialStage } from '../tutorial/director'
 import { targetAt } from '../tutorial/course'
 import type { TutorialLayout } from '../tutorial/layout'
+import { useDrawReach } from './buildZoom'
 
 /** The ring and the beam: spring green, apart from every colour already on the course. */
 export const TARGET_GREEN = '#2bff88'
@@ -62,7 +63,7 @@ const noRaycast = (): void => {}
  * tutorial is off, its layout not in, the view in the other plane, or the
  * mark too small or too far to see.
  */
-export function targetMark(active: boolean, layout: TutorialLayout | null, anchor: Position, anchorPlane: Plane, scaleExp: number, axes: ViewAxes): { centre: [number, number, number]; scale: number; turn: Quaternion } | null {
+export function targetMark(active: boolean, layout: TutorialLayout | null, anchor: Position, anchorPlane: Plane, scaleExp: number, axes: ViewAxes, reach = REACH): { centre: [number, number, number]; scale: number; turn: Quaternion } | null {
   if (!active || !layout || layout.plane !== anchorPlane) return null
   // A gibson is 2^-scaleExp render cells, as a shard is drawn.
   const scale = 1 / Number(1n << BigInt(scaleExp))
@@ -73,7 +74,7 @@ export function targetMark(active: boolean, layout: TutorialLayout | null, ancho
   const i = view.findIndex((a) => a.axis === 'y')
   const up = new Vector3(i === 0 ? 1 : 0, i === 1 ? 1 : 0, i === 2 ? 1 : 0).multiplyScalar(i >= 0 ? view[i].dir : 1)
   const turn = new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), up)
-  return Math.hypot(...centre) > REACH ? null : { centre, scale, turn }
+  return Math.hypot(...centre) > reach ? null : { centre, scale, turn }
 }
 
 /**
@@ -98,7 +99,9 @@ export function TutorialTarget({ axes }: { axes: ViewAxes }): JSX.Element | null
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
 
-  const at = useMemo(() => targetMark(phase !== 'off', layout, anchor, anchorPlane, scaleExp, axes), [phase, layout, anchorPlane, anchor, scaleExp, axes])
+  // Further out while BUILD is pulled back (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
+  const at = useMemo(() => targetMark(phase !== 'off', layout, anchor, anchorPlane, scaleExp, axes, reach), [phase, layout, anchorPlane, anchor, scaleExp, axes, reach])
   const guiding = phase === 'guiding'
 
   const group = useRef<Group>(null)

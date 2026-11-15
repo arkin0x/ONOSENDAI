@@ -10804,7 +10804,7 @@ a.feed__act { text-decoration: none; }
    starts past it (below), so the two read the same numbers. */
 :root { --scanorbs-gap: 8px; --scanorbs-w: calc(var(--scanorbs-col) + var(--scanorbs-gap) + var(--menu-size)); }
 .scanorbs__row { display: flex; align-items: center; gap: var(--scanorbs-gap); }
-.scanorbs__go { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.scanorbs__go { display: flex; }
 .scanorbs__stepper {
   display: flex;
   flex-direction: column;
@@ -10815,6 +10815,7 @@ a.feed__act { text-decoration: none; }
 }
 :root { --scanorbs-col: 112px; }
 .scanorbs__step {
+  position: relative;
   width: 44px;
   height: 44px;
   padding: 0;
@@ -10838,9 +10839,10 @@ a.feed__act { text-decoration: none; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  /* One height for one tag line or two (UNKNOWN and the time), so a change
-     of height never moves the down button or the orb: SCAN HEIGHT stays
-     at the top and the tags hang under it. */
+  /* One height for one tag line or two (UNKNOWN and the time) and the max
+     line, so a change of height never moves the down button or the orb:
+     SCAN HEIGHT stays at the top, the tags hang under it, the max line sits
+     at the bottom. */
   height: var(--scanorbs-value-h);
   justify-content: flex-start;
   font-variant-numeric: tabular-nums;
@@ -10852,10 +10854,13 @@ a.feed__act { text-decoration: none; }
    The edge is a tight dark outline and a soft dark halo, so the words read
    over the brightest cube and still sit lightly over a dark one. */
 :root { --scanorbs-edge: 0 0 1px #000, 0 0 2px rgba(0, 0, 0, 0.95), 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.6); }
-:root { --scanorbs-value-h: 38px; }
+:root { --scanorbs-value-h: 48px; }
 .scanorbs__value b { font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.08em; color: #fff; }
 /* UNKNOWN and how long it takes here, COMPLETE, or HOSAKA (its price is on the SCAN button). */
 .scanorbs__tag { font-size: 9px; line-height: 12px; font-weight: 600; letter-spacing: 0.08em; color: #fff; }
+/* At the top of the range, why up stops: DEVICE MAX or HOSAKA MAX, on the
+   label's last line, kept when empty (the . key's old place is gone). */
+.scanorbs__max { margin-top: auto; height: 10px; font-size: 8px; line-height: 10px; font-weight: 700; letter-spacing: 0.12em; color: #fff; }
 .flyorb.scanorb {
   flex-direction: column;
   border-color: rgba(var(--scan-rgb), 0.55);
@@ -10893,14 +10898,16 @@ a.feed__act { text-decoration: none; }
 @media (prefers-reduced-motion: reduce) { .flyorb.scanorb.is-busy { animation: none; } }
 .scanorb__word { position: relative; z-index: 1; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
 .scanorb__sats { position: relative; z-index: 1; font-size: 7.5px; letter-spacing: 0.06em; color: var(--accent); }
-/* The keys: SPACE under the SCAN button, . under up and , under down, all
-   white with the labels' edge; kept in place while a scan runs, unseen. */
-.scanorbs .flyorb__key { color: #fff; opacity: 1; text-shadow: var(--scanorbs-edge); }
-.scanorbs .flyorb__key.is-off { visibility: hidden; }
-/* A lone . or , reads as a speck at SPACE's size: a size up, on a short line. */
-.scanorbs__hint { font-size: 15px; line-height: 10px; }
-/* At the top of the range, in the . key's place: why up stops. */
-.scanorbs__max { font-size: 8px; line-height: 10px; white-space: nowrap; }
+/* The keys, inside their buttons in the Controls pad's own style
+   (.touchpad__keyhint; arkinox, 2026-11-15: "i wanted them like the
+   keyboard hints in the Controls pad"): . in up, , in down, SPACE in the
+   orb. Kept in place while the key does nothing, unseen. */
+.scanorbs .touchpad__keyhint.is-off { visibility: hidden; }
+/* A lone . or , at the pad's 6px is a one-pixel speck where a letter reads
+   (a mark is about a tenth of its size in ink): three times the size and
+   bold, so it reads as a key at all. Its box grows up from the same bottom
+   edge, so the mark sits where the pad's letters sit. Nothing else differs. */
+.scanorbs .touchpad__keyhint.is-mark { font-size: 18px; font-weight: 700; }
 /* How far along a scan is, then what it found. Always there and always one
    height, the longest line's (three lines; a scan's line and its bar are
    less), empty or not: it showing or going never moves the row above it

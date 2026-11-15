@@ -23,6 +23,7 @@ import { useSecrets, type HeldKey } from '../store/useSecrets'
 import { useDemo } from '../store/useDemo'
 import { baseOf } from '../lib/secrets/base'
 import { WorldLabel } from './WorldLabel'
+import { useDrawReach } from './buildZoom'
 
 /** The green of "found here", dimmer than the deploy box so it sits behind the work. */
 const HELD = '#52e39f'
@@ -103,6 +104,8 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
   // scanned place is focused too, so RETURN brings the list back, but it is
   // no cage, and dimming every cage for it hid the ones around the spot.
   const focused = useSecrets((s) => (s.focused !== null && s.keys[s.focused] ? s.focused : null))
+  // Further out while BUILD is pulled back (buildZoom.ts).
+  const reach = useDrawReach((s) => s.reach)
 
   const geometry = useMemo(() => new EdgesGeometry(new BoxGeometry(1, 1, 1)), [])
 
@@ -141,9 +144,10 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
         corner[i] = (lo + (axis === 'y' ? -0.5 : side - 0.5)) * a.dir
         far = Math.max(far, Math.abs(centre[i]))
       })
-      // The reach every culled layer shares (Scene.tsx CULL_REACH): the fog is
-      // black before it, so a cage never pops at the line (review of #635, S2).
-      if (far > GRID_RADIUS * 8) continue
+      // The reach every culled layer shares (Scene.tsx CULL_REACH, GRID_RADIUS
+      // * 8, further while BUILD is pulled back): the fog is black before it,
+      // so a cage never pops at the line (review of #635, S2).
+      if (far > Math.max(GRID_RADIUS * 8, reach)) continue
       out.push({ key, centre, corner, sides })
     }
     /*
@@ -164,7 +168,7 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
     // Nearest first, so the ones you are standing in are the ones you see.
     out.sort((a, b) => Math.hypot(...a.centre) - Math.hypot(...b.centre))
     return out.slice(0, DRAWN_MAX)
-  }, [show, keys, anchor, anchorPlane, scaleExp, axes, focused])
+  }, [show, keys, anchor, anchorPlane, scaleExp, axes, focused, reach])
 
   if (cages.length === 0) return null
 

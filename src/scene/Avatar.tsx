@@ -80,6 +80,7 @@ import { useLayers } from '../store/useLayers'
 import { AvatarShape } from './AvatarShape'
 import { useAvatarOccluder } from './BuildOccluders'
 import { TapTarget } from './TapTarget'
+import { useDrawReach } from './buildZoom'
 
 /** How far from the build cursor's field the avatar is still drawn in BUILD mode, as PresenceAvatars culls. */
 const REACH = GRID_RADIUS * 8
@@ -146,6 +147,8 @@ export function Avatar(): JSX.Element | null {
   // range, your true position inside its cell in it.
   const anchor = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  // Further out while BUILD is pulled back (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const at = useMemo(() => {
     const axes = useCyberspace.getState().axes()
     return shownPosition === null
@@ -155,7 +158,7 @@ export function Avatar(): JSX.Element | null {
   // Whether it is drawn at all: not while looking at a shard, and in BUILD
   // mode not in another plane than the one you build in, nor beyond the
   // field, where it would be a speck a universe away.
-  const shown = !(focus && !placed) && !(placed && (shownPosition === null || shownPlane !== anchorPlane || Math.hypot(...at) > REACH))
+  const shown = !(focus && !placed) && !(placed && (shownPosition === null || shownPlane !== anchorPlane || Math.hypot(...at) > reach))
   // Among what may block the build cursor while drawn with the Builder on;
   // named only while drawn, so it registers once its group is there.
   const { occluder, dim } = useAvatarOccluder(shown ? 'you' : undefined, drawn)

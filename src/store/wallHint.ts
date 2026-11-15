@@ -69,3 +69,8 @@ export function wallHintLive(key: string, now = performance.now()): boolean {
   const s = useWallHint.getState()
   return s.key === key && now - s.at < WALL_HINT_MS
 }
+
+// DEV window handle, the house pattern (__store, __shards): the browser capture waits for a flash.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  ;(window as unknown as { __wallHint?: unknown }).__wallHint = useWallHint
+}

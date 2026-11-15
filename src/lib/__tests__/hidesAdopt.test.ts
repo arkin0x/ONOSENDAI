@@ -24,12 +24,13 @@ async function bagOf(texts: string[], signer = sk, k = key): Promise<NostrEvent>
 }
 
 const entry: HideEntry = { l: lookupId, k: bytesToHex(key), h: 12, p: 0, x: String(at.x), y: String(at.y), z: String(at.z), n: 'hello', c: 2, t: T }
-const ask = (events: NostrEvent[]) => ({ checked: async () => ({ events }), any: async () => [] as NostrEvent[] })
+const ask = (events: NostrEvent[], trouble = false) => ({ checked: async () => ({ events, trouble }), any: async () => [] as NostrEvent[] })
 
 describe('opening a bag of yours from another device', () => {
   it('opens with the record\'s key, at the record\'s place, and gives back every item with what a row needs', async () => {
     const bag = await bagOf(['hello', 'second'])
-    const found = await adoptEntries([entry], me, ask([bag]))
+    const { found, state } = await adoptEntries([entry], me, ask([bag]))
+    expect(state[lookupId]).toBe('holds')
     expect(found.map((h) => h.text).sort()).toEqual(['hello', 'second'])
     for (const h of found) {
       expect(h.author).toBe(me)
@@ -43,15 +44,16 @@ describe('opening a bag of yours from another device', () => {
 
   it('a key that is not the bag\'s opens nothing', async () => {
     const bag = await bagOf(['hello'])
-    expect(await adoptEntries([{ ...entry, k: 'cd'.repeat(32) }], me, ask([bag]))).toEqual([])
+    expect(await adoptEntries([{ ...entry, k: 'cd'.repeat(32) }], me, ask([bag]))).toEqual({ found: [], state: { [lookupId]: 'unknown' } })
   })
 
   it('a bag under the same d signed by someone else is never yours', async () => {
     const theirs = await bagOf(['not mine'], generateSecretKey())
-    expect(await adoptEntries([entry], me, ask([theirs]))).toEqual([])
+    expect(await adoptEntries([entry], me, ask([theirs]))).toEqual({ found: [], state: { [lookupId]: 'gone' } })
   })
 
-  it('no bag on the relay: nothing, and no error', async () => {
-    expect(await adoptEntries([entry], me, ask([]))).toEqual([])
+  it('no bag on the relay: gone when the canonical relay answered, unknown when it did not', async () => {
+    expect(await adoptEntries([entry], me, ask([]))).toEqual({ found: [], state: { [lookupId]: 'gone' } })
+    expect(await adoptEntries([entry], me, ask([], true))).toEqual({ found: [], state: { [lookupId]: 'unknown' } })
   })
 })

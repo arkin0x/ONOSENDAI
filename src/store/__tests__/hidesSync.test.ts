@@ -11,7 +11,7 @@ import { matchFilter } from 'nostr-tools/filter'
 import { v2 as nip44 } from 'nostr-tools/nip44'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, type NostrEvent } from '../../lib/events'
-import { HIDES_KIND, shardContent, type HideEntry } from '../../lib/hidesRecord'
+import { HIDES_KIND, shardContent, shardTemplate, type HideEntry } from '../../lib/hidesRecord'
 import { entriesOf, noteListChange, resetHidesSync, setHidesDeps, syncHides, useHidesSync, type HidesDeps } from '../hidesSync'
 import type { MyDeployment } from '../useShards'
 
@@ -87,8 +87,14 @@ function as(d: Device, over: Partial<HidesDeps> = {}): void {
     rows: () => d.rows,
     adopt: async (entries) => {
       d.adopted.push(entries)
-      // As claimOwn: what the bag holds, filed once.
-      for (const e of entries) for (const r of bagsOnRelay.get(e.l) ?? []) if (!d.rows.some((x) => x.eventId === r.eventId)) d.rows = [...d.rows, r]
+      // As claimOwn: what the bag holds, filed once; and what the relay says of each bag.
+      const state: Record<string, 'holds' | 'gone' | 'unknown'> = {}
+      for (const e of entries) {
+        const held = bagsOnRelay.get(e.l) ?? []
+        state[e.l] = held.length > 0 ? 'holds' : 'gone'
+        for (const r of held) if (!d.rows.some((x) => x.eventId === r.eventId)) d.rows = [...d.rows, r]
+      }
+      return state
     },
     now: () => clock,
     storage: d.storage,
@@ -186,11 +192,11 @@ describe('the union', () => {
     await syncHides()
     // Device B knows only its own bag and cannot open A's (adopting finds nothing).
     const b = device([row('b1', me)])
-    as(b)
+    resetHidesSync(); as(b)
     clock += 10
     await syncHides()
     const c = device()
-    as(c)
+    resetHidesSync(); as(c)
     await syncHides()
     expect(c.adopted[0].map((e) => e.n).sort()).toEqual(['a1', 'a2', 'b1'])
   })
@@ -258,6 +264,8 @@ describe('taking a bag off your list', () => {
     resetHidesSync(); as(a)
     const before = a.rows
     a.rows = [keep]
+    // DELETE took the bag down on the relay, and the list changed.
+    bagsOnRelay.delete(del.lookupId)
     noteListChange(me, before, a.rows)
     await syncHides()
     // B still lists it (never dropped here) and syncs: its older copy does not bring it back.
@@ -285,12 +293,44 @@ describe('taking a bag off your list', () => {
     expect(c.adopted[0].map((e) => e.n)).toEqual(['back'])
   })
 
-  it('a list that loses most of itself at once is not read as deletions', async () => {
+  it('a list that loses most of itself at once is not read as deletions: the bags still there come back', async () => {
     const rows = ['a', 'b', 'c', 'd', 'e'].map((n) => row(n, me))
+    hidden(...rows)
     const a = device(rows)
     as(a)
+    await syncHides()
+    a.rows = []
     noteListChange(me, rows, [])
+    await syncHides()
     expect(a.storage.getItem(`onosendai:hides-gone:${me}`) ?? '{}').toBe('{}')
+    expect(a.rows.map((r) => r.text).sort()).toEqual(['a', 'b', 'c', 'd', 'e'])
+  })
+
+  it('a device that listed only part of a bag never tombstones it when its part leaves (review of this PR, finding 1)', async () => {
+    // Region R holds two items of yours: one from each device. B lists only its own.
+    const mineA = row('itemA', me, { lookupId: hex('R'), keyHex: hex('kR') })
+    const mineB = row('itemB', me, { lookupId: hex('R'), keyHex: hex('kR') })
+    hidden(mineA)
+    const a = device([mineA, mineB])
+    as(a)
+    await syncHides()
+    const b = device([mineB])
+    resetHidesSync(); as(b)
+    await syncHides()
+    // B moves its item out of R; R still holds A's.
+    clock += 50
+    const moved = row('itemB-moved', me)
+    hidden(moved)
+    const before = b.rows
+    b.rows = [moved]
+    noteListChange(me, before, b.rows)
+    await syncHides()
+    // Not tombstoned: B asked the relay, found A's item, and lists R again.
+    expect(b.storage.getItem(`onosendai:hides-gone:${me}`) ?? '{}').toBe('{}')
+    expect(b.rows.map((r) => r.text)).toContain('itemA')
+    const c = device()
+    resetHidesSync(); as(c); await syncHides()
+    expect(c.adopted[0].map((e) => e.l)).toContain(hex('R'))
   })
 })
 
@@ -372,5 +412,87 @@ describe('what publishes nothing', () => {
     as(a)
     const out = await syncHides()
     expect(out.wrote).toBe(1)
+  })
+})
+
+describe('review of this PR: races, stale reads and refusals', () => {
+  it('a write that lands while the signer is asked is never written over: the sync reads, merges and signs again', async () => {
+    const a = device([row('slowA', me)])
+    hidden(...a.rows)
+    let once = false
+    as(a, {
+      sign: async (t) => {
+        a.signs++
+        if (!once) {
+          once = true
+          // Another device writes while this signer's prompt is up (here, one this device cannot open).
+          await relay.publish(finalizeEvent(shardTemplate(0, 'x', clock + 5), sk) as unknown as NostrEvent)
+        }
+        return finalizeEvent(t, sk) as unknown as NostrEvent
+      },
+    })
+    const out = await syncHides()
+    // The first signature was dropped; the sync ran again on the newer copy (which does not open: never written over).
+    expect(a.signs).toBe(1)
+    expect(out.wrote).toBe(0)
+    expect(relay.events[0].content).toBe('x')
+  })
+
+  it('a tombstone is let go only once a read shows it on the relay', async () => {
+    const keep = row('k', me)
+    const del = row('d', me)
+    hidden(keep, del)
+    const a = device([keep, del])
+    as(a)
+    await syncHides()
+    clock += 20
+    bagsOnRelay.delete(del.lookupId)
+    a.rows = [keep]
+    noteListChange(me, [keep, del], a.rows)
+    await syncHides()
+    // Written, and still kept here until read back.
+    expect(JSON.parse(a.storage.getItem(`onosendai:hides-gone:${me}`) ?? '{}')[del.lookupId]).toBeDefined()
+    await syncHides()
+    expect(JSON.parse(a.storage.getItem(`onosendai:hides-gone:${me}`) ?? '{}')[del.lookupId]).toBeUndefined()
+  })
+
+  it('a relay that answers with an older copy than this device wrote is not written over', async () => {
+    const a = device([row('first', me)])
+    as(a)
+    await syncHides()
+    const written = relay.events[0]
+    // The relay forgets the newest and serves an older one.
+    relay.events.splice(0, relay.events.length, finalizeEvent({ ...shardTemplate(0, written.content, written.created_at - 100) }, sk) as unknown as NostrEvent)
+    a.rows = [...a.rows, row('second', me)]
+    clock += 10
+    const out = await syncHides()
+    expect(out.wrote).toBe(0)
+    expect(useHidesSync.getState().note).toMatch(/older copy/)
+  })
+
+  it('a signer that refuses the decrypt is asked once a load, not on every sync; one with no NIP-44 at all is skipped quietly', async () => {
+    const a = device([row('r', me)])
+    as(a)
+    await syncHides()
+    const b = device([row('s', me)])
+    let asked = 0
+    resetHidesSync()
+    as(b, { crypto: () => ({ nip44Encrypt: async (pt) => nip44.encrypt(pt, selfKey), nip44Decrypt: async () => { asked++; throw new Error('user denied') } }) })
+    await syncHides()
+    await syncHides()
+    expect(asked).toBe(1)
+    expect(relay.events).toHaveLength(1)
+    resetHidesSync()
+    as(b, { crypto: () => ({ nip44Encrypt: async () => { throw new Error('Your signer offers no NIP-44 encrypt') }, nip44Decrypt: async () => { throw new Error('Your signer offers no NIP-44 decrypt, so a chest sealed to you cannot be opened with it.') } }) })
+    await syncHides()
+    expect(useHidesSync.getState().status).toBe('unsupported')
+  })
+
+  it('LOCAL switched on while the signer is asked: nothing is published', async () => {
+    const a = device([row('l', me)])
+    as(a, { sign: async (t) => { a.live = false; return finalizeEvent(t, sk) as unknown as NostrEvent } })
+    const out = await syncHides()
+    expect(out.wrote).toBe(0)
+    expect(relay.events).toHaveLength(0)
   })
 })

@@ -30,13 +30,21 @@
  * Only published bags go in the record: a bag kept LOCAL is on this device
  * alone, and no other device could open it.
  *
- * TOMBSTONES. A bag that leaves this device's list in this session (DELETE,
- * FORGET, a move to another region, a door's room emptied) is tombstoned with
- * the time, kept on this device until a write carries it. A bag that comes
- * back to the list after this device tombstoned it is newer than its
- * tombstone (seenAt); a bag adopted from the record keeps its own time. A change
- * that takes most of the list away at once is not read as deletions (a list
- * that failed to load is not a list emptied).
+ * TOMBSTONES. A bag that leaves this device's list (DELETE, FORGET, a move to
+ * another region, a room emptied) is asked of the relays at the next sync:
+ * this device may have listed only part of it. Deleted, missing, or holding
+ * nothing of yours, it is tombstoned, newer than any entry for it; still
+ * holding items of yours, they are adopted and it stays listed. A tombstone is
+ * kept on this device until a read shows it on the relay. A bag that comes
+ * back after this device tombstoned it is newer than its tombstone (seenAt);
+ * a bag adopted from the record keeps its own time.
+ *
+ * SAFETY. Saved means the canonical relay took it (hidesSyncLive). A write is
+ * signed, then the relays are read again, and if any shard changed meanwhile
+ * (another device, during a long signer prompt) nothing is sent and the sync
+ * runs again. A read older than what this device saw or wrote, or a record of
+ * several shards missing one, is not written over (for a day). A signer that
+ * refuses a decrypt is asked once a load.
  */
 
 import { create } from 'zustand'
@@ -78,6 +86,12 @@ const goneKey = (me: string): string => `onosendai:hides-gone:${me}`
 const seenKey = (me: string): string => `onosendai:hides-seen:${me}`
 /** The bags this device tombstoned, and when: only one of those coming back needs to be newer than a tombstone. */
 const tombedKey = (me: string): string => `onosendai:hides-tombed:${me}`
+/** Bags that left this list, not yet tombstoned: each is asked of the relays first. */
+const leftKey = (me: string): string => `onosendai:hides-left:${me}`
+/** The newest created_at this device has seen or written for each shard: a read behind it is stale. */
+const markKey = (me: string): string => `onosendai:hides-marks:${me}`
+/** A read behind the marks is not written over for this long; then the relay's copy is taken as it is. */
+const STALE_PATIENCE_S = 86_400
 
 /** Signer's self-to-self NIP-44, as useCyberspace selfCrypto gives it. */
 export interface SelfNip44 {
@@ -99,8 +113,13 @@ export interface HidesDeps {
   publish: (event: NostrEvent) => Promise<PublishResult>
   /** This identity's list (useShards `mine`), or null while another identity's is up. */
   rows: (me: string) => readonly MyDeployment[] | null
-  /** Open these bags of yours and file them in your list. */
-  adopt: (entries: HideEntry[], me: string) => Promise<void>
+  /**
+   * Open these bags of yours where they stand, file what they hold in your
+   * list, and say of each what the relays said: it holds items of yours, it
+   * is gone (the canonical relay answered: deleted, missing, or nothing of
+   * yours in it), or nothing is known.
+   */
+  adopt: (entries: HideEntry[], me: string) => Promise<Record<string, 'holds' | 'gone' | 'unknown'>>
   now: () => number
   storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null
   verify: (ev: NostrEvent) => boolean
@@ -128,7 +147,8 @@ export const useHidesSync = create<HidesState>((set) => ({
   setEnabled: (on) => {
     try { deps.storage?.setItem(SETTING_KEY, on ? '1' : '0') } catch { /* private mode */ }
     set({ enabled: on, status: on ? 'idle' : 'off', note: null })
-    if (on) requestSync(0)
+    // Turning it on again is asking again: a signer that refused is asked once more.
+    if (on) { failed.clear(); requestSync(0) }
   },
 }))
 
@@ -202,10 +222,20 @@ export function localRecord(me: string, rows: readonly MyDeployment[], D: HidesD
   return mergeRecords({ e: entriesOf(rows, seenAt(me, D)), x: {} }, { e: {}, x: pendingGone(me, D) })
 }
 
+/** Bags that left this list and wait to be asked of the relays, with the entry each had. */
+function leftEntries(me: string, D: HidesDeps = deps): Record<string, HideEntry> {
+  return readJson<Record<string, HideEntry>>(leftKey(me), {}, D)
+}
+
 /**
- * The bags that left this identity's list between two of its lists, tombstoned
- * now; the bags that came back, seen now. A change that takes more than half of
- * a list of more than three bags is not deletions.
+ * The bags that left this identity's list between two of its lists, and the
+ * bags that came back. One that left is not tombstoned here: this device may
+ * have listed only some of what the bag holds (another device's items in it
+ * are kept by every rewrite), so the next sync asks the relays first, and only
+ * a bag deleted, missing, or holding nothing of yours is tombstoned; one still
+ * holding items of yours has them adopted instead. One that comes back after
+ * this device tombstoned it is newer than that tombstone (seenAt); one merely
+ * adopted keeps its own time, so adopting never rewrites the record.
  */
 export function noteListChange(me: string, prev: readonly MyDeployment[], next: readonly MyDeployment[]): void {
   const before = new Set(prev.filter(recorded).map((d) => d.lookupId))
@@ -217,16 +247,15 @@ export function noteListChange(me: string, prev: readonly MyDeployment[], next: 
   const gone = pendingGone(me)
   const seen = seenAt(me)
   const tombed = readJson<Record<string, number>>(tombedKey(me), {})
-  const massDrop = before.size > 3 && left.length * 2 > before.size
-  if (!massDrop) for (const l of left) { gone[l] = now; tombed[l] = now; delete seen[l] }
+  const waiting = leftEntries(me)
+  const had = left.length > 0 ? entriesOf(prev, seen) : {}
+  for (const l of left) { if (had[l]) waiting[l] = had[l]; delete seen[l] }
   for (const l of came) {
+    delete waiting[l]
     if (gone[l] !== undefined) delete gone[l]
-    // Back on the list after this device tombstoned it: newer than that
-    // tombstone, which may be on the relay already. A bag merely adopted
-    // (another device's, from the record) keeps its own time, so adopting
-    // never rewrites the record.
     if (tombed[l] !== undefined) { seen[l] = now; delete tombed[l] }
   }
+  writeJson(leftKey(me), waiting)
   writeJson(goneKey(me), pruneGone(gone, now))
   writeJson(tombedKey(me), pruneGone(tombed, now))
   // Only bags still on the list need a seen time.
@@ -238,51 +267,94 @@ export function noteListChange(me: string, prev: readonly MyDeployment[], next: 
 
 /** Record keys opened this load, by their wrapped form, for the identity they belong to. */
 let opened: { me: string; keys: Map<string, Uint8Array> } = { me: '', keys: new Map() }
+/** Wrapped keys the signer refused or could not open this load: never asked again until the switch is turned on again. */
+const failed = new Set<string>()
+/** Bags the record names that the relays said are gone, this load: not asked again. */
+let unopened: { me: string; ls: Set<string> } = { me: '', ls: new Set() }
 
 function keysFor(me: string): Map<string, Uint8Array> {
-  if (opened.me !== me) opened = { me, keys: new Map() }
+  if (opened.me !== me) { opened = { me, keys: new Map() }; failed.clear() }
   return opened.keys
+}
+
+function unopenedFor(me: string): Set<string> {
+  if (unopened.me !== me) unopened = { me, ls: new Set() }
+  return unopened.ls
+}
+
+/** A signer that has no NIP-44 at all, as against one that refused this once. */
+function lacksNip44(err: unknown): boolean {
+  return /no NIP-44/i.test(err instanceof Error ? err.message : String(err))
+}
+
+interface Marks { at: Record<string, number>; since: number }
+
+function readMarks(me: string, D: HidesDeps): Marks {
+  const m = readJson<Partial<Marks>>(markKey(me), {}, D)
+  return { at: m.at && typeof m.at === 'object' ? m.at : {}, since: typeof m.since === 'number' ? m.since : 0 }
 }
 
 interface RemoteRead {
   record: HidesRecord
   /** Each shard's part as read, by index. */
   parts: Map<number, HidesRecord>
+  /** Each shard's event id as read: a write is sent only if these are still the newest. */
+  ids: Map<number, string>
+  /** Each shard's created_at as read. */
+  ats: Map<number, number>
   /** The most shards a writer used. */
   k: number
   /** The newest created_at among the shards: a write must be newer. */
   newestAt: number
   /** A record key that opened, to write with, preferring shard 0's. */
   key: { wrapped: string; key: Uint8Array } | null
-  /** Some shard did not open or did not parse: never written over. */
+  /** Some shard did not open or did not parse, or is missing or older than one seen before: never written over. */
   broken: boolean
+  /** Why, in words, when broken. */
+  why: string | null
+  /** The signer has no NIP-44 at all. */
+  unsupported: boolean
   trouble: boolean
 }
 
+const RECORD_FILTER = (me: string): Filter => ({ kinds: [HIDES_KIND], authors: [me], '#d': [...HIDES_D_TAGS] })
+
 async function readRemote(me: string, crypto: SelfNip44, D: HidesDeps): Promise<RemoteRead> {
-  const { events, trouble } = await D.fetch({ kinds: [HIDES_KIND], authors: [me], '#d': [...HIDES_D_TAGS] })
+  const { events, trouble } = await D.fetch(RECORD_FILTER(me))
   const newest = newestShards(events.filter((ev) => D.verify(ev)), me)
   const keys = keysFor(me)
   const parts = new Map<number, HidesRecord>()
+  const ids = new Map<number, string>()
+  const ats = new Map<number, number>()
   let record = emptyRecord()
   let k = 1
   let newestAt = 0
-  let broken = false
+  let why: string | null = null
+  let unsupported = false
   let key: RemoteRead['key'] = null
   for (const i of [...newest.keys()].sort((a, b) => a - b)) {
     const ev = newest.get(i)!
+    ids.set(i, ev.id)
+    ats.set(i, ev.created_at)
     newestAt = Math.max(newestAt, ev.created_at)
     const c = shardContent(ev.content)
-    if (!c) { broken = true; continue }
+    if (!c) { why = NOT_OPENED; continue }
     let rk = keys.get(c.wrapped)
     if (!rk) {
+      if (failed.has(c.wrapped)) { why = NOT_OPENED; continue }
       try {
         if (!crypto.nip44Decrypt) throw new Error('no NIP-44')
         const hex = (await crypto.nip44Decrypt(c.wrapped)).trim().toLowerCase()
         if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error('not a record key')
         rk = hexToBytes(hex)
         keys.set(c.wrapped, rk)
-      } catch { broken = true; continue }
+      } catch (err) {
+        // Asked once a load: a refusal is not asked again on every sync.
+        failed.add(c.wrapped)
+        if (lacksNip44(err)) unsupported = true
+        why = NOT_OPENED
+        continue
+      }
     }
     try {
       const shard = decodeShard(openShard(c.body, rk))
@@ -290,19 +362,44 @@ async function readRemote(me: string, crypto: SelfNip44, D: HidesDeps): Promise<
       record = mergeRecords(record, shard.rec)
       k = Math.max(k, shard.k)
       if (!key || i === 0) key = { wrapped: c.wrapped, key: rk }
-    } catch { broken = true }
+    } catch { why = NOT_OPENED }
   }
-  return { record, parts, k, newestAt, key, broken, trouble }
+  // A shard of a record of several that is missing is lost, not empty: every
+  // shard of such a record is written, empty or not.
+  if (newest.size > 0) for (let i = 0; i < k; i++) if (!newest.has(i) && !why) why = STALE
+  // Older than what this device saw or wrote: the relay answered with a stale
+  // copy. Not written over for a day; past that the relay's copy is what there is.
+  const marks = readMarks(me, D)
+  const patient = D.now() - marks.since < STALE_PATIENCE_S
+  if (patient) for (const [i, at] of Object.entries(marks.at)) {
+    const ev = newest.get(Number(i))
+    if ((!ev || ev.created_at < at) && !why) why = STALE
+  }
+  return { record, parts, ids, ats, k, newestAt, key, broken: why !== null, why, unsupported, trouble }
+}
+
+/** Remember the newest of each shard, as read or as written. */
+function noteMarks(me: string, D: HidesDeps, shards: Iterable<[number, number]>): void {
+  const m = readMarks(me, D)
+  let any = false
+  for (const [i, at] of shards) if ((m.at[i] ?? 0) < at) { m.at[i] = at; any = true }
+  if (any) writeJson(markKey(me), { at: m.at, since: D.now() }, D)
 }
 
 // -- one sync ----------------------------------------------------------------
 
-/** Why nothing was written, in words, or null when all is well. */
-type Outcome = { wrote: number; note: string | null }
+/** What one sync did: shards written, why not, and whether another write landed between its read and its write. */
+type Outcome = { wrote: number; note: string | null; raced?: boolean }
 
 const NOT_ANSWERED = 'The relay did not answer, so your list of hidden things was not saved to it this time.'
 const NOT_OPENED = 'Part of your saved list of hidden things did not open with your signer, so it was left as it is.'
+const STALE = 'The relay answered with an older copy of your list of hidden things, so it was left as it is for now.'
 const NO_NIP44 = 'Your signer has no NIP-44 encryption, so your list of hidden things stays on this device.'
+
+/** Whether writing is still allowed now: LIVE, no tutorial run, the switch on, the same identity. */
+function mayWrite(D: HidesDeps, me: string): boolean {
+  return D.self() === me && D.live() && !D.tutorial(me) && useHidesSync.getState().enabled
+}
 
 async function syncOnce(D: HidesDeps): Promise<Outcome> {
   const me = D.self()
@@ -310,67 +407,102 @@ async function syncOnce(D: HidesDeps): Promise<Outcome> {
   if (!me) return { wrote: 0, note: null }
   if (!st.enabled) { useHidesSync.setState({ status: 'off', note: null }); return { wrote: 0, note: null } }
   const crypto = D.crypto()
-  if (!crypto.nip44Decrypt) { useHidesSync.setState({ status: 'unsupported', note: NO_NIP44 }); return { wrote: 0, note: NO_NIP44 } }
+  const done = (status: HidesStatus, note: string | null): Outcome => { useHidesSync.setState({ status, note }); return { wrote: 0, note } }
+  if (!crypto.nip44Decrypt) return done('unsupported', NO_NIP44)
   useHidesSync.setState({ status: 'syncing' })
   const remote = await readRemote(me, crypto, D)
   if (D.self() !== me) return { wrote: 0, note: null }
+  if (remote.unsupported) return done('unsupported', NO_NIP44)
+  if (!remote.trouble && !remote.broken) noteMarks(me, D, remote.ats)
 
-  // Adopt what this list lacks: never a bag a tombstone here stands over.
   const rows = D.rows(me)
   if (!rows) return { wrote: 0, note: null }
-  const local = localRecord(me, rows, D)
-  const merged = mergeRecords(remote.record, local, D.now())
-  const listed = new Set(rows.map((d) => d.lookupId))
-  const missing = Object.values(merged.e).filter((e) => !listed.has(e.l))
-  if (missing.length > 0) {
-    try { await D.adopt(missing, me) } catch { /* the next sync asks again */ }
+  const merged = mergeRecords(remote.record, localRecord(me, rows, D), D.now())
+  const listed = new Set(rows.filter(recorded).map((d) => d.lookupId))
+  // Adopt what this list lacks (never a bag a tombstone stands over), and ask
+  // the relays about each bag that left this list since the last sync.
+  const skip = unopenedFor(me)
+  const missing = Object.values(merged.e).filter((e) => !listed.has(e.l) && !skip.has(e.l))
+  const waiting = Object.values(leftEntries(me, D)).filter((e) => !listed.has(e.l))
+  const ask = [...missing, ...waiting.filter((w) => !missing.some((m) => m.l === w.l))]
+  if (ask.length > 0) {
+    let states: Record<string, 'holds' | 'gone' | 'unknown'> = {}
+    try { states = await D.adopt(ask, me) } catch { /* the next sync asks again */ }
     if (D.self() !== me) return { wrote: 0, note: null }
+    for (const e of missing) if (states[e.l] === 'gone') skip.add(e.l)
+    const left = leftEntries(me, D)
+    const gone = pendingGone(me, D)
+    const tombed = readJson<Record<string, number>>(tombedKey(me), {}, D)
+    const now = D.now()
+    for (const w of waiting) {
+      const state = states[w.l]
+      if (state === 'unknown' || state === undefined) continue
+      delete left[w.l]
+      if (state === 'gone') {
+        // Newer than any entry for it anyone has written: the bag clock may run ahead of the wall clock.
+        const t = Math.max(now, w.t + 1, (merged.e[w.l]?.t ?? 0) + 1)
+        gone[w.l] = t
+        tombed[w.l] = t
+      }
+    }
+    writeJson(leftKey(me), left, D)
+    writeJson(goneKey(me), pruneGone(gone, now), D)
+    writeJson(tombedKey(me), pruneGone(tombed, now), D)
   }
 
   // Write, where writing is allowed.
-  const done = (status: HidesStatus, note: string | null): Outcome => { useHidesSync.setState({ status, note }); return { wrote: 0, note } }
   if (!D.live()) return done('local', null)
   if (D.tutorial(me)) return done('idle', null)
   if (remote.trouble) return done('error', NOT_ANSWERED)
-  if (remote.broken) return done('error', NOT_OPENED)
+  if (remote.broken) return done('error', remote.why ?? NOT_OPENED)
   if (!crypto.nip44Encrypt) return done('unsupported', NO_NIP44)
-  // What this list holds now, after adopting: the adopted rows are the record's already.
-  const now = mergeRecords(merged, localRecord(me, D.rows(me) ?? rows, D), D.now())
-  if (sameRecord(now, remote.record)) {
-    clearCarried(me, now, D)
-    return done('synced', null)
-  }
+  // What this list holds now, after adopting and tombstoning.
+  const now = mergeRecords(remote.record, localRecord(me, D.rows(me) ?? rows, D), D.now())
+  clearCarried(me, remote.record, D)
+  if (sameRecord(now, remote.record)) return done('synced', null)
   let plan: { k: number; texts: string[] }
   try { plan = planShards(now, remote.k) } catch (err) { return done('error', err instanceof Error ? err.message : String(err)) }
   const changed = plan.texts.map((_, i) => i).filter((i) => {
-    const was = remote.parts.get(i) ?? emptyRecord()
     const part = shardPart(now, i, plan.k)
-    // A shard the relay does not hold and that would be empty is not written.
-    if (!remote.parts.has(i) && Object.keys(part.e).length === 0 && Object.keys(part.x).length === 0) return false
+    // A record of several shards writes every one, so a missing one reads as lost, never as empty.
+    if (!remote.parts.has(i)) return plan.k > 1 || Object.keys(part.e).length > 0 || Object.keys(part.x).length > 0
     // Written again when its content or its count of shards changed.
-    return !sameRecord(was, part) || (remote.parts.has(i) && remote.k !== plan.k)
+    return !sameRecord(remote.parts.get(i)!, part) || remote.k !== plan.k
   })
-  if (changed.length === 0) { clearCarried(me, now, D); return done('synced', null) }
+  if (changed.length === 0) return done('synced', null)
   let key = remote.key
   if (!key) {
     const fresh = newRecordKey()
     let wrapped: string
-    try { wrapped = await crypto.nip44Encrypt(bytesToHex(fresh)) } catch (err) { return done('error', `Your signer did not encrypt your list of hidden things: ${err instanceof Error ? err.message : String(err)}`) }
+    try { wrapped = await crypto.nip44Encrypt(bytesToHex(fresh)) } catch (err) { return lacksNip44(err) ? done('unsupported', NO_NIP44) : done('error', `Your signer did not encrypt your list of hidden things: ${err instanceof Error ? err.message : String(err)}`) }
     key = { wrapped, key: fresh }
     keysFor(me).set(wrapped, fresh)
   }
   const createdAt = Math.max(D.now(), remote.newestAt + 1)
-  let wrote = 0
+  const signed: Array<[number, NostrEvent]> = []
   for (const i of changed) {
-    if (D.self() !== me) return { wrote, note: null }
-    let signed: NostrEvent
-    try { signed = await D.sign(shardTemplate(i, sealShard(plan.texts[i], key.key, key.wrapped), createdAt)) } catch (err) { return { ...done('error', `Your list of hidden things was not signed: ${err instanceof Error ? err.message : String(err)}`), wrote } }
-    if (signed.pubkey !== me || D.self() !== me) return { wrote, note: null }
-    const res = await D.publish(signed)
-    if (!res.ok) return { ...done('error', `No relay took your list of hidden things (${res.reason}).`), wrote }
+    if (!mayWrite(D, me)) return { wrote: 0, note: null }
+    let ev: NostrEvent
+    try { ev = await D.sign(shardTemplate(i, sealShard(plan.texts[i], key.key, key.wrapped), createdAt)) } catch (err) { return done('error', `Your list of hidden things was not signed: ${err instanceof Error ? err.message : String(err)}`) }
+    if (ev.pubkey !== me) return { wrote: 0, note: null }
+    signed.push([i, ev])
+  }
+  // A signer may take minutes: if another write landed meanwhile, what was signed is dropped and the sync runs again.
+  const again = await D.fetch(RECORD_FILTER(me))
+  if (again.trouble) return done('error', NOT_ANSWERED)
+  const newestNow = newestShards(again.events.filter((ev) => D.verify(ev)), me)
+  for (const i of new Set([...newestNow.keys(), ...remote.ids.keys()])) {
+    if (newestNow.get(i)?.id !== remote.ids.get(i)) return { wrote: 0, note: null, raced: true }
+  }
+  let wrote = 0
+  for (const [i, ev] of signed) {
+    if (!mayWrite(D, me)) return { wrote, note: null }
+    const res = await D.publish(ev)
+    if (!res.ok) return { ...done('error', `Your list of hidden things was not saved to the relay (${res.reason}).`), wrote }
+    noteMarks(me, D, [[i, ev.created_at]])
     wrote++
   }
-  clearCarried(me, now, D)
+  // Tombstones are let go only once a read shows them on the relay (clearCarried, next sync).
   useHidesSync.setState({ status: 'synced', note: null })
   return { wrote, note: null }
 }
@@ -393,11 +525,17 @@ let verifies = 0
 /** One sync, after any already running: two never interleave on one device. */
 export function syncHides(): Promise<Outcome> {
   // The world as it is when this sync starts: one sync never reads half of one and half of another.
-  const run = (): Promise<Outcome> => syncOnce(deps).catch((err) => {
+  const once = (): Promise<Outcome> => syncOnce(deps).catch((err) => {
     const note = err instanceof Error ? err.message : String(err)
     useHidesSync.setState({ status: 'error', note })
     return { wrote: 0, note }
   })
+  // Another write landed between this sync's read and its write: read, merge and sign again, a few times.
+  const run = async (): Promise<Outcome> => {
+    let out = await once()
+    for (let n = 0; out.raced && n < 3; n++) out = await once()
+    return out
+  }
   const p = queue.then(run, run)
   queue = p.catch(() => undefined)
   return p.then((out) => {
@@ -413,6 +551,8 @@ export function syncHides(): Promise<Outcome> {
 
 /** A sync after `ms` of quiet. */
 export function requestSync(ms = DEBOUNCE_MS): void {
+  // A new change starts a new round of read-backs.
+  verifies = 0
   if (timer) clearTimeout(timer)
   timer = setTimeout(() => { timer = null; void syncHides() }, ms)
 }
@@ -428,7 +568,7 @@ const offline: HidesDeps = {
   sign: async () => { throw new Error('no signer') },
   publish: async () => ({ ok: false, reason: 'not started' }),
   rows: () => null,
-  adopt: async () => undefined,
+  adopt: async () => ({}),
   now: () => Math.floor(Date.now() / 1000),
   storage: typeof localStorage !== 'undefined' ? localStorage : null,
   verify: (ev) => verifyEvent({ ...ev } as Parameters<typeof verifyEvent>[0]),
@@ -447,6 +587,8 @@ export function setHidesDeps(next: Partial<HidesDeps> | null): HidesDeps {
 /** Tests only: forget the record keys opened, the timers and the queue. */
 export function resetHidesSync(): void {
   opened = { me: '', keys: new Map() }
+  unopened = { me: '', ls: new Set() }
+  failed.clear()
   if (timer) clearTimeout(timer)
   if (verifyTimer) clearTimeout(verifyTimer)
   timer = verifyTimer = null

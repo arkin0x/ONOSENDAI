@@ -28,7 +28,7 @@ export const COMMIT = '.touchops__commit:not(.is-hop):not(.is-view):not(.is-walk
 
 export const WELCOME: TutorialStep = {
   id: 'welcome',
-  title: 'Welcome to cyberspace',
+  title: 'Welcome to cyberspace!',
   caption: "A treasure chest has appeared near your location. Go see what's in it! 👀",
   modal: true,
   go: 'FIND IT',

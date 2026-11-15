@@ -1,8 +1,9 @@
 /**
  * shardRows.tsx - the SHARD sheet's rows that carry their own state: BOUNCE,
  * OPACITY, and the bouncy shard's chip that MENU's list wears too. Moved out
- * of Workshop.tsx unchanged when the workshop was split by place (workshop
- * redesign, phase 1).
+ * of Workshop.tsx when the workshop was split by place (workshop redesign,
+ * phase 1). OPACITY's rail is the shared RailRow (railRow.tsx) that POINT
+ * SIZE, RADIUS and GLOW STRENGTH use too (glowRows.tsx).
  */
 
 import type { ShardModel } from 'sno-core/shards'

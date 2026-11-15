@@ -111,7 +111,7 @@ import { headlampReach, headlampUniforms } from './headlamp'
 import { lineFade } from './nearFade'
 import { canvasPixels, composerSamples } from './composerBudget'
 import './radialFog'
-import { CULL_REACH, fogFarStep, FOG_FAR, FOG_NEAR, FOG_START_SHARE, VIEW_FOG_SCALE } from './fog'
+import { CULL_REACH, fogFar, fogFarStep, FOG_FAR, FOG_NEAR, FOG_START_SHARE, VIEW_FOG_SCALE } from './fog'
 import { cameraNear, nextAim, nextReach, orbitMaxDistance, reachNeed, stepOrbitLimit, useDrawReach } from './buildZoom'
 import { flyGesture, panGesture, sceneMouse, steerToSpend, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
 import { StartLock } from '../lib/viewCamera'
@@ -409,24 +409,24 @@ function SceneFog(): JSX.Element {
     if (!f) return
     // The browser harness can pin the fog, to shoot the old one against the new.
     if (import.meta.env.DEV) { const pin = (window as unknown as { __fogFixed?: [number, number] }).__fogFixed; if (pin) { f.near = pin[0]; f.far = pin[1]; return } }
-    const tv = useTv.getState().on || isBroadcast()
     const base = useTv.getState().on || useCyberspace.getState().walking
     const fromOrigin = state.camera.position.length()
-    // BUILD pulled back: the layers' reach doubles ahead of the orbit and the
-    // fog's end goes out with it (buildZoom.ts). Elsewhere the reach is
-    // CULL_REACH and the fog is as it was.
+    // The fog never darkens what the camera looks at: as the orbit pulls back
+    // the layers' reach doubles ahead of it and the fog's end goes out with it
+    // (buildZoom.ts). At the usual orbit the reach is CULL_REACH and the fog
+    // is as it was.
     const distance = controls ? state.camera.position.distanceTo(controls.target) : 0
-    const build = !tv && useBuilder.getState().active && !useCyberspace.getState().walking
-    aim.current = nextAim(aim.current, reachNeed(build, distance, fromOrigin))
+    aim.current = nextAim(aim.current, reachNeed(distance, fromOrigin))
     // Eased within a mode: a re-anchor moves the camera's distance from the
     // origin in one frame, and the distant scene must not step darker with it
     // (review S2a). The first frame and a change of mode jump there (N10).
-    f.far = fogFarStep(f.far, mode.current, base, fromOrigin, dt, aim.current)
+    f.far = fogFarStep(f.far, mode.current, base, fromOrigin, dt, aim.current, distance)
     mode.current = base
     f.near = f.far * FOG_START_SHARE
     // The layers draw out to the aim at once, and back in only once the fog is black inside it.
     const was = useDrawReach.getState().reach
-    const reach = nextReach(was, aim.current, f.far + fromOrigin, build)
+    const settled = Math.abs(f.far - fogFar(base, fromOrigin, aim.current, distance)) < 0.5
+    const reach = nextReach(was, aim.current, f.far + fromOrigin, settled)
     if (reach !== was) useDrawReach.setState({ reach })
   }, HEADLAMP_PRIORITY)
   return <fog ref={fog} attach="fog" args={[0x000000, FOG_NEAR * VIEW_FOG_SCALE, FOG_FAR * VIEW_FOG_SCALE]} />
@@ -1132,7 +1132,9 @@ function Rig(): JSX.Element {
       const from = c.object.position.distanceTo(smooth.current)
       // A stopped VIEW fly's orbit is ORBIT_MIN_DISTANCE to within rounding: a real orbit, not a collapsed one.
       if (s.walking) outTo.current = from >= ORBIT_MIN_DISTANCE - 1e-6 ? from : START_DISTANCE
-      eye.current = { from, to: s.walking ? WALK_EYE : outTo.current, t0: performance.now() }
+      // Back out no further than the orbit may now go: BUILD left during WALK takes its far limit with it.
+      const outLimit = orbitMaxDistance(!(useTv.getState().on || isBroadcast()) && useBuilder.getState().active, s.scaleExp)
+      eye.current = { from, to: s.walking ? WALK_EYE : Math.min(outTo.current, outLimit), t0: performance.now() }
       c.enableZoom = !s.walking
       c.enableRotate = !s.walking
       clearWalkLook()
@@ -1255,7 +1257,7 @@ function Rig(): JSX.Element {
     const tvOn = useTv.getState().on || isBroadcast()
     const limit = orbitMaxDistance(!tvOn && useBuilder.getState().active && !s.walking, s.scaleExp)
     const orbit = c.object.position.distanceTo(c.target)
-    c.maxDistance = stepOrbitLimit(orbit, limit, dt)
+    c.maxDistance = stepOrbitLimit(orbit, limit, dt, c.maxDistance)
     // The near plane steps back past 96 cells, so the depth buffer keeps its
     // grain (buildZoom.ts cameraNear); set again only on a change of 5%.
     // Exactly CAMERA_NEAR again at the usual orbit, and in TV, whose shots are its own.

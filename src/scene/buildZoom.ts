@@ -8,18 +8,22 @@
  * of 128s is 384 across), but the orbit stopped at 96 cells, and at that
  * distance what you were looking at sat at the fog's end, black.
  *
- * BUILD now pulls back to BUILD_MAX_GIBSONS (1280 at 2^0), the layers'
- * reach (the sphere about the render origin past which nothing is drawn)
- * doubles as far as the orbit needs, one step at a time, and the fog's end
- * goes out with the reach (fog.ts fogFar), at least BUILD_FOG_SHARE times
- * the orbit's distance. The camera's near plane steps back with the orbit
- * past 96 cells, so faces a cell apart still sort 1280 cells off.
- * Every other view keeps the 96-cell orbit, the 192-cell reach, its fog and
+ * BUILD now pulls back to BUILD_MAX_GIBSONS (1280 at 2^0). The camera's
+ * near plane steps back with the orbit past 96 cells, so faces a cell apart
+ * still sort 1280 cells off. Every other view keeps its 96-cell orbit and
  * its near plane.
+ *
+ * And in every view the fog never darkens what the camera looks at (arkinox,
+ * the same day, in HOP near its 96-cell limit: "the darkness is obscuring my
+ * avatar at near the maximum zoom-out"): the layers' reach (the sphere about
+ * the render origin past which nothing is drawn) doubles as far as the orbit
+ * needs, one step at a time, and the fog's end goes out with the reach
+ * (fog.ts fogFar), at least TARGET_FOG_SHARE times the orbit's distance. At
+ * the usual orbit (26 cells) nothing changes: reach 192, fog 141 to 166.
  */
 
 import { create } from 'zustand'
-import { CULL_REACH } from './fog'
+import { CULL_REACH, TARGET_FOG_SHARE } from './fog'
 import { CAMERA_NEAR, ORBIT_MAX_DISTANCE } from './camera'
 
 /**
@@ -48,14 +52,17 @@ export function orbitMaxDistance(build: boolean, scaleExp: number): number {
 export const ORBIT_LIMIT_TAU = 0.4
 
 /**
- * The controls' maxDistance for this frame: the `limit` when the camera,
- * `distance` from its target, is inside it; when the limit has just come in
- * under it (leaving BUILD far out, a zoom step to a coarser scale) the camera
- * eases in rather than jumping, the limit following it down.
+ * The controls' maxDistance for this frame, from the camera's `distance` from
+ * its target and last frame's maxDistance `was`: the `limit`, a hard clamp as
+ * it always was. Only when the limit itself has come in under the camera
+ * (leaving BUILD far out, a zoom step to a coarser scale: `was` above it) does
+ * the camera ease in rather than jump, the limit following it down. A camera
+ * merely outside its own limit (an unlocked orbit as the target pulls away)
+ * is clamped at once, as before.
  */
-export function stepOrbitLimit(distance: number, limit: number, dt: number): number {
-  if (!(distance > limit)) return limit
-  return Math.max(limit, distance + (limit - distance) * (1 - Math.exp(-Math.max(0, dt) / ORBIT_LIMIT_TAU)))
+export function stepOrbitLimit(distance: number, limit: number, dt: number, was: number): number {
+  if (!(distance > limit) || !(was > limit)) return limit
+  return Math.max(limit, Math.min(was, distance + (limit - distance) * (1 - Math.exp(-Math.max(0, dt) / ORBIT_LIMIT_TAU))))
 }
 
 /**
@@ -95,52 +102,46 @@ export function nextAim(aim: number, need: number): number {
  * How far past the layers' reach the fog may be left while it eases in, in
  * render cells: a re-anchor moves the camera up to a field's half-width
  * (GRID_RADIUS) in each axis in one frame, and the fog eases after it (fog.ts
- * FOG_TAU) as it always has. Inside this slack BUILD leaves the reach be,
- * as every view does, so a re-anchor never mounts and drops a ring of shards.
+ * FOG_TAU) as it always has. Inside this slack the reach is left be, so a
+ * re-anchor never mounts and drops a ring of shards.
  */
 export const LAG_SLACK = 48
 
 /**
  * The reach the layers draw to, from the `reach` now, the `aim` and how far
  * from the render origin the fog now reaches (`fogReach`: its end plus the
- * camera's distance from the origin). Up to the aim at once (the fog eases
- * out after it, so nothing is seen before it is drawn). In BUILD also up far
- * enough to cover a fog still easing in behind a fast pull-back, beyond
+ * camera's distance from the origin); `settled` when the fog has reached
+ * where it is going. Up to the aim at once (the fog eases
+ * out after it, so nothing is seen before it is drawn). Also up far enough
+ * to cover a fog still easing in behind a fast pull-back, beyond
  * LAG_SLACK: a wheel zoom 1000 cells out moves the camera 50 cells in a
  * frame. Down only once the fog is black inside the smaller reach (to a cell),
- * so nothing seen is dropped.
+ * so nothing seen is dropped, or once the fog has settled: held at its 96-cell
+ * floor by a camera far from the origin it can never come inside, and the
+ * reach would otherwise stay wide for good.
  */
-export function nextReach(reach: number, aim: number, fogReach: number, build = false): number {
-  const want = build ? Math.max(aim, reachStep(fogReach - LAG_SLACK)) : aim
+export function nextReach(reach: number, aim: number, fogReach: number, settled = false): number {
+  // A settled fog is where the aim put it: nothing easing to cover.
+  const want = settled ? aim : Math.max(aim, reachStep(fogReach - LAG_SLACK))
   if (want >= reach) return want
-  return fogReach <= want + 1 ? want : reach
+  return fogReach <= want + 1 || settled ? want : reach
 }
 
 /**
- * The least the fog's end is in BUILD, as a multiple of the camera's distance
- * from what it looks at: its start is then at least 1.7 times that distance,
- * so what the camera looks at keeps its colour, and from about 400 cells out
- * so does a 3 by 3 of 128 tiles about it. Most of the time it is further, as
- * far as the reach's step allows (fog.ts fogFar). At the 1280-cell limit the
- * reach is 6144 and the fog ends about 4840 out, inside the camera's far
- * plane (CAMERA_FAR).
- */
-export const BUILD_FOG_SHARE = 2
-
-/**
- * How far from the render origin the layers must draw in BUILD for a camera
+ * How far from the render origin the layers must draw for a camera
  * `distance` from its target and `fromOrigin` from the origin: the fog's
- * least end (BUILD_FOG_SHARE) plus the camera's own distance out. Zero
- * outside BUILD, where the reach stays CULL_REACH.
+ * least end (fog.ts TARGET_FOG_SHARE) plus the camera's own distance out.
+ * At the usual orbit that is well inside CULL_REACH; HOP and VIEW pulled
+ * back to 96 need 384, BUILD at its 1280-cell limit 6144.
  */
-export function reachNeed(build: boolean, distance: number, fromOrigin: number): number {
-  return build ? distance * BUILD_FOG_SHARE + fromOrigin : 0
+export function reachNeed(distance: number, fromOrigin: number): number {
+  return (Number.isFinite(distance) ? distance : 0) * TARGET_FOG_SHARE + fromOrigin
 }
 
 /**
  * The reach every culled layer draws to this frame (WorldShards, WorldMessages,
  * the avatars, the seeds, the chests ...), in render cells from the render
- * origin. CULL_REACH except while BUILD is pulled back; set by the scene's fog
- * (Scene.tsx SceneFog), which is black inside it.
+ * origin. CULL_REACH at the usual orbit, further as the orbit pulls back; set
+ * by the scene's fog (Scene.tsx SceneFog), which is black inside it.
  */
 export const useDrawReach = create<{ reach: number }>(() => ({ reach: CULL_REACH }))

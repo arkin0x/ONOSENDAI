@@ -28,7 +28,7 @@ describe('the scene fog', () => {
     expect(fogBody).toMatch(/const base = useTv\.getState\(\)\.on \|\| useCyberspace\.getState\(\)\.walking\n/)
     expect(fogBody).toMatch(/const fromOrigin = state\.camera\.position\.length\(\)\n/)
     // Within the layers' reach, which BUILD pulled back widens (buildZoom.test.ts).
-    expect(fogBody).toMatch(/f\.far = fogFarStep\(f\.far, mode\.current, base, fromOrigin, dt, aim\.current\)\n\s*mode\.current = base\n/)
+    expect(fogBody).toMatch(/f\.far = fogFarStep\(f\.far, mode\.current, base, fromOrigin, dt, aim\.current, distance\)\n\s*mode\.current = base\n/)
     expect(fogBody).toMatch(/const mode = useRef<boolean \| null>\(null\)/)
     expect(fogBody).toMatch(/f\.near = f\.far \* FOG_START_SHARE/)
     // The args are the Fog's first and only construction.

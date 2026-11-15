@@ -28,7 +28,7 @@ export const FOG_NEAR = FOG_FAR * FOG_START_SHARE
  * SecretRegions, Earth ...: GRID_RADIUS * 8). Past it a thing is simply not
  * drawn, so the fog must be black before the camera can see that far, or
  * things pop at the line as the camera moves (review of #635, S2). It is
- * the least reach: while BUILD is pulled back the layers draw further, in
+ * the least reach: as the orbit pulls back the layers draw further, in
  * doublings of it (buildZoom.ts useDrawReach), and the fog follows.
  */
 export const CULL_REACH = GRID_RADIUS * 8
@@ -53,19 +53,36 @@ export const CULL_REACH = GRID_RADIUS * 8
 export const VIEW_FOG_SCALE = 2
 
 /**
+ * The least the fog's end is, in every view, as a multiple of the camera's
+ * distance from what it looks at (the orbit's target: your avatar, the
+ * cursor, a TV shot's subject). Its start is then at least 1.7 times that
+ * distance, so the fog never darkens what the camera looks at, nor the
+ * ground about it (arkinox, 2026-11-15, in HOP near the 96-cell limit: "the
+ * darkness is obscuring my avatar at near the maximum zoom-out"); at BUILD's
+ * farthest pull-back a 3 by 3 of 128 tiles is clear from about 400 cells out.
+ * Nearer than 48 cells it asks for no more than the old 96, and nearer than
+ * about 40 the usual reach already allows it, so the usual orbit, TV's shots
+ * (24 at most) and WALK's eye are as they were. The layers' reach is aimed
+ * to allow it (buildZoom.ts reachNeed).
+ */
+export const TARGET_FOG_SHARE = 2
+
+/**
  * Where the fog is black: TV's and WALK's own end (`base`), or in the
  * third-person views as far as the layers' `reach` allows: that reach less
  * the camera's distance `fromOrigin` from the render origin, so nothing at
- * the cull line is ever seen, never nearer than the old end. The start is
- * FOG_START_SHARE of it.
+ * the cull line is ever seen, never nearer than the old end. In TV and WALK
+ * it is also pushed out to TARGET_FOG_SHARE times the camera's `distance`
+ * from what it looks at, within the reach, should a shot ever stand that far
+ * back. The start is FOG_START_SHARE of it.
  *
  * With the usual reach, CULL_REACH = FOG_FAR * VIEW_FOG_SCALE, that is the
- * 192 at most it always was (166 at the usual orbit). While BUILD is pulled
- * back the reach doubles ahead of the orbit (buildZoom.ts), and the fog's
- * end goes out with it, so what is being built keeps its colour.
+ * 192 at most it always was (166 at the usual orbit). As the orbit pulls back
+ * the reach doubles ahead of it (buildZoom.ts), and the fog's end goes out
+ * with it, so what the camera looks at keeps its colour.
  */
-export function fogFar(base: boolean, fromOrigin: number, reach = CULL_REACH): number {
-  if (base) return FOG_FAR
+export function fogFar(base: boolean, fromOrigin: number, reach = CULL_REACH, distance = 0): number {
+  if (base) return Math.max(FOG_FAR, Math.min(distance * TARGET_FOG_SHARE, reach - fromOrigin))
   return Math.max(FOG_FAR, Math.min(FOG_FAR * VIEW_FOG_SCALE * (reach / CULL_REACH), reach - fromOrigin))
 }
 
@@ -91,9 +108,9 @@ export function easeFog(current: number, target: number, dt: number): number {
  * jump straight to the target: the fog belongs to the view, and easing from
  * the third-person fog to TV's 96 took a second on entering, and the 24/7
  * broadcast page one or two to settle from the Fog's first distances
- * (review of #635, N10). `reach` as fogFar takes it.
+ * (review of #635, N10). `reach` and `distance` as fogFar takes them.
  */
-export function fogFarStep(current: number, was: boolean | null, base: boolean, fromOrigin: number, dt: number, reach = CULL_REACH): number {
-  const target = fogFar(base, fromOrigin, reach)
+export function fogFarStep(current: number, was: boolean | null, base: boolean, fromOrigin: number, dt: number, reach = CULL_REACH, distance = 0): number {
+  const target = fogFar(base, fromOrigin, reach, distance)
   return was === base ? easeFog(current, target, dt) : target
 }

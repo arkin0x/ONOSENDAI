@@ -85,7 +85,7 @@ export const HEADLAMP_NEVER = { value: 0 }
 
 /**
  * The reach for a camera `distance` cells from what it looks at, held under
- * `max`: the orbit's own limit, so in BUILD pulled back (up to 1024 cells at
+ * `max`: the orbit's own limit, so in BUILD pulled back (up to 1280 cells at
  * 2^0, buildZoom.ts) what the camera looks at keeps full colour as it does
  * at the usual orbit, rather than sitting ten reaches out on the floor.
  */

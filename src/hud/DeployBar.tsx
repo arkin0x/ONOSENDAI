@@ -33,25 +33,28 @@
  * SCALE; EDIT shows it too. Not for a LIVE LINK,
  * whose setting is its author's (lib/walkConstrain.ts).
  *
- * Three more choices belong to the BAG rather than to this item, because a bag
+ * More choices belong to the BAG rather than to this item, because a bag
  * is one event per author and region holding everything hidden there (spec
  * §7.6) (arkinox, 2026-10-01):
  *   - PUBLISH HEIGHT HINT: whether the bag carries its `H` tag (spec §8.6, optional).
  *   - PUBLISH SECTOR HINT: a hint naming the bag's sector, heights of 30 on
  *     every axis, with its X, Y, Z and S sector tags (spec §7.7, §10). A hint
- *     must be at least the bag's height, so it is off above height 30. ON by
- *     default for every new bag (owner ruling 2026-11-13: "by default sector
- *     hints should be ON for all bags"; lib/hidden.ts newBagSettings): shards,
- *     messages, keys, items, chests, doors, audio and seeds alike, each a
- *     switch the hider can turn off for that bag. A new bag above height 30
- *     starts with it off, and it comes back on at 30 or lower unless turned
- *     off by hand (useShards `deployHintHeld`). An edit or move keeps its bag's
- *     own choice; one that lands in a region with no bag of yours starts a new
- *     bag, so ON. A room's bag behind a door carries no hint at all
- *     (lib/doors.ts ROOM_BAG_SETTINGS), and this bar shows no bag rows for it.
+ *     must be at least the bag's height, so it is off above height 30, and
+ *     comes back on at 30 or lower (useShards `deployHintHeld`).
+ *   - PUBLISH CONTENTS: what is inside, by kind and count (and, with it off
+ *     and cashu inside, PUBLISH THAT MONEY IS INSIDE).
+ *   The three switches are ON for a player who never touched them and then
+ *   stay what they set them, on every later hide, reload and session, for
+ *   shards, messages, keys, items, chests, doors, audio and seeds alike, into
+ *   a new bag or one of yours already out, an edit or a move (arkinox,
+ *   2026-11-15: "these 3 hint settings (toggles) should stay what you set
+ *   them after the initial defaults of all 3 being turned on";
+ *   store/deployHintPrefs.ts, kept per device). The bag goes out with them as
+ *   shown. A room's bag behind a door carries no hint at all (lib/doors.ts
+ *   ROOM_BAG_SETTINGS), and this bar shows no bag rows for it.
  *   - HINT MESSAGE: a riddle in the bag's plaintext `content` (spec §7.7).
- * When the cursor's region already holds your bag, they start at that bag's
- * settings and the bar says they apply to everything you hid there.
+ * When the cursor's region already holds your bag, the riddle starts at that
+ * bag's and the bar says these settings apply to everything you hid there.
  *
  * The bar is docked in the lower left, where the route overlay docks: over
  * the menu button, a gap short of the controls when the pad is open, and

@@ -133,6 +133,7 @@ import { turnShard, type Turns } from '../lib/turn'
 import { SECTOR_HINT, alignedBase, hintFits, type HintHeights } from '../lib/hint'
 import { hidesThing, type Muted } from '../lib/muteList'
 import { useMutes } from './useMutes'
+import { asShown, hintPrefsOf, saveHintPrefs, withHintPrefs } from './deployHintPrefs'
 import { CONSTRAIN_DEFAULT, authoredConstrain, authoredConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 
 /** A workshop model's WALK setting as it publishes, by id; the default for one that never chose or is not there (DECK-0003 §1.12). */
@@ -1482,10 +1483,12 @@ interface ShardsState {
   deployLink: boolean
   /**
    * The bag settings the deploy bar shows and the deploy writes: `H`, the
-   * hint, the riddle (lib/hidden.ts BagSettings). They are the bag's, so they
-   * start at your existing bag's settings when the cursor's region holds one
-   * (seedDeployBag) and, when it does not, at a new bag's (lib/hidden.ts
-   * newBagSettings: the sector hint on, owner ruling 2026-11-13).
+   * hint, the riddle (lib/hidden.ts BagSettings). The three hint switches
+   * (`H`, the sector hint, the contents) start as this device's player last
+   * set them, all ON until they touch one (deployHintPrefs.ts, arkinox
+   * 2026-11-15); the riddle and the money switch start at your existing
+   * bag's when the cursor's region holds one (seedDeployBag) and empty and
+   * off when it does not.
    */
   deployBag: BagSettings
   /**
@@ -2956,14 +2959,18 @@ export const useShards = create<ShardsState>((set, get) => {
   }
 
   /**
-   * A new bag's controls at `height` (newBagSettings): the sector hint on
-   * where it fits, and held, to come back on, where it does not (owner
-   * ruling 2026-11-13: sector hints ON by default for every bag).
+   * The controls for a bag with these `settings` at `height`: the three hint
+   * switches as this device's player last set them (deployHintPrefs.ts; all
+   * ON until they touch one, arkinox 2026-11-15), the riddle and the money
+   * switch the bag's own. The sector hint ON where a sector is too small for
+   * the region is held, to come back on lower down.
    */
-  const freshBag = (height: number): Pick<ShardsState, 'deployBag' | 'deployHintHeld'> => {
-    const deployBag = newBagSettings(height)
-    return { deployBag, deployHintHeld: deployBag.hint ? null : SECTOR_HINT }
+  const bagStart = (settings: BagSettings, height: number): Pick<ShardsState, 'deployBag' | 'deployHintHeld'> => {
+    const { bag, held } = withHintPrefs(settings, height)
+    return { deployBag: bag, deployHintHeld: held ? SECTOR_HINT : null }
   }
+  /** A new bag's controls at `height` (newBagSettings, then the saved switches). */
+  const freshBag = (height: number): Pick<ShardsState, 'deployBag' | 'deployHintHeld'> => bagStart(newBagSettings(height), height)
 
   /**
    * The same fresh-deploy state every start shares, at the height the bar
@@ -3789,8 +3796,7 @@ export const useShards = create<ShardsState>((set, get) => {
         deploySpin: d.shard.spin ?? 0,
         deployTurn: [0, 0, 0],
         deployFollow: false,
-        deployBag: { ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) },
-        deployHintHeld: null,
+        ...bagStart({ ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) }, d.height),
         deployBagFrom: ownBagIn(get().mine, regionOf(positionOf(d), d.plane, d.height)),
         deployStatus: 'idle',
         deployError: null,
@@ -3893,8 +3899,7 @@ export const useShards = create<ShardsState>((set, get) => {
         deployHeightAuto: false,
         deployUnit: model?.unit ?? 0,
         deployConstrain: model ? authoredConstrainOf(model) : CONSTRAIN_DEFAULT,
-        deployBag: { ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) },
-        deployHintHeld: null,
+        ...bagStart({ ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) }, d.height),
         deployBagFrom: ownBagIn(get().mine, regionOf(positionOf(d), d.plane, d.height)),
         deployNote: null,
         deployAsk: null,
@@ -3915,8 +3920,7 @@ export const useShards = create<ShardsState>((set, get) => {
         deployHeight: d.height,
         // Its own height, chosen: a room it lands in stands in for it until it leaves.
         deployRoomSnap: null,
-        deployBag: { ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) },
-        deployHintHeld: null,
+        ...bagStart({ ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) }, d.height),
         deployBagFrom: ownBagIn(get().mine, regionOf(positionOf(d), d.plane, d.height)),
         deployNote: null,
         deployAsk: null,
@@ -4340,13 +4344,18 @@ export const useShards = create<ShardsState>((set, get) => {
       })
     },
     // Setting the hint yourself is the choice: nothing held comes back over it.
-    setDeployBag: (patch) => set({ deployBag: { ...get().deployBag, ...patch }, ...('hint' in patch ? { deployHintHeld: null } : {}) }),
+    // A hand flip of a hint switch is kept for every later hide (deployHintPrefs.ts).
+    setDeployBag: (patch) => {
+      saveHintPrefs(hintPrefsOf(patch))
+      set({ deployBag: { ...get().deployBag, ...patch }, ...('hint' in patch ? { deployHintHeld: null } : {}) })
+    },
     seedDeployBag: (bag) => {
       const from = get().deployBagFrom
       if ((bag?.region ?? null) === (from?.region ?? null)) return
       // Leaving your bag's region for one with no bag: back to the defaults,
       // so that bag's riddle never follows the cursor into a new bag.
-      set({ ...(bag ? { deployBag: bag.settings, deployHintHeld: null } : freshBag(get().deployHeight)), deployBagFrom: bag })
+      // Your bag's riddle, with the hint switches as you last set them.
+      set({ ...(bag ? bagStart(bag.settings, get().deployHeight) : freshBag(get().deployHeight)), deployBagFrom: bag })
     },
     // Buryable up to the compute ceiling (past that the region derivation
     // throws); discovery only auto-scans to SCAN_MAX_HEIGHT, which the DeployBar
@@ -4780,7 +4789,8 @@ export const useShards = create<ShardsState>((set, get) => {
         // this region's bag only if `deployBagFrom` names this region.
         const region = regionOf(at, plane, deployHeight)
         const seeded = deployBagFrom?.region === region ? deployBagFrom.settings : newBagSettings(deployHeight)
-        const settingsOf = (current: BagSettings | null): BagSettings => (into ? ROOM_BAG_SETTINGS : resolveBagSettings(deployBag, seeded, current, deployHeight))
+        // The hint switches go out as the bar shows them (asShown).
+        const settingsOf = (current: BagSettings | null): BagSettings => (into ? ROOM_BAG_SETTINGS : asShown(resolveBagSettings(deployBag, seeded, current, deployHeight), deployBag, deployHeight))
         let settings: BagSettings = settingsOf(existing.settings)
         // A large shard is hidden by reference (spec §7.6, DECK-0003 §3.2): it
         // becomes its own kind 33331 object sealed with the same key, and the
@@ -5076,7 +5086,7 @@ export const useShards = create<ShardsState>((set, get) => {
             : s.placedLast
           // A room's settings are the room's: left out of it, the next placement starts as any other.
           // Fresh controls name no bag, so the bar seeds them from your bag under the cursor, if any (seedDeployBag).
-          const bag = again ? (into ? { ...freshBag(deployHeight), deployBagFrom: null } : { deployBag: settings, deployHintHeld: null, deployBagFrom: ownBagIn(s.mine, regionOf(at, plane, deployHeight)) }) : {}
+          const bag = again ? (into ? { ...freshBag(deployHeight), deployBagFrom: null } : { ...bagStart(settings, deployHeight), deployBagFrom: ownBagIn(s.mine, regionOf(at, plane, deployHeight)) }) : {}
           set({ deployStatus: 'done', pending: again, deployNote: null, deployAsk: null, placedLast, ...bag })
         }
         // A moved door keeps its room: its secret, and what stands behind it, follow its new id.

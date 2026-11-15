@@ -21,6 +21,7 @@ import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { Reactions } from './Reactions'
 import { ActionComments } from './Comments'
 import { Stacked, useModalStack } from './modalStack'
+import { ModalClose } from './ui/ModalClose'
 
 export function ActionModal(): JSX.Element | null {
   const action = useSocialUi((s) => s.action)
@@ -44,7 +45,7 @@ export function ActionModal(): JSX.Element | null {
         <div className="secret__head">
           <span className={`explorer__type explorer__type--${actionKind(action)}`} title={action.breaks ?? action.name}>{actionLabel(action)}</span>
           {mine && <span className="secret__mine">YOURS</span>}
-          <button className="secret__close" onClick={close} aria-label="Close">✕</button>
+          <ModalClose onClose={close} />
         </div>
 
         <div className="secret__creator">

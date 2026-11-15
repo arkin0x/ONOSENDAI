@@ -30,6 +30,7 @@ import type { FeedObject } from 'sno-core/feed'
 import { useCyberspace } from '../store/useCyberspace'
 import { usePublicShard } from '../store/usePublicShard'
 import { GoArrow } from './ui/GoArrow'
+import { ModalClose } from './ui/ModalClose'
 
 export const BAG_EXPLAINER =
   'A bag is a collection of one or more messages, objects, or cashu tokens encrypted to (hidden at) a location. All users can see a bag exists but they have no information about where to find it. Bags are opened automatically by attempting decryption with all your collected Region Keys.'
@@ -43,7 +44,7 @@ function Shell({ title, onClose, children }: { title: string; onClose: () => voi
       <div className="modal__card login stash-modal" onPointerDown={(e) => e.stopPropagation()}>
         <div className="login__head">
           <h2 className="modal__title">{title}</h2>
-          <button className="secret__close" onClick={onClose} aria-label="Close">✕</button>
+          <ModalClose onClose={onClose} />
         </div>
         {children}
       </div>

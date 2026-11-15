@@ -282,7 +282,8 @@ describe('the sheets', () => {
     const head = byClass(m.all(), 'ws__sheet-head')[0]
     expect(textOf(head)).toContain('GRID')
     expect(textOf(head)).toContain('Cube')
-    const x = byClass(m.all(), 'ws__sheet-x')[0]
+    // The shared ✕ every modal and sheet closes with (hud/ui/ModalClose).
+    const x = byClass(m.all(), 'modal-close')[0]
     expect(x.props['aria-label']).toBe('Close GRID')
     ;(x.props.onClick as () => void)()
     await new Promise((r) => setTimeout(r, 5))

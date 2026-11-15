@@ -181,3 +181,47 @@ describe('a chest row in DISCOVERED NEARBY', () => {
     await none.unmount()
   })
 })
+
+/** The full-width box under a row where an open chest's contents are listed (owner, 2026-11-15). */
+const contentsBox = (r: Mounted): Host | undefined => r.all().find((h) => h.props.className === 'nearby__contents')
+const flat = (h: Host): Host[] => h.children.flatMap((c) => (typeof c === 'string' ? [] : [c, ...flat(c)]))
+
+describe('the loot layout in DISCOVERED NEARBY (owner, 2026-11-15)', () => {
+  it('an opened chest lists its contents across the row, each with its picture and TAKE, then TAKE ALL, which takes them', async () => {
+    const r = await row(await found({ door: false, held: true }))
+    await r.press(/^OPEN$/)
+    await vi.waitFor(() => expect(contentsBox(r) && flat(contentsBox(r)!).some((h) => h.type === 'button' && textOf(h) === 'TAKE ALL')).toBe(true))
+    const box = flat(contentsBox(r)!)
+    const rows = box.filter((h) => h.type === 'li' && String(h.props.className).includes('chest__row--thumb'))
+    expect(rows).toHaveLength(1)
+    expect(textOf(rows[0])).toContain('a note')
+    // The picture is the chamfered frame, not a small glyph.
+    expect(flat(rows[0]).some((h) => String(h.props.className ?? '').split(' ').includes('chamfer'))).toBe(true)
+    expect(flat(rows[0]).filter((h) => h.type === 'button').map(textOf)).toEqual(['TAKE'])
+    // Opened: VIEW is still beside the words, and the contents are not in the words column.
+    expect(actions(r)).not.toContain('OPEN')
+    expect(actions(r).at(-1)).toBe('VIEW')
+    const body = r.all().find((h) => h.props.className === 'nearby__body')!
+    expect(flat(body).some((h) => textOf(h) === 'TAKE ALL')).toBe(false)
+    const takeAll = box.find((h) => h.type === 'button' && textOf(h) === 'TAKE ALL')!
+    ;(takeAll.props.onClick as () => void)()
+    await vi.waitFor(() => expect(Object.values(useInventory.getState().items).some((it) => it.text === 'a note')).toBe(true))
+    await r.unmount()
+  })
+
+  it('a key row draws TAKE beside VIEW, not beside its name, and TAKE takes it', async () => {
+    const lock = forgeKey('Copper Key')
+    const ev = finalizeEvent({ kind: 3340, created_at: T, content: '', tags: [] }, hider) as NostrEvent
+    const h = { eventId: ev.id, inner: ev, keyHex: '00'.repeat(32), bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: ev.pubkey, at: AT, plane: 1, height: 3, createdAt: T, type: 'key', key: lock } as unknown as Hidden
+    useShards.setState({ discovered: { [h.eventId]: h } })
+    const item = { key: h.eventId, type: 'key', keyItem: lock, event: ev, at: AT, plane: 1, height: 3, mine: false, author: ev.pubkey, createdAt: T, distance: 0n, lookupId: h.lookupId, bagId: h.bagId } as unknown as NearbyItem
+    const r = await mount(<ul><Row item={item} me={me()} onView={() => undefined} /></ul>)
+    expect(actions(r)).toEqual(['TAKE', 'VIEW'])
+    const line = r.all().find((x) => x.props.className === 'keyline')!
+    expect(flat(line).some((x) => x.type === 'button')).toBe(false)
+    expect(r.all().some((x) => String(x.props.className ?? '').split(' ').includes('chamfer'))).toBe(true)
+    await r.press(/^TAKE$/)
+    await vi.waitFor(() => expect(Object.values(useInventory.getState().items).some((it) => it.key?.itemPubkey === lock.itemPubkey)).toBe(true))
+    await r.unmount()
+  })
+})

@@ -19,6 +19,7 @@ import { useEscape } from '../hooks/useEscape'
 import { useCyberspace } from '../store/useCyberspace'
 import { mineIds, plannedBlocks, useShardImport, type ImportRow } from '../store/useShardImport'
 import { dupAction, type Dup, type DupMode } from '../lib/shardZip'
+import { ModalClose } from '../hud/ui/ModalClose'
 
 const MODES: Array<{ mode: DupMode; label: string; help: string }> = [
   { mode: 'skip', label: 'SKIP', help: 'Leave out a piece you already have, and a file whose name one of your shards has' },
@@ -94,7 +95,11 @@ export function ZipImport(): JSX.Element | null {
   return createPortal(
     <div className="modal" role="dialog" aria-modal="true" aria-label={`Import ${s.fileName}`} onPointerDown={() => { if (!running && !s.ran) s.close() }}>
       <div className="modal__card modal__card--list zipimport" onPointerDown={(e) => e.stopPropagation()}>
-        <h2 className="modal__title zipimport__title">IMPORT {s.fileName.toUpperCase()}</h2>
+        <div className="modal__head">
+          <h2 className="modal__title zipimport__title">IMPORT {s.fileName.toUpperCase()}</h2>
+          {/* Closes as CANCEL or DONE below does; not while an import is running. */}
+          <ModalClose onClose={() => s.close()} disabled={running} />
+        </div>
         <div className={`zipimport__line ${s.error || s.stall ? 'is-bad' : ''}`} aria-live="polite">{s.stall ? `${s.stall.toUpperCase()} ${line}` : line}</div>
         <div className="zipimport__bar" aria-hidden><span style={{ width: `${Math.round(fraction * 100)}%` }} /></div>
         {s.rows.length > 0 && (

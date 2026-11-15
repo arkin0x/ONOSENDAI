@@ -40,6 +40,7 @@ import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { ChestBlock, KeyLine, listedOnce, useChestOpen } from './ItemRows'
 import { useEscape } from '../hooks/useEscape'
 import { useBagReading } from '../hooks/useBagReadings'
+import { ModalClose } from './ui/ModalClose'
 
 /** An item of this bag that this client can already see, from a scan or from its own deployments. */
 interface OpenedItem {
@@ -210,7 +211,7 @@ export function LootDetail(): JSX.Element | null {
           <span className="secret__badge">◈ {reading !== undefined || opened.length > 0 ? 'DISCOVERED BAG' : 'HIDDEN BAG'}</span>
           {opened.length > 0 && <span className="tag tag--live">{yours ? 'YOURS' : 'FOUND'}</span>}
           {yours && opened.length === 0 && <span className="secret__mine">YOURS</span>}
-          <button className="secret__close" onClick={close} aria-label="Close">✕</button>
+          <ModalClose onClose={close} />
         </div>
 
         {item.riddle && <blockquote className="secret__message" title="The hider's riddle, written in the clear">{item.riddle}</blockquote>}

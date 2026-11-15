@@ -7,6 +7,7 @@
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useEscape } from '../hooks/useEscape'
+import { ModalClose } from './ui/ModalClose'
 
 interface Props {
   /** Something to show above the title, such as the HOSAKA banner. */
@@ -54,7 +55,11 @@ export function ConfirmModal({ banner, title, body, figure, busy = false, confir
     <div className="modal" role="dialog" aria-modal="true" aria-label={title} onPointerDown={() => { if (!busy) (onBackdrop ?? onCancel)() }}>
       <div className={`modal__card ${cardClassName ?? ''}`} onPointerDown={(e) => e.stopPropagation()}>
         {banner}
-        <h2 className="modal__title">{title}</h2>
+        {/* The ✕ is a tap outside: it answers nothing, and does nothing while the confirm is under way. */}
+        <div className="modal__head">
+          <h2 className="modal__title">{title}</h2>
+          <ModalClose onClose={() => (onBackdrop ?? onCancel)()} disabled={busy} />
+        </div>
         {figure !== undefined && <div className="modal__figure">{figure}</div>}
         {/* A div, not a paragraph: an explanation's lists and tables are not
             valid inside a <p>. */}

@@ -351,7 +351,7 @@ saveReport()
   await page.goto(`${base}/demo/spawn`, { waitUntil: 'load' })
   await page.waitForFunction(() => !!document.querySelector('.demo__title'), null, { timeout: 60_000 })
   await sleep(2500)
-  await page.locator('.demo__icon[aria-label="Exit the tour"]').click()
+  await page.locator('[aria-label="Exit the tour"]').click()
   await sleep(1500)
   const after = await state(); const d = await dom()
   report.exit.B = { coachGone: !d.active, live: after.live, focus: after.focus, path: after.path, ok: !d.active && after.live === true && after.focus === null && after.path === '/' }

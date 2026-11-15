@@ -29,7 +29,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ClipboardList, Copy, FastForward, Hand, MapPin, Send, Square, Target, Trash2, Volume2, X } from 'lucide-react'
+import { ClipboardList, Copy, FastForward, Hand, MapPin, Send, Square, Target, Trash2, Volume2 } from 'lucide-react'
 import { useAgentConversation } from '../hooks/useAgentConversation'
 import { useEscape } from '../hooks/useEscape'
 import { useProfile } from '../hooks/useProfile'
@@ -41,6 +41,7 @@ import { ConfirmModal } from './ConfirmModal'
 import { DmInboxSetup } from './DmInboxSetup'
 import { Explanation } from './Explanation'
 import { ProfileBadge } from './ProfileBadge'
+import { ModalClose } from './ui/ModalClose'
 
 /** What a DM inbox is, for the tooltip on NO DM INBOX. */
 export const DM_INBOX_TIP =
@@ -229,7 +230,7 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
           <button className="avatars__go talk__clear" onClick={() => setConfirmClear(true)} disabled={talk.messages.length === 0} title="Delete this conversation's messages kept on this device">
             <Trash2 size={10} aria-hidden /> CLEAR HISTORY
           </button>
-          <button className="secret__close" onClick={onClose} aria-label="Close"><X size={14} /></button>
+          <ModalClose onClose={onClose} />
         </div>
 
         {talk.blocked && (

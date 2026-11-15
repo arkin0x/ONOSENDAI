@@ -352,14 +352,17 @@ describe('key item buttons', () => {
     restore()
   })
 
-  it('say LISTED on the line of an item already in the ITEM FEED, never as a button, and offer no PUBLISH', async () => {
+  it('say LISTED as a chip under the line of an item already in the ITEM FEED, never as a button, and offer no PUBLISH', async () => {
     const { restore } = seed()
     const was = useItemFeed.getState().listedBy
     useItemFeed.setState({ listedBy: () => true })
     try {
       const m = await openKind(KEY_ITEMS_LABEL)
-      const meta = m.all().find((h) => cls(h) === 'item__meta' && /forged by you/.test(textOf(h)))!
-      expect(textOf(meta)).toMatch(/· LISTED/)
+      const row = rowsOf(m.all(), true)[0]
+      const meta = m.all().find((h) => cls(h).split(' ').includes('item__meta') && /forged by you/.test(textOf(h)))!
+      expect(textOf(meta)).not.toMatch(/LISTED/)
+      const chips = m.all().find((h) => cls(h) === 'held__chips' && textOf(row).includes(textOf(h)))!
+      expect(chips.children.filter((c): c is Host => typeof c !== 'string' && c.type === 'span').map(textOf)).toContain('LISTED')
       await m.press(/^ACTIONS$/)
       const held = buttonsIn(rowsOf(m.all(), true)[0]).map(textOf)
       expect(held).toEqual(['ACTIONS', 'DETAILS', 'COPY', 'PLACE', 'ARCHIVE'])
@@ -371,7 +374,7 @@ describe('key item buttons', () => {
     }
   })
 
-  it('share one wrapping row with the OTHER LOOT rows: the taken row carries held__row--loot, and both classes get the same flex-wrap layout, buttons pushed right and allowed to wrap', async () => {
+  it('share one row layout with the OTHER LOOT rows: the taken row carries held__row--loot, and both classes are the same grid, the picture over two rows on the left, ACTIONS under the words on the right, what it opens across the whole row', async () => {
     const { restore } = seed()
     const m = await openKind(OTHER_LOOT_LABEL)
     const [taken] = rowsOf(m.all(), false)
@@ -382,8 +385,11 @@ describe('key item buttons', () => {
     const css = readFileSync(new URL('../../styles.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
     const ruleFor = (part: string): string[] => [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, sel]) => sel.split(',').some((x) => x.trim() === part)).map(([, , body]) => body)
     for (const row of ['.held__row--item', '.held__row--loot']) {
-      expect(ruleFor(row).join(';')).toMatch(/display: flex;.*flex-wrap: wrap/)
-      expect(ruleFor(`${row} > .held__acts`).join(';')).toMatch(/margin-left: auto;.*flex-wrap: wrap/)
+      expect(ruleFor(row).join(';')).toMatch(/display: grid;\s*grid-template-columns: var\(--chamfer-size, 80px\) minmax\(0, 1fr\)/)
+      expect(ruleFor(`${row} > .chamfer`).join(';')).toMatch(/grid-column: 1; grid-row: 1 \/ span 2/)
+      expect(ruleFor(`${row} > .item__line`).join(';')).toMatch(/grid-column: 2; grid-row: 1;/)
+      expect(ruleFor(`${row} > .held__acts`).join(';')).toMatch(/grid-column: 2; grid-row: 2;.*justify-self: end;.*flex-wrap: wrap/)
+      expect(ruleFor(`${row} > .held__menu`).join(';')).toMatch(/grid-column: 1 \/ -1/)
     }
   })
 

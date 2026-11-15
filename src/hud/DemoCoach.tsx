@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Square, SquareMinus, SquarePlus, Volume2, X, type LucideIcon } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Square, SquareMinus, SquarePlus, Volume2, type LucideIcon } from 'lucide-react'
 import { CAPTION_LINKS, splitCaption } from '../demo/captionTokens'
 import { getEventHash, verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from 'nostr-tools'
@@ -36,6 +36,7 @@ import { ChainStatusStrip, useChainStatus } from './ChainStatus'
 import { GO_LIVE_BODY } from './TouchControls'
 import { useCover } from '../hooks/useCover'
 import { startTvInPlace } from '../store/useTv'
+import { ModalClose } from './ui/ModalClose'
 
 /** The kinds the Built on Nostr chapter lists (onosendai/kinds.md). */
 const KINDS: Array<[number, string]> = [
@@ -373,7 +374,7 @@ export function DemoCoach(): JSX.Element | null {
         <span className="demo__tag">TOUR</span>
         <span className="demo__chapter">{chapter?.title}</span>
         <button className="demo__icon" onClick={() => d.setMinimized(true)} aria-label="Fold the caption" title="Fold"><ChevronUp size={14} /></button>
-        <button className="demo__icon" onClick={d.exit} aria-label="Exit the tour" title="Exit the tour"><X size={14} /></button>
+        <ModalClose onClose={d.exit} label="Exit the tour" />
       </div>
       <div className="demo__bar-track" aria-hidden><div className="demo__bar-fill" style={{ width: `${((index + 1) / script.steps.length) * 100}%` }} /></div>
       {/* One scroll box per step, keyed by it: the same box kept from step to

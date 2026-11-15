@@ -22,8 +22,7 @@ import { useNearbyLoot, type NearbyItem } from '../hooks/useNearbyLoot'
 import { useProfile } from '../hooks/useProfile'
 import { findCashuToken } from '../lib/cashu'
 import { hiddenLabel, messagePreview } from '../lib/hidden'
-import { ItemIcon } from './ItemIcon'
-import { ShardThumb } from './ShardThumb'
+import { ItemThumb } from './ItemThumb'
 import type { HeldPlace } from '../lib/inventory'
 import { safeNpub } from '../lib/npub'
 import { formatDistance } from 'sno-core/scale'
@@ -40,6 +39,7 @@ import { GoArrow } from './ui/GoArrow'
 import { useBlooms, wantSeeds } from '../store/useBlooms'
 import { seedOfEvent, viewScaleOf, type SeedItem } from '../lib/seeds/seedItem'
 import { bloomGrowthWords } from '../lib/seeds/bloomWords'
+import { ModalClose } from './ui/ModalClose'
 
 /** Where a nearby item was found, for what is taken out of a chest here. */
 function placeOf(item: NearbyItem): HeldPlace {
@@ -86,30 +86,39 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
   const profile = useProfile(item.author ?? null)
   const author = item.author ?? ''
   const name = author === me ? 'you' : profileLabel(profile, safeNpub(author))
-  // A chest's OPEN, or a door's OPEN or CLOSE, is drawn here, beside VIEW and
-  // the same size (ItemRows ChestBlock actionsIn; tutorial feedback 2026-11-12, item 2).
-  const [chestActs, setChestActs] = useState<HTMLElement | null>(null)
+  // A chest's OPEN, a door's OPEN or CLOSE, and a key's TAKE are drawn here,
+  // beside VIEW and the same size (ItemRows ChestBlock and KeyLine actionsIn;
+  // tutorial feedback 2026-11-12, item 2), under the words, so they never
+  // squeeze the name (owner, 2026-11-15). What an open chest holds is listed
+  // across the whole row under them (contentsIn), each with its TAKE, then
+  // TAKE ALL.
+  const [acts, setActs] = useState<HTMLElement | null>(null)
+  const [contents, setContents] = useState<HTMLElement | null>(null)
   const chest = item.type === 'chest' && !!item.chest
+  const key = item.type === 'key' && !!item.keyItem
+  const coin = item.type === 'message' && findCashuToken(item.text) !== null
   return (
     <li className="secrets__row nearby__row">
-      {item.type === 'shard' && item.shard ? <ShardThumb shard={item.shard} /> : <ItemIcon className="nearby__glyph" type={item.type} coin={item.type === 'message' && findCashuToken(item.text) !== null} size={14} />}
+      <ItemThumb type={item.type} coin={coin} shard={item.type === 'shard' ? item.shard : undefined} image={item.keyItem?.image} model={item.keyItem?.model} />
       <div className="nearby__body">
-        {item.type === 'key' && item.keyItem
-          ? <KeyLine id={item.key} name={item.keyItem.name} author={author} />
-          : item.type === 'chest' && item.chest
-            ? <ChestBlock id={item.key} chest={item.chest} author={author} verified place={placeOf(item)} actionsIn={chestActs} />
-            : <span className="nearby__label">{labelOf(item)}</span>}
-        <span className="nearby__where">{whereOf(item)}{item.type === 'chest' && item.chest && <> · <LockStatus id={item.key} lock={item.chest.lockPubkey} me={me} /></>}</span>
+        {key && item.keyItem
+          ? <KeyLine id={item.key} name={item.keyItem.name} author={author} actionsIn={acts} />
+          : chest && item.chest
+            ? <ChestBlock id={item.key} chest={item.chest} author={author} verified place={placeOf(item)} actionsIn={acts} contentsIn={contents} />
+            : <span className="nearby__label" title={labelOf(item)}>{labelOf(item)}</span>}
+        <span className="nearby__where">{whereOf(item)}</span>
         <span className="nearby__meta">
           {author && <ProfileTap pubkey={author}><ProfilePic pubkey={author} size={14} /></ProfileTap>}
-          <span>{name}</span>
-          <span>· {distanceWords(item.distance)}</span>
+          <span className="nearby__who">{name}</span>
+          <span className="nearby__far">· {distanceWords(item.distance)}</span>
         </span>
+        {chest && item.chest && <span className="held__chips"><LockStatus id={item.key} lock={item.chest.lockPubkey} me={me} /></span>}
       </div>
       <span className="nearby__acts">
-        {chest && <span className="nearby__door" ref={setChestActs} />}
+        {(chest || key) && <span className="nearby__door" ref={setActs} />}
         <button className="avatars__go nearby__view" onClick={() => onView(item)} title="Fly to it">VIEW<GoArrow /></button>
       </span>
+      {chest && <div className="nearby__contents" ref={setContents} />}
     </li>
   )
 }
@@ -133,15 +142,15 @@ export function SeedRow({ item, me, onView }: { item: NearbyItem; me: string; on
   }
   return (
     <li className="secrets__row nearby__row">
-      {view?.shard ? <ShardThumb shard={view.shard} /> : <ItemIcon className="nearby__glyph" type="seed" size={14} />}
+      <ItemThumb type="seed" shard={view?.shard} />
       {/* The whole of its words is the tap, a fingertip's worth on a phone (review of #701). */}
       <button className="nearby__body nearby__name" onClick={card} title="Open its card">
         <span className="nearby__label">{seedName(view?.dna)}</span>
         <span className="nearby__where">{whereOf(item)} · {bloomGrowthWords(view)}</span>
         <span className="nearby__meta">
           {planter && <ProfileTap pubkey={planter} nested><ProfilePic pubkey={planter} size={14} /></ProfileTap>}
-          <span>{name}</span>
-          <span>· {distanceWords(item.distance)}</span>
+          <span className="nearby__who">{name}</span>
+          <span className="nearby__far">· {distanceWords(item.distance)}</span>
         </span>
       </button>
       <span className="nearby__acts">
@@ -208,7 +217,7 @@ export function NearbyList(): JSX.Element {
         <header className="panel__head secrets__head">
           <h2>Discovered nearby</h2>
           <span className="tag">{list.length === 0 ? 'NOTHING HERE' : `${list.length} DECRYPTED HERE`}</span>
-          <button className="targets__remove secrets__close" onClick={close} aria-label="Close" title="Close">✕</button>
+          <ModalClose onClose={close} />
         </header>
         <div className="secrets__summary">
           <span>Hop actions produce region keys that decrypt hidden things nearby.</span>

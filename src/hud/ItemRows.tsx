@@ -25,7 +25,7 @@
  * row that draws one (ItemFace); the key line itself is the words.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { useProfile } from '../hooks/useProfile'
 import { isGuideAuthor } from '../tutorial/guideBags'
@@ -33,8 +33,7 @@ import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry, type Opener } from '../lib/chests'
 import { positionOf, useShards } from '../store/useShards'
 import { BagUnreadable, hiddenLabel, itemLineage, keyItemOf, type ChestItem, type Hidden } from '../lib/hidden'
-import { ItemFace } from './ItemIcon'
-import { ShardThumb } from './ShardThumb'
+import { ItemThumb } from './ItemThumb'
 import { holdsEntry, holdsItem, openingKeys, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
 import { carriedLabel } from '../lib/keyringLocks'
 import { useKeyringLookup } from '../store/useKeyring'
@@ -78,7 +77,7 @@ export function useWho(pubkey: string): string {
  * own (deleted from ITEMS, it is yours to take again), there is nothing to
  * take. TAKE closes the list and the item fades out where it stands.
  */
-export function KeyLine({ id, name, author }: { id?: string; name: string; author: string }): JSX.Element {
+export function KeyLine({ id, name, author, actionsIn }: { id?: string; name: string; author: string; actionsIn?: HTMLElement | null }): JSX.Element {
   const who = useWho(author)
   // Held by its own id, by the lineage a version its hider moved shares
   // with the one held, or by its keypair, as another instance of a key held
@@ -92,9 +91,11 @@ export function KeyLine({ id, name, author }: { id?: string; name: string; autho
         <span className="item__name" title={name}>{name}</span>
         <span className="item__meta">forged by {who}{held && <> · <span className="item__held" title="It is in your ITEMS">IN YOUR ITEMS</span></>}</span>
       </span>
-      {id && found && !held && (
-        <button className="chest__act chest__act--take" onClick={() => takeAndVanish(id, prefersReducedMotion())} title="Put it in your ITEMS">TAKE</button>
-      )}
+      {/* In a DISCOVERED NEARBY row, TAKE is drawn beside VIEW (actionsIn), not beside the name. */}
+      {id && found && !held && (() => {
+        const take = <button className="chest__act chest__act--take" onClick={() => takeAndVanish(id, prefersReducedMotion())} title="Put it in your ITEMS">TAKE</button>
+        return actionsIn !== undefined ? actionsIn && createPortal(take, actionsIn) : take
+      })()}
     </span>
   )
 }
@@ -202,7 +203,7 @@ export function entryLabel(entry: ChestEntry): { label: string; coin: boolean } 
  * `actsBelow`, the chest's card: OPEN or CLOSE across the card's width,
  * under what opens it (tutorial feedback 2026-11-12, item 3).
  */
-export function ChestBlock({ id, chest, author, verified, place, sealer: given, named = true, inChest = false, actionsIn, actsBelow = false }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string; named?: boolean; inChest?: boolean; actionsIn?: HTMLElement | null; actsBelow?: boolean }): JSX.Element {
+export function ChestBlock({ id, chest, author, verified, place, sealer: given, named = true, inChest = false, actionsIn, contentsIn, actsBelow = false }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string; named?: boolean; inChest?: boolean; actionsIn?: HTMLElement | null; contentsIn?: HTMLElement | null; actsBelow?: boolean }): JSX.Element {
   const items = useInventory((s) => s.items)
   const me = useCyberspace((s) => s.identity.pubkey)
   const keys = useMemo(() => openingKeys(items), [items])
@@ -391,7 +392,11 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
       {offerOpen && !closedHere && carried && <span className="chest__fits">A key you carry fits: {carriedLabel(carried, useCyberspace.getState().position)}</span>}
       {status && <span className="chest__status" role="status">{status}</span>}
       {actsBelow && (offerOpen || canClose) && <div className="chest__below">{acts}</div>}
-      {shown && shown.length > 0 && <ChestContents entries={shown} from={from} place={place} />}
+      {/* A DISCOVERED NEARBY row draws what is inside across its whole width, under its words and VIEW (contentsIn). */}
+      {/* Inline in a narrow column (a bag's list, a chest inside a chest) its rows' pictures are smaller, so the names keep their room. */}
+      {shown && shown.length > 0 && (contentsIn !== undefined
+        ? contentsIn && createPortal(<ChestContents entries={shown} from={from} place={place} />, contentsIn)
+        : <ChestContents entries={shown} from={from} place={place} size={inChest || !actsBelow ? CHEST_INLINE_PX : undefined} />)}
     </div>
   )
 }
@@ -411,13 +416,16 @@ export function takeableOf(entries: ChestEntry[], items: Record<string, HeldItem
  * again"): a row deleted from ITEMS, or cleared off TAKEN, comes back with
  * TAKE, after a reload too. With everything held, the list says so.
  */
-export function ChestContents({ entries, from, place }: { entries: ChestEntry[]; from: HeldFrom; place: HeldPlace | null }): JSX.Element {
+/** A chest's contents' pictures where they share a narrow column with other things: a bag's list (LootDetail), a chest inside a chest. */
+export const CHEST_INLINE_PX = 48
+
+export function ChestContents({ entries, from, place, size }: { entries: ChestEntry[]; from: HeldFrom; place: HeldPlace | null; size?: number }): JSX.Element {
   const items = useInventory((s) => s.items)
   const takeable = useMemo(() => takeableOf(entries, items), [entries, items])
   if (takeable.length === 0) return <span className="chest__status" role="status">Everything here is in your ITEMS</span>
   return (
     <ul className="chest__contents">
-      {takeable.map((e) => <ContentRow key={e.id} entry={e} from={from} place={place} />)}
+      {takeable.map((e) => <ContentRow key={e.id} entry={e} from={from} place={place} size={size} />)}
       <li className="chest__all">
         <button className="chest__act chest__act--take" onClick={() => { useInventory.getState().take(takeable, from, place) }} title="Copy everything here into your ITEMS">TAKE ALL</button>
       </li>
@@ -425,22 +433,26 @@ export function ChestContents({ entries, from, place }: { entries: ChestEntry[];
   )
 }
 
-/** One thing inside an opened chest, with TAKE. */
-function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom; place: HeldPlace | null }): JSX.Element {
+/**
+ * One thing inside an opened chest, with TAKE: laid out as a row of ITEMS
+ * (owner, 2026-11-15), the chamfered picture at the Shard Feed's size, the
+ * name on one line, UNSIGNED as a chip, TAKE under the words on the right.
+ */
+function ContentRow({ entry, from, place, size }: { entry: ChestEntry; from: HeldFrom; place: HeldPlace | null; size?: number }): JSX.Element {
   // One shard per model (arkinox, 2026-10-11): a model already held, under any name, reads TAKEN too.
   const held = useInventory((s) => holdsEntry(s.items, entry))
   const { label, coin } = entryLabel(entry)
   const type = entry.body.type
   const take = (): void => { useInventory.getState().take([entry], from, place) }
   return (
-    <li className="chest__row">
-      {type === 'shard' && entry.body.shard ? <ShardThumb shard={entry.body.shard} /> : <ItemFace className={`chest__glyph chest__glyph--${coin ? 'cashu' : type}`} type={type} coin={coin} image={entry.body.key?.image} />}
+    <li className="chest__row chest__row--thumb" style={size ? ({ '--chamfer-size': `${size}px` } as CSSProperties) : undefined}>
+      <ItemThumb type={type} coin={coin} shard={type === 'shard' ? entry.body.shard : undefined} image={entry.body.key?.image} model={entry.body.key?.model} size={size} />
       {type === 'chest' && entry.body.chest
         ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} verified={entry.verified} place={place} sealer={entry.verified ? entry.event.pubkey : undefined} inChest />
         : (
-          <span className="item__line">
+          <span className="item__line held__line">
             <span className="item__name" title={label}>{label}</span>
-            {!entry.verified && <Unsigned />}
+            {!entry.verified && <span className="held__chips"><Unsigned /></span>}
           </span>
         )}
       <button className={`chest__act chest__act--take ${held ? 'is-on' : ''}`} onClick={take} disabled={held} title={held ? 'Already in your ITEMS' : 'Copy it into your ITEMS'}>{held ? 'TAKEN' : 'TAKE'}</button>

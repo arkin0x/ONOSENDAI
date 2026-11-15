@@ -103,7 +103,8 @@ describe("the owner's chain: the chip says where it stops, and RESPAWN", () => {
     expect(said).toContain('Nothing after it counts, so your chain ends where row 22 left you on 2026-09-04. ONOSENDAI will not sign a move onto this chain. Respawn to move again.')
     expect(said).toContain('It was valid when you signed it. The rules changed on 2026-09-07. Sorry.')
     expect(said).not.toContain('—')
-    expect(modalButtons().map(textOf)).toEqual(['SHOW THE ROW', 'CLOSE', 'RESPAWN'])
+    // The ✕ on the title's line every modal has (hud/ui/ModalClose), then its own buttons.
+    expect(modalButtons().map(textOf)).toEqual(['✕', 'SHOW THE ROW', 'CLOSE', 'RESPAWN'])
     await pressInModal('RESPAWN')
     expect(useChainUi.getState().brokenView).toBe('confirm')
     expect(modalText()).toContain('A respawn starts you over.')

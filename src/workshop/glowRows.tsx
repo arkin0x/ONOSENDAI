@@ -20,7 +20,7 @@ import { CloudFog, Sun } from 'lucide-react'
 import { GLOW_REACH, readGlow, readPointSize, type Glow, type GlowStyle } from 'sno-core/glow'
 import {
   POINT_AUTO, RADIUS_MIN, STRENGTH_MAX, STRENGTH_MIN, gibsonsText, pointSizeAt, pointSizeFraction, radiusAt, radiusFraction,
-  stepPointSize, stepRadius, stepStrength, strengthAt, strengthFraction, suggestedGlowStyle, typedStrength, typedTicks,
+  maxGibsonsTyped, stepPointSize, stepRadius, stepStrength, strengthAt, strengthFraction, suggestedGlowStyle, typedStrength, typedTicks,
 } from '../lib/pointGlow'
 import { useWorkshop } from '../store/useWorkshop'
 import { RailRow } from './railRow'
@@ -64,12 +64,14 @@ export function PointSizeRow({ disabled }: { disabled: boolean }): JSX.Element {
       step={stepPointSize}
       min={POINT_AUTO}
       max={GLOW_REACH}
+      ariaMin={0}
+      ariaNow={auto ? null : ticks}
       valueText={auto ? 'AUTO' : `${figure} ${word.toLowerCase()}`}
       shown={auto ? 'AUTO' : <Gibsons ticks={ticks} unit={unit} />}
       less="Smaller points"
       more="Bigger points"
       disabled={disabled}
-      typing={{ hashTitle: 'Type gibsons', hashLabel: 'Type a point size in gibsons', fieldLabel: 'Point size in gibsons', placeholder: `0 to ${gibsonsText(GLOW_REACH, unit).figure} gibsons`, maxLength: 12, decimal: true, parse: (t) => typedTicks(t, unit, 0) }}
+      typing={{ hashTitle: 'Type gibsons', hashLabel: 'Type a point size in gibsons', fieldLabel: 'Point size in gibsons', placeholder: `0 to ${maxGibsonsTyped(unit)} gibsons`, maxLength: 32, decimal: true, parse: (t) => typedTicks(t, unit, 0) }}
     />
   )
 }
@@ -93,7 +95,7 @@ export function GlowRow({ disabled }: { disabled: boolean }): JSX.Element {
     <button
       className={`workshop__mode ws__glowbtn ${style === s ? 'is-on' : ''} ${style === null && suggested === s ? 'is-suggested' : ''}`}
       aria-pressed={style === s}
-      title={style === null && suggested === s ? `${title}. Suits these colors.` : title}
+      title={style === null && suggested === s ? `${title} Suits these colors.` : title}
       disabled={disabled}
       onClick={() => w().setGlow({ style: s })}
     >{icon}{label}</button>
@@ -101,10 +103,10 @@ export function GlowRow({ disabled }: { disabled: boolean }): JSX.Element {
   return (
     <div className={`workshop__row ws__railrow ${disabled ? 'is-off' : ''}`}>
       <span className="workshop__label ws__raillabel">GLOW</span>
-      <div className="workshop__modes ws__glowmodes" role="group" aria-label="Glow">
+      <div className="workshop__modes" role="group" aria-label="Glow">
         <button className={`workshop__mode ws__glowbtn ${style === null ? 'is-on' : ''}`} aria-pressed={style === null} title="No glow" disabled={disabled} onClick={() => w().setGlow(null)}>OFF</button>
-        {button('light', 'LIGHT', <Sun size={12} aria-hidden />, 'Light: adds the points\' colors, like sunlight')}
-        {button('fog', 'FOG', <CloudFog size={12} aria-hidden />, 'Fog: lays the points\' colors over what is behind, like mist')}
+        {button('light', 'LIGHT', <Sun size={12} aria-hidden />, 'Light: adds the points\' colors.')}
+        {button('fog', 'FOG', <CloudFog size={12} aria-hidden />, 'Fog: lays the points\' colors over what is behind.')}
       </div>
     </div>
   )
@@ -134,7 +136,7 @@ export function RadiusRow({ disabled }: { disabled: boolean }): JSX.Element {
       less="Shorter glow"
       more="Longer glow"
       disabled={disabled}
-      typing={{ hashTitle: 'Type gibsons', hashLabel: 'Type a glow radius in gibsons', fieldLabel: 'Glow radius in gibsons', placeholder: `up to ${gibsonsText(GLOW_REACH, unit).figure} gibsons`, maxLength: 12, decimal: true, parse: (t) => typedTicks(t, unit, RADIUS_MIN) }}
+      typing={{ hashTitle: 'Type gibsons', hashLabel: 'Type a glow radius in gibsons', fieldLabel: 'Glow radius in gibsons', placeholder: `up to ${maxGibsonsTyped(unit)} gibsons`, maxLength: 32, decimal: true, parse: (t) => typedTicks(t, unit, RADIUS_MIN) }}
     />
   )
 }
@@ -177,7 +179,7 @@ export function PointGlowRows(): JSX.Element {
       <GlowRow disabled={!points} />
       <RadiusRow disabled={!points || !glowOn} />
       <GlowStrengthRow disabled={!points || !glowOn} />
-      <div className={`ws__explain ws__glownote ${points ? '' : 'is-why'}`}>{GLOW_NOTE}</div>
+      <div className="ws__explain">{GLOW_NOTE}</div>
     </>
   )
 }

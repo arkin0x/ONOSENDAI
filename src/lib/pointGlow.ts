@@ -146,13 +146,25 @@ export function gibsonsText(ticks: number, unit: number): { figure: string; word
 /**
  * A distance typed in gibsons, as whole ticks of an object of `unit`, held
  * between `min` and the 7,680-tick cap; null when it is not a number. A
- * figure that rounds under one tick is `min`.
+ * figure above 0 that rounds under one tick is one tick, and 0 is `min`.
  */
 export function typedTicks(text: string, unit: number, min: number): number | null {
   if (!/^\d*\.?\d+$|^\d+\.$/.test(text)) return null
-  const ticks = Math.round((Number(text) / 2 ** unit) * TICKS)
+  const n = Number(text)
+  const ticks = Math.round((n / 2 ** unit) * TICKS)
   if (!Number.isFinite(ticks)) return null
-  return Math.min(GLOW_REACH, Math.max(min, ticks))
+  // Something typed is never nothing: a figure under one tick is one tick.
+  return Math.min(GLOW_REACH, Math.max(min, n > 0 ? Math.max(1, ticks) : ticks))
+}
+
+/**
+ * The most gibsons # takes at `unit`, as plain digits the field can hold
+ * (64 units, the 7,680-tick cap), for its placeholder: "64" at unit 0,
+ * "67108864" at unit 20.
+ */
+export function maxGibsonsTyped(unit: number): string {
+  const u = Math.round(unit)
+  return u >= 0 ? (64n << BigInt(u)).toString() : String(64 / 2 ** -u)
 }
 
 // ---- the style pre-pick --------------------------------------------------------

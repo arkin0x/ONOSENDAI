@@ -144,6 +144,14 @@ describe('the setters', () => {
     expect(extra()).toEqual({ glow: ['light', 480, 22] })
   })
 
+  it('OFF remembers a glow the shard arrived with, so LIGHT puts it back', () => {
+    load(shard('points', { glow: ['fog', 600, 70] }))
+    w().setGlow(null)
+    expect(extra()).toBeUndefined()
+    w().setGlow({ style: 'light' })
+    expect(extra()).toEqual({ glow: ['light', 600, 70] })
+  })
+
   it('with no style, pre-picks from the points: LIGHT for bright, FOG for dark', () => {
     w().setGlow({})
     expect(extra()).toEqual({ glow: ['light', 120, 40] })

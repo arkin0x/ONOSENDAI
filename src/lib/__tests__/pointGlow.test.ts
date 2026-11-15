@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { GLOW_REACH } from 'sno-core/glow'
 import {
   POINT_AUTO, POINT_AUTO_SPAN, POINT_RAIL_MAX, RADIUS_RAIL_MAX, gibsonsText, meanPointColor, pointSizeAt, pointSizeFraction, radiusAt, radiusFraction,
-  stepLadder, stepPointSize, stepRadius, stepStrength, strengthAt, strengthFraction, suggestedGlowStyle, typedStrength, typedTicks,
+  stepLadder, stepPointSize, stepRadius, stepStrength, strengthAt, strengthFraction, suggestedGlowStyle, typedStrength, typedTicks, maxGibsonsTyped,
 } from '../pointGlow'
 
 describe('POINT SIZE rail', () => {
@@ -97,8 +97,20 @@ describe('gibsons at the object\'s scale', () => {
     expect(typedTicks('1024', 10, 0)).toBe(120)
     expect(typedTicks('0', 0, 1)).toBe(1)
     expect(typedTicks('9999', 0, 0)).toBe(GLOW_REACH)
+    expect(typedTicks('0.001', 0, 0)).toBe(1)
+    expect(typedTicks('3', 20, 0)).toBe(1)
+    expect(typedTicks('0', 20, 0)).toBe(0)
     expect(typedTicks('', 0, 0)).toBeNull()
     expect(typedTicks('1.2.3', 0, 0)).toBeNull()
+  })
+})
+
+describe('the most # takes', () => {
+  it('is 64 units as plain digits the field can hold, and typing it back gives the cap', () => {
+    expect(maxGibsonsTyped(0)).toBe('64')
+    expect(maxGibsonsTyped(20)).toBe('67108864')
+    expect(maxGibsonsTyped(80)).toMatch(/^\d+$/)
+    for (const u of [0, 10, 20, 40, 80]) expect(typedTicks(maxGibsonsTyped(u), u, 0)).toBe(GLOW_REACH)
   })
 })
 

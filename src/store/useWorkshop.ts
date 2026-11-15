@@ -1131,7 +1131,11 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       let wrote: Glow | undefined
       const changed = edit((s) => {
         const had = readGlow(s.extra?.glow)
-        if (patch === null) return s.extra?.glow === undefined ? null : withGlow(s, undefined)
+        if (patch === null) {
+          // OFF remembers the glow it clears, a glow the shard arrived with included, so LIGHT or FOG puts it back.
+          wrote = had
+          return s.extra?.glow === undefined ? null : withGlow(s, undefined)
+        }
         const g: Glow = { ...(had ?? { style: suggestedGlowStyle(s, color), ...glowLast }), ...patch }
         // sno-core clears the field on a fractional value: whole ticks and whole percent only.
         g.radius = Math.round(g.radius)

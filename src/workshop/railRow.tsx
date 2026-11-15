@@ -43,6 +43,10 @@ export interface RailRowProps {
   /** The ends: − stops at `min`, + at `max`, and Home and End go there. */
   min: number
   max: number
+  /** The slider's least value as read aloud, when it is not `min` (POINT SIZE's AUTO sits under 0). */
+  ariaMin?: number
+  /** The value as read aloud, when it is not `value`; null for none (AUTO has no number). */
+  ariaNow?: number | null
   /** The value read aloud. */
   valueText: string
   /** The value cell's content. */
@@ -115,9 +119,9 @@ export function RailRow(p: RailRowProps): JSX.Element {
           role="slider"
           tabIndex={off ? -1 : 0}
           aria-label={p.name}
-          aria-valuemin={p.min}
+          aria-valuemin={p.ariaMin ?? p.min}
           aria-valuemax={p.max}
-          aria-valuenow={p.value}
+          aria-valuenow={p.ariaNow === null ? undefined : p.ariaNow ?? p.value}
           aria-valuetext={p.valueText}
           aria-disabled={off || undefined}
           {...noCallout}

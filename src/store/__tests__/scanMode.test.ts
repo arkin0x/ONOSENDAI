@@ -56,10 +56,10 @@ import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { useSecrets, type HeldKey } from '../useSecrets'
 import { SCAN_MAX_HEIGHT, useShards } from '../useShards'
-import { currentScanRange, scanCubeShown, scanRoute, setScanWorkerFactory, spaceScan, useScan } from '../useScan'
+import { currentScanRange, scanCubeShown, scanRoute, setScanWorkerFactory, useScan } from '../useScan'
 import { currentPadMode, cycleMode, recall } from '../padMode'
 import { placeSpawn } from '../fixtures/placeSpawn'
-import { aboutTime, scanLine, scanPercent, scanTag } from '../../hud/ScanControls'
+import { scanLine, scanPercent, scanTag } from '../../hud/ScanControls'
 import { drawnRegion } from '../../scene/DeployRegionBox'
 
 const S = () => useCyberspace.getState()
@@ -168,62 +168,16 @@ describe('the height', () => {
     expect(clampScanHeight(31, scanRange(16, true, 30))).toBe(30)
   })
 
-  it('says where the cube stands: UNKNOWN and the time, COMPLETE, or HOSAKA; never FREE or HELD (owner, 2026-11-15)', () => {
+  it('says who computes it, and for what', () => {
     const local = scanRange(16, false, null)
-    expect(scanTag(13, local, false, 40)).toBe('UNKNOWN · ABOUT 40 SEC')
-    expect(scanTag(16, local, false, 200)).toBe('UNKNOWN · ABOUT 3 MIN')
-    expect(scanTag(16, local, false, null)).toBe('UNKNOWN')
+    expect(scanTag(13, local, false, null, true)).toBe('ON DEVICE · FREE')
+    expect(scanTag(16, local, false, null, true)).toBe('DEVICE MAX · HOSAKA OFF')
+    expect(scanTag(16, local, false, null, false)).toBe('DEVICE MAX')
     const cloud = scanRange(16, true, 30)
-    expect(scanTag(16, cloud, false, 40)).toBe('UNKNOWN · ABOUT 40 SEC')
-    expect(scanTag(17, cloud, false, null)).toBe('HOSAKA')
-    expect(scanTag(17, cloud, true, null)).toBe('COMPLETE')
-    expect(scanTag(13, local, true, 40)).toBe('COMPLETE')
-    expect(aboutTime(5400)).toBe('ABOUT 2 HR')
-    const src = readFileSync(join('src', 'hud', 'ScanControls.tsx'), 'utf8')
-    // No word FREE or HELD on screen anywhere in SCAN (the doc comment says so, in those words, once).
-    const code = src.replace(/\/\*\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
-    expect(code).not.toMatch(/FREE|HELD/)
-  })
-})
-
-describe('Space in SCAN is a tap on the button (owner, 2026-11-15)', () => {
-  it('at a HOSAKA height: the first press shows CONFIRM with the price, the second pays, even in AUTO under its cap', async () => {
-    cloudOn(true, 'auto', 100)
-    SC().enter()
-    SC().setHeight(22)
-    spaceScan()
-    await Promise.resolve()
-    expect(buy).not.toHaveBeenCalled()
-    expect(SC().confirm).toMatchObject({ height: 22, sats: 21 })
-    // Held down: a repeat never confirms.
-    spaceScan(true)
-    await Promise.resolve()
-    expect(buy).not.toHaveBeenCalled()
-    spaceScan()
-    await vi.waitFor(() => expect(buy).toHaveBeenCalledTimes(1))
-  })
-
-  it('a price that changed between the presses never pays', async () => {
-    cloudOn(true, 'auto', 100)
-    SC().enter()
-    SC().setHeight(22)
-    spaceScan()
-    await Promise.resolve()
-    expect(SC().confirm?.sats).toBe(21)
-    useCyberspace.setState({ cloud: { ...S().cloud, provider: { ...PROVIDER, pricing: { ...PROVIDER.pricing, region_key: [{ max_height: 30, sats: 50, est_time: 'x', est_seconds: 60 }] } } as HosakaProvider } })
-    spaceScan()
-    await Promise.resolve()
-    expect(buy).not.toHaveBeenCalled()
-    // It arms again at the new price; a press after that pays it.
-    expect(SC().confirm?.sats).toBe(50)
-  })
-
-  it('on this device it scans at once, and a repeat does nothing', async () => {
-    SC().enter()
-    spaceScan(true)
-    expect(SC().job).toBeNull()
-    spaceScan()
-    await vi.waitFor(() => expect(rescan).toHaveBeenCalled())
+    expect(scanTag(16, cloud, false, 21, false)).toBe('ON DEVICE · FREE')
+    expect(scanTag(17, cloud, false, 21, false)).toBe('HOSAKA · 21 SATS')
+    expect(scanTag(17, cloud, false, null, false)).toBe('HOSAKA · NO PRICE YET')
+    expect(scanTag(17, cloud, true, 21, false)).toBe('HELD · FREE')
   })
 })
 

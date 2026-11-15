@@ -37,7 +37,9 @@ import { addWalkInputCloser, setWalkMenuCovering, walkMenuCovering } from '../st
 import { canFly, useViewFly } from '../lib/viewFly'
 import { useRegion } from '../store/useRegion'
 import { buildToScan, leaveWalk, scanToHop, viewToAvatar } from '../store/padMode'
-import { scanBuying, spaceScan, useScan } from '../store/useScan'
+import { currentScanRange, scanBuying, scanRoute, useScan } from '../store/useScan'
+import { heldCube } from '../lib/scanCube'
+import { useSecrets } from '../store/useSecrets'
 
 // Cyberspace TV is watching only: WALK's input is closed while it is on (store/walkInput.ts).
 addWalkInputCloser(() => useTv.getState().on)
@@ -286,11 +288,17 @@ export function useKeyboard(): void {
         // faces (arkinox, 2026-11-11), as the Forward button does; it never
         // commits there. R and F are FAR and NEAR again, a cell at a time.
         if (flies) { useViewFly.getState().setKey(1); return }
-        // In SCAN, Space is a tap on the SCAN button (owner, 2026-11-15): on
-        // this device or a cube already held it scans; at a HOSAKA height the
-        // first press shows CONFIRM with the price on the button and only a
-        // second press on the same cube at the same price pays, never one.
-        if (scanning) { spaceScan(event.repeat); return }
+        // In SCAN, Space scans the purple cube: on this device, or a cube
+        // already held. A HOSAKA height is the SCAN button's, which shows the price.
+        if (scanning) {
+          // Held down, Space does not scan again and again.
+          if (event.repeat) return
+          const scan = useScan.getState()
+          const held = heldCube(useSecrets.getState().keys, store.cursor, store.anchorPlane, scan.height) !== null
+          const free = held || scanRoute(scan.height, currentScanRange()) === 'local'
+          if (!scan.job && free) void scan.start({ route: held ? 'held' : 'local' })
+          return
+        }
         // Building never moves you: with nothing to place, Space does nothing.
         if (building) return
         // The next action, as the button names it: HOSAKA's step brings up the

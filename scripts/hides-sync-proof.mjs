@@ -4,7 +4,7 @@
  * in as you). Device A hides two shards; device B, which has never been to
  * those places, lists both and opens one. Every WebSocket is answered by the
  * fake relay here and every other non-localhost request is aborted: nothing
- * reaches a real relay. Also shoots SCAN's status line (centred under the height).
+ * reaches a real relay.
  *
  *   node scripts/hides-sync-proof.mjs http://localhost:5237 /path/to/out
  */
@@ -149,25 +149,6 @@ if (await disc.count()) {
   const view = B.page.locator('.lootd__view', { hasText: 'VIEW' }).first()
   if (await view.count()) { await view.dispatchEvent('click'); await sleep(4000); await B.shot('7-after-VIEW') }
 }
-
-// The SCAN status line, centred under the height (owner fix in the same PR).
-for (let i = 0; i < 3; i++) { await B.page.keyboard.press('Escape'); await sleep(400) }
-if (await B.page.locator('.panel--shards').count()) { await B.page.locator('.hamburger-menu').click(); await sleep(600) }
-await B.mod('/src/store/useScan.ts', `async (m) => { const s = m.useScan.getState(); s.enter(); }`)
-await sleep(1500)
-await B.mod('/src/store/useScan.ts', `async (m) => { const s = m.useScan.getState(); s.setHeight(s.height + 2); void s.start({ route: 'local' }) }`)
-await sleep(300)
-await B.page.locator('.scanorbs').screenshot({ path: path.join(out, 'B-8-scan-status-running.png'), timeout: 120_000 }).catch((e) => console.log('scan shot', e.message))
-await waitFor(async () => !(await B.page.evaluate(async () => (await import('/src/store/useScan.ts')).useScan.getState().job)), 60_000)
-await sleep(500)
-await B.page.locator('.scanorbs').screenshot({ path: path.join(out, 'B-9-scan-status-result.png'), timeout: 120_000 }).catch((e) => console.log('scan shot', e.message))
-const geo = await B.page.evaluate(() => {
-  const r = (s) => { const e = document.querySelector(s); if (!e) return null; const b = e.getBoundingClientRect(); return { cx: Math.round((b.left + b.right) / 2 * 10) / 10, w: Math.round(b.width) } }
-  const line = document.querySelector('.scanorbs__words'); const cs = line ? getComputedStyle(line.parentElement) : null
-  return { value: r('.scanorbs__value b'), line: r('.scanorbs__words'), color: cs?.color, shadow: cs?.textShadow, text: line?.textContent }
-})
-console.log('SCAN centre lines:', JSON.stringify(geo))
-await B.page.screenshot({ path: path.join(out, 'B-10-scan-dock-full.png'), timeout: 120_000 })
 
 console.log('relay events by kind:', JSON.stringify(stats.events), 'aborted non-localhost requests:', stats.aborted)
 console.log('errors A:', errorsA, 'errors B:', B.errors.slice(0, 5))

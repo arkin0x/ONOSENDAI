@@ -34,6 +34,7 @@ import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, r
 import { positionOf, useShards } from '../store/useShards'
 import { BagUnreadable, hiddenLabel, itemLineage, keyItemOf, type ChestItem, type Hidden } from '../lib/hidden'
 import { ItemThumb } from './ItemThumb'
+import { OpensWith } from './KeyListingRow'
 import { holdsEntry, holdsItem, openingKeys, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
 import { carriedLabel } from '../lib/keyringLocks'
 import { useKeyringLookup } from '../store/useKeyring'
@@ -363,6 +364,8 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
 
   const carried = opener?.by === 'key' ? opener.key.carried : undefined
   const opensWith = opener === null ? null : opener.by === 'self' ? 'your identity' : carried ? 'a key you carry' : items[opener.key.id]?.name ?? 'an item you hold'
+  // Neither open here nor closed with CLOSE: what it needs still stands in the way.
+  const locked = !closedHere && !(entries || rereading || canClose)
   const offerOpen = closedHere || (opener && (!entries || owed) && (!canClose || owed))
   const acts = (
     <>
@@ -384,11 +387,16 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
           {/* The card names it above its look (SecretModal); every list names it here. */}
           {named && <span className="item__name" title={chest.name}>{chest.name}</span>}
           <span className="item__meta" title={opensWith ? `Opens with ${opensWith}` : 'The hider’s label of what opens it'}>
-            {closedHere ? 'CLOSED' : entries || rereading || canClose ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
+            {closedHere ? 'CLOSED' : !locked ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
           </span>
         </span>
         {actionsIn !== undefined ? actionsIn && createPortal(acts, actionsIn) : !actsBelow && acts}
       </div>
+      {/* Locked: the listed key item its lock is sealed to, if anyone listed it (KeyListingRow OpensWith).
+          Across a DISCOVERED NEARBY or OTHER LOOT row's whole width (contentsIn), where an open one lists its contents. */}
+      {locked && (contentsIn !== undefined
+        ? contentsIn && createPortal(<OpensWith lock={chest.lockPubkey} opens={!!opener} />, contentsIn)
+        : <OpensWith lock={chest.lockPubkey} opens={!!opener} size={inChest || !actsBelow ? CHEST_INLINE_PX : undefined} />)}
       {offerOpen && !closedHere && carried && <span className="chest__fits">A key you carry fits: {carriedLabel(carried, useCyberspace.getState().position)}</span>}
       {status && <span className="chest__status" role="status">{status}</span>}
       {actsBelow && (offerOpen || canClose) && <div className="chest__below">{acts}</div>}

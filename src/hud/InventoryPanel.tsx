@@ -59,12 +59,14 @@ import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { hasNftLink } from '../lib/nftLink'
 import { ItemThumb } from './ItemThumb'
+import { Copyable, HeldRowLine } from './HeldRowLine'
+import { KeyListingRow } from './KeyListingRow'
 import { ModalClose } from './ui/ModalClose'
-import { chestsOpenedBy, isKeyItem, keyText, splitPanels, type HeldItem } from '../lib/inventory'
+import { chestsOpenedBy, heldKeypairs, isKeyItem, keyText, splitPanels, type HeldItem } from '../lib/inventory'
 import { regionLabel } from '../lib/loot'
 import { provenanceOf } from '../lib/provenance'
 import { safeNpub } from '../lib/npub'
-import { formatAgo, formatStamp, shortHex } from '../lib/time'
+import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { profileLabel } from '../store/useProfiles'
@@ -79,29 +81,12 @@ import { useCashu, cashuStateLabel } from './useCashu'
 import { useMutes } from '../store/useMutes'
 import { hidesThing } from '../lib/muteList'
 import { BlockButton, MuteItemButton } from './BlockButton'
-import { searchListings, type ItemListing } from '../lib/itemListing'
-import { ProfilePic, ProfileTap } from './ProfileBadge'
+import { searchListings } from '../lib/itemListing'
 import { BackupTrouble, RelayTrouble } from './RelayTrouble'
 import { Stacked, leaveModals, useModalStack } from './modalStack'
 
 /** How a held item came to be held, in a word for the row. */
 const SOURCE: Record<HeldItem['source'], string> = { forged: 'forged by you', found: 'found', taken: 'taken', pasted: 'pasted' }
-
-function Copyable({ label, value, title }: { label: string; value: string; title: string }): JSX.Element {
-  const [copied, setCopied] = useState(false)
-  const copy = (): void => {
-    void navigator.clipboard?.writeText(value).then(() => {
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1200)
-    })
-  }
-  return (
-    <>
-      <dt>{label}</dt>
-      <dd><button className="lootd__copy" title={`${title} (click to copy)`} onClick={copy}>{copied ? 'copied' : shortHex(value, 14, 8)}</button></dd>
-    </>
-  )
-}
 
 /**
  * Where a held item was obtained (arkinox, 2026-10-30: "a record of where
@@ -284,27 +269,6 @@ function useRowActions(id: string, name: string, shown = true): { button: JSX.El
     group: (acts) => (open ? <span className="held__menu" id={gid} role="group" aria-label={`Actions for ${name}`}>{acts}</span> : null),
     close,
   }
-}
-
-/**
- * The words of a row in KEY ITEMS or OTHER LOOT, beside its picture (owner,
- * 2026-11-15: "Can you figure out a better layout for the other loot?"):
- * the name on one line, cut with an ellipsis; where it came from and how
- * long ago on the second, the source cut before the age is; what it is now
- * (REDEEMED, LISTED, opens 2 chests, ARCHIVED, UNSIGNED) as small chips on
- * the third. A long name never pushes anything off the row.
- */
-function HeldRowLine({ name, title, source, how, at, chips }: { name: string; title?: string; source: ReactNode; how?: string; at: number; chips?: ReactNode }): JSX.Element {
-  return (
-    <span className="item__line held__line">
-      <span className="item__name" title={title ?? name}>{name}</span>
-      <span className="item__meta held__meta">
-        <span className="held__src">{source}</span>
-        <span className="held__age">{'\u00a0· '}{how ? `${how} ` : ''}<span title={formatStamp(at)}>{formatAgo(at)}</span></span>
-      </span>
-      {chips && <span className="held__chips">{chips}</span>}
-    </span>
-  )
 }
 
 /** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, and ACTIONS: DETAILS, COPY, PLACE, PUBLISH, ARCHIVE, and DELETE once archived. */
@@ -543,45 +507,6 @@ export const useItemsModal = create<{ open: ItemsKind | null }>(() => ({ open: n
 export const FEED_PAGE = 100
 
 /**
- * A published key item someone else listed, in the FEED (store/useItemFeed,
- * the chest and door lock picker's source): its picture, name, who listed it
- * (their picture opens their profile, over this modal), when, and NOT FOUND,
- * since holding it means finding it (owner, 2026-11-14). DETAILS shows its
- * keys to copy and its words. Nothing here publishes; sealing to it is done
- * from a chest or a door's lock, where the picker offers SEAL TO IT.
- */
-function FeedRow({ listing }: { listing: ItemListing }): JSX.Element {
-  const profile = useProfile(listing.lister)
-  const who = profileLabel(profile, safeNpub(listing.lister))
-  const [open, setOpen] = useState(false)
-  return (
-    <li className="secrets__row held__row held__row--item">
-      <ItemThumb type="key" image={listing.image} />
-      <HeldRowLine
-        name={listing.name}
-        title={listing.about || listing.name}
-        source={<>listed by <ProfileTap pubkey={listing.lister} className="items-feed__who" title={who}><ProfilePic pubkey={listing.lister} size={12} /><span className="items-feed__name">{who}</span></ProfileTap></>}
-        at={listing.createdAt}
-        chips={<span className="item__chip tag items-feed__unfound" title="You have not found this item. Find it to hold it">NOT FOUND</span>}
-      />
-      <span className="held__acts">
-        <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>DETAILS</button>
-      </span>
-      {open && (
-        <div className="held__details">
-          <dl>
-            <Copyable label="item" value={safeNpub(listing.itemPubkey)} title={safeNpub(listing.itemPubkey)} />
-            <Copyable label="hex" value={listing.itemPubkey} title={listing.itemPubkey} />
-            <dt>Listed by</dt><dd>{who}</dd>
-            {listing.about && <><dt>About</dt><dd>{listing.about}</dd></>}
-          </dl>
-        </div>
-      )}
-    </li>
-  )
-}
-
-/**
  * KEY ITEMS > FEED: the published key items (kind 33340 listings, the ITEM
  * FEED a chest or door lock picks from), read fresh when it opens, newest
  * first, searchable by name. Never your own listings, nothing by someone
@@ -622,7 +547,7 @@ function FeedList({ held, scroller }: { held: ReadonlySet<string>; scroller: Ref
         {feed.length === 0 && !(trouble && !loading && listings.length === 0) && (
           <li className="secrets__empty">{loading ? 'Reading the item feed…' : q.trim() ? 'No listed item matches.' : 'No one else has listed a key item yet.'}</li>
         )}
-        {feed.slice(0, shownCount).map((l) => <FeedRow key={l.itemPubkey} listing={l} />)}
+        {feed.slice(0, shownCount).map((l) => <KeyListingRow key={l.itemPubkey} listing={l} held={false} />)}
         {feed.length > shownCount && <li ref={end} className="secrets__empty" aria-hidden>…</li>}
       </ul>
     </>
@@ -657,7 +582,7 @@ function ItemsModal({ kind }: { kind: ItemsKind }): JSX.Element {
   )
   const archivedHere = useMemo(() => archived.filter((it) => isKeyItem(it) === (kind === 'keys')), [archived, kind])
   // Every keypair held, archived too, muted or not: a key item you hold is never in FEED.
-  const held = useMemo(() => new Set(Object.values(items).flatMap((it) => (isKeyItem(it) && it.key && !it.cleared ? [it.key.itemPubkey] : []))), [items])
+  const held = useMemo(() => heldKeypairs(items), [items])
   // Which DISCOVERED chests each item opens, from the lock tags of chests seen.
   const chests = useMemo(() => Object.values(discovered).filter((h) => h.type === 'chest' && h.chest).map((h) => ({ id: h.eventId, chest: h.chest! })), [discovered])
   // Whether your forged items are already listed is read from the ITEM FEED,

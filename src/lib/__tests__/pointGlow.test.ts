@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { GLOW_REACH } from 'sno-core/glow'
 import {
   POINT_AUTO, POINT_AUTO_SPAN, POINT_RAIL_MAX, RADIUS_RAIL_MAX, gibsonsText, meanPointColor, pointSizeAt, pointSizeFraction, radiusAt, radiusFraction,
-  stepLadder, stepPointSize, stepRadius, stepStrength, strengthAt, strengthFraction, suggestedGlowStyle, ticksToGibsons, typedStrength, typedTicks,
+  stepLadder, stepPointSize, stepRadius, stepStrength, strengthAt, strengthFraction, suggestedGlowStyle, typedStrength, typedTicks,
 } from '../pointGlow'
 
 describe('POINT SIZE rail', () => {
@@ -76,19 +76,17 @@ describe('RADIUS and GLOW STRENGTH rails', () => {
 
 describe('gibsons at the object\'s scale', () => {
   it('at unit 0 a unit is one gibson, 120 ticks', () => {
-    expect(ticksToGibsons(120, 0)).toBe(1)
     expect(gibsonsText(36, 0)).toEqual({ figure: '0.3', word: 'GIBSONS' })
     expect(gibsonsText(120, 0)).toEqual({ figure: '1', word: 'GIBSON' })
     expect(gibsonsText(0, 0)).toEqual({ figure: '0', word: 'GIBSONS' })
     expect(gibsonsText(GLOW_REACH, 0).figure).toBe('64')
   })
 
-  it('at a larger unit the same ticks are more gibsons, shortened past a thousand', () => {
-    expect(ticksToGibsons(120, 10)).toBe(1024)
+  it('at a larger unit the same ticks are more gibsons, a power of two past a million', () => {
     expect(gibsonsText(36, 4)).toEqual({ figure: '4.8', word: 'GIBSONS' })
     expect(gibsonsText(120, 8).figure).toBe('256')
-    expect(gibsonsText(120, 10).figure).toBe('1.02K')
-    expect(gibsonsText(120, 20).figure).toBe('1.05M')
+    expect(gibsonsText(120, 10).figure).toBe('1024')
+    expect(gibsonsText(120, 20).figure).toBe('2^20')
     expect(gibsonsText(120, 60).figure).toBe('2^60')
   })
 

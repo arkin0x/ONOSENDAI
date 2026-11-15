@@ -94,7 +94,7 @@ describe('the four rows', () => {
     expect(renderToStaticMarkup(<PointGlowRows />)).toContain('aria-valuetext="AUTO"')
     load({ ...shard('points', { pointsize: 120 }), unit: 10 })
     const html = renderToStaticMarkup(<PointGlowRows />)
-    expect(html).toContain('aria-valuetext="1.02K gibsons"')
+    expect(html).toContain('aria-valuetext="1024 gibsons"')
     expect(html).toContain('ws__gibsons-word">GIBSONS<')
   })
 

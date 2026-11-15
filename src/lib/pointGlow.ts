@@ -15,10 +15,11 @@
  */
 
 import { GLOW_REACH, suggestGlowStyle, type GlowStyle } from 'sno-core/glow'
-import type { ShardModel } from 'sno-core/shards'
+import { TICKS_PER_UNIT, type ShardModel } from 'sno-core/shards'
+import { gibsonsLabel, ticksToGibsons } from './pointLook'
 
 /** Ticks in one model unit (§1.2). */
-const TICKS = 120
+const TICKS = TICKS_PER_UNIT
 
 /** POINT SIZE's value for "the reader's own size": no `pointsize` at all. */
 export const POINT_AUTO = -1
@@ -131,25 +132,15 @@ export function typedStrength(text: string): number | null {
 
 // ---- gibsons -------------------------------------------------------------------
 
-/** Ticks of an object of `unit` in gibsons: a tick is 1/120 of a unit, a unit 2^unit gibsons. */
-export function ticksToGibsons(ticks: number, unit: number): number {
-  return (ticks / TICKS) * 2 ** unit
-}
-
 /**
- * A distance in ticks as the rows show it, in gibsons at the object's scale:
- * the figure and the word under it. Under 100 to two decimals (0.3 at unit 0
- * is 36 ticks), under a thousand whole, then short (1.2K, 3.4M, 5T), and past
- * that a power of two, since no one reads 10^15 gibsons.
+ * A distance in ticks as the rows show it, in gibsons at the object's scale
+ * (lib/pointLook gibsonsLabel, the renderer's own reading): the figure, and
+ * the word under it.
  */
 export function gibsonsText(ticks: number, unit: number): { figure: string; word: 'GIBSON' | 'GIBSONS' } {
-  const g = ticksToGibsons(ticks, unit)
-  let figure: string
-  if (g < 100) figure = String(Math.round(g * 100) / 100)
-  else if (g < 1000) figure = String(Math.round(g))
-  else if (g < 1e15) figure = new Intl.NumberFormat('en-US', { notation: 'compact', maximumSignificantDigits: 3 }).format(g)
-  else figure = `2^${Math.round(Math.log2(g))}`
-  return { figure, word: figure === '1' ? 'GIBSON' : 'GIBSONS' }
+  const label = gibsonsLabel(ticksToGibsons(ticks, unit))
+  const cut = label.lastIndexOf(' ')
+  return { figure: label.slice(0, cut), word: label.slice(cut + 1) === 'GIBSON' ? 'GIBSON' : 'GIBSONS' }
 }
 
 /**

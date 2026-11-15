@@ -148,7 +148,7 @@ export function ViewPanel(): JSX.Element {
     {
       id: 'view-glow',
       title: 'Glow',
-      hint: 'Draw object glow.',
+      hint: 'Light and fog that objects cast.',
       on: glow,
       set: (v) => useLayers.getState().setLayer('glow', v),
     },
@@ -195,7 +195,8 @@ export function ViewPanel(): JSX.Element {
         sound you have found or placed: inside one it plays at full volume, and
         it fades to silence at its region's walls.
         Glow draws the light or fog some objects cast around their points;
-        turn it off if a slow phone struggles. The workshop shows it either way.
+        turn it off if a slow phone struggles. The workshop still shows glow
+        on the object you are making.
         Sync hidden list is the one switch here that reaches the relay. Your
         list of hidden things is saved to the relay, encrypted so only you can
         read it. Any device signed in as you shows the same list and can open

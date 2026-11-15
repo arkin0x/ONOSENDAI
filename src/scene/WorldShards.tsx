@@ -18,6 +18,7 @@ import { useCeremony } from '../store/useCeremony'
 import { editingId, useShards, type WorldItem } from '../store/useShards'
 import { WALL_BREATH_SECONDS } from './Rooms'
 import { WalkContactHint } from './WalkContactHint'
+import { glowReachDoublings } from '../lib/pointLook'
 import { ShardMesh } from './ShardMesh'
 import { GHOST_OPACITY } from './shardFaces'
 import { regionBox, type Box } from '../lib/clip'
@@ -156,7 +157,8 @@ export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at
     .filter((w) => w.type === 'shard' && w.shard && w.plane === plane)
     // Not drawn at all once it cannot show a pixel at any distance; a shard
     // with placed objects is exempt, since they can be far larger than it.
-    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL)
+    // A glow reaches past its points (DECK-0003 §1.16 SHOULD keep it visible): its radius widens the cull.
+    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL + glowReachDoublings(w.shard!))
     .map((w) => placeShard(w, origin, scaleExp, axes))
     .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH)
 }

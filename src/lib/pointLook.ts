@@ -126,3 +126,24 @@ export function drawPlan(mode: ShardModel['mode'], look: Pick<PointLook, 'pointS
 export function haloFade({ ghostShare = 1, dim = 1 }: { ghostShare?: number; dim?: number }): number {
   return ghostShare * dim
 }
+
+/**
+ * How many doublings further off an object's glow keeps it worth drawing
+ * (WorldShards FAR_CULL): log2(1 + radius in model units), 0 with no glow. A
+ * glow of the 64-unit reach widens the cull by six.
+ */
+export function glowReachDoublings(s: Looked): number {
+  const g = drawnGlow(s)
+  return g ? Math.log2(1 + ticksToUnits(g.radius)) : 0
+}
+
+/**
+ * Whether no one can see an object (a walker it stops is shown its outline,
+ * store/wallHint.ts; the bench shows faint dots): opacity 0 (its glow, if any,
+ * does not show where the faces are), or POINTS at point size 0 with no glow.
+ */
+export function unseenObject(s: Looked): boolean {
+  if (s.vertices.length === 0) return false
+  if (drawnOpacity(s) === 0) return true
+  return s.mode === 'points' && drawnPointSize(s) === 0 && drawnGlow(s) === undefined
+}

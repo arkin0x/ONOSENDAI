@@ -680,6 +680,20 @@ export function clearWalls(): void {
   resetFollows()
 }
 
+/** What firstHit says of the face it found, reused by every step (stepLimit). */
+const hitWho: { bounce: Bounce; springboard?: boolean; unseen?: boolean } = { bounce: 0 }
+
+/** The wall the last stopped step met, and whether the face was of an object no one can see (a part or the shard). */
+let lastStop: { key: string; unseen: boolean } | null = null
+/**
+ * Whether the face that last stopped a step on the wall `key` belongs to an
+ * object no one can see: the shard itself or the part it places that the
+ * step met (store/wallHint.ts). Undefined when no step has stopped on it.
+ */
+export function lastStopUnseen(key: string): boolean | undefined {
+  return lastStop && lastStop.key === key ? lastStop.unseen : undefined
+}
+
 /** Why a step stopped short: the shard it met, and how far it may go. */
 export interface WallStop {
   /** Whole gibsons the step may take, from 0 (not at all) to its full length. */
@@ -735,6 +749,8 @@ function tolerance(e: Entry, g: number, length: bigint): number {
 export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[], stand: boolean | AxisDirection = false): WallStop {
   const keep = new Set<string>()
   let best: number | null = null
+  /** Whether the face that stops the step belongs to an object no one can see, the shard itself or a part it places. */
+  let bestUnseen = false
   let bestTol = ON_FACE
   let by: WallItem | null = null
   let wait = false
@@ -789,20 +805,20 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
       // Asked to stand (above): a face within a hair of your height, either
       // side, is in your own plane. It is held back, and the step is measured
       // past it, as if it were not there, until the space above you is known.
-      t = firstHit(e.mesh, o, i, s, maxT, -hair / g, e.clip)
+      t = firstHit(e.mesh, o, i, s, maxT, -hair / g, e.clip, hitWho)
       if (t !== null && t * g <= hair) {
         planes.push({ w, tol })
-        t = firstHit(e.mesh, o, i, s, maxT, hair / g, e.clip)
+        t = firstHit(e.mesh, o, i, s, maxT, hair / g, e.clip, hitWho)
       }
     } else {
-      t = firstHit(e.mesh, o, i, s, maxT, ON_FACE / g, e.clip)
+      t = firstHit(e.mesh, o, i, s, maxT, ON_FACE / g, e.clip, hitWho)
     }
     if (t === null) continue
     const gib = t * g
-    if (best === null || gib < best) { best = gib; bestTol = tol; by = w }
+    if (best === null || gib < best) { best = gib; bestTol = tol; by = w; bestUnseen = hitWho.unseen === true }
   }
   // A face in your own plane holds you when the space a hair above you is open.
-  if (planes.length > 0 && openAbove(from, items, { axis, dir: dir < 0 ? 1 : -1 })) { best = 0; bestTol = planes[0].tol; by = planes[0].w }
+  if (planes.length > 0 && openAbove(from, items, { axis, dir: dir < 0 ? 1 : -1 })) { best = 0; bestTol = planes[0].tol; by = planes[0].w; bestUnseen = false }
   // Shards no longer in the world: what their builds held of this WALK's pools comes back.
   const back = new Set<Pool>()
   for (const [k, gone] of entries) if (!keep.has(k)) { entries.delete(k); for (const p of release(gone.spend)) back.add(p) }
@@ -814,6 +830,7 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   if (best !== null) {
     const k = Math.max(0, Math.ceil(best - bestTol) - 1)
     stop = { reach: BigInt(k) < length ? BigInt(k) : length, by }
+    if (by) lastStop = { key: by.key, unseen: bestUnseen }
   }
   return middle && middle.reach < stop.reach ? middle : stop
 }

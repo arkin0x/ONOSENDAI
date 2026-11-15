@@ -98,7 +98,7 @@ const ROWS: Array<[string, string, string]> = [
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
   ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
   ['view-audio-spheres', 'Sound spheres', 'Blue rings where a hidden sound plays at full volume.'],
-  ['view-glow', 'Glow', 'Draw object glow.'],
+  ['view-glow', 'Glow', 'Light and fog that objects cast.'],
   ['view-hides-sync', 'Sync hidden list', 'Your hidden things on every device signed in as you.'],
 ]
 

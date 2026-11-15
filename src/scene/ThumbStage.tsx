@@ -35,6 +35,8 @@ export const THUMB_PX = 160
  * at the display's rate, made every picture wait four frames.
  */
 export const SETTLE_FRAMES = 1
+/** Frames drawn alive and empty before a picture is taken blank: an object whose placed parts draw nothing (all at opacity 0). */
+export const BLANK_FRAMES = 30
 /** For an object that places others, once their payloads are in hand: ShardMesh resolves them again from the shared cache. */
 const PARTS_SETTLE_FRAMES = 12
 /** How long a composite object's parts get to arrive before it is drawn with what came (a placeholder for the rest). */
@@ -106,6 +108,8 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
   // The frame the camera was last placed for, and whether the picture is taken.
   const placed = useRef<ThumbFrame | null>(null)
   const taken = useRef(false)
+  // Frames drawn with the context alive and nothing in them.
+  const blank = useRef(0)
 
   // Priority 1: this canvas is drawn here and not by r3f, so the frame read
   // back is the one just drawn, not the one before it. The camera is placed
@@ -134,8 +138,14 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
     // frame counts only when the context is there and something was drawn
     // in it; until then the job waits, and the watchdog (ThumbHost) makes the
     // stage again.
-    // An object that draws nothing by design (opacity 0 with no glow, POINTS at point size 0) is rightly blank (lib/pointLook.ts).
-    if (gl.getContext().isContextLost() || (gl.info.render.calls === 0 && drawsAnything(job.shard))) return
+    // An object that draws nothing by design (opacity 0 with no glow, POINTS at point size 0) is rightly blank
+    // (lib/pointLook.ts). One whose placed parts may all be such (a room of invisible parts) is taken blank too,
+    // once the context has drawn BLANK_FRAMES frames alive and empty, so it never stalls the queue.
+    if (gl.getContext().isContextLost()) return
+    if (gl.info.render.calls === 0) {
+      blank.current += 1
+      if (drawsAnything(job.shard) && blank.current < BLANK_FRAMES) return
+    }
     frames.current += 1
     if (frames.current < wait || taken.current) return
     taken.current = true

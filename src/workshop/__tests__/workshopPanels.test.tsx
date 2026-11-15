@@ -1,6 +1,6 @@
 /**
  * workshopPanels.test.tsx - the workshop's top bar (arkinox, 2026-10-23;
- * workshop redesign, phase 1): MENU, SHARD, GRID, AVATAR and MOTION, each its
+ * workshop redesign, phase 1): MENU, SHARD, MOTION, AVATAR and GRID, each its
  * own sheet, one open at a time.
  * MENU keeps the shard list and the ways in; SHARD has the open shard's name,
  * the Shard Feed, its counts, DRAW, OPACITY (a slider with a number to type)
@@ -76,8 +76,8 @@ const MOVED: Record<'shard' | 'avatar', string[]> = {
 }
 
 describe('the workshop top bar (workshop redesign, phase 1)', () => {
-  it('reads MENU, SHARD, GRID, AVATAR, MOTION, with SHARD a box and AVATAR a venetian mask, between the way out and DEPLOY', () => {
-    const at = ["area: 'menu', label: 'MENU', icon: Menu", "area: 'shard', label: 'SHARD', icon: Box", "area: 'grid', label: 'GRID', icon: Grid3x3", "area: 'avatar', label: 'AVATAR', icon: VenetianMask", "area: 'motion', label: 'MOTION'"].map((m) => TOPBAR.indexOf(m))
+  it('reads MENU, SHARD, MOTION, AVATAR, GRID, with SHARD a box and AVATAR a venetian mask, between the way out and DEPLOY', () => {
+    const at = ["area: 'menu', label: 'MENU', icon: Menu", "area: 'shard', label: 'SHARD', icon: Box", "area: 'motion', label: 'MOTION'", "area: 'avatar', label: 'AVATAR', icon: VenetianMask", "area: 'grid', label: 'GRID', icon: Grid3x3"].map((m) => TOPBAR.indexOf(m))
     for (const i of at) expect(i).toBeGreaterThan(-1)
     expect([...at].sort((a, b) => a - b)).toEqual(at)
     const close = TOPBAR.indexOf('aria-label="Close the workshop"')

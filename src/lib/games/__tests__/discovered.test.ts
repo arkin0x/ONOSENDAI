@@ -3,7 +3,8 @@
  * (lib/games/discovered.ts): none at first; a game noted on this device for
  * that identity (entered here, or offered by the tutorial's card), kept per
  * identity and past a page that would not keep it; a game whose entry is on
- * the chain; a game whose world bag opened here. Never a game that is off
+ * the chain; a game whose world bag opened here; the live tutorial dungeon
+ * for everyone, found or not (owner, 2026-11-14). Never a game that is off
  * here, so never the DEV dungeon on the production host.
  */
 
@@ -20,9 +21,23 @@ const mem = vi.hoisted(() => {
   return m
 })
 
+// The registry as each test asks: the real one (the DEV dungeon, src/test/noNetwork.ts), or the live dungeon under its real key.
+// 'starterOff': the starter's key, but its world a bundled fixture, so not live.
+const reg = vi.hoisted(() => ({ live: false, starterOff: false }))
+vi.mock('../registry', async (orig) => {
+  const real = await orig<typeof import('../registry')>()
+  const { tutorialGameFor, TUTORIAL_PUBKEY, TUTORIAL_FIXTURE_WORLD } = await import('../tutorialGame')
+  return {
+    ...real,
+    implementedGames: () => (reg.live
+      ? [tutorialGameFor(TUTORIAL_PUBKEY)]
+      : reg.starterOff ? [{ ...tutorialGameFor(TUTORIAL_PUBKEY), world: TUTORIAL_FIXTURE_WORLD }] : real.implementedGames()),
+  }
+})
+
 import type { ActionEvent } from '../../events'
-import { FOUND_GAMES_PREFIX, discoveredGames, enterFromRefusal, enteredOnChain, noteFoundGame, notedGames, useFoundGames, worldsOpened } from '../discovered'
-import { TUTORIAL_GAME } from '../tutorialGame'
+import { FOUND_GAMES_PREFIX, STARTER_GAMES, discoveredGames, enterFromRefusal, enteredOnChain, noteFoundGame, notedGames, useFoundGames, worldsOpened } from '../discovered'
+import { TUTORIAL_GAME, TUTORIAL_PUBKEY } from '../tutorialGame'
 
 const ME = 'a1'.repeat(32)
 const OTHER = 'b2'.repeat(32)
@@ -40,6 +55,8 @@ beforeEach(() => {
   mem.clear()
   // The DEV dungeon every test plays (src/test/noNetwork.ts) is on by this device's switch.
   mem.set('onosendai:games', '1')
+  reg.live = false
+  reg.starterOff = false
 })
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 
@@ -78,6 +95,32 @@ describe('the games found', () => {
     vi.stubGlobal('location', { hostname: 'onosendai.tech', search: '' })
     vi.stubEnv('DEV', false)
     expect(found([DUNGEON], [enter(DUNGEON)])).toEqual([])
+  })
+})
+
+describe('the starter game: the live tutorial dungeon, listed for everyone (owner, 2026-11-14)', () => {
+  it('listed with nothing found, for any identity, the switch off, on the production host', () => {
+    reg.live = true
+    expect(found()).toEqual([TUTORIAL_PUBKEY])
+    mem.delete('onosendai:games')
+    vi.stubGlobal('location', { hostname: 'onosendai.tech', search: '' })
+    vi.stubEnv('DEV', false)
+    expect(found([], [hop()])).toEqual([TUTORIAL_PUBKEY])
+    // Found as well: listed once.
+    expect(found([TUTORIAL_PUBKEY], [enter(TUTORIAL_PUBKEY)])).toEqual([TUTORIAL_PUBKEY])
+  })
+
+  it('only while live: the starter under a world that is not live, or the DEV placeholder, still needs finding', () => {
+    reg.starterOff = true
+    expect(found()).toEqual([])
+    expect(found([TUTORIAL_PUBKEY])).toEqual([TUTORIAL_PUBKEY])
+    reg.starterOff = false
+    expect(found()).toEqual([])
+    expect(found([DUNGEON])).toEqual([DUNGEON])
+  })
+
+  it('other games still need discovery: only the tutorial dungeon is a starter', () => {
+    expect(STARTER_GAMES).toEqual(new Set([TUTORIAL_PUBKEY]))
   })
 })
 

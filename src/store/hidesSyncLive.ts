@@ -5,10 +5,10 @@
  */
 
 import { CYBERSPACE_RELAY, onResume, publishMany, query, queryChecked, relaySet } from '../lib/relay'
-import { holdingBroadcast } from '../lib/noBroadcast'
 import { adoptEntries } from '../lib/hidesAdopt'
 import { useCyberspace } from './useCyberspace'
 import { useShards } from './useShards'
+import { tutorialRunFor } from './useTutorial'
 import { noteListChange, requestSync, setHidesDeps, type HidesDeps } from './hidesSync'
 
 const sameRelay = (a: string, b: string): boolean => a.trim().toLowerCase().replace(/\/+$/, '') === b.trim().toLowerCase().replace(/\/+$/, '')
@@ -23,7 +23,8 @@ export function startHidesSync(): void {
   const deps: Partial<HidesDeps> = {
     self: () => useCyberspace.getState().identity.pubkey,
     live: () => useCyberspace.getState().live,
-    tutorial: (me) => holdingBroadcast(me),
+    // The whole run, folded or not: the no-broadcast tag pauses while the card is folded, this does not.
+    tutorial: (me) => tutorialRunFor(me),
     crypto: () => {
       const c = useCyberspace.getState().selfCrypto()
       return { nip44Encrypt: c.nip44Encrypt, nip44Decrypt: c.nip44Decrypt }

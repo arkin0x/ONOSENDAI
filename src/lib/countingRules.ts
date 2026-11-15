@@ -408,7 +408,9 @@ export function keyChains(events: NostrEvent[], pubkey: string, t: number = Infi
  * ARRIVAL). A spawn tagged no-broadcast (spec §8.13: a first arrival's
  * tutorial) is not an arrival to show; such a key arrives with its first
  * untagged action on that spawn's chain, any v2 action naming the spawn as
- * its genesis, so a new player is counted once the tutorial is behind them.
+ * its genesis, so a new player is counted once the tutorial is behind them,
+ * or at the first move made with its card folded (owner, 2026-11-14: the tag
+ * pauses while the card is minimized; TV shows that move, so it arrives).
  * Only what `events` holds can say so: a key with nothing untagged in hand
  * has not arrived.
  */

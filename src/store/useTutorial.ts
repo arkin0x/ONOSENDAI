@@ -6,10 +6,11 @@
  * tour's own pieces (store/useDemo.ts applyScene, watchAction, aimCursor).
  * A first arrival starts LIVE (owner, 2026-11-14), so Cyberspace TV and the
  * numbers that say whether new players stay can see them: while a run is
- * going, every public event the player signs carries the no-broadcast tag
- * (spec §8.13, lib/noBroadcast.ts), and TV skips it. The tag stops with the
- * run (a finish, a skip, a pause, another identity); events already signed
- * keep it. Until 2026-11-14 a first arrival started LOCAL (feedback
+ * going and its card is up, every public event the player signs carries the
+ * no-broadcast tag (spec §8.13, lib/noBroadcast.ts), and TV skips it. The tag
+ * pauses while the card is folded (owner, 2026-11-14) and stops with the run
+ * (a finish, a skip, a pause, another identity); events already signed keep
+ * it. Until 2026-11-14 a first arrival started LOCAL (feedback
  * 2026-11-11, item 15), so the tutorial's moves would not crowd TV; the tag
  * does that now. The publishing switch is never touched here: a first
  * arrival has the device's (LIVE unless someone turned it off), and a resume
@@ -566,20 +567,39 @@ export const useTutorial = create<TutorialState>((set, get) => {
 })
 
 /**
- * While a run is going for the identity on screen, every public Cyberspace
- * event this client signs carries the no-broadcast tag (spec §8.13;
- * lib/noBroadcast.ts, added in the store's signEvent). `active` is false
- * once the run is finished, skipped or paused, and a run belongs to its
- * player only (another identity pauses it, watchFirstArrival; and only an
- * event signed by the run's own key is tagged), so the tag stops with the
- * run. A minimized run is still a run, and so is one resumed on a later
- * load: its events stay tagged until it is finished or skipped.
+ * Whether the tutorial's card is up and guiding: a run going, its card not
+ * folded to the one-line bar. A modal card (the welcome, "Where next?") is up
+ * whatever the fold says, since it is drawn over everything. The workshop,
+ * which hides the coach while open, still counts as guided: the workshop step
+ * sends the player there, and nothing it signs is a tagged kind. A game
+ * cannot be entered from GAMES mid-run (GamesPanel TUTORIAL_MESSAGE), and the
+ * tutorial's DUNGEON choice ends the run.
  */
-holdBroadcastWhile((signer) => {
+export function tutorialCardUp(s: Pick<TutorialState, 'active' | 'minimized' | 'index' | 'script'> = useTutorial.getState()): boolean {
+  return s.active && (!s.minimized || s.script.steps[s.index]?.modal === true)
+}
+
+/** Whether a run is going for `who` (the identity on screen when not given), folded or not. */
+export function tutorialRunFor(who?: string): boolean {
   const t = useTutorial.getState()
-  const who = signer ?? useCyberspace.getState().identity.pubkey
-  return t.active && t.pubkey !== null && t.pubkey === who
-})
+  const me = who ?? useCyberspace.getState().identity.pubkey
+  return t.active && t.pubkey !== null && t.pubkey === me
+}
+
+/**
+ * While the run's card is up and guiding for the identity on screen, every
+ * public Cyberspace event this client signs carries the no-broadcast tag
+ * (spec §8.13; lib/noBroadcast.ts, added in the store's signEvent). Owner,
+ * 2026-11-14 (ruled A): "no-broadcast tag only while the tutorial card is up
+ * and guiding (minimize/leave pauses tagging; resume restarts)". So folding
+ * the card to its bar pauses the tag and unfolding it brings it back, and a
+ * run finished, skipped or paused (another identity, the tour) tags nothing;
+ * RESUME TUTORIAL starts it again. A run belongs to its player only (another
+ * identity pauses it, watchFirstArrival; and only an event signed by the
+ * run's own key is tagged). An event already signed keeps what it was signed
+ * with.
+ */
+holdBroadcastWhile((signer) => tutorialRunFor(signer) && tutorialCardUp())
 
 /**
  * Where RESUME TUTORIAL would pick `pubkey`'s run up, or null when it has none

@@ -26,6 +26,14 @@ const mem = vi.hoisted(() => {
   return m
 })
 
+// The registry as each test asks: the real one (the DEV dungeon), or the live dungeon under its real key (the starter game).
+const reg = vi.hoisted(() => ({ live: false }))
+vi.mock('../../lib/games/registry', async (orig) => {
+  const real = await orig<typeof import('../../lib/games/registry')>()
+  const { tutorialGameFor, TUTORIAL_PUBKEY } = await import('../../lib/games/tutorialGame')
+  return { ...real, implementedGames: () => (reg.live ? [tutorialGameFor(TUTORIAL_PUBKEY)] : real.implementedGames()) }
+})
+
 vi.mock('../../lib/chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/chains')>()),
   fetchChainEvents: async () => [],
@@ -42,7 +50,7 @@ vi.mock('zustand', async (importOriginal) => {
   return { ...real, create: (init?: Parameters<typeof real.create>[0]) => (init === undefined ? live : live(init)) }
 })
 
-import { GamesPanel, NO_GAMES_LINE, TOUR_MESSAGE } from '../GamesPanel'
+import { GamesPanel, NO_GAMES_LINE, TOUR_MESSAGE, TUTORIAL_MESSAGE } from '../GamesPanel'
 import { GAME_AT_HEAD_MESSAGE, GAME_BUSY_MESSAGE, GAME_CHOOSE_FIRST_MESSAGE, GAME_HOLDS_MESSAGE, GAME_IN_TRANSIT_MESSAGE, GAME_NEEDS_CHAIN_MESSAGE, useCyberspace } from '../../store/useCyberspace'
 import { COVERED_MESSAGE, GAME_ALREADY_MESSAGE, WALK_BUSY_MESSAGE, useGame } from '../../store/useGame'
 import { useWalk } from '../../store/useWalk'
@@ -107,6 +115,7 @@ afterEach(() => {
   useDemo.setState({ active: false })
   if (useTutorial.getState().active) useTutorial.getState().pause()
   useTutorial.setState({ active: false })
+  reg.live = false
 })
 
 describe('the GAMES panel', () => {
@@ -116,6 +125,16 @@ describe('the GAMES panel', () => {
     expect(html).toContain('<h2>Games</h2>')
     expect(html).toContain(`<li class="avatars__empty">${NO_GAMES_LINE}</li>`)
     expect(button('ENTER')).toBeNull()
+  })
+
+  it('the live tutorial dungeon is listed for everyone, nothing found (owner, 2026-11-14: the starter game)', () => {
+    reg.live = true
+    mem.delete('onosendai:games')
+    expect(notedGames(me())).toEqual([])
+    const { html, button } = panel()
+    expect(html).toContain(TUTORIAL_GAME.name)
+    expect(html).not.toContain(NO_GAMES_LINE)
+    expect(button('ENTER')?.props.disabled).toBe(false)
   })
 
   it('with the dungeon found: its name and ENTER, ready', () => {
@@ -179,6 +198,8 @@ describe('the GAMES panel', () => {
       [GAME_IN_TRANSIT_MESSAGE, () => useCyberspace.setState({ transit: { stage: 'boarded' } as never }), () => useCyberspace.setState({ transit: null })],
       [COVERED_MESSAGE, () => useTv.setState({ on: true }), () => useTv.setState({ on: false })],
       [TOUR_MESSAGE, () => useDemo.setState({ active: true }), () => useDemo.setState({ active: false })],
+      // Listed for everyone from the first step (owner, 2026-11-14), but never entered from here mid-run.
+      [TUTORIAL_MESSAGE, () => useTutorial.setState({ active: true }), () => useTutorial.setState({ active: false })],
       [GAME_ALREADY_MESSAGE, () => useGame.setState({ busy: 'entering' }), () => useGame.setState({ busy: null })],
       [COVERED_MESSAGE, () => useWorkshop.setState({ open: true }), () => useWorkshop.setState({ open: false })],
       [WALK_BUSY_MESSAGE, () => useWalk.setState({ falling: true }), () => useWalk.setState({ falling: false })],

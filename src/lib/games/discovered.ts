@@ -17,6 +17,12 @@
  *   (store/foundGames.ts), so a respawn, which starts a new chain, or a
  *   reload, which starts with no finds, forgets nothing.
  *
+ * One game is listed for everyone, found or not: the live tutorial dungeon,
+ * the starter game (owner, 2026-11-14, ruled A: "GAMES panel always lists the
+ * live tutorial dungeon for everyone (starter game); other games still need
+ * discovery"). STARTER_GAMES; only while it is live (flag.ts gameLive), so
+ * the DEV placeholder a device switched on is listed only once found.
+ *
  * Only a game that is on here is ever listed (registry implementedGames): a
  * placeholder is never offered on the production host. Kept per identity on
  * this device; nothing is published for it.
@@ -25,8 +31,10 @@
 import { create } from 'zustand'
 import type { ActionEvent } from '../events'
 import type { Hidden } from '../hidden'
+import { gameLive } from './flag'
 import { implementedGames } from './registry'
 import { inRegion } from './play'
+import { TUTORIAL_PUBKEY } from './tutorialGame'
 import type { GameDef } from './types'
 
 /** Where the games an identity found are kept: their pubkeys, under the identity's. */
@@ -88,11 +96,14 @@ export interface FoundSources {
   finds: Iterable<Pick<Hidden, 'author' | 'at' | 'plane'>>
 }
 
-/** The games found, in the registry's order, among those on here. */
+/** The games every identity is offered without finding them, while they are live: the tutorial dungeon (owner, 2026-11-14). */
+export const STARTER_GAMES: ReadonlySet<string> = new Set([TUTORIAL_PUBKEY])
+
+/** The games listed, in the registry's order, among those on here: the live starter games, and the games found. */
 export function discoveredGames(src: FoundSources): GameDef[] {
   const games = implementedGames()
   const found = new Set([...src.noted, ...enteredOnChain(src.chain), ...worldsOpened(src.finds, games)])
-  return games.filter((g) => found.has(g.pubkey))
+  return games.filter((g) => found.has(g.pubkey) || (STARTER_GAMES.has(g.pubkey) && gameLive(g)))
 }
 
 /**

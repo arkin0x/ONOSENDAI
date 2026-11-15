@@ -22,7 +22,7 @@
  * (VERIFY_MS) and writing the union. Only shards whose content changed are
  * signed. Nothing is written:
  *   - in LOCAL, as nothing else is;
- *   - while a tutorial run is active (signEvent's no-broadcast rule);
+ *   - while a tutorial run is active, its card up or folded;
  *   - when the canonical relay did not answer, or a shard on it did not open:
  *     a record rebuilt from less than the whole would replace the whole;
  *   - when the signer has no NIP-44 (Settings' EXPLAIN says so), or the

@@ -196,6 +196,9 @@ const haloVertex = /* glsl */ `
   attribute float aSeed;
 
   uniform float uRadius;
+  uniform float uCore;
+  uniform float uCoreMinPx;
+  uniform float uCoreMaxPx;
   uniform float uKeep;
   uniform float uMinPx;
   uniform float uMaxPx;
@@ -213,6 +216,7 @@ const haloVertex = /* glsl */ `
   varying vec2 vUv;
   varying vec4 vTurn;
   varying float vFade;
+  varying float vHole;
 
   #include <clipping_planes_pars_vertex>
 
@@ -252,6 +256,9 @@ const haloVertex = /* glsl */ `
       * smoothstep(0.5 * shown, shown, length(mv.xyz))
       * (1.0 - fogShare(depth));
     vFade = fade;
+    // The point's own disc, as a share of the halo drawn: the halo leaves it clear, so the point shows on top of its own glow.
+    float corePx = uCore > 0.0 ? clamp(uCore * k * att, uCoreMinPx * uDpr, uCoreMaxPx * uDpr) * 0.5 : 0.0;
+    vHole = corePx / max(min(px, uMaxPx), 0.0001);
 
     mv.xy += position.xy * shown;
     vec4 mvPosition = mv;
@@ -272,6 +279,7 @@ const haloFragment = /* glsl */ `
   varying vec2 vUv;
   varying vec4 vTurn;
   varying float vFade;
+  varying float vHole;
 
   #include <clipping_planes_pars_fragment>
 
@@ -286,6 +294,7 @@ const haloFragment = /* glsl */ `
     float n = n1 * 0.65 + n2 * 0.35;
     float density = fall * mix(1.0, smoothstep(0.18, 0.82, n) * 1.7, uNoise);
     float a = clamp(density * uStrength * uOpacity * vFade, 0.0, 1.0);
+    if (vHole > 0.0) a *= smoothstep(vHole * 0.85, vHole * 1.05, sqrt(d2));
     if (a < 0.002) discard;
     gl_FragColor = vec4(vColor * a, a);
   }
@@ -313,6 +322,8 @@ export function haloBlend(style: GlowStyle, world: boolean): HaloBlend {
 
 /**
  * One object's halo material. Uniforms of its own: `uRadius` (model units),
+ * `uCore` (its points' diameter at a POINT SIZE, model units, 0 for none: the
+ * halo leaves the point's own disc clear, so a point shows on top of its glow),
  * `uStrength` (GLOW STRENGTH, 0..1), `uKeep` (the budget's share), the size
  * limits, and `uOpacity`, the client's own fade of the whole object (a
  * ghost, `dim`, a decode, EDIT's breath, TV's look: the traversals that fade
@@ -324,6 +335,9 @@ export function createHaloMaterial(style: GlowStyle, world: boolean): ShaderMate
     fragmentShader: haloFragment,
     uniforms: UniformsUtils.merge([UniformsLib.fog, {
       uRadius: { value: 1 },
+      uCore: { value: 0 },
+      uCoreMinPx: { value: 1.5 },
+      uCoreMaxPx: { value: 64 },
       uStrength: { value: 1 },
       uOpacity: { value: 1 },
       uKeep: { value: 1 },

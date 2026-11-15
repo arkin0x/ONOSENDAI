@@ -26,6 +26,7 @@ import {
   EdgesGeometry,
   Line,
   LineBasicMaterial,
+  MeshBasicMaterial,
   Matrix4,
   Vector3,
   type Plane,
@@ -704,18 +705,21 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
       {/* At a POINT SIZE: billboards, since a GPU caps a GL point's size. 0 draws no points. */}
       {/* Nothing of its own drawn (opacity 0, or POINTS at point size 0): an invisible copy still answers taps and picks, and is never drawn, so it hides and occludes nothing. */}
       {!cull && (look.hidden || plan.points === 'none') && (shard.mode === 'solid' && index.length > 0 && look.hidden
-        ? <mesh name="shard-hit" visible={false} geometry={indexed} frustumCulled={false} {...pick}><meshBasicMaterial /></mesh>
+        ? <mesh name="shard-hit" visible={false} geometry={indexed} material={HIT_MATERIAL} frustumCulled={false} {...pick} />
         : <points name="shard-hit" visible={false} geometry={plain} material={pointMaterial} frustumCulled={false} />)}
       {plan.points === 'billboard' && look.pointSize !== undefined && (
         <PointCores plain={pointsPlain} size={look.pointSize} opacity={opacity} glow={SHARD_POINTS.glow} headlamp={headlamp && !lit} clipPlanes={clipPlanes} />
       )}
       {plan.halos && look.glow && (
-        <GlowHalos plain={pointsPlain} glow={look.glow} radius={look.glowRadius} strength={look.glowStrength} fade={haloFade({ ghostShare: ghost ? GHOST_OPACITY : 1, dim })} world={world} trusted={glowTrusted} clipPlanes={clipPlanes} walls={clip} birth={birth} dissolve={dissolve} />
+        <GlowHalos plain={pointsPlain} glow={look.glow} radius={look.glowRadius} strength={look.glowStrength} core={plan.points === 'billboard' ? look.pointSize : 0} fade={haloFade({ ghostShare: ghost ? GHOST_OPACITY : 1, dim })} world={world} trusted={glowTrusted} clipPlanes={clipPlanes} walls={clip} birth={birth} dissolve={dissolve} />
       )}
       </>)}
     </group>
   )
 }
+
+/** The material of an invisible hit copy (never drawn: it only lets a ray find the faces). */
+const HIT_MATERIAL = new MeshBasicMaterial()
 
 /** A unit cube's twelve edges, centred on the origin: the placeholder (§1.10). */
 export const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))

@@ -106,6 +106,8 @@ interface HaloProps {
   radius: number
   /** GLOW STRENGTH, 0..1. */
   strength: number
+  /** The diameter its points are drawn at as billboards (model units), or 0: the halo leaves that disc clear. */
+  core?: number
   /** The client's own fade of the whole object (a ghost's share, `dim`); never the object's opacity. */
   fade: number
   /** In the world's scene: keep the bloom's tag (glowHalos haloBlend). */
@@ -121,7 +123,7 @@ interface HaloProps {
 }
 
 /** The glow round each point. */
-export function GlowHalos({ plain, glow, radius, strength, fade, world, trusted, clipPlanes, walls, birth, dissolve }: HaloProps): JSX.Element {
+export function GlowHalos({ plain, glow, radius, strength, core = 0, fade, world, trusted, clipPlanes, walls, birth, dissolve }: HaloProps): JSX.Element {
   const gl = useThree((s) => s.gl)
   const geometry = useMemo(() => billboardsOf(plain), [plain]) as InstancedBufferGeometry
   const material = useMemo(() => createHaloMaterial(glow.style, world), [glow.style, world])
@@ -169,6 +171,9 @@ export function GlowHalos({ plain, glow, radius, strength, fade, world, trusted,
     const u = material.uniforms
     u.uRadius.value = radius
     u.uStrength.value = strength
+    u.uCore.value = core
+    u.uCoreMinPx.value = limits.pointMinPx
+    u.uCoreMaxPx.value = limits.pointMaxPx
     // Written only when it changes: EDIT's breath, the build dim and TV's look write it too, after this.
     const shown = fade * settledShare(performance.now(), birth, dissolve)
     if (shown !== wrote.current) { u.uOpacity.value = shown; wrote.current = shown }

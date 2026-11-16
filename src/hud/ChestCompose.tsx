@@ -201,12 +201,12 @@ export type ChestModalMode = { mode: 'place' } | { mode: 'edit'; eventId: string
  * lib/shardSearch.ts). Its own component, so the search starts empty each
  * time + SHARD opens.
  */
-function ShardChoice({ models, onPick, onCancel }: { models: readonly ShardModel[]; onPick: (shardId: string) => void; onCancel: () => void }): JSX.Element {
+function ShardChoice({ byRecent, onPick, onCancel }: { byRecent: readonly ShardModel[]; onPick: (shardId: string) => void; onCancel: () => void }): JSX.Element {
   const [query, setQuery] = useState('')
   return (
     <>
       <ul className="objpick__list compose__models" aria-label="Model to seal">
-        <ShardFolders items={models} refOf={modelRef} nameOf={modelName} query={query} row={(s, f) => (
+        <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} query={query} row={(s, f) => (
           <li key={s.id} {...f.drag}>
             <button className="objpick__row" onClick={() => onPick(s.id)} title={`Seal "${s.name}" in the chest`}>
               <ShardThumb shard={s} own />
@@ -531,7 +531,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
           </div>
         </>
       ) : adding === 'shard' ? (
-        <ShardChoice models={byRecent} onPick={(shardId) => add({ kind: 'shard', shardId })} onCancel={() => setAdding(null)} />
+        <ShardChoice byRecent={byRecent} onPick={(shardId) => add({ kind: 'shard', shardId })} onCancel={() => setAdding(null)} />
       ) : adding === 'item' ? (
         <div className="compose__row">
           <button className="chest__act" onClick={() => setAdding('mine')} title="The same item, every setting kept: only items you made">FROM MY ITEMS</button>

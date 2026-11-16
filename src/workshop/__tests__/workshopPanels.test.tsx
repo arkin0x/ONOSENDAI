@@ -106,7 +106,7 @@ describe('the workshop top bar (workshop redesign, phase 1)', () => {
   })
 
   it('keeps the list and the ways in under MENU', () => {
-    for (const m of ['SHARDS ({shardCount})', '+ NEW SHARD', '>PASTE</button>', "{importing ? 'READING' : 'IMPORT'}", '{pasteOpen && (', '<ShardList currentId={currentId} onOpen={onOpen} />', 'CLEAR THIS SCENE', '<Explanation>']) {
+    for (const m of ['SHARDS ({shardCount})', '+ NEW SHARD', '>PASTE</button>', "{importing ? 'READING' : 'IMPORT'}", '{pasteOpen && (', '<ShardList currentId={currentId} onOpen={onOpen} query={query} />', 'CLEAR THIS SCENE', '<Explanation>']) {
       expect(SHEET.menu).toContain(m)
     }
   })

@@ -56,6 +56,7 @@ import { LAYERS_KEY, useLayers } from '../../store/useLayers'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useWalk } from '../../store/useWalk'
 import { GRAVITY_KEY } from '../../store/walkGravity'
+import { FLUID_KEY, useFluidWalk } from '../../store/fluidSwitch'
 
 type SwitchEl = ReactElement<{ id: string; checked: boolean; onCheckedChange: (v: boolean) => void }>
 
@@ -94,6 +95,7 @@ const ROWS: Array<[string, string, string]> = [
   ['view-walk-avatar', 'Hide avatar in WALK', 'Walk without your own avatar around the camera.'],
   ['view-walk-look', 'Look sphere in WALK', 'A ball in the bottom right to drag and look around.'],
   ['view-walk-gravity', 'Gravity in WALK', 'Fall, land and jump.'],
+  ['view-walk-fluid', 'Fluid WALK', 'Hold to glide. Moves still land on whole gibsons.'],
   ['view-chain-trail', 'Chain trail', 'The red line of your movement history.'],
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
   ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
@@ -103,7 +105,7 @@ const ROWS: Array<[string, string, string]> = [
 ]
 
 describe('the Settings panel', () => {
-  it('is a panel titled Settings with eleven switches, one to a row, each a title and a gray subtitle, in order', () => {
+  it('is a panel titled Settings with twelve switches, one to a row, each a title and a gray subtitle, in order', () => {
     const html = view()
     expect(html).toMatch(/^<section class="panel panel--view">/)
     expect(html).toContain('<h2>Settings</h2>')
@@ -199,6 +201,18 @@ describe('the Settings panel', () => {
     viewSwitch('view-audio-spheres').props.onCheckedChange(true)
     expect(useLayers.getState().audioSpheres).toBe(true)
     expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ audioSpheres: true })
+  })
+
+  it('Fluid WALK drives the switch, remembered on this device', () => {
+    useFluidWalk.setState({ on: false })
+    expect(switchTag(view(), 'view-walk-fluid')).toContain('aria-checked="false"')
+    viewSwitch('view-walk-fluid').props.onCheckedChange(true)
+    expect(useFluidWalk.getState().on).toBe(true)
+    expect(localStorage.getItem(FLUID_KEY)).toBe('on')
+    expect(switchTag(view(), 'view-walk-fluid')).toContain('aria-checked="true"')
+    viewSwitch('view-walk-fluid').props.onCheckedChange(false)
+    expect(useFluidWalk.getState().on).toBe(false)
+    expect(localStorage.getItem(FLUID_KEY)).toBe('off')
   })
 
   it('Gravity in WALK starts off and drives the walk, remembered on this device', () => {

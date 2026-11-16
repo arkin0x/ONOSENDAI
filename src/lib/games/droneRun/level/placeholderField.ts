@@ -205,14 +205,19 @@ function points(name: string, pts: V3[], colors: number[], palette: RGB[], glow:
 
 // ---------------------------------------------------------------- palettes
 
-const GROUND: RGB[] = [[92, 98, 64], [104, 110, 70], [84, 88, 58], [118, 104, 72], [72, 76, 52]]
-const STONE: RGB[] = [[118, 116, 108], [104, 102, 96], [132, 128, 118], [88, 86, 82], [146, 140, 126]]
-const BRICK: RGB[] = [[128, 88, 70], [112, 76, 62], [142, 100, 80], [96, 66, 56], [84, 80, 76]]
-const WOOD: RGB[] = [[150, 108, 62], [128, 90, 52], [104, 72, 42], [172, 128, 76]]
-const CONCRETE: RGB[] = [[140, 142, 140], [124, 126, 126], [156, 156, 150], [108, 110, 112]]
-const BERM: RGB[] = [[96, 104, 66], [110, 96, 66], [86, 92, 60], [124, 110, 76]]
-const DAIS: RGB[] = [[160, 150, 120], [140, 130, 104], [186, 170, 128], [112, 104, 86], [212, 176, 84]]
-const FOG: RGB[] = [[150, 162, 172], [130, 142, 156], [172, 180, 186]]
+// A PS1 field under a black sky: deep greens and earth browns on the ground,
+// dark stones. A palette value is drawn as linear light (the world's faces are
+// unlit vertex colours, shown through the sRGB output), so it shows much
+// lighter than it reads: [11, 32, 6] shows as a deep grass green near
+// [58, 100, 42]. The values here are chosen dark for that.
+const GROUND: RGB[] = [[11, 32, 6], [16, 43, 8], [7, 23, 4], [35, 20, 8], [22, 12, 5], [27, 51, 9]]
+const STONE: RGB[] = [[30, 29, 25], [23, 22, 19], [40, 37, 31], [16, 15, 14], [50, 45, 35]]
+const BRICK: RGB[] = [[40, 13, 8], [29, 9, 6], [51, 17, 10], [19, 6, 4], [14, 12, 12]]
+const WOOD: RGB[] = [[59, 25, 8], [40, 17, 5], [24, 10, 4], [80, 35, 12]]
+const CONCRETE: RGB[] = [[35, 37, 37], [26, 27, 29], [46, 46, 43], [18, 19, 22]]
+const BERM: RGB[] = [[15, 32, 6], [35, 20, 8], [10, 24, 5], [46, 27, 11]]
+const DAIS: RGB[] = [[48, 40, 25], [34, 29, 18], [63, 51, 30], [20, 17, 12], [141, 78, 10]]
+const FOG: RGB[] = [[27, 35, 45], [19, 26, 35], [38, 46, 55]]
 const CYAN: RGB[] = [[190, 244, 255], [70, 214, 255]]
 const GOLD: RGB[] = [[255, 196, 64], [255, 236, 170]]
 
@@ -232,9 +237,17 @@ function ground(name: string, seed: number, bumps: number): FieldPayload {
     // Quarters of a gibson: a gentle lump, never a step.
     return Math.min(1, Math.round(h * 4) / 4)
   }
+  // Patches of four by four cells (16 gibsons): mostly grass, some moss, some bare earth; inside a patch,
+  // 2 by 2 checks of its two shades with a few odd cells, so every cell reads as a PS1 texel.
+  const patch = Array.from({ length: (N / 4) * (N / 4) }, () => { const v = r(); return v < 0.22 ? 'earth' : v < 0.42 ? 'moss' : 'grass' })
   const cellColor = (i: number, j: number): number => {
     const v = r()
-    return ((i >> 1) + (j >> 1)) % 2 === 0 ? (v < 0.15 ? 3 : v < 0.3 ? 4 : 0) : (v < 0.15 ? 2 : 1)
+    const even = ((i >> 1) + (j >> 1)) % 2 === 0
+    switch (patch[(i >> 2) * (N / 4) + (j >> 2)]) {
+      case 'earth': return v < 0.15 ? 2 : even ? 3 : 4
+      case 'moss': return v < 0.12 ? 3 : even ? 5 : 1
+      default: return v < 0.1 ? 4 : v < 0.25 ? 5 : even ? 0 : (v < 0.6 ? 1 : 2)
+    }
   }
   const at = (i: number, j: number): V3 => [-32 + i * S, height(i, j), -32 + j * S]
   for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) m.quad(at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1), cellColor(i, j), [0, 1, 0])

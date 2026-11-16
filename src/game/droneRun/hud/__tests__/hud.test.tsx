@@ -3,7 +3,9 @@
  * same fixed slots, so nothing moves between them (owner: no layout jumps);
  * the cards' buttons call RESTART, NEXT WAVE and EXIT GAME, and Enter or R
  * press the first; each gun shows its own gauge; the phone's buttons write
- * the controls; the run's events play their sounds and restart the pulses.
+ * the controls, three and four fingers at once; the aim assist box shows
+ * only on a phone with the PULSE RIFLE and tells the assist its size; the
+ * run's events play their sounds and restart the pulses.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -25,6 +27,11 @@ vi.mock('../../../../lib/relay', async (importOriginal) => ({
   queryEach: vi.fn(async () => []),
 }))
 const played: Array<[string, number]> = []
+const assistCalls: Array<number | null> = []
+vi.mock('../../assist', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../assist')>()
+  return { ...real, setAssistBox: (h: number | null) => { assistCalls.push(h); real.setAssistBox(h) } }
+})
 vi.mock('../../audio', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../audio')>()),
   playSound: (s: string, w = 0) => { played.push([s, w]); return true },
@@ -36,11 +43,15 @@ import { mount, textOf, type Host } from '../../../../test/elementRoot'
 import { HudView, type HudViewProps } from '../HudView'
 import { DroneRunHud, reactTo } from '../DroneRunHud'
 import { TouchPad } from '../TouchPad'
-import { BASE_WEAPONS, COPY, IDLE_HUD, weaponsOfHud, type HudState } from '../model'
-import { readInput, resetInput } from '../../input'
+import { ASSIST_PX, BASE_WEAPONS, COPY, FIRE_PX, IDLE_HUD, JUMP_PX, STICK_PX, weaponsOfHud, type HudState } from '../model'
+import { AssistBox } from '../AssistBox'
+import { lookState, lookStickRate, readInput, resetInput, tickLook } from '../../input'
+import { readFileSync } from 'node:fs'
 import type { RunEvent } from '../../../../lib/games/droneRun/sim/events'
 
 const PHASES: HudState['phase'][] = ['safe', 'wave', 'cleared', 'failed']
+/** A stick's refs, empty (no DOM). */
+const sticks = () => ({ base: { current: null }, knob: { current: null } })
 
 function props(over: Partial<HudState> = {}, more: Partial<HudViewProps> = {}): HudViewProps {
   return {
@@ -61,12 +72,12 @@ function props(over: Partial<HudState> = {}, more: Partial<HudViewProps> = {}): 
 
 const cls = (h: Host): string => String(h.props.className ?? '')
 /** The fixed slots: every element whose class is one of these, as a sorted list of class names. */
-const SLOTS = ['drun-top', 'drun-pips', 'drun-wave', 'drun-left', 'drun-clock', 'drun-sound', 'drun-prompt', 'drun-prompt__title', 'drun-prompt__line', 'drun-cross', 'drun-bottom', 'drun-gun', 'drun-gun__name', 'drun-gauge', 'drun-gauge__status', 'drun-hints', 'drun-stick', 'drun-btn']
+const SLOTS = ['drun-top', 'drun-pips', 'drun-wave', 'drun-left', 'drun-clock', 'drun-sound', 'drun-prompt', 'drun-prompt__title', 'drun-prompt__line', 'drun-cross', 'drun-bottom', 'drun-gun', 'drun-gun__name', 'drun-gauge', 'drun-gauge__status', 'drun-hints', 'drun-stick', 'drun-btn', 'drun-radar', 'drun-assist']
 function slots(all: Host[]): string[] {
-  return all.flatMap((h) => cls(h).split(' ').filter((c) => SLOTS.includes(c) || c.startsWith('drun-btn--'))).sort()
+  return all.flatMap((h) => cls(h).split(' ').filter((c) => SLOTS.includes(c) || c.startsWith('drun-btn--') || c.startsWith('drun-stick--'))).sort()
 }
 
-beforeEach(() => { resetInput(0, 0); played.length = 0 })
+beforeEach(() => { resetInput(0, 0); played.length = 0; assistCalls.length = 0 })
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('the HUD keeps its slots in every phase', () => {
@@ -74,7 +85,7 @@ describe('the HUD keeps its slots in every phase', () => {
     it(`${touch ? 'phone' : 'desktop'}: the same boxes in safe, wave, cleared and failed`, async () => {
       const seen: string[][] = []
       for (const phase of PHASES) {
-        const m = await mount(createElement('div', null, createElement(HudView, props({ phase, hp: phase === 'failed' ? 0 : 2 })), touch ? createElement(TouchPad, { hud: { ...IDLE_HUD, phase }, weapons: BASE_WEAPONS, baseRef: { current: null }, knobRef: { current: null } }) : null))
+        const m = await mount(createElement('div', null, createElement(HudView, props({ phase, hp: phase === 'failed' ? 0 : 2 })), touch ? createElement(TouchPad, { hud: { ...IDLE_HUD, phase }, weapons: BASE_WEAPONS, move: sticks(), look: sticks() }) : null))
         seen.push(slots(m.all()))
         await m.unmount()
       }
@@ -214,7 +225,7 @@ describe('the phone\'s buttons', () => {
   const btn = (all: Host[], mod: string): Host => all.find((h) => cls(h).includes(`drun-btn--${mod}`))!
 
   it('FIRE held fires; JUMP and the gun button are edges; RELOAD only for the gun with a magazine', async () => {
-    const m = await mount(createElement(TouchPad, { hud: { ...IDLE_HUD, weapon: 0 }, weapons: BASE_WEAPONS, baseRef: { current: null }, knobRef: { current: null } }))
+    const m = await mount(createElement(TouchPad, { hud: { ...IDLE_HUD, weapon: 0 }, weapons: BASE_WEAPONS, move: sticks(), look: sticks() }))
     const all = m.all()
     ;(btn(all, 'fire').props.onPointerDown as (e: unknown) => void)(ev())
     expect(readInput().fire).toBe(true)
@@ -228,7 +239,7 @@ describe('the phone\'s buttons', () => {
     expect(btn(all, 'reload').props.hidden).toBe(true)
     expect(textOf(btn(all, 'gun'))).toContain('PULSE RIFLE')
     await m.unmount()
-    const scatter = await mount(createElement(TouchPad, { hud: { ...IDLE_HUD, weapon: 1, ammo: 2, mag: 6 }, weapons: BASE_WEAPONS, baseRef: { current: null }, knobRef: { current: null } }))
+    const scatter = await mount(createElement(TouchPad, { hud: { ...IDLE_HUD, weapon: 1, ammo: 2, mag: 6 }, weapons: BASE_WEAPONS, move: sticks(), look: sticks() }))
     const r = btn(scatter.all(), 'reload')
     expect(r.props.hidden).toBe(false)
     ;(r.props.onPointerDown as (e: unknown) => void)(ev())
@@ -262,5 +273,173 @@ describe('the run\'s events', () => {
     expect(m.all().some((h) => cls(h) === 'drun-flash')).toBe(true)
     await m.unmount()
     expect(send).toBeNull()
+  })
+})
+
+describe('three fingers at once, and a fourth on JUMP (phone)', () => {
+  type Handler = (e: unknown) => void
+  const W = 375, H = 812
+  const MOVE = { cx: 20 + STICK_PX / 2, cy: H - 24 - STICK_PX / 2 }
+  const LOOK = { cx: W - 20 - STICK_PX / 2, cy: H - 24 - STICK_PX / 2 }
+  const g = globalThis as unknown as Record<string, unknown>
+  let saved: Record<string, unknown> = {}
+  let winEvents: EventTarget
+  beforeEach(() => {
+    saved = { innerWidth: g.innerWidth, innerHeight: g.innerHeight, document: g.document, addEventListener: g.addEventListener, removeEventListener: g.removeEventListener }
+    winEvents = new EventTarget()
+    const docEvents = new EventTarget()
+    g.innerWidth = W
+    g.innerHeight = H
+    g.addEventListener = (t: string, f: EventListener) => winEvents.addEventListener(t, f)
+    g.removeEventListener = (t: string, f: EventListener) => winEvents.removeEventListener(t, f)
+    g.document = { visibilityState: 'visible', addEventListener: (t: string, f: EventListener) => docEvents.addEventListener(t, f), removeEventListener: (t: string, f: EventListener) => docEvents.removeEventListener(t, f) }
+  })
+  afterEach(() => { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete g[k]; else g[k] = v } })
+
+  async function pad() {
+    const m = await mount(createElement(DroneRunHud, { hud: { ...IDLE_HUD, phase: 'wave' }, restart: vi.fn(), nextWave: vi.fn(), subscribe: () => () => {}, exit: vi.fn(), touch: true }))
+    const find = (c: string): Host => m.all().find((h) => cls(h).split(' ').includes(c))!
+    const layer = find('drun-layer')
+    const on = (h: Host, name: string, e: Record<string, unknown>): void => (h.props[name] as Handler)({ pointerType: 'touch', preventDefault: () => {}, stopPropagation: () => {}, currentTarget: { clientWidth: W, setPointerCapture: () => {} }, ...e })
+    const touch = (name: 'onPointerDown' | 'onPointerMove' | 'onPointerUp' | 'onPointerCancel' | 'onLostPointerCapture', id: number, x = 0, y = 0): void => on(layer, name, { pointerId: id, clientX: x, clientY: y })
+    const button = (mod: string, name: string, id: number): void => on(find(`drun-btn--${mod}`), name, { pointerId: id })
+    return { m, touch, button }
+  }
+
+  it('move, look and fire held together; lifting one leaves the others; JUMP on top', async () => {
+    const { m, touch, button } = await pad()
+    touch('onPointerDown', 1, MOVE.cx, MOVE.cy - 60)
+    touch('onPointerDown', 2, LOOK.cx + 40, LOOK.cy)
+    button('fire', 'onPointerDown', 3)
+    tickLook(0.1)
+    const a = readInput()
+    expect(a.move.fwd).toBeCloseTo(1)
+    expect(a.yaw).toBeCloseTo(lookStickRate(40, 0, STICK_PX / 2).yaw * 0.1)
+    expect(a.yaw).toBeLessThan(0)
+    expect(a.fire).toBe(true)
+    // The LOOK finger lifts: the turning stops, moving and firing go on.
+    touch('onPointerUp', 2)
+    const y = lookState.yaw
+    tickLook(0.1)
+    const b = readInput()
+    expect(b.yaw).toBe(y)
+    expect(b.move.fwd).toBeCloseTo(1)
+    expect(b.fire).toBe(true)
+    // A fourth finger on JUMP: an edge, while the others hold.
+    touch('onPointerDown', 2, LOOK.cx - 40, LOOK.cy)
+    button('jump', 'onPointerDown', 4)
+    tickLook(0.1)
+    const c = readInput()
+    expect(c.jump).toBe(true)
+    expect(c.move.fwd).toBeCloseTo(1)
+    expect(c.fire).toBe(true)
+    expect(c.yaw).toBeGreaterThan(y)
+    expect(readInput().jump).toBe(false)
+    await m.unmount()
+  })
+
+  it('a finger that slides off its control keeps it; cancel and lost capture let go of that finger only; blur of all', async () => {
+    const { m, touch, button } = await pad()
+    touch('onPointerDown', 1, MOVE.cx, MOVE.cy - 60)
+    touch('onPointerDown', 2, LOOK.cx + 60, LOOK.cy)
+    button('fire', 'onPointerDown', 3)
+    // The MOVE finger slides far onto the right half; another finger on the left is not a second stick.
+    touch('onPointerMove', 1, 330, MOVE.cy)
+    touch('onPointerDown', 5, MOVE.cx, MOVE.cy + 60)
+    expect(readInput().move.strafe).toBeCloseTo(1)
+    // FIRE's finger moving over the view (it is captured by FIRE) moves nothing.
+    touch('onPointerMove', 3, 100, 100)
+    expect(readInput().fire).toBe(true)
+    // A cancel on the MOVE finger: moving stops; the look and fire hold.
+    touch('onPointerCancel', 1)
+    tickLook(0.1)
+    const a = readInput()
+    expect(a.move).toEqual({ fwd: 0, strafe: 0 })
+    expect(a.fire).toBe(true)
+    expect(a.yaw).toBeLessThan(0)
+    // Lost capture on the LOOK finger: turning stops; fire holds.
+    touch('onLostPointerCapture', 2)
+    const y = lookState.yaw
+    tickLook(0.1)
+    expect(readInput().yaw).toBe(y)
+    // Two fingers on FIRE: one cancelled, the other still fires; its lost capture ends it.
+    button('fire', 'onPointerDown', 7)
+    button('fire', 'onPointerCancel', 3)
+    expect(readInput().fire).toBe(true)
+    button('fire', 'onLostPointerCapture', 7)
+    expect(readInput().fire).toBe(false)
+    // All three again, then the window loses focus: everything lets go.
+    touch('onPointerDown', 8, MOVE.cx, MOVE.cy - 60)
+    touch('onPointerDown', 9, LOOK.cx + 60, LOOK.cy)
+    button('fire', 'onPointerDown', 10)
+    winEvents.dispatchEvent(new Event('blur'))
+    const y2 = lookState.yaw
+    tickLook(0.1)
+    const b = readInput()
+    expect(b.move).toEqual({ fwd: 0, strafe: 0 })
+    expect(b.fire).toBe(false)
+    expect(b.yaw).toBe(y2)
+    // The controls take new fingers after.
+    touch('onPointerDown', 11, MOVE.cx, MOVE.cy - 60)
+    expect(readInput().move.fwd).toBeCloseTo(1)
+    await m.unmount()
+  })
+})
+
+describe('the aim assist box', () => {
+  const box = (all: Host[]): Host | undefined => all.find((h) => cls(h).split(' ').includes('drun-assist'))
+
+  it('its side is between FIRE and the MOVE stick, from the same variables in the CSS', () => {
+    expect(ASSIST_PX).toBeGreaterThan(FIRE_PX)
+    expect(ASSIST_PX).toBeLessThan(STICK_PX)
+    const css = readFileSync(new URL('../../../../styles.css', import.meta.url), 'utf8')
+    expect(css).toContain('--drun-assist: calc((var(--drun-stick) + var(--drun-fire)) / 2);')
+    expect(css).toContain(`--drun-stick: ${STICK_PX}px;`)
+    expect(css).toContain(`--drun-fire: ${FIRE_PX}px;`)
+    expect(css).toContain(`--drun-jump: ${JUMP_PX}px;`)
+    expect(css).toMatch(/\.drun-assist \{[^}]*width: var\(--drun-assist\);/)
+  })
+
+  it('shows on a phone with the PULSE RIFLE, and tells the assist half its side', async () => {
+    const m = await mount(createElement(HudView, props({ phase: 'wave', weapon: 0 }, { touch: true })))
+    const b = box(m.all())!
+    expect(cls(b)).toBe('drun-assist')
+    const last = assistCalls[assistCalls.length - 1]!
+    expect(last).toBeGreaterThan(FIRE_PX / 2)
+    expect(last).toBeLessThan(STICK_PX / 2)
+    await m.unmount()
+    expect(assistCalls[assistCalls.length - 1]).toBeNull()
+  })
+
+  it('hidden (in place) with another gun or a card up; not drawn on a desktop; the assist told null', async () => {
+    for (const over of [{ phase: 'wave' as const, weapon: 1 }, { phase: 'wave' as const, weapon: 2 }, { phase: 'failed' as const, weapon: 0 }, { phase: 'cleared' as const, weapon: 0 }]) {
+      assistCalls.length = 0
+      const m = await mount(createElement(HudView, props(over, { touch: true })))
+      expect(cls(box(m.all())!)).toBe('drun-assist is-off')
+      expect(assistCalls.every((c) => c === null)).toBe(true)
+      expect(assistCalls.length).toBeGreaterThan(0)
+      await m.unmount()
+    }
+    assistCalls.length = 0
+    const desk = await mount(createElement(HudView, props({ phase: 'wave', weapon: 0 }, { touch: false })))
+    expect(box(desk.all())).toBeUndefined()
+    expect(assistCalls.filter((c) => c !== null)).toEqual([])
+    await desk.unmount()
+  })
+
+  it('measures itself as drawn: a new size is a new half side', async () => {
+    const g = globalThis as unknown as Record<string, unknown>
+    const had = g.ResizeObserver
+    let cb: ((entries: Array<{ contentRect: { width: number } }>) => void) | null = null
+    const observed: unknown[] = []
+    g.ResizeObserver = class { constructor(f: typeof cb) { cb = f } observe(el: unknown) { observed.push(el) } disconnect() { cb = null } }
+    const m = await mount(createElement(AssistBox, { shown: true }))
+    expect(observed.length).toBe(1)
+    cb!([{ contentRect: { width: 98 } }])
+    expect(assistCalls[assistCalls.length - 1]).toBe(49)
+    await m.unmount()
+    expect(cb).toBeNull()
+    expect(assistCalls[assistCalls.length - 1]).toBeNull()
+    if (had === undefined) delete g.ResizeObserver; else g.ResizeObserver = had
   })
 })

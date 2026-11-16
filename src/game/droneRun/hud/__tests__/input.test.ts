@@ -2,13 +2,14 @@
  * input.test.ts - DRONE RUN's controls (game/droneRun/input.ts): keys to a
  * RunInput, edges cleared once read, held keys, the wheel and Q cycling the
  * guns, the pointer lock and its fallback to a drag, the phone's stick math
- * (dead zone, analog magnitude) and its fingers by pointer id.
+ * (dead zone, analog magnitude), the LOOK stick's turn rate (dead zone,
+ * curve, top rate, directions) and every finger by its pointer id.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  attachDesktop, keyAction, lookState, noteWeapons, pointer, readInput, resetInput, setInputPaused, stickVector,
-  TouchTracker, MOUSE_RAD_PER_PX, DRAG_RAD_PER_PX, STICK_DEAD, TOUCH_RAD_PER_PX, PITCH_LIMIT,
+  attachDesktop, keyAction, lookBy, lookState, lookStickRate, noteWeapons, pointer, readInput, releaseAll, resetInput, setInputPaused, setLookRate, stickVector, tickLook,
+  TouchTracker, MOUSE_RAD_PER_PX, DRAG_RAD_PER_PX, STICK_DEAD, TOUCH_RAD_PER_PX, PITCH_LIMIT, LOOK_DEAD, LOOK_CURVE, LOOK_MAX_YAW, LOOK_MAX_PITCH, LOOK_GRAB,
 } from '../../input'
 
 type Fn = (e: unknown) => void
@@ -297,5 +298,121 @@ describe('the phone\'s stick', () => {
     expect(m.fwd).toBeCloseTo(Math.SQRT1_2)
     t.up(1)
     h.detach()
+  })
+})
+
+describe('the LOOK stick\'s turn rate', () => {
+  const R = 60
+  it('nothing inside the dead zone', () => {
+    expect(lookStickRate(0, 0, R)).toEqual({ yaw: 0, pitch: 0, mag: 0 })
+    expect(lookStickRate(LOOK_DEAD * R - 0.1, 0, R).mag).toBe(0)
+    expect(lookStickRate(0, LOOK_DEAD * R - 0.1, R).mag).toBe(0)
+  })
+
+  it('the top rate at the rim and past it: 180 degrees a second across, less up and down', () => {
+    expect(LOOK_MAX_YAW).toBeCloseTo(Math.PI)
+    expect(LOOK_MAX_PITCH).toBeLessThan(LOOK_MAX_YAW)
+    expect(lookStickRate(R, 0, R).yaw).toBeCloseTo(-LOOK_MAX_YAW)
+    expect(lookStickRate(4 * R, 0, R).yaw).toBeCloseTo(-LOOK_MAX_YAW)
+    expect(lookStickRate(0, -R, R).pitch).toBeCloseTo(LOOK_MAX_PITCH)
+    expect(lookStickRate(0, -R, R).yaw).toBeCloseTo(0)
+  })
+
+  it('a gentle curve: a small push turns much slower than its share of the reach', () => {
+    const half = (LOOK_DEAD + (1 - LOOK_DEAD) / 2) * R
+    const r = lookStickRate(half, 0, R)
+    expect(r.mag).toBeCloseTo(Math.pow(0.5, LOOK_CURVE))
+    expect(r.mag).toBeLessThan(0.35)
+    // Rising all the way: further out is always faster.
+    let prev = 0
+    for (let x = LOOK_DEAD * R + 1; x <= R; x += 3) { const m = lookStickRate(x, 0, R).mag; expect(m).toBeGreaterThan(prev); prev = m }
+  })
+
+  it('stick right turns the view right and up looks up, as the drag and the mouse do (lookBy)', () => {
+    const right = lookStickRate(R, 0, R)
+    resetInput(0, 0)
+    lookBy(10, 0, 0.01)
+    expect(Math.sign(right.yaw)).toBe(Math.sign(lookState.yaw))
+    const up = lookStickRate(0, -R, R)
+    resetInput(0, 0)
+    lookBy(0, -10, 0.01)
+    expect(Math.sign(up.pitch)).toBe(Math.sign(lookState.pitch))
+    expect(lookStickRate(-R, 0, R).yaw).toBeGreaterThan(0)
+    expect(lookStickRate(0, R, R).pitch).toBeLessThan(0)
+  })
+
+  it('tickLook turns the view by the rate over the frame; nothing while paused; the pitch stays within its limit', () => {
+    setLookRate(-1, 0.5)
+    tickLook(0.05)
+    expect(lookState.yaw).toBeCloseTo(-0.05)
+    expect(lookState.pitch).toBeCloseTo(0.025)
+    // A long frame (a tab coming back) turns no more than a tenth of a second's worth.
+    tickLook(5)
+    expect(lookState.yaw).toBeCloseTo(-0.15)
+    setInputPaused(true)
+    tickLook(0.05)
+    expect(lookState.yaw).toBeCloseTo(-0.15)
+    setInputPaused(false)
+    setLookRate(0, 100)
+    tickLook(0.1)
+    expect(lookState.pitch).toBe(PITCH_LIMIT)
+    releaseAll()
+    const y = lookState.yaw
+    tickLook(0.1)
+    expect(lookState.yaw).toBe(y)
+  })
+})
+
+describe('the phone\'s fingers: MOVE stick, LOOK stick, look drag', () => {
+  const MOVE = { cx: 80, cy: 728, radius: 60 }
+  const LOOK = { cx: 295, cy: 728, radius: 60 }
+  const tracker = () => new TouchTracker(() => MOVE, { look: () => LOOK })
+
+  it('a finger on the LOOK stick holds it; elsewhere on the right it drags; each its own finger', () => {
+    const t = tracker()
+    expect(t.down(1, LOOK.cx + 40, LOOK.cy, 375)).toBe('lookstick')
+    expect(t.down(2, LOOK.cx, LOOK.cy - LOOK.radius * LOOK_GRAB - 5, 375)).toBe('look')
+    // A second finger on the LOOK stick is not a second stick.
+    expect(t.down(3, LOOK.cx, LOOK.cy, 375)).toBeNull()
+    expect(t.holding).toEqual({ stick: null, lookStick: 1, look: 2 })
+    expect(t.lookKnob).toEqual({ dx: 40, dy: 0 })
+    tickLook(0.1)
+    expect(lookState.yaw).toBeCloseTo(lookStickRate(40, 0, 60).yaw * 0.1)
+    // The drag adds its own turn on top.
+    const y = lookState.yaw
+    t.move(2, LOOK.cx + 10, LOOK.cy - 200)
+    expect(lookState.yaw).toBeCloseTo(y - 10 * TOUCH_RAD_PER_PX)
+    // Lifting the stick stops the turning; the drag keeps working.
+    t.up(1)
+    const y2 = lookState.yaw
+    tickLook(0.1)
+    expect(lookState.yaw).toBe(y2)
+    expect(t.lookKnob).toEqual({ dx: 0, dy: 0 })
+    t.move(2, LOOK.cx + 20, LOOK.cy - 200)
+    expect(lookState.yaw).toBeCloseTo(y2 - 10 * TOUCH_RAD_PER_PX)
+  })
+
+  it('a finger keeps its stick wherever it slides, until it lifts', () => {
+    const t = tracker()
+    t.down(1, MOVE.cx, MOVE.cy - 60, 375)
+    t.down(2, LOOK.cx + 60, LOOK.cy, 375)
+    // The MOVE finger slides over to the right half, the LOOK finger to the left: each keeps its own.
+    t.move(1, 300, MOVE.cy)
+    t.move(2, 20, LOOK.cy)
+    expect(readInput().move.strafe).toBeCloseTo(1)
+    expect(t.holding).toEqual({ stick: 1, lookStick: 2, look: null })
+    tickLook(0.1)
+    expect(lookState.yaw).toBeGreaterThan(0)
+    t.clear()
+    expect(t.holding).toEqual({ stick: null, lookStick: null, look: null })
+    expect(readInput().move).toEqual({ fwd: 0, strafe: 0 })
+    const y = lookState.yaw
+    tickLook(0.1)
+    expect(lookState.yaw).toBe(y)
+  })
+
+  it('without a LOOK stick on screen (a desktop touch screen) the right half drags as before', () => {
+    const t = new TouchTracker(() => MOVE)
+    expect(t.down(1, LOOK.cx, LOOK.cy, 375)).toBe('look')
   })
 })

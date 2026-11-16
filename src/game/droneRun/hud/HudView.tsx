@@ -6,20 +6,23 @@
  * | Slot | What it shows |
  * |---|---|
  * | top left | HP pips (hearts, filled or empty); the one just lost pulses; they blink while you cannot be hit |
- * | top right | WAVE n / total, drones left (radar), the clock, the sound switch (M) |
- * | centre | the crosshair; a small X on it when a shot hits |
+ * | under the pips | the radar (Radar.tsx): drones as dots, the end zone in gold, forward up |
+ * | top right | WAVE n / total, drones left (a drone icon), the clock, the sound switch (M) |
+ * | centre | the crosshair; a small X on it when a shot hits; on a phone with the PULSE RIFLE, the aim assist's box round it (AssistBox.tsx) |
  * | edges | a red flash when you are hit |
  * | under the top bar | the safe zone's line: the wave's name, then "Leave the safe zone to start the wave." (kept empty, not removed, in other phases) |
  * | bottom (desktop) | the guns 1 2 3 with the one in hand lit, its name and its gauge; the key hints under it, folded during a wave |
  * | middle | the cards: RUN FAILED (RESTART, EXIT GAME) and WAVE n CLEAR (time, drones downed, NEXT WAVE, EXIT GAME) |
  *
- * On a phone the guns and the gauge are on the gun button by FIRE
- * (TouchPad), and the key hints are not drawn.
+ * On a phone the guns and the gauge are on the gun button above the MOVE
+ * stick (TouchPad), and the key hints are not drawn.
  */
 
-import { Heart, Radar, Volume2, VolumeX } from 'lucide-react'
+import { Drone, Heart, Volume2, VolumeX } from 'lucide-react'
 import { formatClearTime } from '../../../lib/games/progress'
-import { COPY, weaponIcon, type HudState, type HudWeapon } from './model'
+import { AssistBox } from './AssistBox'
+import { assistShown, COPY, weaponIcon, type HudState, type HudWeapon } from './model'
+import { Radar } from './Radar'
 
 export interface Pulses {
   /** Counts up on each hit taken: the red flash restarts. */
@@ -81,6 +84,8 @@ export function HudView(p: HudViewProps): JSX.Element {
     <div className={`drun-hudview drun-hudview--${hud.phase}${touch ? ' is-touch' : ''}`}>
       {pulses.hurt > 0 && <div key={`hurt${pulses.hurt}`} className="drun-flash" aria-hidden />}
 
+      {touch && <AssistBox shown={assistShown(touch, hud)} />}
+
       <div className="drun-cross" aria-hidden>
         <span className="drun-cross__h" />
         <span className="drun-cross__v" />
@@ -96,7 +101,7 @@ export function HudView(p: HudViewProps): JSX.Element {
         </span>
         <span className="drun-top__right">
           <span className="drun-wave">{COPY.waveOf(hud.wave, hud.wavesTotal)}</span>
-          <span className="drun-left" aria-label="drones left"><Radar size={15} strokeWidth={2.4} aria-hidden />{hud.dronesLeft}</span>
+          <span className="drun-left" aria-label="drones left"><Drone size={16} strokeWidth={2.2} aria-hidden />{hud.dronesLeft}</span>
           <span className="drun-clock" aria-label="time">{formatClearTime(hud.runTime * 1000)}</span>
           <button className="drun-sound" aria-label={p.muted ? 'Sound off' : 'Sound on'} title="M" onClick={tap(p.onToggleSound)}>
             {p.muted ? <VolumeX size={15} strokeWidth={2.4} aria-hidden /> : <Volume2 size={15} strokeWidth={2.4} aria-hidden />}
@@ -104,6 +109,8 @@ export function HudView(p: HudViewProps): JSX.Element {
           </button>
         </span>
       </div>
+
+      <Radar />
 
       <div className="drun-prompt" aria-hidden={hud.phase !== 'safe'}>
         <span className="drun-prompt__title">{hud.phase === 'safe' ? `${COPY.wave(hud.wave)}${hud.waveName ? `  ${hud.waveName}` : ''}` : ''}</span>

@@ -62,6 +62,23 @@ export function weaponIcon(w: HudWeapon | undefined): LucideIcon {
   return w ? ICONS[w.gauge] : Crosshair
 }
 
+/**
+ * The phone controls' sizes as styles.css draws them on a tall screen, CSS
+ * px (--drun-stick, --drun-fire, --drun-jump): for the places a finger is
+ * measured from before the controls are drawn, and for tests. The CSS is the
+ * source; keep these in step with it.
+ */
+export const STICK_PX = 120
+export const FIRE_PX = 88
+export const JUMP_PX = 64
+/** The aim assist box's side: halfway between FIRE and the MOVE stick (--drun-assist). */
+export const ASSIST_PX = (STICK_PX + FIRE_PX) / 2
+
+/** The aim assist box shows on a touch screen, with the first gun (the PULSE RIFLE) in hand, while no card is up. */
+export function assistShown(touch: boolean, hud: Pick<HudState, 'phase' | 'weapon'>): boolean {
+  return touch && hud.weapon === 0 && hud.phase !== 'failed' && hud.phase !== 'cleared'
+}
+
 /** The HUD before the runner says anything (the world loading): the safe zone, full health, the base variant's guns. */
 export const IDLE_HUD: HudState = {
   phase: 'safe', hp: 3, maxHp: 3, invulnerable: false, wave: 1, waveName: '', wavesTotal: 3, dronesLeft: 0,
@@ -86,6 +103,8 @@ export const COPY = {
   reload: 'RELOAD',
   fire: 'FIRE',
   jump: 'JUMP',
+  move: 'MOVE',
+  look: 'LOOK',
   heat: 'HEAT',
   charge: 'CHARGE',
   /** The desktop hint line: key, then what it does. */

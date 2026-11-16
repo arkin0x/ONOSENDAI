@@ -165,8 +165,9 @@ export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, s
           the object at true size before you place it. IMPORT, at the top of this sheet, brings a 3D file
           ({IMPORT_FORMATS_LABEL}) into this shard, its longest side half of GRID SIZE, standing on the level;
           a .json SNO object or a zip of shards comes in as new shards, and a file dropped on the workshop comes
-          in the same way. PLY has no up of its own and is read Y up, so export a PLY from Blender with Up set
-          to Y and Forward to -Z; from MagicaVoxel, import the .vox.
+          in the same way. A PLY from Blender comes in standing with Blender's default export settings; if you
+          exported it with Up set to Y, it comes in on its back and a quarter turn stands it up. Any other PLY is
+          read Y up. From MagicaVoxel, import the .vox.
           Under SHARD, PUBLISH puts the shard on your relays as a
           public object: the Shard Feed lists it, anyone can place it, and PUBLISH AGAIN replaces it under the same
           address; RETRACT asks the relays to drop it. That is separate from hiding, which seals a copy at a place.

@@ -1,7 +1,7 @@
 {
   "name": "onosendai-v2",
   "private": true,
-  "version": "2.14.0",
+  "version": "2.15.0",
   "license": "CC-BY-SA-4.0",
   "repository": "https://github.com/arkin0x/ONOSENDAI.git",
   "author": "arkin0x <arkinox+onosendai@pm.me>",
@@ -29,7 +29,7 @@
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "sno-core": "github:arkin0x/sno-core#v0.1.30",
+    "sno-core": "github:arkin0x/sno-core#v0.1.33",
     "three": "^0.169.0",
     "zustand": "^4.5.5"
   },

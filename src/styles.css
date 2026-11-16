@@ -3941,6 +3941,8 @@ select.avatars__input option:checked {
 .ws__eyerow-setting b { font-size: 10px; letter-spacing: 0.08em; color: var(--accent); }
 .ws__eyerow-setting b.is-chosen { color: var(--ok); }
 .ws__eyerow-set { position: relative; flex: none; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.ws__eyerow-main .ws__facerow-modes { flex: none; flex-wrap: nowrap; justify-content: flex-end; }
+.ws__eyerow-main .ws__facerow-modes .workshop__mode { flex: none; min-width: 84px; min-height: 44px; }
 .ws__eyerow-note { height: 28px; font-size: 10px; letter-spacing: 0.04em; line-height: 14px; color: var(--accent); overflow: hidden; }
 /* Two classes, to outrank .benchpaste's own place, which comes later. */
 .benchpaste.ws__ask { left: auto; right: var(--ws-gutter); bottom: calc(100% + 8px); z-index: 4; width: 200px; }

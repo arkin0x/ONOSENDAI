@@ -235,5 +235,3 @@ export function yawOnly(q: Quaternion, out: Quaternion): Quaternion {
   return out.setFromAxisAngle(Y, Math.atan2(-hx, -hz))
 }
 
-/** A version 1 payload's eye into the version 2 frame: shared with every payload reader (lib/eyeV1). */
-export { v1Eye } from './eyeV1'

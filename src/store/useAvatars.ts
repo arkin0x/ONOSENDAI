@@ -22,7 +22,6 @@ import { useEffect } from 'react'
 import { create } from 'zustand'
 import { verifyAvatar } from 'cyberspace-core'
 import { AVATAR_KIND, avatarShard, avatarSize, avatarTemplate } from '../lib/avatar'
-import { v1Eye } from '../lib/eyeV1'
 import type { NostrEvent } from '../lib/events'
 import { publish, query } from '../lib/relay'
 import { SignerAccountMismatch } from '../lib/signers'
@@ -237,8 +236,8 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
       // in a shape no one else sees; the payload only for a copy kept before
       // the event was.
       const payloadRead = kept.event ? null : kept.payload ? fromPayload(kept.payload, `avatar:${me}`) : null
-      // A version 1 payload's eye into the version 2 frame, as avatarFromEvent reads it (lib/eyeV1).
-      const read = payloadRead && v1Eye(payloadRead, kept.payload)
+      // sno-core's fromPayload turns a version 1 payload's eye into the version 2 frame itself.
+      const read = payloadRead
       const shard = kept.event ? avatarShard(kept.event) : read && keepOwnTable(read, me)
       set({
         shards: { ...get().shards, [me]: shard },

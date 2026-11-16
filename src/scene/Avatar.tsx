@@ -65,7 +65,7 @@
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Group, Material, type Quaternion } from 'three'
-import { avatarTurn, facingPair } from '../lib/facing'
+import { facingTurn, headingPair } from '../lib/facing'
 import { anchorCentre, GRID_RADIUS, placeCentre, type Position } from '../lib/space'
 import { nearGate } from '../lib/walkGate'
 import { committedAnchor } from '../lib/renderFrame'
@@ -76,6 +76,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
 import { avatarInBuild } from '../lib/buildCursor'
 import { usePersonCard } from '../store/usePersonCard'
+import { useAvatarFace } from '../store/avatarFace'
 import { useLayers } from '../store/useLayers'
 import { AvatarShape } from './AvatarShape'
 import { useAvatarOccluder } from './BuildOccluders'
@@ -118,14 +119,18 @@ export function Avatar(): JSX.Element | null {
   const facingIndex = placed && spectating ? scrub : null
   // Whose shape: yours, or the spectated avatar's, whose marker this is then.
   const pubkey = useCyberspace((s) => s.focusPubkey())
+  // PATH or UPRIGHT, from the shape it wears (DECK-0003 §1.18).
+  const face = useAvatarFace(pubkey)
   // The last move on the chain drawn, as a key so a re-render costs nothing
   // until the chain grows; the avatar turns to face the way it went.
   const view = useCyberspace((s) => s.view)
   // Time decides the angle: the move that brought the avatar to the link on
   // show, which while scrubbing the chain is the link before the explored one
   // and this one, not the head's last move (lib/facing.ts facingPair).
+  // UPRIGHT keeps its heading on a move straight up or down your view, so
+  // its pair is the latest move that went across your up (headingPair).
   const moveKey = useCyberspace((s) => {
-    const pair = facingPair(s.focusChain(), placed ? facingIndex : s.exploreIndex)
+    const pair = headingPair(s.focusChain(), placed ? facingIndex : s.exploreIndex, face, s.axes())
     if (!pair) return null
     const a = pair[0].position, b = pair[1].position
     return `${a.x},${a.y},${a.z}>${b.x},${b.y},${b.z}`
@@ -133,13 +138,16 @@ export function Avatar(): JSX.Element | null {
   // The turn its group carries: the facing in world terms with the view frame
   // composed on, so a compass turn turns the avatar with the world, upside
   // down included (lib/facing.ts avatarTurn). With no move yet it still turns
-  // with the view, lying on cyberspace axes as built.
+  // with the view, lying on cyberspace axes as built. UPRIGHT is the same
+  // turn laid level about your view's up (render +Y), so it stands on its
+  // feet on your screen however the compass has turned the world
+  // (lib/facing.ts uprightTurn; arkinox, 2026-11-16).
   const facing = useMemo(() => {
     const s = useCyberspace.getState()
-    const pair = moveKey ? facingPair(s.focusChain(), placed ? facingIndex : s.exploreIndex) : null
-    return avatarTurn(s.axes(), pair ? [pair[0].position, pair[1].position] : null)
+    const pair = moveKey ? headingPair(s.focusChain(), placed ? facingIndex : s.exploreIndex, face, s.axes()) : null
+    return facingTurn(s.axes(), pair ? [pair[0].position, pair[1].position] : null, face)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moveKey, view])
+  }, [moveKey, view, face])
   // The view the group was last snapped to. A view turn snaps, as the rest of
   // the world does; only a new heading within one view eases in.
   const turnedFor = useRef<Quaternion | null>(null)

@@ -12164,9 +12164,10 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
  * moves between phases. The view layer (.drun-layer) takes the presses meant
  * for the game (pointer lock, the phone's stick and look); the game bar stays
  * above it all. Phone controls: a stick per thumb (MOVE left, LOOK right),
- * FIRE and JUMP above LOOK, the gun above MOVE; the radar top left under
- * the pips. Sizes come from the variables on .drun-hud (the aim assist box
- * is the mean of FIRE and the stick). Classes start drun-. */
+ * FIRE and JUMP above LOOK, the gun above MOVE (beside it on a screen 380px
+ * tall or less); the radar top left under the pips. Sizes come from the
+ * variables on .drun-hud (the aim assist box is the mean of FIRE and the
+ * stick). Classes start drun-. */
 .gameview--drun > .gameview__bar,
 .gameview--drun > .gameview__note { z-index: 5; }
 .drun-hud {
@@ -12488,9 +12489,9 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   right: 0;
   bottom: 9%;
   text-align: center;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.14em;
-  color: rgba(255, 255, 255, 0.85);
+  color: #fff;
   text-shadow: var(--drun-shadow);
 }
 .drun-stick__knob {
@@ -12583,5 +12584,12 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   .drun-hud { --drun-stick: 100px; --drun-fire: 72px; --drun-jump: 56px; --drun-radar: 72px; }
   .drun-btn--reload { left: calc(16px + 150px + 8px); bottom: calc(var(--drun-above-stick) + 10px); }
   .drun-prompt { top: calc(var(--drun-top) + 36px); }
+}
+/* A very short landscape phone (812x375, 800x360, 640x320): the radar comes down to 56px and the gun goes beside
+ * the MOVE stick, RELOAD above it, so nothing on the left reaches up into the radar. */
+@media (max-height: 380px) {
+  .drun-hud { --drun-radar: 56px; --drun-beside-move: calc(20px + var(--drun-stick) + 10px); }
+  .drun-btn--gun { left: var(--drun-beside-move); bottom: calc(var(--drun-bottom) + 4px); }
+  .drun-btn--reload { left: var(--drun-beside-move); bottom: calc(var(--drun-bottom) + 4px + 56px + 8px); }
 }
 /* ---------- end DRONE RUN ---------- */

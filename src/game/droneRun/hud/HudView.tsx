@@ -8,7 +8,7 @@
  * | top left | HP pips (hearts, filled or empty); the one just lost pulses; they blink while you cannot be hit |
  * | under the pips | the radar (Radar.tsx): drones as dots, the end zone in gold, forward up |
  * | top right | WAVE n / total, drones left (a drone icon), the clock, the sound switch (M) |
- * | centre | the crosshair; a small X on it when a shot hits; on a phone with the PULSE RIFLE, the aim assist's box round it (AssistBox.tsx) |
+ * | centre | the crosshair; a small X on it when a shot hits; on a phone with an assist gun (the PULSE RIFLE) in hand, the aim assist's box round it (AssistBox.tsx, model.ts assistShown) |
  * | edges | a red flash when you are hit |
  * | under the top bar | the safe zone's line: the wave's name, then "Leave the safe zone to start the wave." (kept empty, not removed, in other phases) |
  * | bottom (desktop) | the guns 1 2 3 with the one in hand lit, its name and its gauge; the key hints under it, folded during a wave |
@@ -35,6 +35,8 @@ export interface HudViewProps {
   hud: HudState
   weapons: HudWeapon[]
   touch: boolean
+  /** On a touch screen, whether the last pointer was a finger (not a trackpad or a mouse): the aim assist box needs it. Default true. */
+  fingers?: boolean
   /** The mouse is locked to the view (desktop). */
   locked: boolean
   muted: boolean
@@ -84,7 +86,7 @@ export function HudView(p: HudViewProps): JSX.Element {
     <div className={`drun-hudview drun-hudview--${hud.phase}${touch ? ' is-touch' : ''}`}>
       {pulses.hurt > 0 && <div key={`hurt${pulses.hurt}`} className="drun-flash" aria-hidden />}
 
-      {touch && <AssistBox shown={assistShown(touch, hud)} />}
+      {touch && <AssistBox shown={assistShown(p.fingers ?? true, hud, weapons, p.exiting)} />}
 
       <div className="drun-cross" aria-hidden>
         <span className="drun-cross__h" />

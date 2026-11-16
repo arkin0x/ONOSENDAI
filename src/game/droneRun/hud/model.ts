@@ -28,6 +28,8 @@ export interface HudWeapon {
   gauge: Gauge
   /** A charge gun that also heats (the rail): a thin heat line under its charge bar. */
   heats: boolean
+  /** Its WeaponDef's `assist`: "auto" (the PULSE RIFLE in the base variant) shows the aim assist box on a phone while it is in hand. */
+  assist: 'auto' | null
 }
 
 /** Which gauge a gun has: a magazine, a charge, or heat. */
@@ -38,17 +40,18 @@ export function gaugeOf(def: Pick<WeaponDef, 'mode' | 'ammo' | 'heat'>): Gauge {
 }
 
 export function hudWeapons(defs: readonly WeaponDef[]): HudWeapon[] {
-  return defs.map((d) => ({ id: d.id, name: d.name, gauge: gaugeOf(d), heats: !!d.heat }))
+  return defs.map((d) => ({ id: d.id, name: d.name, gauge: gaugeOf(d), heats: !!d.heat, assist: d.assist ?? null }))
 }
 
-/** The guns as the runner's store lists them (names, what each runs on, which charge); the base variant's when it lists none. */
-export function weaponsOfHud(h: Pick<DroneRunHud, 'weaponNames' | 'weaponKinds' | 'weaponCharges'>): HudWeapon[] {
+/** The guns as the runner's store lists them (names, what each runs on, which charge, which take the assist); the base variant's when it lists none. */
+export function weaponsOfHud(h: Pick<DroneRunHud, 'weaponNames' | 'weaponKinds' | 'weaponCharges' | 'weaponAssists'>): HudWeapon[] {
   if (h.weaponNames.length === 0) return BASE_WEAPONS
   return h.weaponNames.map((name, i) => ({
     id: `${i}:${name}`,
     name,
     gauge: h.weaponCharges[i] ? 'charge' : (h.weaponKinds[i] ?? 'heat'),
     heats: (h.weaponKinds[i] ?? 'heat') === 'heat',
+    assist: h.weaponAssists[i] ?? null,
   }))
 }
 
@@ -74,16 +77,22 @@ export const JUMP_PX = 64
 /** The aim assist box's side: halfway between FIRE and the MOVE stick (--drun-assist). */
 export const ASSIST_PX = (STICK_PX + FIRE_PX) / 2
 
-/** The aim assist box shows on a touch screen, with the first gun (the PULSE RIFLE) in hand, while no card is up. */
-export function assistShown(touch: boolean, hud: Pick<HudState, 'phase' | 'weapon'>): boolean {
-  return touch && hud.weapon === 0 && hud.phase !== 'failed' && hud.phase !== 'cleared'
+/**
+ * The aim assist box shows (and so the assist runs) only when all hold:
+ * - `fingers`: a touch screen whose last pointer was a finger (an iPad
+ *   driven by a trackpad or a mouse hides it until the next touch);
+ * - the gun in hand has `assist: "auto"` (the variant's data);
+ * - no card is up and the game is not exiting.
+ */
+export function assistShown(fingers: boolean, hud: Pick<HudState, 'phase' | 'weapon'>, weapons: readonly HudWeapon[], exiting = false): boolean {
+  return fingers && !exiting && weapons[hud.weapon]?.assist === 'auto' && hud.phase !== 'failed' && hud.phase !== 'cleared'
 }
 
 /** The HUD before the runner says anything (the world loading): the safe zone, full health, the base variant's guns. */
 export const IDLE_HUD: HudState = {
   phase: 'safe', hp: 3, maxHp: 3, invulnerable: false, wave: 1, waveName: '', wavesTotal: 3, dronesLeft: 0,
   weapon: 0, weaponNames: BASE_WEAPONS.map((w) => w.name), weaponKinds: BASE_WEAPONS.map((w) => (w.gauge === 'ammo' ? 'ammo' : 'heat')),
-  weaponCharges: BASE_WEAPONS.map((w) => w.gauge === 'charge'), heat: 0, overheated: false, ammo: 0, mag: 0, reloading: false,
+  weaponCharges: BASE_WEAPONS.map((w) => w.gauge === 'charge'), weaponAssists: BASE_WEAPONS.map((w) => w.assist), heat: 0, overheated: false, ammo: 0, mag: 0, reloading: false,
   charge: 0, switching: false, runTime: 0, kills: 0, score: 0,
 }
 

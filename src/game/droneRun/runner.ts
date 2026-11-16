@@ -62,6 +62,8 @@ export interface DroneRunHud {
   /** What each gun runs on, by index: 'heat' or 'ammo'; and whether it charges. */
   weaponKinds: readonly ('heat' | 'ammo')[]
   weaponCharges: readonly boolean[]
+  /** Each gun's `assist` (its WeaponDef's: "auto" or null), by index: the HUD shows the aim assist box with such a gun in hand. */
+  weaponAssists: readonly ('auto' | null)[]
   /** The gun in hand's heat, 0..1 of its overheat point (0 for an ammo gun). Rounded to 0.02. */
   heat: number
   overheated: boolean
@@ -81,7 +83,7 @@ export interface DroneRunHud {
 
 const EMPTY_HUD: DroneRunHud = {
   phase: 'safe', hp: 0, maxHp: 0, invulnerable: false, wave: 1, waveName: '', wavesTotal: 0, dronesLeft: 0,
-  weapon: 0, weaponNames: [], weaponKinds: [], weaponCharges: [], heat: 0, overheated: false, ammo: 0, mag: 0, reloading: false,
+  weapon: 0, weaponNames: [], weaponKinds: [], weaponCharges: [], weaponAssists: [], heat: 0, overheated: false, ammo: 0, mag: 0, reloading: false,
   charge: 0, switching: false, runTime: 0, kills: 0, score: 0,
 }
 
@@ -98,14 +100,16 @@ export function onDroneRunEvent(cb: Listener): () => void {
 }
 
 /** Static facts about a variant's guns, made once per variant so the HUD's lists keep their references. */
-const weaponFacts = new WeakMap<DroneRunVariant, Pick<DroneRunHud, 'weaponNames' | 'weaponKinds' | 'weaponCharges'>>()
-function factsOf(v: DroneRunVariant): Pick<DroneRunHud, 'weaponNames' | 'weaponKinds' | 'weaponCharges'> {
+type WeaponFacts = Pick<DroneRunHud, 'weaponNames' | 'weaponKinds' | 'weaponCharges' | 'weaponAssists'>
+const weaponFacts = new WeakMap<DroneRunVariant, WeaponFacts>()
+function factsOf(v: DroneRunVariant): WeaponFacts {
   let f = weaponFacts.get(v)
   if (!f) {
     f = {
       weaponNames: Object.freeze(v.spec.weapons.map((w) => w.name)),
       weaponKinds: Object.freeze(v.spec.weapons.map((w) => (w.heat ? 'heat' : 'ammo') as 'heat' | 'ammo')),
       weaponCharges: Object.freeze(v.spec.weapons.map((w) => w.mode === 'charge')),
+      weaponAssists: Object.freeze(v.spec.weapons.map((w) => w.assist ?? null)),
     }
     weaponFacts.set(v, f)
   }

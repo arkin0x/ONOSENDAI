@@ -9,9 +9,10 @@
  * - It measures itself as drawn (ResizeObserver) and tells the assist
  *   (assist.ts setAssistBox) half its side in CSS px; when it is not shown
  *   it tells it null, and the assist stops.
- * - Shown only on touch screens, with the PULSE RIFLE in hand (the first
- *   gun), and no card up. The element stays in place either way (hidden, not
- *   removed), so nothing moves.
+ * - Shown only on touch screens whose last pointer was a finger, with a gun
+ *   whose def has assist "auto" in hand (the PULSE RIFLE), no card up and
+ *   the game not exiting (model.ts assistShown). The element stays in place
+ *   either way (hidden, not removed), so nothing moves.
  * - While the assist has a drone (assistState.target) the brackets brighten
  *   a little; read each screen frame, set as a class, never through React.
  */

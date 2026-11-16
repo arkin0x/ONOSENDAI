@@ -16,8 +16,11 @@
  * - plays the sounds from the run's events (audio.ts), and flashes the
  *   screen's edges on a hit taken and the hit marker on a hit landed;
  * - while a card is up (RUN FAILED, WAVE n CLEAR) lets the mouse go, stops
- *   the game reading the controls, and takes Enter and R for the card's
- *   first button (RESTART, NEXT WAVE);
+ *   the game reading the controls, pauses the run (so the aim assist asks
+ *   nothing) and takes Enter and R for the card's first button (RESTART,
+ *   NEXT WAVE);
+ * - shows the aim assist box only while the last pointer was a finger and
+ *   the game is not exiting (model.ts assistShown);
  * - tells the controls how many guns there are and which is in hand, so
  *   Q, the wheel and the gun button go to the next one.
  */
@@ -52,6 +55,29 @@ function coarsePointer(): boolean {
   try { return typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches } catch { return false }
 }
 
+/**
+ * Whether the last pointer on the page was a finger: true until a pointer
+ * says otherwise on a touch screen; a mouse, a pen or a trackpad (an iPad
+ * with one) makes it false, the next touch true again. Watched on the
+ * window, before anything else handles the event. Off a touch screen, false.
+ */
+export function useLastPointerFinger(touch: boolean): boolean {
+  const [finger, setFinger] = useState(true)
+  const last = useRef(true)
+  useEffect(() => {
+    if (!touch || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return
+    const seen = (e: PointerEvent): void => {
+      const now = e.pointerType === 'touch'
+      if (now !== last.current) { last.current = now; setFinger(now) }
+    }
+    const opts = { capture: true, passive: true }
+    window.addEventListener('pointerdown', seen, opts)
+    window.addEventListener('pointermove', seen, opts)
+    return () => { window.removeEventListener('pointerdown', seen, opts); window.removeEventListener('pointermove', seen, opts) }
+  }, [touch])
+  return touch && finger
+}
+
 function usePointerLocked(): boolean {
   return useSyncExternalStore(
     (l) => { pointer.listeners.add(l); return () => { pointer.listeners.delete(l) } },
@@ -78,7 +104,8 @@ export function reactTo(e: RunEvent): { sound: Parameters<typeof playSound>[0] |
 
 export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe, exit, touch: forceTouch }: DroneRunHudProps): JSX.Element {
   const touch = forceTouch ?? coarsePointer()
-  const listed = useMemo(() => weaponsOfHud(hud), [hud.weaponNames, hud.weaponKinds, hud.weaponCharges])
+  const fingers = useLastPointerFinger(touch)
+  const listed = useMemo(() => weaponsOfHud(hud), [hud.weaponNames, hud.weaponKinds, hud.weaponCharges, hud.weaponAssists])
   const weapons = given ?? listed
   const locked = usePointerLocked()
   const muted = useDroneRunSound((s) => s.muted) || useSoundMutes((s) => s.master)
@@ -203,6 +230,7 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
         hud={hud}
         weapons={weapons}
         touch={touch}
+        fingers={fingers}
         locked={locked}
         muted={muted}
         exiting={exiting}

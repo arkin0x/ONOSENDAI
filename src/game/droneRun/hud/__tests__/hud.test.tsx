@@ -43,7 +43,7 @@ import { mount, textOf, type Host } from '../../../../test/elementRoot'
 import { HudView, type HudViewProps } from '../HudView'
 import { DroneRunHud, reactTo } from '../DroneRunHud'
 import { TouchPad } from '../TouchPad'
-import { ASSIST_PX, BASE_WEAPONS, COPY, FIRE_PX, IDLE_HUD, JUMP_PX, STICK_PX, weaponsOfHud, type HudState } from '../model'
+import { ASSIST_PX, BASE_WEAPONS, COPY, FIRE_PX, IDLE_HUD, JUMP_PX, STICK_PX, assistShown, weaponsOfHud, type HudState } from '../model'
 import { AssistBox } from '../AssistBox'
 import { lookState, lookStickRate, readInput, resetInput, tickLook } from '../../input'
 import { readFileSync } from 'node:fs'
@@ -141,9 +141,12 @@ describe('the gauge follows the gun in hand', () => {
   })
 
   it('the runner\'s lists name the guns and their gauges', () => {
-    const w = weaponsOfHud({ weaponNames: ['A', 'B', 'C'], weaponKinds: ['heat', 'ammo', 'heat'], weaponCharges: [false, false, true] })
-    expect(w.map((x) => [x.gauge, x.heats])).toEqual([['heat', true], ['ammo', false], ['charge', true]])
-    expect(weaponsOfHud({ weaponNames: [], weaponKinds: [], weaponCharges: [] })).toBe(BASE_WEAPONS)
+    const w = weaponsOfHud({ weaponNames: ['A', 'B', 'C'], weaponKinds: ['heat', 'ammo', 'heat'], weaponCharges: [false, false, true], weaponAssists: [null, 'auto', null] })
+    expect(w.map((x) => [x.gauge, x.heats, x.assist])).toEqual([['heat', true, null], ['ammo', false, 'auto'], ['charge', true, null]])
+    expect(weaponsOfHud({ weaponNames: [], weaponKinds: [], weaponCharges: [], weaponAssists: [] })).toBe(BASE_WEAPONS)
+    // The base variant's: the PULSE RIFLE alone takes the assist.
+    expect(BASE_WEAPONS.map((x) => x.assist)).toEqual(['auto', null, null])
+    expect(weaponsOfHud(IDLE_HUD).map((x) => x.assist)).toEqual(['auto', null, null])
   })
 
   it('desktop: printed hints, full in the safe zone, folded in a wave; CLICK AIM before the lock', async () => {
@@ -306,6 +309,26 @@ describe('three fingers at once, and a fourth on JUMP (phone)', () => {
     return { m, touch, button }
   }
 
+  it('the aim assist box follows the last pointer: a trackpad or a mouse hides it, the next touch brings it back', async () => {
+    const m = await mount(createElement(DroneRunHud, { hud: { ...IDLE_HUD, phase: 'wave' }, restart: vi.fn(), nextWave: vi.fn(), subscribe: () => () => {}, exit: vi.fn(), touch: true }))
+    const boxCls = (): string => cls(m.all().find((h) => cls(h).split(' ').includes('drun-assist'))!)
+    const pointer = (type: string, pointerType: string): void => { winEvents.dispatchEvent(Object.assign(new Event(type), { pointerType })) }
+    const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5))
+    expect(boxCls()).toBe('drun-assist')
+    pointer('pointermove', 'mouse')
+    await tick()
+    expect(boxCls()).toBe('drun-assist is-off')
+    expect(assistCalls[assistCalls.length - 1]).toBeNull()
+    pointer('pointerdown', 'pen')
+    await tick()
+    expect(boxCls()).toBe('drun-assist is-off')
+    pointer('pointerdown', 'touch')
+    await tick()
+    expect(boxCls()).toBe('drun-assist')
+    expect(assistCalls[assistCalls.length - 1]).toBeGreaterThan(0)
+    await m.unmount()
+  })
+
   it('move, look and fire held together; lifting one leaves the others; JUMP on top', async () => {
     const { m, touch, button } = await pad()
     touch('onPointerDown', 1, MOVE.cx, MOVE.cy - 60)
@@ -386,6 +409,38 @@ describe('three fingers at once, and a fourth on JUMP (phone)', () => {
   })
 })
 
+describe('a short landscape phone: nothing on the left reaches the radar', () => {
+  const css = readFileSync(new URL('../../../../styles.css', import.meta.url), 'utf8')
+  /** The body of the `@media (max-height: Npx)` block in the DRONE RUN section. */
+  const block = (h: number): string => {
+    const from = css.indexOf('/* ---------- DRONE RUN: HUD')
+    const at = css.indexOf(`@media (max-height: ${h}px) {`, from)
+    expect(at).toBeGreaterThan(from)
+    return css.slice(at, css.indexOf('\n}', at))
+  }
+  const px = (body: string, name: string): number => Number(new RegExp(`${name}: (\\d+)px`).exec(body)?.[1] ?? NaN)
+
+  it('at 812x375, 800x360 and 640x320 the radar ends above the gun button and RELOAD (the sizes the CSS gives)', () => {
+    const short = block(520), shorter = block(380)
+    const stick = px(short, '--drun-stick'), radar = px(shorter, '--drun-radar')
+    expect(radar).toBe(56)
+    expect(shorter).toContain('.drun-btn--gun { left: var(--drun-beside-move); bottom: calc(var(--drun-bottom) + 4px); }')
+    expect(shorter).toContain('--drun-beside-move: calc(20px + var(--drun-stick) + 10px);')
+    // The layout's own numbers: the HUD's top line 12 + 46, the radar 38 under it; the gun button 56 tall, RELOAD 36 above it with 8 between.
+    const radarBottom = 12 + 46 + 38 + radar
+    for (const [w, h] of [[812, 375], [800, 360], [640, 320]]) {
+      const bottom = 20 + 4
+      const gunTop = h - bottom - 56
+      const reloadTop = h - (bottom + 56 + 8) - 36
+      expect(reloadTop).toBeGreaterThan(radarBottom)
+      expect(gunTop).toBeGreaterThan(radarBottom)
+      // Beside the MOVE stick, inside the screen's left half, and below the aim assist box in the middle.
+      expect(20 + stick + 10 + 150).toBeLessThan(w / 2)
+      expect(gunTop).toBeGreaterThan(h / 2 + (stick + px(short, '--drun-fire')) / 4)
+    }
+  })
+})
+
 describe('the aim assist box', () => {
   const box = (all: Host[]): Host | undefined => all.find((h) => cls(h).split(' ').includes('drun-assist'))
 
@@ -425,6 +480,32 @@ describe('the aim assist box', () => {
     expect(box(desk.all())).toBeUndefined()
     expect(assistCalls.filter((c) => c !== null)).toEqual([])
     await desk.unmount()
+  })
+
+  it('follows the gun\'s own assist flag, not its place in the list', async () => {
+    // A variant whose assist gun is the second.
+    const moved = BASE_WEAPONS.map((w, i) => ({ ...w, assist: i === 1 ? 'auto' as const : null }))
+    const second = await mount(createElement(HudView, props({ phase: 'wave', weapon: 1 }, { touch: true, weapons: moved })))
+    expect(cls(box(second.all())!)).toBe('drun-assist')
+    await second.unmount()
+    const first = await mount(createElement(HudView, props({ phase: 'wave', weapon: 0 }, { touch: true, weapons: moved })))
+    expect(cls(box(first.all())!)).toBe('drun-assist is-off')
+    await first.unmount()
+    expect(assistShown(true, { phase: 'wave', weapon: 1 }, moved)).toBe(true)
+    expect(assistShown(true, { phase: 'wave', weapon: 0 }, moved)).toBe(false)
+    expect(assistShown(true, { phase: 'wave', weapon: 5 }, moved)).toBe(false)
+  })
+
+  it('hidden while the game is exiting, and while the last pointer was not a finger', async () => {
+    expect(assistShown(true, { phase: 'wave', weapon: 0 }, BASE_WEAPONS, true)).toBe(false)
+    expect(assistShown(false, { phase: 'wave', weapon: 0 }, BASE_WEAPONS)).toBe(false)
+    for (const more of [{ exiting: true }, { fingers: false }]) {
+      assistCalls.length = 0
+      const m = await mount(createElement(HudView, props({ phase: 'wave', weapon: 0 }, { touch: true, ...more })))
+      expect(cls(box(m.all())!)).toBe('drun-assist is-off')
+      expect(assistCalls.filter((c) => c !== null)).toEqual([])
+      await m.unmount()
+    }
   })
 
   it('measures itself as drawn: a new size is a new half side', async () => {

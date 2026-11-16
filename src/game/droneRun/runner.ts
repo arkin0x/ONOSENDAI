@@ -306,12 +306,17 @@ export class DroneRunner {
     return was ? lerp3(out, was, pos, this.alpha()) : lerp3(out, pos, pos, 0)
   }
 
-  /** Pause or go on. Going on drops the time away (the next frame runs no step). */
-  setPaused(on: boolean): void {
-    if (on === this.paused) return
-    this.paused = on
+  /** Why the run is paused: the page is hidden, a card is up. It goes on only when no reason is left. */
+  private readonly pauses = new Set<string>()
+
+  /** Pause or go on, for `why` (default 'hidden'). Going on drops the time away (the next frame runs no step). */
+  setPaused(on: boolean, why = 'hidden'): void {
+    if (on) this.pauses.add(why); else this.pauses.delete(why)
+    const now = this.pauses.size > 0
+    if (now === this.paused) return
+    this.paused = now
     this.carry = 0
-    if (!on) this.skipNext = true
+    if (!now) this.skipNext = true
   }
 
   /** Back to the safe zone: full HP, no drones, the same wave. */
@@ -366,5 +371,5 @@ export function nextWaveRun(): void {
 
 /** A card up or down (the HUD's own pauses): no steps meanwhile. */
 export function setRunPaused(on: boolean): void {
-  active?.setPaused(on)
+  active?.setPaused(on, 'card')
 }

@@ -12029,8 +12029,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
  * for the game (pointer lock, the phone's stick and look); the game bar stays
  * above it all. Phone controls follow WALK's sides: move on the left, look,
  * FIRE and JUMP on the right. Classes start drun-. */
-.gameview:has(.drun-hud) > .gameview__bar,
-.gameview:has(.drun-hud) > .gameview__note { z-index: 5; }
+.gameview--drun > .gameview__bar,
+.gameview--drun > .gameview__note { z-index: 5; }
 .drun-hud {
   --drun-top: calc(max(12px, env(safe-area-inset-top)) + 46px);
   --drun-bottom: max(20px, env(safe-area-inset-bottom));

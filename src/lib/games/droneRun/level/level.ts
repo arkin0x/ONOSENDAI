@@ -84,8 +84,12 @@ function box(raw: unknown, what: string): LevelBox {
   return { lo, hi }
 }
 
+/** The longest id or name a level may give anything, in characters: names are shown in the GAMES panel. */
+export const WORD_MAX = 64
+
 function word(raw: unknown, what: string): string {
   if (typeof raw !== 'string' || raw.trim() === '') throw new Error(`${what} is missing`)
+  if (raw.length > WORD_MAX) throw new Error(`${what} is longer than ${WORD_MAX} characters`)
   return raw
 }
 

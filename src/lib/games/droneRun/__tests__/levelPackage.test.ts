@@ -115,6 +115,12 @@ describe('reading a level package', () => {
     expect(() => readLevelPackage(zipOf(testLevel({ pieces: [{ piece: 'field-crate', at: [128, 64, 256] }] })))).toThrow(/region-local/)
   })
 
+  it('refuses a level missing a spawn point the waves use, and an over-long name', () => {
+    const spawns = field.level.spawns.filter((sp) => sp.id !== 's3')
+    expect(() => readLevelPackage(zipOf(testLevel({ spawns })))).toThrow(/no spawn point s3, which the waves use/)
+    expect(() => readLevelPackage(zipOf(testLevel({ name: 'x'.repeat(65) })))).toThrow(/longer than 64 characters/)
+  })
+
   it('refuses a payload over the size limit', () => {
     const big = { ...field.payloads['field-crate'], name: 'x'.repeat(PIECE_MAX_BYTES) }
     expect(() => readLevelPackage(zipOf(testLevel(), { 'field-ground-flat': field.payloads['field-ground-flat'], 'field-crate': big }))).toThrow(`payloads/field-crate.json is over ${PIECE_MAX_BYTES / 1024} KB.`)

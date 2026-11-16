@@ -17,6 +17,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import baseVariant from '../variants/drone-run-base.json'
 import { fromPayload } from 'sno-core/shards'
 import { shardRefusal } from '../../../hidden'
 import { insideBox, pieceNames, readLevel, type Local } from '../level/level'
@@ -50,6 +51,11 @@ describe('the frame', () => {
   it('the zones are the full battlefield\'s, their front lines 100 apart', () => {
     expect(level.zones).toEqual({ start: { lo: [108, 62, 184], hi: [148, 80, 204] }, finish: { lo: [114, 66, 66], hi: [142, 78, 84] } })
     expect(level.zones.start.lo[2] - level.zones.finish.hi[2]).toBe(100)
+  })
+
+  it('the base variant names the same zones as the field (the variant\'s spec.zones are the level\'s)', () => {
+    const z = (baseVariant as { spec: { zones: unknown } }).spec.zones
+    expect(z).toEqual(placeholderField().level.zones)
   })
 
   it('spawn points s1..s14 and a patrol loop', () => {

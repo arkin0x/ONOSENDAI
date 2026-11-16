@@ -37,7 +37,7 @@ import { noteChainHolders } from './chainHolders'
 import { chainLanded, onReleased } from './chainStore'
 import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend } from './release'
-import { newestEventOnRelays, noteStaleFormatStuck, retireStaleFormat, useCyberspace } from '../store/useCyberspace'
+import { newestEventOnRelays, noteStaleFormatStuck, retirePlaceholderRun, retireStaleFormat, useCyberspace } from '../store/useCyberspace'
 import { staleHopFormat } from './staleFormat'
 import { movementBlocked, useVersionGate } from './versionGate'
 import { entersPlaceholderGame } from './games/flag'
@@ -135,8 +135,12 @@ async function pump(): Promise<void> {
   if (staleHopFormat(next)) { if (retireStaleFormat() === null) noteStaleFormatStuck(next); return }
   // Never an entry into a placeholder game (a DEV test world, lib/games/flag.ts): it was
   // signed in LOCAL for a test run and names a throwaway key that must never reach a relay.
-  // The drain stops here for good, and everything after it stays on this device too.
-  if (entersPlaceholderGame(next)) { heldForTestGame = true; return }
+  // A finished run at the head is cut off the chain (retirePlaceholderRun, which useGame
+  // also does on EXIT), and the store update that makes asks for the next drain. Otherwise
+  // (a run still open, or moves signed after it) the drain waits here, and nothing from
+  // the entry on is sent.
+  heldForTestGame = false
+  if (entersPlaceholderGame(next)) { if (!retirePlaceholderRun()) heldForTestGame = true; return }
 
   // An action goes out only once it has landed on this device, because that
   // is where two tabs that signed from one head find out which of them won.

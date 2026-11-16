@@ -111,6 +111,17 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
   }, [card])
   useEffect(() => () => { setInputPaused(false) }, [])
 
+  // Away from the page (an app switch on a phone, a hidden tab): every finger lets go, so the stick and the look take
+  // the next touch, even when the old touches never sent their pointerup.
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return
+    const letGo = (): void => { tracker.clear(); drawKnob() }
+    const hidden = (): void => { if (document.visibilityState === 'hidden') letGo() }
+    window.addEventListener('blur', letGo)
+    document.addEventListener('visibilitychange', hidden)
+    return () => { window.removeEventListener('blur', letGo); document.removeEventListener('visibilitychange', hidden) }
+  }, [])
+
   useEffect(() => { noteWeapons(weapons.length, hud.weapon) }, [weapons.length, hud.weapon])
 
   // Enter or R presses the card's first button.
@@ -163,6 +174,7 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
         onPointerMove={onTouchMove}
         onPointerUp={onTouchUp}
         onPointerCancel={onTouchUp}
+        onLostPointerCapture={onTouchUp}
       />
       <HudView
         hud={hud}

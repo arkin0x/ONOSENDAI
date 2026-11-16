@@ -30,6 +30,7 @@ import type { GameDef } from '../lib/games/types'
 import { useCyberspace } from '../store/useCyberspace'
 import { useDemo } from '../store/useDemo'
 import { enterBlocked, enterBlockedFor, isDroneRun, useGame } from '../store/useGame'
+import { useDroneRunLevels } from '../store/useDroneRunLevels'
 import { useShards } from '../store/useShards'
 import { useTutorial } from '../store/useTutorial'
 import { useTv } from '../store/useTv'
@@ -37,6 +38,9 @@ import { useWalk } from '../store/useWalk'
 import { useWorkshop } from '../store/useWorkshop'
 import '../store/foundGames'
 import { Explanation } from './Explanation'
+
+/** Why DRONE RUN's ENTER is greyed out while a level is being imported. */
+export const IMPORTING_MESSAGE = 'Wait for the level to finish importing.'
 
 /** Why ENTER is greyed out during the tour (/demo), which a game would sit under. */
 export const TOUR_MESSAGE = 'Leave the tour first.'
@@ -86,6 +90,8 @@ export function GamesPanel(): JSX.Element {
   useCyberspace(() => whyNoEnter())
   // A test game's ENTER follows LOCAL and LIVE (useGame localOnlyRefusal).
   useCyberspace((s) => s.live)
+  // DRONE RUN's ENTER waits while a level is being imported: the field it plays is chosen at ENTER.
+  const importing = useDroneRunLevels((s) => s.busy !== null)
   const [entering, setEntering] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
 
@@ -118,7 +124,7 @@ export function GamesPanel(): JSX.Element {
       )
     }
     const place = enterFromRefusal(game)
-    const why = whyNoEnterFor(game) ?? place
+    const why = whyNoEnterFor(game) ?? place ?? (isDroneRun(game) && importing ? IMPORTING_MESSAGE : null)
     return (
       <li key={game.pubkey} className="avatars__row games__row">
         <span className="avatars__who" title={game.name}>{game.name}</span>

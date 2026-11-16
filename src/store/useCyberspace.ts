@@ -130,7 +130,7 @@ import { lookBeforeMove, movementBlocked, useVersionGate, VERSION_BLOCKED_MESSAG
 import { enterVirtualTemplate, exitVirtualTemplate, type Links } from '../lib/games/bracket'
 import type { GameDef } from '../lib/games/types'
 import { canLeave, gameFor } from '../lib/games/registry'
-import { isPlaceholderGame } from '../lib/games/flag'
+import { entersPlaceholderGame, isPlaceholderGame } from '../lib/games/flag'
 import { cancelProof, postProof, PROOF_WORKER_FAILED_MESSAGE, type ProofMode, type ProofResponse } from '../lib/workers'
 import { staleFormatCut } from '../lib/staleFormat'
 import { offloadFrom, cloudSeconds } from '../lib/crossover'
@@ -3494,6 +3494,34 @@ export function retireStaleFormat(): string | null {
   return words
 }
 
+/**
+ * Take a finished test run off the chain: an entry into a placeholder game
+ * (lib/games/flag.ts) and its exit, when they are the chain's last two
+ * actions and neither was published. A test run is signed in LOCAL so the
+ * games framework plays it as any game, but it names a throwaway key and must
+ * never reach a relay (lib/publisher.ts stops at such an entry), so once it is
+ * over it is set aside, as a stale-format cut sets actions aside, and the
+ * chain goes on from the action before the entry: nothing of the test is left
+ * to hold back this identity's later moves when it goes LIVE. True when it cut.
+ */
+export function retirePlaceholderRun(): boolean {
+  const s = useCyberspace.getState()
+  const n = s.events.length
+  if (n < 3) return false
+  const entry = s.events[n - 2]
+  const exit = s.events[n - 1]
+  if (!entersPlaceholderGame(entry)) return false
+  const closes = exit.tags.some((t) => t[0] === 'A' && t[1] === 'exit-virtual') && exit.tags.some((t) => t[0] === 'e' && t[1] === entry.id && t[3] === 'entry')
+  if (!closes || s.published[entry.id] === 'ok' || s.published[exit.id] === 'ok') return false
+  const events = s.events.slice(0, n - 2)
+  setAside.add(entry.id)
+  setAside.add(exit.id)
+  const d = derive({ version: 2, events, published: events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id), stats: s.chain, held: s.held })
+  useCyberspace.setState({ ...d })
+  saveChain(d.events, d.published, d.chain, s.held)
+  return true
+}
+
 const pubkeyHex = currentSigner.pubkey
 if (mintedOnLoad) markMinted(pubkeyHex)
 
@@ -3797,9 +3825,11 @@ async function signGameEvent(
   const early = check(parsedChain(before.events))
   if (early) return { refused: early }
   // A placeholder game's events, signed in LOCAL, never leave this device (lib/publisher.ts stops
-  // at its entry for good), so no fork with another device can follow from them: the look at the
-  // relays is skipped, and a test run plays with no relay in reach.
-  const refusal = placeholder && !before.live ? null : await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+  // at its entry, and the run is cut off the chain when it ends, retirePlaceholderRun), so no fork
+  // with another device can follow from them: only the look at the relays is skipped, and a test run
+  // plays with no relay in reach. The checks here (the saved chain read in, another tab's move
+  // folded in) still run, as for any move.
+  const refusal = placeholder && !before.live ? await headCheckedHere() : await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
   if (get().proof.message === HEAD_RETRYING_MESSAGE) set({ proof: IDLE_PROOF })
   if (refusal === STALE_CONFIRMATION) return { refused: GAME_STALE_MESSAGE }
   if (refusal) return { refused: refusal }

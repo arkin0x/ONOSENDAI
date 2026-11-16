@@ -110,3 +110,7 @@ Exactly one of `heat` or `ammo`.
 ## The simulation in one paragraph
 
 `createRun(variant, solids, { level, seed, wave })` makes a run; `stepRun(state, input)` advances it one fixed step of 1/60 s, mutating the state in place, and lists what happened in `state.events`. Inputs are `{ move: { fwd, strafe }, yaw, pitch, jump, fire, select, reload }`. `restart` and `nextWave` return fresh states; `stateHash` fingerprints a state. The run is a pure function of the variant, the solids, the level, the seed and the input log, so another client can replay it.
+
+### Replay across engines
+
+The replay holds inside one JavaScript engine: the same inputs give the same `stateHash`. Across engines it may not. ECMAScript lets `Math.sin`, `cos`, `atan2`, `hypot` and `exp` differ in the last bits between V8, JavaScriptCore and SpiderMonkey, and over thousands of steps that can change a hit. A client in another engine or language that wants to check someone else's run would need positions and velocities in fixed point, or fixed approximations of those functions. Until then, a replay check is only good within the engine that recorded the run.

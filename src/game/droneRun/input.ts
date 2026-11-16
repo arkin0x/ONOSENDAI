@@ -199,6 +199,11 @@ export interface DesktopOptions {
 }
 
 /** Refused this many times in a row, the lock is not asked for again this session: a drag looks instead. */
+/** Wheel scroll, in pixels, that changes the gun once (a mouse notch is about 100). */
+export const WHEEL_STEP = 60
+/** A pause in wheel events this long, in ms, ends a scroll gesture. */
+export const WHEEL_GAP_MS = 180
+
 const LOCK_TRIES = 2
 /** After the lock goes (Esc), a refusal within this long is the browser's pause, not a refusal, ms. */
 const LOCK_COOLDOWN_MS = 2000
@@ -292,10 +297,25 @@ export function attachDesktop(host: DesktopHost, opts: DesktopOptions = {}): () 
     if (e.button === 0 || e.type === 'pointercancel') setFire('mouse', false)
     if (drag && drag.id === e.pointerId) drag = null
   }
+  // A trackpad scroll sends dozens of small wheel events per gesture: they add up, and a gun
+  // changes once per WHEEL_STEP of scroll and at most once per gesture (a gap of WHEEL_GAP_MS
+  // ends one), so one swipe is one gun. A mouse notch (about 100) is one gun each.
+  let wheelSum = 0
+  let wheelAt = -Infinity
+  let wheelSpent = false
   const wheel = (e: WheelEvent): void => {
     if (paused || e.deltaY === 0) return
     e.preventDefault()
-    pressCycle(e.deltaY > 0 ? 1 : -1)
+    const t = now()
+    if (t - wheelAt > WHEEL_GAP_MS) { wheelSum = 0; wheelSpent = false }
+    wheelAt = t
+    const px = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 800 : e.deltaY
+    wheelSum += px
+    const notch = Math.abs(px) >= WHEEL_STEP
+    if (Math.abs(wheelSum) < WHEEL_STEP || (wheelSpent && !notch)) return
+    pressCycle(wheelSum > 0 ? 1 : -1)
+    wheelSum = 0
+    wheelSpent = true
   }
   const lockchange = (): void => {
     const on = doc.pointerLockElement === el

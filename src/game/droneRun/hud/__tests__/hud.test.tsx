@@ -143,7 +143,7 @@ describe('the gauge follows the gun in hand', () => {
     const wave = await mount(createElement(HudView, props({ phase: 'wave' }, { locked: false })))
     expect(wave.says('WASD')).toBe(false)
     expect(wave.says('CLICKAIM')).toBe(true)
-    expect(wave.says('1 2 3GUNS')).toBe(true)
+    expect(wave.says('1 2 3 QGUNS')).toBe(true)
     await wave.unmount()
   })
 })

@@ -23,6 +23,12 @@ import { fromPayload } from 'sno-core/shards'
 import { listZip, readEntry, ZipError, type ZipEntry } from '../../../zipRead'
 import { shardRefusal } from '../../../hidden'
 import { pieceNames, readLevel, type Level } from './level'
+import baseVariant from '../variants/drone-run-base.json'
+
+/** The spawn point ids the game's waves name (the base variant's wave scripts): an imported level must have each. */
+export const WAVE_SPAWN_IDS: readonly string[] = [...new Set(
+  (baseVariant as { spec: { waves: Array<{ spawns: Array<{ at: unknown }> }> } }).spec.waves.flatMap((w) => w.spawns.map((sp) => sp.at)).filter((at): at is string => typeof at === 'string'),
+)].sort()
 
 /** The zip itself, at most. */
 export const PACKAGE_MAX_BYTES = 16 * 1024 * 1024
@@ -97,6 +103,10 @@ export function readLevelPackage(bytes: Uint8Array): LevelPackage {
   try { level = readLevel(read.value) } catch (err) {
     throw new Error(`level.json: ${err instanceof Error ? err.message : String(err)}.`)
   }
+  // Every spawn point the game's waves name must be in the level, or the first wave would stop on it after ENTER.
+  const have = new Set(level.spawns.map((sp) => sp.id))
+  const missing = WAVE_SPAWN_IDS.filter((id) => !have.has(id))
+  if (missing.length > 0) throw new Error(`level.json has no spawn point ${missing.join(', ')}, which the waves use.`)
   let total = read.size
   const payloads: Record<string, unknown> = {}
   const facesOf = new Map<string, number>()

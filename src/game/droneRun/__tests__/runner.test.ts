@@ -26,7 +26,7 @@ function boxTris(lo: Vec3, hi: Vec3): number[] {
 /** A flat field: the ground's top at 63.5 (the floor of gibson 64), and a wall across the middle to give the drones something to fly round. */
 const SOLIDS: Solids = buildSolids([...boxTris([-0.5, 48, -0.5], [255.5, 63.5, 255.5]), ...boxTris([100, 63.5, 150], [110, 70, 152])])
 
-const LEVEL: LevelInfo = standInLevel(variant(), [128, 64, 212])
+const LEVEL: LevelInfo = standInLevel(variant(), [128, 64, 196])
 
 /** A scripted input log in screen terms: run forward out of the safe zone, turn, strafe, fire in bursts, switch guns, jump. */
 function inputLog(n: number): RunInput[] {

@@ -34,7 +34,7 @@ export function DroneRunScreen(): JSX.Element | null {
   const status = busy === 'entering' ? 'ENTERING' : busy === 'exiting' ? 'LEAVING' : world === null && !worldError ? 'LOADING THE WORLD' : null
 
   return (
-    <div className="gameview" role="application" aria-label={`${game.name}: in a game`} data-level={level?.id}>
+    <div className="gameview gameview--drun" role="application" aria-label={`${game.name}: in a game`} data-level={level?.id}>
       <div className="gameview__canvas">
         {entry && world && <Canvas3D game={game} world={world} entry={entry} level={level ?? null} />}
       </div>

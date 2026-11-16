@@ -112,6 +112,19 @@ describe('keys to a RunInput', () => {
     h.detach()
   })
 
+  it('a trackpad swipe (many small wheel events) changes the gun once; the next swipe changes it again', () => {
+    const clock = { t: 10_000 }
+    const h = host('grant', clock)
+    noteWeapons(3, 0)
+    for (let i = 0; i < 40; i++) { clock.t += 16; h.el.fire('wheel', { deltaY: 8, deltaMode: 0 }) }
+    expect(readInput().select).toBe(1)
+    expect(readInput().select).toBeNull()
+    clock.t += 500
+    for (let i = 0; i < 40; i++) { clock.t += 16; h.el.fire('wheel', { deltaY: 8, deltaMode: 0 }) }
+    expect(readInput().select).toBe(2)
+    h.detach()
+  })
+
   it('keys with Cmd, Ctrl or Alt are the browser\'s; Meta lets go of everything', () => {
     const h = host()
     key(h, 'keydown', 'KeyW')

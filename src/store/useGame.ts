@@ -43,14 +43,14 @@
  */
 
 import { create } from 'zustand'
-import { GAME_NEEDS_CHAIN_MESSAGE, gameEventRefusal, useCyberspace, whyNoMove, type CyberspaceState } from './useCyberspace'
+import { GAME_NEEDS_CHAIN_MESSAGE, gameEventRefusal, retirePlaceholderRun, useCyberspace, whyNoMove, type CyberspaceState } from './useCyberspace'
 import { useWalk } from './useWalk'
 import { openBracket, positionHex, type ActionEvent } from '../lib/events'
 import { teleportTemplate } from '../lib/games/bracket'
 import { canLeave, gameFor } from '../lib/games/registry'
 import { useWorkshop } from './useWorkshop'
 import { tvIsOn } from './tvOn'
-import { gameEnabled, gamesEnabled } from '../lib/games/flag'
+import { gameEnabled, gamesEnabled, isPlaceholderGame } from '../lib/games/flag'
 import { TUTORIAL_GAME } from '../lib/games/tutorialGame'
 import { inRegion, padUnder, stepIn, type WorldShard } from '../lib/games/play'
 import { jump as jumpBody, move as moveBody, tick as tickBody, type Arc, type Body } from '../lib/games/gravity'
@@ -516,6 +516,10 @@ export const useGame = create<GameState>((set, get) => {
       set({ session: null, busy: null })
       // That bracket is over: its key, gate and clock are of no more use here.
       if (entryId) saveProgress(entryId, null)
+      // A DRONE RUN test run (a placeholder game, signed in LOCAL) comes off the chain now it is over, so it never holds
+      // back this identity's later moves from a relay (useCyberspace retirePlaceholderRun; the publisher does the same
+      // for any finished placeholder run it meets at the head).
+      if (game && isDroneRun(game) && isPlaceholderGame(game.pubkey)) retirePlaceholderRun()
       // The view you entered from, exactly (DECK-0002 §7). The base position
       // needs nothing: the exit's C is the entry's c, so you stand where you did.
       if (session?.snapshot) useCyberspace.setState({ ...session.snapshot })

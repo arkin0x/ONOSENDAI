@@ -77,7 +77,7 @@ import type { NostrEvent } from '../../../events'
 import { GAME_NEEDS_CHAIN_MESSAGE, useCyberspace } from '../../../../store/useCyberspace'
 import { LOCAL_ONLY_MESSAGE, enterBlockedFor, useGame } from '../../../../store/useGame'
 import { whyNoEnterFor, panelGames } from '../../../../hud/GamesPanel'
-import { startPublisher } from '../../../publisher'
+import { publisherHeldForTestGame, startPublisher } from '../../../publisher'
 import { TUTORIAL_GAME } from '../../tutorialGame'
 import { implementedGames } from '../../registry'
 import { DRONE_RUN_GAME, DRONE_RUN_DEV_PUBKEY } from '../game'
@@ -175,14 +175,20 @@ describe('entering, playing and leaving in LOCAL', () => {
     expect(G().session).toBe(before)
     expect(S().events.length).toBe(2)
 
+    // Every head the chain passes through, so the exit is seen before the run comes off the chain.
+    const heads: NostrEvent[] = []
+    const stop = useCyberspace.subscribe((st) => { const h = st.events[st.events.length - 1]; if (h && heads[heads.length - 1] !== h) heads.push(h) })
     expect(await G().exit()).toBeNull()
-    const exit = last()
-    expect(tag(exit, 'A')?.[1]).toBe('exit-virtual')
+    stop()
+    const exit = heads.find((e) => tag(e, 'A')?.[1] === 'exit-virtual')!
     expect(tag(exit, 'c')).toBeUndefined()
     expect(tag(exit, 'C')?.[1]).toBe(tag(entry, 'c')?.[1])
+    expect(tag(exit, 'e')).toBeDefined()
     expect(G().session).toBeNull()
-    expect(S().events.length).toBe(3)
-    // Held here: queued for a LIVE that never came, never sent.
+    // The finished test run comes off the chain: the spawn is all that is left, so nothing of the run can hold back a
+    // later LIVE (useCyberspace retirePlaceholderRun).
+    expect(S().events.map((e) => tag(e, 'A')?.[1])).toEqual(['spawn'])
+    expect(S().prevEventId).toBe(S().events[0].id)
     await new Promise((r) => setTimeout(r, 50))
     expect(Object.values(S().published).every((st) => st === 'queued')).toBe(true)
     expect(sent.count).toBe(0)
@@ -196,11 +202,22 @@ describe('entering, playing and leaving in LOCAL', () => {
       expect(S().events.map((e) => tag(e, 'A')?.[1])).toEqual(['spawn', 'enter-virtual'])
       await worldLoaded()
       expect(await G().exit()).toBeNull()
-      expect(tag(last(), 'A')?.[1]).toBe('exit-virtual')
+      expect(S().events.map((e) => tag(e, 'A')?.[1])).toEqual(['spawn'])
       expect(sent.count).toBe(0)
     } finally {
       relays.answer = true
     }
+  })
+
+  it('after a finished test run, going LIVE sends the chain as it was before the run: never the run itself', async () => {
+    startPublisher()
+    expect(await G().enter(DRONE_RUN_GAME)).toBeNull()
+    await worldLoaded()
+    const entryId = last().id
+    expect(await G().exit()).toBeNull()
+    expect(S().events.some((e) => e.id === entryId)).toBe(false)
+    // The publisher sees a chain with no placeholder entry in it: nothing holds it back.
+    expect(publisherHeldForTestGame()).toBe(false)
   })
 
   it('resume after a reload goes back in at the entry point, signing nothing', async () => {

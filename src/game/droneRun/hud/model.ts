@@ -89,8 +89,8 @@ export const COPY = {
   heat: 'HEAT',
   charge: 'CHARGE',
   /** The desktop hint line: key, then what it does. */
-  hintsFull: [['WASD', 'MOVE'], ['SPACE', 'JUMP'], ['CLICK', 'FIRE'], ['1 2 3', 'GUNS'], ['R', 'RELOAD'], ['M', 'SOUND']] as const,
-  hintsWave: [['1 2 3', 'GUNS'], ['R', 'RELOAD']] as const,
+  hintsFull: [['WASD', 'MOVE'], ['SPACE', 'JUMP'], ['CLICK', 'FIRE'], ['1 2 3 Q', 'GUNS'], ['R', 'RELOAD'], ['M', 'SOUND']] as const,
+  hintsWave: [['1 2 3 Q', 'GUNS'], ['R', 'RELOAD']] as const,
   /** Before the pointer is locked, the click aims (takes the mouse). */
   aim: 'AIM',
 } as const

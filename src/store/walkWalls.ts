@@ -64,7 +64,7 @@ import { WALK_CUT_MARGIN, regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
 import type { AxisDirection, AxisName, Position, ViewAxes } from '../lib/space'
 import { WORLD_DOWN, upOf } from '../lib/walkDown'
-import { constrainOf, enclosed, firstHit, wallMesh, type WallMesh } from '../lib/walkConstrain'
+import { constrainOf, enclosed, firstHit, nearFace, segmentHit, wallMesh, type WallMesh } from '../lib/walkConstrain'
 import type { Bounce } from '../lib/walkBounce'
 import { useShards, type WorldItem } from './useShards'
 import { useCyberspace } from './useCyberspace'
@@ -828,6 +828,104 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     stop = { reach: BigInt(k) < length ? BigInt(k) : length, by, ...(by ? { unseen: bestUnseen } : {}) }
   }
   return middle && middle.reach < stop.reach ? middle : stop
+}
+
+/** A share of a gibson: a face met no more squarely than this is pulled back from as if it were met at this angle, so a glancing wall still leaves the near plane room. */
+const EYE_SQUARE_MIN = 0.2
+
+/** The most times the eye steps back toward the walker to clear a face beside it: past that it is at the walker's point. */
+const EYE_BACK_STEPS = 64
+
+/** Whether `w`'s region (drawn only there, regionReached) meets the box `lo`..`hi`, in bigint gibsons. */
+function regionMeets(w: WallItem, lo: Position, hi: Position): boolean {
+  if (w.uncut) return true
+  const h = BigInt(w.height)
+  for (const a of ['x', 'y', 'z'] as const) {
+    const rlo = ((w.at[a] >> h) << h) - 1n
+    const rhi = ((w.at[a] >> h) << h) + (1n << h)
+    if (hi[a] < rlo || lo[a] > rhi) return false
+  }
+  return true
+}
+
+/**
+ * How much of the WALK eye's offset the camera may take: the share, 0 to 1,
+ * of the line from the walker's point out to the eye (lib/avatarEye.ts) that
+ * stays clear of the faces that stop a walker (DECK-0003 §1.12). The camera
+ * is pulled back along that line, the way a third-person camera's arm
+ * shortens, so it never looks from the far side of a wall or a ceiling its
+ * walker is held by, whether the eye is a little above the walker or far
+ * behind it (arkinox, 2026-11-16: the eye may sit anywhere within the
+ * avatar size limit).
+ *
+ * The walker stands at `from` plus `lead` (a fall's height between whole
+ * gibsons, cyberspace gibsons); the eye is `eye` gibsons from there. Two
+ * rules, both with room `margin` gibsons for the camera's near plane, which
+ * would otherwise cut a face it is nearly touching and show what is behind:
+ *
+ * - The first face the line crosses (carried on by `margin` past the eye, so
+ *   a face just beyond it counts) holds the eye at least `margin` short of
+ *   it, measured square to the face. A face through the walker's own point
+ *   (the floor it walks along) lets the eye rise away from it, and holds an
+ *   eye below the walker: `up` says which way is up.
+ * - The eye is then stepped back toward the walker, half a margin at a time,
+ *   until no face but the walker's own floor is within `margin` of it.
+ *
+ * Nothing moves, nothing is published: this is where the camera looks from.
+ * A shard whose walls are still on their way is not waited for.
+ */
+export function eyeReach(from: Position, lead: readonly [number, number, number], eye: readonly [number, number, number], margin: number, items: readonly WallItem[], up: AxisDirection = UP_Y): number {
+  const len = Math.hypot(eye[0], eye[1], eye[2])
+  if (!(len > 0)) return 1
+  const u = [eye[0] / len, eye[1] / len, eye[2] / len]
+  const ext = [eye[0] + u[0] * margin, eye[1] + u[1] * margin, eye[2] + u[2] * margin]
+  const ui = up.axis === 'x' ? 0 : up.axis === 'y' ? 1 : 2
+  // Toward the walker's feet: the floor it stands in holds the eye.
+  const below = u[ui] * up.dir < -1e-9
+  const lo = { x: 0n, y: 0n, z: 0n }, hi = { x: 0n, y: 0n, z: 0n }
+  ;(['x', 'y', 'z'] as const).forEach((a, q) => {
+    lo[a] = from[a] + BigInt(Math.floor(Math.min(lead[q], lead[q] + ext[q]) - margin)) - 1n
+    hi[a] = from[a] + BigInt(Math.ceil(Math.max(lead[q], lead[q] + ext[q]) + margin)) + 1n
+  })
+  const near: Array<{ e: Entry; g: number; o: [number, number, number]; tol: number }> = []
+  let reach = len
+  for (const w of items) {
+    if (w.inside || !regionMeets(w, lo, hi)) continue
+    const e = entryFor(w)
+    if (e.first || !e.reach) continue
+    const g = 2 ** w.shard.unit
+    const tol = tolerance(e, g, 0n)
+    // The line's box against the walls' box, in gibsons from the shard's coordinate.
+    const off = [Number(from.x - w.at.x) + lead[0], Number(from.y - w.at.y) + lead[1], Number(from.z - w.at.z) + lead[2]]
+    const r = e.reach
+    const wlo = [Number(r.lo.x), Number(r.lo.y), Number(r.lo.z)], whi = [Number(r.hi.x), Number(r.hi.y), Number(r.hi.z)]
+    let apart = false
+    for (let q = 0; q < 3; q++) {
+      const a = Math.min(off[q], off[q] + ext[q]) - margin - tol - 1, b = Math.max(off[q], off[q] + ext[q]) + margin + tol + 1
+      if (b < wlo[q] || a > whi[q]) apart = true
+    }
+    if (apart) continue
+    // The shard's render frame, in its own model units: Z flips, as stepLimit has it.
+    const o: [number, number, number] = [off[0] / g, off[1] / g, -off[2] / g]
+    near.push({ e, g, o, tol })
+    const d: [number, number, number] = [ext[0] / g, ext[1] / g, -ext[2] / g]
+    const span = len + margin
+    const hit = segmentHit(e.mesh, o, d, (below ? -tol : tol) / span, e.clip)
+    if (hit === null) continue
+    reach = Math.min(reach, hit.s * span - margin / Math.max(hit.square, EYE_SQUARE_MIN))
+  }
+  reach = Math.max(0, reach)
+  for (let n = 0; n < EYE_BACK_STEPS && reach > 0 && near.length > 0; n++) {
+    const p = [lead[0] + u[0] * reach, lead[1] + u[1] * reach, lead[2] + u[2] * reach]
+    const close = near.some(({ e, g, o, tol }) => {
+      const at: [number, number, number] = [o[0] + (p[0] - lead[0]) / g, o[1] + (p[1] - lead[1]) / g, o[2] - (p[2] - lead[2]) / g]
+      return nearFace(e.mesh, at, margin / g, e.clip, o, tol / g)
+    })
+    if (!close) break
+    reach = Math.max(0, reach - margin / 2)
+    if (n === EYE_BACK_STEPS - 1) reach = 0
+  }
+  return reach / len
 }
 
 /** How many times floorPad has been asked: for the test that a world with no bounce asks it nothing. */

@@ -590,3 +590,145 @@ export function enclosed(mesh: WallMesh, p: readonly [number, number, number], c
   }
   return false
 }
+
+/** One placement's corners where it stands, for the eye's tests (segmentHit, nearFace): their own, so they never share firstHit's. */
+let eyeScratch = new Float64Array(0)
+
+/**
+ * Every blocking triangle of `mesh` whose placement's bounds meet the box
+ * `lo`..`hi` (the shard's render frame, model units), handed to `each` as a
+ * buffer and three corner offsets into it, and whether it is the shard's own
+ * (cut at the region, `clip`). A placement wholly outside the box is passed by.
+ */
+function eachTriangle(mesh: WallMesh, lo: readonly number[], hi: readonly number[], each: (t: Float64Array, a: number, b: number, c: number, own: boolean) => void): void {
+  const t = mesh.tris
+  for (let n = 0; n < t.length; n += 9) each(t, n, n + 3, n + 6, true)
+  for (const p of mesh.placements) {
+    let apart = false
+    for (let q = 0; q < 3; q++) if (hi[q] < p.min[q] - NEAR || lo[q] > p.max[q] + NEAR) apart = true
+    if (apart) continue
+    const { corners, tris } = p.walls
+    const f = p.f
+    if (eyeScratch.length < corners.length) eyeScratch = new Float64Array(Math.max(corners.length, eyeScratch.length * 2))
+    for (let q = 0; q < corners.length; q += 3) {
+      const r0 = corners[q], r1 = corners[q + 1], r2 = corners[q + 2]
+      eyeScratch[q] = f[0] * r0 + f[4] * r1 + f[8] * r2 + f[12]
+      eyeScratch[q + 1] = f[1] * r0 + f[5] * r1 + f[9] * r2 + f[13]
+      eyeScratch[q + 2] = f[2] * r0 + f[6] * r1 + f[10] * r2 + f[14]
+    }
+    for (let n = 0; n < tris.length; n += 3) each(eyeScratch, tris[n] * 3, tris[n + 1] * 3, tris[n + 2] * 3, false)
+  }
+}
+
+/** Whether `p` is inside the region box `clip`, give or take float rounding (none: everywhere). */
+function insideClip(p: readonly number[], clip?: Box): boolean {
+  if (!clip) return true
+  for (let q = 0; q < 3; q++) if (p[q] < clip.min[q] - EDGE_SLACK || p[q] > clip.max[q] + EDGE_SLACK) return false
+  return true
+}
+
+/**
+ * The first blocking face a straight segment crosses, in any direction: the
+ * WALK eye's line from the walker's point out to the eye (lib/avatarEye.ts),
+ * which unlike a step need not run along an axis. The segment is `o + s * d`
+ * for `s` in (`minS`, 1] (the shard's render frame, model units). Returns the
+ * share `s` of the nearest hit, and how squarely the segment meets that face
+ * (the cosine between them, 0 edge-on to 1 head-on), or null when it crosses
+ * nothing. A negative `minS` counts a face through `o` too. With `clip`, the
+ * shard's own faces count only inside the region box, where they are drawn.
+ */
+export function segmentHit(mesh: WallMesh, o: readonly [number, number, number], d: readonly [number, number, number], minS: number, clip?: Box): { s: number; square: number } | null {
+  const lo = [0, 1, 2].map((q) => Math.min(o[q], o[q] + d[q]))
+  const hi = [0, 1, 2].map((q) => Math.max(o[q], o[q] + d[q]))
+  const len = Math.hypot(d[0], d[1], d[2])
+  if (!(len > 0)) return null
+  let best: { s: number; square: number } | null = null
+  eachTriangle(mesh, lo, hi, (t, a, b, c, own) => {
+    for (let q = 0; q < 3; q++) {
+      if (Math.max(t[a + q], t[b + q], t[c + q]) < lo[q] - NEAR) return
+      if (Math.min(t[a + q], t[b + q], t[c + q]) > hi[q] + NEAR) return
+    }
+    // Moller and Trumbore, as `enclosed` crosses.
+    const e1x = t[b] - t[a], e1y = t[b + 1] - t[a + 1], e1z = t[b + 2] - t[a + 2]
+    const e2x = t[c] - t[a], e2y = t[c + 1] - t[a + 1], e2z = t[c + 2] - t[a + 2]
+    const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x
+    const det = e1x * px + e1y * py + e1z * pz
+    const size = Math.hypot(e1x, e1y, e1z) * Math.hypot(e2x, e2y, e2z)
+    if (!(Math.abs(det) > FLAT * size * len)) return
+    const tx = o[0] - t[a], ty = o[1] - t[a + 1], tz = o[2] - t[a + 2]
+    const u = (tx * px + ty * py + tz * pz) / det
+    if (u < -EDGE_SLACK || u > 1 + EDGE_SLACK) return
+    const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x
+    const v = (d[0] * qx + d[1] * qy + d[2] * qz) / det
+    if (v < -EDGE_SLACK || u + v > 1 + EDGE_SLACK) return
+    const s = (e2x * qx + e2y * qy + e2z * qz) / det
+    if (!(s > minS) || s > 1) return
+    if (best !== null && s >= best.s) return
+    if (own && !insideClip([o[0] + d[0] * s, o[1] + d[1] * s, o[2] + d[2] * s], clip)) return
+    // |n . d| / (|n| |d|), with n = e1 x e2.
+    const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x
+    const square = Math.abs(nx * d[0] + ny * d[1] + nz * d[2]) / (Math.hypot(nx, ny, nz) * len)
+    best = { s, square }
+  })
+  return best
+}
+
+/** The point of triangle a, b, c (in `t`) nearest `p`, into `out` (Ericson, Real-Time Collision Detection 5.1.5). */
+function nearestOnTriangle(p: readonly number[], t: Float64Array, a: number, b: number, c: number, out: number[]): void {
+  const abx = t[b] - t[a], aby = t[b + 1] - t[a + 1], abz = t[b + 2] - t[a + 2]
+  const acx = t[c] - t[a], acy = t[c + 1] - t[a + 1], acz = t[c + 2] - t[a + 2]
+  const apx = p[0] - t[a], apy = p[1] - t[a + 1], apz = p[2] - t[a + 2]
+  const set = (x: number, y: number, z: number): void => { out[0] = x; out[1] = y; out[2] = z }
+  const d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz
+  if (d1 <= 0 && d2 <= 0) return set(t[a], t[a + 1], t[a + 2])
+  const bpx = p[0] - t[b], bpy = p[1] - t[b + 1], bpz = p[2] - t[b + 2]
+  const d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz
+  if (d3 >= 0 && d4 <= d3) return set(t[b], t[b + 1], t[b + 2])
+  const vc = d1 * d4 - d3 * d2
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) { const v = d1 / (d1 - d3); return set(t[a] + abx * v, t[a + 1] + aby * v, t[a + 2] + abz * v) }
+  const cpx = p[0] - t[c], cpy = p[1] - t[c + 1], cpz = p[2] - t[c + 2]
+  const d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz
+  if (d6 >= 0 && d5 <= d6) return set(t[c], t[c + 1], t[c + 2])
+  const vb = d5 * d2 - d1 * d6
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) { const w = d2 / (d2 - d6); return set(t[a] + acx * w, t[a + 1] + acy * w, t[a + 2] + acz * w) }
+  const va = d3 * d6 - d5 * d4
+  if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
+    const w = (d4 - d3) / ((d4 - d3) + (d5 - d6))
+    return set(t[b] + (t[c] - t[b]) * w, t[b + 1] + (t[c + 1] - t[b + 1]) * w, t[b + 2] + (t[c + 2] - t[b + 2]) * w)
+  }
+  const den = 1 / (va + vb + vc)
+  const v = vb * den, w = vc * den
+  set(t[a] + abx * v + acx * w, t[a + 1] + aby * v + acy * w, t[a + 2] + abz * v + acz * w)
+}
+
+const nearAt = [0, 0, 0]
+
+/**
+ * Whether a blocking face of `mesh` comes within `r` of `p` (the shard's
+ * render frame, model units): the WALK eye too near a wall for the camera's
+ * near plane, which would cut the wall away and show what is behind it.
+ * Faces within `skipR` of `skip` are left out: the floor the walker's own
+ * point stands in, which the eye rises away from. With `clip`, the shard's
+ * own faces count only inside the region box.
+ */
+export function nearFace(mesh: WallMesh, p: readonly [number, number, number], r: number, clip?: Box, skip?: readonly [number, number, number], skipR = 0): boolean {
+  const lo = [p[0] - r, p[1] - r, p[2] - r]
+  const hi = [p[0] + r, p[1] + r, p[2] + r]
+  let near = false
+  eachTriangle(mesh, lo, hi, (t, a, b, c, own) => {
+    if (near) return
+    for (let q = 0; q < 3; q++) {
+      if (Math.max(t[a + q], t[b + q], t[c + q]) < lo[q]) return
+      if (Math.min(t[a + q], t[b + q], t[c + q]) > hi[q]) return
+    }
+    nearestOnTriangle(p, t, a, b, c, nearAt)
+    if (Math.hypot(nearAt[0] - p[0], nearAt[1] - p[1], nearAt[2] - p[2]) >= r) return
+    if (own && !insideClip(nearAt, clip)) return
+    if (skip) {
+      nearestOnTriangle(skip, t, a, b, c, nearAt)
+      if (Math.hypot(nearAt[0] - skip[0], nearAt[1] - skip[1], nearAt[2] - skip[2]) <= skipR) return
+    }
+    near = true
+  })
+  return near
+}

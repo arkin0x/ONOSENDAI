@@ -86,8 +86,8 @@ describe('the workshop shell, on every tap and paint', () => {
     expect(workshop).not.toMatch(/avatarWork|avatarReach/)
   })
   it('keeps the shard list out of its own render: memoized, reading the shards itself', () => {
-    expect(menuSheet).toMatch(/const ShardList = memo\(function ShardList\(\{ currentId, onOpen \}: \{ currentId: string; onOpen: \(\) => void \}\)/)
-    expect(menuSheet).toMatch(/<ShardList currentId=\{currentId\} onOpen=\{onOpen\} \/>/)
+    expect(menuSheet).toMatch(/const ShardList = memo\(function ShardList\(\{ currentId, onOpen, query = '' \}: \{ currentId: string; onOpen: \(\) => void; query\?: string \}\)/)
+    expect(menuSheet).toMatch(/<ShardList currentId=\{currentId\} onOpen=\{onOpen\} query=\{query\} \/>/)
     expect(workshop).toMatch(/<MenuBody currentId=\{shard\.id\} onOpen=\{closeSheet\}/)
     // The close it is handed is stable, or the memo would draw it on every render.
     expect(workshop).toMatch(/const closeSheet = useCallback\(\(\) => setSheet\(null\), \[\]\)/)

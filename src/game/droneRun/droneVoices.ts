@@ -570,7 +570,8 @@ export class DroneVoices {
 
   /** One update at context time `t` into `out` (the game's bus). */
   frame(ac: BaseAudioContext, out: AudioNode, input: VoiceInput, t: number): void {
-    if (this.ctx && this.ctx !== ac) this.dispose()
+    // A new context, or a new bus: every voice and the old compressor and trim are parted, and made again on the new one.
+    if ((this.ctx && this.ctx !== ac) || (this.mix && this.mix.to !== out)) this.dispose()
     this.ctx = ac
     if (t - this.last < UPDATE_S - 1e-6 && t >= this.last) return
     this.last = t

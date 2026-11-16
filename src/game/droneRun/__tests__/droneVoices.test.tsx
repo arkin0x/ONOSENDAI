@@ -284,6 +284,43 @@ describe('how loud and how bright', () => {
     expect(DEFAULT_SOUNDS.voices.mix).toBeLessThan(1)
   })
 
+  it('dispose disconnects the compressor and its trim; a new bus parts the old ones and builds on the new', () => {
+    /** A context whose compressors and gains record their disconnects. */
+    const tracked = () => {
+      const ac = fakeContext() as unknown as { createDynamicsCompressor: () => unknown; createGain: () => unknown }
+      const comps: Array<{ cut: number }> = [], gains: Array<{ cut: number }> = []
+      const realComp = ac.createDynamicsCompressor, realGain = ac.createGain
+      const wrap = (n: Record<string, unknown>, list: Array<{ cut: number }>) => { const rec = { cut: 0 }; list.push(rec); const d = n.disconnect as () => void; n.disconnect = () => { rec.cut++; d() }; return n }
+      ac.createDynamicsCompressor = () => wrap(realComp() as Record<string, unknown>, comps)
+      ac.createGain = () => wrap(realGain() as Record<string, unknown>, gains)
+      return { ac: ac as unknown as BaseAudioContext, comps, gains }
+    }
+    // At once.
+    const a = tracked()
+    const v = new DroneVoices(DEFAULT_SOUNDS, false)
+    v.frame(a.ac, OUT, input([drone(1, 'scout', [0, 4, -20])]), 0)
+    expect(a.comps.length).toBe(1)
+    // The trim (gains[0]) is the gain made right after the compressor, before any voice's.
+    v.dispose()
+    expect(a.comps[0].cut).toBeGreaterThan(0)
+    expect(a.gains[0].cut).toBeGreaterThan(0)
+    // The bus changes: the old compressor and trim are parted, one new pair made into the new bus.
+    const b = tracked()
+    const w = new DroneVoices(DEFAULT_SOUNDS, false)
+    const OUT2 = { connect: () => {}, disconnect: () => {} } as unknown as AudioNode
+    w.frame(b.ac, OUT, input([drone(1, 'scout', [0, 4, -20])]), 0)
+    expect(b.comps.length).toBe(1)
+    w.frame(b.ac, OUT2, input([drone(1, 'scout', [0, 4, -20])]), 1)
+    expect(b.comps.length).toBe(2)
+    expect(b.comps[0].cut).toBeGreaterThan(0)
+    expect(b.gains[0].cut).toBeGreaterThan(0)
+    expect(b.comps[1].cut).toBe(0)
+    expect(w.heard()).toEqual(['d1'])
+    // The same bus again: nothing new.
+    w.frame(b.ac, OUT2, input([drone(1, 'scout', [0, 4, -20])]), 2)
+    expect(b.comps.length).toBe(2)
+  })
+
   it('behind a wall the low-pass closes and the level drops (segmentClear says blocked)', () => {
     const open = new DroneVoices(DEFAULT_SOUNDS, false)
     const walled = new DroneVoices(DEFAULT_SOUNDS, false)

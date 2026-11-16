@@ -373,6 +373,31 @@ describe('the deploy bar’s meter shows the form it goes out in', () => {
   }, 60000)
 })
 
+describe('a bag already past the cap (owner\u2019s castle, 2026-11-16: 323,623 of 240,000 bytes, INLINE, and HIDE & PUBLISH went)', () => {
+  it('the meter and the deploy both bring it under the cap, so nothing past what the canonical relay takes goes out', async () => {
+    const H = 6
+    const model = coil()
+    const planned = plannedShard(model, me())
+    S().startDeployMessage('first')
+    S().setDeployHeight(H)
+    await S().deploy()
+    S().cancelDeploy()
+    const first = S().mine.find((d) => d.text === 'first')!
+    const point = positionOf(first)
+    // An old bag, written before the guard: well past the cap.
+    await fill(first.lookupId, hexToBytes(first.keyHex), point, H, 330_000)
+    const m = deployBagMeter(bagRowsFor(S().mine, { region: regionOf(point, first.plane, H), door: null }), planned, { height: H, settings: first.bag!, owner: me(), room: false, place: { at: point, plane: first.plane } })
+    // Before: refusal null at 318,068 bytes, and the deploy published a bag that size.
+    expect(m.refusal).toBeNull()
+    expect(m.bytes).toBeLessThanOrEqual(BAG_SAFE_BYTES)
+    useCyberspace.setState({ cursor: point })
+    const { row, error } = await place(model, H)
+    expect(error).toBeNull()
+    expect(row).toBeDefined()
+    expect(JSON.stringify(newestBag(first.lookupId)).length).toBeLessThanOrEqual(BAG_SAFE_BYTES)
+  }, 60000)
+})
+
 /** What the comment panel is given for a world item (hud/SecretModal): its lineage when it has one, else its key. */
 function subjectOf(w: WorldItem): CommentSubject {
   return { author: w.author!, lookupId: w.lookupId!, itemId: w.lineage ?? w.key, type: w.type, target: w.target, at: w.at, height: w.height, bagKeyHex: w.bagKeyHex }

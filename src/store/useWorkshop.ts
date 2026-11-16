@@ -1105,7 +1105,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!src) return id
       const copy: ShardModel = { ...src, id: uuid(), name: `${src.name} copy`, vertices: src.vertices.map(cloneVertex), faces: src.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       // Beside its source, in the same folder; a source at the top keeps the copy there.
-      fileCopy(copy.id, src.id)
+      // Filing is a nicety: a fault in it never costs the copy itself.
+      try { fileCopy(copy.id, src.id) } catch (err) { console.warn('[workshop] could not file the copy in its folder', err) }
       const list = [...get().shards, copy]
       set({ shards: list, currentId: copy.id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null }); save(list)
       return copy.id

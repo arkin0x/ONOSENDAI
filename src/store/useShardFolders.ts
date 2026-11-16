@@ -275,10 +275,16 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
 // The workshop opens the top of its list, deploys counted (useWorkshop newestId).
 readLastUsedFrom(() => useShardFolders.getState().tree.used)
 
-// A duplicate lands in its source's folder (useWorkshop duplicate); a source at the top files nothing.
+// A duplicate lands in its source's folder (useWorkshop duplicate); a source
+// at the top files nothing. While the tree is still being read, every shard
+// looks to be at the top, so the copy is filed once it has been read.
 fileCopiesWith((copy, source) => {
-  const at = folderOf(useShardFolders.getState().tree, source)
-  if (at !== null) useShardFolders.getState().assignToFolder(copy, at)
+  const file = (): void => {
+    const at = folderOf(useShardFolders.getState().tree, source)
+    if (at !== null) useShardFolders.getState().assignToFolder(copy, at)
+  }
+  if (useShardFolders.getState().storage === 'loading') void useShardFolders.getState().load().then(file)
+  else file()
 })
 
 /** Make or find a folder path from the top, for code outside React: returns the last folder's id. */

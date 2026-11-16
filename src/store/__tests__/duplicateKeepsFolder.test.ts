@@ -113,6 +113,39 @@ describe('DUPLICATE keeps the folder', () => {
     expect(nodeAt(after.folders, ['maze-kit']).count).toBe(1)
   })
 
+  it('the copy is already in its folder when it joins the list, so it is never drawn at the top first', async () => {
+    const { folders, workshop } = await boot()
+    const src = workshop.useWorkshop.getState().create('wall')
+    const kit = folders.createFolderPath(['maze-kit'])!
+    folders.assignToFolder(src, kit)
+    const seen: Array<string | null> = []
+    const stop = workshop.useWorkshop.subscribe((s, prev) => {
+      if (s.shards.length > prev.shards.length) seen.push(folderOf(folders.useShardFolders.getState().tree, s.shards[s.shards.length - 1].id))
+    })
+    workshop.useWorkshop.getState().duplicate(src)
+    stop()
+    expect(seen).toEqual([kit])
+  })
+
+  it('a duplicate made while the folders are still being read is filed once they are', async () => {
+    const a = await boot()
+    const src = a.workshop.useWorkshop.getState().create('gate')
+    const kit = a.folders.createFolderPath(['maze-kit'])!
+    a.folders.assignToFolder(src, kit)
+    await a.folders.useShardFolders.getState().flush()
+
+    // A page load: the folder store fresh and not yet read back, the shards already there.
+    vi.resetModules()
+    const folders = await import('../useShardFolders')
+    const workshop = await import('../useWorkshop')
+    workshop.useWorkshop.setState({ shards: a.workshop.useWorkshop.getState().shards, currentId: null })
+    expect(folders.useShardFolders.getState().storage).toBe('loading')
+    const copy = workshop.useWorkshop.getState().duplicate(src)
+    await folders.useShardFolders.getState().load(ME)
+    await folders.useShardFolders.getState().flush()
+    expect(folderOf(folders.useShardFolders.getState().tree, copy)).toBe(kit)
+  })
+
   it('a copy of a copy stays in the folder too', async () => {
     const { folders, workshop } = await boot()
     const ws = workshop.useWorkshop.getState

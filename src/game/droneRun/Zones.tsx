@@ -6,11 +6,17 @@
  * fog (it is a guide, not part of the world), never written to the depth
  * buffer, and added onto what is behind it.
  *
+ * Standing inside a zone, its curtain is all round you at eye height and
+ * adds its colour over the whole view (on the end zone's dais the WAVE CLEAR
+ * card sat on a gold-white screen): there the curtain fades to
+ * INSIDE_SHARE of its light, eased, and comes back as you step out.
+ *
  * Drawn by the game from the level's zone boxes, never as world shards.
  * Ledger: the zones are class (b) (the variant's rules); this look is (c).
  */
 
 import { useEffect, useMemo } from 'react'
+import { useFrame } from '@react-three/fiber'
 import { AdditiveBlending, BufferGeometry, DoubleSide, Float32BufferAttribute, LineBasicMaterial, LineLoop, Mesh, MeshBasicMaterial } from 'three'
 import { groundBelow, type Box3, type Solids } from '../../lib/games/droneRun/sim'
 
@@ -18,6 +24,14 @@ import { groundBelow, type Box3, type Solids } from '../../lib/games/droneRun/si
 export const ZONE_COLORS = { start: [0.25, 0.92, 1] as const, finish: [1, 0.78, 0.22] as const }
 /** How high the curtain rises, gibsons. */
 export const CURTAIN_HEIGHT = 7
+/** The curtain's light while the eye is inside its zone, as a share of its full light. */
+export const INSIDE_SHARE = 0.2
+
+/** Whether a render-frame point (x, -cyberspace z) stands over a zone's footprint. */
+export function overZone(box: Box3, x: number, renderZ: number): boolean {
+  const z = -renderZ
+  return x >= box.lo[0] && x <= box.hi[0] && z >= box.lo[2] && z <= box.hi[2]
+}
 
 /** The floor under a zone: the ground below its middle, else its own bottom. */
 export function zoneFloor(box: Box3, solids: Solids): number {
@@ -32,7 +46,7 @@ function corners(box: Box3, y: number): number[][] {
   return [[box.lo[0], y, -box.lo[2]], [box.hi[0], y, -box.lo[2]], [box.hi[0], y, -box.hi[2]], [box.lo[0], y, -box.hi[2]]]
 }
 
-function zoneObjects(box: Box3, floor: number, rgb: readonly [number, number, number]): { objects: (Mesh | LineLoop)[]; dispose: () => void } {
+function zoneObjects(box: Box3, floor: number, rgb: readonly [number, number, number]): { curtain: MeshBasicMaterial; objects: (Mesh | LineLoop)[]; dispose: () => void } {
   const y = floor + 0.04
   const c = corners(box, y)
   // The outline.
@@ -66,6 +80,7 @@ function zoneObjects(box: Box3, floor: number, rgb: readonly [number, number, nu
   const curtain = new Mesh(curtainG, curtainM)
   for (const o of [line, fill, curtain]) { o.frustumCulled = false; o.renderOrder = 18; o.raycast = () => {} }
   return {
+    curtain: curtainM,
     objects: [fill, curtain, line],
     dispose: () => { lineG.dispose(); lineM.dispose(); fillG.dispose(); fillM.dispose(); curtainG.dispose(); curtainM.dispose() },
   }
@@ -77,5 +92,15 @@ export function Zones({ start, finish, solids }: { start: Box3; finish: Box3; so
     zoneObjects(finish, zoneFloor(finish, solids), ZONE_COLORS.finish),
   ], [start, finish, solids])
   useEffect(() => () => { for (const z of made) z.dispose() }, [made])
+  // Inside a zone its curtain dims (see the header); eased so stepping in or out never flicks.
+  const boxes = [start, finish]
+  useFrame(({ camera }, dt) => {
+    const k = 1 - Math.exp(-Math.min(dt, 0.25) * 6)
+    for (let i = 0; i < made.length; i++) {
+      const want = overZone(boxes[i], camera.position.x, camera.position.z) ? INSIDE_SHARE : 1
+      const c = made[i].curtain.color
+      c.setScalar(c.r + (want - c.r) * k)
+    }
+  })
   return <>{made.flatMap((z, i) => z.objects.map((o, j) => <primitive key={`${i}:${j}`} object={o} />))}</>
 }

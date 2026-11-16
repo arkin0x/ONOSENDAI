@@ -743,6 +743,45 @@ function tolerance(e: Entry, g: number, length: bigint): number {
  * "above" is the opposite way. Any other step is measured as without it.
  */
 export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[], stand: boolean | AxisDirection = false): WallStop {
+  const m = measureStep(from, axis, dir, length, items, stand)
+  // The last whole gibson at least `tol` short of the face: one short at a
+  // fine zoom, further at a coarse one, where the measure is coarser too.
+  if (m.wait) { waited = true; return { reach: 0n, by: null } }
+  let stop: WallStop = { reach: length, by: null }
+  if (m.best !== null) {
+    const k = Math.max(0, Math.ceil(m.best - m.bestTol) - 1)
+    stop = { reach: BigInt(k) < length ? BigInt(k) : length, by: m.by, ...(m.by ? { unseen: m.bestUnseen } : {}) }
+  }
+  return m.middle && m.middle.reach < stop.reach ? m.middle : stop
+}
+
+/**
+ * Fluid WALK (store/walkFluid.ts): how far, in gibsons, the first face that
+ * holds a walker at `from` is along `axis` in direction `dir`, measured as
+ * stepLimit measures it, within a step of `length`; null when none is that
+ * near, when a door slab holds the walker, or when a wall is still on its
+ * way. The smooth position stops FLUID_FACE_GAP short of it, so the eye
+ * never goes into a face nearer than its gibson's edge. A question only: it
+ * moves nothing and never makes a step wait.
+ */
+export function faceDistance(from: Position, axis: AxisName, dir: 1 | -1, items: readonly WallItem[], length = 1n): number | null {
+  const m = measureStep(from, axis, dir, length, items, false)
+  if (m.wait || m.middle) return null
+  return m.best
+}
+
+/** What stepLimit measured: the nearest face's distance in gibsons and its tolerance, whose it is, a door slab's middle, and whether a wall is on its way. */
+interface StepMeasure {
+  best: number | null
+  bestTol: number
+  by: WallItem | null
+  bestUnseen: boolean
+  wait: boolean
+  middle: WallStop | null
+}
+
+/** stepLimit's measure, before it is turned into whole gibsons. */
+function measureStep(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[], stand: boolean | AxisDirection): StepMeasure {
   const keep = new Set<string>()
   let best: number | null = null
   /** Whether the face that stops the step belongs to an object no one can see, the shard itself or a part it places. */
@@ -819,15 +858,7 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   const back = new Set<Pool>()
   for (const [k, gone] of entries) if (!keep.has(k)) { entries.delete(k); for (const p of release(gone.spend)) back.add(p) }
   for (const p of back) reviveStarved(p)
-  // The last whole gibson at least `tol` short of the face: one short at a
-  // fine zoom, further at a coarse one, where the measure is coarser too.
-  if (wait) { waited = true; return { reach: 0n, by: null } }
-  let stop: WallStop = { reach: length, by: null }
-  if (best !== null) {
-    const k = Math.max(0, Math.ceil(best - bestTol) - 1)
-    stop = { reach: BigInt(k) < length ? BigInt(k) : length, by, ...(by ? { unseen: bestUnseen } : {}) }
-  }
-  return middle && middle.reach < stop.reach ? middle : stop
+  return { best, bestTol, by, bestUnseen, wait, middle }
 }
 
 /** A face met no more squarely than this is pulled back from as if it were met at this angle, so a glancing wall still leaves the near plane room. */

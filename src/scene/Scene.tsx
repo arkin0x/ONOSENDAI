@@ -41,11 +41,12 @@ import { GRID_RADIUS, cellDelta, claimScreenAxes, itemCentre, levelScreenAxes, o
 import { upOf } from '../lib/walkDown'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
-import { setWalkFacing, walkBody, walkEye, walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
+import { setWalkFacing, walkBody, walkEye, walkFacing, walkFall, walkFallUp, walkGlide } from '../lib/walkEye'
 import { WalkEyeRig } from './walkEyeRig'
 import { useAvatars } from '../store/useAvatars'
 import { clearWalkLook, lookRadPerPx, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
 import { tickFall, useWalk, walkDown } from '../store/useWalk'
+import { tickFluid } from '../store/walkFluid'
 import { orbitOffset } from '../workshop/benchAxes'
 import { WalkProbe } from './WalkProbe'
 import { commitAnchor, commitScale, committedAnchor } from '../lib/renderFrame'
@@ -596,6 +597,17 @@ function renderUp(view: Quaternion, axis: AxisName, sign: 1 | -1): [number, numb
   return upFor.dir
 }
 
+/** Each cyberspace axis's render direction in `view`, kept for the last view asked: fluid WALK's eye offset (walkGlide) is by cyberspace axis. */
+let glideFor: { view: Quaternion | null; x: [number, number, number]; y: [number, number, number]; z: [number, number, number] } = { view: null, x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }
+function glideAxes(view: Quaternion): typeof glideFor {
+  if (glideFor.view !== view) {
+    const axes = viewAxes(view)
+    const d = (a: AxisName): [number, number, number] => { const v = renderDirection(axes, a); return [v[0], v[1], v[2]] }
+    glideFor = { view, x: d('x'), y: d('y'), z: d('z') }
+  }
+  return glideFor
+}
+
 function Rig(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const genesisId = useCyberspace((s) => s.genesisId)
@@ -950,8 +962,10 @@ function Rig(): JSX.Element {
     // centre out in front (ViewFly.ts pivot; arkinox, 2026-11-12). The
     // tutorial's auto-rotate is the camera's own turn, not a hand's.
     viewRig.pivot(c.object.position, c.target, smooth.current, !c.autoRotate)
-    // GRAVITY's fall (store/useWalk.ts) takes its frame first: it can land,
-    // which moves the cursor read below.
+    // Fluid WALK (store/walkFluid.ts) takes its frame first: a crossing moves
+    // the anchor (the cursor) and can start a fall. Then GRAVITY's fall
+    // (store/useWalk.ts): it can land, which moves the cursor read below.
+    tickFluid()
     tickFall()
     // So does the camera's offset from its orbit (ViewFly.ts): VIEW's fly
     // glides the view along the line of sight while the cursor waits, the
@@ -1017,6 +1031,14 @@ function Rig(): JSX.Element {
       tx += up[0] * k
       ty += up[1] * k
       tz += up[2] * k
+    }
+    // Fluid WALK: the eye is the smooth position, off the anchor's middle by
+    // walkGlide steps (one render cell each), followed exactly below.
+    if (walkGlide.active) {
+      const r = glideAxes(s.view)
+      tx += r.x[0] * walkGlide.x + r.y[0] * walkGlide.y + r.z[0] * walkGlide.z
+      ty += r.x[1] * walkGlide.x + r.y[1] * walkGlide.y + r.z[1] * walkGlide.z
+      tz += r.x[2] * walkGlide.x + r.y[2] * walkGlide.y + r.z[2] * walkGlide.z
     }
     // How far the render frame moved since the last frame, for the offset to
     // tell a moved frame from a moved cursor; null when there is no path (a
@@ -1121,6 +1143,14 @@ function Rig(): JSX.Element {
       if (up[0] !== 0) dx = tx - smooth.current.x
       if (up[1] !== 0) dy = ty - smooth.current.y
       if (up[2] !== 0) dz = tz - smooth.current.z
+    }
+    // Fluid WALK is not eased at all: the eye is the smooth position, which
+    // is already smooth. A jump of the target it did not make (more than a
+    // few cells in one frame) still eases.
+    if (s.walking && walkGlide.exact && Math.abs(tx - smooth.current.x) + Math.abs(ty - smooth.current.y) + Math.abs(tz - smooth.current.z) < 3) {
+      dx = tx - smooth.current.x
+      dy = ty - smooth.current.y
+      dz = tz - smooth.current.z
     }
 
     // Locked, the camera moves with what it is framing, which preserves the

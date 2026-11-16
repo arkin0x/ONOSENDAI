@@ -7,11 +7,26 @@
  * about its own center with its top kept to cyberspace up wherever the move
  * allows. Worked out in cyberspace axes and then turned to the view, so the
  * avatar turns with the world when the compass turns it.
+ *
+ * That is the avatar's PATH facing, the default. An avatar whose payload says
+ * `"face": "upright"` (DECK-0003 §1.18; arkinox, 2026-11-16) turns only left
+ * and right, never tilting, and keeps its heading on a move straight up or
+ * down. Upright is upright to you: its top is your view's up, the up of the
+ * world as you have turned it with the 3D compass, which the scene always
+ * draws as render +Y (its world group carries no rotation; the compass
+ * changes `axes`). So an upright avatar is yawed about render +Y alone, and
+ * stays on its feet on your screen however the world is turned. Everyone
+ * sees it upright in their own view; facing is presentation, not state.
  */
 
 import { Quaternion, Vector3 } from 'three'
+import { drawnFace, type FaceMode } from 'sno-core/face'
+import type { ShardModel } from 'sno-core/shards'
 import type { AxisDirection, Position, ViewAxes } from './space'
 import { composePose, renderPose, viewPose, type Pose, type V3 } from './pose'
+import { yawOnly } from './avatarEye'
+
+export type { FaceMode }
 
 /**
  * The render-space direction of a move, under the view's axes (the same
@@ -87,4 +102,69 @@ export function facingPose(from: Position, to: Position): Pose | null {
 export function avatarTurn(axes: ViewAxes, move: readonly [Position, Position] | null): Quaternion {
   const facing = move ? facingPose(move[0], move[1]) : null
   return new Quaternion().setFromRotationMatrix(renderPose(composePose(viewPose(axes), facing ?? IDENTITY)))
+}
+
+/** How a worn shard turns as it moves (DECK-0003 §1.18): "path" unless its `face` says "upright"; the default avatar turns along its path. */
+export function faceOf(shard: Pick<ShardModel, 'extra'> | null | undefined): FaceMode {
+  return shard ? drawnFace(shard) : 'path'
+}
+
+/** Below this, a move's part across the view's up counts as none: straight up or down (render units of a unit vector). */
+const LEVEL_EPS = 1e-6
+
+/**
+ * Whether a move has a part across the view's up: anything but straight up
+ * or straight down as the view `axes` draws it. Measured on moveDirection, the
+ * same thousandths the turn is built from, so a move this calls level is one
+ * whose upright turn has a heading to read.
+ */
+export function crossesUp(from: Position, to: Position, axes: ViewAxes): boolean {
+  const d = moveDirection(from, to, axes)
+  return d !== null && Math.hypot(d.x, d.z) > LEVEL_EPS
+}
+
+/**
+ * The two positions an avatar's heading comes from, at a point on the chain,
+ * for its facing mode in the view `axes`.
+ *
+ * PATH is facingPair: the move that brought it to the link on show. UPRIGHT
+ * keeps its heading on a move straight up or down (DECK-0003 §1.18), so it
+ * walks back from that move to the latest one that went somewhere across the
+ * view's up; with none before, the first such move after (as the spawn faces
+ * the first move out). Null when no move does, and the upright avatar then
+ * stands at rest, turned about up alone (uprightTurn of no move). Which moves
+ * count depends on the view: turn the world so X is up and a move along X is
+ * a move straight up.
+ */
+export function headingPair<T extends { position: Position }>(chain: T[], index: number | null, face: FaceMode, axes: ViewAxes): [T, T] | null {
+  const pair = facingPair(chain, index)
+  if (!pair || face !== 'upright') return pair
+  if (crossesUp(pair[0].position, pair[1].position, axes)) return pair
+  const n = chain.length
+  const i = index === null ? n - 1 : Math.max(0, Math.min(n - 1, index))
+  // The pair ends at link max(i, 1); look back from the move before it.
+  for (let k = Math.max(i, 1) - 1; k >= 1; k--) {
+    if (crossesUp(chain[k - 1].position, chain[k].position, axes)) return [chain[k - 1], chain[k]]
+  }
+  for (let k = Math.max(i, 1) + 1; k < n; k++) {
+    if (crossesUp(chain[k - 1].position, chain[k].position, axes)) return [chain[k - 1], chain[k]]
+  }
+  return null
+}
+
+/**
+ * The turn an UPRIGHT avatar's group carries in the view `axes`: the path
+ * turn of `move` laid level, a yaw about render +Y (your view's up) alone, so
+ * its nose points along the move's part across your up and its top stays up
+ * on your screen whatever the compass has done to the world. With no move,
+ * its rest pose (lying on cyberspace axes as built, turned with the view)
+ * laid level the same way.
+ */
+export function uprightTurn(axes: ViewAxes, move: readonly [Position, Position] | null): Quaternion {
+  return yawOnly(avatarTurn(axes, move), new Quaternion())
+}
+
+/** The turn an avatar's group carries for its facing mode: avatarTurn for PATH, uprightTurn for UPRIGHT. */
+export function facingTurn(axes: ViewAxes, move: readonly [Position, Position] | null, face: FaceMode): Quaternion {
+  return face === 'upright' ? uprightTurn(axes, move) : avatarTurn(axes, move)
 }

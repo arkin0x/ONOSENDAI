@@ -104,7 +104,7 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
   // scanned place is focused too, so RETURN brings the list back, but it is
   // no cage, and dimming every cage for it hid the ones around the spot.
   const focused = useSecrets((s) => (s.focused !== null && s.keys[s.focused] ? s.focused : null))
-  // Further out while BUILD is pulled back (buildZoom.ts).
+  // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => s.reach)
 
   const geometry = useMemo(() => new EdgesGeometry(new BoxGeometry(1, 1, 1)), [])
@@ -144,8 +144,8 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
         corner[i] = (lo + (axis === 'y' ? -0.5 : side - 0.5)) * a.dir
         far = Math.max(far, Math.abs(centre[i]))
       })
-      // The reach every culled layer shares (Scene.tsx CULL_REACH, GRID_RADIUS
-      // * 8, further while BUILD is pulled back): the fog is black before it,
+      // The reach every culled layer shares (fog.ts CULL_REACH, GRID_RADIUS
+      // * 8, further as the fog's end needs): the fog is black before it,
       // so a cage never pops at the line (review of #635, S2).
       if (far > Math.max(GRID_RADIUS * 8, reach)) continue
       out.push({ key, centre, corner, sides })

@@ -154,7 +154,7 @@ export function StarredMarks({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const still = useReducedMotion()
 
-  // Further out while BUILD is pulled back (buildZoom.ts).
+  // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => Math.max(STAR_REACH, s.reach))
   const placed = useMemo(
     () => placedStars(places, alignedOrigin(anchor, scaleExp), anchorPlane, scaleExp, axes, reach),

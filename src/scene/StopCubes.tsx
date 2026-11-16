@@ -61,7 +61,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
   // StopField's NEAREST cube stands where that stop is; the fleet leaves it be.
   const nearestMarked = useStopMarks((s) => s.nearest)
 
-  // Further out while BUILD is pulled back (buildZoom.ts).
+  // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const cubes = useMemo(() => {
     void indexVersion

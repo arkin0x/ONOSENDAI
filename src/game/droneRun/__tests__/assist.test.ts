@@ -262,6 +262,25 @@ describe('auto-fire', () => {
     stepRun(st, inp)
     expect(eye(st)).toEqual(predicted)
   })
+
+  it('sprinting at sprint speed with stamina part drained, the predicted eye is the stepped one (the copy spends stamina as the run does)', () => {
+    const st = standing(quiet(), field)
+    const sprintIn = input({ move: { fwd: 1, strafe: 0.3 }, sprint: true })
+    // Up to sprint speed, and well into the stamina.
+    for (let i = 0; i < 80; i++) stepRun(st, sprintIn)
+    const sp = st.world.variant.spec.player.stamina!
+    expect(st.body.sprinting).toBe(true)
+    expect(st.body.stamina).toBeGreaterThan(0)
+    expect(st.body.stamina).toBeLessThan(sp.max * 0.6)
+    expect(Math.hypot(st.body.vel[0], st.body.vel[2])).toBeGreaterThan(9.09 * 1.2)
+    const before = { stamina: st.body.stamina, wait: st.body.staminaWait, lock: st.body.sprintLock }
+    const predicted = eyeAfterStep(st, sprintIn)
+    // The copy left the run's body as it was.
+    expect({ stamina: st.body.stamina, wait: st.body.staminaWait, lock: st.body.sprintLock }).toEqual(before)
+    stepRun(st, sprintIn)
+    expect(eye(st)).toEqual(predicted)
+    expect(st.body.sprinting).toBe(true)
+  })
 })
 
 /** A wave of scouts and swarmers coming at the player from ahead, with hedges to fly round. */

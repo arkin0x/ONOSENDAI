@@ -32,10 +32,10 @@
 
 import { create } from 'zustand'
 import { describeError } from '../lib/secrets/db'
-import { EMPTY_TREE, applyOp, canonical, childrenOf, cleanName, newFolderId, type Folder, type FolderOp, type FolderTree } from '../lib/shardFolders'
+import { EMPTY_TREE, applyOp, canonical, childrenOf, cleanName, folderOf, newFolderId, type Folder, type FolderOp, type FolderTree } from '../lib/shardFolders'
 import { commitOps, openShardFoldersDb, readTree } from '../lib/shardFoldersDb'
 import { useCyberspace } from './useCyberspace'
-import { readLastUsedFrom } from './useWorkshop'
+import { fileCopiesWith, readLastUsedFrom } from './useWorkshop'
 
 export type FolderStorage = 'loading' | 'indexeddb' | 'memory'
 
@@ -274,6 +274,12 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
 
 // The workshop opens the top of its list, deploys counted (useWorkshop newestId).
 readLastUsedFrom(() => useShardFolders.getState().tree.used)
+
+// A duplicate lands in its source's folder (useWorkshop duplicate); a source at the top files nothing.
+fileCopiesWith((copy, source) => {
+  const at = folderOf(useShardFolders.getState().tree, source)
+  if (at !== null) useShardFolders.getState().assignToFolder(copy, at)
+})
 
 /** Make or find a folder path from the top, for code outside React: returns the last folder's id. */
 export function createFolderPath(path: readonly string[]): string | null {

@@ -100,9 +100,11 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
   const key = item.type === 'key' && !!item.keyItem
   const coin = item.type === 'message' && findCashuToken(item.text) !== null
   // A key item's INFO, before and after TAKE: who hid it, and the thread its card opens (lib/commentSubjects).
+  // Revealed from a chest unsigned: who forged it is a claim (Hidden `claim`), said on the card as UNSIGNED.
+  const claim = useShards((s) => !!s.discovered[item.key]?.claim)
   const info = useMemo((): KeyInfoSource | null => (key && item.keyItem
-    ? { id: item.key, event: item.event, key: item.keyItem, forger: item.event?.pubkey ?? author, hider: author || null, guide: isGuideKey(author), subject: subjectOfWorldItem(item) }
-    : null), [key, item, author])
+    ? { id: item.key, event: item.event, key: item.keyItem, forger: item.event?.pubkey ?? author, verified: !claim, hider: author || null, guide: isGuideKey(author), subject: subjectOfWorldItem(item) }
+    : null), [key, item, author, claim])
   return (
     <li className="secrets__row nearby__row">
       <ItemThumb type={item.type} coin={coin} shard={item.type === 'shard' ? item.shard : undefined} image={item.keyItem?.image} model={item.keyItem?.model} />

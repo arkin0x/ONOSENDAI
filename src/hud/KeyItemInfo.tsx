@@ -153,7 +153,8 @@ export function KeyItemModal({ info, onClose }: { info: KeyInfoSource; onClose: 
   // LISTED by anyone, from the ITEM FEED as read this session (read once a session, as a lock's card reads it).
   const listed = useItemFeed((s) => s.listings.some((l) => l.itemPubkey === key.itemPubkey))
   useEffect(() => { useItemFeed.getState().ensure() }, [])
-  const reaction = useMemo(() => (subject ? reactionTargetOf(subject) : null), [subject])
+  // A key a tutorial guide sealed never has a thread here, whatever a caller handed in: no event may name the guide key.
+  const reaction = useMemo(() => (subject && !info.guide ? reactionTargetOf(subject) : null), [subject, info.guide])
   return (
     <Stacked>
       {/* Its pointer stays here: the list under it must not read a tap on this card as a tap outside itself. */}
@@ -175,7 +176,7 @@ export function KeyItemModal({ info, onClose }: { info: KeyInfoSource; onClose: 
             {info.verified === false && <span className="item__chip item__chip--dim" title="This item carries no signature, so who forged it is a claim">UNSIGNED</span>}
           </span>
           <LeftBy info={info} />
-          {subject && reaction ? (
+          {subject && reaction && !info.guide ? (
             <>
               <Reactions target={reaction.target} alsoTell={reaction.alsoTell} />
               <Comments subject={subject} />

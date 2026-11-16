@@ -65,7 +65,8 @@ import { InventoryPanel } from '../InventoryPanel'
 import { SecretModal } from '../SecretModal'
 import { ChestContents } from '../ItemRows'
 import { Row } from '../NearbyLootModal'
-import { GUIDE_NO_THREAD, IN_YOUR_ITEMS, KEY_ITEM_LABEL, NOWHERE_NO_THREAD } from '../KeyItemInfo'
+import { GUIDE_NO_THREAD, IN_YOUR_ITEMS, KEY_ITEM_LABEL, KeyItemModal, NOWHERE_NO_THREAD } from '../KeyItemInfo'
+import { subjectOfHidden } from '../../lib/commentSubjects'
 import type { NearbyItem } from '../../hooks/useNearbyLoot'
 
 const hiderSk = generateSecretKey()
@@ -328,6 +329,16 @@ describe('before TAKE', () => {
     expect(r.buttons(/^POST$/)).toHaveLength(0)
     expect(r.all().some((h) => h.type === 'textarea')).toBe(false)
     expect(relay.published).toHaveLength(0)
+  })
+
+  it('the card itself never offers a thread for a key marked as a guide\'s, even handed one', async () => {
+    const { found } = await silverKey()
+    const subject = subjectOfHidden(found)!
+    const r = keep(await mount(createElement(KeyItemModal, { info: { id: found.eventId, event: found.inner as NostrEvent, key: found.key!, forger: HIDER, hider: HIDER, guide: true, subject }, onClose: () => undefined })))
+    await settled(30)
+    expect(r.says(GUIDE_NO_THREAD)).toBe(true)
+    expect(reactButtons(r)).toHaveLength(0)
+    expect(r.buttons(/^POST$/)).toHaveLength(0)
   })
 
   it('in an opened chest: the key item\'s row has INFO beside TAKE', async () => {

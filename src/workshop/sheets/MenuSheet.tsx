@@ -6,7 +6,7 @@
  * from the old panel unchanged; the tutorial still opens the workshop on it.
  */
 
-import { memo } from 'react'
+import { memo, useState } from 'react'
 import { ClipboardCopy, CopyPlus } from 'lucide-react'
 import { IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
 import { bounceChip } from '../../lib/walkBounce'
@@ -19,6 +19,7 @@ import { BounceChip } from '../shardRows'
 import { copyShardById } from '../shardClipboard'
 import { useBeginner } from '../beginner'
 import { Field, Switch } from '../../hud/ui/Switch'
+import { SearchField } from '../../hud/ui/SearchField'
 
 /**
  * A folder's DELETE CONTENTS in the MENU's list (hud/ShardFolders): the
@@ -49,8 +50,9 @@ const DELETE_CONTENTS: DeleteContents = {
  * and while SELECT is on a tap on the row picks it or lets it go instead,
  * so the picks are not lost to a closing menu (review of PR 631).
  * MENU opens again where it was scrolled to (hooks/useScrollMemory).
+ * `query` is the search above it (hud/ShardFolders, lib/shardSearch.ts).
  */
-export const ShardList = memo(function ShardList({ currentId, onOpen }: { currentId: string; onOpen: () => void }): JSX.Element {
+export const ShardList = memo(function ShardList({ currentId, onOpen, query = '' }: { currentId: string; onOpen: () => void; query?: string }): JSX.Element {
   const shards = useWorkshop((s) => s.shards)
   const w = useWorkshop.getState
   // The list's order (the comment below says why).
@@ -59,11 +61,11 @@ export const ShardList = memo(function ShardList({ currentId, onOpen }: { curren
     <ul className="workshop__list">
       {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26).
           A deploy counts as an edit here, inside its folder (arkinox, 2026-10-23). */}
-      <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} deleteContents={DELETE_CONTENTS} row={(s, f) => (
+      <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} deleteContents={DELETE_CONTENTS} query={query} row={(s, f) => (
         <li key={s.id} className={s.id === currentId ? 'is-current' : ''} {...f.drag}>
           <button className="workshop__pick" aria-pressed={f.selecting ? f.picked : undefined} onClick={() => { if (f.selecting) { f.toggle(); return } w().select(s.id); onOpen() }}>
             <ShardThumb shard={s} own />
-            <span className="workshop__pick-name">{s.name}</span>
+            <span className="workshop__pick-name">{f.mark(s.name)}</span>
             {/* The chip rides in the facts line: the row is a two-row grid beside its picture. */}
             <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}{bounceChip(s) && <> <BounceChip shard={s} /></>}</span>
           </button>
@@ -93,6 +95,7 @@ interface MenuBodyProps {
 /** MENU's body, inside its sheet. */
 export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, setPaste }: MenuBodyProps): JSX.Element {
   const shardCount = useWorkshop((s) => s.shards.length)
+  const [query, setQuery] = useState('')
   const tools = useBeginner((b) => b.tools)
   const hasContent = useWorkshop((s) => { const c = s.current(); return c !== null && (c.vertices.length > 0 || (c.parts?.length ?? 0) > 0) })
   const pasteOpen = box.open
@@ -130,7 +133,9 @@ export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, s
           </div>
         </div>
       )}
-      <ShardList currentId={currentId} onOpen={onOpen} />
+      {/* Above the list here, not under it: MENU's sheet scrolls as a whole, and under a library of a hundred shards the box would be out of reach. */}
+      {(shardCount > 1 || query !== '') && <SearchField className="workshop__search" value={query} onChange={setQuery} placeholder="Search shards and folders" label="Search your shards and folders" />}
+      <ShardList currentId={currentId} onOpen={onOpen} query={query} />
       {/* The dock's six tools, or a beginner's four with MORE TOOLS (phase 4). */}
       <div className="workshop__row">
         <Field id="ws-all-tools" label="ADD and FACE in the dock">

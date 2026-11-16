@@ -63,6 +63,7 @@ import { useInventory } from '../useInventory'
 import { resetOpenedChests } from '../useOpenedChests'
 import { behindDoor, fillingChest, hereInRoom, ownDoors, placingChest, positionOf, sealingDoor, useShards, type MyDeployment } from '../useShards'
 import { openRoom } from '../rooms'
+import { HINT_PREFS_KEY, loadHintPrefs } from '../deployHintPrefs'
 
 const S = () => useShards.getState()
 const C = () => useCyberspace.getState()
@@ -109,6 +110,7 @@ beforeEach(() => {
   lock = forgeKey('Silver Key')
   localStorage.removeItem('onosendai:door-secrets')
   localStorage.removeItem('onosendai:chests-opened')
+  localStorage.removeItem(HINT_PREFS_KEY)
   resetDoorSecrets()
   resetOpenedChests()
   useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null, deployLeaveOut: [], deployRoomSnap: null, deployInto: null, placedLast: null })
@@ -197,6 +199,24 @@ describe('what is placed in its room (R1, height-specific)', () => {
     // The next placement is lined up as a new bag's, naming no bag, so the bar seeds it from yours under the cursor.
     expect(S().pending).not.toBeNull()
     expect({ hint: S().deployBag.hint, from: S().deployBagFrom }).toEqual({ hint: SECTOR_HINT, from: null })
+  })
+
+  it('a room\u2019s bag carries none of the hint switches, and the player\u2019s saved switches stay as set (arkinox, 2026-11-15)', async () => {
+    // Contents turned off by hand on an ordinary hide first: the bar shows no bag rows inside a room.
+    S().startDeployMessage('elsewhere')
+    S().setDeployBag({ contents: false })
+    S().cancelDeploy()
+    const d = await sealDoor()
+    S().startDeployMessage('behind it')
+    S().setDeployHeight(HEIGHT)
+    expect(S().deployBag).toMatchObject({ heightTag: true, hint: SECTOR_HINT, contents: false })
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    const inside = S().mine.find((m) => m.text === 'behind it')!
+    expect(inside.room).toEqual({ doorId: d.eventId })
+    expect(inside.bag).toEqual(ROOM_BAG_SETTINGS)
+    expect(loadHintPrefs()).toEqual({ height: true, sector: true, contents: false, money: false })
+    expect({ heightTag: S().deployBag.heightTag, contents: S().deployBag.contents }).toEqual({ heightTag: true, contents: false })
   })
 
   it('at any other height, in its cube: it joins the room anyway, at the room\u2019s height (arkinox, 2026-11-09)', async () => {

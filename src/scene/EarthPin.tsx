@@ -50,6 +50,7 @@ import { alignedOrigin, samePosition, useCyberspace } from '../store/useCyberspa
 import { useStarred } from '../store/useStarred'
 import { STAR_REACH } from './StarredMarks'
 import { WorldLabel } from './WorldLabel'
+import { useDrawReach } from './buildZoom'
 
 /** Beyond this many cells from the anchor the pin is off the grid and not drawn. */
 const PIN_REACH = GRID_RADIUS * 8
@@ -84,9 +85,9 @@ export function pinPoint(
  * or in the other plane leaves the pin its label.
  */
 export function starNamesPin(
-  pin: Position, places: StarredPlace[], origin: Position, plane: Plane, scaleExp: number, axes: ViewAxes,
+  pin: Position, places: StarredPlace[], origin: Position, plane: Plane, scaleExp: number, axes: ViewAxes, reach = STAR_REACH,
 ): boolean {
-  return placedStars(places, origin, plane, scaleExp, axes, STAR_REACH).some(({ place }) => {
+  return placedStars(places, origin, plane, scaleExp, axes, Math.max(STAR_REACH, reach)).some(({ place }) => {
     const at = placePosition(place.input)
     return at !== null && samePosition(at, pin) && sceneLabel(place) !== null
   })
@@ -98,13 +99,15 @@ export function EarthPin({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane = useCyberspace((s) => s.anchorPlane)
   const places = useStarred((s) => s.places)
+  // Further out while BUILD is pulled back (buildZoom.ts), as StarredMarks.
+  const reach = useDrawReach((s) => Math.max(PIN_REACH, s.reach))
 
   const built = useMemo(() => {
     // The pin is a dataspace thing: in ideaspace there is no Earth to pin to.
     if (!pin || plane !== 0) return null
     const origin = alignedOrigin(anchor, scaleExp)
     const c = pinPoint(pin.position, origin, scaleExp, axes)
-    if (Math.abs(c[0]) > PIN_REACH || Math.abs(c[1]) > PIN_REACH || Math.abs(c[2]) > PIN_REACH) return null
+    if (Math.abs(c[0]) > reach || Math.abs(c[1]) > reach || Math.abs(c[2]) > reach) return null
 
     const dot = new BufferGeometry()
     dot.setAttribute('position', new Float32BufferAttribute([c[0], c[1], c[2]], 3))
@@ -118,9 +121,9 @@ export function EarthPin({ axes }: { axes: ViewAxes }): JSX.Element | null {
     const arms = new BufferGeometry()
     arms.setAttribute('position', new Float32BufferAttribute(cross, 3))
 
-    const named = starNamesPin(pin.position, places, origin, plane, scaleExp, axes)
+    const named = starNamesPin(pin.position, places, origin, plane, scaleExp, axes, reach)
     return { dot, arms, at: c, labelAt: [c[0], c[1] + ARM, c[2]] as [number, number, number], named }
-  }, [pin, anchor, scaleExp, plane, axes, places])
+  }, [pin, anchor, scaleExp, plane, axes, places, reach])
 
   // GPU buffers are not garbage collected; release each pin when replaced.
   useEffect(() => () => { built?.dot.dispose(); built?.arms.dispose() }, [built])

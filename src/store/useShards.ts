@@ -133,6 +133,7 @@ import { turnShard, type Turns } from '../lib/turn'
 import { SECTOR_HINT, alignedBase, hintFits, type HintHeights } from '../lib/hint'
 import { hidesThing, type Muted } from '../lib/muteList'
 import { useMutes } from './useMutes'
+import { asShown, hintPrefsOf, loadHintPrefs, saveHintPrefs, withHintPrefs } from './deployHintPrefs'
 import { CONSTRAIN_DEFAULT, authoredConstrain, authoredConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 
 /** A workshop model's WALK setting as it publishes, by id; the default for one that never chose or is not there (DECK-0003 §1.12). */
@@ -1312,6 +1313,35 @@ export function ownBagIn(mine: MyDeployment[], region: string): OwnBag | null {
   return { region, settings: { ...DEFAULT_BAG_SETTINGS, ...(newest.bag ?? {}) }, count: items.length, cashu: items.some((d) => d.inner.kind === MESSAGE_KIND && findCashuToken(d.inner.content) !== null) }
 }
 
+/**
+ * Whether the deploy bar shows PUBLISH THAT MONEY IS INSIDE: the message being
+ * hidden holds a cashu token, or your bag in the region does as far as this
+ * device knows (ownBagIn). The deploy reads the same answer, and a bag goes
+ * out saying money only when the row was there to see and was ON (arkinox,
+ * 2026-11-15: "money off by default"), so a switch saved ON for one bag
+ * never speaks for another whose cashu this device does not list.
+ */
+export function moneyRowShown(pending: Pick<NonNullable<ShardsState['pending']>, 'type'> & { text?: string } | null, bag: Pick<OwnBag, 'cashu'> | null): boolean {
+  return (pending?.type === 'message' && typeof pending.text === 'string' && findCashuToken(pending.text) !== null) || (bag?.cashu ?? false)
+}
+
+/**
+ * The bag settings for a write that ADDS a cashu token without the deploy
+ * bar (HIDE AGAIN, a room's entries moving out to an ordinary bag): money
+ * stays said only while this device's saved switch is ON as well, so such a
+ * write never says money the player would have seen OFF, and never turns
+ * it on. A write that adds no token keeps what the bag says until you hide
+ * into it again (deployHintPrefs.ts).
+ */
+export function moneyAsSaved(settings: BagSettings, addsCashu: boolean): BagSettings {
+  return addsCashu && settings.money && !loadHintPrefs().money ? { ...settings, money: false } : settings
+}
+
+/** Whether any of these items is a message holding a cashu token. */
+function holdsCashu(items: readonly Pick<NostrEvent, 'kind' | 'content'>[]): boolean {
+  return items.some((e) => e.kind === MESSAGE_KIND && findCashuToken(e.content) !== null)
+}
+
 /** How long the upload of PLACE AGAIN's fresh audio copy waits on the signer: a person reads the prompt. */
 const AUDIO_SIGN_PATIENCE_MS = 60_000
 
@@ -1482,34 +1512,40 @@ interface ShardsState {
   deployLink: boolean
   /**
    * The bag settings the deploy bar shows and the deploy writes: `H`, the
-   * hint, the riddle (lib/hidden.ts BagSettings). They are the bag's, so they
-   * start at your existing bag's settings when the cursor's region holds one
-   * (seedDeployBag) and, when it does not, at a new bag's (lib/hidden.ts
-   * newBagSettings: the sector hint on, owner ruling 2026-11-13).
+   * hint, the riddle (lib/hidden.ts BagSettings). The three hint switches
+   * (`H`, the sector hint, the contents) start as this device's player last
+   * set them, all ON until they touch one (deployHintPrefs.ts, arkinox
+   * 2026-11-15), and so does the money switch, OFF until they touch it
+   * ("money off by default"); the riddle starts at your existing bag's when
+   * the cursor's region holds one (seedDeployBag) and empty when it does not.
    */
   deployBag: BagSettings
   /**
    * The hint a height too large for it took off the bag (heightPatch), put
-   * back when the height fits it again: a new bag's sector hint, off above
-   * height 30, is on again at 30 or lower. Cleared whenever you set the hint
-   * yourself (setDeployBag), so an OFF you chose stays off.
+   * back when the height fits it again: the sector hint, ON in your saved
+   * switches but off above height 30, is on again at 30 or lower. Cleared
+   * whenever you set the hint yourself (setDeployBag), so an OFF you chose
+   * stays off.
    */
   deployHintHeld: HintHeights | null
   /**
    * The bag the controls were seeded from: its region and the settings it had
    * then, or null when they start from the defaults. deploy() compares what
    * you chose with this to tell a change you made from a value you never
-   * touched, so a riddle or hint written from another device since is carried
-   * forward rather than overwritten (resolveBagSettings).
+   * touched, so a riddle written from another device since is carried
+   * forward rather than overwritten (resolveBagSettings). The three hint
+   * switches and the money switch always go out as shown (deployHintPrefs.ts
+   * asShown).
    */
   deployBagFrom: OwnBag | null
   /** Change some of the bag settings. */
   setDeployBag: (patch: Partial<BagSettings>) => void
   /**
-   * Start the controls at this bag's settings when the region under the cursor
-   * changes to one that holds your bag, or back at the defaults when it moves
-   * from one that did to one that does not. Moving between regions with no bag
-   * keeps what you set.
+   * Start the controls at this bag's riddle, with the hint and money
+   * switches as you last set them, when the region under the cursor changes
+   * to one that holds your bag, or back at a new bag's when it moves from one
+   * that did to one that does not. Moving between regions with no bag keeps
+   * what you set.
    */
   seedDeployBag: (bag: OwnBag | null) => void
   deployStatus: DeployStatus
@@ -2933,8 +2969,8 @@ export const useShards = create<ShardsState>((set, get) => {
    * than lying in wait. A hint smaller than the region cannot contain it (spec
    * §7.7): the sector hint goes off above height 30 the way the snap goes off
    * below its own height. Unlike the snap it is held (`deployHintHeld`) and
-   * comes back on at 30 or lower, because it is on by default (owner ruling
-   * 2026-11-13). Only an OFF you chose stays off: it is never held.
+   * comes back on at 30 or lower while your saved switch has it ON
+   * (deployHintPrefs.ts). Only an OFF you chose stays off: it is never held.
    */
   const heightPatch = (height: number): Partial<ShardsState> => {
     const offered = snapHere(height)
@@ -2956,14 +2992,18 @@ export const useShards = create<ShardsState>((set, get) => {
   }
 
   /**
-   * A new bag's controls at `height` (newBagSettings): the sector hint on
-   * where it fits, and held, to come back on, where it does not (owner
-   * ruling 2026-11-13: sector hints ON by default for every bag).
+   * The controls for a bag with these `settings` at `height`: the three hint
+   * switches as this device's player last set them (deployHintPrefs.ts; all
+   * ON until they touch one, arkinox 2026-11-15; money OFF until they touch
+   * it), the riddle the bag's own. The sector hint ON where a sector is too small for
+   * the region is held, to come back on lower down.
    */
-  const freshBag = (height: number): Pick<ShardsState, 'deployBag' | 'deployHintHeld'> => {
-    const deployBag = newBagSettings(height)
-    return { deployBag, deployHintHeld: deployBag.hint ? null : SECTOR_HINT }
+  const bagStart = (settings: BagSettings, height: number): Pick<ShardsState, 'deployBag' | 'deployHintHeld'> => {
+    const { bag, held } = withHintPrefs(settings, height)
+    return { deployBag: bag, deployHintHeld: held ? SECTOR_HINT : null }
   }
+  /** A new bag's controls at `height` (newBagSettings, then the saved switches). */
+  const freshBag = (height: number): Pick<ShardsState, 'deployBag' | 'deployHintHeld'> => bagStart(newBagSettings(height), height)
 
   /**
    * The same fresh-deploy state every start shares, at the height the bar
@@ -3306,7 +3346,7 @@ export const useShards = create<ShardsState>((set, get) => {
     // that does not fit, before anything is signed. A resealed object keeps
     // its reference entry (the same address), so it is measured as it is.
     const target = await gatherInners(to.lookupId, to.key, targetLive, to.height, me)
-    const settings = to.room ? ROOM_BAG_SETTINGS : target.settings ?? DEFAULT_BAG_SETTINGS
+    const settings = to.room ? ROOM_BAG_SETTINGS : moneyAsSaved(target.settings ?? DEFAULT_BAG_SETTINGS, holdsCashu(rows.map((r) => r.inner)))
     const place = { at: positionOf(src), plane: src.plane }
     // An item in a sealed entry goes sealed again into the target, under the
     // target's key and a fresh `d` (spec §7.6 The key: a sealed entry belongs
@@ -3531,7 +3571,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const rumor = d.type === 'message' || d.type === 'audio'
       const key = hexToBytes(d.keyHex)
       const existing = await gatherInners(d.lookupId, key, true, d.height, owner)
-      const settings = d.room ? ROOM_BAG_SETTINGS : existing.settings ?? d.bag ?? DEFAULT_BAG_SETTINGS
+      const settings = d.room ? ROOM_BAG_SETTINGS : moneyAsSaved(existing.settings ?? d.bag ?? DEFAULT_BAG_SETTINGS, holdsCashu([template]))
       // Whether the copy fits inline, before it is signed: a shard goes by
       // reference when the bag would not hold it inline (lib/bagFit.ts), and
       // a bag that cannot hold it either way refuses it now, in words.
@@ -3703,8 +3743,7 @@ export const useShards = create<ShardsState>((set, get) => {
     deployFollow: false,
     deployConstrain: CONSTRAIN_DEFAULT,
     deployLink: false,
-    deployBag: newBagSettings(0),
-    deployHintHeld: null,
+    ...freshBag(0),
     deployBagFrom: null,
     deployStatus: 'idle',
     placedLast: null,
@@ -3712,8 +3751,8 @@ export const useShards = create<ShardsState>((set, get) => {
       const s = get()
       const last = s.placedLast
       if (!last || s.pending || s.deployStatus === 'working' || againName(s) === null) return false
-      // The bag controls start at the defaults and are seeded from the bag
-      // under the cursor, as for any new deploy: they are that bag's.
+      // The bag controls start as a new bag's, with your saved hint switches,
+      // and take the riddle of your bag under the cursor, as for any new deploy.
       set({ pending: last.pending, ...last.settings, deployTurn: [...last.settings.deployTurn] as Turns, ...freshBag(last.settings.deployHeight), deployBagFrom: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null })
       cyber().setBuildStep(last.step)
       return true
@@ -3772,7 +3811,8 @@ export const useShards = create<ShardsState>((set, get) => {
     }),
     // A move starts exactly as the shard stands: its height (held, not
     // fitted, so the shard stays in its bag and keeps its comments unless
-    // you change it), its size, its pose and its bag's settings.
+    // you change it), its size, its pose and its bag's riddle, with the hint
+    // switches as you last set them.
     startEditShard: (eventId) => {
       const d = get().mine.find((m) => m.eventId === eventId)
       if (!d?.shard || !editable(d, cyber().identity.pubkey) || get().deployStatus === 'working') return
@@ -3789,8 +3829,7 @@ export const useShards = create<ShardsState>((set, get) => {
         deploySpin: d.shard.spin ?? 0,
         deployTurn: [0, 0, 0],
         deployFollow: false,
-        deployBag: { ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) },
-        deployHintHeld: null,
+        ...bagStart({ ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) }, d.height),
         deployBagFrom: ownBagIn(get().mine, regionOf(positionOf(d), d.plane, d.height)),
         deployStatus: 'idle',
         deployError: null,
@@ -3893,8 +3932,7 @@ export const useShards = create<ShardsState>((set, get) => {
         deployHeightAuto: false,
         deployUnit: model?.unit ?? 0,
         deployConstrain: model ? authoredConstrainOf(model) : CONSTRAIN_DEFAULT,
-        deployBag: { ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) },
-        deployHintHeld: null,
+        ...bagStart({ ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) }, d.height),
         deployBagFrom: ownBagIn(get().mine, regionOf(positionOf(d), d.plane, d.height)),
         deployNote: null,
         deployAsk: null,
@@ -3915,8 +3953,7 @@ export const useShards = create<ShardsState>((set, get) => {
         deployHeight: d.height,
         // Its own height, chosen: a room it lands in stands in for it until it leaves.
         deployRoomSnap: null,
-        deployBag: { ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) },
-        deployHintHeld: null,
+        ...bagStart({ ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) }, d.height),
         deployBagFrom: ownBagIn(get().mine, regionOf(positionOf(d), d.plane, d.height)),
         deployNote: null,
         deployAsk: null,
@@ -4340,13 +4377,18 @@ export const useShards = create<ShardsState>((set, get) => {
       })
     },
     // Setting the hint yourself is the choice: nothing held comes back over it.
-    setDeployBag: (patch) => set({ deployBag: { ...get().deployBag, ...patch }, ...('hint' in patch ? { deployHintHeld: null } : {}) }),
+    // A hand flip of a hint switch is kept for every later hide (deployHintPrefs.ts).
+    setDeployBag: (patch) => {
+      saveHintPrefs(hintPrefsOf(patch))
+      set({ deployBag: { ...get().deployBag, ...patch }, ...('hint' in patch ? { deployHintHeld: null } : {}) })
+    },
     seedDeployBag: (bag) => {
       const from = get().deployBagFrom
       if ((bag?.region ?? null) === (from?.region ?? null)) return
       // Leaving your bag's region for one with no bag: back to the defaults,
       // so that bag's riddle never follows the cursor into a new bag.
-      set({ ...(bag ? { deployBag: bag.settings, deployHintHeld: null } : freshBag(get().deployHeight)), deployBagFrom: bag })
+      // Your bag's riddle, with the hint switches as you last set them.
+      set({ ...(bag ? bagStart(bag.settings, get().deployHeight) : freshBag(get().deployHeight)), deployBagFrom: bag })
     },
     // Buryable up to the compute ceiling (past that the region derivation
     // throws); discovery only auto-scans to SCAN_MAX_HEIGHT, which the DeployBar
@@ -4774,13 +4816,17 @@ export const useShards = create<ShardsState>((set, get) => {
         // Its entry as the bag holds it: inline, by reference, or in a sealed entry (standsFor).
         const gone = replaced && replaced.lookupId === rk.lookupId ? replaced : null
         const standing = gone ? existing.entries.filter((e) => !standsFor(e, gone)) : existing.entries
-        // What you changed in the deploy bar wins; what you left as it was
-        // takes the bag's current value, which may be newer than what the
-        // bar showed (resolveBagSettings). The controls were seeded from
-        // this region's bag only if `deployBagFrom` names this region.
+        // The riddle: what you changed in the deploy bar
+        // wins; what you left as it was takes the bag's current value, which
+        // may be newer than what the bar showed (resolveBagSettings). The
+        // controls were seeded from this region's bag only if `deployBagFrom`
+        // names this region.
         const region = regionOf(at, plane, deployHeight)
         const seeded = deployBagFrom?.region === region ? deployBagFrom.settings : newBagSettings(deployHeight)
-        const settingsOf = (current: BagSettings | null): BagSettings => (into ? ROOM_BAG_SETTINGS : resolveBagSettings(deployBag, seeded, current, deployHeight))
+        // The hint and money switches go out as the bar shows them (asShown):
+        // money OFF where the bar showed no money row (moneyRowShown).
+        const shown = moneyRowShown(pending, ownBagIn(get().mine, region)) ? deployBag : { ...deployBag, money: false }
+        const settingsOf = (current: BagSettings | null): BagSettings => (into ? ROOM_BAG_SETTINGS : asShown(resolveBagSettings(deployBag, seeded, current, deployHeight), shown, deployHeight))
         let settings: BagSettings = settingsOf(existing.settings)
         // A large shard is hidden by reference (spec §7.6, DECK-0003 §3.2): it
         // becomes its own kind 33331 object sealed with the same key, and the
@@ -5076,7 +5122,7 @@ export const useShards = create<ShardsState>((set, get) => {
             : s.placedLast
           // A room's settings are the room's: left out of it, the next placement starts as any other.
           // Fresh controls name no bag, so the bar seeds them from your bag under the cursor, if any (seedDeployBag).
-          const bag = again ? (into ? { ...freshBag(deployHeight), deployBagFrom: null } : { deployBag: settings, deployHintHeld: null, deployBagFrom: ownBagIn(s.mine, regionOf(at, plane, deployHeight)) }) : {}
+          const bag = again ? (into ? { ...freshBag(deployHeight), deployBagFrom: null } : { ...bagStart(settings, deployHeight), deployBagFrom: ownBagIn(s.mine, regionOf(at, plane, deployHeight)) }) : {}
           set({ deployStatus: 'done', pending: again, deployNote: null, deployAsk: null, placedLast, ...bag })
         }
         // A moved door keeps its room: its secret, and what stands behind it, follow its new id.
@@ -5484,7 +5530,8 @@ export const useShards = create<ShardsState>((set, get) => {
         if (!h.chestId) return null
         const chest = discovered[h.chestId] ?? get().mine.find((d) => d.eventId === h.chestId)
         const name = chest?.chest?.name ?? ''
-        const place = chest ? { lookupId: chest.lookupId, bagId: chest.bagId, at: { x: chest.at.x.toString(), y: chest.at.y.toString(), z: chest.at.z.toString() }, plane: chest.plane, height: chest.height } : placeOf(h)
+        // The find's own author, as the chest that revealed it named it (chests.ts revealedIn): its card's thread (lib/commentSubjects).
+        const place = chest ? { lookupId: chest.lookupId, bagId: chest.bagId, at: { x: chest.at.x.toString(), y: chest.at.y.toString(), z: chest.at.z.toString() }, plane: chest.plane, height: chest.height, author: h.author } : placeOf(h)
         return { from: { chestId: h.chestId, chestName: name }, place }
       }
       const inv = useInventory.getState()
@@ -5494,7 +5541,7 @@ export const useShards = create<ShardsState>((set, get) => {
       for (const id of eventIds) {
         const d = discovered[id] ? undefined : get().mine.find((x) => x.eventId === id)
         if (!d?.key || !d.inner || inv.has(id)) continue
-        added.push(inv.holdForged(d.inner as NostrEvent, d.key, { lookupId: d.lookupId, bagId: d.bagId, at: d.at, plane: d.plane, height: d.height }))
+        added.push(inv.holdForged(d.inner as NostrEvent, d.key, { lookupId: d.lookupId, bagId: d.bagId, at: d.at, plane: d.plane, height: d.height, author: me }))
       }
       // Taking an item opens nothing: the chest it opens waits for OPEN
       // (arkinox, 2026-10-26: "everything must be opened or taken manually").

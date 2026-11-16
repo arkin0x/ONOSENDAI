@@ -7,7 +7,9 @@
  * under a hash of exactly what the picture shows: the mode, the vertices
  * with their colours, the faces, the face colours, and what the object
  * places with how it places them, and the objects it carries for those
- * placements (DECK-0003 §1.10), since they are what is drawn there. The name, the id and the time of the last
+ * placements (DECK-0003 §1.10), since they are what is drawn there, and how
+ * it draws: its opacity (§1.11), point size (§1.15) and glow (§1.16), read
+ * as the renderer reads them, so a malformed value keys as absent. The name, the id and the time of the last
  * edit are left out. An edit to the shape is a new key, so the row asks for
  * a new picture; a rename keeps the old one. A model in the workshop and the
  * same object in the feed share one picture.
@@ -16,10 +18,11 @@
  * the light, the size) and bump it, so every kept picture is drawn again.
  */
 
-import type { ShardModel } from 'sno-core/shards'
+import { readOpacity, type ShardModel } from 'sno-core/shards'
+import { readGlow, readPointSize } from 'sno-core/glow'
 
-/** Bump when the pictures are drawn differently, so none drawn before is shown again. */
-export const LOOK = 1
+/** Bump when the pictures are drawn differently, so none drawn before is shown again. 2: pictures draw glow halos and point sizes. */
+export const LOOK = 2
 
 /**
  * A 53 bit hash of a string (cyrb53, public domain), as 14 hex digits. Not
@@ -57,7 +60,10 @@ export function thumbKeyOf(shard: ShardModel): string {
   const composite = isComposite(shard)
   // The carried objects only when there are any, so every key made before they existed stays as it was.
   const carried = composite && shard.objects ? [shard.objects] : []
-  const text = JSON.stringify([LOOK, shard.mode, shard.vertices, shard.faces, shard.facecolors ?? null, composite ? shard.refs : null, composite ? shard.parts : null, composite ? shard.unit : 0, ...carried])
+  // How it draws, read (a malformed value is absent); kept whatever the mode, since the picture of a mode change is a new key anyway.
+  const glow = readGlow(shard.extra?.glow)
+  const look = [readOpacity(shard.opacity) ?? null, readPointSize(shard.extra?.pointsize) ?? null, glow ? [glow.style, glow.radius, glow.strength] : null]
+  const text = JSON.stringify([LOOK, shard.mode, shard.vertices, shard.faces, shard.facecolors ?? null, composite ? shard.refs : null, composite ? shard.parts : null, composite ? shard.unit : 0, look, ...carried])
   const key = `shape:${hash53(text)}${hash53(text, 0x9e3779b9)}`
   keys.set(shard, key)
   return key

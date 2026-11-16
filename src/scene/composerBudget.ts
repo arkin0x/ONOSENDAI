@@ -42,3 +42,6 @@ export function canvasPixels(view: { innerWidth: number; innerHeight: number; de
   const ratio = Math.min(2, Math.max(1, view.devicePixelRatio))
   return view.innerWidth * view.innerHeight * ratio * ratio
 }
+
+/** The composers' samples, fixed for the page: a new count would make a new composer. The world's (Scene.tsx) and the bench's LOOK (workshop/benchBloom.tsx). */
+export const COMPOSER_SAMPLES = typeof window === 'undefined' ? SAMPLES : composerSamples(canvasPixels(window))

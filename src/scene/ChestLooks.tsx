@@ -39,6 +39,7 @@ import { placedPose } from '../lib/pose'
 import { trueScale } from '../lib/itemModel'
 import { followsVersion, onFollows, trustedPlacement } from '../lib/trust'
 import { FLOATING_NAME, NOTE, NOTE_EDGE_PX, author, itemMarkText } from './WorldMessages'
+import { useDrawReach } from './buildZoom'
 
 const REACH = GRID_RADIUS * 8
 /**
@@ -116,6 +117,8 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const follows = useSyncExternalStore(onFollows, followsVersion)
   const frames = useRef<KeptLookFrames>(new Map())
 
+  // Further out while BUILD is pulled back (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const placed = useMemo<PlacedLook[]>(() => {
     if (!markShown('note', scaleExp)) { frames.current.clear(); return [] }
     const origin = alignedOrigin(anchor, scaleExp)
@@ -125,7 +128,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
       const look = lookOf(w)
       if (!look) continue
       const centre = itemCentre(w.at, origin, scaleExp, axes)
-      if (Math.hypot(...centre) > REACH) continue
+      if (Math.hypot(...centre) > reach) continue
       const inside = openedContents(opened, me, w.key, w.chest.lockPubkey)
       // What the mute list hides is not drawn coming out, as it is not listed (ItemRows ChestBlock).
       const shown = inside?.filter((e) => !hidesThing(muted, { authors: [w.author ?? '', e.event.pubkey], ids: [e.id] }, me))
@@ -138,7 +141,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
     return out
     // mine, discovered, curated and muted are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, anchorPlane, scaleExp, axes, me, mine, discovered, curated, muted, opened, items, itemsReady, follows])
+  }, [anchor, anchorPlane, scaleExp, axes, me, mine, discovered, curated, muted, opened, items, itemsReady, follows, reach])
 
   // OPEN asks whether a chest is drawn, to know whether its ceremony can be seen (store/useOpenCeremony).
   useEffect(() => { setDrawnLooks(placed.map((w) => w.key)) }, [placed])

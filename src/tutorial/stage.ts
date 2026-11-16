@@ -167,7 +167,7 @@ export function boxModel(): ShardModel {
     colors: c.map(() => 159),
     faces: [],
     // The outline reads clearly from across the region, but short of solid so
-    // it never hides the chest inside it (readOpacity takes 1..99).
+    // it never hides the chest inside it (readOpacity holds 0..99; 100 is absent).
     opacity: 85,
     constrain: 'off',
   } as ShardPayload

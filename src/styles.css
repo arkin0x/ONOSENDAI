@@ -7492,7 +7492,21 @@ select.avatars__input option:checked {
 /* OPACITY in SHARD (Workshop OpacityRow): the hyperspace scrubber's rail, with
    a ring while the keys have it, since its arrows move it. */
 .ws__opacity-rail { flex: 1 1 60px; min-width: 60px; }
-.ws__opacity-value { flex: none; width: 4.5ch; text-align: right; }
+.ws__opacity-value { flex: none; width: 6ch; text-align: right; }
+/* The SHARD sheet's slider rows (workshop/railRow.tsx): one label width, so
+   OPACITY, POINT SIZE, RADIUS and GLOW STRENGTH line their rails up. */
+.ws__raillabel { flex: none; width: 64px; line-height: 1.25; }
+/* Greyed, never hidden (owner, 2026-11-15): the row dims as one, values kept. */
+.ws__railrow.is-off { opacity: 0.4; }
+.ws__railrow.is-off .workshop__btn:disabled,
+.ws__railrow.is-off .workshop__mode:disabled { opacity: 1; cursor: default; }
+.ws__railrow.is-off .explorer__rail { cursor: default; }
+/* A distance in gibsons: the figure, and the word small under it. */
+.ws__gibsons { display: inline-flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }
+.ws__gibsons-word { font-size: 9px; letter-spacing: 0.02em; }
+/* GLOW's buttons carry a lucide icon; the style that suits the colors wears an outline while GLOW is OFF. */
+.ws__glowbtn { display: inline-flex; align-items: center; gap: 5px; }
+.ws__glowbtn.is-suggested { border-color: var(--accent); }
 .ws__opacity-rail:focus { outline: none; }
 .ws__opacity-rail:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
@@ -9897,9 +9911,34 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
 .workshop__pick > .shardthumb,
 .shards__goto > .shardthumb { grid-row: span 2; }
 .workshop__pick:has(> .shardthumb) { padding: 5px 4px; }
-/* PLACE OBJECT's MINE: picture, name, then the facts at the right. */
-.objpick__row:has(> .shardthumb) { align-items: center; padding: 6px 10px 6px 6px; }
-.objpick__row > .shardthumb + .objpick__name { flex: 1; min-width: 0; }
+/* A picker's shard row (PLACE OBJECT, Model, + SHARD, STAMP): the picture,
+   then the name with the facts under it, so the name has the row's width
+   (arkinox, 2026-11-16). The name takes two lines at most and ends in an
+   ellipsis; it breaks at its hyphens ("basilica-plug-wall-door"), and inside
+   a word only when one word is wider than the row. */
+.objpick__row:has(> .shardthumb) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 3px;
+  align-items: center;
+  justify-items: start;
+  padding: 6px 10px 6px 6px;
+}
+.objpick__row > .shardthumb { grid-row: span 2; }
+.objpick__row:has(> .shardthumb) > .objpick__name {
+  align-self: end;
+  max-width: 100%;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  word-break: normal;
+  line-height: 1.35;
+}
+.objpick__row:has(> .shardthumb) > .objpick__meta { align-self: start; }
 .feed__text {
   display: flex;
   flex-direction: column;
@@ -10804,7 +10843,7 @@ a.feed__act { text-decoration: none; }
    starts past it (below), so the two read the same numbers. */
 :root { --scanorbs-gap: 8px; --scanorbs-w: calc(var(--scanorbs-col) + var(--scanorbs-gap) + var(--menu-size)); }
 .scanorbs__row { display: flex; align-items: center; gap: var(--scanorbs-gap); }
-.scanorbs__go { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.scanorbs__go { display: flex; }
 .scanorbs__stepper {
   display: flex;
   flex-direction: column;
@@ -10815,6 +10854,7 @@ a.feed__act { text-decoration: none; }
 }
 :root { --scanorbs-col: 112px; }
 .scanorbs__step {
+  position: relative;
   width: 44px;
   height: 44px;
   padding: 0;
@@ -10838,9 +10878,10 @@ a.feed__act { text-decoration: none; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  /* One height for one tag line or two (UNKNOWN and the time), so a change
-     of height never moves the down button or the orb: SCAN HEIGHT stays
-     at the top and the tags hang under it. */
+  /* One height for one tag line or two (UNKNOWN and the time) and the max
+     line, so a change of height never moves the down button or the orb:
+     SCAN HEIGHT stays at the top, the tags hang under it, the max line sits
+     at the bottom. */
   height: var(--scanorbs-value-h);
   justify-content: flex-start;
   font-variant-numeric: tabular-nums;
@@ -10852,10 +10893,13 @@ a.feed__act { text-decoration: none; }
    The edge is a tight dark outline and a soft dark halo, so the words read
    over the brightest cube and still sit lightly over a dark one. */
 :root { --scanorbs-edge: 0 0 1px #000, 0 0 2px rgba(0, 0, 0, 0.95), 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.6); }
-:root { --scanorbs-value-h: 38px; }
+:root { --scanorbs-value-h: 48px; }
 .scanorbs__value b { font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.08em; color: #fff; }
 /* UNKNOWN and how long it takes here, COMPLETE, or HOSAKA (its price is on the SCAN button). */
 .scanorbs__tag { font-size: 9px; line-height: 12px; font-weight: 600; letter-spacing: 0.08em; color: #fff; }
+/* At the top of the range, why up stops: DEVICE MAX or HOSAKA MAX, on the
+   label's last line, kept when empty (the . key's old place is gone). */
+.scanorbs__max { margin-top: auto; height: 10px; font-size: 8px; line-height: 10px; font-weight: 700; letter-spacing: 0.12em; color: #fff; }
 .flyorb.scanorb {
   flex-direction: column;
   border-color: rgba(var(--scan-rgb), 0.55);
@@ -10893,14 +10937,16 @@ a.feed__act { text-decoration: none; }
 @media (prefers-reduced-motion: reduce) { .flyorb.scanorb.is-busy { animation: none; } }
 .scanorb__word { position: relative; z-index: 1; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
 .scanorb__sats { position: relative; z-index: 1; font-size: 7.5px; letter-spacing: 0.06em; color: var(--accent); }
-/* The keys: SPACE under the SCAN button, . under up and , under down, all
-   white with the labels' edge; kept in place while a scan runs, unseen. */
-.scanorbs .flyorb__key { color: #fff; opacity: 1; text-shadow: var(--scanorbs-edge); }
-.scanorbs .flyorb__key.is-off { visibility: hidden; }
-/* A lone . or , reads as a speck at SPACE's size: a size up, on a short line. */
-.scanorbs__hint { font-size: 15px; line-height: 10px; }
-/* At the top of the range, in the . key's place: why up stops. */
-.scanorbs__max { font-size: 8px; line-height: 10px; white-space: nowrap; }
+/* The keys, inside their buttons in the Controls pad's own style
+   (.touchpad__keyhint; arkinox, 2026-11-15: "i wanted them like the
+   keyboard hints in the Controls pad"): . in up, , in down, SPACE in the
+   orb. Kept in place while the key does nothing, unseen. */
+.scanorbs .touchpad__keyhint.is-off { visibility: hidden; }
+/* A lone . or , at the pad's 6px is a one-pixel speck where a letter reads
+   (a mark is about a tenth of its size in ink): three times the size and
+   bold, so it reads as a key at all. Its box grows up from the same bottom
+   edge, so the mark sits where the pad's letters sit. Nothing else differs. */
+.scanorbs .touchpad__keyhint.is-mark { font-size: 18px; font-weight: 700; }
 /* How far along a scan is, then what it found. Always there and always one
    height, the longest line's (three lines; a scan's line and its bar are
    less), empty or not: it showing or going never moves the row above it
@@ -11772,9 +11818,18 @@ html.tv-broadcast body { overflow: hidden; }
 .items-modal .held__views { align-items: center; }
 .held__tabs { display: flex; gap: 6px; flex-wrap: wrap; }
 /* FEED: who listed it, their picture and name one tap to their profile; NOT FOUND in the warning colour. */
+/* "listed by" and the lister side by side, the lister's name cut first, so a narrow card (OPENS WITH in a door's card) never hides it behind an ellipsis. */
+.items-feed__src { display: flex; align-items: center; gap: 0.6ch; min-width: 0; }
+.items-feed__src > span:first-child { flex: none; }
 .items-feed__who { max-width: 100%; min-width: 0; display: inline-flex; align-items: center; gap: 3px; padding: 0; font: inherit; color: inherit; background: none; border: 0; cursor: pointer; vertical-align: middle; }
 .items-feed__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .items-feed__unfound { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.items-feed__held { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+/* OPENS WITH: the listed key item a locked door or chest is sealed to, its row as the FEED draws it. */
+.lockkey { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-top: 4px; }
+.lockkey__label { margin-bottom: 0; }
+.lockkey__list { max-height: none; overflow: visible; flex: 0 0 auto; }
+.lockkey__list > .held__row { padding: 4px 0; }
 
 /* A picture's frame with its top-left and bottom-right corners cut at 45
    degrees (ui/Chamfer.tsx; owner, 2026-11-15: "the pictures should maybe
@@ -11894,10 +11949,60 @@ html.tv-broadcast body { overflow: hidden; }
 }
 .chest__row--thumb > .chamfer { grid-column: 1; grid-row: 1 / span 2; }
 .chest__row--thumb > .item__line, .chest__row--thumb > .chest { grid-column: 2; grid-row: 1; min-width: 0; }
-.chest__row--thumb > .chest__act--take { grid-column: 2; grid-row: 2; align-self: end; justify-self: end; }
+.chest__row--thumb > .chest__row-acts { grid-column: 2; grid-row: 2; align-self: end; justify-self: end; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 /* An OTHER LOOT chest's contents, across the whole row under its words and ACTIONS. */
 .held__row--loot > .held__contents { grid-column: 1 / -1; min-width: 0; }
 .held__contents:empty { display: none; }
 /* DISCOVERED NEARBY's buttons wrap under the words on a narrow phone, right-aligned, rather than run past the row. */
 .nearby__row > .nearby__acts { display: flex; flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
 .nearby__row > .nearby__acts > .nearby__door { display: contents; }
+
+/* ---------- Search under a list of shards (hud/ui/SearchField.tsx) ----------
+ * The client's own input with a search icon inside it at the left and a
+ * clear ✕ over it at the right, so the ✕ coming and going moves nothing. */
+.searchfield { position: relative; display: flex; align-items: center; flex: none; margin-top: 8px; }
+.searchfield__icon { position: absolute; left: 9px; color: var(--dim); pointer-events: none; }
+.searchfield .searchfield__input { margin: 0; padding-left: 30px; padding-right: 36px; }
+.searchfield__input::placeholder { color: var(--dim); opacity: 1; }
+.searchfield__clear {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--dim); background: transparent; border: 1px solid rgba(0, 229, 255, 0.25); border-radius: 4px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+/* A 44px target around the drawn 26px box, as the shared close has. */
+.searchfield__clear::before { content: ''; position: absolute; inset: -9px; }
+.searchfield__clear:hover { color: var(--fg); border-color: rgba(0, 229, 255, 0.5); }
+/* The matched part of a name. */
+.searchfield__hit { color: var(--accent); background: rgba(0, 229, 255, 0.16); border-radius: 2px; padding: 0; }
+/* 16px on a phone, so iOS does not zoom the page when the box takes the focus. */
+@media (max-width: 600px) { .searchfield .searchfield__input { font-size: 16px; padding-top: 6px; padding-bottom: 6px; } }
+/* Nothing a search matched. */
+li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(--dim); border-top: 0; }
+.workshop__search { margin: 4px 0 6px; }
+.compose__search { margin: 0 0 6px; }
+
+/* ---------- A modal as tall as the screen as its list needs (PLACE OBJECT, Model) ----------
+ * arkinox, 2026-11-16: "this modal needs to expand to full screen height (as
+ * needed)". Inside the safe area; above a phone's keyboard the overlay is
+ * placed on the visual viewport (hooks/useVisualViewport.ts). The card is a
+ * column capped at the overlay's height: the title row, the tabs, the note
+ * and the search keep their size, and only the list gives way and scrolls.
+ * A short list leaves it compact. While a search has text the card keeps the
+ * height it had (ui/SearchField holdHeight) and the list takes the room,
+ * so the search box stays where it was under the finger. */
+.modal.modal--fill {
+  padding:
+    max(16px, env(safe-area-inset-top, 0px))
+    max(16px, env(safe-area-inset-right, 0px))
+    max(16px, env(safe-area-inset-bottom, 0px))
+    max(16px, env(safe-area-inset-left, 0px));
+}
+.modal__card.stash-modal--fill { display: flex; flex-direction: column; max-height: 100%; overflow: hidden; }
+.stash-modal--fill > * { flex: none; }
+.stash-modal--fill > .objpick__body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.objpick__body > * { flex: none; }
+.stash-modal--fill .objpick__body > .objpick__list { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; overscroll-behavior: contain; }
+.stash-modal--fill .objpick__body > .feed { flex: 1 1 auto; min-height: 0; }
+.stash-modal--fill .objpick__body > .feed > .feed__list { flex: 1 1 auto; min-height: 0; max-height: none; }
+.stash-modal--fill .objpick__body > .feed > .feed__refresh { flex: none; }

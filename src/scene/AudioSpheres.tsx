@@ -26,6 +26,7 @@ import { useLayers } from '../store/useLayers'
 import { useMutes } from '../store/useMutes'
 import { useShards, type WorldItem } from '../store/useShards'
 import { FadeRings } from './AudioSphereGhost'
+import { useDrawReach } from './buildZoom'
 
 /** As far out as the notes are drawn (WorldMessages REACH). */
 const REACH = GRID_RADIUS * 8
@@ -45,14 +46,14 @@ export interface AudioSphere {
  * The spheres to draw: every sound among `items` on `plane`, where the notes
  * are drawn at this zoom (markShown), within reach, with a radius above zero.
  */
-export function audioSpheres(items: readonly WorldItem[], plane: number, origin: Position, scaleExp: number, axes: ViewAxes): AudioSphere[] {
+export function audioSpheres(items: readonly WorldItem[], plane: number, origin: Position, scaleExp: number, axes: ViewAxes, reach = REACH): AudioSphere[] {
   if (!markShown('note', scaleExp)) return []
   const unit = 2 ** scaleExp
   const out: AudioSphere[] = []
   for (const w of items) {
     if (w.type !== 'audio' || !w.audio || w.plane !== plane) continue
     const centre = itemCentre(w.at, origin, scaleExp, axes)
-    if (Math.hypot(...centre) > REACH) continue
+    if (Math.hypot(...centre) > reach) continue
     const radius = fadeRadius(w.audio.fade, sourceLocal(w.at, w.height), w.height) / unit
     if (radius > 0) out.push({ key: w.key, centre, radius })
   }
@@ -64,10 +65,10 @@ export function audioSpheres(items: readonly WorldItem[], plane: number, origin:
  * otherwise one for every sound HiddenAudio would play (heardAudio, with
  * AUTOPLAY on, as it filters them), chest-held audio included.
  */
-export function worldSpheres(on: boolean, anchor: Position, plane: number, scaleExp: number, axes: ViewAxes): AudioSphere[] {
+export function worldSpheres(on: boolean, anchor: Position, plane: number, scaleExp: number, axes: ViewAxes, reach = REACH): AudioSphere[] {
   if (!on) return []
   const heard = useShards.getState().heardAudio().filter((w) => w.audio?.autoplay)
-  return audioSpheres(heard, plane, alignedOrigin(anchor, scaleExp), scaleExp, axes)
+  return audioSpheres(heard, plane, alignedOrigin(anchor, scaleExp), scaleExp, axes, reach)
 }
 
 export function AudioSpheres({ axes }: { axes: ViewAxes }): JSX.Element | null {
@@ -80,12 +81,14 @@ export function AudioSpheres({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const discovered = useShards((s) => s.discovered)
   const curated = useShards((s) => s.curated)
   const muted = useMutes((s) => s.muted)
+  // Further out while BUILD is pulled back (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const spheres = useMemo(
-    () => worldSpheres(on, anchor, plane, scaleExp, axes),
+    () => worldSpheres(on, anchor, plane, scaleExp, axes, reach),
     // mine, discovered, curated, muted and who you are are what heardAudio
     // reads, as HiddenAudio keys its own list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [on, anchor, plane, scaleExp, axes, mine, discovered, curated, muted, me],
+    [on, anchor, plane, scaleExp, axes, mine, discovered, curated, muted, me, reach],
   )
   if (spheres.length === 0) return null
   return (

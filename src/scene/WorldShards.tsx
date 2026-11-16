@@ -17,6 +17,8 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
 import { editingId, useShards, type WorldItem } from '../store/useShards'
 import { WALL_BREATH_SECONDS } from './Rooms'
+import { WalkContactHint } from './WalkContactHint'
+import { glowReachDoublings } from '../lib/pointLook'
 import { ShardMesh } from './ShardMesh'
 import { GHOST_OPACITY } from './shardFaces'
 import { regionBox, type Box } from '../lib/clip'
@@ -26,6 +28,7 @@ import { TapTarget, farCullDoublings } from './TapTarget'
 import { passesTaps } from '../tutorial/guideBags'
 import { useMutes } from '../store/useMutes'
 import { useBuildDimmed } from './BuildOccluders'
+import { useDrawReach } from './buildZoom'
 
 const REACH = GRID_RADIUS * 8
 /** Past this many doublings out from its unit, a shard with no placed objects can never be seen (TapTarget farCullDoublings). */
@@ -145,19 +148,21 @@ export function placeShard(
 
 /**
  * The shards of `items` that can be drawn from here: in the view's plane, not
- * too small to show a pixel at any distance, and in reach. Placed in the
+ * too small to show a pixel at any distance, and within `reach` of the render
+ * origin (REACH, or further while BUILD is pulled back). Placed in the
  * render frame anchored at `anchor`. Cyberspace TV draws its own finds with
  * this (TvFinds).
  */
-export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at' | 'height' | 'plane'> & Partial<Pick<WorldItem, 'author'>> & { shard?: ShardModel }>, anchor: Position, plane: number, scaleExp: number, axes: ViewAxes): PlacedShardDraw[] {
+export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at' | 'height' | 'plane'> & Partial<Pick<WorldItem, 'author'>> & { shard?: ShardModel }>, anchor: Position, plane: number, scaleExp: number, axes: ViewAxes, reach = REACH): PlacedShardDraw[] {
   const origin = alignedOrigin(anchor, scaleExp)
   return items
     .filter((w) => w.type === 'shard' && w.shard && w.plane === plane)
     // Not drawn at all once it cannot show a pixel at any distance; a shard
     // with placed objects is exempt, since they can be far larger than it.
-    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL)
+    // A glow reaches past its points (DECK-0003 §1.16 SHOULD keep it visible): its radius widens the cull.
+    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL + glowReachDoublings(w.shard!))
     .map((w) => placeShard(w, origin, scaleExp, axes))
-    .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH)
+    .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= reach)
 }
 
 /** Two clip boxes that cut the same. */
@@ -227,11 +232,13 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
   const me = useCyberspace((s) => s.identity.pubkey)
   useEffect(() => { readFollows() }, [me])
 
+  // Further out while BUILD is pulled back (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const fresh = useMemo(() => {
-    return drawableShards(useShards.getState().drawnItems(), anchor, anchorPlane, scaleExp, axes)
+    return drawableShards(useShards.getState().drawnItems(), anchor, anchorPlane, scaleExp, axes, reach)
     // mine and discovered are what worldShards reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted])
+  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted, reach])
   // A move keeps each shard's cut and GPU buffers: only its place changes (steadied).
   const placed = useSteadied(fresh)
 
@@ -273,6 +280,8 @@ export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRe
       <group ref={setDrawn}>
         <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} clip={w.clip} pose={w.pose} budget={budget} dim={moving ? 1 : dim} />
       </group>
+      {/* A wall you cannot see, outlined for a moment after it stopped your walk (store/wallHint.ts). */}
+      <WalkContactHint shardKey={w.key} shard={w.shard} scale={w.scale} clip={w.clip} pose={w.pose} />
       {/* Not tappable while it moves: the ghost is the one being aimed. */}
       {/* Dimmed in build mode, a tap passes through it (BuildOccluders tapsPassThrough). */}
       {!moving && tappable && !passesTaps(w.key) && <TapTarget measure={drawn} occluder={occludes ? w.key : undefined} onTap={() => useShards.getState().selectSecret(w.key)} />}

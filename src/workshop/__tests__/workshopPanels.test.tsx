@@ -57,6 +57,7 @@ const MOVED: Record<'shard' | 'avatar', string[]> = {
     '<div className="ws__stats">',
     'aria-label="Render mode"',
     '<OpacityRow />',
+    '<PointGlowRows />',
     'CONSTRAIN MOVEMENT IN WALK MODE',
   ],
   avatar: [
@@ -106,12 +107,12 @@ describe('the workshop top bar (workshop redesign, phase 1)', () => {
   })
 
   it('keeps the list and the ways in under MENU', () => {
-    for (const m of ['SHARDS ({shardCount})', '+ NEW SHARD', '>PASTE</button>', "{importing ? 'READING' : 'IMPORT'}", '{pasteOpen && (', '<ShardList currentId={currentId} onOpen={onOpen} />', 'CLEAR THIS SCENE', '<Explanation>']) {
+    for (const m of ['SHARDS ({shardCount})', '+ NEW SHARD', '>PASTE</button>', "{importing ? 'READING' : 'IMPORT'}", '{pasteOpen && (', '<ShardList currentId={currentId} onOpen={onOpen} query={query} />', 'CLEAR THIS SCENE', '<Explanation>']) {
       expect(SHEET.menu).toContain(m)
     }
   })
 
-  it('puts SHARD in order: name, Shard Feed, counts, DRAW, OPACITY, CONSTRAIN', () => {
+  it('puts SHARD in order: name, Shard Feed, counts, DRAW, OPACITY, POINT SIZE to GLOW STRENGTH, CONSTRAIN', () => {
     const s = SHEET.shard
     const order = MOVED.shard.filter((m) => !m.includes('retract') && !m.includes('publish(') && !m.includes('publishAsk ===') && !m.includes('BYTES')).map((m) => s.indexOf(m))
     expect([...order].sort((a, b) => a - b)).toEqual(order)
@@ -136,28 +137,28 @@ describe('OPACITY in SHARD', () => {
     useWorkshop.setState({ shards: [s], currentId: s.id, past: [], future: [] })
   })
 
-  it('is a slider from the floor to 100 with the value, the steppers and #', () => {
+  it('is a slider from 0 to 100 with the value, the steppers and #', () => {
     const s = shard(40)
     useWorkshop.setState({ shards: [s], currentId: s.id })
     const html = renderToStaticMarkup(<OpacityRow />)
     expect(html).toContain('role="slider"')
-    expect(html).toContain('aria-valuemin="10"')
+    expect(html).toContain('aria-valuemin="0"')
     expect(html).toContain('aria-valuemax="100"')
     expect(html).toContain('aria-valuenow="40"')
     expect(html).toContain('40%')
-    // (40 - 10) / 90 of the way along.
-    expect(html).toContain('left:33.33')
+    // 40 / 100 of the way along.
+    expect(html).toContain('left:40')
     expect(html).toContain('aria-label="More see-through"')
     expect(html).toContain('aria-label="More solid"')
     expect(html).toContain('aria-label="Type an opacity percent"')
     expect(html).toContain('linescrub__hash')
   })
 
-  it('reads solid with no opacity, and a stored 5 as the floor', () => {
+  it('reads solid with no opacity, and a stored 5 as 5 (no floor)', () => {
     expect(renderToStaticMarkup(<OpacityRow />)).toContain('aria-valuenow="100"')
     const s = shard(5)
     useWorkshop.setState({ shards: [s], currentId: s.id })
-    expect(renderToStaticMarkup(<OpacityRow />)).toContain('aria-valuenow="10"')
+    expect(renderToStaticMarkup(<OpacityRow />)).toContain('aria-valuenow="5"')
   })
 
   it('undoes a whole drag in one step', () => {

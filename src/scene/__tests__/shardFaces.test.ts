@@ -12,10 +12,11 @@ import { HEADLAMP_FACES, HEADLAMP_LINES, patchHeadlamp } from '../headlamp'
 import { DOTS_ORDER, FACE_TAG_STENCIL, GHOST_OPACITY, OVERLAY_ORDER, SEE_THROUGH_BLEND, TAG_BLEND, TRANSLUCENT_ORDER, basicFaceProps, benchOrders, lineProps, litFaceProps, seeThrough, shardOpacity, shardOrder } from '../shardFaces'
 
 describe('what a shard is drawn at', () => {
-  it('is its own opacity with the 10% floor, 1 when it has none', () => {
+  it('is its own opacity with no floor, 1 when it has none', () => {
     expect(shardOpacity({})).toBe(1)
     expect(shardOpacity({ opacity: 50 })).toBe(0.5)
-    expect(shardOpacity({ opacity: 3 })).toBe(0.1)
+    expect(shardOpacity({ opacity: 3 })).toBe(0.03)
+    expect(shardOpacity({ opacity: 0 })).toBe(0)
   })
 
   it('multiplies a ghost by the object\'s own', () => {

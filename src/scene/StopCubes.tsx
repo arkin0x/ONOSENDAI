@@ -23,6 +23,7 @@ import { selectStopInScene, stopPlane, stopPosition } from '../hud/HyperspacePan
 import { WorldLabel } from './WorldLabel'
 import { DEST_CUBE_PX, FLEET_CUBE_PX, markerSide, projScaleOf } from '../lib/markerSize'
 import { useStopMarks } from '../store/useStopMarks'
+import { useDrawReach } from './buildZoom'
 
 /** The fleet: toned-down bitcoin orange. Only the chosen destination gets
  * v1's bright HYPERJUMP yellow, glowing and spinning, so one cube in the
@@ -60,6 +61,8 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
   // StopField's NEAREST cube stands where that stop is; the fleet leaves it be.
   const nearestMarked = useStopMarks((s) => s.nearest)
 
+  // Further out while BUILD is pulled back (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const cubes = useMemo(() => {
     void indexVersion
     const index = getStopIndex()
@@ -107,7 +110,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
       if (stopPlane(stop) !== anchorPlane) continue
       if (stop.height === nearestMarked && stop.height !== destination && stop.height !== scrubHeight) continue
       const centre = markerCentre(stopPosition(stop), origin, scaleExp, axes)
-      if (Math.abs(centre[0]) > REACH || Math.abs(centre[1]) > REACH || Math.abs(centre[2]) > REACH) continue
+      if (Math.abs(centre[0]) > reach || Math.abs(centre[1]) > reach || Math.abs(centre[2]) > reach) continue
       let crowded = false
       for (const o of out) {
         const dx = centre[0] - o.centre[0]
@@ -122,7 +125,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
       out.push({ stop, centre })
     }
     return out
-  }, [indexVersion, anchor, anchorPlane, scaleExp, axes, scrubHeight, destination, nearestMarked])
+  }, [indexVersion, anchor, anchorPlane, scaleExp, axes, scrubHeight, destination, nearestMarked, reach])
 
   const spin = useRef<Group>(null)
   const fleet = useRef<Group>(null)

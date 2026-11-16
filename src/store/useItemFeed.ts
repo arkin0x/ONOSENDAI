@@ -31,6 +31,13 @@ interface ItemFeedState {
   publishing: string | null
   /** Read the feed from your relays. */
   load: () => Promise<void>
+  /**
+   * Read it only if this session has not yet: what a lock shown with its key
+   * item asks for (hud/KeyListingRow OpensWith), so opening cards and lists
+   * of locked things reads the feed once, not once per card. A read that got
+   * no answer is tried again at most once a minute.
+   */
+  ensure: () => void
   /** List a key item you forged. Null when a relay took it, else the reason. */
   publish: (key: KeyItem) => Promise<string | null>
   /** Whether `itemPubkey` is listed by `lister` in what has been read. */
@@ -44,6 +51,10 @@ function watchSignIn(): void {
   watching = true
   onCanonicalSignIn(() => { if (useItemFeed.getState().trouble) void useItemFeed.getState().load() })
 }
+
+/** How long ensure waits after a read that got no answer before asking again. */
+export const ENSURE_RETRY_MS = 60_000
+let ensuredAt = 0
 
 /** Every listing read this session, by event id, so a re-read never loses one a relay forgot. */
 const seen = new Map<string, import('../lib/events').NostrEvent>()
@@ -69,6 +80,14 @@ export const useItemFeed = create<ItemFeedState>((set, get) => ({
     } finally {
       set({ loading: false })
     }
+  },
+
+  ensure: () => {
+    const { readAt, loading } = get()
+    if (readAt > 0 || loading || Date.now() - ensuredAt < ENSURE_RETRY_MS) return
+    ensuredAt = Date.now()
+    // A card drawing a lock never fails for want of the feed: load says what went wrong in `trouble`.
+    get().load().catch(() => {})
   },
 
   publish: async (key) => {

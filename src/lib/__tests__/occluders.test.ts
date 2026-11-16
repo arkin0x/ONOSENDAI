@@ -281,3 +281,26 @@ describe('the picker\'s own ray test (review of #618)', () => {
     expect(median).toBeLessThan(1)
   })
 })
+
+describe('what never occludes (DECK-0003 §6: only opaque solid objects enclose)', () => {
+  it('a glow halo or a point billboard (an instanced square) is never a face', async () => {
+    const { billboardsOf } = await import('../../scene/glowHalos')
+    const pts = new BufferGeometry()
+    pts.setAttribute('position', new Float32BufferAttribute([0, 0, 0], 3))
+    pts.setAttribute('color', new Float32BufferAttribute([1, 1, 1], 3))
+    const g = new Group()
+    const halo = new Mesh(billboardsOf(pts), new MeshBasicMaterial({ side: DoubleSide }))
+    // Scaled up so its square would cover the whole line of sight if it were tested as a face.
+    halo.scale.setScalar(20)
+    g.add(halo)
+    g.position.set(0, 0, 5)
+    g.updateMatrixWorld(true)
+    expect(pickOccluders([{ key: 'halo', object: g }], eye, cursorAt(0, 0, 0)).size).toBe(0)
+  })
+  it('an object at opacity 0 draws no face mesh (lib/pointLook drawPlan), so nothing of it is there to occlude', async () => {
+    const { drawPlan } = await import('../pointLook')
+    expect(drawPlan('solid', { pointSize: undefined, glow: undefined, hidden: true })).toMatchObject({ faces: false, lines: false, points: 'none' })
+    // Its group holds nothing a ray can meet.
+    expect(pickOccluders([{ key: 'zero', object: new Group() }], eye, cursorAt(0, 0, 0)).size).toBe(0)
+  })
+})

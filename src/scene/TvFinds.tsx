@@ -74,7 +74,7 @@ const RIM = 0.7
 /**
  * Blending that draws a find over what is behind it at its opacity, and
  * leaves the alpha already there: over the empty background that is 0, the
- * tag the bloom is blind to (Scene.tsx WorldBloom), so a find never glows
+ * tag the bloom is blind to (worldBloom.tsx WorldBloom), so a find never glows
  * brighter than the avatars, however translucent.
  */
 const OUT_OF_BLOOM = {
@@ -182,7 +182,8 @@ export function aimRays(eyePos: Vector3, body: Sphere, turn: Quaternion): boolea
 }
 
 const meshes: Mesh[] = []
-function collectMesh(o: Object3D): void { if ((o as Mesh).isMesh && o.visible) meshes.push(o as Mesh) }
+// A billboard (glow halos, points at a POINT SIZE: scene/glowHalos.ts) is no face, so it never frames a shot.
+function collectMesh(o: Object3D): void { if ((o as Mesh).isMesh && o.visible && !((o as Mesh).geometry as { isInstancedBufferGeometry?: boolean } | undefined)?.isInstancedBufferGeometry) meshes.push(o as Mesh) }
 
 /** Whether any of the rays meets a face of this shard before the avatar. */
 export function shardInTheWay(drawn: Object3D): boolean {

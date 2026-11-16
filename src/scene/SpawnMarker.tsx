@@ -27,6 +27,7 @@ import { GRID_RADIUS, placeCentre, type Position, type ViewAxes } from '../lib/s
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { WorldLabel } from './WorldLabel'
 import { MARKER_FADE_FROM_RADII, MARKER_FADE_TO_RADII, lineFade, patchNearFade, type NearFadeRange } from './nearFade'
+import { useDrawReach } from './buildZoom'
 
 const MODEL = '/spawn.glb'
 
@@ -90,6 +91,8 @@ function Model({ pubkey, axes }: Props): JSX.Element | null {
     materials: Record<string, Material>
   }
 
+  // Further out while BUILD is pulled back (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const at = useMemo(() => {
     // A spawn is a coordinate in one plane; in the other plane it is not here.
     if (spawnPlane(pubkey) !== anchorPlane) return null
@@ -102,8 +105,8 @@ function Model({ pubkey, axes }: Props): JSX.Element | null {
     if (scale < MIN_SCALE) return null
     const origin = alignedOrigin(position, scaleExp)
     const centre = placeCentre(spawn, origin, scaleExp, axes)
-    return Math.hypot(...centre) > REACH ? null : { centre, scale }
-  }, [pubkey, position, scaleExp, axes])
+    return Math.hypot(...centre) > reach ? null : { centre, scale }
+  }, [pubkey, position, scaleExp, axes, reach])
 
   // The GLB's materials are black with an emissive color, which is what lets
   // them glow under bloom. The scene's tone mapping would dull that, so it is

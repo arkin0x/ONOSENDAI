@@ -33,25 +33,31 @@
  * SCALE; EDIT shows it too. Not for a LIVE LINK,
  * whose setting is its author's (lib/walkConstrain.ts).
  *
- * Three more choices belong to the BAG rather than to this item, because a bag
+ * More choices belong to the BAG rather than to this item, because a bag
  * is one event per author and region holding everything hidden there (spec
  * §7.6) (arkinox, 2026-10-01):
  *   - PUBLISH HEIGHT HINT: whether the bag carries its `H` tag (spec §8.6, optional).
  *   - PUBLISH SECTOR HINT: a hint naming the bag's sector, heights of 30 on
  *     every axis, with its X, Y, Z and S sector tags (spec §7.7, §10). A hint
- *     must be at least the bag's height, so it is off above height 30. ON by
- *     default for every new bag (owner ruling 2026-11-13: "by default sector
- *     hints should be ON for all bags"; lib/hidden.ts newBagSettings): shards,
- *     messages, keys, items, chests, doors, audio and seeds alike, each a
- *     switch the hider can turn off for that bag. A new bag above height 30
- *     starts with it off, and it comes back on at 30 or lower unless turned
- *     off by hand (useShards `deployHintHeld`). An edit or move keeps its bag's
- *     own choice; one that lands in a region with no bag of yours starts a new
- *     bag, so ON. A room's bag behind a door carries no hint at all
- *     (lib/doors.ts ROOM_BAG_SETTINGS), and this bar shows no bag rows for it.
+ *     must be at least the bag's height, so it is off above height 30, and
+ *     comes back on at 30 or lower (useShards `deployHintHeld`).
+ *   - PUBLISH CONTENTS: what is inside, by kind and count, money left out.
+ *   - PUBLISH THAT MONEY IS INSIDE: shown whenever cashu is inside, with
+ *     contents on or off. Money is said only with it on: counted beside the
+ *     rest with contents on, alone without (lib/hidden.ts bagContentsTags).
+ *   The three hint switches are ON for a player who never touched them, the
+ *   money switch OFF (arkinox, 2026-11-15: "money off by default"), and all
+ *   four then stay what they set them, on every later hide, reload and session, for
+ *   shards, messages, keys, items, chests, doors, audio and seeds alike, into
+ *   a new bag or one of yours already out, an edit or a move (arkinox,
+ *   2026-11-15: "these 3 hint settings (toggles) should stay what you set
+ *   them after the initial defaults of all 3 being turned on";
+ *   store/deployHintPrefs.ts, kept per device). The bag goes out with them as
+ *   shown. A room's bag behind a door carries no hint at all (lib/doors.ts
+ *   ROOM_BAG_SETTINGS), and this bar shows no bag rows for it.
  *   - HINT MESSAGE: a riddle in the bag's plaintext `content` (spec §7.7).
- * When the cursor's region already holds your bag, they start at that bag's
- * settings and the bar says they apply to everything you hid there.
+ * When the cursor's region already holds your bag, the riddle starts at that
+ * bag's and the bar says these settings apply to everything you hid there.
  *
  * The bar is docked in the lower left, where the route overlay docks: over
  * the menu button, a gap short of the controls when the pad is open, and
@@ -86,7 +92,7 @@ import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT, type ShardModel } from 'sno-core/shards'
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { fadeStep, inscribedRadius, sourceLocal } from '../lib/audioItem'
-import { LINK_PROTECTED, SCAN_MAX_HEIGHT, autoRoomFor, bagRowsFor, deployBagMeter, plannedShard, posedForDeploy, type BagMeter, fillingChest, placedDoorHeight, movingId, placingChest, sealingDoor, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
+import { LINK_PROTECTED, SCAN_MAX_HEIGHT, autoRoomFor, bagRowsFor, deployBagMeter, plannedShard, posedForDeploy, type BagMeter, fillingChest, placedDoorHeight, movingId, placingChest, sealingDoor, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, moneyRowShown, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
 import { aimedPoint } from '../lib/chests'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
@@ -754,7 +760,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
       )}
 
       {/* A room bag says nothing in public: no settings to choose (§3.7.2). */}
-      {!intoChest && !sealing && <BagControls height={height} bag={bag} existing={existing?.count ?? 0} cashu={(pending.type === 'message' && findCashuToken(pending.text) !== null) || (existing?.cashu ?? false)} />}
+      {!intoChest && !sealing && <BagControls height={height} bag={bag} existing={existing?.count ?? 0} cashu={moneyRowShown(pending, existing)} />}
       </div>
 
     </div>
@@ -767,13 +773,13 @@ function Pow({ e }: { e: number }): JSX.Element {
 }
 
 /**
- * The bag's three public settings (lib/hidden.ts BagSettings), for shards and
+ * The bag's public settings (lib/hidden.ts BagSettings), for shards and
  * messages alike. `existing` is how many of your things the cursor's region
  * already holds: the settings are that bag's, and the bar says so.
  */
-function BagControls({ height, bag, existing, cashu }: { height: number; bag: ReturnType<typeof useShards.getState>['deployBag']; existing: number; cashu: boolean }): JSX.Element {
+export function BagControls({ height, bag, existing, cashu }: { height: number; bag: ReturnType<typeof useShards.getState>['deployBag']; existing: number; cashu: boolean }): JSX.Element {
   const set = (patch: Partial<typeof bag>): void => useShards.getState().setDeployBag(patch)
-  // A new bag's sector hint this height took off, to come back on lower down.
+  // The sector hint your saved switch has ON, which this height took off, to come back on lower down.
   const held = useShards((s) => s.deployHintHeld !== null)
   // A hint must be at least the bag's height (spec §7.7); a sector is 2^30.
   const sectorFits = height <= SECTOR_HEIGHT
@@ -813,15 +819,23 @@ function BagControls({ height, bag, existing, cashu }: { height: number; bag: Re
         />
       </Field>
 
-      {/* What is inside, by kind and count, on the bag's face; and, when a
-          cashu token is inside, money alone (arkinox, 2026-10-18: bags with
-          "a little more personality", hyped on Cyberspace TV). Worked out
-          from the bag each time it is sealed (lib/hidden.ts bagContentsTags). */}
-      <Field id="deploy-contents-hint" label="Publish contents" hint="Tells seekers what is inside: how many shards, messages, keys, chests, cashu tokens and NFTs. Not where, and not what they say.">
+      {/* What is inside, by kind and count, on the bag's face (arkinox,
+          2026-10-18: bags with "a little more personality", hyped on
+          Cyberspace TV); money only when its own switch is on, which starts
+          off and shows whenever cashu is inside (arkinox, 2026-11-15: "money
+          off by default"). Worked out from the bag each time it is sealed
+          (lib/hidden.ts bagContentsTags). */}
+      <Field id="deploy-contents-hint" label="Publish contents" hint="Tells seekers what is inside: how many shards, messages, keys, chests and NFTs. Not where, and not what they say. Money stays secret unless you publish it.">
         <Switch id="deploy-contents-hint" checked={bag.contents} onCheckedChange={(v) => set({ contents: v })} />
       </Field>
-      {cashu && !bag.contents && (
-        <Field id="deploy-money-hint" label="Publish that money is inside" hint="Tells seekers there is cashu in this bag, without saying how much.">
+      {cashu && (
+        <Field
+          id="deploy-money-hint"
+          label="Publish that money is inside"
+          hint={bag.contents
+            ? 'Tells seekers how many cashu tokens are in this bag, not how much they hold. Off, the contents leave money out.'
+            : 'Tells seekers there is cashu in this bag, without saying how much.'}
+        >
           <Switch id="deploy-money-hint" checked={bag.money} onCheckedChange={(v) => set({ money: v })} />
         </Field>
       )}

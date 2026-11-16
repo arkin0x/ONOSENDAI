@@ -126,6 +126,28 @@ export function centerEye(shard: Pick<ShardModel, 'vertices'>): Eye {
 }
 
 /**
+ * How far from the origin an eye may be on each axis, in ticks of the shard's
+ * grid: the avatar size limit, MAX_AVATAR_RADIUS gibsons, at the avatar's true
+ * scale (avatarScale), which is as far as WALK carries it (walkEyeLocal brings
+ * anything farther in), and never past the 64-unit position bound.
+ */
+export function eyeReachTicks(shard: ShardModel): number {
+  return Math.min(EYE_REACH, Math.floor((MAX_AVATAR_RADIUS * TICKS_PER_UNIT) / avatarScale(shard)))
+}
+
+/**
+ * The eye as WALK uses it, in ticks in the bench's frame: an eye past the
+ * size limit brought in as a whole along its line, as walkEyeLocal does, so
+ * the workshop never prints a place WALK will not use.
+ */
+export function usedBenchEye(shard: ShardModel): [number, number, number] {
+  const e = benchEye(shard)
+  const reach = eyeReachTicks(shard)
+  const far = Math.max(Math.abs(e[0]), Math.abs(e[1]), Math.abs(e[2]))
+  return far > reach ? (e.map((t) => (t * reach) / far + 0) as [number, number, number]) : e
+}
+
+/**
  * Ticks of the shard's grid as gibsons, to two decimals, as the eye row and
  * the eye strip print them: at the avatar's true scale (avatarScale, the
  * shrink of an avatar past the size limit included). Worked in whole
@@ -139,7 +161,7 @@ export function gibsonsLabel(ticks: number, shard: ShardModel): string {
 
 /** The eye as the workshop prints it: "0, 1.33, 0", in gibsons in the bench's frame. */
 export function eyeLabel(shard: ShardModel): string {
-  return benchEye(shard).map((t) => gibsonsLabel(t, shard)).join(', ')
+  return usedBenchEye(shard).map((t) => gibsonsLabel(t, shard)).join(', ')
 }
 
 /**
@@ -210,3 +232,6 @@ export function yawOnly(q: Quaternion, out: Quaternion): Quaternion {
   if (hx * hx + hz * hz < 1e-20) return out.identity()
   return out.setFromAxisAngle(Y, Math.atan2(-hx, -hz))
 }
+
+/** A version 1 payload's eye into the version 2 frame: shared with every payload reader (lib/eyeV1). */
+export { v1Eye } from './eyeV1'

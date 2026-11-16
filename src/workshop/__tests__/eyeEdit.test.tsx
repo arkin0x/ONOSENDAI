@@ -34,26 +34,20 @@ vi.mock('../../hud/ui/Switch', () => ({
   ),
   Field: ({ label, children }: { label: string; children: unknown }) => <div className="ui-field"><span>{label}</span>{children as never}</div>,
 }))
-// WALK, as far as TRY WALK reaches into it: entering sets walking (or not, when a test says it cannot start).
-const walk = vi.hoisted(() => ({ canStart: true, entered: 0 }))
-vi.mock('../../store/useWalk', async () => {
-  const { useCyberspace } = await import('../../store/useCyberspace')
-  return { useWalk: { getState: () => ({ enter: () => { walk.entered++; if (walk.canStart) useCyberspace.setState({ walking: true }) } }) } }
-})
-
 const { mount, textOf } = await import('../../test/elementRoot')
 const { Workshop } = await import('../Workshop')
 const { MoveHandles } = await import('../shell/MoveHandles')
 const { reportHandles } = await import('../benchAxes')
 const { useWorkshop } = await import('../../store/useWorkshop')
-const { useCyberspace } = await import('../../store/useCyberspace')
-const { useTryEye, tryEyeFor } = await import('../../store/tryEye')
 const { escapeTop } = await import('../../hooks/useEscape')
 const { newShard } = await import('sno-core/shards')
 const { useBeginner } = await import('../beginner')
 const { useTutorial } = await import('../../store/useTutorial')
-const { eyeStatus } = await import('../shell/EyeBar')
-const { eyeSetting } = await import('../sheets/EyeRow')
+const { eyeStatus: statusParts } = await import('../shell/EyeBar')
+const eyeStatus = (label: string): string => statusParts(label).join('')
+const { eyeSetting, eyeNote } = await import('../sheets/EyeRow')
+const { withEye } = await import('../../lib/avatarEye')
+const { useAvatars } = await import('../../store/useAvatars')
 
 /** A shard one unit tall and wide, so its automatic eye is 105 ticks up (120 - floor(120 / 8)): 0.88 gibsons. */
 function cube() {
@@ -82,10 +76,7 @@ beforeEach(() => {
   localStorage.setItem('onosendai:workshop-intro', '1')
   useBeginner.setState({ tools: 'all', step: null, glow: null, done: true, uses: { view: 3, stamp: 3, select: 3, paint: 3, add: 3, face: 3 } })
   useTutorial.setState({ active: false })
-  useCyberspace.setState({ walking: false })
-  useTryEye.setState({ pubkey: null, shard: null })
-  walk.canStart = true
-  walk.entered = 0
+  useAvatars.setState({ shards: {} })
 })
 afterEach(() => {
   useWorkshop.setState({ open: false, eyeEdit: false })
@@ -103,6 +94,7 @@ describe('FIRST-PERSON EYE in the AVATAR sheet', () => {
     expect(words(row)).toContain('AUTO')
     expect(words(row)).toContain('0, 0.88, 0')
     expect(words(row)).toContain('USE THIS SHARD PUBLISHES THE EYE.')
+    expect(cls(byClass(m.all(), 'ws__eyerow-note')[0])).toBe('ws__eyerow-note')
     expect(buttonsIn(row).map(words)).toEqual(['SET EYE'])
     useWorkshop.getState().setEye([0, 240, 120])
     await tick()
@@ -133,6 +125,29 @@ describe('FIRST-PERSON EYE in the AVATAR sheet', () => {
     expect(cls(byClass(m.all(), 'ws__strip')[0])).not.toContain('ws__strip--eye')
     expect(m.all().some((h) => h.props['aria-label'] === 'What you see')).toBe(false)
     await m.unmount()
+  })
+
+  it('says when the avatar you wear is this shape with another eye', () => {
+    const s = useWorkshop.getState().current()!
+    // Not worn, or worn with the same eye: how the eye is published.
+    expect(eyeNote(s, null)).toBe('USE THIS SHARD PUBLISHES THE EYE.')
+    expect(eyeNote(s, { ...s, name: 'Worn' })).toBe('USE THIS SHARD PUBLISHES THE EYE.')
+    // The workshop's eye moved, the worn one still automatic.
+    const chosen = withEye(s, [0, 240, 0])
+    expect(eyeNote(chosen, s)).toBe('YOUR WORN AVATAR STILL USES AUTO. USE THIS SHARD TO UPDATE IT.')
+    expect(eyeNote(s, chosen)).toBe('YOUR WORN AVATAR STILL USES 0, 2, 0. USE THIS SHARD TO UPDATE IT.')
+    // Another shape altogether: nothing to compare.
+    expect(eyeNote(chosen, { ...s, vertices: s.vertices.slice(0, 2) })).toBe('USE THIS SHARD PUBLISHES THE EYE.')
+  })
+
+  it('keeps the strip one height, the eye\'s status line inside it, and the guide card away', () => {
+    const css = readFileSync(join(__dirname, '..', '..', 'styles.css'), 'utf8')
+    const rule = (sel: string): string => { const at = css.indexOf(`\n${sel} {`); expect(at, sel).toBeGreaterThan(-1); return css.slice(at, css.indexOf('}', at)) }
+    // The eye's strip sets no height of its own: it keeps .ws__strip's.
+    expect(rule('.ws__strip.ws__strip--eye')).not.toMatch(/height/)
+    expect(rule('.ws__eyebar')).toContain('flex: 1 1 0')
+    const ws = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
+    expect(ws).toContain('{sheet === null && !eyeEdit && <Guide />}')
   })
 
   it('greys the slots that cannot act rather than hiding them', async () => {
@@ -220,26 +235,41 @@ describe('the eye in hand', () => {
       ;(b.props.onPointerDown as (e: unknown) => void)({ preventDefault: () => {}, stopPropagation: () => {} })
       ;(b.props.onPointerUp as () => void)()
     }
-    // From the automatic eye, 105 up: one step up is 135, and the eye is CHOSEN.
+    // From the automatic eye, 105 up, off the grid: the first step up lands on the grid at 120, and the eye is CHOSEN.
     press('Y up a step')
-    expect(eye()).toEqual([0, 135, 0])
+    expect(eye()).toEqual([0, 120, 0])
+    press('Y up a step')
+    expect(eye()).toEqual([0, 150, 0])
     press('X down a step')
-    expect(eye()).toEqual([-30, 135, 0])
+    expect(eye()).toEqual([-30, 150, 0])
     // The bench's +Z is the payload's -Z.
     press('Z up a step')
-    expect(eye()).toEqual([-30, 135, -30])
+    expect(eye()).toEqual([-30, 150, -30])
     await tick()
     expect(words(byClass(m.all(), 'ws__eyenums')[0])).toContain('-0.25')
-    expect(words(byClass(m.all(), 'ws__eyeline')[0])).toBe(`${eyeStatus('-0.25, 1.13, 0.25')}CHOSEN`)
+    expect(words(byClass(m.all(), 'ws__eyeline')[0])).toBe(`${eyeStatus('-0.25, 1.25, 0.25')}CHOSEN`)
     await m.unmount()
   })
 
-  it('stops at the 64-unit position bound and writes nothing malformed', () => {
-    useWorkshop.getState().setEye([0, 7680, 0])
+  it('stops at the reach WALK honours: 4 gibsons at the avatar\'s true scale', () => {
+    // The cube at unit 0 is drawn at true scale: 4 gibsons is 480 ticks.
+    useWorkshop.getState().setEye([0, 480, 0])
     expect(useWorkshop.getState().moveEye(1, 120)).toBe(false)
-    expect(eye()).toEqual([0, 7680, 0])
+    expect(eye()).toEqual([0, 480, 0])
     expect(useWorkshop.getState().moveEye(1, -120)).toBe(true)
-    expect(eye()).toEqual([0, 7560, 0])
+    expect(eye()).toEqual([0, 360, 0])
+    // At unit 1 a tick is twice the gibsons: the reach is 240 ticks, and NUMBERS stops there too.
+    useWorkshop.setState({ shards: [{ ...useWorkshop.getState().current()!, unit: 1 }] })
+    useWorkshop.getState().setEye([0, 240, 0])
+    expect(useWorkshop.getState().moveEye(1, 120)).toBe(false)
+    expect(useWorkshop.getState().moveEye(0, 120)).toBe(true)
+    expect(eye()).toEqual([120, 240, 0])
+  })
+
+  it('prints only the eye WALK uses: one past the size limit is brought in along its line', () => {
+    // 9 gibsons up, written by hand: WALK brings it to 4.
+    useWorkshop.getState().setEye([0, 1080, 0])
+    expect(eyeSetting(useWorkshop.getState().current()!)).toEqual({ mode: 'CHOSEN', place: '0, 4, 0' })
   })
 })
 
@@ -264,16 +294,17 @@ describe('the move handles on the eye', () => {
     expect(y).toBeTruthy()
     ;(y.props.onPointerDown as (e: unknown) => void)(ev(0, 0, 'pointerdown'))
     ;(y.props.onPointerUp as (e: unknown) => void)(ev(0, 0, 'pointerup'))
-    expect(eye()).toEqual([0, 135, 0])
+    // From AUTO's 105, off the grid of 30: the first step lands on it, at 120.
+    expect(eye()).toEqual([0, 120, 0])
     expect(useWorkshop.getState().past).toHaveLength(1)
     // Two units up the screen: 240 ticks, eight steps of 30, one UNDO.
     ;(y.props.onPointerDown as (e: unknown) => void)(ev(0, 0, 'pointerdown'))
     ;(y.props.onPointerMove as (e: unknown) => void)(ev(0, -100))
     ;(y.props.onPointerUp as (e: unknown) => void)(ev(0, -100, 'pointerup'))
-    expect(eye()).toEqual([0, 375, 0])
+    expect(eye()).toEqual([0, 360, 0])
     expect(useWorkshop.getState().past).toHaveLength(2)
     useWorkshop.getState().undo()
-    expect(eye()).toEqual([0, 135, 0])
+    expect(eye()).toEqual([0, 120, 0])
     useWorkshop.getState().undo()
     expect(eye()).toBeUndefined()
     // +Z on the bench is the payload's -Z.
@@ -281,6 +312,12 @@ describe('the move handles on the eye', () => {
     ;(z.props.onPointerDown as (e: unknown) => void)(ev(0, 0, 'pointerdown'))
     ;(z.props.onPointerUp as (e: unknown) => void)(ev(0, 0, 'pointerup'))
     expect(eye()).toEqual([0, 105, -30])
+    // After CENTER (60, 60, 0), off a whole unit's grid on Y: one step up lands on the grid at 120.
+    useWorkshop.setState({ division: 1 })
+    useWorkshop.getState().setEye([60, 60, 0])
+    ;(y.props.onPointerDown as (e: unknown) => void)(ev(0, 0, 'pointerdown'))
+    ;(y.props.onPointerUp as (e: unknown) => void)(ev(0, 0, 'pointerup'))
+    expect(eye()).toEqual([60, 120, 0])
     // The marker, the dashed line and TODAY'S EYE are drawn.
     expect(m.all().some((h) => cls(h).includes('ws__handle-hub--eye'))).toBe(true)
     expect(m.all().some((h) => cls(h).includes('ws__eye-line'))).toBe(true)
@@ -297,74 +334,6 @@ describe('the move handles on the eye', () => {
   })
 })
 
-describe('TRY WALK', () => {
-  const me = (): string => useCyberspace.getState().identity.pubkey
-
-  it('walks from the workshop shard\'s eye, unpublished, and leaving WALK brings SET EYE back with its UNDO', async () => {
-    const w = useWorkshop.getState
-    w().setEyeEdit(true)
-    w().setEye([0, 300, 0])
-    const id = w().currentId
-    const m = await mount(<Workshop />)
-    await m.press('TRY WALK')
-    expect(walk.entered).toBe(1)
-    expect(w().open).toBe(false)
-    expect(useCyberspace.getState().walking).toBe(true)
-    // The WALK camera's override, for your own pubkey only.
-    expect(tryEyeFor(me())?.extra?.eye).toEqual([0, 300, 0])
-    expect(tryEyeFor('someone else')).toBeNull()
-    useCyberspace.setState({ walking: false })
-    await tick()
-    expect(w().open).toBe(true)
-    expect(w().currentId).toBe(id)
-    expect(w().eyeEdit).toBe(true)
-    expect(w().past).toHaveLength(1)
-    expect(tryEyeFor(me())).toBeNull()
-    // Walking again later is plain WALK: the try is over.
-    useCyberspace.setState({ walking: true })
-    useCyberspace.setState({ walking: false })
-    await tick()
-    expect(tryEyeFor(me())).toBeNull()
-    await m.unmount()
-  })
-
-  it('is cleared by DONE, and by the workshop opening some other way meanwhile', async () => {
-    const w = useWorkshop.getState
-    w().setEyeEdit(true)
-    const m = await mount(<Workshop />)
-    await m.press('TRY WALK')
-    expect(tryEyeFor(me())).not.toBeNull()
-    // Opened from elsewhere while walking: the try ends, nothing comes back on leaving WALK.
-    w().openWorkshop()
-    expect(tryEyeFor(me())).toBeNull()
-    expect(w().eyeEdit).toBe(false)
-    useCyberspace.setState({ walking: false })
-    await tick()
-    expect(w().eyeEdit).toBe(false)
-    // DONE clears an override set by hand, as leaving SET EYE any way does.
-    w().setEyeEdit(true)
-    useTryEye.setState({ pubkey: me(), shard: w().current() })
-    w().setEyeEdit(false)
-    expect(tryEyeFor(me())).toBeNull()
-    await m.unmount()
-  })
-
-  it('stays in the workshop with a line when WALK cannot start', async () => {
-    walk.canStart = false
-    const w = useWorkshop.getState
-    w().setEyeEdit(true)
-    w().setEye([0, 300, 0])
-    const m = await mount(<Workshop />)
-    await m.press('TRY WALK')
-    expect(w().open).toBe(true)
-    expect(w().eyeEdit).toBe(true)
-    expect(w().past).toHaveLength(1)
-    expect(w().notice).toBe('WALK cannot start from here right now.')
-    expect(tryEyeFor(me())).toBeNull()
-    await m.unmount()
-  })
-})
-
 describe('key hints', () => {
   it('prints E on SET EYE and DONE, and the move keys on the status line', async () => {
     const m = await mount(<Workshop />)
@@ -376,12 +345,6 @@ describe('key hints', () => {
     expect(keys.type).toBe('kbd')
     expect(textOf(keys)).toBe('WASD R F MOVE · E DONE')
     await m.unmount()
-  })
-
-  it('binds E to SET EYE with nothing held, and the move keys to the eye while it is in hand', () => {
-    const bench = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
-    expect(bench).toContain('else if (!holding) w.setEyeEdit(!w.eyeEdit)')
-    expect(bench).toContain('if (nudge[e.code] && w.eyeEdit) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveEye(n.axis, n.delta * w.step()); return }')
   })
 
   it('writes no em dash anywhere it touches', () => {

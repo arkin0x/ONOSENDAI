@@ -792,8 +792,8 @@ function HandleProjector(): null {
   return null
 }
 
-/** Keyboard on the bench: undo, tools, nudge, fill, delete, level, turn. */
-function Keys(): null {
+/** Keyboard on the bench: undo, tools, nudge, fill, delete, level, turn, SET EYE. Exported for its tests. */
+export function Keys(): null {
   const camera = useThree((s) => s.camera)
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -849,11 +849,11 @@ function Keys(): null {
       if (e.code === 'Digit6') w.setTool('face')
       // Q and E turn the selection a quarter turn while SELECT holds one; Q turns the stamp otherwise.
       if (e.code === 'KeyQ') { if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else if (!look) w.turnStamp() }
-      // E: a quarter turn while SELECT holds something; with nothing held, SET EYE in hand or put down (AVATAR's FIRST-PERSON EYE).
+      // E: a quarter turn while SELECT holds something; with nothing held and no corners picked, SET EYE in hand or put down (AVATAR's FIRST-PERSON EYE).
       if (e.code === 'KeyE') {
         const holding = w.selection.length > 0 || w.partSel.length > 0 || w.selectedFaces.length > 0
         if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(1)
-        else if (!holding) w.setEyeEdit(!w.eyeEdit)
+        else if (!holding && w.facePick.length === 0) w.setEyeEdit(!w.eyeEdit)
       }
       if (e.code === 'BracketRight') w.setLevel(w.level + w.step())
       if (e.code === 'BracketLeft') w.setLevel(w.level - w.step())

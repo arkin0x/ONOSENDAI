@@ -24,9 +24,9 @@ import { noCallout, useRepeatable } from '../../hooks/useRepeatable'
 import { useWorkshop } from '../../store/useWorkshop'
 import { startTryWalk } from '../../store/tryEye'
 
-/** The status line's words: where the eye is, in gibsons from 0, 0, 0. */
-export function eyeStatus(label: string): string {
-  return `EYE ${label} GIBSONS FROM 0, 0, 0`
+/** The status line's words: where the eye is, in gibsons from 0, 0, 0. A narrow phone shows only the first part (styles.css). */
+export function eyeStatus(label: string): [string, string] {
+  return [`EYE ${label}`, ' GIBSONS FROM 0, 0, 0']
 }
 
 /** NUMBERS: X, Y and Z steppers, each press one grid step, printed in gibsons. */
@@ -63,11 +63,12 @@ export function EyeBar(): JSX.Element | null {
   const chosen = eyeChosen(shard)
   const at = benchEye(shard)
   const atOrigin = chosen && at.every((t) => t === 0)
+  const status = eyeStatus(eyeLabel(shard))
   return (
     <>
       <div className="ws__eyeline" role="status" aria-live="polite">
         <ScanEye size={14} strokeWidth={2.25} aria-hidden />
-        <span className="ws__eyeline-text">{eyeStatus(eyeLabel(shard))}</span>
+        <span className="ws__eyeline-text">{status[0]}<span className="ws__eyeline-from">{status[1]}</span></span>
         <kbd className="ws__eyeline-keys" aria-hidden>WASD R F MOVE · E DONE</kbd>
         <b className={`ws__eyeline-mode${chosen ? ' is-chosen' : ''}`}>{chosen ? 'CHOSEN' : 'AUTO'}</b>
       </div>
@@ -84,7 +85,7 @@ export function EyeBar(): JSX.Element | null {
         <button className={`ws__heldbtn ws__heldbtn--two${numbers ? ' is-on' : ''}`} aria-expanded={numbers} aria-haspopup="true" onClick={() => setNumbers((n) => !n)} title="X, Y and Z in gibsons, a grid step a press" {...noCallout}>
           <Hash size={18} strokeWidth={2} aria-hidden /><span>NUMBERS</span>
         </button>
-        <button className="ws__heldbtn ws__eyebar-gap" disabled={!has} onClick={() => { startTryWalk() }} title="Walk with this eye before you publish. Leave WALK to come back here" {...noCallout}>
+        <button className="ws__heldbtn ws__eyebar-gap" disabled={!has} onClick={() => { startTryWalk() }} title="Walk with this eye before you publish. Your steps are real moves. Leave WALK to come back here" {...noCallout}>
           <Footprints size={18} strokeWidth={2} aria-hidden /><span>TRY WALK</span>
         </button>
         <button className="ws__heldbtn ws__heldbtn--ok" onClick={() => w().setEyeEdit(false)} title="Put the eye down (E)" aria-label="Done with the eye" {...noCallout}>

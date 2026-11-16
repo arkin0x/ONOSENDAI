@@ -79,7 +79,7 @@ const REGION: Record<Area, string> = { menu: 'Menu', shard: 'Shard', grid: 'Grid
  * in what is left (benchAxes BenchInsets). Measured again whenever any of
  * them changes size, the window does, or a sheet comes or goes.
  */
-function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind | null, open: boolean, guiding: boolean): void {
+function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind | null, open: boolean, guiding: boolean, eyeEdit = false): void {
   useLayoutEffect(() => {
     const el = root.current
     if (!open || !el || typeof ResizeObserver === 'undefined') return
@@ -96,17 +96,19 @@ function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind 
       const side = !!sheetEl && getComputedStyle(sheetEl).position === 'fixed'
       const guide = el.querySelector('.ws__guide')?.getBoundingClientRect().top
       const edge = (!side && sheetBox ? sheetBox.top : guide) ?? strip
-      const right = side && sheetBox ? Math.max(0, Math.round(box.right - sheetBox.left)) : 0
+      // SET EYE's WHAT YOU SEE, open: a right inset too, so the bench frames the eye clear of the picture.
+      const eyeView = el.querySelector('.ws__eyeview:not(.is-folded)')?.getBoundingClientRect()
+      const right = Math.max(side && sheetBox ? Math.max(0, Math.round(box.right - sheetBox.left)) : 0, eyeView ? Math.max(0, Math.round(box.right - eyeView.left)) : 0)
       const insets = { top: Math.max(0, Math.round(top - box.top)), bottom: Math.max(0, Math.round(box.bottom - edge)), rest: Math.max(0, Math.round(box.bottom - strip)), right }
       const now = useBenchView.getState().insets
       if (now.top !== insets.top || now.bottom !== insets.bottom || now.rest !== insets.rest || now.right !== insets.right) useBenchView.setState({ insets })
     }
     const ro = new ResizeObserver(measure)
-    for (const sel of ['.ws__topbar', '.ws__bottom', '.ws__sheet', '.ws__guide']) { const n = el.querySelector(sel); if (n) ro.observe(n) }
+    for (const sel of ['.ws__topbar', '.ws__bottom', '.ws__sheet', '.ws__guide', '.ws__eyeview']) { const n = el.querySelector(sel); if (n) ro.observe(n) }
     window.addEventListener('resize', measure)
     measure()
     return () => { ro.disconnect(); window.removeEventListener('resize', measure) }
-  }, [root, sheet, open, guiding])
+  }, [root, sheet, open, guiding, eyeEdit])
   // Shut, the bench frames nothing: the next opening starts from the middle.
   useEffect(() => { if (!open) useBenchView.setState({ insets: { top: 0, bottom: 0, rest: 0, right: 0 } }) }, [open])
 }
@@ -186,7 +188,7 @@ export function Workshop(): JSX.Element | null {
   const root = useRef<HTMLDivElement>(null)
   // The guide's card stands over the strip too, and the shard is framed above it.
   const guiding = useBeginner((s) => s.step !== null && !s.paused) && !tutorialActive
-  useBenchInsets(root, sheet, open, guiding)
+  useBenchInsets(root, sheet, open, guiding, eyeEdit && !viewOpen)
   // Every hook above this line, none below it: the early return that follows
   // changes which hooks run, and React counts them. One sat after the
   // return for a day and opening the workshop threw React #310 (2026-09-24).
@@ -300,7 +302,7 @@ export function Workshop(): JSX.Element | null {
         {sheet === 'palette' && <PaletteModal onClose={closeSheet} foldAsk={foldAsk} />}
         {sheet === 'object' && <ObjectPicker onClose={closeSheet} />}
         {/* The first visit's guide and the tool's fading hint, over the strip; neither over a sheet. */}
-        {sheet === null && <Guide />}
+        {sheet === null && !eyeEdit && <Guide />}
         <ToolHint hidden={sheet !== null || eyeEdit} />
         <Strip onPickObject={() => setSheet('object')} onMore={() => toggle('more')} moreBadge={stacked} />
         <Dock onColor={tapColor} colorOpen={sheet === 'palette'} />

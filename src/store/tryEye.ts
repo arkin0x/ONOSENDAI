@@ -6,16 +6,26 @@
  * While a try runs, the WALK camera (scene/Scene.tsx Rig) and your own drawn
  * avatar (scene/AvatarShape.tsx) take the shard on the bench in place of the
  * avatar you wear, for your own pubkey only and on this device only. Nothing
- * is signed or published. Leaving WALK opens the workshop again on the same
- * shard, its UNDO and REDO as they were, with the eye in hand. The try ends
- * there, on DONE, on anything else that puts the eye down, and when the
- * workshop is opened some other way meanwhile.
+ * is signed or published by the try itself; the steps you take are real
+ * moves, as any WALK's are. WALK is entered the pad's way (padMode
+ * enterWalk), so BUILD and SCAN end as the WALK button ends them, spectating,
+ * history and hyperspace transit refuse it, and leaving goes back to the mode
+ * it was entered from.
+ *
+ * Leaving WALK on purpose, the pad's way out (padMode leaveWalk: the lit
+ * WALK, the mode button, X), still at your head, opens the workshop again on
+ * the same shard, its UNDO and REDO as they were, with the eye in hand. Any
+ * other end of the walk (spectating, history, VIEW, the demo or tutorial, a
+ * respawn) ends the try silently and clears the override. So do DONE,
+ * anything else that puts the eye down, and the workshop opening some other
+ * way meanwhile. The walls a try walks against are the worn avatar's, as in
+ * any WALK (store/walkWalls.ts).
  */
 
 import { create } from 'zustand'
 import type { ShardModel } from 'sno-core/shards'
 import { useCyberspace } from './useCyberspace'
-import { useWalk } from './useWalk'
+import { enterWalk, walkLeaves } from './padMode'
 import { useWorkshop, type Tool } from './useWorkshop'
 
 interface TryEyeState {
@@ -55,9 +65,9 @@ function comeBack(back: Back): void {
 }
 
 /**
- * TRY WALK: the workshop closes, WALK starts where you stand, looking from
- * the workshop shard's eye. False, with the workshop left open and a line on
- * the bench, when WALK cannot start.
+ * TRY WALK: the workshop closes, WALK starts where you stand the pad's way
+ * (padMode enterWalk), looking from the workshop shard's eye. False, with the
+ * workshop left open and a line on the bench, when WALK cannot start.
  */
 export function startTryWalk(): boolean {
   const w = useWorkshop.getState()
@@ -68,17 +78,27 @@ export function startTryWalk(): boolean {
   clearTryEye()
   w.closeWorkshop()
   useTryEye.setState({ pubkey, shard })
-  useWalk.getState().enter()
+  enterWalk()
   if (!useCyberspace.getState().walking) {
     clearTryEye()
     comeBack(back)
     useWorkshop.setState({ notice: 'WALK cannot start from here right now.' })
     return false
   }
+  const leftBefore = walkLeaves()
   const offWalk = useCyberspace.subscribe((s) => {
     if (s.walking) return
+    // Left the pad's way, or ended by something else (the demo, spectating, history, a respawn)?
+    const onPurpose = walkLeaves() > leftBefore
     clearTryEye()
-    comeBack(back)
+    if (!onPurpose) return
+    // After the pad's way out has finished putting the earlier mode back, and
+    // only still on your own head: not spectating, not in history.
+    queueMicrotask(() => {
+      const cs = useCyberspace.getState()
+      if (cs.walking || cs.spectate !== null || cs.exploreIndex !== null || useWorkshop.getState().open) return
+      comeBack(back)
+    })
   })
   // The workshop opened some other way while walking: the try is over, and nothing to come back to.
   const offOpen = useWorkshop.subscribe((s, prev) => { if (s.open && !prev.open) clearTryEye() })

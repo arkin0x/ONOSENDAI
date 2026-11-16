@@ -51,7 +51,8 @@ import { noTable, signedTableOnly, you } from '../lib/carried'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 import { bounceOf, springboardOf, withBounce, type Bounce } from '../lib/walkBounce'
 import { withAnim } from '../lib/anim'
-import { EYE_FIELD, EYE_REACH, benchEye, flipEyeZ, withEye, type Eye } from '../lib/avatarEye'
+import { EYE_FIELD, benchEye, eyeReachTicks, flipEyeZ, withEye, type Eye } from '../lib/avatarEye'
+import { v1Eye } from '../lib/eyeV1'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
@@ -578,9 +579,11 @@ export interface WorkshopState {
   setEyeEdit: (on: boolean) => void
   /**
    * The eye one move along a model axis (the bench's frame, as moveSelected
-   * moves points), `delta` ticks. An automatic eye starts from where it is and
-   * becomes CHOSEN. Refused, and false, past the 64-unit position bound
-   * (avatarEye EYE_REACH). One UNDO each, as any edit.
+   * moves points), `delta` ticks, landing on the snap's grid (an eye off it,
+   * AUTO's or CENTER's, goes to the next grid line that way first). An
+   * automatic eye starts from where it is and becomes CHOSEN. Refused, and
+   * false, past the reach WALK honours: the avatar size limit at the avatar's
+   * true scale (avatarEye eyeReachTicks). One UNDO each, as any edit.
    */
   moveEye: (axis: 0 | 1 | 2, delta: number) => boolean
   /**
@@ -721,7 +724,9 @@ export interface WorkshopState {
 export function shardFromText(text: string, id: string): ShardModel | null {
   let raw: unknown
   try { raw = JSON.parse(text) } catch { return null }
-  return fromPayload(raw, id)
+  // A version 1 payload's eye into the version 2 frame, as a worn avatar's is (lib/eyeV1).
+  const m = fromPayload(raw, id)
+  return m && v1Eye(m, raw)
 }
 
 /** Whose object a model was made from (REMIX): sno-core's, shared with snocrash. */
@@ -1617,8 +1622,14 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const s = get().current()
       if (!s || delta === 0) return false
       const at = benchEye(s)
-      at[axis] += delta
-      if (at.some((t) => t < -EYE_REACH || t > EYE_REACH)) { set({ notice: 'The eye can go no further that way.' }); return false }
+      // Onto the snap's grid on the way: an eye off it (AUTO, CENTER) lands on
+      // the next grid line in the move's direction, then steps along the grid.
+      const grid = get().step()
+      const to = at[axis] + delta
+      at[axis] = grid > 0 ? (delta > 0 ? Math.floor(to / grid) : Math.ceil(to / grid)) * grid + 0 : to
+      // No farther than WALK carries it: the avatar size limit at true scale (avatarEye eyeReachTicks).
+      const reach = eyeReachTicks(s)
+      if (at.some((t) => Math.abs(t) > reach)) { set({ notice: 'The eye can go no further that way: the avatar size limit.' }); return false }
       return edit((m) => withEye(m, flipEyeZ(at)))
     },
 

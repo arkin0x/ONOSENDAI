@@ -19,6 +19,7 @@ import { AVATAR_CONTENT_MAX, AVATAR_CONTENT_WARN, avatarContentBytes, verifyAvat
 import { TICKS_PER_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
 import { keepOwnTable, withoutCarried } from './carried'
 import { CLIENT_TAG } from './client'
+import { v1Eye } from './eyeV1'
 
 export const AVATAR_KIND = 11333
 
@@ -90,19 +91,6 @@ export function avatarShard(ev: { kind: number; pubkey: string; content: string;
   if (!ev.content) return null
   if (!verifyAvatar(ev).ok) return null
   return avatarFromEvent(ev)
-}
-
-/**
- * An eye (lib/avatarEye.ts) is in its payload's own frame, as the vertices
- * are. A version 1 payload's Z points the other way (DECK-0003 §2), and its
- * vertices are read with it negated; its eye is put into the version 2 frame
- * here, the one every other reader and writer of `extra` assumes, so a copy
- * written back out as version 2 keeps its eye where it was.
- */
-function v1Eye(shard: ShardModel, raw: unknown): ShardModel {
-  const eye = shard.extra?.eye
-  if ((raw as { v?: unknown } | null)?.v !== 1 || !Array.isArray(eye) || eye.length !== 3 || !eye.every((c) => Number.isInteger(c) && Math.abs(c as number) <= 7680)) return shard
-  return { ...shard, extra: { ...shard.extra, eye: [eye[0] + 0, eye[1] + 0, -eye[2] + 0] } }
 }
 
 /**

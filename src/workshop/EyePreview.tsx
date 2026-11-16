@@ -13,9 +13,16 @@
  * backs culled. Ahead: a doorway two gibsons tall and the default avatar, one
  * gibson across, standing on its own point, for scale.
  *
+ * The picture has the screen's own shape (upright on a phone) and WALK's
+ * field of view and near plane (scene/camera FOV, CAMERA_NEAR), so it shows
+ * what WALK will show. An avatar small enough to be drawn as the icosahedron
+ * looks from the icosahedron's eye (MARKER_EYE), and draws nothing of its own
+ * from inside, as in WALK.
+ *
  * Cheap: its own small canvas that draws only when the eye or the shape
  * changes (frameloop "demand"), and none at all while folded. Tap the picture
- * to make it bigger; the fold button puts it away to free the view.
+ * to make it bigger; the fold button puts it away to free the view. The bench
+ * frames the shard clear of it (Workshop useBenchInsets reads its box).
  */
 
 import { Canvas, useThree } from '@react-three/fiber'
@@ -23,18 +30,27 @@ import { useLayoutEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronUp, Eye } from 'lucide-react'
 import { EdgesGeometry, IcosahedronGeometry, type PerspectiveCamera } from 'three'
 import type { ShardModel } from 'sno-core/shards'
-import { avatarScale } from '../lib/avatar'
+import { avatarDraw, avatarScale } from '../lib/avatar'
 import { walkEyeLocal } from '../lib/avatarEye'
 import { keepPrograms } from '../lib/keepPrograms'
 import { BG } from '../lib/palette'
-import { FOV } from '../scene/camera'
+import { CAMERA_NEAR, FOV } from '../scene/camera'
 import { ShardLights } from '../scene/shardLight'
 import { ShardMesh } from '../scene/ShardMesh'
 import { useWorkshop } from '../store/useWorkshop'
 
-/** The picture's size, CSS pixels, small and tapped bigger. */
-export const PREVIEW_SMALL = { width: 150, height: 112 }
-export const PREVIEW_BIG = { width: 300, height: 224 }
+/** The picture's width, CSS pixels, small and tapped bigger; its height follows the screen's shape. */
+export const PREVIEW_WIDTH = { small: 90, big: 180 }
+/** Never taller than this share of the screen, so a tall phone keeps its bench. */
+const MAX_HEIGHT_SHARE = { small: 0.25, big: 0.5 }
+
+/** The picture's size for a screen `w` by `h`: the screen's own shape, `big` or small. Pure. */
+export function previewSize(w: number, h: number, big: boolean): { width: number; height: number } {
+  const k = big ? 'big' : 'small'
+  const aspect = w > 0 && h > 0 ? h / w : 812 / 375
+  const height = Math.min(Math.round(PREVIEW_WIDTH[k] * aspect), Math.round(h * MAX_HEIGHT_SHARE[k]))
+  return { width: Math.round(height / aspect), height }
+}
 
 /** The camera at the eye, looking level along the nose (render -Z). */
 function EyeCamera({ eye }: { eye: [number, number, number] }): null {
@@ -65,7 +81,7 @@ function SampleFloor(): JSX.Element {
       <mesh position={[1.5, 1, -4]}><boxGeometry args={[1, 2, 1]} /><meshLambertMaterial color="#3f8f5a" /></mesh>
       <mesh position={[0, 2.25, -4]}><boxGeometry args={[4, 0.5, 1]} /><meshLambertMaterial color="#357a4c" /></mesh>
       {/* Someone wearing the default avatar, standing on their own point. */}
-      <lineSegments geometry={MARKER} position={[-1.1, 0, -2.5]}>
+      <lineSegments geometry={MARKER} position={[-0.8, 0, -2.5]}>
         <lineBasicMaterial color="#ffffff" transparent opacity={0.85} toneMapped={false} />
       </lineSegments>
     </group>
@@ -73,17 +89,20 @@ function SampleFloor(): JSX.Element {
 }
 
 function PreviewScene({ shard }: { shard: ShardModel }): JSX.Element {
+  // walkEyeLocal at zoom 2^0: the eye at true scale within the size limit, or
+  // the icosahedron's eye (MARKER_EYE) when the shape is drawn as the marker.
   const e = walkEyeLocal(shard, 0, 1)
   const eye = useMemo<[number, number, number]>(() => [e[0], e[1], e[2]], [e[0], e[1], e[2]]) // eslint-disable-line react-hooks/exhaustive-deps
+  const marker = shard.vertices.length === 0 || avatarDraw(shard, 0) === 'marker'
   const k = avatarScale(shard)
   return (
     <>
       <EyeCamera eye={eye} />
       <ShardLights />
       <SampleFloor />
-      {shard.vertices.length > 0 && (
+      {/* The icosahedron draws nothing from inside (AvatarShape firstPerson); a shape draws unlit, backs culled, opaque, still (DECK-0003 §3.3). Not lit: lit draws the backs too, darker. */}
+      {!marker && (
         <group scale={[k, k, k]}>
-          {/* As WALK draws you from inside (AvatarShape firstPerson): unlit, backs culled, opaque, still (DECK-0003 §3.3). Not lit: lit draws the backs too, darker. */}
           <ShardMesh shard={shard} cull still ignoreOpacity />
         </group>
       )}
@@ -96,26 +115,28 @@ export function EyePreview(): JSX.Element | null {
   const [folded, setFolded] = useState(false)
   const [big, setBig] = useState(false)
   if (!shard) return null
-  const size = big ? PREVIEW_BIG : PREVIEW_SMALL
+  const size = previewSize(typeof window !== 'undefined' ? window.innerWidth : 375, typeof window !== 'undefined' ? window.innerHeight : 812, big)
   return (
     <div className={`ws__eyeview${folded ? ' is-folded' : ''}${big ? ' is-big' : ''}`} role="group" aria-label="What you see">
       {!folded && (
-        <button className="ws__eyeview-pic" style={{ width: size.width, height: size.height }} onClick={() => setBig((b) => !b)} title={big ? 'Smaller' : 'Bigger'} aria-label={big ? 'Make the picture smaller' : 'Make the picture bigger'}>
+        <div className="ws__eyeview-pic" style={{ width: size.width, height: size.height }}>
           <Canvas
             dpr={[1, 2]}
             frameloop="demand"
             gl={{ antialias: true }}
-            camera={{ fov: FOV, near: 0.02, far: 200 }}
+            camera={{ fov: FOV, near: CAMERA_NEAR, far: 200 }}
             onCreated={({ gl, scene }) => keepPrograms(gl, scene)}
             style={{ width: size.width, height: size.height, background: BG, pointerEvents: 'none' }}
           >
             <PreviewScene shard={shard} />
           </Canvas>
-        </button>
+          {/* Beside the canvas, over it: the tap that makes it bigger or smaller. */}
+          <button className="ws__eyeview-zoom" onClick={() => setBig((b) => !b)} title={big ? 'Smaller' : 'Bigger'} aria-label={big ? 'Make the picture smaller' : 'Make the picture bigger'} />
+        </div>
       )}
       {/* Its name over the picture's top edge, and the fold: folded, the name alone, to unfold it. */}
       <button className="ws__eyeview-head" onClick={() => setFolded((f) => !f)} aria-expanded={!folded} title={folded ? 'Show what you see from the eye' : 'Fold it away to free the view'}>
-        <Eye size={13} strokeWidth={2.25} aria-hidden /><span>WHAT YOU SEE</span>
+        {folded && <Eye size={13} strokeWidth={2.25} aria-hidden />}<span>WHAT YOU SEE</span>
         {folded ? <ChevronDown size={14} strokeWidth={2.25} aria-hidden /> : <ChevronUp size={14} strokeWidth={2.25} aria-hidden />}
       </button>
     </div>

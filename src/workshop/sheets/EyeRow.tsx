@@ -4,11 +4,16 @@
  * the camera sits in WALK when this shard is worn, AUTO or CHOSEN with the
  * place in gibsons, and SET EYE, which closes the sheet and puts the eye in
  * your hand on the bench (shell/EyeBar). A reserved line under it says how
- * the eye reaches others: USE THIS SHARD publishes it, with the avatar.
+ * the eye reaches others: USE THIS SHARD publishes it, with the avatar; and
+ * when the avatar you wear is this shape with another eye, that it still
+ * uses its old one until you do.
  */
 
 import { ScanEye } from 'lucide-react'
-import { eyeChosen, eyeLabel } from '../../lib/avatarEye'
+import { toPayload, type ShardModel } from 'sno-core/shards'
+import { eyeChosen, eyeLabel, withEye } from '../../lib/avatarEye'
+import { useAvatars } from '../../store/useAvatars'
+import { useCyberspace } from '../../store/useCyberspace'
 import { useWorkshop } from '../../store/useWorkshop'
 
 /** The row's setting: AUTO or CHOSEN, and the eye's place in gibsons ("0, 1.33, 0"). */
@@ -16,10 +21,28 @@ export function eyeSetting(shard: Parameters<typeof eyeLabel>[0]): { mode: 'AUTO
   return { mode: eyeChosen(shard) ? 'CHOSEN' : 'AUTO', place: eyeLabel(shard) }
 }
 
+/** The shape without its eye, as a payload's text: two shards that differ only in `eye` read the same. */
+const shapeKey = (s: ShardModel): string => { const { name: _n, ...rest } = toPayload(withEye(s, undefined)) as unknown as Record<string, unknown>; return JSON.stringify(rest) }
+
+/**
+ * The reserved line's words. When the avatar you wear is this shard's shape
+ * with another eye, it says what the worn one still uses; otherwise how the
+ * eye is published.
+ */
+export function eyeNote(shard: ShardModel, worn: ShardModel | null): string {
+  if (worn && eyeLabel(worn) + eyeChosen(worn) !== eyeLabel(shard) + eyeChosen(shard) && shapeKey(worn) === shapeKey(shard)) {
+    return `YOUR WORN AVATAR STILL USES ${eyeChosen(worn) ? eyeLabel(worn) : 'AUTO'}. USE THIS SHARD TO UPDATE IT.`
+  }
+  return 'USE THIS SHARD PUBLISHES THE EYE.'
+}
+
 export function EyeRow(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const worn = useAvatars((s) => s.shards[me] ?? null)
   if (!shard) return null
   const { mode, place } = eyeSetting(shard)
+  const note = eyeNote(shard, worn)
   return (
     <div className="ws__eyerow" role="group" aria-label="First-person eye">
       <div className="ws__eyerow-main">
@@ -39,7 +62,7 @@ export function EyeRow(): JSX.Element | null {
           <ScanEye size={16} strokeWidth={2.25} aria-hidden /><span>SET EYE</span><kbd className="ws__key" aria-hidden>E</kbd>
         </button>
       </div>
-      <span className="ws__eyerow-note">USE THIS SHARD PUBLISHES THE EYE.</span>
+      <span className="ws__eyerow-note" title={note}>{note}</span>
     </div>
   )
 }

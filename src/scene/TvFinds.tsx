@@ -74,7 +74,7 @@ const RIM = 0.7
 /**
  * Blending that draws a find over what is behind it at its opacity, and
  * leaves the alpha already there: over the empty background that is 0, the
- * tag the bloom is blind to (Scene.tsx WorldBloom), so a find never glows
+ * tag the bloom is blind to (worldBloom.tsx WorldBloom), so a find never glows
  * brighter than the avatars, however translucent.
  */
 const OUT_OF_BLOOM = {

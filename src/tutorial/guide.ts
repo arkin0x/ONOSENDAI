@@ -32,3 +32,19 @@ export function guideKey(): { secret: Uint8Array; pubkey: string } {
   const secret = hexToBytes(hex)
   return { secret, pubkey: getPublicKey(secret) }
 }
+
+/** The pubkey last derived from a stored guide key, by that key's hex. */
+let storedPub: { hex: string; pubkey: string } | null = null
+
+/**
+ * The pubkey of the guide key this device keeps, or null when none is kept.
+ * Never makes one: it is asked about things already held, after a reload
+ * too, when no tutorial has staged and guideBags knows no guide key.
+ */
+export function storedGuidePubkey(): string | null {
+  let hex: string | null = made
+  try { hex = localStorage.getItem(GUIDE_KEY) ?? made } catch { /* private mode */ }
+  if (!hex || !HEX_64.test(hex)) return null
+  if (storedPub?.hex !== hex) storedPub = { hex, pubkey: getPublicKey(hexToBytes(hex)) }
+  return storedPub.pubkey
+}

@@ -6,7 +6,10 @@
  * PIECE's color, the dropper, FLIP for faces; the point's exact place, to
  * read or type; and the move pad, the nudge keys that the move handles on the
  * object replaced. Always: PASTE and its choices, ALL, COLOR ALL, WELD when
- * points are stacked, and in SELECT the BOX and REMOVE switches.
+ * points are stacked, and in SELECT the BOX and REMOVE switches. LOOK shows
+ * the shard as the world does (workshop/benchLook.tsx): what is held is out
+ * of sight there, so nothing here acts on it or takes more (no HELD, no ALL,
+ * no WELD of the held points).
  */
 
 import { useEffect, useState } from 'react'
@@ -17,6 +20,7 @@ import { dragHistory } from '../../lib/opacityStep'
 import { stackedSpots } from '../../lib/weld'
 import { useCyberspace } from '../../store/useCyberspace'
 import { ownAddress, useWorkshop } from '../../store/useWorkshop'
+import { isLook } from '../lookTool'
 import { nudgeFor, nudgeLabel, useBenchView, type NudgeName } from '../benchAxes'
 import { useHeldPoints } from '../shell/HeldBar'
 
@@ -142,7 +146,8 @@ export function MoreBody({ onClose }: { onClose?: () => void } = {}): JSX.Elemen
   const points = useHeldPoints()
   const w = useWorkshop.getState
   if (!shard) return null
-  const held = selection.length > 0 || partSel.length > 0 || faceHeld
+  const look = isLook(tool)
+  const held = !look && (selection.length > 0 || partSel.length > 0 || faceHeld)
   const stacked = stackedSpots(shard)
   // One point, however many vertices share it (two stamps touching at a corner).
   const one = points === 1 && partSel.length === 0 ? selection[0] : null
@@ -189,10 +194,10 @@ export function MoreBody({ onClose }: { onClose?: () => void } = {}): JSX.Elemen
               <Key icon={ClipboardPaste} label="CLEAR CLIPBOARD" title={`Let the ${clipWords} go; PASTE goes with them`} danger onClick={() => w().clearClip()} />
             </>
           )}
-          <Key icon={Waypoints} label="ALL" title={tool === 'select' ? `Every one of the ${w().selectKind}` : 'Every point and every placed object'} aria="Select everything" disabled={shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0} onClick={() => w().selectAll()} />
+          {!look && <Key icon={Waypoints} label="ALL" title={tool === 'select' ? `Every one of the ${w().selectKind}` : 'Every point and every placed object'} aria="Select everything" disabled={shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0} onClick={() => w().selectAll()} />}
           {tool === 'paint' && <Key icon={Pipette} label="TAKE COLOR" title="The next tap takes the color of the point or face it meets" aria="Take a color with the next tap" onClick={() => { w().setPaintTake(true); onClose?.() }} />}
           <Key icon={Globe} label="COLOR ALL" title="The color in hand onto every vertex and every face in the object" aria="Color everything" disabled={shard.vertices.length === 0} onClick={() => w().colorAll(w().color)} />
-          {stacked.spots > 0 && (
+          {stacked.spots > 0 && !(look && selection.length >= 2) && (
             <Key icon={Merge} label={`WELD ${stacked.spots}`} title={selection.length >= 2 ? `Fold the selected points that stand on one spot into one (${stacked.points} points share ${stacked.spots} spot${stacked.spots === 1 ? '' : 's'})` : `Fold every point standing on another into one (${stacked.points} points share ${stacked.spots} spot${stacked.spots === 1 ? '' : 's'}); faces that disagree on color keep their own`} aria={selection.length >= 2 ? 'Weld the selected stacked points' : 'Weld every stacked point'} onClick={() => w().weld()} />
           )}
         </div>

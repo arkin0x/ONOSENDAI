@@ -48,7 +48,7 @@ const WALL_OPACITY = 0.25
  *
  * Over a shard face: the same color blend, but the alpha under it is left as
  * it was. The face's alpha is its tag, the thing that keeps the bloom off it
- * (Scene.tsx WorldBloom), and ordinary blending overwrote it with the box's
+ * (worldBloom.tsx WorldBloom), and ordinary blending overwrote it with the box's
  * own opacity: the bloom then saw a white face as light and blew it out into
  * a glowing blob wherever the box covered it, which is exactly where your own
  * avatar always sits (arkinox, 2026-10-12). The face still takes the box's

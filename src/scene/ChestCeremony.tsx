@@ -13,7 +13,7 @@
  *   - the glints: a few dozen points of light at the gold inside, each
  *     twinkling on its own clock, drawn with the shared glow sprite
  *     (lib/glow.ts). Points are seen by the scene's bloom and faces are not
- *     (Scene.tsx WorldBloom), so the gold flares without the frame swelling;
+ *     (worldBloom.tsx WorldBloom), so the gold flares without the frame swelling;
  *   - the rain: glyphs of the wordmark (lib/decode.ts GLYPHS) rising from
  *     the mouth, flickering until they resolve, then fading. One draw call,
  *     their motion worked in the vertex shader, as BurstLines works its.

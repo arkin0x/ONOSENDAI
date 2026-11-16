@@ -51,10 +51,15 @@ describe('the scene uses it', () => {
   it('asks for the budget\'s samples, not the library\'s default of 8', () => {
     expect(scene).toMatch(/<EffectComposer [^>]*multisampling=\{COMPOSER_SAMPLES\}/)
   })
+  // The composer's buffer settings live with the bloom, shared with the workshop's LOOK (worldBloom.tsx).
+  const bloom = fs.readFileSync(path.resolve(__dirname, '../worldBloom.tsx'), 'utf8')
+  const budget = fs.readFileSync(path.resolve(__dirname, '../composerBudget.ts'), 'utf8')
   it('gives the second buffer no samples, since it only takes a full-screen pass', () => {
-    expect(scene).toMatch(/composer\.outputBuffer\.samples = 0/)
+    expect(bloom).toMatch(/composer\.outputBuffer\.samples = 0/)
+    expect(scene).toMatch(/<EffectComposer ref=\{resolveColourOnly\}/)
   })
   it('keeps the sample count outside the render, so no render makes a new composer', () => {
-    expect(scene).toMatch(/^const COMPOSER_SAMPLES = /m)
+    expect(budget).toMatch(/^export const COMPOSER_SAMPLES = /m)
+    expect(scene).toMatch(/import \{ COMPOSER_SAMPLES \} from '\.\/composerBudget'/)
   })
 })

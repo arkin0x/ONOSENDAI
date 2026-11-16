@@ -5530,7 +5530,8 @@ export const useShards = create<ShardsState>((set, get) => {
         if (!h.chestId) return null
         const chest = discovered[h.chestId] ?? get().mine.find((d) => d.eventId === h.chestId)
         const name = chest?.chest?.name ?? ''
-        const place = chest ? { lookupId: chest.lookupId, bagId: chest.bagId, at: { x: chest.at.x.toString(), y: chest.at.y.toString(), z: chest.at.z.toString() }, plane: chest.plane, height: chest.height } : placeOf(h)
+        // The find's own author, as the chest that revealed it named it (chests.ts revealedIn): its card's thread (lib/commentSubjects).
+        const place = chest ? { lookupId: chest.lookupId, bagId: chest.bagId, at: { x: chest.at.x.toString(), y: chest.at.y.toString(), z: chest.at.z.toString() }, plane: chest.plane, height: chest.height, author: h.author } : placeOf(h)
         return { from: { chestId: h.chestId, chestName: name }, place }
       }
       const inv = useInventory.getState()
@@ -5540,7 +5541,7 @@ export const useShards = create<ShardsState>((set, get) => {
       for (const id of eventIds) {
         const d = discovered[id] ? undefined : get().mine.find((x) => x.eventId === id)
         if (!d?.key || !d.inner || inv.has(id)) continue
-        added.push(inv.holdForged(d.inner as NostrEvent, d.key, { lookupId: d.lookupId, bagId: d.bagId, at: d.at, plane: d.plane, height: d.height }))
+        added.push(inv.holdForged(d.inner as NostrEvent, d.key, { lookupId: d.lookupId, bagId: d.bagId, at: d.at, plane: d.plane, height: d.height, author: me }))
       }
       // Taking an item opens nothing: the chest it opens waits for OPEN
       // (arkinox, 2026-10-26: "everything must be opened or taken manually").

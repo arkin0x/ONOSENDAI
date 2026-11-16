@@ -1,7 +1,7 @@
 /**
- * commentSubjects.ts: which thread an item's COMMENT opens, from every place
- * the item is listed (owner, 2026-11-15: "we should be able to comment on key
- * items we find and take").
+ * commentSubjects.ts: which thread a key item's INFO card opens, from every
+ * place the item is listed (owner, 2026-11-15: "we should be able to comment
+ * on key items we find and take"; 2026-11-16: INFO, with reactions too).
  *
  * One rule for every surface, so a comment made on a key item before it is
  * taken (its card in the world, its DISCOVERED NEARBY row, its row in an
@@ -22,7 +22,8 @@
  */
 
 import type { CommentSubject } from './comments'
-import { itemTargetOf } from './comments'
+import { itemKind, itemTargetOf } from './comments'
+import type { SocialTarget } from './social'
 import { itemLineage, type Hidden } from './hidden'
 import type { HeldItem } from './inventory'
 import type { Position } from './space'
@@ -138,4 +139,20 @@ export function subjectOfHeld(item: Pick<HeldItem, 'id' | 'type' | 'event' | 'pl
 
 function positionOfPlace(at: { x: string; y: string; z: string }): Position | null {
   try { return { x: BigInt(at.x), y: BigInt(at.y), z: BigInt(at.z) } } catch { return null }
+}
+
+/**
+ * What a reaction answers for a thread's item, and who else it tells: the
+ * same event the item card reacts to (SecretModal ItemCard), so reactions
+ * and comments sit together on every surface. Kind 7 is public and carries
+ * no words: the item's lineage id, its kind and its author by `p`, never the
+ * bag's address, its key or a key item's secret. The comment thread's public
+ * tags already pair that id and author with the bag, so a reaction says less
+ * than a comment does. A LIVE LINK (a public object) is reacted to as that
+ * object alone, without the hider (isForeignItem).
+ */
+export function reactionTargetOf(subject: CommentSubject): { target: SocialTarget; alsoTell: string[] } {
+  const t = subject.target
+  if (t?.id && t.public) return { target: { id: t.id, pubkey: t.pubkey, kind: t.kind, address: t.address }, alsoTell: [] }
+  return { target: { id: subject.itemId, pubkey: t?.pubkey ?? subject.author, kind: t?.kind ?? itemKind(subject.type), address: t?.address }, alsoTell: [subject.author] }
 }

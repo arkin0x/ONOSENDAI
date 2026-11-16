@@ -1,10 +1,13 @@
 /**
- * keyItemComments.test.tsx: COMMENT on key items you find and take (owner,
- * 2026-11-15: "we should be able to comment on key items we find and take").
- * Pressed for real: COMMENT in KEY ITEMS > MINE (each row's ACTIONS), on a
- * key item's DISCOVERED NEARBY row and its row in an opened chest. A comment
- * posted from MINE lands in the thread the item's card opens where it was
- * found, sealed under the same bag key; a thing in a room never gets the
+ * keyItemComments.test.tsx: INFO on key items you find and take, and the
+ * card it opens with the reactions and comments (owner, 2026-11-15: "we
+ * should be able to comment on key items we find and take"; 2026-11-16: "i
+ * want to be able to react to a key item too ... call the action button
+ * 'info'"). Pressed for real: INFO in KEY ITEMS > MINE (each row's ACTIONS),
+ * on a key item's DISCOVERED NEARBY row and its row in an opened chest. A
+ * comment posted from MINE lands in the thread the item's card opens where it
+ * was found, sealed under the same bag key; a reaction lands on the event the
+ * card reacts to, with nothing secret in it; a thing in a room never gets the
  * region key around it; during the tutorial it carries the no-broadcast tag
  * (signEvent). The relay is a mock that keeps what is published. No network.
  */
@@ -29,10 +32,10 @@ vi.mock('../../lib/relay', () => ({
   onCanonicalSignIn: () => () => {},
   signInFailed: () => false,
   publish: vi.fn(async (ev: { id: string; kind: number; tags: string[][] }) => { relay.published.push(ev); return { ok: true } }),
-  publishMany: vi.fn(async () => ({ ok: true })),
+  publishMany: vi.fn(async (_relays: string[], ev: { id: string; kind: number; tags: string[][] }) => { relay.published.push(ev); return { ok: true } }),
   publishLight: vi.fn(async () => true),
   query: vi.fn(async () => []),
-  queryAny: vi.fn(async () => []),
+  queryAny: vi.fn(async (_relays: string[], f: { kinds?: number[]; '#e'?: string[] }) => relay.published.filter((e) => (!f.kinds || f.kinds.includes(e.kind)) && (!f['#e'] || e.tags.some((t) => t[0] === 'e' && f['#e']!.includes(t[1]))))),
   queryAnyChecked: vi.fn(async () => ({ events: [], trouble: null })),
   queryChecked: vi.fn(async (f: { kinds?: number[]; '#A'?: string[] }) => ({
     events: relay.published.filter((e) => (!f.kinds || f.kinds.includes(e.kind)) && (!f['#A'] || f['#A'].includes(e.tags.find((t) => t[0] === 'A')?.[1] ?? ''))),
@@ -62,6 +65,8 @@ import { InventoryPanel } from '../InventoryPanel'
 import { SecretModal } from '../SecretModal'
 import { ChestContents } from '../ItemRows'
 import { Row } from '../NearbyLootModal'
+import { GUIDE_NO_THREAD, IN_YOUR_ITEMS, KEY_ITEM_LABEL, KeyItemModal, NOWHERE_NO_THREAD } from '../KeyItemInfo'
+import { subjectOfHidden } from '../../lib/commentSubjects'
 import type { NearbyItem } from '../../hooks/useNearbyLoot'
 
 const hiderSk = generateSecretKey()
@@ -105,6 +110,14 @@ async function mineActions(): Promise<Mounted> {
   return m
 }
 
+/** The six one-tap reactions on the open card. */
+const reactButtons = (m: Mounted): Host[] => m.all().filter((h) => h.type === 'button' && String(h.props.className ?? '').includes('reactions__btn'))
+/** Tap one of them. */
+async function react(m: Mounted, i: number): Promise<void> {
+  ;(reactButtons(m)[i].props.onClick as () => void)()
+  await settled(30)
+}
+
 const publicTags = (e: { tags: string[][] }): string[][] => e.tags.filter((t) => t[0] !== 'encrypted')
 
 let open: Mounted[] = []
@@ -124,13 +137,23 @@ afterEach(async () => {
 })
 
 describe('KEY ITEMS > MINE', () => {
-  it('each key row\'s ACTIONS has COMMENT, which opens the composer and the comments on it', async () => {
+  it('each key row\'s ACTIONS has INFO, which opens the key item card: its name, who left it, reactions and the comments on it', async () => {
     const { found } = await silverKey()
     hold(found)
     const m = keep(await mineActions())
-    expect(m.buttons(/^COMMENT$/)).toHaveLength(1)
-    await m.press(/^COMMENT$/)
+    expect(m.buttons(/^INFO$/)).toHaveLength(1)
+    expect(m.buttons(/^COMMENT$/)).toHaveLength(0)
+    const explains = m.buttons(/^EXPLAIN$/).length
+    await m.press(/^INFO$/)
     await settled(30)
+    expect(m.says(KEY_ITEM_LABEL)).toBe(true)
+    expect(m.says('Silver Key')).toBe(true)
+    expect(m.says('Left by')).toBe(true)
+    expect(m.says('Forged it and hid it.')).toBe(true)
+    expect(m.says(IN_YOUR_ITEMS)).toBe(true)
+    expect(m.says('Reactions')).toBe(true)
+    expect(reactButtons(m)).toHaveLength(6)
+    expect(m.buttons(/^EXPLAIN$/)).toHaveLength(explains + 1)
     expect(m.says('Comments')).toBe(true)
     expect(m.all().find((h) => h.type === 'textarea')?.props.placeholder).toBe('Say something to the author')
     expect(m.buttons(/^POST$/)).toHaveLength(1)
@@ -141,7 +164,7 @@ describe('KEY ITEMS > MINE', () => {
     const { found, regionKey, secretHex } = await silverKey()
     hold(found)
     const m = keep(await mineActions())
-    await m.press(/^COMMENT$/)
+    await m.press(/^INFO$/)
     await settled(30)
     await post(m, 'from my items')
     expect(relay.published).toHaveLength(1)
@@ -178,7 +201,7 @@ describe('KEY ITEMS > MINE', () => {
     const off = holdBroadcastWhile(() => true)
     try {
       const m = keep(await mineActions())
-      await m.press(/^COMMENT$/)
+      await m.press(/^INFO$/)
       await settled(30)
       await post(m, 'in the tutorial')
     } finally { off() }
@@ -195,7 +218,7 @@ describe('KEY ITEMS > MINE', () => {
     const inRoom = { ...found, lookupId: lookupIdOf(roomKey), keyHex: bytesToHex(roomKey) }
     hold(inRoom)
     const m = keep(await mineActions())
-    await m.press(/^COMMENT$/)
+    await m.press(/^INFO$/)
     await settled(30)
     expect(m.says('COMMENTS UNAVAILABLE')).toBe(true)
     expect(m.buttons(/^POST$/)).toHaveLength(0)
@@ -204,7 +227,7 @@ describe('KEY ITEMS > MINE', () => {
     // The room known here (its bag found here): its key, and the thread opens.
     useShards.setState({ discovered: { other: { ...inRoom, eventId: 'other', type: 'message', key: undefined } } })
     const again = keep(await mineActions())
-    await again.press(/^COMMENT$/)
+    await again.press(/^INFO$/)
     await settled(30)
     expect(again.says('COMMENTS UNAVAILABLE')).toBe(false)
     await post(again, 'behind the door')
@@ -212,13 +235,56 @@ describe('KEY ITEMS > MINE', () => {
     expect((await openComments([relay.published[0] as NostrEvent], roomKey)).get(relay.published[0].id)).toBe('behind the door')
   })
 
-  it('a key pasted from another device has no COMMENT: it was found nowhere', async () => {
+  it('a key pasted from another device opens INFO with no reactions or comments: it was found nowhere', async () => {
     const { found } = await silverKey()
     const row = { ...hold(found), source: 'pasted' as const, place: null }
     useInventory.setState({ items: { [row.id]: row } })
     const m = keep(await mineActions())
-    expect(m.buttons(/^COMMENT$/)).toHaveLength(0)
     expect(m.buttons(/^COPY$/)).toHaveLength(1)
+    await m.press(/^INFO$/)
+    await settled(30)
+    expect(m.says(NOWHERE_NO_THREAD)).toBe(true)
+    expect(m.says('Forged by')).toBe(true)
+    expect(reactButtons(m)).toHaveLength(0)
+    expect(m.buttons(/^POST$/)).toHaveLength(0)
+  })
+
+  it('a reaction from INFO lands on the event the card in the world reacts to, public, with nothing secret in it', async () => {
+    const { found, regionKey, secretHex } = await silverKey()
+    hold(found)
+    const m = keep(await mineActions())
+    await m.press(/^INFO$/)
+    await settled(30)
+    await react(m, 0)
+    expect(relay.published).toHaveLength(1)
+    const fromInfo = relay.published[0] as NostrEvent
+    expect(fromInfo.kind).toBe(7)
+    // The key item's lineage, its kind and its hider; never the bag's address.
+    expect(fromInfo.tags).toEqual(expect.arrayContaining([['e', found.eventId, '', HIDER], ['p', HIDER], ['k', '3340']]))
+    expect(fromInfo.tags.some((t) => t[0] === 'a' || t[0] === 'A')).toBe(false)
+    const out = JSON.stringify(fromInfo)
+    expect(out).not.toContain(secretHex)
+    expect(out).not.toContain(bytesToHex(regionKey))
+    expect(out).not.toContain(found.lookupId)
+    expect(out).not.toContain(found.key!.itemPubkey)
+    await m.unmount(); open = []
+
+    // The card where it was found counts it, and its own reaction carries the same public tags.
+    useShards.setState({ discovered: { [found.eventId]: found }, selectedSecret: found.eventId })
+    const card = keep(await mount(createElement(SecretModal)))
+    await settled(30)
+    expect(card.says('Reactions (1)')).toBe(true)
+    await react(card, 2)
+    expect(relay.published).toHaveLength(2)
+    const fromCard = relay.published[1] as NostrEvent
+    const kept = (e: NostrEvent): string[][] => e.tags.filter((t) => t[0] !== 'client')
+    expect(kept(fromCard)).toEqual(kept(fromInfo))
+
+    // And INFO shows both, with the comment thread under them.
+    const again = keep(await mineActions())
+    await again.press(/^INFO$/)
+    await settled(30)
+    expect(again.says('Reactions (2)')).toBe(true)
   })
 })
 
@@ -232,21 +298,21 @@ describe('before TAKE', () => {
     .flatMap((c) => (typeof c !== 'string' && c.props.className === 'nearby__door' ? c.children : [c]))
     .map((c) => textOf(c as Host))
 
-  it('DISCOVERED NEARBY: COMMENT beside TAKE and VIEW, and still there once taken', async () => {
+  it('DISCOVERED NEARBY: INFO beside TAKE and VIEW, and still there once taken', async () => {
     const { found } = await silverKey()
     useShards.setState({ discovered: { [found.eventId]: found } })
     const r = keep(await nearby(found))
-    expect(acts(r)).toEqual(['TAKE', 'COMMENT', 'VIEW'])
-    await r.press(/^COMMENT$/)
+    expect(acts(r)).toEqual(['TAKE', 'INFO', 'VIEW'])
+    await r.press(/^INFO$/)
     await settled(30)
     expect(r.all().find((h) => h.type === 'textarea')?.props.placeholder).toBe('Say something to the author')
     await r.unmount(); open = []
     hold(found)
     const after = keep(await nearby(found))
-    expect(acts(after)).toEqual(['COMMENT', 'VIEW'])
+    expect(acts(after)).toEqual(['INFO', 'VIEW'])
   })
 
-  it('DISCOVERED NEARBY: nothing a tutorial guide sealed has COMMENT', async () => {
+  it('DISCOVERED NEARBY: a key a tutorial guide sealed opens INFO with one line and no reactions or comments', async () => {
     const { found } = await silverKey()
     // A guide key of its own: one staged stays a guide key for the visit (guideBags).
     const staged = finalizeEvent({ kind: 33330, created_at: T, tags: [['d', 'x']], content: '' }, generateSecretKey()) as NostrEvent
@@ -254,24 +320,42 @@ describe('before TAKE', () => {
     const guided = { ...found, author: staged.pubkey }
     useShards.setState({ discovered: { [found.eventId]: guided } })
     const r = keep(await nearby(guided))
-    expect(r.buttons(/^COMMENT$/)).toHaveLength(0)
+    expect(acts(r)).toEqual(['TAKE', 'INFO', 'VIEW'])
+    await r.press(/^INFO$/)
+    await settled(30)
+    expect(r.says(GUIDE_NO_THREAD)).toBe(true)
+    expect(r.says('the tutorial')).toBe(true)
+    expect(reactButtons(r)).toHaveLength(0)
+    expect(r.buttons(/^POST$/)).toHaveLength(0)
+    expect(r.all().some((h) => h.type === 'textarea')).toBe(false)
+    expect(relay.published).toHaveLength(0)
   })
 
-  it('in an opened chest: the key item\'s row has COMMENT beside TAKE', async () => {
+  it('the card itself never offers a thread for a key marked as a guide\'s, even handed one', async () => {
+    const { found } = await silverKey()
+    const subject = subjectOfHidden(found)!
+    const r = keep(await mount(createElement(KeyItemModal, { info: { id: found.eventId, event: found.inner as NostrEvent, key: found.key!, forger: HIDER, hider: HIDER, guide: true, subject }, onClose: () => undefined })))
+    await settled(30)
+    expect(r.says(GUIDE_NO_THREAD)).toBe(true)
+    expect(reactButtons(r)).toHaveLength(0)
+    expect(r.buttons(/^POST$/)).toHaveLength(0)
+  })
+
+  it('in an opened chest: the key item\'s row has INFO beside TAKE', async () => {
     const { found } = await silverKey()
     const revealed = { ...found, chestId: 'chest-1' }
     useShards.setState({ discovered: { [found.eventId]: revealed } })
     const entry = { id: found.eventId, event: found.inner as NostrEvent, verified: true, body: { type: 'key' as const, key: found.key } }
     const r = keep(await mount(createElement(ChestContents, { entries: [entry], from: { chestId: 'chest-1', chestName: 'Box' }, place: { lookupId: found.lookupId, bagId: 'bag-1', at: { x: AT.x.toString(), y: AT.y.toString(), z: AT.z.toString() }, plane: 0, height: HEIGHT, author: HIDER } })))
-    expect(r.buttons(/^COMMENT$/)).toHaveLength(1)
+    expect(r.buttons(/^INFO$/)).toHaveLength(1)
     expect(r.buttons(/^TAKE$/)).toHaveLength(1)
-    await r.press(/^COMMENT$/)
+    await r.press(/^INFO$/)
     await settled(30)
     await post(r, 'in the chest')
     // TAKE: the row it is held under names the same thread.
     await r.press(/^TAKE ALL$/)
     const m = keep(await mineActions())
-    await m.press(/^COMMENT$/)
+    await m.press(/^INFO$/)
     await settled(30)
     expect(m.says('in the chest')).toBe(true)
   })

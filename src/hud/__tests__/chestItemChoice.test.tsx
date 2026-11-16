@@ -271,7 +271,8 @@ describe('+ ITEM: FROM MY ITEMS or FORGE NEW', () => {
     const m = await openPlaced()
     await m.press('+ ITEM')
     await m.press('FORGE NEW')
-    const npub = (): string => String(m.all().find((h) => h.type === 'button' && String(h.props.title ?? '').startsWith('npub'))?.props.title)
+    // The item's npub, a tap to copy (ui/CopyValue), whole in its tooltip's first line.
+    const npub = (): string => String(m.all().find((h) => (h.type === 'button' || h.props.role === 'button') && String(h.props.title ?? '').startsWith('npub'))?.props.title).split('\n')[0]
     const first = npub()
     expect(first).toMatch(/^npub1/)
     await type(m, 'Item name', 'Dropped Key')

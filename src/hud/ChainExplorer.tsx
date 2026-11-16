@@ -50,6 +50,7 @@ import { ItemIcon } from './ItemIcon'
 import { findLcaHeight } from 'cyberspace-core'
 import { keyStateForAction, useSecrets } from '../store/useSecrets'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
+import { CopyValue } from './ui/CopyValue'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { actionKind, actionLabel } from '../lib/events'
@@ -347,17 +348,18 @@ function ChainExplorerChip(): JSX.Element {
 
           {/* One field per line, labelled in words, so the block stays narrow
               rather than running a wide C … S … row across the scene. */}
-          <div className="explorer__detail" title={action.coordHex}>
-            <span className="explorer__key">coord </span>{shortHex(action.coordHex, 8, 6)}
+          {/* Each value a tap to copy, the whole of it however it is shown (owner, 2026-11-16). */}
+          <div className="explorer__detail">
+            <span className="explorer__key">coord </span><CopyValue value={action.coordHex} shown={shortHex(action.coordHex, 8, 6)} />
           </div>
-          <div className="explorer__detail" title={action.sector}>
-            <span className="explorer__key">sector </span>{action.sector}
+          <div className="explorer__detail">
+            <span className="explorer__key">sector </span><CopyValue value={action.sector} />
           </div>
           {/* Inside a game the coord above is where the identity entered from
               and still is; this is where the action puts it in the game. */}
           {(action.role === 'enter' || action.role === 'virtual') && action.declared && (
-            <div className="explorer__detail explorer__detail--game" title={action.declared.coordHex}>
-              <span className="explorer__key">in game </span>{shortHex(action.declared.coordHex, 8, 6)}
+            <div className="explorer__detail explorer__detail--game">
+              <span className="explorer__key">in game </span><CopyValue value={action.declared.coordHex} shown={shortHex(action.declared.coordHex, 8, 6)} />
             </div>
           )}
           {/* Not a game's: what the action itself claimed, where that is not
@@ -365,18 +367,18 @@ function ChainExplorerChip(): JSX.Element {
               first broken one on, where you are frozen at the last valid
               position (arkinox, 2026-10-07). */}
           {action.role !== 'enter' && action.role !== 'virtual' && action.declared && (
-            <div className="explorer__detail explorer__detail--claimed" title={action.declared.coordHex}>
-              <span className="explorer__key">claimed </span>{shortHex(action.declared.coordHex, 8, 6)}
+            <div className="explorer__detail explorer__detail--claimed">
+              <span className="explorer__key">claimed </span><CopyValue value={action.declared.coordHex} shown={shortHex(action.declared.coordHex, 8, 6)} />
             </div>
           )}
           {action.game && (
-            <div className="explorer__detail explorer__detail--game" title={nip19.npubEncode(action.game.pubkey)}>
-              <span className="explorer__key">game </span>{shortHex(nip19.npubEncode(action.game.pubkey), 10, 6)}
+            <div className="explorer__detail explorer__detail--game">
+              <span className="explorer__key">game </span><CopyValue value={nip19.npubEncode(action.game.pubkey)} shown={shortHex(nip19.npubEncode(action.game.pubkey), 10, 6)} />
             </div>
           )}
           {action.proofHash && (
-            <div className="explorer__detail" title={action.proofHash}>
-              <span className="explorer__key">proof </span>{shortHex(action.proofHash, 8, 6)}
+            <div className="explorer__detail">
+              <span className="explorer__key">proof </span><CopyValue value={action.proofHash} shown={shortHex(action.proofHash, 8, 6)} />
             </div>
           )}
           <button className="explorer__comments" {...noCallout}

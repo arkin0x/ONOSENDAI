@@ -20,6 +20,7 @@ import { useToast } from '../store/useToast'
 import { mutedBy, type Tag } from '../lib/muteList'
 import { shortHex } from '../lib/time'
 import { ModalClose } from './ui/ModalClose'
+import { CopyValue } from './ui/CopyValue'
 
 /** The pubkeys and item ids one half names, in the order written. */
 function entries(tags: readonly Tag[], self: string): { pubkeys: string[]; items: string[] } {
@@ -80,7 +81,7 @@ export function MuteListModal({ onClose }: { onClose: () => void }): JSX.Element
           ))}
           {things.map((id) => (
             <li key={id} className="mutes__row">
-              <span className="mutes__item" title={id}>ITEM {shortHex(id, 8, 6)}</span>
+              <span className="mutes__item">ITEM <CopyValue value={id} shown={shortHex(id, 8, 6)} /></span>
               {isPublic(id, pub.items) && <span className="tag" title="Written in public, by this app or another">PUBLIC</span>}
               <button className="identity__change" disabled={busy} onClick={async () => refused(await useMutes.getState().unmuteItem(id))} title="Remove it from your mute list">
                 <Undo2 size={10} strokeWidth={2.25} aria-hidden /> UNMUTE

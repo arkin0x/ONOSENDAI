@@ -44,6 +44,7 @@ import { useRoomKeys } from '../store/useKeyring'
 import { Explanation } from './Explanation'
 import { useEscape } from '../hooks/useEscape'
 import { ModalClose } from './ui/ModalClose'
+import { CopyValue } from './ui/CopyValue'
 
 const SORTS: Array<[SecretsSort, string]> = [['recent', 'MOST RECENT'], ['volume', 'LARGEST']]
 
@@ -282,6 +283,8 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                 return (
                   <Fragment key={k.lookupId}>
                   <li className="secrets__row">
+                    {/* The id beside the row's button, not in it: a tap on it copies and does not fly there. */}
+                    <div className="secrets__main">
                     <button className="secrets__go" onClick={() => go(k)} title="Look at this region">
                       <span className="secrets__where">
                         <ItemIcon type="key" size={11} />
@@ -294,8 +297,9 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                         {k.plane === 1 ? 'ideaspace' : 'dataspace'} · {k.source === 'cloud' ? 'bought' : k.source === 'hop' ? 'crossed' : k.source === 'scanmode' ? 'scanned' : 'opened'} · {formatAgo(k.at, now)}
                         {found > 0 && <span className="secrets__found"> · {found} found</span>}
                       </span>
-                      <span className="secrets__id">{k.lookupId.slice(0, 16)}…</span>
                     </button>
+                    <CopyValue className="secrets__id" value={k.lookupId} shown={`${k.lookupId.slice(0, 16)}…`} />
+                    </div>
                     <button
                       className="secrets__scan"
                       disabled={scanning === k.lookupId}
@@ -363,6 +367,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                 return (
                   <Fragment key={p.id}>
                   <li className="secrets__row">
+                    <div className="secrets__main">
                     <button className="secrets__go" onClick={() => look(p)} title="Look at this place">
                       <span className="secrets__where">
                         <MapPin size={11} strokeWidth={2.25} aria-hidden />
@@ -373,8 +378,9 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                         {p.plane === 1 ? 'ideaspace' : 'dataspace'} · stood here {formatAgo(p.at, now)}
                         {p.first < p.at && ` · first ${formatAgo(p.first, now)}`}
                       </span>
-                      <span className="secrets__id">{p.keys[0]?.slice(0, 16)}…</span>
                     </button>
+                    {p.keys[0] && <CopyValue className="secrets__id" value={p.keys[0]} shown={`${p.keys[0].slice(0, 16)}…`} />}
+                    </div>
                     <button
                       className="secrets__scan"
                       disabled={scanning === p.id}
@@ -566,7 +572,7 @@ function RoomKeys(): JSX.Element | null {
         {rooms.map((r) => (
           <li key={r.lookupId} className="secrets__row">
             <span className="secrets__where">{r.kind === 'room' && r.name ? r.name : 'a room'}</span>
-            <span className="secrets__id">{r.lookupId.slice(0, 16)}…</span>
+            <CopyValue className="secrets__id" value={r.lookupId} shown={`${r.lookupId.slice(0, 16)}…`} />
           </li>
         ))}
       </ul>

@@ -22,6 +22,7 @@ import { Reactions } from './Reactions'
 import { ActionComments } from './Comments'
 import { Stacked, useModalStack } from './modalStack'
 import { ModalClose } from './ui/ModalClose'
+import { CopyValue } from './ui/CopyValue'
 
 export function ActionModal(): JSX.Element | null {
   const action = useSocialUi((s) => s.action)
@@ -54,15 +55,16 @@ export function ActionModal(): JSX.Element | null {
             <ProfileTap pubkey={action.pubkey}><ProfilePic pubkey={action.pubkey} size={40} /></ProfileTap>
             <div className="secret__person-text">
               <ProfileTap pubkey={action.pubkey} className="secret__name">{profileLabel(profile, npub)}{mine ? ' (you)' : ''}</ProfileTap>
-              <span className="secret__npub" title={npub}>{shortHex(npub, 14, 8)}</span>
+              <CopyValue className="secret__npub" value={npub} shown={shortHex(npub, 14, 8)} />
             </div>
           </div>
         </div>
 
         <dl className="secret__facts">
           <div><dt>When</dt><dd title={formatStamp(action.createdAt)}>{formatAgo(action.createdAt)}</dd></div>
-          <div><dt>Coord</dt><dd title={action.coordHex}>{shortHex(action.coordHex, 8, 6)}</dd></div>
-          <div><dt>Sector</dt><dd title={action.sector}>{action.sector}</dd></div>
+          {/* Each a tap to copy, the whole value whatever is shown (owner, 2026-11-16). */}
+          <div><dt>Coord</dt><dd><CopyValue value={action.coordHex} shown={shortHex(action.coordHex, 8, 6)} /></dd></div>
+          <div><dt>Sector</dt><dd><CopyValue value={action.sector} /></dd></div>
         </dl>
 
         {unpublished && (

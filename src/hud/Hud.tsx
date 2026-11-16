@@ -55,6 +55,8 @@ import { useCover } from '../hooks/useCover'
 import { SpeakeasyLine } from './SpeakeasyLine'
 import { appVersion } from '../lib/tv/upgradeAnnounce'
 import { STRAYLIGHT_INVITE } from '../tutorial/straylight'
+import { CopyValue } from './ui/CopyValue'
+import { copyText } from '../lib/copyText'
 
 /** The menu footer's version: VERSION 2.1, or the build stamp for a build with no simple version. */
 const SHOWN_VERSION = ((v) => (v ? `VERSION ${v}` : __ONOSENDAI_VERSION__))(appVersion())
@@ -93,10 +95,11 @@ const COPIED_MS = 1200
 function useCopied(): [string | null, (key: string, text: string) => void] {
   const [copied, setCopied] = useState<string | null>(null)
   const copy = (key: string, text: string): void => {
-    navigator.clipboard?.writeText(text).then(
-      () => { setCopied(key); window.setTimeout(() => setCopied((c) => (c === key ? null : c)), COPIED_MS) },
-      () => { /* no clipboard here: the value stays selectable */ },
-    )
+    // The clipboard, or the old copy command where it is refused (lib/copyText).
+    void copyText(text).then((ok) => {
+      if (ok) { setCopied(key); window.setTimeout(() => setCopied((c) => (c === key ? null : c)), COPIED_MS) }
+      // Neither worked: the value stays selectable.
+    })
   }
   return [copied, copy]
 }
@@ -124,7 +127,7 @@ function IdentityPanel(): JSX.Element {
         <div className="identity__who-text">
           <span className="identity__name">{name}</span>
           <span className="identity__signer">{SIGNER_LABEL[signerKind] ?? signerKind}</span>
-          <span className="secret__npub" title={identity.npub}>{shortHex(identity.npub, 14, 8)}</span>
+          <CopyValue className="secret__npub" value={identity.npub} shown={shortHex(identity.npub, 14, 8)} />
         </div>
         <div className="identity__acts">
           <button className="identity__change" onClick={() => useProfileView.getState().edit()}>PROFILE</button>

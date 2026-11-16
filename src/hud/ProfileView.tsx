@@ -29,6 +29,7 @@ import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { EventData } from './EventData'
 import { BlockButton } from './BlockButton'
 import { ModalClose } from './ui/ModalClose'
+import { copyText } from '../lib/copyText'
 
 /** How long to wait on the relays for the kind 0, as the editor does. */
 const FETCH_WAIT_MS = 5000
@@ -91,9 +92,12 @@ function ProfileCard({ pubkey, onClose }: { pubkey: string; onClose: () => void 
   const mine = pubkey === me
 
   const copy = (what: string, value: string): void => {
-    navigator.clipboard?.writeText(value).catch(() => {})
-    setCopied(what)
-    window.setTimeout(() => setCopied((c) => (c === what ? null : c)), COPIED_MS)
+    // The clipboard, or the old copy command where it is refused (lib/copyText).
+    void copyText(value).then((ok) => {
+      if (!ok) return
+      setCopied(what)
+      window.setTimeout(() => setCopied((c) => (c === what ? null : c)), COPIED_MS)
+    })
   }
 
   return (

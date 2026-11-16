@@ -37,6 +37,7 @@ import { GO_LIVE_BODY } from './TouchControls'
 import { useCover } from '../hooks/useCover'
 import { startTvInPlace } from '../store/useTv'
 import { ModalClose } from './ui/ModalClose'
+import { CopyValue } from './ui/CopyValue'
 
 /** The kinds the Built on Nostr chapter lists (onosendai/kinds.md). */
 const KINDS: Array<[number, string]> = [
@@ -113,7 +114,7 @@ function Verify({ waiting }: { waiting: boolean }): JSX.Element {
   if (!check) return <div className="demo__panel"><div className="demo__note">No signed event yet.</div></div>
   return (
     <div className="demo__panel demo__checks">
-      <div className={check.idOk ? 'is-ok' : 'is-bad'}>{check.idOk ? '✓' : '✗'} ID = sha256(fields) <code>{check.id.slice(0, 16)}…</code></div>
+      <div className={check.idOk ? 'is-ok' : 'is-bad'}>{check.idOk ? '✓' : '✗'} ID = sha256(fields) <code><CopyValue value={check.id} shown={`${check.id.slice(0, 16)}…`} /></code></div>
       <div className={check.sigOk ? 'is-ok' : 'is-bad'}>{check.sigOk ? '✓' : '✗'} Schnorr signature by your key <code>{check.sig.slice(0, 16)}…</code></div>
     </div>
   )
@@ -155,9 +156,9 @@ function Chain(): JSX.Element {
   const ok = prev === before.id
   return (
     <div className="demo__panel demo__checks">
-      <div>newest <code>{head.id.slice(0, 16)}…</code></div>
-      <div>names previous <code>{(prev ?? 'none').slice(0, 16)}…</code></div>
-      <div className={ok ? 'is-ok' : 'is-bad'}>{ok ? '✓' : '✗'} the event before it <code>{before.id.slice(0, 16)}…</code></div>
+      <div>newest <code><CopyValue value={head.id} shown={`${head.id.slice(0, 16)}…`} /></code></div>
+      <div>names previous <code>{prev ? <CopyValue value={prev} shown={`${prev.slice(0, 16)}…`} /> : 'none'}</code></div>
+      <div className={ok ? 'is-ok' : 'is-bad'}>{ok ? '✓' : '✗'} the event before it <code><CopyValue value={before.id} shown={`${before.id.slice(0, 16)}…`} /></code></div>
     </div>
   )
 }

@@ -41,6 +41,7 @@ import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { Reactions } from './Reactions'
 import { ModalClose } from './ui/ModalClose'
 import { Stacked, useModalStack } from './modalStack'
+import { CopyValue } from './ui/CopyValue'
 
 /** The action's word on every key item row (owner, 2026-11-16). */
 export const INFO = 'INFO'
@@ -107,7 +108,7 @@ function Person({ pubkey, label, note }: { pubkey: string; label: string; note?:
         <div className="secret__person-text">
           <ProfileTap pubkey={pubkey} className="secret__name">{profileLabel(profile, npub)}{pubkey === me ? ' (you)' : ''}</ProfileTap>
           {profile?.nip05 && <span className="secret__nip05">{profile.nip05.replace(/^_@/, '')}</span>}
-          <span className="secret__npub" title={npub}>{shortHex(npub, 14, 8)}</span>
+          <CopyValue className="secret__npub" value={npub} shown={shortHex(npub, 14, 8)} />
         </div>
       </div>
       {note && <p className="keyinfo__role">{note}</p>}

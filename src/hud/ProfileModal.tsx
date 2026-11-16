@@ -29,6 +29,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useProfiles } from '../store/useProfiles'
 import { useEscape } from '../hooks/useEscape'
 import { ModalClose } from './ui/ModalClose'
+import { CopyValue } from './ui/CopyValue'
 
 /** How long to wait on the general relays for the current kind 0 and server list. */
 const FETCH_WAIT_MS = 5000
@@ -194,7 +195,7 @@ export function ProfileModal({ onClose }: { onClose: () => void }): JSX.Element 
           <div className="login__current-text">
             <span className="secret__name">{(fields.display_name ?? fields.name ?? '').trim() || 'Unnamed'}</span>
             <span className="login__kind">{loaded ? (existing ? 'EDITING YOUR PROFILE' : 'NO PROFILE YET') : 'READING THE RELAYS…'}</span>
-            <span className="secret__npub" title={identity.npub}>{shortHex(identity.npub, 14, 8)}</span>
+            <CopyValue className="secret__npub" value={identity.npub} shown={shortHex(identity.npub, 14, 8)} />
           </div>
         </div>
 

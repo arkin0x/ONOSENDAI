@@ -55,6 +55,8 @@ import { activateAgent } from '../store/followAgent'
 import { DmInboxSetup, useMyDmInbox } from './DmInboxSetup'
 import { Explanation } from './Explanation'
 import { ProfileBadge } from './ProfileBadge'
+import { copyText } from '../lib/copyText'
+import { CopyValue } from './ui/CopyValue'
 
 /** How long a tapped button says COPIED before its label returns. */
 const COPIED_MS = 1200
@@ -74,7 +76,7 @@ export function AgentsPanel(): JSX.Element {
   const ready = /^[0-9a-f]{64}$/.test(identity.pubkey)
   const { agents, status, refresh } = useMyAgents(identity.pubkey)
   const myInbox = useMyDmInbox(identity.pubkey, ready)
-  // 'invite', or the pubkey whose npub was copied last.
+  // 'invite' while its COPY says COPIED (an agent's npub copies itself, ui/CopyValue).
   const [copied, setCopied] = useState<string | null>(null)
   // ACTIVATE: the pasted npub, whether it is running, what it said, and whether one went this visit.
   const [paste, setPaste] = useState('')
@@ -89,10 +91,10 @@ export function AgentsPanel(): JSX.Element {
   const unread = useAgentUnread()
 
   const copy = (key: string, text: string): void => {
-    navigator.clipboard?.writeText(text).then(
-      () => { setCopied(key); window.setTimeout(() => setCopied((c) => (c === key ? null : c)), COPIED_MS) },
-      () => { /* no clipboard here: nothing to report */ },
-    )
+    // The clipboard, or the old copy command where it is refused (lib/copyText).
+    void copyText(text).then((ok) => {
+      if (ok) { setCopied(key); window.setTimeout(() => setCopied((c) => (c === key ? null : c)), COPIED_MS) }
+    })
   }
 
   const activate = (): void => {
@@ -172,9 +174,7 @@ export function AgentsPanel(): JSX.Element {
           return (
             <li key={pubkey} className="avatars__row agents__row">
               <ProfileBadge pubkey={pubkey} tappable />
-              <button className="copy agents__npub" onClick={() => copy(pubkey, npub)} title={`${npub}\nTap to copy`}>
-                {copied === pubkey ? 'COPIED' : shortHex(npub, 12, 6)}
-              </button>
+              <CopyValue className="agents__npub" value={npub} shown={shortHex(npub, 12, 6)} />
               <button
                 className="avatars__spectate agents__talk"
                 onClick={() => setTalking(pubkey)}

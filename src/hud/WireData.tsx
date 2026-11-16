@@ -30,7 +30,7 @@ import { shardRefusal } from '../lib/hidden'
 import { useCalibration } from '../lib/calibration'
 import { useCyberspace } from '../store/useCyberspace'
 import { discoveryKeyOf, positionOf, useShards, type DiscoveryKey, type MyDeployment } from '../store/useShards'
-import { CopyValue } from './EventData'
+import { CopyValue } from './ui/CopyValue'
 
 export type TestState = 'idle' | 'testing' | 'found' | 'missing' | 'refused' | 'unread' | 'wrongKey' | 'underived'
 
@@ -119,11 +119,11 @@ export function WireData({ dep, initialTest = 'idle', initialChecked = null }: {
       <dl className="eventdata__props" aria-label="On the wire">
         <div>
           <dt>lookup ID</dt>
-          <dd><CopyValue value={dep.lookupId} title="Tap to copy the lookup id: the d tag of the bag this is in" /></dd>
+          <dd><CopyValue className="eventdata__value" value={dep.lookupId} title="Tap to copy the lookup id: the d tag of the bag this is in" /></dd>
         </div>
         <div>
           <dt>coord</dt>
-          <dd><CopyValue value={coord} title={`Tap to copy the C coordinate\nx ${at.x}\ny ${at.y}\nz ${at.z}`} /></dd>
+          <dd><CopyValue className="eventdata__value" value={coord} title={`Tap to copy the C coordinate\nx ${at.x}\ny ${at.y}\nz ${at.z}`} /></dd>
         </div>
         <div>
           <dt>height</dt>

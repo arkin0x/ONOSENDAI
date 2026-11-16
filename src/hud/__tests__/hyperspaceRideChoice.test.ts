@@ -28,6 +28,8 @@ vi.mock('../../lib/hyperspace/station', async (o) => ({ ...(await o() as object)
 vi.mock('../../store/useHyperspace', async (o) => ({
   ...(await o() as object),
   getStopByHeight: (height: number) => ({ height, kind: 'port', merkleRoot: 'ab'.repeat(32), blockHash: 'cd'.repeat(32), coordExact: (5n << 200n) + 1n, coordApprox: (5n << 200n) + 1n }),
+  getBlockHash: () => 'cd'.repeat(32),
+  firstUnhashedHeight: () => null,
 }))
 // A server render reads a zustand store's initial state; here each hook reads the live state.
 vi.mock('zustand', async (importOriginal) => {

@@ -19,7 +19,7 @@ import {
   stepOrbitLimit,
   useDrawReach,
 } from '../buildZoom'
-import { CULL_REACH, fogFar, fogNear } from '../fog'
+import { CULL_REACH, fogFar, fogNear, type FogView } from '../fog'
 import { CAMERA_FAR, CAMERA_NEAR, FOV, ORBIT_MAX_DISTANCE } from '../camera'
 import { distanceShare, headlampReach, NEAR_SHARE, REACH_MAX } from '../headlamp'
 
@@ -28,13 +28,13 @@ const halfWidthAt = (distance: number, aspect: number): number => distance * Mat
 
 /** A SceneFog frame, as Scene.tsx runs it. */
 interface Fog { near: number; far: number; reach: number }
-function frame(f: Fog, distance: number, fromOrigin: number, base = false): Fog {
-  const far = fogFar(base, distance)
-  return { near: fogNear(base, distance), far, reach: nextReach(f.reach, far + fromOrigin) }
+function frame(f: Fog, distance: number, fromOrigin: number, view: FogView = 'orbit'): Fog {
+  const far = fogFar(view, distance)
+  return { near: fogNear(view, distance), far, reach: nextReach(f.reach, far + fromOrigin) }
 }
-const fresh = (): Fog => ({ near: fogNear(false, 26), far: fogFar(false, 26), reach: CULL_REACH })
+const fresh = (): Fog => ({ near: fogNear('orbit', 26), far: fogFar('orbit', 26), reach: CULL_REACH })
 /** The fog after the camera has held `distance` from its target and `fromOrigin` from the origin for a while. */
-const settled = (distance: number, fromOrigin: number, base = false): Fog => { let f = fresh(); for (let i = 0; i < 10; i++) f = frame(f, distance, fromOrigin, base); return f }
+const settled = (distance: number, fromOrigin: number, view: FogView = 'orbit'): Fog => { let f = fresh(); for (let i = 0; i < 10; i++) f = frame(f, distance, fromOrigin, view); return f }
 
 describe('how far the orbit pulls back', () => {
   it('is 96 cells outside BUILD at every zoom', () => {
@@ -94,19 +94,20 @@ describe('the fog never darkens what the camera looks at', () => {
   })
 
   it('in every mode at every zoom out to its limit, the target is well inside the unfogged range, and the fog black inside the reach', () => {
-    const modes: Array<{ name: string; limit: (e: number) => number; base: boolean }> = [
-      { name: 'HOP/VIEW', limit: (e) => orbitMaxDistance(false, e), base: false },
-      { name: 'BUILD', limit: (e) => orbitMaxDistance(true, e), base: false },
+    const modes: Array<{ name: string; limit: (e: number) => number; view: FogView }> = [
+      { name: 'HOP/VIEW', limit: (e) => orbitMaxDistance(false, e), view: 'orbit' },
+      { name: 'BUILD', limit: (e) => orbitMaxDistance(true, e), view: 'orbit' },
       // TV's shots stand 24 out at most, WALK's eye on the avatar; held to 64 to be sure.
-      { name: 'TV/WALK', limit: () => 64, base: true },
+      { name: 'TV', limit: () => 64, view: 'tv' },
+      { name: 'WALK', limit: () => 64, view: 'walk' },
     ]
     for (const m of modes) {
       for (let e = 0; e <= 6; e++) {
         for (let d = 0; d <= m.limit(e); d += 2) {
           for (const fromOrigin of [d, d + 24 * Math.sqrt(3)]) {
-            const f = settled(d, fromOrigin, m.base)
-            // At least 1.5 times as far as the target, and in the third-person views 40 cells more.
-            expect(f.near, `${m.name} 2^${e} at ${d}`).toBeGreaterThanOrEqual(d * 1.5 + (m.base ? 0 : 40) - 1e-6)
+            const f = settled(d, fromOrigin, m.view)
+            // At least 1.5 times as far as the target, and in the third-person views and WALK 40 cells more.
+            expect(f.near, `${m.name} 2^${e} at ${d}`).toBeGreaterThanOrEqual(d * 1.5 + (m.view === 'tv' ? 0 : 40) - 1e-6)
             expect(f.far).toBeLessThan(CAMERA_FAR)
             expect(f.far + fromOrigin).toBeLessThanOrEqual(f.reach + 1e-9)
             // At 2^0 in BUILD a 3 by 3 of 128 tiles' far corner (192 * sqrt 2 past the cursor, at most) is clear from

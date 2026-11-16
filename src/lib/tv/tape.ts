@@ -23,7 +23,7 @@ import { HIDDEN_KIND, OBJECT_KIND, heightHint, readBagContents } from '../hidden
 import { fromPayload } from 'sno-core/shards'
 import { parseHint } from '../hint'
 import { COMMENT_KIND, PLACEHOLDER, parseComment } from '../comments'
-import { AVATAR_KIND, avatarFromEvent } from '../avatar'
+import { AVATAR_KIND, avatarShard } from '../avatar'
 import { REACTION_KIND, parseReaction } from '../social'
 import type { Beat, TapeItem } from './director'
 import { cleanText } from './text'
@@ -154,7 +154,7 @@ export function itemOf(ev: NostrEvent): TapeItem | null {
   }
   if (ev.kind === AVATAR_KIND) {
     // An empty avatar clears it: nothing to show.
-    return avatarFromEvent(ev) ? { kind: 'avatar', ...base, event: ev } : null
+    return avatarShard(ev) ? { kind: 'avatar', ...base, event: ev } : null
   }
   if (ev.kind === REACTION_KIND) {
     const r = parseReaction(ev)

@@ -15,8 +15,9 @@
  * puts the dodecahedron back.
  */
 
+import { AVATAR_CONTENT_MAX, AVATAR_CONTENT_WARN, avatarContentBytes, verifyAvatar } from 'cyberspace-core'
 import { TICKS_PER_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
-import { keepOwnTable } from './carried'
+import { keepOwnTable, withoutCarried } from './carried'
 import { CLIENT_TAG } from './client'
 
 export const AVATAR_KIND = 11333
@@ -29,11 +30,41 @@ export function avatarTemplate(shard: ShardModel | null, createdAt: number): Ava
     kind: AVATAR_KIND,
     created_at: createdAt,
     // No `d`: a replaceable kind has no second key, and writing one would
-    // only invite a reader to filter on it. The client tag is here and not
-    // added at signing because the work is mined over these tags (client.ts).
+    // only invite a reader to filter on it. The client tag is written here,
+    // where a signer would add it anyway (client.ts).
     tags: shard ? [['name', shard.name], [...CLIENT_TAG]] : [[...CLIENT_TAG]],
     content: shard ? JSON.stringify(toPayload(shard)) : '',
   }
+}
+
+/**
+ * The content an avatar of this shard is published with: what came to you
+ * sealed is left out (an avatar is public, withoutCarried), as adopt signs it.
+ */
+export function avatarContent(shard: ShardModel): string {
+  return avatarTemplate(withoutCarried(shard), 0).content
+}
+
+/** Where an avatar's content stands against the size limit (spec 8.10). */
+export interface AvatarSize {
+  /** UTF-8 bytes of the content, as the limit counts them. */
+  bytes: number
+  /** Over the 128 KB size limit: no client draws it, so it is never signed. */
+  over: boolean
+  /** Within the limit but big enough that some remote signers (NIP-46) refuse it. */
+  warn: boolean
+}
+
+/** The content against the size limit and the size some remote signers refuse. */
+export function avatarSize(content: string): AvatarSize {
+  const bytes = avatarContentBytes(content)
+  const over = bytes > AVATAR_CONTENT_MAX
+  return { bytes, over, warn: !over && bytes > AVATAR_CONTENT_WARN }
+}
+
+/** Kilobytes as the AVATAR sheet shows them: 1 KB is 1,024 bytes, so the limit reads 128 KB. */
+export function avatarKb(bytes: number, round: (n: number) => number = Math.round): number {
+  return round(bytes / 1024)
 }
 
 /** The shard an avatar event carries, or null when it carries none or is not one. */
@@ -41,11 +72,37 @@ export function avatarFromEvent(ev: { kind: number; pubkey: string; content: str
   if (ev.kind !== AVATAR_KIND) return null
   if (!ev.content) return null
   try {
-    const shard = fromPayload(JSON.parse(ev.content), `avatar:${ev.pubkey}`)
-    return shard && keepOwnTable(shard, ev.pubkey)
+    const raw = JSON.parse(ev.content)
+    const shard = fromPayload(raw, `avatar:${ev.pubkey}`)
+    return shard && keepOwnTable(v1Eye(shard, raw), ev.pubkey)
   } catch {
     return null
   }
+}
+
+/**
+ * The shard an avatar event is drawn as: none for an empty content (the
+ * dodecahedron), none for one that is not an avatar every client draws
+ * (spec 8.10, verifyAvatar: the kind, the size limit, a readable payload).
+ * Tags are not read, so a nonce tag on an older avatar changes nothing.
+ */
+export function avatarShard(ev: { kind: number; pubkey: string; content: string; tags: string[][] }): ShardModel | null {
+  if (!ev.content) return null
+  if (!verifyAvatar(ev).ok) return null
+  return avatarFromEvent(ev)
+}
+
+/**
+ * An eye (lib/avatarEye.ts) is in its payload's own frame, as the vertices
+ * are. A version 1 payload's Z points the other way (DECK-0003 §2), and its
+ * vertices are read with it negated; its eye is put into the version 2 frame
+ * here, the one every other reader and writer of `extra` assumes, so a copy
+ * written back out as version 2 keeps its eye where it was.
+ */
+function v1Eye(shard: ShardModel, raw: unknown): ShardModel {
+  const eye = shard.extra?.eye
+  if ((raw as { v?: unknown } | null)?.v !== 1 || !Array.isArray(eye) || eye.length !== 3 || typeof eye[2] !== 'number') return shard
+  return { ...shard, extra: { ...shard.extra, eye: [eye[0], eye[1], eye[2] === 0 ? 0 : -eye[2]] } }
 }
 
 /**

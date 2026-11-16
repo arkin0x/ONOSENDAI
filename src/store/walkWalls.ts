@@ -64,7 +64,7 @@ import { WALK_CUT_MARGIN, regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
 import type { AxisDirection, AxisName, Position, ViewAxes } from '../lib/space'
 import { WORLD_DOWN, upOf } from '../lib/walkDown'
-import { constrainOf, enclosed, firstHit, wallMesh, type WallMesh } from '../lib/walkConstrain'
+import { constrainOf, enclosed, firstHit, segmentHit, triangleDistance, triangleNormal, trianglesNear, wallMesh, type WallMesh } from '../lib/walkConstrain'
 import type { Bounce } from '../lib/walkBounce'
 import { useShards, type WorldItem } from './useShards'
 import { useCyberspace } from './useCyberspace'
@@ -859,6 +859,168 @@ function measureStep(from: Position, axis: AxisName, dir: 1 | -1, length: bigint
   for (const [k, gone] of entries) if (!keep.has(k)) { entries.delete(k); for (const p of release(gone.spend)) back.add(p) }
   for (const p of back) reviveStarved(p)
   return { best, bestTol, by, bestUnseen, wait, middle }
+}
+
+/** A face met no more squarely than this is pulled back from as if it were met at this angle, so a glancing wall still leaves the near plane room. */
+const EYE_SQUARE_MIN = 0.2
+
+/** The most times the eye steps back toward the walker to clear a face beside it: past that it is at the walker's point. */
+const EYE_BACK_STEPS = 64
+
+/**
+ * How near level a face through the walker's point must be for the eye to
+ * rise away from it: the cosine between its normal and up. A floor or a ramp
+ * the walker walks along is; a wall through the walker's point is not, and
+ * holds the eye at the walker.
+ */
+const EYE_FLOOR_MIN = 0.2
+
+/** How far above the walker's point the eye's line starts, in gibsons (at least sixteen of a shard's measuring tolerance): a hair, so a floor in the walker's plane is below it. */
+const EYE_LIFT = 1e-4
+
+/** Whether `w`'s region (drawn only there, regionReached) meets the box `lo`..`hi`, in bigint gibsons. */
+function regionMeets(w: WallItem, lo: Position, hi: Position): boolean {
+  if (w.uncut) return true
+  const h = BigInt(w.height)
+  for (const a of ['x', 'y', 'z'] as const) {
+    const rlo = ((w.at[a] >> h) << h) - 1n
+    const rhi = ((w.at[a] >> h) << h) + (1n << h)
+    if (hi[a] < rlo || lo[a] > rhi) return false
+  }
+  return true
+}
+
+/**
+ * How much of the WALK eye's offset the camera may take: the share, 0 to 1,
+ * of the line from the walker's point out to the eye (lib/avatarEye.ts) that
+ * stays clear of the faces that stop a walker (DECK-0003 §1.12). The camera
+ * is pulled back along that line, the way a third-person camera's arm
+ * shortens, so it never looks from the far side of a wall or a ceiling its
+ * walker is held by, whether the eye is a little above the walker or far
+ * behind it (arkinox, 2026-11-16: the eye may sit anywhere within the
+ * avatar size limit).
+ *
+ * The walker stands at `from` plus `lead` (the eased point between gibsons,
+ * cyberspace gibsons from the centre of `from`'s gibson); the eye is `eye`
+ * gibsons from there. `margin` gibsons is room for the camera's near plane,
+ * which would otherwise cut a face it is nearly touching and show what is
+ * behind it. Three rules:
+ *
+ * - The line starts a hair above the walker's point, against gravity
+ *   (EYE_LIFT): walking along a floor keeps the walker's point in the
+ *   floor's plane, and from just above it the floor is a face like any other,
+ *   which an eye rising from it never crosses and an eye below the walker
+ *   always does. So does a ramp. A wall whose plane the walker stands in
+ *   (it walked into it along the wall) still passes through that start, and
+ *   holds any eye at the walker, since one side of it or the other is behind
+ *   the wall; the top edge of a block the walker stands on does not, so the
+ *   eye rises from a rim. A start inside a closed solid (the walker against
+ *   the underside of a block) holds the eye at the walker too.
+ * - The walker's point as drawn (`lead`, a step under way, the zoom's cell
+ *   centre) must be reachable from its gibson's centre without crossing a
+ *   face, or the eye stays at the walker.
+ * - The first face the line crosses (carried on by `margin` past the eye, so
+ *   a face just beyond it counts) holds the eye at least `margin` short of
+ *   it, measured square to the face.
+ * - The eye is then stepped back toward the walker, half a margin at a time,
+ *   until no face is within `margin` of it, or nearer to it than the face is
+ *   to the walker: stepping back cannot clear a face the walker itself is
+ *   near, so such a face only holds the eye from coming nearer than the
+ *   walker is.
+ *
+ * A shard in reach whose walls are still on their way, or a closed door whose
+ * slab holds the walker, holds the eye at the walker, and `out.pending` says
+ * the first, so the answer is not kept. Nothing moves, nothing is published:
+ * this is where the camera looks from.
+ */
+export function eyeReach(from: Position, lead: readonly [number, number, number], eye: readonly [number, number, number], margin: number, items: readonly WallItem[], up: AxisDirection = UP_Y, out?: { pending: boolean }): number {
+  if (out) out.pending = false
+  const len = Math.hypot(eye[0], eye[1], eye[2])
+  if (!(len > 0)) return 1
+  const u = [eye[0] / len, eye[1] / len, eye[2] / len]
+  const span = len + margin
+  const ext = [u[0] * span, u[1] * span, u[2] * span]
+  const upC = [0, 0, 0]
+  upC[up.axis === 'x' ? 0 : up.axis === 'y' ? 1 : 2] = up.dir
+  // In a shard's render frame Z flips (stepLimit): up and the line's way, as unit vectors there.
+  const upM = [upC[0], upC[1], -upC[2]]
+  const uM = [u[0], u[1], -u[2]]
+  const lo = { x: 0n, y: 0n, z: 0n }, hi = { x: 0n, y: 0n, z: 0n }
+  ;(['x', 'y', 'z'] as const).forEach((a, q) => {
+    lo[a] = from[a] + BigInt(Math.floor(Math.min(lead[q], lead[q] + ext[q]) - margin)) - 1n
+    hi[a] = from[a] + BigInt(Math.ceil(Math.max(lead[q], lead[q] + ext[q]) + margin)) + 1n
+  })
+  const near: Array<{ tris: Float64Array; walker: Float64Array; o: [number, number, number]; g: number }> = []
+  const nrm = [0, 0, 0]
+  let reach = len
+  for (const w of items) {
+    if (!regionMeets(w, lo, hi)) continue
+    const e = entryFor(w)
+    // Its first build is on its way: the eye waits at the walker, as a step waits (stepLimit).
+    if (e.first && !e.reach) { if (out) out.pending = true; return 0 }
+    if (!e.reach) continue
+    const g = 2 ** w.shard.unit
+    const tol = tolerance(e, g, 0n)
+    // The line's box against the walls' box, in gibsons from the shard's coordinate.
+    const off = [Number(from.x - w.at.x) + lead[0], Number(from.y - w.at.y) + lead[1], Number(from.z - w.at.z) + lead[2]]
+    const r = e.reach
+    const wlo = [Number(r.lo.x), Number(r.lo.y), Number(r.lo.z)], whi = [Number(r.hi.x), Number(r.hi.y), Number(r.hi.z)]
+    let apart = false
+    for (let q = 0; q < 3; q++) {
+      const a = Math.min(off[q], off[q] + ext[q], off[q] - lead[q]) - margin - tol - 1, b = Math.max(off[q], off[q] + ext[q], off[q] - lead[q]) + margin + tol + 1
+      if (b < wlo[q] || a > whi[q]) apart = true
+    }
+    if (apart) continue
+    if (e.first) { if (out) out.pending = true; return 0 }
+    // A closed door's slab that holds the walker (wallItemsAt): the walker is inside a wall.
+    if (w.inside) return 0
+    // The shard's render frame, in its own model units: Z flips, as stepLimit has it.
+    // The line starts a hair above the walker's point (EYE_LIFT).
+    const lift = Math.max(EYE_LIFT, 16 * tol) / g
+    const o: [number, number, number] = [off[0] / g + upM[0] * lift, off[1] / g + upM[1] * lift, -off[2] / g + upM[2] * lift]
+    const d: [number, number, number] = [ext[0] / g, ext[1] / g, -ext[2] / g]
+    // The gibson's centre, lifted the same, and the way from it to the walker's point as drawn.
+    const leadM: [number, number, number] = [lead[0] / g, lead[1] / g, -lead[2] / g]
+    const o0: [number, number, number] = [o[0] - leadM[0], o[1] - leadM[1], o[2] - leadM[2]]
+    const pad = (margin + tol) / g
+    const boxLo = [0, 1, 2].map((q) => Math.min(o[q], o[q] + d[q], o0[q]) - pad)
+    const boxHi = [0, 1, 2].map((q) => Math.max(o[q], o[q] + d[q], o0[q]) + pad)
+    const tris = trianglesNear(e.mesh, boxLo, boxHi, e.clip)
+    if (tris.length === 0) continue
+    const walker = new Float64Array(tris.length / 9)
+    for (let n = 0; n < tris.length; n += 9) {
+      const dist = triangleDistance(tris, n, o)
+      walker[n / 9] = dist
+      if (dist > tol / g || !triangleNormal(tris, n, nrm)) continue
+      // Through the line's start: a wall whose plane the walker stands in holds any eye. A floor or a
+      // ramp still through it (only on a monument, whose tolerance passes the lift) lets go only upward.
+      const nu = nrm[0] * upM[0] + nrm[1] * upM[1] + nrm[2] * upM[2]
+      const leaves = (nrm[0] * uM[0] + nrm[1] * uM[1] + nrm[2] * uM[2]) * Math.sign(nu)
+      if (Math.abs(nu) < EYE_FLOOR_MIN || !(leaves > 1e-9)) return 0
+    }
+    // The start inside a closed solid: the walker is against its underside or in it.
+    if (enclosed(e.mesh, o, e.clip)) return 0
+    // The walker's point as drawn must be on the gibson's own side of every face.
+    const leadLen = Math.hypot(leadM[0], leadM[1], leadM[2])
+    if (leadLen * g > tol && segmentHit(tris, o0, leadM, tol / (leadLen * g)) !== null) return 0
+    near.push({ tris, walker, o, g })
+    const hit = segmentHit(tris, o, d, tol / span)
+    if (hit !== null) reach = Math.min(reach, hit.s * span - margin / Math.max(hit.square, EYE_SQUARE_MIN))
+  }
+  reach = Math.max(0, reach)
+  for (let n = 0; n < EYE_BACK_STEPS && reach > 0 && near.length > 0; n++) {
+    const close = near.some(({ tris, walker, o, g }) => {
+      const p = [o[0] + (uM[0] * reach) / g, o[1] + (uM[1] * reach) / g, o[2] + (uM[2] * reach) / g]
+      const room = margin / g
+      for (let t = 0; t < walker.length; t++) {
+        if (triangleDistance(tris, t * 9, p) < Math.min(room, walker[t])) return true
+      }
+      return false
+    })
+    if (!close) break
+    reach = n === EYE_BACK_STEPS - 1 ? 0 : Math.max(0, reach - margin / 2)
+  }
+  return reach / len
 }
 
 /** How many times floorPad has been asked: for the test that a world with no bounce asks it nothing. */

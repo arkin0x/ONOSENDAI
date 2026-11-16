@@ -278,7 +278,7 @@ export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRe
   return (
     <group position={w.centre}>
       <group ref={setDrawn}>
-        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} clip={w.clip} pose={w.pose} budget={budget} dim={moving ? 1 : dim} />
+        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} noBloom={moving} clip={w.clip} pose={w.pose} budget={budget} dim={moving ? 1 : dim} />
       </group>
       {/* A wall you cannot see, outlined for a moment after it stopped your walk (store/wallHint.ts). */}
       <WalkContactHint shardKey={w.key} shard={w.shard} scale={w.scale} clip={w.clip} pose={w.pose} />

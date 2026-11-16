@@ -106,6 +106,30 @@ describe('across a reload', () => {
   })
 })
 
+describe('the money switch covers NFTs, across a reload (owner ruling 2026-11-16)', () => {
+  const LINK = `https://nonfungible.cash/claim/${'6f'.repeat(16)}#${'A'.repeat(43)}`
+  it('off for a fresh player with an NFT; turned on, it is on again after a reload, under the same key', async () => {
+    const before = (await import('../useShards')).useShards
+    before.getState().startDeployMessage(`for you ${LINK}`)
+    expect(before.getState().deployBag.money).toBe(false)
+    before.getState().setDeployBag({ money: true })
+    expect(JSON.parse(localStorage.getItem(HINT_PREFS_KEY)!)).toEqual({ height: true, sector: true, contents: true, money: true })
+    vi.resetModules()
+    const after = (await import('../useShards')).useShards
+    expect(after).not.toBe(before)
+    after.getState().startDeployMessage(`after reload ${LINK}`)
+    expect(after.getState().deployBag.money).toBe(true)
+  })
+
+  it('a choice saved for money before NFTs joined it carries over to NFTs', async () => {
+    localStorage.setItem(HINT_PREFS_KEY, JSON.stringify({ height: true, sector: true, contents: true, money: true }))
+    vi.resetModules()
+    const after = (await import('../useShards')).useShards
+    after.getState().startDeployMessage(`for you ${LINK}`)
+    expect(after.getState().deployBag.money).toBe(true)
+  })
+})
+
 describe('the money switch across a reload', () => {
   it('off for a fresh player with cashu; turned on, it is on again after a reload', async () => {
     const before = (await import('../useShards')).useShards

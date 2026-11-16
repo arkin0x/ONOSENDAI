@@ -80,7 +80,7 @@ describe('the height tag: H, read with a fallback to a legacy h (spec 8.6)', () 
   it('a bag that said its height with h is rewritten with H', async () => {
     const ct = await encryptForRegion(rk.key, JSON.stringify([m0()]))
     const old = finalizeEvent({ kind: HIDDEN_KIND, created_at: 100, content: '', tags: [['d', rk.lookupId], ['encrypted', 'aes-256-gcm', ct], ['version', '2'], ['h', '6']] }, sk)
-    const settings = bagSettingsOf(old, 6)
+    const settings = bagSettingsOf(old, 6, { cashu: 0, nft: 0 })
     expect(settings.heightTag).toBe(true)
     const items = await unbag(old, rk.key)
     expect(items[0].height).toBe(6)

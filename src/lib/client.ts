@@ -11,8 +11,8 @@
  * events published by it to carry the proper client tag"), added by the
  * signers themselves so no publishing path can forget it. Two exceptions:
  *
- * - A template that already names a client is left as it is. An avatar is
- *   mined over its own tags (spec 8.10: NIP-13 work on the event id), so it
+ * - A template that already names a client is left as it is. A seed is
+ *   mined over its own tags (DECK-0008: NIP-13 work on the event id), so it
  *   carries the tag from the template and the work is done over it; adding
  *   it again at signing would change the id and void the work.
  * - Auth events are not attributed. They are proofs handed to one server

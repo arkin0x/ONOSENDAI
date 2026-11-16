@@ -30,11 +30,9 @@ import { importFitFor } from 'sno-core/meshToShard'
 import { BUILT_IN } from 'sno-core/snoPalette'
 import { useEscape } from '../hooks/useEscape'
 import { useScrollMemory } from '../hooks/useScrollMemory'
-import { minedIn } from '../lib/avatarMine'
 import { importFiles } from '../lib/meshImport'
 import { IMPORT_PICKER_ACCEPT } from '../lib/shardZip'
 import { stackedSpots } from '../lib/weld'
-import { useAvatars } from '../store/useAvatars'
 import { useShardFolders } from '../store/useShardFolders'
 import { routeImport, useShardImport } from '../store/useShardImport'
 import { useWorkshop } from '../store/useWorkshop'
@@ -115,8 +113,6 @@ export function Workshop(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
   // WELD's count, shown on MORE while points stand on one another.
   const stacked = useMemo(() => (shard ? stackedSpots(shard).spots : 0), [shard])
-  const phase = useAvatars((s) => s.phase)
-  const minedMs = useAvatars((s) => s.minedMs)
   // The one sheet that is open, if any: an area, the palette, or the object picker.
   const [sheet, setSheet] = useState<SheetKind | null>(null)
   const area = isArea(sheet) ? sheet : null
@@ -148,14 +144,6 @@ export function Workshop(): JSX.Element | null {
       b.setStep('stamp')
     }
   }, [open, tutorialActive])
-  // The moment the work is done: say so, because the signer's prompt may take a
-  // while to appear and nothing else marks the end of the mining.
-  const lastPhase = useRef<typeof phase>(null)
-  useEffect(() => {
-    if (lastPhase.current === 'mining' && phase === 'signing') useWorkshop.setState({ notice: `Mined in ${minedIn(minedMs ?? 0)}. Sign the avatar event when your signer asks.` })
-    lastPhase.current = phase
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase])
   // The view ball's menu, shut by a tap anywhere else, and by a sheet rising.
   const [viewOpen, setViewOpen] = useState(false)
   // Asks the palette to fold away, by counting up (PaletteModal foldAsk).

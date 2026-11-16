@@ -70,7 +70,7 @@ import { anchorCentre, GRID_RADIUS, placeCentre, type Position } from '../lib/sp
 import { nearGate } from '../lib/walkGate'
 import { committedAnchor } from '../lib/renderFrame'
 import { travelOffset } from '../lib/travel'
-import { walkEye } from '../lib/walkEye'
+import { walkBody, walkEye } from '../lib/walkEye'
 import { WalkGhost } from '../lib/walkGhost'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
@@ -194,11 +194,14 @@ export function Avatar(): JSX.Element | null {
     // In WALK you face where you look, live as you turn (arkinox,
     // 2026-10-13), not the way your last move went. The model's nose (+Z)
     // draws as render -Z and its top as render +Y (pose.ts renderPose), which
-    // are exactly the camera's forward and up in its own frame, so the turn
-    // is the camera's own. Local only: everyone else sees the heading your
-    // chain gives. Leaving WALK eases back to that heading below.
+    // are the camera's forward and up in its own frame, so the turn is the
+    // camera's heading, about up only (lib/walkEye.ts walkBody): the camera
+    // tilts about the avatar's eye, and looking down no longer tips the
+    // avatar or swings its eye about the origin (arkinox, 2026-11-16). Local
+    // only: everyone else sees the heading your chain gives. Leaving WALK
+    // eases back to that heading below.
     if (walking) {
-      d.quaternion.copy(camera.quaternion)
+      d.quaternion.copy(walkBody)
       turnedFor.current = view
       return
     }

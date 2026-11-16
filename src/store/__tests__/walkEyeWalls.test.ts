@@ -47,6 +47,20 @@ function slab(axis: AxisName, dir: 1 | -1, near: number, half = 2, unit = 0): Sh
   return withConstrain({ ...newShard('Slab'), unit, mode: 'solid', vertices: verts, faces }, 'all')
 }
 
+/** A solid box from `lo` to `hi` ticks (the model's axes are cyberspace's). */
+function box(lo: number[], hi: number[]): ShardModel {
+  const v = (x: number, y: number, z: number): ShardModel['vertices'][number] => {
+    const t = [x, y, z]
+    const p = t.map((q) => Math.floor(q / 120)) as [number, number, number]
+    const r = t.map((q, i) => q - p[i] * 120) as [number, number, number]
+    return r.some((q) => q !== 0) ? { p, t: r, c: [1, 1, 1] } : { p, c: [1, 1, 1] }
+  }
+  const verts = [v(lo[0], lo[1], lo[2]), v(hi[0], lo[1], lo[2]), v(hi[0], lo[1], hi[2]), v(lo[0], lo[1], hi[2]), v(lo[0], hi[1], lo[2]), v(hi[0], hi[1], lo[2]), v(hi[0], hi[1], hi[2]), v(lo[0], hi[1], hi[2])]
+  const q = (a: number, b: number, c: number, e: number): number[][] => [[a, b, c], [a, c, e]]
+  const faces = [...q(0, 1, 2, 3), ...q(4, 7, 6, 5), ...q(0, 4, 5, 1), ...q(1, 5, 6, 2), ...q(2, 6, 7, 3), ...q(3, 7, 4, 0)] as Array<[number, number, number]>
+  return withConstrain({ ...newShard('Box'), mode: 'solid', vertices: verts, faces }, 'all')
+}
+
 /** A ramp through the walker's point, rising one in one toward +Z (cyberspace), two units each way, two ticks thick. */
 function ramp(): ShardModel {
   const v = (x: number, y: number, z: number): ShardModel['vertices'][number] => {
@@ -155,6 +169,31 @@ describe('eyeReach', () => {
     expect(eyeReach(AT, [0, 0, 0], [0, 1.3, 0], ROOM, wall)).toBe(0)
   })
 
+  it('lets the eye rise from the rim of a block the walker stands on', () => {
+    // A block one unit deep below the walker, its edge through the walker's point: x from 0 to 2, y from -1 to 0.
+    const block = item(box([0, -120, -240], [240, 0, 240]))
+    expect(eyeReach(AT, [0, 0, 0], [0, 1.3, 0], ROOM, [block])).toBe(1)
+    // Behind, away from the block and a little up: clear.
+    expect(eyeReach(AT, [0, 0, 0], [-2, 0.5, 0], ROOM, [block])).toBe(1)
+    // Down into the block: held.
+    expect(eyeReach(AT, [0, 0, 0], [1, -0.5, 0], ROOM, [block])).toBe(0)
+  })
+
+  it('keeps a level eye behind the walker over the floor it stands in', () => {
+    expect(eyeReach(AT, [0, 0, 0], [0, 0, -4], ROOM, [item(slab('y', -1, 0))])).toBe(1)
+  })
+
+  it('holds the eye at a walker against the underside of a block', () => {
+    // A block from the walker's height up to 2: its underside in the walker's plane.
+    expect(eyeReach(AT, [0, 0, 0], [0, 1.3, 0], ROOM, [item(box([-240, 0, -240], [240, 240, 240]))])).toBe(0)
+  })
+
+  it('holds the eye when the walker as drawn is past a face from its gibson', () => {
+    // Drawn half a gibson toward +X (a coarse zoom's cell centre), with a wall 0.25 out between.
+    expect(eyeReach(AT, [0.5, 0, 0], [0, 1, 0], ROOM, [item(slab('x', 1, 0.25, 2))])).toBe(0)
+    expect(eyeReach(AT, [0.5, 0, 0], [0, 1, 0], ROOM, [item(slab('x', 1, 1, 2))])).toBe(1)
+  })
+
   it('lets the eye rise from a ramp the walker stands on, and holds an eye behind and below it', () => {
     const r = item(ramp())
     expect(eyeReach(AT, [0, 0, 0], [0, 1.3, 0], ROOM, [r])).toBe(1)
@@ -195,10 +234,11 @@ describe('eyeReach', () => {
       const k = eyeReach(AT, [0, 0, 0], eye, ROOM, items)
       const at = eye.map((v) => v * k)
       const dist = (p: number[], bx: { lo: number[]; hi: number[] }): number => Math.hypot(...p.map((v, q) => Math.max(bx.lo[q] - v, 0, v - bx.hi[q])))
-      // Every slab is at least the room from where the eye ends, or no nearer it than the walker is.
+      // Every slab is at least the room from where the eye ends, or no nearer it than the walker is
+      // (give or take the hair the line starts above the walker, EYE_LIFT).
       for (const bx of boxes) {
         const d = dist(at, bx)
-        expect(d >= ROOM - 1e-9 || d >= dist([0, 0, 0], bx) - 1e-9, JSON.stringify({ eye, k, bx, d })).toBe(true)
+        expect(d >= ROOM - 2e-4 || d >= dist([0, 0, 0], bx) - 2e-4, JSON.stringify({ eye, k, bx, d })).toBe(true)
       }
     }
   })

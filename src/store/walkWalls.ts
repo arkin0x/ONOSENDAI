@@ -844,6 +844,9 @@ const EYE_BACK_STEPS = 64
  */
 const EYE_FLOOR_MIN = 0.2
 
+/** How far above the walker's point the eye's line starts, in gibsons (at least sixteen of a shard's measuring tolerance): a hair, so a floor in the walker's plane is below it. */
+const EYE_LIFT = 1e-4
+
 /** Whether `w`'s region (drawn only there, regionReached) meets the box `lo`..`hi`, in bigint gibsons. */
 function regionMeets(w: WallItem, lo: Position, hi: Position): boolean {
   if (w.uncut) return true
@@ -872,11 +875,19 @@ function regionMeets(w: WallItem, lo: Position, hi: Position): boolean {
  * which would otherwise cut a face it is nearly touching and show what is
  * behind it. Three rules:
  *
- * - A face through the walker's own point holds the eye at the walker,
- *   unless it is a floor or a ramp (near level against `up`) and the line
- *   leaves it on its upper side: the floor you walk along lets the eye rise
- *   from it and holds an eye below it; a wall through your point holds any
- *   eye, since one side of it or the other is behind the wall.
+ * - The line starts a hair above the walker's point, against gravity
+ *   (EYE_LIFT): walking along a floor keeps the walker's point in the
+ *   floor's plane, and from just above it the floor is a face like any other,
+ *   which an eye rising from it never crosses and an eye below the walker
+ *   always does. So does a ramp. A wall whose plane the walker stands in
+ *   (it walked into it along the wall) still passes through that start, and
+ *   holds any eye at the walker, since one side of it or the other is behind
+ *   the wall; the top edge of a block the walker stands on does not, so the
+ *   eye rises from a rim. A start inside a closed solid (the walker against
+ *   the underside of a block) holds the eye at the walker too.
+ * - The walker's point as drawn (`lead`, a step under way, the zoom's cell
+ *   centre) must be reachable from its gibson's centre without crossing a
+ *   face, or the eye stays at the walker.
  * - The first face the line crosses (carried on by `margin` past the eye, so
  *   a face just beyond it counts) holds the eye at least `margin` short of
  *   it, measured square to the face.
@@ -914,7 +925,8 @@ export function eyeReach(from: Position, lead: readonly [number, number, number]
   for (const w of items) {
     if (!regionMeets(w, lo, hi)) continue
     const e = entryFor(w)
-    if (e.first) { if (out) out.pending = true; return 0 }
+    // Its first build is on its way: the eye waits at the walker, as a step waits (stepLimit).
+    if (e.first && !e.reach) { if (out) out.pending = true; return 0 }
     if (!e.reach) continue
     const g = 2 ** w.shard.unit
     const tol = tolerance(e, g, 0n)
@@ -924,18 +936,24 @@ export function eyeReach(from: Position, lead: readonly [number, number, number]
     const wlo = [Number(r.lo.x), Number(r.lo.y), Number(r.lo.z)], whi = [Number(r.hi.x), Number(r.hi.y), Number(r.hi.z)]
     let apart = false
     for (let q = 0; q < 3; q++) {
-      const a = Math.min(off[q], off[q] + ext[q]) - margin - tol - 1, b = Math.max(off[q], off[q] + ext[q]) + margin + tol + 1
+      const a = Math.min(off[q], off[q] + ext[q], off[q] - lead[q]) - margin - tol - 1, b = Math.max(off[q], off[q] + ext[q], off[q] - lead[q]) + margin + tol + 1
       if (b < wlo[q] || a > whi[q]) apart = true
     }
     if (apart) continue
+    if (e.first) { if (out) out.pending = true; return 0 }
     // A closed door's slab that holds the walker (wallItemsAt): the walker is inside a wall.
     if (w.inside) return 0
     // The shard's render frame, in its own model units: Z flips, as stepLimit has it.
-    const o: [number, number, number] = [off[0] / g, off[1] / g, -off[2] / g]
+    // The line starts a hair above the walker's point (EYE_LIFT).
+    const lift = Math.max(EYE_LIFT, 16 * tol) / g
+    const o: [number, number, number] = [off[0] / g + upM[0] * lift, off[1] / g + upM[1] * lift, -off[2] / g + upM[2] * lift]
     const d: [number, number, number] = [ext[0] / g, ext[1] / g, -ext[2] / g]
+    // The gibson's centre, lifted the same, and the way from it to the walker's point as drawn.
+    const leadM: [number, number, number] = [lead[0] / g, lead[1] / g, -lead[2] / g]
+    const o0: [number, number, number] = [o[0] - leadM[0], o[1] - leadM[1], o[2] - leadM[2]]
     const pad = (margin + tol) / g
-    const boxLo = [0, 1, 2].map((q) => Math.min(o[q], o[q] + d[q]) - pad)
-    const boxHi = [0, 1, 2].map((q) => Math.max(o[q], o[q] + d[q]) + pad)
+    const boxLo = [0, 1, 2].map((q) => Math.min(o[q], o[q] + d[q], o0[q]) - pad)
+    const boxHi = [0, 1, 2].map((q) => Math.max(o[q], o[q] + d[q], o0[q]) + pad)
     const tris = trianglesNear(e.mesh, boxLo, boxHi, e.clip)
     if (tris.length === 0) continue
     const walker = new Float64Array(tris.length / 9)
@@ -943,11 +961,17 @@ export function eyeReach(from: Position, lead: readonly [number, number, number]
       const dist = triangleDistance(tris, n, o)
       walker[n / 9] = dist
       if (dist > tol / g || !triangleNormal(tris, n, nrm)) continue
-      // Through the walker's point: only a floor or a ramp, left on its upper side, lets the eye go.
+      // Through the line's start: a wall whose plane the walker stands in holds any eye. A floor or a
+      // ramp still through it (only on a monument, whose tolerance passes the lift) lets go only upward.
       const nu = nrm[0] * upM[0] + nrm[1] * upM[1] + nrm[2] * upM[2]
       const leaves = (nrm[0] * uM[0] + nrm[1] * uM[1] + nrm[2] * uM[2]) * Math.sign(nu)
       if (Math.abs(nu) < EYE_FLOOR_MIN || !(leaves > 1e-9)) return 0
     }
+    // The start inside a closed solid: the walker is against its underside or in it.
+    if (enclosed(e.mesh, o, e.clip)) return 0
+    // The walker's point as drawn must be on the gibson's own side of every face.
+    const leadLen = Math.hypot(leadM[0], leadM[1], leadM[2])
+    if (leadLen * g > tol && segmentHit(tris, o0, leadM, tol / (leadLen * g)) !== null) return 0
     near.push({ tris, walker, o, g })
     const hit = segmentHit(tris, o, d, tol / span)
     if (hit !== null) reach = Math.min(reach, hit.s * span - margin / Math.max(hit.square, EYE_SQUARE_MIN))

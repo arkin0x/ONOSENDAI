@@ -55,7 +55,7 @@ export function PresenceAvatars({ axes }: { axes: ViewAxes }): JSX.Element | nul
     return (p: Present['position']) => placeCentre(p, origin, scaleExp, axes)
   }, [anchor, scaleExp, axes])
 
-  // Further out while BUILD is pulled back (buildZoom.ts).
+  // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const near = useMemo(() => {
     if (scaleExp >= AVATAR_SCALE_LIMIT) return []

@@ -111,7 +111,7 @@ import { headlampReach, headlampUniforms } from './headlamp'
 import { lineFade } from './nearFade'
 import { canvasPixels, composerSamples } from './composerBudget'
 import './radialFog'
-import { fogDistanceStep, fogFar, fogNear } from './fog'
+import { fogFar, fogNear } from './fog'
 import { cameraNear, nextReach, orbitMaxDistance, stepOrbitLimit, useDrawReach } from './buildZoom'
 import { flyGesture, panGesture, sceneMouse, steerToSpend, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
 import { StartLock } from '../lib/viewCamera'
@@ -394,26 +394,26 @@ const HEADLAMP_PRIORITY = 0.75
  */
 function SceneFog(): JSX.Element {
   const fog = useRef<Fog>(null)
-  // The mode the last frame's fog was for (TV or WALK, or a third-person view); null before the first.
-  const mode = useRef<boolean | null>(null)
-  // The camera's distance from its target the fog is set from, gliding after the real one (fog.ts fogDistanceStep).
-  const from = useRef(0)
   const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
   useLayoutEffect(() => {
     // The browser harness reads and sets it, as it reads __rig.
     if (import.meta.env.DEV) (window as unknown as { __fog?: unknown }).__fog = fog.current
   }, [])
-  useFrame((state, dt) => {
+  useFrame((state) => {
     const f = fog.current
     if (!f) return
     // The browser harness can pin the fog, to shoot the old one against the new.
-    if (import.meta.env.DEV) { const pin = (window as unknown as { __fogFixed?: [number, number] }).__fogFixed; if (pin) { f.near = pin[0]; f.far = pin[1]; return } }
-    const base = useTv.getState().on || useCyberspace.getState().walking
-    const distance = controls ? state.camera.position.distanceTo(controls.target) : 0
-    from.current = fogDistanceStep(from.current, mode.current, base, distance, dt)
-    mode.current = base
-    f.near = fogNear(base, from.current)
-    f.far = fogFar(base, from.current)
+    const pin = import.meta.env.DEV ? (window as unknown as { __fogFixed?: [number, number] }).__fogFixed : undefined
+    if (pin) {
+      f.near = pin[0]
+      f.far = pin[1]
+    } else {
+      const base = useTv.getState().on || useCyberspace.getState().walking
+      // A stopped VIEW fly brings the target in close; the distance it drops is owed and fades (ViewFly.ts reachOwed).
+      const distance = controls ? state.camera.position.distanceTo(controls.target) + viewRig.reachOwed : 0
+      f.near = fogNear(base, distance)
+      f.far = fogFar(base, distance)
+    }
     // The layers draw at least as far as the fog's end can be seen from the
     // camera, out at once and in only well inside it: a step is in the black.
     const was = useDrawReach.getState().reach

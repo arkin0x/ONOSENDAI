@@ -32,59 +32,29 @@ describe('the scene fog', () => {
 
   it('moves one Fog in place every frame, from the camera\'s distance to its target, rather than making a new one', () => {
     expect(fogBody).toMatch(/const base = useTv\.getState\(\)\.on \|\| useCyberspace\.getState\(\)\.walking\n/)
-    expect(fogBody).toMatch(/const distance = controls \? state\.camera\.position\.distanceTo\(controls\.target\) : 0\n/)
-    expect(fogBody).toMatch(/from\.current = fogDistanceStep\(from\.current, mode\.current, base, distance, dt\)\n\s*mode\.current = base\n/)
-    expect(fogBody).toMatch(/const mode = useRef<boolean \| null>\(null\)/)
-    expect(fogBody).toMatch(/f\.near = fogNear\(base, from\.current\)\n\s*f\.far = fogFar\(base, from\.current\)\n/)
-    // The camera's distance from the render origin never moves the fog (a re-anchor), only the reach.
-    expect(fogBody).toMatch(/nextReach\(was, f\.far \+ state\.camera\.position\.length\(\)\)/)
+    // A stopped VIEW fly's drop in distance is owed and fades, as the headlamp takes it.
+    expect(fogBody).toMatch(/const distance = controls \? state\.camera\.position\.distanceTo\(controls\.target\) \+ viewRig\.reachOwed : 0\n/)
+    expect(fogBody).toMatch(/f\.near = fogNear\(base, distance\)\n\s*f\.far = fogFar\(base, distance\)\n/)
+    // Fresh every frame: nothing eased, nothing remembered from the last frame but the reach.
+    expect(fogBody).not.toMatch(/useRef<boolean/)
+    expect(fogBody).not.toMatch(/\bdt\b/)
+    // The camera's distance from the render origin never moves the fog (a re-anchor), only the reach,
+    // and a pinned fog (the harness) still sets the reach.
+    expect(fogBody).toMatch(/\} else \{[\s\S]*\}\n\s*\/\/ The layers draw[\s\S]*const reach = nextReach\(was, f\.far \+ state\.camera\.position\.length\(\)\)/)
     expect(fogBody).not.toMatch(/fromOrigin/)
     // The args are the Fog's first and only construction.
     expect(fogBody).toMatch(/args=\{\[0x000000, fogNear\(false, 0\), fogFar\(false, 0\)\]\}/)
   })
 
-  it('a jump in the camera\'s distance within a view glides, the same at any frame rate, never a step', async () => {
-    const { easeFog, fogDistanceStep, fogFar, FOG_TAU } = await import('../fog')
-    // A VIEW fly stopping: the view's centre comes in from 50 cells to 2 in one frame.
-    const run = (fps: number, seconds: number): { d: number; worst: number } => {
-      let d = 50
-      let worst = 0
-      for (let i = 0; i < Math.round(fps * seconds); i++) {
-        const next = fogDistanceStep(d, false, false, 2, 1 / fps)
-        worst = Math.max(worst, Math.abs(fogFar(false, next) - fogFar(false, d)))
-        d = next
-      }
-      return { d, worst }
-    }
-    const a = run(30, 1)
-    const b = run(60, 1)
-    const c = run(144, 1)
-    expect(a.d).toBeCloseTo(b.d, 9)
-    expect(b.d).toBeCloseTo(c.d, 9)
-    // One time constant takes 1 - 1/e of the way.
-    expect(easeFog(50, 2, FOG_TAU)).toBeCloseTo(2 + 48 / Math.E, 9)
-    // At 60 fps no frame moves the end by more than 11 cells, where it fell 168 in one.
-    expect(b.worst).toBeLessThan(11)
-    expect(fogFar(false, 50) - fogFar(false, 2)).toBe(168)
-    expect(easeFog(100, 150, 0)).toBe(100)
-  })
-
-  it('N10: the first frame, and TV or WALK on or off, take the camera\'s distance at once', async () => {
-    const { fogDistanceStep, fogFar } = await import('../fog')
-    // The 24/7 broadcast page: TV on from the first frame.
-    expect(fogFar(true, fogDistanceStep(0, null, true, 12, 1 / 60))).toBe(96)
-    // A third-person view 26 out: 251 at once, not eased from the Fog's first distances.
-    expect(fogDistanceStep(0, null, false, 26, 1 / 60)).toBe(26)
-    expect(fogDistanceStep(0, null, true, 26, 0)).toBe(26)
-    // Entering TV from the orbit, leaving WALK for it: at once.
-    expect(fogDistanceStep(26, false, true, 8, 1 / 60)).toBe(8)
-    expect(fogDistanceStep(0.001, true, false, 30, 1 / 60)).toBe(30)
-    // Within a mode it glides.
-    expect(fogDistanceStep(26, false, false, 40, 1 / 60)).toBeGreaterThan(26)
-    expect(fogDistanceStep(26, false, false, 40, 1 / 60)).toBeLessThan(40)
+  it('takes the same distances in every mode for the same camera, and TV\'s and WALK\'s are constant over their shots', async () => {
+    const { fogNear, fogFar } = await import('../fog')
+    for (let d = 0; d <= 24; d += 0.25) expect([fogNear(true, d), fogFar(true, d)]).toEqual([48, 96])
     // Not a number is no distance.
-    expect(fogDistanceStep(Number.NaN, false, false, 26, 1 / 60)).toBe(26)
-    expect(fogDistanceStep(26, false, false, Number.NaN, 10)).toBeCloseTo(0, 6)
+    expect(fogFar(false, Number.NaN)).toBe(fogFar(false, 0))
+    expect(fogNear(false, Number.POSITIVE_INFINITY)).toBe(fogNear(false, 0))
+    expect(fogFar(false, -5)).toBe(fogFar(false, 0))
+    // The start is always short of the end, even past any zoom a view allows.
+    for (const d of [0, 1e3, 1e4, 1e6]) for (const base of [true, false]) expect(fogNear(base, d)).toBeLessThan(fogFar(base, d))
   })
 
   it('S2b: three fogs by straight-line distance, so the bound below is exact at every screen edge', async () => {

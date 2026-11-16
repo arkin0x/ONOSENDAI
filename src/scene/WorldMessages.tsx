@@ -221,7 +221,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
   const itemsRead = useInventory((s) => s.owner === me && s.storage !== 'loading')
   const vanishing = useTakeVanish((s) => s.playing)
 
-  // Further out while BUILD is pulled back (buildZoom.ts).
+  // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const placed = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)

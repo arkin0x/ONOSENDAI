@@ -22,8 +22,8 @@ import { FOG_FAR, FOG_NEAR, fogFar, fogNear } from '../fog'
 import { ShaderLib } from 'three'
 import { SHARD_DOTS, createDiscMaterial } from '../pointDisc'
 
-/** three's linear fog factor: 0 before `near`, 1 at `far`. */
-const fogFactor = (d: number, near: number, far: number): number => Math.min(1, Math.max(0, (d - near) / (far - near)))
+/** three's fog factor (fog_fragment): a smoothstep, 0 before `near`, 1 at `far`. */
+const fogFactor = (d: number, near: number, far: number): number => { const t = Math.min(1, Math.max(0, (d - near) / (far - near))); return t * t * (3 - 2 * t) }
 
 /** What share of its colour a world face keeps, as the shaders take it. */
 function kept(d: number, nz: number, reach: number, near: number, far: number, face = facingShare(nz), dist = distanceShare(d, reach)): number {
@@ -73,7 +73,7 @@ describe('the darkening, cut to about a tenth', () => {
     const ratio = (nz: number, to: number): number => meanLoss((d) => keptNow(d, nz), 5, to) / meanLoss((d) => keptBefore(d, nz, 26), 5, to)
     // Facing the camera, a tenth or less; ground near edge on (nz 0.3) keeps a little more, for its shapes.
     expect(ratio(1, near)).toBeLessThan(0.1)
-    expect(ratio(0.6, near)).toBeLessThan(0.14)
+    expect(ratio(0.6, near)).toBeLessThan(0.15)
     expect(ratio(0.3, near)).toBeLessThan(0.2)
     // Out to where the old fog was black, the long fade takes about a third of what the old took.
     for (const nz of [0.3, 0.6, 1]) expect(ratio(nz, 166), `nz ${nz}`).toBeLessThan(0.4)

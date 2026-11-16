@@ -10,8 +10,12 @@
  *
  * Its start and its end are each a fixed distance plus a share of the
  * camera's distance from what it looks at (the orbit's target: your avatar,
- * the cursor, a TV shot's subject), and nothing else: zoom out a little and
- * the fog goes out a little, never back in. Before, its end was "as far as
+ * the cursor, a TV shot's subject), and nothing else, taken fresh every
+ * frame: zoom out a little and the fog goes out a little, never back in. A
+ * zoom is already smooth (the controls damp it), so the fog needs no easing
+ * of its own; a VIEW fly that stops with the view's centre close ahead owes
+ * the distance it drops and pays it back gently (ViewFly.ts reachOwed), as
+ * the headlamp does. Before, its end was "as far as
  * the layers' reach allows", that reach less the camera's distance from the
  * render origin, and the reach doubled in steps as the orbit pulled back, so
  * between steps the fog came in as the camera went out (HOP from 26 to 64
@@ -23,7 +27,9 @@
  *
  * The fade is long, as it was before 2026-11-15 (a start at 0.225 of the
  * end): colour falls off gently over most of what the camera can see rather
- * than at a thin band at the edge (0.85 of the end, #769). And it reaches
+ * than at a thin band at the edge (0.85 of the end, #769). three eases it in
+ * and out (a smoothstep from start to end), so it is softer still at both
+ * ends: at the usual orbit a tile 100 cells off keeps 96% of its colour. And it reaches
  * further than that one did: at the usual orbit (26 cells) full colour to 79
  * cells, black at 251, where it was 37 to 166; at HOP's 96-cell limit 184 to
  * 496, where it was 22 to 96. Darkness up close was the headlamp's, and its
@@ -84,8 +90,8 @@ const cells = (distance: number): number => (Number.isFinite(distance) ? Math.ma
  */
 export function fogNear(base: boolean, distance: number): number {
   const d = cells(distance)
-  if (base) return Math.max(FOG_NEAR, d * 2)
-  return Math.min(VIEW_FOG_NEAR + d * VIEW_FOG_NEAR_SHARE, fogFar(false, d))
+  // Never at its end (smoothstep needs the two apart); no view comes near it, BUILD's farthest is 0.42.
+  return Math.min(base ? Math.max(FOG_NEAR, d * 2) : VIEW_FOG_NEAR + d * VIEW_FOG_NEAR_SHARE, fogFar(base, d) * 0.9)
 }
 
 /**
@@ -99,43 +105,4 @@ export function fogFar(base: boolean, distance: number): number {
   const d = cells(distance)
   if (base) return Math.min(FOG_FAR_MAX, Math.max(FOG_FAR, d * 4))
   return Math.min(FOG_FAR_MAX, VIEW_FOG_FAR + d * VIEW_FOG_FAR_SHARE)
-}
-
-/**
- * How quickly the distance the fog is set from follows the camera's, in
- * seconds (an exponential time constant). A zoom is already smooth (the
- * controls damp it) and the fog keeps up with it; a jump in the camera's
- * distance within a view (a VIEW fly stopping with the view's centre close
- * ahead, a landing) glides instead of stepping.
- */
-export const FOG_TAU = 0.25
-
-/**
- * The least share of the camera's distance the fog is set from while it
- * glides: a pull-back faster than FOG_TAU (a wheel held out in BUILD) leaves
- * the fog behind, and at this share its start is still past the target
- * (40 + 1.2 times its distance).
- */
-export const FOG_LAG_FLOOR = 0.8
-
-/** `current` one frame of `dt` seconds closer to `target`, the same at any frame rate. */
-export function easeFog(current: number, target: number, dt: number): number {
-  return target + (current - target) * Math.exp(-Math.max(0, dt) / FOG_TAU)
-}
-
-/**
- * The distance the fog is set from (fogNear, fogFar) one frame of `dt`
- * seconds on, for a camera `distance` from its target in TV or WALK (`base`)
- * or not, the fog now set from `current` and the previous frame's mode `was`
- * (null before the first frame). Within a mode it glides after the camera's
- * (easeFog), never under FOG_LAG_FLOOR of it; the first frame and a change of
- * mode (TV or WALK on or off) take the camera's at once: the fog belongs to
- * the view, and the 24/7 broadcast page must not settle from the Fog's first
- * distances (review of #635, N10). Moving toward the camera's distance, never
- * past it, so while a zoom goes one way the fog goes the same way.
- */
-export function fogDistanceStep(current: number, was: boolean | null, base: boolean, distance: number, dt: number): number {
-  const d = cells(distance)
-  if (was !== base || !Number.isFinite(current)) return d
-  return Math.max(easeFog(current, d, dt), d * FOG_LAG_FLOOR)
 }

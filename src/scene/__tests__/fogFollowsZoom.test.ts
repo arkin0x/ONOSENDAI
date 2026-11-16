@@ -11,14 +11,16 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { fogDistanceStep, fogFar, fogNear } from '../fog'
-import { nextReach, orbitMaxDistance, reachStep } from '../buildZoom'
+import { fogFar, fogNear } from '../fog'
+import { nextReach, orbitMaxDistance } from '../buildZoom'
 import { ORBIT_MIN_DISTANCE } from '../camera'
 
 /** The fog as it stood before this change (#772), for a camera `d` from its target over the origin: [start, end]. */
 function before(d: number): [number, number] {
   const need = d * 2 + d
-  const reach = reachStep(need)
+  // Its reach doubled: 192, 384, 768 ...
+  let reach = 192
+  while (reach < need) reach *= 2
   const far = Math.max(96, Math.min(192 * (reach / 192), reach - d))
   return [far * 0.85, far]
 }
@@ -79,33 +81,38 @@ describe('the fog follows the zoom', () => {
     })
   }
 
-  it('a slow zoom out and in, frame by frame as the scene runs it: the fog never moves against the zoom, and the reach is always past it', () => {
+  it('a zoom out and in, frame by frame as the scene runs it, turning back with no pause: the fog never moves against the zoom, and the reach is always past it', () => {
     for (const max of [96, 1280]) {
-      let from = 26
-      let mode: boolean | null = null
-      let reach = 192
-      let last = [fogNear(false, 26), fogFar(false, 26)]
-      const frame = (d: number, out: boolean): void => {
-        from = fogDistanceStep(from, mode, false, d, 1 / 60)
-        mode = false
-        const now = [fogNear(false, from), fogFar(false, from)]
-        // A re-anchor moves the camera from the origin, never the fog.
-        for (const fromOrigin of [d, d + 24 * Math.sqrt(3)]) reach = nextReach(reach, now[1] + fromOrigin)
-        expect(reach).toBeGreaterThanOrEqual(now[1] + d + 24 * Math.sqrt(3))
-        expect(now[0]).toBeGreaterThan(d * 1.2)
-        for (const i of [0, 1]) {
-          if (out) expect(now[i]).toBeGreaterThanOrEqual(last[i] - 1e-9)
-          else expect(now[i]).toBeLessThanOrEqual(last[i] + 1e-9)
+      for (const seconds of [0.5, 4]) {
+        for (const hold of [0, 60]) {
+          let reach = 192
+          let lastD = 26
+          let last = [fogNear(false, 26), fogFar(false, 26)]
+          const frame = (d: number): void => {
+            const now = [fogNear(false, d), fogFar(false, d)]
+            // A re-anchor moves the camera from the origin, never the fog.
+            for (const fromOrigin of [d, d + 24 * Math.sqrt(3)]) {
+              reach = nextReach(reach, now[1] + fromOrigin)
+              expect(reach).toBeGreaterThanOrEqual(now[1] + fromOrigin)
+            }
+            expect(now[0]).toBeGreaterThanOrEqual(d * 1.5 + 40)
+            for (const i of [0, 1]) {
+              // Each moves the way the camera does, or not at all.
+              expect(Math.sign(now[i] - last[i]) * Math.sign(d - lastD)).toBeGreaterThanOrEqual(0)
+              if (d === lastD) expect(now[i]).toBe(last[i])
+            }
+            last = now
+            lastD = d
+          }
+          // Out, held or not, and straight back in: as a hand pinches.
+          const n = Math.round(60 * seconds)
+          for (let i = 1; i <= n; i++) frame(26 * (max / 26) ** (i / n))
+          for (let i = 0; i < hold; i++) frame(max)
+          for (let i = 1; i <= n; i++) frame(max * (26 / max) ** (i / n))
+          // Where it started, at once: nothing still settling.
+          expect(last).toEqual([fogNear(false, 26), fogFar(false, 26)])
         }
-        last = now
       }
-      // Out over four seconds, a second held, in over four, two held: as a hand pinches.
-      const seconds = 4
-      for (let i = 1; i <= 60 * seconds; i++) frame(26 * (max / 26) ** (i / (60 * seconds)), true)
-      for (let i = 0; i < 60; i++) frame(max, true)
-      for (let i = 1; i <= 60 * seconds; i++) frame(max * (26 / max) ** (i / (60 * seconds)), false)
-      for (let i = 0; i < 120; i++) frame(26, false)
-      expect(last[1]).toBeCloseTo(fogFar(false, 26), 0)
     }
   })
 

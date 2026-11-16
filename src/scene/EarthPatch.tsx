@@ -54,6 +54,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { coastTier, linesInWindow } from '../lib/coastline'
 import { useCoastline } from '../hooks/useCoastline'
 import { WorldLabel } from './WorldLabel'
+import { useDrawReach } from './buildZoom'
 
 const REACH = GRID_RADIUS * 8
 
@@ -87,6 +88,8 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
     earthRadiusCells(scaleExp) * 2 > GRID_RADIUS * 8
   const coast = useCoastline(wantCoast ? coastTier(scaleExp) : null)
 
+  // The reach every culled layer shares (buildZoom.ts), never less than REACH: the fog is black inside it.
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const built = useMemo((): BuiltPatch | null => {
     // Ideaspace has no planet (§9.1); the globe regime belongs to Earth.tsx.
     if (plane !== 0) return null
@@ -98,7 +101,7 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
     // is farther away than the view reaches, there is no ground in frame.
     const geo = axesToLatLon(anchor.x, anchor.y, anchor.z)
     const cellM = 2 ** (scaleExp - 33)
-    const reachM = REACH * cellM
+    const reachM = reach * cellM
     if (Math.abs(geo.altM) > reachM * 1.5) return null
 
     // The lat/lon window the reach can see, capped at a hemisphere: at the
@@ -231,7 +234,7 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
       meridianAt,
       opacity,
     }
-  }, [anchor, scaleExp, plane, axes, coast])
+  }, [anchor, scaleExp, plane, axes, coast, reach])
 
   // GPU buffers are not garbage collected; release each set when replaced.
   useEffect(() => () => {

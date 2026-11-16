@@ -76,11 +76,19 @@ export function cameraNear(distance: number): number {
   return CAMERA_NEAR * Math.max(1, (Number.isFinite(distance) ? distance : 0) / ORBIT_MAX_DISTANCE)
 }
 
-/** The reach doubles from CULL_REACH: 192, 384, 768, 1536, 3072, 6144. The least step at or past `need`. */
+/**
+ * The reach grows from CULL_REACH in half-doublings (each step the square root
+ * of 2 further): 192, 272, 384, 544, 768, 1087, 1536 ... 6144. Every cell
+ * drawn past the fog's end is in the black and wasted, and a whole doubling
+ * drew up to eight times the volume the fog needed; a half-doubling at most
+ * 2.8 times. The least step at or past `need`.
+ */
 export function reachStep(need: number): number {
-  let r = CULL_REACH
-  while (r < need && r < CULL_REACH * 2 ** 10) r *= 2
-  return r
+  for (let k = 0; k < 20; k++) {
+    const r = Math.ceil(CULL_REACH * 2 ** (k / 2) - 1e-9)
+    if (r >= need) return r
+  }
+  return CULL_REACH * 2 ** 10
 }
 
 /** A smaller reach is taken only once the need is this share of it or less, so a zoom or a re-anchor held near a step does not flip it. */
@@ -107,6 +115,7 @@ export function nextReach(reach: number, need: number): number {
  * The reach every culled layer draws to this frame (WorldShards, WorldMessages,
  * the avatars, the seeds, the chests ...), in render cells from the render
  * origin. Set by the scene's fog (Scene.tsx SceneFog) beyond its end:
- * 384 at the usual orbit, 768 at HOP's 96-cell limit, 6144 at BUILD's 1280.
+ * 272 to 384 at the usual orbit, 768 at HOP's 96-cell limit, 6144 at
+ * BUILD's 1280.
  */
 export const useDrawReach = create<{ reach: number }>(() => ({ reach: CULL_REACH }))

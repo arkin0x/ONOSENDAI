@@ -1,11 +1,13 @@
 /**
  * runLevel.ts - what a run plays, for the canvas: the variant a game names,
- * its client fog, a game position as region-local gibsons, and a stand-in
- * level for when the session has none. Pure.
+ * its client fog, a game position as region-local gibsons, a stand-in
+ * level for when the session has none, and which world shards the game
+ * draws. Pure.
  */
 
 import type { DroneRunVariant, LevelInfo, Vec3 } from '../../lib/games/droneRun/sim'
 import baseVariant from '../../lib/games/droneRun/variants/drone-run-base.json'
+import type { WorldShard } from '../../lib/games/play'
 import type { Position } from '../../lib/space'
 
 /** The variants this client knows, by id. */
@@ -49,4 +51,18 @@ export function standInLevel(v: DroneRunVariant, entry: Vec3 | null): LevelInfo 
   })
   const mid: Vec3 = [Math.round((s.lo[0] + s.hi[0]) / 2), s.lo[1], Math.round((s.lo[2] + s.hi[2]) / 2)]
   return { zones, entry: entry ?? mid, spawns }
+}
+
+/**
+ * The world shards DRONE RUN draws: all but the entry marker. A world's
+ * first item is its entry marker, standing exactly at the entry point
+ * (DECK-0002 §2.2; level/build.ts and level/levelWorld.ts put it there). It
+ * marks where a player appears; here the safe zone is marked already (Zones),
+ * and the pale plate made a cyan patch on the ground at the start. The marker
+ * stays in the world as published; it is only not drawn.
+ */
+export function drawnWorld(world: readonly WorldShard[], entry: Position | null): WorldShard[] {
+  const first = world[0]
+  const marker = !!first && !!entry && first.at.x === entry.x && first.at.y === entry.y && first.at.z === entry.z
+  return marker ? world.slice(1) : [...world]
 }

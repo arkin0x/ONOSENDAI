@@ -14,7 +14,7 @@
  * - World shards: placeShard, ShardMesh and GlowFollowsSetting, as
  *   game/GameView.tsx draws the dungeon, so FOG and LIGHT shards show. One
  *   object placed at many points shares its event id, so each is keyed by
- *   its index too.
+ *   its index too. The entry marker is not drawn (runLevel.ts drawnWorld).
  * - Two passes a frame (Renderer): the world, then, with the depth cleared,
  *   the gun from a camera at the eye with the same lens (Viewmodel.tsx).
  * - The page hidden, the run pauses (runner.setPaused) and owes nothing for
@@ -42,7 +42,7 @@ import { ShardLights } from '../../scene/shardLight'
 import { CAMERA_NEAR, FOV } from '../../scene/camera'
 import { useReducedMotion } from '../../hooks/useReducedMotion'
 import { DroneRunner, runnerSolids, setActiveRunner } from './runner'
-import { fogOf, localOf, standInLevel, variantFor } from './runLevel'
+import { drawnWorld, fogOf, localOf, standInLevel, variantFor } from './runLevel'
 import { cameraYaw, toRender } from './frame'
 import { lookState } from './input'
 import { droneRunModels, type DroneRunModels } from './models'
@@ -56,9 +56,10 @@ import { frameStats, installDevHandle } from './devHandle'
 /** The game's frame, as the game view's: cyberspace X right, Y up, Z into the screen (render Z flipped). */
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
 
-function Shards({ game, world }: { game: GameDef; world: WorldShard[] }): JSX.Element {
+function Shards({ game, world, entry }: { game: GameDef; world: WorldShard[]; entry: Position | null }): JSX.Element {
   // One object placed at many points shares its event id (lib/hidden.ts unbag), so each placement is keyed by its index too.
-  const placed = useMemo(() => world.map((w, i) => ({ id: `${w.key}:${i}`, ...placeShard({ key: w.key, at: w.at, height: w.height, plane: game.region.plane, shard: w.shard }, game.region.base, 0, AXES) })), [game, world])
+  // The entry marker is left out (runLevel.ts drawnWorld): the safe zone marks the start.
+  const placed = useMemo(() => drawnWorld(world, entry).map((w, i) => ({ id: `${w.key}:${i}`, ...placeShard({ key: w.key, at: w.at, height: w.height, plane: game.region.plane, shard: w.shard }, game.region.base, 0, AXES) })), [game, world, entry])
   return (
     <>
       {placed.map((p) => (
@@ -224,7 +225,7 @@ export function Canvas3D({ game, world, entry, level, seed = 0 }: Canvas3DProps)
       <fog attach="fog" args={[BG, fog.near, fog.far]} />
       <ShardLights />
       <GlowFollowsSetting>
-        <Shards game={game} world={world} />
+        <Shards game={game} world={world} entry={entry} />
         {made.zones && <Zones start={made.zones.start} finish={made.zones.finish} solids={solids} />}
         {view && (
           <>

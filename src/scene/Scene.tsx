@@ -37,10 +37,13 @@ import { keepPrograms } from '../lib/keepPrograms'
 import { sortWithoutBoxing } from '../lib/sortNoAlloc'
 import { FrameDriver } from './frameDriver'
 import { BG } from '../lib/palette'
-import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, placeCentre, renderDirection, viewAxes, type AxisName, type Position } from '../lib/space'
+import { GRID_RADIUS, cellDelta, claimScreenAxes, itemCentre, levelScreenAxes, originShift, placeCentre, renderDirection, viewAxes, type AxisName, type Position } from '../lib/space'
+import { upOf } from '../lib/walkDown'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
-import { setWalkFacing, walkEye, walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
+import { setWalkFacing, walkBody, walkEye, walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
+import { WalkEyeRig } from './walkEyeRig'
+import { useAvatars } from '../store/useAvatars'
 import { clearWalkLook, lookRadPerPx, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
 import { tickFall, useWalk, walkDown } from '../store/useWalk'
 import { orbitOffset } from '../workshop/benchAxes'
@@ -572,9 +575,9 @@ function LensShift(): null {
  * merely remap the axes, it also returns the camera to straight-on.
  */
 /**
- * The WALK eye's distance from the avatar's centre, in render cells: as good
- * as at it, and far enough off it that the orbit still has a direction to
- * turn about.
+ * The WALK camera's distance from the avatar's eye (walkEyeRig.ts), in render
+ * cells: as good as at it, and far enough off it that the orbit still has a
+ * direction to turn about.
  */
 const WALK_EYE = 0.001
 /** Scratch for the eye's line of sight, so the frame loop allocates nothing. */
@@ -641,8 +644,18 @@ function Rig(): JSX.Element {
   // WALK's look direction, from the eye outward to the camera: kept between
   // frames so only the walker's own turning changes it.
   const walkLook = useRef<Vector3 | null>(null)
-  const eye = useRef<{ from: number; to: number; t0: number } | null>(null)
+  // `mixFrom` is how far onto the avatar's eye the glide starts (eyeMix), so
+  // a WALK left and entered again mid-glide carries on from where it was.
+  const eye = useRef<{ from: number; to: number; t0: number; mixFrom: number } | null>(null)
   const outTo = useRef(START_DISTANCE)
+  // The avatar's eye (walkEyeRig.ts): the orbit's target is the walker's
+  // point plus `eyeShift`, which is the eye's offset times `eyeMix`, 0 out of
+  // WALK and 1 in it, glided between with the camera's distance.
+  const eyeRig = useMemo(() => new WalkEyeRig(), [])
+  const eyeShift = useRef(new Vector3())
+  const eyeMix = useRef(0)
+  const eyeVec = useMemo(() => new Vector3(), [])
+  const eyeFwd = useMemo(() => new Vector3(), [])
 
   // Locked means the camera travels with the cursor, so an axis-aligned view
   // stays framed on it as you drive. Aligning with Shift+WASD re-locks; orbiting
@@ -988,6 +1001,13 @@ function Rig(): JSX.Element {
     let tx = live[0] + (lag ? lag[0] : 0)
     let ty = live[1] + (lag ? lag[1] : 0)
     let tz = live[2] + (lag ? lag[2] : 0)
+    // The centre of the cursor's own gibson as drawn: the walls behind the
+    // avatar's eye are asked from the eased walker point's distance from it
+    // (walkEyeRig.ts), and they stand on gibsons, not on the zoom's cells.
+    const gibson = s.walking || eye.current ? itemCentre(s.cursor, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, s.axes()) : null
+    const gx = gibson ? gibson[0] + (lag ? lag[0] : 0) : 0
+    const gy = gibson ? gibson[1] + (lag ? lag[1] : 0) : 0
+    const gz = gibson ? gibson[2] + (lag ? lag[2] : 0) : 0
     // In a fall the eye is above or below the cursor (the point the fall
     // left off from), along the fall's up, and follows that height exactly.
     const falling = s.walking && walkFall.active
@@ -1121,12 +1141,14 @@ function Rig(): JSX.Element {
     // your head), and a re-frame above is undone on the next frame.
     if (s.walking !== walkWas.current) {
       walkWas.current = s.walking
-      const from = c.object.position.distanceTo(smooth.current)
+      // From the orbit's target: the walker's point, plus the eye as far as it is in.
+      const from = c.object.position.distanceTo(eyeVec.copy(smooth.current).add(eyeShift.current))
+      if (s.walking && eyeMix.current === 0) eyeRig.reset()
       // A stopped VIEW fly's orbit is ORBIT_MIN_DISTANCE to within rounding: a real orbit, not a collapsed one.
       if (s.walking) outTo.current = from >= ORBIT_MIN_DISTANCE - 1e-6 ? from : START_DISTANCE
       // Back out no further than the orbit may now go: BUILD left during WALK takes its far limit with it.
       const outLimit = orbitMaxDistance(!(useTv.getState().on || isBroadcast()) && useBuilder.getState().active, s.scaleExp)
-      eye.current = { from, to: s.walking ? WALK_EYE : Math.min(outTo.current, outLimit), t0: performance.now() }
+      eye.current = { from, to: s.walking ? WALK_EYE : Math.min(outTo.current, outLimit), t0: performance.now(), mixFrom: eyeMix.current }
       c.enableZoom = !s.walking
       c.enableRotate = !s.walking
       clearWalkLook()
@@ -1142,7 +1164,7 @@ function Rig(): JSX.Element {
       // camera straight on at an orbit distance, and from inside the avatar
       // that read as the view snapping to the chain's frame as a step landed
       // (arkinox, 2026-10-13).
-      const along = s.walking && walkLook.current ? walkDir.copy(walkLook.current) : walkDir.copy(c.object.position).sub(smooth.current)
+      const along = s.walking && walkLook.current ? walkDir.copy(walkLook.current) : walkDir.copy(c.object.position).sub(smooth.current).sub(eyeShift.current)
       if (along.lengthSq() === 0) along.set(0, 0, 1)
       if (s.walking && walkLook.current) {
         const [lx, ly] = takeWalkLook(dt)
@@ -1151,14 +1173,36 @@ function Rig(): JSX.Element {
         const [rx, ry] = takeWalkLookRad(dt)
         if (rx !== 0 || ry !== 0) along.copy(orbitOffset(along, rx, ry, 1))
       }
-      c.object.position.copy(smooth.current).addScaledVector(along.normalize(), d)
+      // The camera looks from the avatar's eye (lib/avatarEye.ts), not its
+      // origin: above the floor the walker's point is in, turned with the
+      // body, pulled back short of any wall or ceiling between the walker
+      // and the eye. It glides onto the eye on the way in and off it on the
+      // way out, over the same beat as the distance.
+      const mixTo = s.walking ? 1 : 0
+      eyeMix.current = mixTo + (eye.current.mixFrom - mixTo) * lerpRemaining(t)
+      eyeRig.offset({
+        shard: useAvatars.getState().shards[s.focusPubkey()] ?? null,
+        scaleExp: s.scaleExp,
+        axes: s.axes(),
+        plane: s.plane,
+        cursor: s.cursor,
+        lead: [smooth.current.x - gx, smooth.current.y - gy, smooth.current.z - gz],
+        forward: eyeFwd.copy(along).negate(),
+        up: upOf(walkDown()),
+        walls: s.walking,
+        now: performance.now(),
+      }, eyeVec)
+      eyeShift.current.copy(eyeVec).multiplyScalar(eyeMix.current)
+      // The body's turn for Avatar.tsx, from the same heading: your heading, never the look up or down.
+      walkBody.copy(eyeRig.body)
+      c.object.position.copy(smooth.current).add(eyeShift.current).addScaledVector(along.normalize(), d)
       c.minDistance = Math.min(ORBIT_MIN_DISTANCE, d * 0.5)
       locked.current = true
-      if (t >= 1 && !s.walking) { eye.current = null; c.minDistance = ORBIT_MIN_DISTANCE }
+      if (t >= 1 && !s.walking) { eye.current = null; c.minDistance = ORBIT_MIN_DISTANCE; eyeMix.current = 0; eyeShift.current.set(0, 0, 0) }
     }
     walkEye.copy(smooth.current)
 
-    c.target.copy(smooth.current)
+    c.target.copy(smooth.current).add(eyeShift.current)
     // The tour's camera for this step, once, as a pinch would leave it: at
     // its distance, from its side when it has one (cyberspace x, y, z put
     // into the view's render axes, as Earth is placed), else along the line

@@ -24,7 +24,7 @@
  */
 
 import type { ShardModel } from 'sno-core/shards'
-import { regionBox, type Box } from '../clip'
+import { WALK_CUT_MARGIN, regionBox, type Box } from '../clip'
 import { placedPose } from '../pose'
 import type { AxisName, Position, ViewAxes } from '../space'
 import { firstHit, wallMesh, type WallMesh } from '../walkConstrain'
@@ -53,7 +53,7 @@ function wallsOf(w: WorldShard): Walls {
   const k = `${w.at.x},${w.at.y},${w.at.z},${w.height}`
   let walls = byPlace.get(k)
   if (!walls) {
-    walls = { mesh: wallMesh(w.shard, [], placedPose(WALL_AXES)), clip: regionBox(w.at, w.height, w.shard.unit, WALL_AXES) }
+    walls = { mesh: wallMesh(w.shard, [], placedPose(WALL_AXES)), clip: regionBox(w.at, w.height, w.shard.unit, WALL_AXES, WALK_CUT_MARGIN) }
     byPlace.set(k, walls)
   }
   return walls

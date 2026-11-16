@@ -59,6 +59,16 @@ import type { Position, ViewAxes } from './space'
  */
 export const REGION_CUT_MARGIN = 0.5
 
+/**
+ * Where WALK's walls are cut: a hair short of the drawn cut. A walker is a
+ * point at the centre of its gibson (DECK-0003 §1.12), and the drawn cut runs
+ * through the centres of the next region's first gibsons, so cut there a wall
+ * from this region would hold a walker standing in the next one, by an edge
+ * it barely touches. A walker is still held only where a wall is drawn. A
+ * power of two, so the cut is exact in a float at every unit.
+ */
+export const WALK_CUT_MARGIN = 0.5 - 1 / 256
+
 export function regionBox(at: Position, height: number, unit: number, axes: ViewAxes, margin: number = REGION_CUT_MARGIN): Box {
   const h = BigInt(height)
   const perUnit = 2 ** unit

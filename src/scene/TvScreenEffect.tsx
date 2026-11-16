@@ -46,7 +46,7 @@ import { useProfiles } from '../store/useProfiles'
 import { targetColor } from '../lib/targets'
 import { tvName } from '../lib/tv/text'
 import { objectsOf } from '../workshop/ObjectPicker'
-import { avatarFromEvent } from '../lib/avatar'
+import { avatarShard } from '../lib/avatar'
 import { tvSpin } from '../hud/TvSegments'
 import { uploadRegions } from './drawTracker'
 import { CUT_MS, MARGIN_X, MARGIN_Y, TV_FONT, TvPainter, type FlatRect, type TvAssets, type TvExplainer, type TvMusic } from './tvPainter'
@@ -672,7 +672,7 @@ export function TvScreenEffect(): JSX.Element {
     if (resized) overlay.dispose()
     const profiles = useProfiles.getState()
     const item = tv.shot?.item
-    if (item?.id !== segment.current.id) segment.current = { id: item?.id, shard: item?.kind === 'object' ? (objectsOf([item.event])[0]?.shard ?? null) : item?.kind === 'avatar' ? avatarFromEvent(item.event) : null }
+    if (item?.id !== segment.current.id) segment.current = { id: item?.id, shard: item?.kind === 'object' ? (objectsOf([item.event])[0]?.shard ?? null) : item?.kind === 'avatar' ? avatarShard(item.event) : null }
     const assets: TvAssets = {
       name: (pk) => { if (profiles.profiles[pk] === undefined) profiles.request(pk); return tvName(pk, profiles.profiles[pk]?.name) },
       bot: (pk) => profiles.profiles[pk]?.bot === true,

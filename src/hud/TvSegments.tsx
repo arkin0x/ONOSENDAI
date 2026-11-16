@@ -25,7 +25,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useAvatarShard } from '../store/useAvatars'
 import { placeable, useTv } from '../store/useTv'
 import { objectsOf } from '../workshop/ObjectPicker'
-import { avatarFromEvent } from '../lib/avatar'
+import { avatarShard } from '../lib/avatar'
 import { QUOTE_MAX, type TapeItem } from '../lib/tv/director'
 import type { BagContents, ContentsCounts } from '../lib/hidden'
 import { ShardSpin, type Pace } from '../scene/ShardSpin'
@@ -132,7 +132,7 @@ export function TvSpinHost(): JSX.Element | null {
   const avatar = useAvatarShard(commenter)
   const shard = useMemo(() => {
     if (item?.kind === 'object') return objectsOf([item.event])[0]?.shard ?? null
-    if (item?.kind === 'avatar') return avatarFromEvent(item.event)
+    if (item?.kind === 'avatar') return avatarShard(item.event)
     if (item?.kind === 'comment' || leader) return avatar
     return null
   }, [item, avatar, leader])

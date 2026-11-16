@@ -1,5 +1,6 @@
 /**
- * avatar.worker.ts - mines an avatar's nonce off the main thread.
+ * avatar.worker.ts - mines a nonce off the main thread (a seed's work,
+ * DECK-0008; avatars no longer mine, spec 8.10, so the name is historical).
  *
  * One request per worker: chunks of nonces between progress messages, so the
  * elapsed time and the live rate are on screen while it runs. Several run at

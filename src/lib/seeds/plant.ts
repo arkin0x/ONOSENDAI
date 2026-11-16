@@ -4,7 +4,7 @@
  *
  * Publishing a DNA is free; each seed pays NIP-13 work on its own id at its
  * DNA's price (§7, arkinox's ruling of 2026-11-10). The work is mined in
- * workers (the avatar's miner, lib/avatarWorker.ts: the same NIP-13 loop,
+ * workers (lib/avatarWorker.ts, once the avatar's miner too: a NIP-13 loop,
  * every core but one, progress and cancel), with the committed target equal
  * to the price. The seed's `planted` is the clock height when it is planted
  * (§4.2), its `C` the build cursor's point, and it carries NIP-70's `-`, as

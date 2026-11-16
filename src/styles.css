@@ -7492,7 +7492,21 @@ select.avatars__input option:checked {
 /* OPACITY in SHARD (Workshop OpacityRow): the hyperspace scrubber's rail, with
    a ring while the keys have it, since its arrows move it. */
 .ws__opacity-rail { flex: 1 1 60px; min-width: 60px; }
-.ws__opacity-value { flex: none; width: 4.5ch; text-align: right; }
+.ws__opacity-value { flex: none; width: 6ch; text-align: right; }
+/* The SHARD sheet's slider rows (workshop/railRow.tsx): one label width, so
+   OPACITY, POINT SIZE, RADIUS and GLOW STRENGTH line their rails up. */
+.ws__raillabel { flex: none; width: 64px; line-height: 1.25; }
+/* Greyed, never hidden (owner, 2026-11-15): the row dims as one, values kept. */
+.ws__railrow.is-off { opacity: 0.4; }
+.ws__railrow.is-off .workshop__btn:disabled,
+.ws__railrow.is-off .workshop__mode:disabled { opacity: 1; cursor: default; }
+.ws__railrow.is-off .explorer__rail { cursor: default; }
+/* A distance in gibsons: the figure, and the word small under it. */
+.ws__gibsons { display: inline-flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }
+.ws__gibsons-word { font-size: 9px; letter-spacing: 0.02em; }
+/* GLOW's buttons carry a lucide icon; the style that suits the colors wears an outline while GLOW is OFF. */
+.ws__glowbtn { display: inline-flex; align-items: center; gap: 5px; }
+.ws__glowbtn.is-suggested { border-color: var(--accent); }
 .ws__opacity-rail:focus { outline: none; }
 .ws__opacity-rail:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
@@ -9897,9 +9911,34 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
 .workshop__pick > .shardthumb,
 .shards__goto > .shardthumb { grid-row: span 2; }
 .workshop__pick:has(> .shardthumb) { padding: 5px 4px; }
-/* PLACE OBJECT's MINE: picture, name, then the facts at the right. */
-.objpick__row:has(> .shardthumb) { align-items: center; padding: 6px 10px 6px 6px; }
-.objpick__row > .shardthumb + .objpick__name { flex: 1; min-width: 0; }
+/* A picker's shard row (PLACE OBJECT, Model, + SHARD, STAMP): the picture,
+   then the name with the facts under it, so the name has the row's width
+   (arkinox, 2026-11-16). The name takes two lines at most and ends in an
+   ellipsis; it breaks at its hyphens ("basilica-plug-wall-door"), and inside
+   a word only when one word is wider than the row. */
+.objpick__row:has(> .shardthumb) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 3px;
+  align-items: center;
+  justify-items: start;
+  padding: 6px 10px 6px 6px;
+}
+.objpick__row > .shardthumb { grid-row: span 2; }
+.objpick__row:has(> .shardthumb) > .objpick__name {
+  align-self: end;
+  max-width: 100%;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  word-break: normal;
+  line-height: 1.35;
+}
+.objpick__row:has(> .shardthumb) > .objpick__meta { align-self: start; }
 .feed__text {
   display: flex;
   flex-direction: column;
@@ -11917,3 +11956,53 @@ html.tv-broadcast body { overflow: hidden; }
 /* DISCOVERED NEARBY's buttons wrap under the words on a narrow phone, right-aligned, rather than run past the row. */
 .nearby__row > .nearby__acts { display: flex; flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
 .nearby__row > .nearby__acts > .nearby__door { display: contents; }
+
+/* ---------- Search under a list of shards (hud/ui/SearchField.tsx) ----------
+ * The client's own input with a search icon inside it at the left and a
+ * clear ✕ over it at the right, so the ✕ coming and going moves nothing. */
+.searchfield { position: relative; display: flex; align-items: center; flex: none; margin-top: 8px; }
+.searchfield__icon { position: absolute; left: 9px; color: var(--dim); pointer-events: none; }
+.searchfield .searchfield__input { margin: 0; padding-left: 30px; padding-right: 36px; }
+.searchfield__input::placeholder { color: var(--dim); opacity: 1; }
+.searchfield__clear {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--dim); background: transparent; border: 1px solid rgba(0, 229, 255, 0.25); border-radius: 4px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+/* A 44px target around the drawn 26px box, as the shared close has. */
+.searchfield__clear::before { content: ''; position: absolute; inset: -9px; }
+.searchfield__clear:hover { color: var(--fg); border-color: rgba(0, 229, 255, 0.5); }
+/* The matched part of a name. */
+.searchfield__hit { color: var(--accent); background: rgba(0, 229, 255, 0.16); border-radius: 2px; padding: 0; }
+/* 16px on a phone, so iOS does not zoom the page when the box takes the focus. */
+@media (max-width: 600px) { .searchfield .searchfield__input { font-size: 16px; padding-top: 6px; padding-bottom: 6px; } }
+/* Nothing a search matched. */
+li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(--dim); border-top: 0; }
+.workshop__search { margin: 4px 0 6px; }
+.compose__search { margin: 0 0 6px; }
+
+/* ---------- A modal as tall as the screen as its list needs (PLACE OBJECT, Model) ----------
+ * arkinox, 2026-11-16: "this modal needs to expand to full screen height (as
+ * needed)". Inside the safe area; above a phone's keyboard the overlay is
+ * placed on the visual viewport (hooks/useVisualViewport.ts). The card is a
+ * column capped at the overlay's height: the title row, the tabs, the note
+ * and the search keep their size, and only the list gives way and scrolls.
+ * A short list leaves it compact. While a search has text the card keeps the
+ * height it had (ui/SearchField holdHeight) and the list takes the room,
+ * so the search box stays where it was under the finger. */
+.modal.modal--fill {
+  padding:
+    max(16px, env(safe-area-inset-top, 0px))
+    max(16px, env(safe-area-inset-right, 0px))
+    max(16px, env(safe-area-inset-bottom, 0px))
+    max(16px, env(safe-area-inset-left, 0px));
+}
+.modal__card.stash-modal--fill { display: flex; flex-direction: column; max-height: 100%; overflow: hidden; }
+.stash-modal--fill > * { flex: none; }
+.stash-modal--fill > .objpick__body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.objpick__body > * { flex: none; }
+.stash-modal--fill .objpick__body > .objpick__list { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; overscroll-behavior: contain; }
+.stash-modal--fill .objpick__body > .feed { flex: 1 1 auto; min-height: 0; }
+.stash-modal--fill .objpick__body > .feed > .feed__list { flex: 1 1 auto; min-height: 0; max-height: none; }
+.stash-modal--fill .objpick__body > .feed > .feed__refresh { flex: none; }

@@ -73,6 +73,13 @@ export interface WalkStep {
   to: Position
   /** The shard whose face stopped the press short, or null when it went its full way (climbing included). */
   by: WallItem | null
+  /** Whether the face that stopped it is of an object no one can see (WallStop `unseen`), from the same stop as `by`. */
+  unseen?: boolean
+}
+
+/** A stop's `by` and `unseen` together, from one WallStop. */
+function stopOf(to: Position, wall: { by: WallItem | null; unseen?: boolean }): WalkStep {
+  return { to, by: wall.by, ...(wall.by && wall.unseen !== undefined ? { unseen: wall.unseen } : {}) }
 }
 
 /**
@@ -141,7 +148,7 @@ function settled(at: Position, items: readonly WallItem[], gravity: boolean, dow
 export function walkStep(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[], gravity = false, down: AxisDirection = WORLD_DOWN): WalkStep {
   if (axis === down.axis || length > STEP_SUBSTEP_MAX || !standing(from, items, gravity, down)) {
     const wall = stepLimit(from, axis, dir, length, items)
-    return { to: moved(from, axis, dir, wall.reach), by: wall.by }
+    return stopOf(moved(from, axis, dir, wall.reach), wall)
   }
   let at = from
   for (let n = 0n; n < length; n++) {
@@ -149,7 +156,8 @@ export function walkStep(from: Position, axis: AxisName, dir: 1 | -1, length: bi
     const lift = ahead.reach === 1n ? null : lifted(at, axis, dir, items, gravity, down)
     const next = lift ? lift.on : moved(at, axis, dir, 1n)
     // Held: the press stops on the last gibson it reached.
-    if (next === null) return { to: at, by: lift?.lid ?? ahead.by }
+    // A lid overhead says nothing of its faces' owner (judged by the shard); else the stop ahead.
+    if (next === null) return lift?.lid ? { to: at, by: lift.lid } : stopOf(at, ahead)
     const floor = settled(next, items, gravity, down)
     at = floor.at
     // Off an edge higher than a step-down, with no floor near: the rest of
@@ -160,7 +168,7 @@ export function walkStep(from: Position, axis: AxisName, dir: 1 | -1, length: bi
       const rest = length - n - 1n
       if (rest === 0n) break
       const wall = stepLimit(at, axis, dir, rest, items)
-      return { to: moved(at, axis, dir, wall.reach), by: wall.by }
+      return stopOf(moved(at, axis, dir, wall.reach), wall)
     }
   }
   return { to: at, by: null }

@@ -17,6 +17,7 @@ import { useCyberspace } from '../../store/useCyberspace'
 import { usePublished } from '../../store/usePublished'
 import { useWorkshop } from '../../store/useWorkshop'
 import { BounceChip, BounceRow, OpacityRow } from '../shardRows'
+import { PointGlowRows } from '../glowRows'
 
 export function ShardBody(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
@@ -126,6 +127,10 @@ export function ShardBody(): JSX.Element | null {
           number to type, as the hyperspace rail has (arkinox, 2026-10-23);
           100 is solid and writes nothing. */}
       <OpacityRow />
+      {/* How its points draw (DECK-0003 §1.15 and §1.16): POINT SIZE, GLOW,
+          RADIUS and GLOW STRENGTH, greyed but in place outside POINTS
+          (owner, 2026-11-15). */}
+      <PointGlowRows />
       {/* Whether a walker can cross it in WALK (DECK-0003 §1.12): three
           buttons like DRAW's. A shard that never chose shows OPAQUE,
           which is what it publishes as (arkinox, 2026-10-23). */}

@@ -17,6 +17,8 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
 import { editingId, useShards, type WorldItem } from '../store/useShards'
 import { WALL_BREATH_SECONDS } from './Rooms'
+import { WalkContactHint } from './WalkContactHint'
+import { glowReachDoublings } from '../lib/pointLook'
 import { ShardMesh } from './ShardMesh'
 import { GHOST_OPACITY } from './shardFaces'
 import { regionBox, type Box } from '../lib/clip'
@@ -157,7 +159,8 @@ export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at
     .filter((w) => w.type === 'shard' && w.shard && w.plane === plane)
     // Not drawn at all once it cannot show a pixel at any distance; a shard
     // with placed objects is exempt, since they can be far larger than it.
-    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL)
+    // A glow reaches past its points (DECK-0003 §1.16 SHOULD keep it visible): its radius widens the cull.
+    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL + glowReachDoublings(w.shard!))
     .map((w) => placeShard(w, origin, scaleExp, axes))
     .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= reach)
 }
@@ -277,6 +280,8 @@ export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRe
       <group ref={setDrawn}>
         <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} clip={w.clip} pose={w.pose} budget={budget} dim={moving ? 1 : dim} />
       </group>
+      {/* A wall you cannot see, outlined for a moment after it stopped your walk (store/wallHint.ts). */}
+      <WalkContactHint shardKey={w.key} shard={w.shard} scale={w.scale} clip={w.clip} pose={w.pose} />
       {/* Not tappable while it moves: the ghost is the one being aimed. */}
       {/* Dimmed in build mode, a tap passes through it (BuildOccluders tapsPassThrough). */}
       {!moving && tappable && !passesTaps(w.key) && <TapTarget measure={drawn} occluder={occludes ? w.key : undefined} onTap={() => useShards.getState().selectSecret(w.key)} />}

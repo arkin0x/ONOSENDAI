@@ -49,6 +49,7 @@ import type { Box } from './clip'
 import { renderPose, type Pose } from './pose'
 import { bounceOf, springboardOf, type Bounce } from './walkBounce'
 import { hasAnim } from './anim'
+import { unseenObject } from './pointLook'
 
 /** What a shard asks of a walker. */
 export type Constrain = 'off' | 'all' | 'opaque'
@@ -135,8 +136,20 @@ export function seeThrough(s: Pick<ShardModel, 'mode' | 'opacity'>): boolean {
   return readOpacity(s.opacity) !== undefined || s.mode !== 'solid'
 }
 
-/** Whether this object's own faces stop a walker. */
-export function blocks(s: Pick<ShardModel, 'mode' | 'opacity' | 'extra'>): boolean {
+/**
+ * Whether an object at opacity 0 still stops a walker by its `constrain`.
+ * Ruled 2026-11-15 (owner): yes, 0% plus `constrain` blocks, since invisible
+ * walls and floors are a building tool. So `all` stops a walker at every
+ * opacity, and `opaque` never stops at 0, which is not opaque. Kept as one
+ * switch: false would make an object at 0 stop nothing, whatever its
+ * `constrain`. A walker stopped by a wall it cannot see is shown a brief
+ * outline of it (scene/WalkContactHint.tsx).
+ */
+export const ZERO_OPACITY_STOPS_WALKERS = true
+
+/** Whether this object's own faces stop a walker. `zeroStops`: ZERO_OPACITY_STOPS_WALKERS, a parameter so a test can flip it. */
+export function blocks(s: Pick<ShardModel, 'mode' | 'opacity' | 'extra'>, zeroStops: boolean = ZERO_OPACITY_STOPS_WALKERS): boolean {
+  if (!zeroStops && readOpacity(s.opacity) === 0) return false
   const c = constrainOf(s)
   return c === 'all' || (c === 'opaque' && !seeThrough(s))
 }
@@ -283,6 +296,8 @@ export interface WallPlacement {
   bounce?: Bounce
   /** The placed object's own `springboard` (lib/walkBounce.ts). */
   springboard?: boolean
+  /** No one can see the placed object (lib/pointLook.ts unseenObject): a walker it stops is shown its outline. */
+  unseen?: boolean
 }
 
 /**
@@ -308,6 +323,8 @@ export interface WallMesh {
   ownBounce?: Bounce
   /** The shard's own `springboard` (lib/walkBounce.ts). */
   ownSpringboard?: boolean
+  /** No one can see the shard itself (lib/pointLook.ts unseenObject). */
+  ownUnseen?: boolean
   /** The objects it places, and theirs, each where it stands. */
   placements: WallPlacement[]
   /** The bounds of every corner of every triangle, own and placed, or null for no triangles. */
@@ -357,7 +374,7 @@ export function wallMesh(shard: ShardModel, placed: readonly Placed[], pose?: Po
       if (blocks(m)) {
         const walls = wallsOf(m)
         if (walls.tris.length) {
-          const at = { walls, f: Float64Array.from(f), min: [Infinity, Infinity, Infinity] as [number, number, number], max: [-Infinity, -Infinity, -Infinity] as [number, number, number], bounce: bounceOf(m), springboard: springboardOf(m) }
+          const at = { walls, f: Float64Array.from(f), min: [Infinity, Infinity, Infinity] as [number, number, number], max: [-Infinity, -Infinity, -Infinity] as [number, number, number], bounce: bounceOf(m), springboard: springboardOf(m), unseen: unseenObject(m) }
           const c = walls.corners
           for (let u = 0; u < walls.used.length; u++) {
             const q = walls.used[u] * 3
@@ -382,7 +399,7 @@ export function wallMesh(shard: ShardModel, placed: readonly Placed[], pose?: Po
   }
   place(shard, placed, root)
   const any = tris.length > 0 || placements.length > 0
-  return { tris, own: tris.length / 9, ownWalls, ownBounce: bounceOf(shard), ownSpringboard: springboardOf(shard), placements, min: any ? min : null, max: any ? max : null }
+  return { tris, own: tris.length / 9, ownWalls, ownBounce: bounceOf(shard), ownSpringboard: springboardOf(shard), ownUnseen: unseenObject(shard), placements, min: any ? min : null, max: any ? max : null }
 }
 
 /** Two faces this close along a step, as a share of its distance (at least one model unit), are flush: float rounding only. */
@@ -426,7 +443,7 @@ let scratch = new Float64Array(0)
  * `springboard` beside it. Of two faces at the same distance, within float
  * rounding, one with a bounce is the one returned.
  */
-export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i: 0 | 1 | 2, s: 1 | -1, maxT: number, minT: number, clip?: Box, who?: { bounce: Bounce; springboard?: boolean }): number | null {
+export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i: 0 | 1 | 2, s: 1 | -1, maxT: number, minT: number, clip?: Box, who?: { bounce: Bounce; springboard?: boolean; unseen?: boolean }): number | null {
   const j = (i + 1) % 3, k = (i + 2) % 3
   const pj = o[j], pk = o[k], pi = o[i]
   let best: number | null = null
@@ -435,6 +452,8 @@ export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i
   /** The owner of the triangles being tested now: what a hit among them bounces by. */
   let owner: Bounce = mesh.ownBounce ?? 0
   let ownerSpring = mesh.ownSpringboard ?? false
+  let ownerUnseen = mesh.ownUnseen ?? false
+  let bestUnseen = false
   // One triangle: the cheap rejects, then the exact test.
   const test = (t: Float64Array, a: number, b: number, c: number, own: boolean): void => {
     const aj = t[a + j], ak = t[a + k], bj = t[b + j], bk = t[b + k], cj = t[c + j], ck = t[c + k]
@@ -468,6 +487,7 @@ export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i
     best = along
     bestBounce = owner
     bestSpring = ownerSpring
+    bestUnseen = ownerUnseen
   }
   const t = mesh.tris
   for (let n = 0; n < t.length; n += 9) test(t, n, n + 3, n + 6, true)
@@ -493,9 +513,10 @@ export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i
     }
     owner = p.bounce ?? 0
     ownerSpring = p.springboard ?? false
+    ownerUnseen = p.unseen ?? false
     for (let n = 0; n < tris.length; n += 3) test(scratch, tris[n] * 3, tris[n + 1] * 3, tris[n + 2] * 3, false)
   }
-  if (who) { who.bounce = best === null ? 0 : bestBounce; who.springboard = best !== null && bestSpring }
+  if (who) { who.bounce = best === null ? 0 : bestBounce; who.springboard = best !== null && bestSpring; if ('unseen' in who) who.unseen = best !== null && bestUnseen }
   return best
 }
 

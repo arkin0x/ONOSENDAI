@@ -41,6 +41,7 @@ import { useShardFolders } from '../store/useShardFolders'
 import { routeImport, useShardImport } from '../store/useShardImport'
 import { useWorkshop } from '../store/useWorkshop'
 import { Bench } from './Bench'
+import { EyePreview } from './EyePreview'
 import { useBenchView } from './benchAxes'
 import { StorageWarning, Toast } from './Notices'
 import { Guide } from './shell/Guide'
@@ -287,6 +288,8 @@ export function Workshop(): JSX.Element | null {
       <TopBar open={area} onArea={toggle} />
       <Rail />
       <ViewBall open={viewOpen} onToggle={toggleView} onClose={() => setViewOpen(false)} />
+      {/* SET EYE's WHAT YOU SEE, under the view ball and under the handles too, so a handle is never hidden behind it. */}
+      {eyeEdit && !viewOpen && <EyePreview />}
       {/* The move handles, on what is held, in any tool. */}
       <MoveHandles />
 
@@ -310,7 +313,7 @@ export function Workshop(): JSX.Element | null {
         {sheet === 'object' && <ObjectPicker onClose={closeSheet} />}
         {/* The first visit's guide and the tool's fading hint, over the strip; neither over a sheet. */}
         {sheet === null && <Guide />}
-        <ToolHint hidden={sheet !== null} />
+        <ToolHint hidden={sheet !== null || eyeEdit} />
         <Strip onPickObject={() => setSheet('object')} onMore={() => toggle('more')} moreBadge={stacked} />
         <Dock onColor={tapColor} colorOpen={sheet === 'palette'} />
       </div>

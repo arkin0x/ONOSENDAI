@@ -3838,12 +3838,13 @@ select.avatars__input option:checked {
 .ws__heldbtn.is-on { color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent); background: rgba(0, 229, 255, 0.08); }
 .ws__heldbtn--ok { color: var(--ok); }
 .ws__eyebar-gap { border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent); border-radius: 0; }
-/* NUMBERS: X, Y and Z steppers, risen over the strip as its other questions are. */
-.benchpaste.ws__ask.ws__eyenums { left: var(--ws-gutter); right: var(--ws-gutter); width: auto; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px; }
-.ws__eyenum { display: flex; align-items: center; gap: 2px; }
+/* NUMBERS: X, Y and Z steppers in one row, risen over the strip as its other questions are. */
+.benchpaste.ws__ask.ws__eyenums { left: var(--ws-gutter); right: var(--ws-gutter); width: auto; display: grid; grid-template-columns: repeat(3, auto); justify-content: space-around; align-items: center; gap: 0 4px; padding: 4px 6px; }
+.ws__eyenum { display: flex; align-items: center; gap: 0; }
 .ws__eyenum .ws__stripbtn { border: 0; background: none; }
-.ws__eyenum .ws__stepper-value { min-width: 40px; }
-.ws__eyenums-step { flex-basis: 100%; text-align: center; font-size: 9.5px; letter-spacing: 0.08em; color: var(--dim); }
+.ws__eyenum .ws__stripbtn--sq { width: 36px; }
+.ws__eyenum .ws__stepper-value { min-width: 36px; }
+.ws__eyenums-step { grid-column: 1 / -1; text-align: center; font-size: 9.5px; letter-spacing: 0.08em; color: var(--dim); }
 /* The eye on the bench: a cyan ring with an eye where the held middle's dot is, labelled EYE. */
 .ws__handle-hub.ws__handle-hub--eye {
   left: -17px;
@@ -3860,8 +3861,8 @@ select.avatars__input option:checked {
 }
 .ws__handle-hub--eye b {
   position: absolute;
-  left: calc(100% + 6px);
-  bottom: calc(100% - 4px);
+  right: calc(100% + 6px);
+  bottom: calc(100% - 6px);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -3874,8 +3875,11 @@ select.avatars__input option:checked {
 .ws__eye-origin-dot { position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; background: rgba(6, 14, 22, 0.6); }
 .ws__eye-origin-label {
   position: absolute;
-  left: 12px;
+  left: 14px;
   top: 4px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(5, 7, 13, 0.55);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -3883,11 +3887,25 @@ select.avatars__input option:checked {
   color: #fff;
   text-shadow: 0 1px 3px #000, 0 0 6px #000;
 }
-/* WHAT YOU SEE, under the view ball. */
-.ws__eyeview { display: flex; flex-direction: column; align-items: stretch; border-radius: 10px; overflow: hidden; background: rgba(6, 14, 22, 0.92); border: 1px solid var(--border); }
+/* WHAT YOU SEE, under the view ball, beneath the move handles (z-index 1 to
+   their 2), so a handle that reaches it is drawn over it, never hidden. */
+.ws__eyeview {
+  position: absolute;
+  top: calc(var(--ws-top-end) + 10px + 60px + 8px);
+  right: max(var(--ws-gutter), var(--ws-safe-r, 0px));
+  z-index: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(6, 14, 22, 0.92);
+  border: 1px solid var(--border);
+}
 .ws__eyeview-head {
-  height: 28px;
-  padding: 0 8px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 26px;
+  padding: 0 6px 0 8px;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -3895,15 +3913,17 @@ select.avatars__input option:checked {
   font-size: 10px;
   letter-spacing: 0.08em;
   color: #fff;
-  background: none;
+  text-shadow: 0 1px 3px #000;
+  background: linear-gradient(rgba(5, 7, 13, 0.7), rgba(5, 7, 13, 0));
   border: 0;
   cursor: pointer;
 }
 .ws__eyeview-head > span { flex: 1; text-align: left; }
+.ws__eyeview.is-folded .ws__eyeview-head { position: static; height: 30px; background: none; }
+.ws__eyeview.is-folded { border-radius: 15px; }
 .ws__eyeview-pic { display: block; padding: 0; border: 0; background: none; cursor: zoom-in; }
 .ws__eyeview.is-big .ws__eyeview-pic { cursor: zoom-out; }
 .ws__eyeview-pic canvas { display: block; }
-.ws__eyeview.is-folded { border-radius: 14px; }
 /* FIRST-PERSON EYE, the AVATAR sheet's row: its words, the setting, SET EYE,
    and the reserved line under it. */
 .ws__eyerow { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); padding-top: 8px; }

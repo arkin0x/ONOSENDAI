@@ -65,7 +65,7 @@ function SampleFloor(): JSX.Element {
       <mesh position={[1.5, 1, -4]}><boxGeometry args={[1, 2, 1]} /><meshLambertMaterial color="#3f8f5a" /></mesh>
       <mesh position={[0, 2.25, -4]}><boxGeometry args={[4, 0.5, 1]} /><meshLambertMaterial color="#357a4c" /></mesh>
       {/* Someone wearing the default avatar, standing on their own point. */}
-      <lineSegments geometry={MARKER} position={[-2.5, 0, -2.5]}>
+      <lineSegments geometry={MARKER} position={[-1.1, 0, -2.5]}>
         <lineBasicMaterial color="#ffffff" transparent opacity={0.85} toneMapped={false} />
       </lineSegments>
     </group>
@@ -83,8 +83,8 @@ function PreviewScene({ shard }: { shard: ShardModel }): JSX.Element {
       <SampleFloor />
       {shard.vertices.length > 0 && (
         <group scale={[k, k, k]}>
-          {/* As WALK draws you from inside: backs culled, opaque, still (DECK-0003 §3.3). */}
-          <ShardMesh shard={shard} lit cull still ignoreOpacity />
+          {/* As WALK draws you from inside (AvatarShape firstPerson): as the world draws it, backs culled, opaque, still (DECK-0003 §3.3). */}
+          <ShardMesh shard={shard} world headlamp={false} cull still ignoreOpacity />
         </group>
       )}
     </>
@@ -99,10 +99,6 @@ export function EyePreview(): JSX.Element | null {
   const size = big ? PREVIEW_BIG : PREVIEW_SMALL
   return (
     <div className={`ws__eyeview${folded ? ' is-folded' : ''}${big ? ' is-big' : ''}`} role="group" aria-label="What you see">
-      <button className="ws__eyeview-head" onClick={() => setFolded((f) => !f)} aria-expanded={!folded} title={folded ? 'Show what you see from the eye' : 'Fold it away to free the view'}>
-        <Eye size={13} strokeWidth={2.25} aria-hidden /><span>WHAT YOU SEE</span>
-        {folded ? <ChevronDown size={14} strokeWidth={2.25} aria-hidden /> : <ChevronUp size={14} strokeWidth={2.25} aria-hidden />}
-      </button>
       {!folded && (
         <button className="ws__eyeview-pic" style={{ width: size.width, height: size.height }} onClick={() => setBig((b) => !b)} title={big ? 'Smaller' : 'Bigger'} aria-label={big ? 'Make the picture smaller' : 'Make the picture bigger'}>
           <Canvas
@@ -117,6 +113,11 @@ export function EyePreview(): JSX.Element | null {
           </Canvas>
         </button>
       )}
+      {/* Its name over the picture's top edge, and the fold: folded, the name alone, to unfold it. */}
+      <button className="ws__eyeview-head" onClick={() => setFolded((f) => !f)} aria-expanded={!folded} title={folded ? 'Show what you see from the eye' : 'Fold it away to free the view'}>
+        <Eye size={13} strokeWidth={2.25} aria-hidden /><span>WHAT YOU SEE</span>
+        {folded ? <ChevronDown size={14} strokeWidth={2.25} aria-hidden /> : <ChevronUp size={14} strokeWidth={2.25} aria-hidden />}
+      </button>
     </div>
   )
 }

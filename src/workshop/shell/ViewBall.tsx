@@ -20,7 +20,6 @@ import { noCallout } from '../../hooks/useRepeatable'
 import { useWorkshop } from '../../store/useWorkshop'
 import { benchPose, orbitBy, planeAfter, requestView, useBenchView, type ViewKind } from '../benchAxes'
 import { stepDivision } from '../divisions'
-import { EyePreview } from '../EyePreview'
 
 /** The bench's axes as the compass draws them: model +Z is render -Z (shards.ts toRender). */
 const BENCH_DIRS = { x: new Vector3(1, 0, 0), y: new Vector3(0, 1, 0), z: new Vector3(0, 0, -1) }
@@ -86,8 +85,6 @@ function ViewMenu({ onClose }: { onClose: () => void }): JSX.Element {
 }
 
 export function ViewBall({ open, onToggle, onClose }: { open: boolean; onToggle: () => void; onClose: () => void }): JSX.Element {
-  // SET EYE's WHAT YOU SEE stands under the ball, where the views menu would; the menu, open, takes the place.
-  const eyeEdit = useWorkshop((s) => s.eyeEdit)
   return (
     <div className="ws__view">
       <OrbitSphere
@@ -102,7 +99,6 @@ export function ViewBall({ open, onToggle, onClose }: { open: boolean; onToggle:
         <Compass3D bench pose={benchPose} dirs={BENCH_DIRS} />
       </OrbitSphere>
       {open && <ViewMenu onClose={onClose} />}
-      {eyeEdit && !open && <EyePreview />}
     </div>
   )
 }

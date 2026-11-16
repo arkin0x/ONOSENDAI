@@ -46,7 +46,7 @@ function EyeNumbers(): JSX.Element | null {
           <button className="ws__stripbtn ws__stripbtn--sq" {...bind(() => { w().moveEye(axis as 0 | 1 | 2, w().step()) })} aria-label={`${name} up a step`}>+</button>
         </div>
       ))}
-      <span className="ws__eyenums-step">A STEP IS {gibsonsLabel(step, shard)} GIBSONS</span>
+      <span className="ws__eyenums-step">A STEP IS {gibsonsLabel(step, shard)} {gibsonsLabel(step, shard) === '1' ? 'GIBSON' : 'GIBSONS'}</span>
     </div>
   )
 }

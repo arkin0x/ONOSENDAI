@@ -112,7 +112,7 @@ import { headlampReach, headlampUniforms } from './headlamp'
 import { lineFade } from './nearFade'
 import { COMPOSER_SAMPLES } from './composerBudget'
 import './radialFog'
-import { fogFar, fogNear } from './fog'
+import { fogFar, fogNear, type FogView } from './fog'
 import { cameraNear, nextReach, orbitMaxDistance, stepOrbitLimit, useDrawReach } from './buildZoom'
 import { flyGesture, panGesture, sceneMouse, steerToSpend, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
 import { StartLock } from '../lib/viewCamera'
@@ -409,11 +409,12 @@ function SceneFog(): JSX.Element {
       f.near = pin[0]
       f.far = pin[1]
     } else {
-      const base = useTv.getState().on || useCyberspace.getState().walking
+      // TV's own fog over a walk it shows; WALK's reaches far ahead of the walker (fog.ts WALK_FOG_FAR).
+      const view: FogView = useTv.getState().on ? 'tv' : useCyberspace.getState().walking ? 'walk' : 'orbit'
       // A stopped VIEW fly brings the target in close; the distance it drops is owed and fades (ViewFly.ts reachOwed).
       const distance = controls ? state.camera.position.distanceTo(controls.target) + viewRig.reachOwed : 0
-      f.near = fogNear(base, distance)
-      f.far = fogFar(base, distance)
+      f.near = fogNear(view, distance)
+      f.far = fogFar(view, distance)
     }
     // The layers draw at least as far as the fog's end can be seen from the
     // camera, out at once and in only well inside it: a step is in the black.
@@ -421,7 +422,7 @@ function SceneFog(): JSX.Element {
     const reach = nextReach(was, f.far + state.camera.position.length())
     if (reach !== was) useDrawReach.setState({ reach })
   }, HEADLAMP_PRIORITY)
-  return <fog ref={fog} attach="fog" args={[0x000000, fogNear(false, 0), fogFar(false, 0)]} />
+  return <fog ref={fog} attach="fog" args={[0x000000, fogNear('orbit', 0), fogFar('orbit', 0)]} />
 }
 
 /**

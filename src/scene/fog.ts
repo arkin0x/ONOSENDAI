@@ -39,13 +39,33 @@
 import { CAMERA_FAR } from './camera'
 import { GRID_RADIUS } from '../lib/space'
 
-/** Where the fog is black in Cyberspace TV and WALK, in render cells, for a camera close to what it looks at: the end they were tuned with. */
+/** Where the fog is black in Cyberspace TV, in render cells, for a camera close to what it looks at: the end it was tuned with. */
 export const FOG_FAR = GRID_RADIUS * 4
 /**
- * Where it begins in TV and WALK, for a camera close to what it looks at:
- * half its end, a long fade (it was 21.6, then 81.6, a thin band, in #769).
+ * Where it begins in TV, for a camera close to what it looks at: half its
+ * end, a long fade (it was 21.6, then 81.6, a thin band, in #769).
  */
 export const FOG_NEAR = FOG_FAR / 2
+
+/**
+ * Where the fog is black in WALK, in render cells, with the eye on the
+ * avatar (arkinox, 2026-11-16: "the draw distance fog in WALK is way more
+ * restrictive than in HOP. I'd like to be able to see further in WALK
+ * mode."). It shared TV's 96 (#779), so a walker saw a tile or so of
+ * landscape and then black, where HOP at its usual orbit (26 cells) sees
+ * clear to 79 and black at 251. Now WALK sees past HOP's: a few 64 and 128
+ * tiles ahead in full colour, then a long soft fade.
+ */
+export const WALK_FOG_FAR = 300
+/** Where it begins in WALK: a little past HOP's usual 79, and under a third of its end, so the fade is long and soft. */
+export const WALK_FOG_NEAR = 80
+
+/**
+ * Which fog a view takes: the third-person views' (HOP, VIEW, BUILD,
+ * spectating), which follows the zoom; WALK's, far and fixed with the eye on
+ * the avatar; or Cyberspace TV's, close and fixed for its shots.
+ */
+export type FogView = 'orbit' | 'walk' | 'tv'
 
 /** In the third-person views (HOP, VIEW, BUILD, spectating), where the fog begins with the camera on its target, in render cells. */
 export const VIEW_FOG_NEAR = 40
@@ -76,33 +96,37 @@ export const CULL_REACH = GRID_RADIUS * 8
 /** A camera `distance` from its target, as a number the fog can use: 0 if it is not one. */
 const cells = (distance: number): number => (Number.isFinite(distance) ? Math.max(0, distance) : 0)
 
+/** WALK's and TV's fixed distances, [start, end], with the camera close to what it looks at. */
+const fixed = (view: 'walk' | 'tv'): [number, number] => (view === 'walk' ? [WALK_FOG_NEAR, WALK_FOG_FAR] : [FOG_NEAR, FOG_FAR])
+
 /**
  * Where the fog begins, in render cells straight out from the camera, for a
- * camera `distance` from what it looks at, in TV or WALK (`base`) or a
- * third-person view. Always further than the target, so the fog never darkens
- * it nor the ground about it (arkinox, 2026-11-15, in HOP near the 96-cell
- * limit: "the darkness is obscuring my avatar at near the maximum zoom-out"):
- * at least 1.5 times as far, and 40 cells more. In BUILD at 2^0 a 3 by 3 of
- * 128 tiles about the cursor is all clear from 480 cells out.
+ * camera `distance` from what it looks at, in `view`. Always further than the
+ * target, so the fog never darkens it nor the ground about it (arkinox,
+ * 2026-11-15, in HOP near the 96-cell limit: "the darkness is obscuring my
+ * avatar at near the maximum zoom-out"): at least 1.5 times as far, and 40
+ * cells more in the third-person views. In BUILD at 2^0 a 3 by 3 of 128 tiles
+ * about the cursor is all clear from 480 cells out.
  *
  * TV's shots stand 24 out at most and WALK's eye sits on the avatar, so in
- * both it is FOG_NEAR; a shot further back takes it out to twice its distance.
+ * both it is their fixed start (FOG_NEAR, WALK_FOG_NEAR); a camera further
+ * back takes it out to twice its distance.
  */
-export function fogNear(base: boolean, distance: number): number {
+export function fogNear(view: FogView, distance: number): number {
   const d = cells(distance)
   // Never at its end (smoothstep needs the two apart); no view comes near it, BUILD's farthest is 0.42.
-  return Math.min(base ? Math.max(FOG_NEAR, d * 2) : VIEW_FOG_NEAR + d * VIEW_FOG_NEAR_SHARE, fogFar(base, d) * 0.9)
+  return Math.min(view === 'orbit' ? VIEW_FOG_NEAR + d * VIEW_FOG_NEAR_SHARE : Math.max(fixed(view)[0], d * 2), fogFar(view, d) * 0.9)
 }
 
 /**
  * Where the fog is black, in render cells straight out from the camera, for a
- * camera `distance` from what it looks at, in TV or WALK (`base`) or a
- * third-person view. Two to four times as far as where it begins,
- * so the fade between is long and soft. FOG_FAR in TV and WALK, four times a
- * shot's distance should one stand further back.
+ * camera `distance` from what it looks at, in `view`. Two to four times as far
+ * as where it begins, so the fade between is long and soft. FOG_FAR in TV and
+ * WALK_FOG_FAR in WALK, four times the camera's distance should it stand
+ * further back.
  */
-export function fogFar(base: boolean, distance: number): number {
+export function fogFar(view: FogView, distance: number): number {
   const d = cells(distance)
-  if (base) return Math.min(FOG_FAR_MAX, Math.max(FOG_FAR, d * 4))
+  if (view !== 'orbit') return Math.min(FOG_FAR_MAX, Math.max(fixed(view)[1], d * 4))
   return Math.min(FOG_FAR_MAX, VIEW_FOG_FAR + d * VIEW_FOG_FAR_SHARE)
 }

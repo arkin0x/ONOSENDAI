@@ -26,11 +26,11 @@ import {
   FLUID_WALL_REACH, accelerate, dueCrossing, len, syncSpeedFactor, wishOf, zero, type Vec,
 } from '../lib/fluidWalk'
 import { moveDirection } from '../lib/moves'
-import { walkFacing, walkGlide } from '../lib/walkEye'
-import { WORLD_DOWN } from '../lib/walkDown'
+import { walkFacing, walkFall, walkGlide } from '../lib/walkEye'
+import { WORLD_DOWN, raised } from '../lib/walkDown'
 import { useCyberspace } from './useCyberspace'
 import { fluidCross, fallState, useWalk, walkDown } from './useWalk'
-import { fluidNudge, fluidOn } from './fluidSwitch'
+import { fluidNudge, fluidOn, useFluidWalk } from './fluidSwitch'
 import { heldNow } from './walkHold'
 import { walkInputOpen } from './walkInput'
 import { faceDistance, wallItemsAt } from './walkWalls'
@@ -41,8 +41,14 @@ export const GLIDE_TAU_S = 0.09
 /** Past this many steps the anchor jumped too far to glide (a respawn, a hyperjump): the eye cuts. */
 const GLIDE_MAX = 64
 
-/** The longest frame stepped at once, in seconds; a longer gap (a hidden tab) is cut to it. */
-const MAX_DT = 0.05
+/** The longest frame walked, in seconds; a longer gap (a hidden tab) is cut to it. */
+const MAX_DT = 0.25
+
+/** A frame is walked in steps of at most this, in seconds. */
+const SUB_DT = 1 / 60
+
+/** In the air a held face is asked again this often, in ms: the arc's height changes under it (a held key pressed every 110 ms). */
+const AIR_RECHECK_MS = 100
 
 /** How far from the middle, in steps, the smooth position asks whether the next gibson its way can be entered. */
 const PROBE_FROM = 0.05
@@ -75,7 +81,12 @@ const st = {
   held: new Map<string, Held>(),
   /** Ways out of this anchor already asked and found open, by `axis` and sign. */
   open: new Set<string>(),
+  /** The gravity the asking was done under ('' with it off). */
+  down: '',
 }
+
+/** How the crossings went, for the headless recording and tests: plain counters. */
+export const fluidCounts = { moved: 0, held: 0, wait: 0 }
 
 const key = (axis: AxisName, dir: number): string => `${axis}${dir > 0 ? '+' : '-'}`
 
@@ -158,7 +169,9 @@ function stepsBetween(a: Position, b: Position, length: bigint): Vec {
 /**
  * One frame of fluid WALK at `now` (ms). Called by the rig before the fall's
  * frame (tickFall), so a crossing that walks off a ledge starts its fall in
- * the same frame. True while it is running.
+ * the same frame. A long frame is walked in steps of at most SUB_DT, so the
+ * walk keeps real time on a slow device, as the fall does. True while it is
+ * running.
  */
 export function tickFluid(now: number = performance.now()): boolean {
   const cs = useCyberspace.getState()
@@ -181,6 +194,9 @@ export function tickFluid(now: number = performance.now()): boolean {
   const gravity = useWalk.getState().gravity
   const g: AxisDirection = gravity ? walkDown() : WORLD_DOWN
   const falling = fallState() !== null
+  // Gravity switched, or turned with the view: what was asked was asked of another down.
+  const down = gravity ? `${g.axis}${g.dir}` : ''
+  if (down !== st.down) { st.down = down; clearAsked() }
   // The anchor moved without a crossing: a STOP, a step that did not land, a
   // move from another device, a fall's height. A fall's own change of
   // height (an arc, a landing, a bounce) is the fall's eye, not a glide.
@@ -203,30 +219,60 @@ export function tickFluid(now: number = performance.now()): boolean {
     st.frac[g.axis] = 0
     st.v[g.axis] = 0
   }
-
   const wish = wishNow(now, gravity, g)
-  const behind = useWalk.getState().behind
-  const factor = syncSpeedFactor(behind)
+  const level = gravity ? LEVEL[g.axis] : AXES
+  for (let left = dt; left > 1e-9; left -= SUB_DT) substep(Math.min(SUB_DT, left), now, wish, gravity, g, level, length)
+  if (dt === 0) substep(0, now, wish, gravity, g, level, length)
+  decay(dt)
+  st.wasFalling = fallState() !== null
+  writeEye(true)
+  return true
+}
+
+/** The axes across each gravity axis, and so the ones a diagonal may use: kept, so a frame allocates no list. */
+const LEVEL: Record<AxisName, readonly AxisName[]> = { x: ['y', 'z'], y: ['x', 'z'], z: ['x', 'y'] }
+
+/**
+ * What the walk will have queued once everything in hand closes: the
+ * segments not yet proven, the open one, and a fall's mid-air hops and its
+ * landing. The speed eases and holds by this (syncSpeedFactor), so neither a
+ * settle nor a landing can carry the queue to the LOSING SYNC warning.
+ */
+export function fluidPending(): number {
+  const w = useWalk.getState()
+  const f = fallState()
+  return w.behind + (w.open ? 1 : 0) + (f ? f.waypoints.length + 1 : 0)
+}
+
+/** One step of the walk's motion, `dt` seconds: the speed, the smooth position, what holds it, and the crossings due. */
+function substep(dt: number, now: number, wish: Vec, gravity: boolean, g: AxisDirection, level: readonly AxisName[], length: bigint): void {
+  const falling = fallState() !== null
+  const factor = syncSpeedFactor(fluidPending())
   const max = FLUID_MAX_SPEED * Math.max(factor, 0.25)
   if (falling) accelerate(st.v, wish, max, FLUID_AIR_ACCEL, FLUID_AIR_DECEL, dt)
   else accelerate(st.v, wish, max, FLUID_ACCEL, FLUID_DECEL, dt)
   if (gravity) st.v[g.axis] = 0
   for (const a of AXES) st.frac[a] += st.v[a] * dt
 
-  // A drift off the way you push (under 22.5 degrees of it) never walks off a ledge.
+  // A drift off the way you push (under 22.5 degrees of it), or a coast with
+  // nothing held, never walks off a ledge.
   const w = len(wish)
-  const edgeSafe = (a: AxisName): boolean => gravity && !falling && w > 1e-9 && Math.abs(wish[a]) < DRIFT * w
+  const edgeSafe = (a: AxisName): boolean => gravity && !falling && (w <= 1e-9 || Math.abs(wish[a]) < DRIFT * w)
+  // In the air the height changes under a held face: asked again as often as a held key pressed.
+  const recheck = falling ? AIR_RECHECK_MS : RECHECK_MS
 
   // Heading out of the middle along an axis not yet asked from this anchor:
   // ask now whether the next gibson that way can be entered, so a wall is
-  // met at its face (the eye slows to it) instead of passed and put back.
+  // met at its face (the eye slows to it) instead of passed and put back. A
+  // step a wall cuts short (a coarse zoom) is a wall too.
   for (const a of AXES) {
     if (Math.abs(st.frac[a]) < PROBE_FROM || st.frac[a] * st.v[a] <= 0) continue
     const dir: 1 | -1 = st.frac[a] > 0 ? 1 : -1
     const k = key(a, dir)
     if (st.held.has(k) || st.open.has(k)) continue
     const res = fluidCross({ axis: a, dir }, null, edgeSafe(a), true)
-    if (res.kind === 'moved') st.open.add(k)
+    if (res.kind === 'moved' && whole(res, a, length)) st.open.add(k)
+    else if (res.kind === 'moved') holdAt({ axis: a, dir }, wallLimit({ axis: a, dir }, length), now, false)
     else if (res.kind === 'held') holdAt({ axis: a, dir }, res.by ? wallLimit({ axis: a, dir }, length) : FLUID_EDGE_REACH, now, !res.by)
   }
 
@@ -240,37 +286,39 @@ export function tickFluid(now: number = performance.now()): boolean {
     if (h.edge && !edgeSafe(a)) { st.held.delete(key(a, dir)); continue }
     if (Math.abs(st.frac[a]) <= h.limit) continue
     // Pushing on it a while: asked again where it stands (a door opened, a
-    // wall went), so the eye never drifts off the face and back.
-    if (now - h.at >= RECHECK_MS && st.v[a] * dir > 0) {
+    // wall went, the arc rose over it), so the eye never drifts off the face
+    // and back. Not while the walk waits for the chain.
+    if (factor > 0 && now - h.at >= recheck && st.v[a] * dir > 0) {
       const res = fluidCross({ axis: a, dir }, null, edgeSafe(a))
-      if (res.kind === 'moved') { moved(res, { axis: a, dir }, null, length); continue }
+      if (res.kind === 'moved') { moved(res, { axis: a, dir }, null, length, falling ? g.axis : null); continue }
       h.at = now
     }
     st.frac[a] = dir * h.limit
     if (st.v[a] * dir > 0) st.v[a] = 0
   }
 
-  // The crossings due, a few a frame at most.
-  const level = AXES.filter((a) => !gravity || a !== g.axis)
+  // The crossings due, a few at most.
   for (let n = 0; n < 4; n++) {
     const due = dueCrossing(st.frac, st.v, level)
     if (!due) break
     const { main, side } = due
-    // One under the LOSING SYNC warning: no new gibson until the chain catches up.
+    // Two under the LOSING SYNC warning: no new gibson until the chain catches up.
     if (factor === 0) { holdEdges(); break }
     const known = st.held.get(key(main.axis, main.dir))
-    if (known) { holdAt(main, known.limit, known.at, known.edge); continue }
+    if (known && now - known.at < recheck) { holdAt(main, known.limit, known.at, known.edge); continue }
     const res = fluidCross(main, side, edgeSafe(main.axis))
-    if (res.kind === 'moved') { moved(res, main, side, length); continue }
+    fluidCounts[res.kind]++
+    if (res.kind === 'moved') { moved(res, main, side, length, falling ? g.axis : null); continue }
     if (res.kind === 'wait') { holdEdges(); break }
     // Held: by a wall, measured to its face; by the edge safety, near the edge.
     holdAt(main, res.by ? wallLimit(main, length) : FLUID_EDGE_REACH, now, !res.by)
   }
+}
 
-  decay(dt)
-  st.wasFalling = fallState() !== null
-  writeEye(true)
-  return true
+/** Whether a step went its whole length along `a`. */
+function whole(res: { from: Position; to: Position }, a: AxisName, length: bigint): boolean {
+  const d = res.to[a] - res.from[a]
+  return d === length || d === -length
 }
 
 /** What is held now (or a tap's nudge), as the way to go. */
@@ -303,7 +351,9 @@ function wallLimit(d: AxisDirection, length: bigint): number {
   const cs = useCyberspace.getState()
   const fall = fallState()
   const items = fall ? fall.items : wallItemsAt(cs.plane, cs.cursor)
-  const face = faceDistance(cs.cursor, d.axis, d.dir, items, length)
+  // In the air, measured at the height the eye is at, not where the hop began.
+  const from = fall && walkFall.active ? raised(cs.cursor, fall.down, BigInt(Math.round(walkFall.offset))) : cs.cursor
+  const face = faceDistance(from, d.axis, d.dir, items, length)
   const n = Number(length)
   // The face is measured from the anchor, where the eye is at the middle.
   if (face === null) return FLUID_WALL_REACH
@@ -327,10 +377,11 @@ function holdEdges(): void {
  * middle; across it (a stair's rise, a settle), the eye stays where it was
  * and glides up or down onto it.
  */
-function moved(res: { from: Position; to: Position }, main: AxisDirection, side: AxisDirection | null, length: bigint): void {
+function moved(res: { from: Position; to: Position }, main: AxisDirection, side: AxisDirection | null, length: bigint, fallAxis: AxisName | null): void {
   const d = stepsBetween(res.to, res.from, length)
   for (const a of AXES) {
-    if (d[a] === 0) continue
+    // In the air the height is the fall's own eye (walkFall), never a glide.
+    if (d[a] === 0 || a === fallAxis) continue
     if (a === main.axis || (side && a === side.axis)) st.frac[a] -= d[a]
     else st.glide[a] -= d[a]
   }
@@ -362,6 +413,13 @@ function clearAsked(): void {
 function same(a: Position, b: Position): boolean {
   return a.x === b.x && a.y === b.y && a.z === b.z
 }
+
+// The switch turned while walking: the open segment closes (a step WALK
+// press would grow it by heading, a fluid crossing by line, and the two
+// must not share one), and the smooth position glides onto its anchor.
+useFluidWalk.subscribe((s, prev) => {
+  if (s.on !== prev.on && useCyberspace.getState().walking) useWalk.getState().settle()
+})
 
 // DEV window handle, the house pattern: fluid WALK's state for the headless recording.
 if (import.meta.env.DEV && typeof window !== 'undefined') {

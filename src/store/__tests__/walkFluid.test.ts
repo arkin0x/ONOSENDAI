@@ -299,6 +299,26 @@ describe('walls', () => {
   })
 })
 
+describe('a running jump onto a ledge', () => {
+  it('pushing on a ledge 3 up, a jump carries you onto it (the held face is asked again as the arc rises)', async () => {
+    world(start, [boxes('Ground', 'all', [FLOOR, [[-40, -1, -40], [40, 3, -2.5]]]), [0, -1, 0]])
+    walk(true)
+    await wallsBuilt()
+    down('KeyW')
+    frames(800)
+    // Held at the ledge's foot.
+    expect(rel(start)).toEqual([0, 0, -2])
+    down('Space'); up('Space')
+    frames(2000)
+    up('KeyW')
+    frames(500)
+    const c = rel(start)
+    expect(c[1]).toBe(3)
+    expect(c[2]).toBeLessThan(-2)
+    expect(fallState()).toBeNull()
+  })
+})
+
 describe('floors from Landscape Kit tiles', () => {
   it('walks up the Grass Ramp Up standing on it, a step at a time, under gravity', async () => {
     const ramp = withConstrain(fromPayload(RAMP, 'ramp')!, 'all')
@@ -387,11 +407,11 @@ describe('anchoring the chain', () => {
 describe('the queue stays honest', () => {
   it('eases the speed as proofs fall behind', () => {
     expect(syncSpeedFactor(0)).toBe(1)
-    expect(syncSpeedFactor(4)).toBe(1)
-    expect(syncSpeedFactor(5)).toBeCloseTo(0.75, 9)
-    expect(syncSpeedFactor(6)).toBeCloseTo(0.5, 9)
-    expect(syncSpeedFactor(7)).toBeCloseTo(0.25, 9)
-    expect(FLUID_HOLD_AT).toBe(SYNC_WARN_AT - 2)
+    expect(syncSpeedFactor(5)).toBe(1)
+    expect(syncSpeedFactor(6)).toBeCloseTo(0.75, 9)
+    expect(syncSpeedFactor(7)).toBeCloseTo(0.5, 9)
+    expect(syncSpeedFactor(8)).toBeCloseTo(0.25, 9)
+    expect(FLUID_HOLD_AT).toBe(SYNC_WARN_AT - 1)
     expect(syncSpeedFactor(FLUID_HOLD_AT)).toBe(0)
   })
 
@@ -416,7 +436,7 @@ describe('the queue stays honest', () => {
       expect(Math.abs(fluidState().frac.x)).toBeLessThanOrEqual(0.75)
       expect(Math.abs(fluidState().frac.z)).toBeLessThanOrEqual(0.75)
     }
-    expect(most).toBeGreaterThanOrEqual(FLUID_HOLD_AT)
+    expect(most).toBeGreaterThanOrEqual(FLUID_HOLD_AT - 2)
     expect(most).toBeLessThan(SYNC_WARN_AT)
     // Held a good while with the key down.
     expect(stillest).toBeGreaterThan(2000)

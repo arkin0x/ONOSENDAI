@@ -52,7 +52,7 @@
 import { useCyberspace } from './useCyberspace'
 import { useWalk } from './useWalk'
 import { walkInputOpen } from './walkInput'
-import { fluidOn, noteNudge } from './fluidSwitch'
+import { fluidNudge, fluidOn, noteNudge } from './fluidSwitch'
 import { FLUID_NUDGE_MS } from '../lib/fluidWalk'
 import type { HeldDir } from '../lib/walkKeys'
 
@@ -173,6 +173,8 @@ export function holdEndAll(prefix: string): void {
 export function holdReleaseAll(): void {
   held.clear()
   stopLoop()
+  // A tap's push goes too (fluid WALK): a STOP, a step that did not land or leaving WALK is never nudged on.
+  fluidNudge.until = 0
 }
 
 // WALK beginning or ending lets go of everything: nothing held in one walk

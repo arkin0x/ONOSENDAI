@@ -71,28 +71,29 @@ export const FLUID_EDGE_REACH = 0.45
 /**
  * The longest line a segment may stray from, in gibsons: the gibsons walked
  * since the segment began must all be within this of the straight hop that
- * publishes it. Under 1, so a turn round a corner is two hops, never one
- * that cuts it; over half a gibson, so a walk at any angle (the gibsons it
- * crosses zigzag round its line) is still one hop.
+ * publishes it. Under 1, so a turn round a corner more than a gibson each
+ * way is two hops, never one that cuts it (a one-gibson L, 0.71 off its
+ * line, is one hop, as a diagonal step always was); over half a gibson, so
+ * a walk at any angle (the gibsons it crosses zigzag round its line) is
+ * still one hop.
  */
 export const FLUID_LINE_SLACK = 0.75
 
 /**
  * Queue honesty: how the walking speed eases as the walk falls behind its
- * proofs (`behind`, store/useWalk.ts: closed segments not yet proven). Up to
- * FLUID_EASE_FROM it is full speed; then a quarter less for each one more;
- * at FLUID_HOLD_AT no new gibson is entered at all until the chain catches
- * up. That is two under the LOSING SYNC warning (SYNC_WARN_AT, 10): the
- * segment still open when the walker is held closes once it is still
- * (WALK_SETTLE_MS) and counts one more, so walking alone stops at 9 and
- * never brings the warning up. The smooth position is never more than about
- * 0.75 of a step from its anchor (the diagonal zone at a corner), so it can
- * never run ahead of what is queued: only the queue can, and that is what
- * this caps.
+ * proofs. It counts what will be queued once everything in hand closes
+ * (store/walkFluid.ts fluidPending): the segments not yet proven, the one
+ * still open, and a fall's mid-air hops and landing. Up to FLUID_EASE_FROM
+ * it is full speed; then a quarter less for each one more; at FLUID_HOLD_AT,
+ * one under the LOSING SYNC warning (SYNC_WARN_AT, 10), no new gibson is
+ * entered at all until the chain catches up, so walking alone never brings
+ * the warning up. The smooth position is never more than about 0.75 of a
+ * step from its anchor (the diagonal zone at a corner), so it can never run
+ * ahead of what is queued: only the queue can, and that is what this caps.
  */
-export const FLUID_EASE_FROM = 4
-/** See FLUID_EASE_FROM: two under SYNC_WARN_AT (10). */
-export const FLUID_HOLD_AT = 8
+export const FLUID_EASE_FROM = 5
+/** See FLUID_EASE_FROM: one under SYNC_WARN_AT (10). */
+export const FLUID_HOLD_AT = 9
 
 /** The share of the walking speed allowed `behind` proofs behind: 1 up to FLUID_EASE_FROM, falling by a quarter each, 0 from FLUID_HOLD_AT. */
 export function syncSpeedFactor(behind: number): number {

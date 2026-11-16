@@ -119,3 +119,24 @@ describe('drift and decode', () => {
     expect(settledShare(100_000, undefined, 1000)).toBe(0)
   })
 })
+
+describe('halos and the bloom tag, per canvas and per draw (#778 LOOK)', () => {
+  it('keep the tag in the world canvas and wherever the shard is drawn as the world draws it (LOOK); accumulate elsewhere', async () => {
+    const { haloKeepsTag } = await import('../PointBillboards')
+    expect(haloKeepsTag(true, false)).toBe(true) // the placing ghost in the world
+    expect(haloKeepsTag(false, true)).toBe(true) // the bench in LOOK, under its world bloom
+    expect(haloKeepsTag(false, false)).toBe(false) // the editing tools, games, pictures
+    expect(haloBlend('fog', haloKeepsTag(false, true))).toMatchObject({ blendSrcAlpha: ZeroFactor, blendDstAlpha: OneFactor })
+    expect(haloBlend('fog', haloKeepsTag(false, false))).toMatchObject({ blendSrcAlpha: OneFactor, blendDstAlpha: OneMinusSrcAlphaFactor })
+  })
+})
+
+describe('billboard points take no dot scale (#778)', () => {
+  it('are sized in model units: the PointCores draw in ShardMesh never reads the canvas dot scale', () => {
+    const mesh = readFileSync('src/scene/ShardMesh.tsx', 'utf8')
+    const cores = mesh.split('\n').find((l) => l.includes('<PointCores'))
+    expect(cores).toBeDefined()
+    expect(cores).not.toMatch(/dotScale|scaledDisc/)
+    expect(readFileSync('src/scene/PointBillboards.tsx', 'utf8')).not.toMatch(/useDotScale|dotScale/)
+  })
+})

@@ -202,10 +202,23 @@ describe('comments with no key held', () => {
     const key = new Uint8Array(32).fill(5)
     const theirs = finalizeEvent(await sealedComment(subject, itemParent(subject), 'derived', 1_800_000_000, key), new Uint8Array(32).fill(4))
     relay.events = [theirs]
-    worker.resolve!({ key, lookupId: 'l'.repeat(64) })
+    // A key that fits the bag (its lookup id is the bag's): only such a key is used (store/bagKeys, useComments).
+    worker.resolve!({ key, lookupId: subject.lookupId })
     state = await settle(subject)
     expect(state.comments.map((c) => c.text)).toEqual(['derived'])
     expect(regionKeyAt).not.toHaveBeenCalled()
     expect(regionKeyOffThread).toHaveBeenCalledTimes(1)
+  })
+
+  it('a derived key that does not fit the bag (a thing in a room) is never used: COMMENTS UNAVAILABLE, nothing read or sealed', async () => {
+    const subject = subjectAt(13)
+    let state = await settle(subject)
+    worker.resolve!({ key: new Uint8Array(32).fill(5), lookupId: 'f'.repeat(64) })
+    state = await settle(subject)
+    expect(state.unavailable).toBe(true)
+    expect(state.loading).toBe(false)
+    expect(vi.mocked(queryChecked)).not.toHaveBeenCalled()
+    expect(await state.post('words')).toBe(false)
+    expect(relay.published).toEqual([])
   })
 })

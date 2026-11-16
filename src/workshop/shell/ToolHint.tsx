@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react'
 import { shallow } from 'zustand/shallow'
 import { useWorkshop, type Tool } from '../../store/useWorkshop'
+import { isLook } from '../lookTool'
 import { HINT_USES, useBeginner, useViewTurned } from '../beginner'
 
 /** The line for the tool in hand, as the store stands. Pure. */
@@ -58,6 +59,7 @@ function LiveHint({ tool, hidden }: { tool: Tool; hidden: boolean }): JSX.Elemen
   // LOOK's use is a turn of the view; it re-arms after each.
   const [turns, setTurns] = useState(0)
   useViewTurned(tool === 'view', () => { useBeginner.getState().bump('view'); setTurns((n) => n + 1) }, 0.45, turns)
-  if (hidden || s.holding) return null
+  // The held bar's place while something is held, except in LOOK, where the held bar does not show (Strip).
+  if (hidden || (s.holding && !isLook(tool))) return null
   return <div className="ws__toolhint" role="status">{hintFor(s)}</div>
 }

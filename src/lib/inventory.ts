@@ -23,6 +23,7 @@ import { withAuthoredConstrain } from './walkConstrain'
 import type { NostrEvent } from './events'
 import type { ChestEntry, OpeningKey } from './chests'
 import type { AudioItem } from './audioItem'
+import { isGuideKey } from './commentSubjects'
 import { KEY_KIND, hiddenLabel, itemLineage, keyItemOf, type ChestItem, type Hidden, type HiddenType, type ItemBody, type KeyItem } from './hidden'
 
 /** What a key looks like as text, for COPY and PASTE across devices. */
@@ -38,6 +39,21 @@ export interface HeldPlace {
   at: { x: string; y: string; z: string }
   plane: Plane
   height: number
+  /**
+   * Who signed the bag: who the in-world card names as the author of what was
+   * found there (Hidden `author`), so a key item's COMMENT in ITEMS opens the
+   * thread its card opens (lib/commentSubjects.ts). For something taken out
+   * of a chest, the chest's hider as the chest was opened. Absent on rows
+   * held before it was kept. Kept on this device only, like the rest.
+   */
+  author?: string
+  /**
+   * The bag was sealed by a tutorial guide key (tutorial/guideBags.ts), as
+   * told when it was taken: never a thread, whatever guide key this device
+   * keeps later (lib/commentSubjects subjectOfHeld). Its bag was never on a
+   * relay, and a comment would name the guide key in public.
+   */
+  guide?: true
 }
 
 /** The chest a taken item came out of. */
@@ -144,11 +160,13 @@ export function rowKeyOf(owner: string, id: string): string {
 }
 
 /** A found item's place, as the inventory keeps it. */
-export function placeOf(h: Pick<Hidden, 'lookupId' | 'bagId' | 'at' | 'plane' | 'height'>): HeldPlace {
-  return { lookupId: h.lookupId, bagId: h.bagId, at: { x: h.at.x.toString(), y: h.at.y.toString(), z: h.at.z.toString() }, plane: h.plane, height: h.height }
+export function placeOf(h: Pick<Hidden, 'lookupId' | 'bagId' | 'at' | 'plane' | 'height'> & Partial<Pick<Hidden, 'author'>>): HeldPlace {
+  return { lookupId: h.lookupId, bagId: h.bagId, at: { x: h.at.x.toString(), y: h.at.y.toString(), z: h.at.z.toString() }, plane: h.plane, height: h.height, ...(h.author ? { author: h.author } : {}) }
 }
 
-function row(owner: string, event: NostrEvent, body: ItemBody, verified: boolean, source: HeldSource, place: HeldPlace | null, from: HeldFrom | null, at: number): HeldItem {
+function row(owner: string, event: NostrEvent, body: ItemBody, verified: boolean, source: HeldSource, given: HeldPlace | null, from: HeldFrom | null, at: number): HeldItem {
+  // Sealed by a tutorial guide key: said on the place at TAKE, so it holds after a reload or a new guide key.
+  const place = given?.author && isGuideKey(given.author) ? { ...given, guide: true as const } : given
   return {
     rowKey: rowKeyOf(owner, event.id),
     owner,

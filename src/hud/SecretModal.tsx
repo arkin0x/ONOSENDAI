@@ -34,6 +34,7 @@ import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { Comments, PublicComments } from './Comments'
 import { Reactions } from './Reactions'
 import { itemKind } from '../lib/comments'
+import { subjectOfWorldItem } from '../lib/commentSubjects'
 import { useProfile } from '../hooks/useProfile'
 import { isGuideAuthor } from '../tutorial/guideBags'
 import { profileLabel } from '../store/useProfiles'
@@ -205,7 +206,8 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
     useCyberspace.getState().viewAt(item.at, item.plane, label, viewScaleOf(item), { item: true })
   }
   // Where it was found, for what is taken out of a chest here.
-  const place = { lookupId: item.lookupId ?? '', bagId: item.bagId ?? '', at: { x: item.at.x.toString(), y: item.at.y.toString(), z: item.at.z.toString() }, plane: item.plane, height: item.height }
+  const place = { lookupId: item.lookupId ?? '', bagId: item.bagId ?? '', at: { x: item.at.x.toString(), y: item.at.y.toString(), z: item.at.z.toString() }, plane: item.plane, height: item.height, ...(author ? { author } : {}) }
+  const commentSubject = useMemo(() => subjectOfWorldItem(item), [item])
   const watch = (): void => { leave(); void spectate(author) }
   // A message with a Cashu token in it copies only the words around the
   // token: the token has its own COPY TOKEN on the card, and a message that
@@ -330,9 +332,8 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
               alsoTell={[author]}
             />}
 
-        {item.author && item.lookupId && (
-          <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.lineage ?? item.key, type: item.type, target: item.target, at: item.at, height: item.height, bagKeyHex: item.bagKeyHex }} />
-        )}
+        {/* The thread every surface opens for this item (lib/commentSubjects): KEY ITEMS > MINE opens this one for a key taken from here. */}
+        {commentSubject && <Comments subject={commentSubject} />}
         {/* A published shard's comments are public, as it is (Comments PublicComments). */}
         {published && item.target?.id && (
           <PublicComments target={{ id: item.target.id, pubkey: item.target.pubkey, kind: item.target.kind, address: item.target.address }} />

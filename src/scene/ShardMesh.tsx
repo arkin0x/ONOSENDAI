@@ -39,6 +39,7 @@ import { useResolved, type Resolved } from '../lib/parts'
 import { dropDemand, provisional, setDemand, useAllowance, type Allowance } from './meshBudget'
 import { followsVersion, onFollows, trustedAuthor } from '../lib/trust'
 import { ACCENT, WARN } from '../lib/palette'
+import { scaledDisc, useDotScale } from './dotScale'
 import { renderPose, type Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
 import { faceEdges } from 'sno-core/outline'
@@ -50,7 +51,7 @@ import { HEADLAMP_FACES, HEADLAMP_LINES } from './headlamp'
 import { holdPlaced, placedBuffers, type PlacedBuffers } from './placedBuffers'
 import { animOf, type Motion } from '../lib/anim'
 import { AnimClock, AnimGroups, clipWalls } from './animMotion'
-import { drawPlan, haloFade, pointLookOf } from '../lib/pointLook'
+import { benchFaintDots, drawPlan, haloFade, pointLookOf } from '../lib/pointLook'
 import { GlowHalos, GlowTrust, PointCores, useGlowAllowed } from './PointBillboards'
 
 export { FACE_TAG_STENCIL } from './shardFaces'
@@ -75,7 +76,7 @@ interface Props {
    * everything lit back onto the frame, and across a filled face that is
    * several times the face's own colour, so faces came out white with a
    * tint. Out there the faces write their colour with alpha 0, a tag the
-   * scene's bloom is blind to (Scene.tsx WorldBloom), so they draw at their
+   * scene's bloom is blind to (worldBloom.tsx WorldBloom), so they draw at their
    * own colours, as on the bench; points and lines are untagged and glow as
    * they always did. Not for a ghost, whose translucency needs real alpha.
    */
@@ -393,14 +394,10 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   const glowAllowed = useGlowAllowed()
   const plan = drawPlan(given.mode, look, { cull, glowAllowed })
   // On the workshop's bench (the only canvas with its own anim clock,
-  // scene/animMotion.ts AnimClock), an object no one can see (opacity 0, or
-  // POINTS at point size 0 with no glow) must stay findable (DECK-0003 §1.11,
-  // §1.15). The bench's own vertex handles already mark every vertex in every
-  // tool, except while an object with `anim` is drawn moving (VIEW or the
-  // preview), when they are hidden (Bench.tsx Handles). Only then does it show
-  // faint dots, which move with it. Never in the world, the feed or the pictures.
+  // scene/animMotion.ts AnimClock), faint dots for an object no one can see,
+  // only where the bench's handles are hidden and never in LOOK (lib/pointLook.ts benchFaintDots).
   const onBench = useContext(AnimClock) !== null
-  const benchFaint = onBench && moving && !cull && (look.hidden || (given.mode === 'points' && look.pointSize === 0 && !look.glow))
+  const benchFaint = benchFaintDots(given, look, { onBench, moving, cull, world })
   const faintMaterial = useMemo(() => (benchFaint ? createDiscMaterial(SHARD_POINTS, BENCH_FAINT_OPACITY, false) : null), [benchFaint])
   useEffect(() => () => { faintMaterial?.dispose() }, [faintMaterial])
   const trustedAbove = useContext(GlowTrust)
@@ -516,9 +513,12 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
 
   // The points, drawn as the terrain field draws its gibsons: a feathered disc
   // with a bright core for the bloom, sized in pixels between a floor and a cap.
+  // At the canvas's own dot scale (scene/dotScale.ts): 1, the world's, except on the workshop's LOOK.
+  const dotScale = useDotScale()
   const pointMaterial = useMemo(() => {
-    return createDiscMaterial(shard.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, shard.mode === 'points' ? opacity : opacity * 0.55, headlamp && !lit)
-  }, [shard.mode, opacity, headlamp, lit])
+    const profile = scaledDisc(shard.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, dotScale)
+    return createDiscMaterial(profile, shard.mode === 'points' ? opacity : opacity * 0.55, headlamp && !lit)
+  }, [shard.mode, opacity, headlamp, lit, dotScale])
   useEffect(() => () => pointMaterial.dispose(), [pointMaterial])
   useEffect(() => { pointMaterial.clippingPlanes = clipPlanes ?? null }, [pointMaterial, clipPlanes])
 
@@ -716,7 +716,8 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
       {plan.points === 'disc' && (shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (
         <points geometry={plain} material={pointMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} />
       )}
-      {/* At a POINT SIZE: billboards, since a GPU caps a GL point's size. 0 draws no points. */}
+      {/* At a POINT SIZE: billboards, since a GPU caps a GL point's size. 0 draws no points. Sized in model
+          units, carried by the model's own scale, so the canvas's dot scale (scene/dotScale.ts, LOOK) never applies. */}
       {/* Nothing of its own drawn (opacity 0, or POINTS at point size 0): an invisible copy still answers taps and picks, and is never drawn, so it hides and occludes nothing. */}
       {!cull && (look.hidden || plan.points === 'none') && (shard.mode === 'solid' && index.length > 0 && look.hidden
         ? <mesh name="shard-hit" visible={false} geometry={indexed} material={HIT_MATERIAL} frustumCulled={false} {...pick} />
@@ -726,7 +727,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
         <PointCores plain={pointsPlain} size={look.pointSize} opacity={opacity} glow={SHARD_POINTS.glow} headlamp={headlamp && !lit} clipPlanes={clipPlanes} walls={clip} />
       )}
       {plan.halos && look.glow && (
-        <GlowHalos plain={pointsPlain} glow={look.glow} radius={look.glowRadius} strength={look.glowStrength} core={plan.points === 'billboard' ? look.pointSize : 0} fade={haloFade({ ghostShare: ghost ? GHOST_OPACITY : 1, dim })} trusted={glowTrusted} clipPlanes={clipPlanes} walls={clip} birth={birth} dissolve={dissolve} />
+        <GlowHalos plain={pointsPlain} glow={look.glow} radius={look.glowRadius} strength={look.glowStrength} drawnWorld={world} core={plan.points === 'billboard' ? look.pointSize : 0} fade={haloFade({ ghostShare: ghost ? GHOST_OPACITY : 1, dim })} trusted={glowTrusted} clipPlanes={clipPlanes} walls={clip} birth={birth} dissolve={dissolve} />
       )}
       </>)}
     </group>

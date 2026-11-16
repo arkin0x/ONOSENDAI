@@ -152,3 +152,16 @@ export function unseenObject(s: Looked): boolean {
   if (drawnOpacity(s) === 0) return true
   return s.mode === 'points' && drawnPointSize(s) === 0 && drawnGlow(s) === undefined
 }
+
+/**
+ * Whether the workshop's bench shows faint dots for an object no one can see
+ * (DECK-0003 §1.11, §1.15: its author must be able to find it). The bench's
+ * vertex handles mark every vertex in every editing tool, except while an
+ * object with `anim` is drawn moving, when they are hidden (`moving`); LOOK
+ * (`world`, the bench drawing the shard as the world does) shows the world
+ * as it is, so never there; never off the bench.
+ */
+export function benchFaintDots(s: Looked, look: Pick<PointLook, 'hidden' | 'pointSize' | 'glow'>, { onBench, moving, cull = false, world }: { onBench: boolean; moving: boolean; cull?: boolean; world: boolean }): boolean {
+  if (!onBench || !moving || cull || world) return false
+  return look.hidden || (s.mode === 'points' && look.pointSize === 0 && !look.glow)
+}

@@ -15,6 +15,12 @@
  * - A windup (a sniper's or a heavy's telegraph) grows a light on each
  *   muzzle from nothing to full over windupS: the warning to move.
  * - A hit flashes the drone white for HIT_FLASH_S.
+ * - Far away, past where the fog starts to take the drone (the sky is black
+ *   and so is the fog), a faint speck of its eyes' colour stays at its
+ *   middle, drawn through the fog (the view's beacons pool), so a drone 30 to
+ *   50 gibsons off is still a point you can find. It comes in from SPECK_FROM
+ *   to SPECK_FULL gibsons and goes again past SPECK_GONE. With GLOW off the
+ *   pool still draws a small hard core.
  *
  * Ledger class (c): the look. The drone's position, its sphere and its
  * windup time are the simulation's (class b), and the telegraph is drawn
@@ -43,6 +49,30 @@ const FLASH = new Color(3.2, 3.2, 3.2)
 
 /** One material for every drone: lit as the world's lit shards are, both sides, at the payload's own colours. */
 export const DRONE_MATERIAL = new MeshLambertMaterial({ vertexColors: true, flatShading: true, side: DoubleSide, toneMapped: SHARD_FACES_TONE_MAPPED })
+
+/** The far speck (see the header): from, full and gone, gibsons from the eye; its light and size (gibsons). */
+export const SPECK_FROM = 18
+export const SPECK_FULL = 34
+export const SPECK_GONE = 110
+export const SPECK_LIGHT = 0.75
+export const SPECK_RADIUS = 0.4
+
+const smooth = (a: number, b: number, x: number): number => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
+
+/** How much of the far speck shows for a drone `dist` gibsons from the eye: none close, full from SPECK_FULL, fading out toward SPECK_GONE. */
+export function speckShare(dist: number): number {
+  return smooth(SPECK_FROM, SPECK_FULL, dist) * (1 - smooth(SPECK_GONE * 0.8, SPECK_GONE, dist))
+}
+
+/** The mean colour of a drone's glowing points (its eyes), or white. */
+function eyeColor(model: DroneModel): [number, number, number] {
+  let r = 0, g = 0, b = 0, n = 0
+  for (const gl of model.glows) for (let k = 0; k < gl.colors.length; k += 3) { r += gl.colors[k]; g += gl.colors[k + 1]; b += gl.colors[k + 2]; n++ }
+  if (!n) return [1, 1, 1]
+  // Brought up to full brightness: a speck is a light, whatever its eyes' strength.
+  const m = Math.max(r, g, b) / n || 1
+  return [r / n / m, g / n / m, b / n / m]
+}
 
 interface Pose { yaw: number; frame: number }
 
@@ -78,6 +108,7 @@ function DroneKind({ view, kind, model }: { view: DroneRunView; kind: string; mo
   }), [model])
   const muzzles = useMemo(() => (model.muzzles.length ? model.muzzles : [[0, 0, model.across * 0.5] as [number, number, number]]), [model])
   const tint = kind === 'sniper' ? SNIPER_TINT : HEAVY_TINT
+  const speck = useMemo(() => eyeColor(model), [model])
   useEffect(() => () => { body?.dispose(); for (const p of parts) p.dispose() }, [body, parts])
 
   const poses = useRef(new Map<number, Pose>())
@@ -93,11 +124,11 @@ function DroneKind({ view, kind, model }: { view: DroneRunView; kind: string; mo
     m: new Matrix4(), pm: new Matrix4(), spin: new Matrix4(), v: new Vector3(), eye: new Vector3(),
   }), [])
 
-  useFrame((_, frameDt) => {
+  useFrame(({ camera }, frameDt) => {
     const dt = frameDt * view.runner.timeScale
     const t = view.time
     clock.current = t
-    const { runner, glow } = view
+    const { runner, glow, beacons } = view
     const st = runner.state
     const defs = st.world.variant.spec.enemies
     const player = st.body.pos
@@ -148,6 +179,11 @@ function DroneKind({ view, kind, model }: { view: DroneRunView; kind: string; mo
           glow.push(tmp.v.x, tmp.v.y, tmp.v.z, c[k] * bright, c[k + 1] * bright, c[k + 2] * bright, g.radius)
         }
       }
+      // The far speck.
+      const far = speckShare(camera.position.distanceTo(tmp.pos)) * SPECK_LIGHT
+      // With GLOW off the pool keeps a hard core a quarter of the radius: twice the radius there, so the speck stays a few pixels.
+      const speckR = SPECK_RADIUS * Math.max(1, Math.sqrt(model.across)) * (view.glowOn ? 1 : 2)
+      if (far > 0.01) beacons.push(tmp.pos.x, tmp.pos.y, tmp.pos.z, speck[0] * far, speck[1] * far, speck[2] * far, speckR)
       // The telegraph: a light on each muzzle, growing over the windup.
       const shot = def.attack.shot
       if (d.windup >= 0 && shot) {
@@ -187,5 +223,10 @@ function DroneKind({ view, kind, model }: { view: DroneRunView; kind: string; mo
 
 export function Drones({ view }: { view: DroneRunView }): JSX.Element {
   const kinds = useMemo(() => view.runner.state.world.variant.spec.enemies.map((e) => e.id).filter((id) => view.models.drones[id]), [view])
-  return <>{kinds.map((k) => <DroneKind key={k} view={view} kind={k} model={view.models.drones[k]} />)}</>
+  return (
+    <>
+      {kinds.map((k) => <DroneKind key={k} view={view} kind={k} model={view.models.drones[k]} />)}
+      <primitive object={view.beacons.mesh} />
+    </>
+  )
 }

@@ -119,6 +119,7 @@ function OpenPools({ view }: { view: DroneRunView }): null {
     view.glowOn = glowOn
     view.glow.begin()
     view.ribbons.begin()
+    view.beacons.begin()
     view.vmGlow.begin()
   }, PRIORITY.open)
   return null
@@ -136,6 +137,7 @@ function Renderer({ view, vmScene, vmCamera }: { view: DroneRunView; vmScene: Sc
     const facts = { dpr, bufferHeight: size.height * dpr, glow: view.glowOn }
     view.glow.end(facts)
     view.ribbons.end(facts)
+    view.beacons.end(facts)
     view.vmGlow.end(facts)
     if (vmCamera.fov !== camera.fov || vmCamera.aspect !== camera.aspect) {
       vmCamera.fov = camera.fov

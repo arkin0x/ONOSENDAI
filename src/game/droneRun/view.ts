@@ -20,6 +20,8 @@ export interface DroneRunView {
   /** Glow and streaks in the world's scene. */
   glow: GlowPool
   ribbons: RibbonPool
+  /** Far drones' specks, drawn through the fog (Drones.tsx). */
+  beacons: GlowPool
   /** Glow in the viewmodel's own pass (muzzle flash, heat, charge), camera space. */
   vmGlow: GlowPool
   /** The muzzle of the gun in hand, camera space (gibsons), as last drawn. */
@@ -38,6 +40,7 @@ export function makeView(runner: DroneRunner, models: DroneRunModels, reducedMot
     runner, models, reducedMotion, glowOn: true, time: 0,
     glow: new GlowPool(2048, true),
     ribbons: new RibbonPool(512),
+    beacons: new GlowPool(128, false),
     vmGlow: new GlowPool(256, false),
     muzzleCam: new Vector3(0.3, -0.2, -1.6),
     bob: { phase: 0, amount: 0 },
@@ -47,5 +50,6 @@ export function makeView(runner: DroneRunner, models: DroneRunModels, reducedMot
 export function disposeView(v: DroneRunView): void {
   v.glow.dispose()
   v.ribbons.dispose()
+  v.beacons.dispose()
   v.vmGlow.dispose()
 }

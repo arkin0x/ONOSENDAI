@@ -220,11 +220,11 @@ export function ChainPanel(): JSX.Element {
 
       <div className="hash">
         <span className="hash__label">genesis</span>
-        <code>{genesisId}</code>
+        <code><CopyValue value={genesisId} /></code>
       </div>
       <div className="hash">
         <span className="hash__label">chain head{events.length <= 1 ? ' (spawn)' : ''}</span>
-        <code>{prevEventId}</code>
+        <code><CopyValue value={prevEventId} /></code>
       </div>
 
       {publishError && <p className="notice">{CYBERSPACE_RELAY}: {publishError}</p>}

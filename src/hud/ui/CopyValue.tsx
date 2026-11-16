@@ -36,8 +36,11 @@ export async function copyAndFlash(
   setFlash: (f: CopyFlash) => void,
   timer: MutableRefObject<number>,
   copy: (text: string) => Promise<boolean> = copyText,
+  alive: () => boolean = () => true,
 ): Promise<void> {
   const ok = await copy(value)
+  // Gone while it copied (its modal closed): nothing left to flash.
+  if (!alive()) return
   setFlash(ok ? 'copied' : 'failed')
   window.clearTimeout(timer.current)
   timer.current = window.setTimeout(() => setFlash(null), COPIED_MS)
@@ -59,29 +62,33 @@ interface Props {
 export function CopyValue({ value, shown, title, className, icon = true }: Props): JSX.Element {
   const [flash, setFlash] = useState<CopyFlash>(null)
   const timer = useRef(0)
-  useEffect(() => () => window.clearTimeout(timer.current), [])
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; window.clearTimeout(timer.current) } }, [])
   // Its own tap only: a value inside a row that opens something copies and does not also open it.
-  const onClick = (e?: { stopPropagation: () => void }): void => { e?.stopPropagation(); void copyAndFlash(value, setFlash, timer) }
+  const onClick = (e?: { stopPropagation: () => void }): void => { e?.stopPropagation(); void copyAndFlash(value, setFlash, timer, copyText, () => mounted.current) }
   return <CopyValueView value={value} shown={shown} title={title} className={className} icon={icon} flash={flash} onClick={onClick} />
 }
 
 /** How it is drawn, apart from the tap: exported for the tests. */
 export function CopyValueView({ value, shown, title, className, icon = true, flash, onClick }: Props & { flash: CopyFlash; onClick?: (e?: { stopPropagation: () => void }) => void }): JSX.Element {
+  // The last letter rides with the icon (.copyv__tail, nowrap), so the icon
+  // never wraps onto a line of its own and no hidden character is added to
+  // what a hand selection picks up.
+  const text = shown ?? value
+  // A value cut to its ends (an ellipsis in it) is short: one line, never split at the cut.
+  const cut = text !== value && text.includes('\u2026')
   return (
     <span
       role="button"
       tabIndex={0}
-      className={`copyv${className ? ` ${className}` : ''}${flash ? ' is-flash' : ''}`}
+      className={`copyv${cut ? ' copyv--cut' : ''}${className ? ` ${className}` : ''}${flash ? ' is-flash' : ''}`}
       title={title ?? `${value}\nTap to copy`}
-      aria-label={flash === 'copied' ? 'Copied' : flash === 'failed' ? 'Could not copy' : `${shown ?? value}, tap to copy`}
+      aria-label={flash === 'copied' ? 'Copied' : flash === 'failed' ? 'Could not copy' : `${text}, tap to copy`}
       onClick={onClick}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(e) } }}
     >
       <span className="copyv__value">
-        {shown ?? value}
-        {/* A word joiner: the icon never wraps onto a line of its own. */}
-        {icon && '\u2060'}
-        {icon && <Copy className="copyv__icon" size={9} strokeWidth={2.25} aria-hidden />}
+        {icon ? <>{text.slice(0, -1)}<span className="copyv__tail">{text.slice(-1)}<Copy className="copyv__icon" size={9} strokeWidth={2.25} aria-hidden /></span></> : text}
       </span>
       {flash && <span className="copyv__flash" aria-hidden>{flash === 'copied' ? 'COPIED' : 'COULD NOT COPY'}</span>}
     </span>

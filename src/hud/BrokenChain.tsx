@@ -35,7 +35,7 @@
  * it unchecked, and a respawn would not help.
  */
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { Gauge, TriangleAlert } from 'lucide-react'
 import { actionLabel, type ActionEvent, type firstBreak } from '../lib/events'
 import { apologyFor, apologyHeading, breakCause, brokenWords, endOfChainLabel, relayStopWords, stopDay } from '../lib/chainBreak'
@@ -46,6 +46,7 @@ import { walkChain } from '../store/useBuilder'
 import { useChainUi } from '../store/useChainUi'
 import { ConfirmModal } from './ConfirmModal'
 import { Explanation } from './Explanation'
+import { CopyValue } from './ui/CopyValue'
 
 /** A reason as a sentence: its first letter capitalized. */
 const sentence = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1)
@@ -75,7 +76,7 @@ export function BrokenChainNotice({ broken, actions }: { broken: NonNullable<Ret
       </p>
       <p className="brokenchain__line">
         <b>What broke it:</b> {fork
-          ? <>a fork: {fork.branchIds.map((id) => `event ${id.slice(0, 8)}…`).join(' and ')} each name event {fork.previousId.slice(0, 8)}… as the action before them</>
+          ? <>a fork: {fork.branchIds.map((id, i) => <Fragment key={id}>{i > 0 && ' and '}event <CopyValue value={id} shown={`${id.slice(0, 8)}…`} /></Fragment>)} each name event <CopyValue value={fork.previousId} shown={`${fork.previousId.slice(0, 8)}…`} /> as the action before them</>
           : rowName(index, action)}.
       </p>
       <p className="brokenchain__line">

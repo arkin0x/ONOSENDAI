@@ -60,6 +60,14 @@ describe('copyByCommand', () => {
     expect(f.before.focus).toHaveBeenCalled()
   })
 
+  it('never gives focus back to a text field, so a phone does not open its keyboard again', () => {
+    const f = fakeDoc(true)
+    const field = { tagName: 'INPUT', focus: vi.fn() }
+    ;(f.doc as unknown as { activeElement: unknown }).activeElement = field
+    expect(copyByCommand('x', f.doc)).toBe(true)
+    expect(field.focus).not.toHaveBeenCalled()
+  })
+
   it('says false when the browser will not copy, or throws, and still cleans up', () => {
     for (const how of [false, 'throws'] as const) {
       const f = fakeDoc(how)

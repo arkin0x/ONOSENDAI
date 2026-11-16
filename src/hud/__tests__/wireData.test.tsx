@@ -92,9 +92,9 @@ describe('the wire facts (WireData)', () => {
     // The switch is the card's now, under the preview (PublishRow), not a wire fact.
     expect(html).not.toContain('<dt>published</dt>')
     expect(html).not.toContain('class="pubswitch"')
-    expect(html).toMatch(new RegExp(`class="copyv eventdata__value"[^>]*><span class="copyv__value">${LOOKUP}\u2060<svg`))
+    expect(html).toMatch(new RegExp(`class="copyv eventdata__value"[^>]*aria-label="${LOOKUP}, tap to copy"`))
     // The C coordinate, as the movement chain writes it.
-    expect(html).toMatch(new RegExp(`class="copyv eventdata__value"[^>]*><span class="copyv__value">${positionHex(positionOf(dep), 0)}\u2060<svg`))
+    expect(html).toMatch(new RegExp(`class="copyv eventdata__value"[^>]*aria-label="${positionHex(positionOf(dep), 0)}, tap to copy"`))
     expect(html).toContain('>8</span>')
     expect(html).toContain('relay.test</span>')
     expect(html).toContain('two.test</span>')
@@ -156,7 +156,7 @@ describe('the kind, named', () => {
     expect(kindName(3341)).toBe('chest')
     expect(kindName(11333)).toBeNull()
     const html = renderToStaticMarkup(<EventData event={{ id: 'a'.repeat(64), pubkey: 'b'.repeat(64), created_at: 1, kind: 3340, tags: [], content: '', sig: 'c'.repeat(128) }} />)
-    expect(html).toMatch(/<dt>kind<\/dt><dd><span role="button"[^>]*class="copyv eventdata__value"[^>]*><span class="copyv__value">3340 \(item\)\u2060<svg/)
+    expect(html).toMatch(/<dt>kind<\/dt><dd><span role="button"[^>]*class="copyv eventdata__value"[^>]*aria-label="3340 \(item\), tap to copy"/)
   })
 })
 

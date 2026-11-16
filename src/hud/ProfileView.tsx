@@ -29,7 +29,7 @@ import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { EventData } from './EventData'
 import { BlockButton } from './BlockButton'
 import { ModalClose } from './ui/ModalClose'
-import { CopyValue } from './ui/CopyValue'
+import { copyText } from '../lib/copyText'
 
 /** How long to wait on the relays for the kind 0, as the editor does. */
 const FETCH_WAIT_MS = 5000
@@ -92,9 +92,12 @@ function ProfileCard({ pubkey, onClose }: { pubkey: string; onClose: () => void 
   const mine = pubkey === me
 
   const copy = (what: string, value: string): void => {
-    navigator.clipboard?.writeText(value).catch(() => {})
-    setCopied(what)
-    window.setTimeout(() => setCopied((c) => (c === what ? null : c)), COPIED_MS)
+    // The clipboard, or the old copy command where it is refused (lib/copyText).
+    void copyText(value).then((ok) => {
+      if (!ok) return
+      setCopied(what)
+      window.setTimeout(() => setCopied((c) => (c === what ? null : c)), COPIED_MS)
+    })
   }
 
   return (
@@ -120,7 +123,7 @@ function ProfileCard({ pubkey, onClose }: { pubkey: string; onClose: () => void 
             {displayName && handle && handle !== displayName && <span className="profilev__handle">@{handle}</span>}
             {nip05 && <span className="secret__nip05">{nip05}</span>}
             <span className="person__npub">
-              <CopyValue className="secret__npub" value={npub} shown={shortHex(npub, 14, 8)} />
+              <span className="secret__npub" title={npub}>{shortHex(npub, 14, 8)}</span>
               <button className="person__copy" onClick={() => copy('npub', npub)} title="Copy the npub" aria-label="Copy the npub">
                 <Copy size={10} strokeWidth={2.25} aria-hidden />{copied === 'npub' ? 'COPIED' : 'COPY'}
               </button>

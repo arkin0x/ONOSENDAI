@@ -15,6 +15,12 @@
  * worked; never rejects, so a tap handler can fire and forget.
  */
 
+/** Whether focusing it would bring up a phone's keyboard. */
+function isEditable(el: HTMLElement): boolean {
+  const tag = (el.tagName ?? '').toUpperCase()
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable === true
+}
+
 /** The old way: a hidden field, selected, copied. True when the browser says it copied. */
 export function copyByCommand(text: string, doc: Document = document): boolean {
   const body = doc.body
@@ -38,7 +44,10 @@ export function copyByCommand(text: string, doc: Document = document): boolean {
     ok = false
   } finally {
     body.removeChild(field)
-    try { before?.focus?.({ preventScroll: true }) } catch { /* nothing to give focus back to */ }
+    // Focus goes back, except to a field a phone would open its keyboard for again.
+    if (before && !isEditable(before)) {
+      try { before.focus?.({ preventScroll: true }) } catch { /* nothing to give focus back to */ }
+    }
   }
   return ok
 }

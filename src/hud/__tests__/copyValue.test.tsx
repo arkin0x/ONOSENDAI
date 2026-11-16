@@ -75,6 +75,12 @@ describe('CopyValue', () => {
     expect(html).toContain('role="button"')
     expect(html).toMatch(/class="[^"]*copyv__icon/)
     expect(html).not.toContain('COPIED')
+    // The icon rides with the last letter, and no hidden character is added to the text.
+    expect(html).toContain('<span class="copyv__tail">f<svg')
+    expect(html).not.toContain('\u2060')
+    // Cut to its ends, it stays on one line; a whole sector still wraps.
+    expect(html).toContain('class="copyv copyv--cut"')
+    expect(renderToStaticMarkup(<CopyValueView value={SECTOR} flash={null} />)).not.toContain('copyv--cut')
   })
 
   it('shows COPIED over the value, which stays (hidden) to keep its space', () => {
@@ -99,6 +105,12 @@ describe('copyAndFlash', () => {
     expect(set).toHaveBeenLastCalledWith('copied')
     vi.advanceTimersByTime(1)
     expect(set).toHaveBeenLastCalledWith(null)
+  })
+
+  it('flashes nothing when the value is gone before the copy finished (its modal closed)', async () => {
+    const set = vi.fn()
+    await copyAndFlash(SECTOR, set, { current: 0 }, () => Promise.resolve(true), () => false)
+    expect(set).not.toHaveBeenCalled()
   })
 
   it('flashes failed when the copy did not happen', async () => {

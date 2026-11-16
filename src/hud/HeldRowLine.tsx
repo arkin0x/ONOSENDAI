@@ -14,7 +14,7 @@ export function Copyable({ label, value, title }: { label: string; value: string
   return (
     <>
       <dt>{label}</dt>
-      <dd><CopyValue className="lootd__copy" value={value} shown={shortHex(value, 14, 8)} title={`${title}\n${value}\nTap to copy`} /></dd>
+      <dd><CopyValue className="lootd__copy" value={value} shown={shortHex(value, 14, 8)} title={title === value ? undefined : `${title}\n${value}\nTap to copy`} /></dd>
     </>
   )
 }

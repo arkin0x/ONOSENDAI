@@ -25,7 +25,7 @@ Every field below is tagged:
 | `id`, `name` | The variant's id and shown name | (b) |
 | `spec` | The rules (below) | (b) |
 | `world.level` | The level the world was built from; the world itself is shards in the region's bags, read like any game world | (a) |
-| `client` | Model refs, colours, fog distances for drawing, viewmodel offsets, camera bob, sounds | (c) |
+| `client` | Model refs, colours, fog distances for drawing, viewmodel offsets, camera bob, sounds (`sounds`: each drone id's looping voice, its pitch, waveforms, chop, filter, level, attack rise and windup whine; `sounds.voices`: how many are heard at once on a phone and a desktop, how far they carry, Doppler and wall muffling) | (c) |
 
 ### spec
 

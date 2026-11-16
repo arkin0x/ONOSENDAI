@@ -248,6 +248,10 @@ describe('how loud and how bright', () => {
     expect(new Set(sig).size).toBe(enemies.length)
   })
 
+  it('the code\'s defaults mirror the base variant\'s client.sounds', () => {
+    expect(soundsOf((base as { client?: unknown }).client)).toEqual(DEFAULT_SOUNDS)
+  })
+
   it('the variant may change one number and keep the rest', () => {
     const s = soundsOf({ sounds: { voices: { phone: 4 }, scout: { base: 400 } } })
     expect(s.voices.phone).toBe(4)

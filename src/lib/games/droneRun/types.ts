@@ -250,8 +250,70 @@ export interface DroneRunVariant {
   /** Class (a): the world is shards in the region's bags; this names the level they were built from. */
   world: { level: string }
   /** Class (c): this client's look and feel. Never read by the simulation. */
-  client?: Record<string, unknown>
+  client?: DroneRunClient
 }
+
+/** Class (c): ONOSENDAI's look and feel for a variant. Every field is optional; a client ignores what it does not know. */
+export interface DroneRunClient {
+  /** How the drones sound (game/droneRun/droneVoices.ts): `voices`, and one entry per drone id. Any field left out takes the client's default. */
+  sounds?: ClientSounds
+  [key: string]: unknown
+}
+
+export interface ClientSounds {
+  voices?: Partial<VoiceSettings>
+  [droneId: string]: Partial<VoiceDef> | Partial<VoiceSettings> | undefined
+}
+
+/* ---------- class (c): the drones' voices ---------- */
+
+export type SoundWave = 'sine' | 'triangle' | 'sawtooth' | 'square'
+
+/** How one drone kind sounds (client.sounds.<drone id>). Frequencies in Hz, levels 0..1. */
+export interface VoiceDef {
+  /** The main pitch. */
+  base: number
+  /** Up to three oscillators (more are ignored): waveform, pitch as a multiple of base, detune in cents, share of the mix. Detuned copies at ratio 1 are a swarm's layers. */
+  oscs: { wave: SoundWave; ratio: number; detune?: number; mix: number }[]
+  /** Rotor wash: noise through a band-pass at `band` (it follows the pitch), its Q and share. */
+  noise?: { band: number; q: number; mix: number }
+  /** The chop: one LFO at `rate`, on the level (`amp`, 0..1 of it) and on the pitch (`pitch`, cents). */
+  lfo?: { rate: number; amp: number; pitch: number; wave?: SoundWave }
+  /** The low-pass in the open, calm, and its Q. */
+  filter: number
+  q?: number
+  /** The level at `near` gibsons, calm. */
+  gain: number
+  /** Each drone a little different: up to this many cents off, and this share faster or slower chop. */
+  spread?: { cents: number; rate: number }
+  /** At a full attack cue: the pitch rise in cents (a dive, a windup), and how many times louder and brighter. */
+  attack: { pitch: number; gain: number; bright: number }
+  /** A whine through a shot's windup: from and to Hz, its level at full charge. */
+  whine?: { from: number; to: number; gain: number }
+}
+
+/** How many voices, how far they carry, and how the space treats them (client.sounds.voices). */
+export interface VoiceSettings {
+  /** The most voices at once on a phone (a coarse pointer) and on a desktop. */
+  phone: number
+  desktop: number
+  /** Heard out to this many times the drone's detection range. */
+  reach: number
+  /** Full level within this many gibsons; beyond, inverse. */
+  near: number
+  /** How quickly it falls beyond `near` (1 is the plain inverse law). */
+  rolloff: number
+  /** The attack cue's closeness: none beyond `cueFar` gibsons, all of its share within `cueNear`. */
+  cueNear: number
+  cueFar: number
+  /** Doppler: the speed of sound in gibsons a second, and the clamp on the pitch ratio. */
+  doppler: { c: number; min: number; max: number }
+  /** Behind a solid: the low-pass and the level are multiplied by these. */
+  occluded: { cutoff: number; gain: number }
+  /** Voices checked for a wall each update. */
+  checks: number
+}
+
 
 /** A named spawn point of the level. */
 export interface SpawnPoint {

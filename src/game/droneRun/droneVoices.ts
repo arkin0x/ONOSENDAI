@@ -52,57 +52,12 @@
  * DEFAULT_SOUNDS below.
  */
 
-import type { DroneDef, Vec3 } from '../../lib/games/droneRun/types'
+import type { DroneDef, Vec3, VoiceDef, VoiceSettings } from '../../lib/games/droneRun/types'
 import { PLAYING_MARGIN } from '../../lib/audioWorld'
 
-/* ---------- the data ---------- */
+/* ---------- the data (types.ts: VoiceDef, VoiceSettings, ClientSounds) ---------- */
 
-export type Wave = 'sine' | 'triangle' | 'sawtooth' | 'square'
-
-/** How one drone kind sounds (client.sounds.<drone id>). Frequencies in Hz, levels 0..1. */
-export interface VoiceDef {
-  /** The main pitch. */
-  base: number
-  /** Up to three oscillators (more are ignored): waveform, pitch as a multiple of base, detune in cents, share of the mix. Detuned copies at ratio 1 are a swarm's layers. */
-  oscs: { wave: Wave; ratio: number; detune?: number; mix: number }[]
-  /** Rotor wash: noise through a band-pass at `band` (it follows the pitch), its Q and share. */
-  noise?: { band: number; q: number; mix: number }
-  /** The chop: one LFO at `rate`, on the level (`amp`, 0..1 of it) and on the pitch (`pitch`, cents). */
-  lfo?: { rate: number; amp: number; pitch: number; wave?: Wave }
-  /** The low-pass in the open, calm, and its Q. */
-  filter: number
-  q?: number
-  /** The level at `near` gibsons, calm. */
-  gain: number
-  /** Each drone a little different: up to this many cents off, and this share faster or slower chop. */
-  spread?: { cents: number; rate: number }
-  /** At a full attack cue: the pitch rise in cents (a dive, a windup), and how many times louder and brighter. */
-  attack: { pitch: number; gain: number; bright: number }
-  /** A whine through a shot's windup: from and to Hz, its level at full charge. */
-  whine?: { from: number; to: number; gain: number }
-}
-
-/** How many voices, how far they carry, and how the space treats them (client.sounds.voices). */
-export interface VoiceSettings {
-  /** The most voices at once on a phone (a coarse pointer) and on a desktop. */
-  phone: number
-  desktop: number
-  /** Heard out to this many times the drone's detection range. */
-  reach: number
-  /** Full level within this many gibsons; beyond, inverse. */
-  near: number
-  /** How quickly it falls beyond `near` (1 is the plain inverse law). */
-  rolloff: number
-  /** The attack cue's closeness: none beyond `cueFar` gibsons, all of its share within `cueNear`. */
-  cueNear: number
-  cueFar: number
-  /** Doppler: the speed of sound in gibsons a second, and the clamp on the pitch ratio. */
-  doppler: { c: number; min: number; max: number }
-  /** Behind a solid: the low-pass and the level are multiplied by these. */
-  occluded: { cutoff: number; gain: number }
-  /** Voices checked for a wall each update. */
-  checks: number
-}
+export type { VoiceDef, VoiceSettings }
 
 export interface DroneRunSounds {
   voices: VoiceSettings
@@ -123,7 +78,7 @@ export const DEFAULT_SOUNDS: DroneRunSounds = {
       oscs: [{ wave: 'sawtooth', ratio: 1, mix: 0.55 }, { wave: 'triangle', ratio: 2, detune: 6, mix: 0.3 }, { wave: 'sine', ratio: 3, mix: 0.15 }],
       noise: { band: 2600, q: 1.5, mix: 0.2 },
       lfo: { rate: 46, amp: 0.35, pitch: 0, wave: 'sine' },
-      filter: 2400, q: 1, gain: 0.05,
+      filter: 2400, q: 1, gain: 0.065,
       spread: { cents: 25, rate: 0.1 },
       attack: { pitch: 700, gain: 1.8, bright: 2.2 },
     },
@@ -132,7 +87,7 @@ export const DEFAULT_SOUNDS: DroneRunSounds = {
       oscs: [{ wave: 'sine', ratio: 1, mix: 0.6 }, { wave: 'triangle', ratio: 2, detune: 3, mix: 0.3 }, { wave: 'sine', ratio: 3, mix: 0.1 }],
       noise: { band: 240, q: 0.7, mix: 0.08 },
       lfo: { rate: 0.45, amp: 0.08, pitch: 4, wave: 'sine' },
-      filter: 650, q: 0.7, gain: 0.07,
+      filter: 650, q: 0.7, gain: 0.09,
       spread: { cents: 8, rate: 0.1 },
       attack: { pitch: 0, gain: 1.5, bright: 3.4 },
       whine: { from: 380, to: 1900, gain: 0.5 },
@@ -142,7 +97,7 @@ export const DEFAULT_SOUNDS: DroneRunSounds = {
       oscs: [{ wave: 'sawtooth', ratio: 1, mix: 0.4 }, { wave: 'sawtooth', ratio: 1, detune: 34, mix: 0.33 }, { wave: 'sawtooth', ratio: 1, detune: -27, mix: 0.27 }],
       noise: { band: 160, q: 0.8, mix: 0.3 },
       lfo: { rate: 9, amp: 0.45, pitch: 0, wave: 'sine' },
-      filter: 340, q: 1.2, gain: 0.09,
+      filter: 340, q: 1.2, gain: 0.11,
       spread: { cents: 6, rate: 0.08 },
       attack: { pitch: 200, gain: 1.6, bright: 2.4 },
       whine: { from: 110, to: 330, gain: 0.35 },
@@ -152,7 +107,7 @@ export const DEFAULT_SOUNDS: DroneRunSounds = {
       oscs: [{ wave: 'triangle', ratio: 1, mix: 0.4 }, { wave: 'triangle', ratio: 1, detune: 18, mix: 0.35 }, { wave: 'sawtooth', ratio: 1.5, detune: -10, mix: 0.25 }],
       noise: { band: 4200, q: 2, mix: 0.1 },
       lfo: { rate: 27, amp: 0.7, pitch: 30, wave: 'sawtooth' },
-      filter: 3800, q: 0.8, gain: 0.03,
+      filter: 3800, q: 0.8, gain: 0.04,
       spread: { cents: 60, rate: 0.3 },
       attack: { pitch: 150, gain: 1.6, bright: 1.8 },
     },

@@ -42,6 +42,7 @@ import { setTalking } from '../store/useAgentDms'
 import { EventData } from './EventData'
 import { BlockButton } from './BlockButton'
 import { ModalClose } from './ui/ModalClose'
+import { copyText } from '../lib/copyText'
 
 /** How long COPIED stays on a button, as on a hidden item's card. */
 const COPIED_MS = 1400
@@ -102,7 +103,7 @@ export function PersonCard({ pubkey, shard, event = null, onClose, Preview = Car
     setCopied(what)
     window.setTimeout(() => setCopied((c) => (c === what ? null : c)), COPIED_MS)
   }
-  const copyNpub = (): void => { void navigator.clipboard?.writeText(npub); flash('npub') }
+  const copyNpub = (): void => { void copyText(npub).then((ok) => { if (ok) flash('npub') }) }
   const copyShard = (): void => {
     if (!shard) return
     copyAvatarToWorkshop(shard, pubkey, me)

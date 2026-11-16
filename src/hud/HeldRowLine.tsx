@@ -5,22 +5,16 @@
  * exactly as it is in ITEMS.
  */
 
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
+import { CopyValue } from './ui/CopyValue'
 
 /** A label and a shortened value in a DETAILS list; a tap copies the whole value. */
 export function Copyable({ label, value, title }: { label: string; value: string; title: string }): JSX.Element {
-  const [copied, setCopied] = useState(false)
-  const copy = (): void => {
-    void navigator.clipboard?.writeText(value).then(() => {
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1200)
-    })
-  }
   return (
     <>
       <dt>{label}</dt>
-      <dd><button className="lootd__copy" title={`${title} (click to copy)`} onClick={copy}>{copied ? 'copied' : shortHex(value, 14, 8)}</button></dd>
+      <dd><CopyValue className="lootd__copy" value={value} shown={shortHex(value, 14, 8)} title={title === value ? undefined : `${title}\n${value}\nTap to copy`} /></dd>
     </>
   )
 }

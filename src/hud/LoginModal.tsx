@@ -17,6 +17,7 @@ import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { useEscape } from '../hooks/useEscape'
 import { ModalClose } from './ui/ModalClose'
+import { CopyValue } from './ui/CopyValue'
 
 const KIND_LABEL: Record<string, string> = {
   local: 'Local key',
@@ -164,7 +165,7 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
               <div className="login__current-text">
                 <span className="secret__name">{profileLabel(profile, identity.npub)}</span>
                 <span className="login__kind">{KIND_LABEL[signerKind] ?? signerKind}</span>
-                <span className="secret__npub" title={identity.npub}>{shortHex(identity.npub, 14, 8)}</span>
+                <CopyValue className="secret__npub" value={identity.npub} shown={shortHex(identity.npub, 14, 8)} />
               </div>
             </div>
           </>

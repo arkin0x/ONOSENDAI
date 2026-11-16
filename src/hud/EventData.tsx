@@ -22,12 +22,13 @@
  * to our metadata section ... then we can have these unified").
  */
 
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import type { NostrEvent } from 'nostr-tools'
 import { formatStamp } from '../lib/time'
 import { CHEST_KIND, KEY_KIND, MESSAGE_KIND, OBJECT_KIND, SHARD_KIND } from '../lib/hidden'
 import { AUDIO_KIND } from '../lib/audioItem'
 import { hasNftLink, maskNftKeys } from '../lib/nftLink'
+import { CopyValue } from './ui/CopyValue'
 
 /** What stands in for a hidden secret. */
 export const HIDDEN_SECRET = '(hidden)'
@@ -76,9 +77,6 @@ export function eventJson(ev: Omit<NostrEvent, 'sig'> & { sig?: string }): strin
   return `{\n  "id": ${s(ev.id)},\n  "pubkey": ${s(ev.pubkey)},\n  "created_at": ${s(ev.created_at)},\n  "kind": ${s(ev.kind)},\n  "tags": ${tags},\n  "content": ${s(ev.content)}${sig}\n}`
 }
 
-/** How long COPIED stays, as on the other copies. */
-const COPIED_MS = 1400
-
 /**
  * What a kind is to a reader, as the wire record named it (arkinox,
  * 2026-10-10: a key item is an item, never a shard). An object of kind
@@ -94,21 +92,6 @@ export function kindName(kind: number): string | null {
     case AUDIO_KIND: return 'audio'
     default: return null
   }
-}
-
-/** One value a tap copies, with COPIED in its place for a moment. `shown` is what reads, when it is not the value itself. */
-export function CopyValue({ value, title, shown }: { value: string; title: string; shown?: string }): JSX.Element {
-  const [copied, setCopied] = useState(false)
-  // The latest tap's timer, so an earlier one never clears a newer COPIED.
-  const timer = useRef(0)
-  const copy = (): void => {
-    // Refused (no permission, an insecure page): nothing to undo, the words stay to select.
-    navigator.clipboard?.writeText(value).catch(() => {})
-    setCopied(true)
-    window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(() => setCopied(false), COPIED_MS)
-  }
-  return <button className="eventdata__value" title={title} onClick={copy}>{copied ? 'COPIED' : shown ?? value}</button>
 }
 
 export function EventData({ event: raw, children }: { event: NostrEvent; children?: ReactNode }): JSX.Element {
@@ -133,7 +116,7 @@ export function EventData({ event: raw, children }: { event: NostrEvent; childre
             <dd>
               {value === undefined
                 ? <span className="eventdata__none">none</span>
-                : <CopyValue value={value} title={title} shown={shown} />}
+                : <CopyValue className="eventdata__value" value={value} title={title} shown={shown} />}
             </dd>
           </div>
         ))}

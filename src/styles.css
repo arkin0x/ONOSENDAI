@@ -356,6 +356,41 @@ body {
   color: var(--accent);
 }
 
+/* A value that copies on a tap (ui/CopyValue): the value as it reads, in the
+ * colour around it, a small copy icon after it, and COPIED over it for a
+ * moment. The value keeps its space while COPIED shows, so nothing moves. */
+.copyv {
+  position: relative;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .copyv:hover { color: var(--accent); }
+  .copyv:hover .copyv__icon { opacity: 1; }
+}
+.copyv:focus-visible { color: var(--accent); outline: 1px dotted var(--accent); outline-offset: 1px; }
+/* The last letter and the icon, kept on one line: the icon never wraps alone. */
+.copyv__tail { white-space: nowrap; }
+/* A value cut to its ends (cfe6b74c…8254ef) stays on one line. */
+.copyv--cut { white-space: nowrap; }
+.copyv__icon {
+  display: inline-block;
+  margin-left: 0.35em;
+  vertical-align: -0.05em;
+  opacity: 0.55;
+}
+.copyv:focus-visible .copyv__icon { opacity: 1; }
+.copyv.is-flash .copyv__value { visibility: hidden; }
+.copyv__flash {
+  position: absolute;
+  top: 0;
+  left: 0;
+  white-space: nowrap;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
 /* An explanation in paragraphs. */
 .explain__well p {
   margin: 0;
@@ -7817,6 +7852,15 @@ select.avatars__input option:checked {
 }
 
 .secrets__row:first-child { border-top: none; }
+
+/* A region or place row's button with its copyable id under it (ui/CopyValue). */
+.secrets__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.secrets__main > .copyv { align-self: flex-start; margin: 0 4px 2px; }
 
 .secrets__go {
   flex: 1 1 auto;

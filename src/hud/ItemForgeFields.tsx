@@ -36,6 +36,7 @@ import { nip19 } from 'nostr-tools'
 import { MAX_ITEM_NAME, type KeyItem } from '../lib/hidden'
 import { MAX_PICTURE_SIDE, MAX_PICTURE_URI, fitWithin, type PictureDim } from '../lib/itemPicture'
 import { shortHex } from '../lib/time'
+import { CopyValue } from './ui/CopyValue'
 
 /** What the file input takes: the raster kinds every browser decodes. The result is always PNG. */
 const PICTURE_TYPES = 'image/png,image/jpeg,image/webp,image/gif'
@@ -96,7 +97,6 @@ const iconKey = (address: string): string => `item-model:${address}`
  * `idPrefix` keeps the motion switches' ids apart from another composer's.
  */
 export function ItemForgeFields({ item: key, onChange: setKey, idPrefix = 'item' }: { item: KeyItem; onChange: (update: (k: KeyItem) => KeyItem) => void; idPrefix?: string }): JSX.Element {
-  const [copied, setCopied] = useState<string | null>(null)
   // The PICTURE control: the hidden file input, and the sentence when a file
   // was refused (the previous picture, if any, stays).
   const fileRef = useRef<HTMLInputElement>(null)
@@ -119,12 +119,6 @@ export function ItemForgeFields({ item: key, onChange: setKey, idPrefix = 'item'
   }
   const refused = (err: unknown): void => { if (live.current) setPictureNote(err instanceof Error ? err.message : String(err)) }
 
-  const copy = (what: string, text: string): void => {
-    void navigator.clipboard?.writeText(text).then(() => {
-      setCopied(what)
-      window.setTimeout(() => setCopied((c) => (c === what ? null : c)), 1200)
-    })
-  }
   const choosePicture = (file: File | undefined): void => {
     if (!file) return
     setPictureNote(null)
@@ -207,9 +201,9 @@ export function ItemForgeFields({ item: key, onChange: setKey, idPrefix = 'item'
       />
       {/* The public half, two ways: what a chest is sealed to. The secret is never shown. */}
       <div className="compose__pubkey">
-        <button className="lootd__copy" title={`${npub} (click to copy)`} onClick={() => copy('npub', npub)}>{copied === 'npub' ? 'copied' : shortHex(npub, 16, 10)}</button>
+        <CopyValue className="lootd__copy" value={npub} shown={shortHex(npub, 16, 10)} />
         {' · '}
-        <button className="lootd__copy" title={`${key.itemPubkey} (click to copy)`} onClick={() => copy('hex', key.itemPubkey)}>{copied === 'hex' ? 'copied' : shortHex(key.itemPubkey, 12, 8)}</button>
+        <CopyValue className="lootd__copy" value={key.itemPubkey} shown={shortHex(key.itemPubkey, 12, 8)} />
       </div>
       {/* The picture: a preview at its own size in a 32 by 32 well, then the
           buttons. The input is hidden behind PICTURE, and cleared after each

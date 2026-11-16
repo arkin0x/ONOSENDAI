@@ -22,6 +22,7 @@ import { offloadFrom } from '../lib/crossover'
 import { useCalibration } from '../lib/calibration'
 import { Explanation } from './Explanation'
 import { GoArrow } from './ui/GoArrow'
+import { CopyValue } from './ui/CopyValue'
 
 const MODES: Array<[CloudMode, string]> = [['auto', 'AUTO'], ['ask', 'ASK'], ['off', 'OFF']]
 /** The amounts most people want, so the common case is one tap. */
@@ -360,7 +361,7 @@ export function CloudPanel(): JSX.Element {
       {cloud.last && !job && (
         <p className="legend__note">
           Last cloud {cloud.last.action}: {satsOf(cloud.last.costMsats)} sats, job {cloud.last.jobId.slice(0, 8)}
-          {cloud.last.lookupId ? `, region ${shortHex(cloud.last.lookupId, 8, 4)}` : ''}.
+          {cloud.last.lookupId && <>, region <CopyValue value={cloud.last.lookupId} shown={shortHex(cloud.last.lookupId, 8, 4)} /></>}.
         </p>
       )}
 

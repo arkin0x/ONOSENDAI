@@ -111,7 +111,12 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
     const halfLat = Math.min(90, (reachM / radiusM) * (180 / Math.PI) * 1.2)
     const cosLat = Math.max(0.05, Math.cos((geo.lat * Math.PI) / 180))
     const halfLon = Math.min(179.9, halfLat / cosLat)
-    const step = graticuleStep(halfLat * 2)
+    // The rulings' spacing, and each line's sampling, from the least reach's
+    // window: the shared reach only runs the lines further out, so a step in
+    // it never re-grids the ground under the camera.
+    const baseHalfLat = Math.min(90, ((REACH * cellM) / radiusM) * (180 / Math.PI) * 1.2)
+    const step = graticuleStep(baseHalfLat * 2)
+    const samples = Math.ceil(SAMPLES * Math.min(8, halfLat / baseHalfLat))
 
     const originM = originCsMetres(alignedOrigin(anchor, scaleExp))
     const at = (lat: number, lon: number, altM = 0): [number, number, number] =>
@@ -123,8 +128,8 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
       out: number[], fix: 'lat' | 'lon', v: number, from: number, to: number,
     ): void => {
       let prev: [number, number, number] | null = null
-      for (let i = 0; i <= SAMPLES; i++) {
-        const t = from + ((to - from) * i) / SAMPLES
+      for (let i = 0; i <= samples; i++) {
+        const t = from + ((to - from) * i) / samples
         const p = fix === 'lat' ? at(v, t) : at(t, v)
         if (prev) out.push(...prev, ...p)
         prev = p

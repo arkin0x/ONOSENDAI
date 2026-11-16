@@ -115,7 +115,7 @@ export function nextReach(reach: number, need: number): number {
  * The reach every culled layer draws to this frame (WorldShards, WorldMessages,
  * the avatars, the seeds, the chests ...), in render cells from the render
  * origin. Set by the scene's fog (Scene.tsx SceneFog) beyond its end:
- * 272 to 384 at the usual orbit, 768 at HOP's 96-cell limit, 6144 at
- * BUILD's 1280.
+ * 384 at the usual orbit, 768 at HOP's 96-cell limit, 6144 at BUILD's
+ * 1280.
  */
 export const useDrawReach = create<{ reach: number }>(() => ({ reach: CULL_REACH }))

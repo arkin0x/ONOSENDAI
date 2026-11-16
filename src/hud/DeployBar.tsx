@@ -41,10 +41,13 @@
  *     every axis, with its X, Y, Z and S sector tags (spec §7.7, §10). A hint
  *     must be at least the bag's height, so it is off above height 30, and
  *     comes back on at 30 or lower (useShards `deployHintHeld`).
- *   - PUBLISH CONTENTS: what is inside, by kind and count, money left out.
- *   - PUBLISH THAT MONEY IS INSIDE: shown whenever cashu is inside, with
- *     contents on or off. Money is said only with it on: counted beside the
- *     rest with contents on, alone without (lib/hidden.ts bagContentsTags).
+ *   - PUBLISH CONTENTS: what is inside, by kind and count, money and NFTs left out.
+ *   - PUBLISH THAT MONEY OR NFTS ARE INSIDE: shown whenever a cashu token or
+ *     an NFT claim link is inside, with contents on or off. They are said
+ *     only with it on: counted beside the rest with contents on, alone
+ *     without (lib/hidden.ts bagContentsTags; owner ruling 2026-11-16: an
+ *     NFT claim link is hidden by default as money is, since whoever finds
+ *     it can claim it).
  *   The three hint switches are ON for a player who never touched them, the
  *   money switch OFF (arkinox, 2026-11-15: "money off by default"), and all
  *   four then stay what they set them, on every later hide, reload and session, for
@@ -760,7 +763,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
       )}
 
       {/* A room bag says nothing in public: no settings to choose (§3.7.2). */}
-      {!intoChest && !sealing && <BagControls height={height} bag={bag} existing={existing?.count ?? 0} cashu={moneyRowShown(pending, existing)} />}
+      {!intoChest && !sealing && <BagControls height={height} bag={bag} existing={existing?.count ?? 0} claimable={moneyRowShown(pending, existing)} />}
       </div>
 
     </div>
@@ -777,7 +780,7 @@ function Pow({ e }: { e: number }): JSX.Element {
  * messages alike. `existing` is how many of your things the cursor's region
  * already holds: the settings are that bag's, and the bar says so.
  */
-export function BagControls({ height, bag, existing, cashu }: { height: number; bag: ReturnType<typeof useShards.getState>['deployBag']; existing: number; cashu: boolean }): JSX.Element {
+export function BagControls({ height, bag, existing, claimable }: { height: number; bag: ReturnType<typeof useShards.getState>['deployBag']; existing: number; claimable: boolean }): JSX.Element {
   const set = (patch: Partial<typeof bag>): void => useShards.getState().setDeployBag(patch)
   // The sector hint your saved switch has ON, which this height took off, to come back on lower down.
   const held = useShards((s) => s.deployHintHeld !== null)
@@ -821,20 +824,21 @@ export function BagControls({ height, bag, existing, cashu }: { height: number; 
 
       {/* What is inside, by kind and count, on the bag's face (arkinox,
           2026-10-18: bags with "a little more personality", hyped on
-          Cyberspace TV); money only when its own switch is on, which starts
-          off and shows whenever cashu is inside (arkinox, 2026-11-15: "money
-          off by default"). Worked out from the bag each time it is sealed
-          (lib/hidden.ts bagContentsTags). */}
-      <Field id="deploy-contents-hint" label="Publish contents" hint="Tells seekers what is inside: how many shards, messages, keys, chests and NFTs. Not where, and not what they say. Money stays secret unless you publish it.">
+          Cyberspace TV); money and NFTs only when their own switch is on,
+          which starts off and shows whenever a cashu token or an NFT claim
+          link is inside (arkinox, 2026-11-15: "money off by default"; owner
+          ruling 2026-11-16: NFTs the same way). Worked out from the bag each
+          time it is sealed (lib/hidden.ts bagContentsTags). */}
+      <Field id="deploy-contents-hint" label="Publish contents" hint="Tells seekers what is inside: how many shards, messages, keys and chests. Not where, and not what they say. Money and NFTs stay secret unless you publish them.">
         <Switch id="deploy-contents-hint" checked={bag.contents} onCheckedChange={(v) => set({ contents: v })} />
       </Field>
-      {cashu && (
+      {claimable && (
         <Field
           id="deploy-money-hint"
-          label="Publish that money is inside"
+          label="Publish that money or NFTs are inside"
           hint={bag.contents
-            ? 'Tells seekers how many cashu tokens are in this bag, not how much they hold. Off, the contents leave money out.'
-            : 'Tells seekers there is cashu in this bag, without saying how much.'}
+            ? 'Tells seekers how many cashu tokens and NFTs are in this bag, not what they hold. Off, the contents leave them out.'
+            : 'Tells seekers there is cashu or an NFT in this bag, without saying how many.'}
         >
           <Switch id="deploy-money-hint" checked={bag.money} onCheckedChange={(v) => set({ money: v })} />
         </Field>

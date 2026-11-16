@@ -12,7 +12,8 @@
  * where the height is too large for it and back on below, which never
  * changes the saved choice. Money is said only with its own switch on,
  * OFF for a player who never touched it and shown whenever cashu is inside
- * (arkinox, 2026-11-15: "money off by default").
+ * (arkinox, 2026-11-15: "money off by default"). NFT claim links go with
+ * money, on the same switch (owner ruling 2026-11-16, spec 7.7 Claimable kinds).
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -55,6 +56,8 @@ import { hexToBytes, type NostrEvent } from '../../lib/events'
 
 const HEIGHT = 6
 const TOKEN = 'cashuBo2FteBtodHRwczovL21pbnQubWluaWJpdHMuY2FzaC9CaXRjb2luYXVjc2F0YXSBomFpSABQBVDwSUFGYXCBpGFhAmFzeEAzZjNlYTU2YTk3ZjE3MDAxMjZkZjVlZDNlNDNmYjU2NjAzMmQ0YWQyNTNkNmNiODEyZGI0N2E1OTA0MjZmNDVjYWNYIQKr8zhNlxrJ0lMVMXKkXy9Ww7GjPU2LaH3sz5Y1HlgLv2Fko2FlWCCa5DHXKlbV8GLuXtnZsc2vJ8fsoTHpp6W3t3q0B2-ZomFzWCCTJGYFX4d0fwWhP6rgrgIX1xZpCCr0K0jj4Z3vKYIhR2FyWCBqvA'
+const LINK = `https://nonfungible.cash/claim/${'6f'.repeat(16)}#${'A'.repeat(43)}`
+const LINK2 = `https://nonfungible.cash/claim/${'0a'.repeat(16)}#${'B'.repeat(42)}w`
 const CEILING = useShards.getState().deployCeiling
 const lastBag = () => [...sent].reverse().find((e) => e.kind === HIDDEN_KIND) as unknown as NostrEvent
 const tagNames = (ev: NostrEvent): string[] => ev.tags.map((t) => t[0])
@@ -186,7 +189,7 @@ describe('the sector hint and the height', () => {
     s.setDeployBag({ riddle: 'typed', contents: false, money: false })
     s.seedDeployBag(null)
     expect(useShards.getState().deployBag.riddle).toBe('typed')
-    s.seedDeployBag({ region: 'r1', settings: { heightTag: false, hint: null, riddle: 'bag riddle', contents: false, money: false }, count: 2, cashu: false })
+    s.seedDeployBag({ region: 'r1', settings: { heightTag: false, hint: null, riddle: 'bag riddle', contents: false, money: false }, count: 2, claimable: false })
     expect(useShards.getState().deployBag.riddle).toBe('bag riddle')
     s.seedDeployBag(null)
     expect(useShards.getState().deployBag).toEqual(newBagSettings(0))
@@ -309,7 +312,7 @@ describe('the three hint switches: ON for a new player, then what they set (arki
 
   it('leaving your bag\'s region for an empty one above height 30: off and held, never a hint too small', () => {
     useShards.setState({ deployCeiling: () => 40, deployHeight: 35 })
-    S().seedDeployBag({ region: 'r', settings: { heightTag: true, hint: null, riddle: '', contents: false, money: false }, count: 1, cashu: false })
+    S().seedDeployBag({ region: 'r', settings: { heightTag: true, hint: null, riddle: '', contents: false, money: false }, count: 1, claimable: false })
     S().seedDeployBag(null)
     expect(S().deployBag.hint).toBeNull()
     expect(S().deployHintHeld).toEqual(SECTOR_HINT)
@@ -459,8 +462,8 @@ describe('money off by default (arkinox, 2026-11-15)', () => {
   it('the row shows for a cashu message being hidden, or your bag listing one; not otherwise', () => {
     expect(moneyRowShown({ type: 'message', text: `x ${TOKEN}` }, null)).toBe(true)
     expect(moneyRowShown({ type: 'message', text: 'x' }, null)).toBe(false)
-    expect(moneyRowShown({ type: 'message', text: 'x' }, { cashu: true })).toBe(true)
-    expect(moneyRowShown({ type: 'key' }, { cashu: false })).toBe(false)
+    expect(moneyRowShown({ type: 'message', text: 'x' }, { claimable: true })).toBe(true)
+    expect(moneyRowShown({ type: 'key' }, { claimable: false })).toBe(false)
     expect(moneyRowShown(null, null)).toBe(false)
   })
 
@@ -473,6 +476,95 @@ describe('money off by default (arkinox, 2026-11-15)', () => {
     S().setDeployBag({ money: true })
     expect(moneyAsSaved(said, true).money).toBe(true)
     expect(moneyAsSaved({ ...said, money: false }, true).money).toBe(false)
+  })
+})
+
+describe('NFT claim links hidden by default, as money is (owner ruling 2026-11-16)', () => {
+  const S = () => useShards.getState()
+  const contentsRows = (ev: NostrEvent): string[][] => ev.tags.filter((t) => t[0] === 'contents')
+  /** Every public word of the bag but its ciphertext: its tags and its riddle. */
+  const saysNft = (ev: NostrEvent): boolean => /nft|nonfungible/i.test(JSON.stringify(ev.tags.filter((t) => t[0] !== 'encrypted'))) || /nft|nonfungible/i.test(ev.content)
+  const region = (): string => {
+    const cs = useCyberspace.getState()
+    return regionOf(deployPoint(cs.cursor, cs.scaleExp, HEIGHT), cs.plane, HEIGHT)
+  }
+
+  it('a fresh player hiding an NFT: the row shows, off, and the bag says nothing of it', async () => {
+    S().startDeployMessage(`for you ${LINK}`)
+    expect(S().deployBag).toMatchObject({ contents: true, money: false })
+    expect(moneyRowShown(S().pending, null)).toBe(true)
+    await hide(`for you ${LINK}`)
+    const bag = lastBag()
+    expect(contentsRows(bag)).toEqual([['contents', 'message', '1']])
+    expect(saysNft(bag)).toBe(false)
+    expect(S().mine[0].bag).toMatchObject({ contents: true, money: false })
+  })
+
+  it('the bag with an NFT says exactly what the same bag without it says', async () => {
+    await hide(`for you ${LINK} ${LINK2}`)
+    const withNft = lastBag()
+    useShards.setState({ mine: [] })
+    sent.length = 0
+    await hide('for you')
+    const without = lastBag()
+    expect(contentsRows(withNft)).toEqual(contentsRows(without))
+    expect(tagNames(withNft)).toEqual(tagNames(without))
+    expect(withNft.content).toBe(without.content)
+  })
+
+  it('contents off and the switch off: nothing at all', async () => {
+    await hide(`for you ${LINK}`, { contents: false })
+    expect(contentsRows(lastBag())).toEqual([])
+    expect(saysNft(lastBag())).toBe(false)
+  })
+
+  it('turned on, the bag counts the NFTs, and the choice is kept for the next hide', async () => {
+    await hide(`for you ${LINK} ${LINK2}`, { money: true })
+    expect(contentsRows(lastBag())).toEqual([['contents', 'message', '1'], ['contents', 'nft', '2']])
+    expect(loadHintPrefs()).toMatchObject({ money: true })
+    S().startDeployMessage(`more ${LINK}`)
+    expect(S().deployBag.money).toBe(true)
+  })
+
+  it('contents off and the switch on: only that an NFT is inside, with no count', async () => {
+    await hide(`for you ${LINK}`, { contents: false, money: true })
+    expect(contentsRows(lastBag())).toEqual([['contents', 'nft']])
+  })
+
+  it('cashu and an NFT together: both left out off, both counted on', async () => {
+    await hide(`for you ${TOKEN} and ${LINK}`)
+    expect(contentsRows(lastBag())).toEqual([['contents', 'message', '1']])
+    useShards.setState({ mine: [] })
+    await hide(`for you ${TOKEN} and ${LINK}`, { money: true })
+    expect(contentsRows(lastBag())).toEqual([['contents', 'message', '1'], ['contents', 'cashu', '1'], ['contents', 'nft', '1']])
+  })
+
+  it('your bag holding an NFT shows the row for a plain message hidden into it, and a switch saved ON never speaks for a bag this device does not list', async () => {
+    await hide(`for you ${LINK}`, { money: true })
+    expect(ownBagIn(S().mine, region())).toMatchObject({ claimable: true })
+    expect(moneyRowShown({ type: 'message', text: 'plain' }, ownBagIn(S().mine, region()))).toBe(true)
+    // Another device's view: the bag holds the link, this device lists none of it.
+    const first = lastBag()
+    useShards.setState({ mine: [] })
+    relayBags = [first]
+    await hide('plain')
+    expect(contentsRows(lastBag())).toEqual([['contents', 'message', '2']])
+    expect(saysNft(lastBag())).toBe(false)
+  })
+
+  it('a bag that counted its NFT before this, and kept a token quiet, does not count the token on a rewrite that is not a hide', async () => {
+    // The bag as the client wrote it before NFTs joined the switch: contents on, money off, the NFT counted.
+    await hide(`for you ${TOKEN}`)
+    await hide(`and ${LINK}`)
+    const holder = lastBag()
+    const old = { ...holder, tags: [...holder.tags.filter((t) => t[0] !== 'contents' && t[0] !== 'client'), ['contents', 'message', '2'], ['contents', 'nft', '1']] }
+    relayBags = [old]
+    sent.length = 0
+    // A DELETE of the NFT message rewrites the bag without the bar.
+    await S().deleteInstance(S().mine.find((d) => d.text?.startsWith('and '))!.eventId)
+    const rows = contentsRows(lastBag())
+    expect(rows.some((t) => t[1] === 'cashu')).toBe(false)
+    expect(rows).toEqual([['contents', 'message', '1']])
   })
 })
 

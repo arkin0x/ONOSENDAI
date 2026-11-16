@@ -1,16 +1,25 @@
 /**
  * waveOne.test.ts - the base variant's first wave on the built-in field,
  * played by a scripted thumb with the touch aim assist on: clearable, but
- * not free. The player advances on the finish at a quarter of full speed
- * (fighting as it goes), the look drifts after the nearest drone the way a
- * thumb would, and the assist fires; the simulation's assist roll sends
- * some of those shots wide, the rifle overheats, and scouts land dives.
+ * not free, whether the player stops to fight or keeps moving. The player
+ * heads for the finish at some share of full speed, maybe weaving side to
+ * side; the look drifts after the nearest drone the way a thumb would, and
+ * the assist fires. The simulation's assist roll sends some shots wide, the
+ * rifle overheats, snipers lead their bolts and scouts re-aim their dives.
  *
- * At the tuning of 2026-11-16, over seeds 1 to 8: every run clears, 6 HP
- * lost in all (0 to 2 a run, a hit in 4 of the 8), 27 overheats in all
- * (about 3 a run), about 17% of assisted shots wide. A player who keeps moving at half speed
- * or more is not hit on this field (sniper shots and scout dives both aim
- * at where the player was), so the slow advance is the one checked.
+ * At the tuning of 2026-11-16 (sniper lead 1, scout dive track 90 degrees a
+ * second), over seeds 1 to 12:
+ *
+ * | Player                                   | Cleared | Hit in | HP lost |
+ * |------------------------------------------|---------|--------|---------|
+ * | full speed, straight                     | 12      | 12     | 15      |
+ * | full speed, weaving a little (0.3)       | 12      | 1      | 1       |
+ * | three quarters, weaving a little         | 12      | 3      | 3       |
+ * | half speed, weaving a little             | 12      | 10     | 14      |
+ * | quarter speed, weaving (0.6), fighting   | 11      | 6      | 10      |
+ *
+ * So running in a straight line no longer dodges everything (a led bolt
+ * meets it), while changing direction still can.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -37,8 +46,8 @@ function variant(): DroneRunVariant {
   return JSON.parse(JSON.stringify(base)) as DroneRunVariant
 }
 
-/** How the scripted player goes: `pace` of full speed toward the finish (0 stands once out of the start zone). */
-interface Style { pace: number; sprint?: boolean; thumb?: number }
+/** How the scripted player goes: `pace` of full speed toward the finish; `weave`, how far it swings side to side (0 straight, 0.6 about 30 degrees); `thumb`, how quickly the look follows a drone; `sprint` while no drone is near. */
+interface Style { pace: number; sprint?: boolean; thumb?: number; weave?: number }
 
 interface Outcome { phase: string; hp: number; timeS: number; kills: number; shots: number; assisted: number; wide: number; overheats: number; hitsTaken: number }
 
@@ -58,7 +67,10 @@ function playWaveOne(seed: number, style: Style, maxS = 90): { st: RunState; out
     const dl = Math.hypot(dx, dz) || 1
     const fx = Math.sin(yaw), fz = -Math.cos(yaw), rx = -Math.cos(yaw), rz = -Math.sin(yaw)
     const pace = st.phase === 'safe' ? 1 : style.pace
-    const fwd = ((dx * fx + dz * fz) / dl) * pace, strafe = ((dx * rx + dz * rz) / dl) * pace
+    // A weave: side to side across the way to the finish, a swing every 4 s or so.
+    const wv = st.phase === 'safe' ? 0 : (style.weave ?? 0) * Math.sin(i / 40 + seed)
+    const wx = dx / dl - (dz / dl) * wv, wz = dz / dl + (dx / dl) * wv, wl = Math.hypot(wx, wz) || 1
+    const fwd = ((wx * fx + wz * fz) / wl) * pace, strafe = ((wx * rx + wz * rz) / wl) * pace
     const speed = Math.hypot(st.body.vel[0], st.body.vel[2])
     stuck = pace > 0 && speed < 2 ? stuck + 1 : 0
     const inp: RunInput = { move: { fwd, strafe }, yaw, pitch, jump: stuck > 10 && i % 20 === 0, fire: false, select: null, reload: false, sprint: style.sprint && st.drones.length === 0 }
@@ -90,29 +102,36 @@ function playWaveOne(seed: number, style: Style, maxS = 90): { st: RunState; out
 
 describe('wave 1 on the built-in field, assist on', () => {
   const SEEDS = [1, 2, 3, 4, 5, 6, 7, 8]
+  const play = (style: Style): Outcome[] => SEEDS.map((seed) => playWaveOne(seed, style).out)
+  const cleared = (runs: Outcome[]): number => runs.filter((r) => r.phase === 'cleared').length
+  const hitIn = (runs: Outcome[]): number => runs.filter((r) => r.hp < 3).length
 
-  it('a slow, fighting advance clears every seed but takes hits, and the auto-firing rifle overheats', () => {
-    const runs = SEEDS.map((seed) => playWaveOne(seed, { pace: 0.25 }).out)
-    for (const r of runs) {
-      expect(r.phase).toBe('cleared')
-      expect(r.overheats).toBeGreaterThan(0)
-    }
-    const lost = runs.reduce((n, r) => n + (3 - r.hp), 0)
-    expect(lost).toBeGreaterThanOrEqual(3)
-    expect(runs.filter((r) => r.hp < 3).length).toBeGreaterThanOrEqual(3)
+  it('running straight for the finish at full speed clears, but a led sniper bolt lands in most seeds', () => {
+    const runs = play({ pace: 1 })
+    expect(cleared(runs)).toBe(8)
+    expect(hitIn(runs)).toBeGreaterThanOrEqual(6)
+  }, 60000)
+
+  it('keeping moving at half speed clears in most seeds and takes hits in most', () => {
+    const runs = play({ pace: 0.5, weave: 0.3 })
+    expect(cleared(runs)).toBeGreaterThanOrEqual(6)
+    expect(hitIn(runs)).toBeGreaterThanOrEqual(5)
+  }, 60000)
+
+  it('a slow, fighting advance with sidesteps clears in most seeds, takes hits, and the auto-firing rifle overheats', () => {
+    const runs = play({ pace: 0.25, weave: 0.6 })
+    expect(cleared(runs)).toBeGreaterThanOrEqual(6)
+    expect(hitIn(runs)).toBeGreaterThanOrEqual(3)
+    for (const r of runs) expect(r.overheats).toBeGreaterThan(0)
     // The assist roll: about 15% of the assisted shots go wide.
     const assisted = runs.reduce((n, r) => n + r.assisted, 0), wide = runs.reduce((n, r) => n + r.wide, 0)
-    expect(assisted).toBeGreaterThan(200)
+    expect(assisted).toBeGreaterThan(150)
     expect(wide / assisted).toBeGreaterThan(0.09)
     expect(wide / assisted).toBeLessThan(0.23)
   }, 60000)
 
-  it('a sloppier thumb clears too', () => {
-    for (const seed of SEEDS.slice(0, 4)) expect(playWaveOne(seed, { pace: 0.25, thumb: 0.04 }).out.phase).toBe('cleared')
-  }, 60000)
-
-  it('a run with sprint and assisted shots replays from its input log to the same hash', () => {
-    const { st, log } = playWaveOne(3, { pace: 1, sprint: true })
+  it('a run with sprint, led bolts and assisted shots replays from its input log to the same hash', () => {
+    const { st, log } = playWaveOne(3, { pace: 1, sprint: true, weave: 0.3 })
     expect(log.some((x) => x.sprint)).toBe(true)
     expect(log.some((x) => x.aim)).toBe(true)
     const again = createRun(variant(), solids, { level, seed: 3, wave: 0 })

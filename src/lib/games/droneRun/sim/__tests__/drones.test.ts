@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { canSee, makeDrone, moveSphere, stepDrones, stepDroneShots, type Drone, type DroneContext, type PlayerTarget } from '../drones'
+import { canSee, interceptTime, makeDrone, moveSphere, stepDrones, stepDroneShots, trackDive, type Drone, type DroneContext, type PlayerTarget } from '../drones'
 import { regionBounds } from '../player'
 import { makeRng, next } from '../rng'
 import { buildSolids, groundBelow, segmentCast, sphereHits, type Solids } from '../solids'
@@ -224,5 +224,136 @@ describe('drones never pass through a wall built from shards', () => {
         })
       }
     }
+  })
+})
+
+describe('leading shots (attack.lead) and tracking dives (dive.track)', () => {
+  const open = boxes(GROUND)
+  const HEAVY = 2
+
+  it('the base variant: the sniper leads fully, the heavy 0.7, both held to 3 s; the scout\'s dive re-aims at 90 degrees a second', () => {
+    expect(enemies[SNIPER].attack).toMatchObject({ lead: 1, leadMaxS: 3 })
+    expect(enemies[HEAVY].attack).toMatchObject({ lead: 0.7, leadMaxS: 3 })
+    expect(enemies[SCOUT].dive?.track).toBe(90)
+  })
+
+  it('interceptTime: where a bolt (with its muzzle offset) meets a target moving at constant velocity', () => {
+    const from: Vec3 = [10, 20, 5], at: Vec3 = [40, 3, -12], vel: Vec3 = [6, 0, -4]
+    const t = interceptTime(from, at, vel, 16, 1.2)!
+    expect(t).toBeGreaterThan(0)
+    const meet: Vec3 = [at[0] + vel[0] * t, at[1] + vel[1] * t, at[2] + vel[2] * t]
+    expect(Math.hypot(meet[0] - from[0], meet[1] - from[1], meet[2] - from[2])).toBeCloseTo(1.2 + 16 * t, 9)
+    // Standing still: distance less the offset, over the speed.
+    expect(interceptTime(from, at, [0, 0, 0], 16, 1.2)).toBeCloseTo((Math.hypot(30, -17, -17) - 1.2) / 16, 12)
+    // A target faster than the bolt running straight away: never.
+    expect(interceptTime([0, 0, 0], [0, 0, -10], [0, 0, -20], 16, 0)).toBeNull()
+  })
+
+  /** A sniper firing at a player who runs at constant level velocity `vel`; returns whether its first bolt hits. */
+  function boltAt(lead: number, vel: Vec3): boolean {
+    const defs = enemies.map((e, k) => (k === SNIPER ? { ...e, attack: { ...e.attack, lead } } : e))
+    const p: PlayerTarget = { ...player([128, 64, 100]), vel }
+    const g = rig(open, p, defs)
+    g.add(SNIPER, [128, 78, 135])
+    let fired = false, hit = false
+    for (let i = 0; i < 60 * 12 && !hit; i++) {
+      g.step()
+      if (g.events.some((e) => e.type === 'drone-shot')) fired = true
+      if (g.ctx.playerHits.length) hit = true
+      // The player runs on: feet and eye move with the velocity.
+      for (const q of [p.feet, p.eye]) { q[0] += vel[0] * STEP_S; q[2] += vel[2] * STEP_S }
+      if (fired && g.ctx.shots.length === 0) break
+    }
+    expect(fired).toBe(true)
+    return hit
+  }
+
+  it('lead 1 hits a player running across at constant speed; lead 0 misses them; either hits one standing still', () => {
+    const across: Vec3 = [-9, 0, 0]
+    expect(boltAt(1, across)).toBe(true)
+    expect(boltAt(0, across)).toBe(false)
+    expect(boltAt(0, [0, 0, 0])).toBe(true)
+    expect(boltAt(1, [0, 0, 0])).toBe(true)
+  })
+
+  it('a led bolt is dodged by a change of direction after it is fired', () => {
+    const defs = enemies.map((e, k) => (k === SNIPER ? { ...e, attack: { ...e.attack, lead: 1 } } : e))
+    const vel: Vec3 = [-9, 0, 0]
+    const p: PlayerTarget = { ...player([128, 64, 100]), vel }
+    const g = rig(open, p, defs)
+    g.add(SNIPER, [128, 78, 135])
+    let fired = false, hit = false
+    for (let i = 0; i < 60 * 12 && !hit; i++) {
+      g.step()
+      if (g.events.some((e) => e.type === 'drone-shot')) { fired = true; vel[0] = 9 }
+      if (g.ctx.playerHits.length) hit = true
+      for (const q of [p.feet, p.eye]) { q[0] += vel[0] * STEP_S; q[2] += vel[2] * STEP_S }
+      if (fired && g.ctx.shots.length === 0) break
+    }
+    expect(fired).toBe(true)
+    expect(hit).toBe(false)
+  })
+
+  it('trackDive turns the dive\'s level bearing toward the chest by at most its turn, keeping its descent and distance', () => {
+    const d = makeDrone(1, enemies, SCOUT, [0, 10, 0], [0, 0, 0], makeRng(1))
+    d.aim = [0, 10, -20]
+    const chest: Vec3 = [20, 10, -20]
+    const max = (15 * Math.PI) / 180 / 60
+    trackDive(d, chest, max)
+    const h = [d.aim[0] - d.pos[0], d.aim[1] - d.pos[1], d.aim[2] - d.pos[2]]
+    const hl = Math.hypot(...h)
+    expect(hl).toBeCloseTo(20, 9)
+    expect(h[1]).toBe(0)
+    expect(Math.acos(-h[2] / hl)).toBeCloseTo(max, 9)
+    // A diving heading keeps its descent: only the bearing turns.
+    const f = makeDrone(3, enemies, SCOUT, [0, 10, 0], [0, 0, 0], makeRng(1))
+    f.aim = [0, 2, -20]
+    trackDive(f, [20, 2, -20], max)
+    expect(f.aim[1]).toBe(2)
+    expect(Math.hypot(f.aim[0], f.aim[2])).toBeCloseTo(20, 9)
+    // Within the turn, it points straight at the chest.
+    const e = makeDrone(2, enemies, SCOUT, [0, 10, 0], [0, 0, 0], makeRng(1))
+    e.aim = [0, 10, -20]
+    trackDive(e, [0.001, 10, -20], max)
+    expect(e.aim[0]).toBeCloseTo(0.001, 9)
+  })
+
+  it('in a dive, the heading to the locked point never turns faster than dive.track', () => {
+    const p: PlayerTarget = { ...player([128, 64, 128]), vel: [7, 0, 0] }
+    const g = rig(open, p)
+    const d = g.add(SCOUT, [128, 74, 150])
+    let prev: Vec3 | null = null, turns = 0, maxStep = 0
+    for (let i = 0; i < 60 * 10; i++) {
+      g.step()
+      for (const q of [p.feet, p.eye]) q[0] += 7 * STEP_S
+      if (d.mode !== 'dive') { prev = null; continue }
+      const h: Vec3 = [d.aim[0] - d.pos[0], d.aim[1] - d.pos[1], d.aim[2] - d.pos[2]]
+      const l = Math.hypot(...h)
+      if (prev && l > 0.5) {
+        const pl = Math.hypot(...prev)
+        const a = Math.acos(Math.max(-1, Math.min(1, (h[0] * prev[0] + h[1] * prev[1] + h[2] * prev[2]) / (l * pl))))
+        maxStep = Math.max(maxStep, a)
+        turns++
+      }
+      prev = h
+    }
+    expect(turns).toBeGreaterThan(10)
+    // The drone's own move between steps shifts the heading a little too; the turn itself is at most 90 degrees a second.
+    expect(maxStep).toBeGreaterThan(0)
+    expect(maxStep).toBeLessThan(((90 * Math.PI) / 180 / 60) * 1.5 + 0.02)
+  })
+
+  it('track 0 keeps the dive\'s point locked where the chest was', () => {
+    const defs = enemies.map((e, k) => (k === SCOUT ? { ...e, dive: { ...e.dive, track: 0 } } : e))
+    const p: PlayerTarget = { ...player([128, 64, 128]), vel: [7, 0, 0] }
+    const g = rig(open, p, defs)
+    const d = g.add(SCOUT, [128, 74, 150])
+    let locked: Vec3 | null = null
+    for (let i = 0; i < 60 * 10; i++) {
+      g.step()
+      for (const q of [p.feet, p.eye]) q[0] += 7 * STEP_S
+      if (d.mode === 'dive') { locked ??= [d.aim[0], d.aim[1], d.aim[2]]; expect(d.aim).toEqual(locked) } else if (locked) break
+    }
+    expect(locked).not.toBeNull()
   })
 })

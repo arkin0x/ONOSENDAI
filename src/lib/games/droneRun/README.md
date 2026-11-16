@@ -83,9 +83,11 @@ Exactly one of `heat` or `ammo`.
 | `detect` | Sees the player only within this AND with a clear line of sight | (b) |
 | `loseAfterS` | Seconds out of sight before it gives up and patrols | (b) |
 | `preferRange` | The range a standoff or tank drone holds (band of 4 either side) | (b) |
-| `attack` | `{ kind: "contact" or "shot", damage (always 1), cooldownS, shot?: { speed, radius, range, windupS }, burst?, burstGapS? }` | (b) |
+| `attack` | `{ kind: "contact" or "shot", damage (always 1), cooldownS, shot?: { speed, radius, range, windupS }, burst?, burstGapS?, lead?, leadMaxS? }` | (b) |
+| `attack.lead`, `attack.leadMaxS` | How much a shot leads a moving player, 0..1 (default 0), and the longest prediction, seconds (default 1.5). Leading below. Base: sniper 1 and 3 s, heavy 0.7 and 3 s | (b) |
 | `altitude` | `{ min, max }` above the ground under it | (b) |
-| `dive` | Optional dive tuning: `commitRange`, `speedFactor`, `maxS`, `pullUpS`, `hoverAbove` | (b) |
+| `dive` | Optional dive tuning: `commitRange`, `speedFactor`, `maxS`, `pullUpS`, `hoverAbove`, `track` | (b) |
+| `dive.track` | How fast a dive re-aims, degrees a second (default 0: the point stays locked). Tracking below. Base scout: 90 | (b) |
 | `swarm` | Optional swarm tuning: `separation`, `neighbour`, `cohesion` | (b) |
 
 ### WaveScript
@@ -122,6 +124,13 @@ A rule (b): which shots may miss changes where shots land, so a checker must rol
 | Field | Meaning | Class |
 |---|---|---|
 | `sprint` | Optional, held (absent is false). While held, a move is held (the wish is not zero) and stamina is above 0 with no lockout running, the top speed is `speedMul` times fluid WALK's and stamina drains `drainPerS` a second; the refill delay restarts. Running dry starts a lockout of `lockoutS`, during which sprint does nothing. Any step not sprinting counts the lockout and the delay down, then refills `refillPerS` a second up to `max`. Acceleration and braking stay fluid WALK's (let go above the walking top speed, the body brakes at FLUID_DECEL). It is in the input log, so a replay is exact | (b) |
+
+### Leading shots and tracking dives
+
+Rules (b), with no random draws: both are functions of the state alone, so a replay is exact.
+
+- Leading: a shot fired while the drone sees the player aims at the chest plus the player's level velocity (the body's velocity with its vertical part dropped: a jump is not predicted) times `lead` times `t`. `t` is the intercept time of a bolt at `shot.speed` from the drone's centre, leaving `radius + shot.radius + 0.05` out along its way, against a target at the chest moving at the full level velocity: the smallest t above 0 with |chest + v t - drone| = offset + speed t (sim/drones.ts `interceptTime`), held to `leadMaxS`, and `leadMaxS` when there is none. Lead 1 meets a player running in a straight line at constant speed; a change of direction after the shot still dodges it. Out of sight, the drone fires at the last known place, unled. Each shot of a burst is led as it is fired.
+- Tracking: while diving and seeing the player, the level bearing of the dive's heading (from the drone to its locked point) turns toward the chest's bearing by at most `track` degrees a second; the locked point keeps its height and its distance from the drone (sim/drones.ts `trackDive`). So moving across a dive no longer dodges it, a late sidestep faster across than the drone can turn still does, and running straight at it meets it no sooner than a locked dive (the drone speed test's 1.6 s floor holds).
 
 ### What the simulation reads from the level
 

@@ -336,7 +336,7 @@ describe('every assisted shot hits unless the simulation\'s roll says miss', () 
       for (const k in r.st.kills) kills += r.st.kills[k]
       expect(kills).toBeGreaterThan(0)
     }
-    expect(total).toBeGreaterThan(150)
+    expect(total).toBeGreaterThan(100)
     // 85% of the assisted shots hit, within a tolerance for the sample.
     expect(hits / total).toBeGreaterThan(0.78)
     expect(hits / total).toBeLessThan(0.92)

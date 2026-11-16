@@ -166,7 +166,8 @@
           "speedFactor": 1.35,
           "maxS": 1.6,
           "pullUpS": 0.9,
-          "hoverAbove": 5
+          "hoverAbove": 5,
+          "track": 90
         }
       },
       {
@@ -190,7 +191,9 @@
             "radius": 0.35,
             "range": 70,
             "windupS": 0.8
-          }
+          },
+          "lead": 1,
+          "leadMaxS": 3
         },
         "altitude": {
           "min": 10,
@@ -220,7 +223,9 @@
             "radius": 0.5,
             "range": 50,
             "windupS": 0.6
-          }
+          },
+          "lead": 0.7,
+          "leadMaxS": 3
         },
         "altitude": {
           "min": 5,

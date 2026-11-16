@@ -217,6 +217,15 @@ describe('determinism', () => {
     expect(stateHash(walked)).not.toBe(stateHash(a))
   })
 
+  it('led shots and tracking dives replay exactly, and they change the run (no random draws: a function of the state alone)', () => {
+    const log = inputLog(14, 60 * 25)
+    const a = play(variant(), log), b = play(variant(), JSON.parse(JSON.stringify(log)) as RunInput[])
+    expect(stateHash(a)).toBe(stateHash(b))
+    const plain = variant()
+    for (const e of plain.spec.enemies) { delete e.attack.lead; if (e.dive) e.dive.track = 0 }
+    expect(stateHash(play(plain, log))).not.toBe(stateHash(a))
+  })
+
   it('a recorded input log, written out and read back, replays to the same result', () => {
     const log = inputLog(12, 60 * 20)
     const live = createRun(variant(), field, { level: testLevel(), seed: 9, wave: 2 })

@@ -144,6 +144,12 @@ export function checkVariant(v: DroneRunVariant, level: RunLevel): void {
     if (w.assistHit !== undefined && !(w.assistHit >= 0 && w.assistHit <= 1)) throw new Error(`Weapon ${w.id}: assistHit must be from 0 to 1.`)
     if (w.assistMissBy !== undefined && !(w.assistMissBy >= 0)) throw new Error(`Weapon ${w.id}: assistMissBy must be 0 or more.`)
   }
+  for (const e of s.enemies) {
+    const a = e.attack
+    if (a.lead !== undefined && !(a.lead >= 0 && a.lead <= 1)) throw new Error(`Enemy ${e.id}: attack.lead must be from 0 to 1.`)
+    if (a.leadMaxS !== undefined && !(a.leadMaxS > 0)) throw new Error(`Enemy ${e.id}: attack.leadMaxS must be above 0.`)
+    if (e.dive?.track !== undefined && !(e.dive.track >= 0)) throw new Error(`Enemy ${e.id}: dive.track must be 0 or more.`)
+  }
   const sp = s.player.stamina
   if (sp && !([sp.max, sp.drainPerS, sp.refillPerS, sp.refillDelayS, sp.lockoutS].every((x) => Number.isFinite(x) && x >= 0) && sp.max > 0 && sp.speedMul > 0)) throw new Error('player.stamina needs max and speedMul above 0 and every other number 0 or more.')
   if (!s.waves.length) throw new Error('A variant needs at least one wave.')
@@ -247,7 +253,7 @@ export function stepRun(st: RunState, input: RunInput): RunState {
       ev.push({ type: 'drone-spawned', drone: d.id, enemy: d.enemy, at: [at[0], at[1], at[2]] })
     }
     const playerHits: PlayerHit[] = []
-    const droneCtx = { defs: spec.enemies, solids, bounds, player: { feet: st.body.pos, eye, height: p.height, radius: p.radius }, rng: st.rng.drones, dt, events: ev, playerHits, shots: st.droneShots, ids: st.ids }
+    const droneCtx = { defs: spec.enemies, solids, bounds, player: { feet: st.body.pos, eye, height: p.height, radius: p.radius, vel: st.body.vel }, rng: st.rng.drones, dt, events: ev, playerHits, shots: st.droneShots, ids: st.ids }
     stepDrones(st.drones, droneCtx)
     stepDroneShots(droneCtx)
     for (const h of playerHits) {

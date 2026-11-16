@@ -17,10 +17,27 @@
  *   straight at it at speed x speedFactor (a dive can be dodged). A contact
  *   ends the dive; so does reaching the locked point, maxS, or a wall. It
  *   pulls up and away for pullUpS, then lines up again.
+ * - dive tracking (dive.track, degrees a second, default 0): while diving and
+ *   seeing the player, the level bearing of the dive's heading turns toward
+ *   the player's chest by at most track a second; its descent and the
+ *   locked point's height and distance stay as committed (sim trackDive).
+ *   So moving across a dive no longer dodges it, a late sidestep faster
+ *   than the drone can turn still does, and running straight at it meets
+ *   it no sooner than a locked dive. 0 keeps the point locked where the
+ *   chest was at the commit.
  * - standoff (sniper): holds preferRange (a band of 4 either side), strafing
  *   side to side; seeing the player within shot.range it winds up for
  *   windupS (the telegraph) and fires a slow projectile at the player's
  *   chest. Projectiles fly straight and stop at any solid.
+ * - Leading (attack.lead, 0..1, default 0; attack.leadMaxS, default 1.5):
+ *   a shot fired while the drone sees the player aims at the chest plus the
+ *   player's level velocity (vertical left out: a jump is not predicted)
+ *   times lead times t, where t is when a bolt from the drone would meet a
+ *   target moving at full level velocity (the intercept, counting the
+ *   muzzle offset), held to leadMaxS (leadMaxS when there is none). Lead 1
+ *   hits a player running in a straight line at constant speed; lead 0 aims
+ *   where the player is. A sidestep or a change of direction after the
+ *   shot still dodges it.
  * - tank (heavy): slow, approaches to preferRange (default 20), barely
  *   strafes, and fires bursts of `burst` shots `burstGapS` apart.
  * - swarm (swarmer): seeks the player, keeping `separation` from other
@@ -50,7 +67,7 @@ import type { Bounds } from './player'
 import { next, range, type Rng } from './rng'
 import { groundBelow, segmentCast, segmentClear, sphereHits, spherePush, type Solids } from './solids'
 
-export const DIVE_DEFAULTS = { commitRange: 14, speedFactor: 1.5, maxS: 1.6, pullUpS: 0.9, hoverAbove: 5 }
+export const DIVE_DEFAULTS = { commitRange: 14, speedFactor: 1.5, maxS: 1.6, pullUpS: 0.9, hoverAbove: 5, track: 0 }
 export const SWARM_DEFAULTS = { separation: 2, neighbour: 10, cohesion: 0.6 }
 /** A tank's range when its def gives none. */
 export const TANK_RANGE = 20
@@ -114,6 +131,8 @@ export interface PlayerTarget {
   eye: Vec3
   height: number
   radius: number
+  /** The body's velocity (only its level part is read, for leading). Absent: standing still. */
+  vel?: Vec3
 }
 
 /** A hit on the player for the run to judge. */
@@ -278,6 +297,28 @@ export function steer(vel: Vec3, want: Vec3, max: number, accel: number, turnRat
   vel[0] = nv[0]; vel[1] = nv[1]; vel[2] = nv[2]
 }
 
+/**
+ * A tracking dive's step: the level part of the heading (toward the locked
+ * point) turned toward the chest's bearing by at most `maxTurn` radians;
+ * the heading's climb or descent and the locked point's distance stay as
+ * they were. So a player moving across the dive is followed, but one
+ * running straight at it is met no sooner than by a locked dive.
+ */
+export function trackDive(d: Drone, chest: Vec3, maxTurn: number): void {
+  const to = sub(d.aim, d.pos)
+  const far = len(to)
+  const lx = to[0], lz = to[2], level = Math.hypot(lx, lz)
+  const cx = chest[0] - d.pos[0], cz = chest[2] - d.pos[2], cl = Math.hypot(cx, cz)
+  if (far < 1e-9 || level < 1e-9 || cl < 1e-9) return
+  // The signed level angle from the heading's bearing to the chest's, held to maxTurn.
+  const ux = lx / level, uz = lz / level, vx = cx / cl, vz = cz / cl
+  const ang = Math.atan2(ux * vz - uz * vx, ux * vx + uz * vz)
+  const turn = Math.max(-maxTurn, Math.min(maxTurn, ang))
+  const c = Math.cos(turn), sn = Math.sin(turn)
+  const nx = (ux * c - uz * sn) * level, nz = (ux * sn + uz * c) * level
+  d.aim = [d.pos[0] + nx, d.aim[1], d.pos[2] + nz]
+}
+
 /** Whether a drone sees the eye: within its detect range and with a clear line. */
 export function canSee(s: Solids, def: DroneDef, from: Vec3, eye: Vec3): boolean {
   return dist(from, eye) <= def.detect && segmentClear(s, from, eye)
@@ -288,9 +329,43 @@ function pickPatrol(d: Drone, ctx: DroneContext): void {
   d.patrolTo = [d.home[0] + Math.cos(a) * r, d.home[1] + h, d.home[2] + Math.sin(a) * r]
 }
 
-/** Fires one drone shot at `at`. */
+/** A shot's prediction time when the drone's def gives none, seconds. */
+export const DEFAULT_LEAD_MAX_S = 1.5
+
+/**
+ * When a bolt fired from `from` at `speed` (leaving `off` out along its way)
+ * meets a target at `at` moving at constant `vel`: the smallest t > 0 with
+ * |at + vel t - from| = off + speed t, or null for none.
+ */
+export function interceptTime(from: Vec3, at: Vec3, vel: Vec3, speed: number, off: number): number | null {
+  const rx = at[0] - from[0], ry = at[1] - from[1], rz = at[2] - from[2]
+  const a = vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2] - speed * speed
+  const b = 2 * (rx * vel[0] + ry * vel[1] + rz * vel[2] - off * speed)
+  const c = rx * rx + ry * ry + rz * rz - off * off
+  if (Math.abs(a) < 1e-9) return Math.abs(b) < 1e-12 ? null : -c / b > 0 ? -c / b : null
+  const disc = b * b - 4 * a * c
+  if (disc < 0) return null
+  const q = Math.sqrt(disc)
+  const t1 = (-b - q) / (2 * a), t2 = (-b + q) / (2 * a)
+  const lo = Math.min(t1, t2), hi = Math.max(t1, t2)
+  return lo > 0 ? lo : hi > 0 ? hi : null
+}
+
+/** Where a drone aims a shot: `at`, led by the player's level velocity (see the file header) when it sees them and its def leads. */
+export function leadPoint(d: Drone, def: DroneDef, shot: DroneShotDef, at: Vec3, player: PlayerTarget): Vec3 {
+  const lead = Math.max(0, Math.min(1, def.attack.lead ?? 0))
+  const v = player.vel
+  if (!(lead > 0) || !d.sees || !v) return at
+  const lv: Vec3 = [v[0], 0, v[2]]
+  if (lv[0] === 0 && lv[2] === 0) return at
+  const maxS = def.attack.leadMaxS ?? DEFAULT_LEAD_MAX_S
+  const t = Math.min(maxS, interceptTime(d.pos, at, lv, shot.speed, def.radius + shot.radius + 0.05) ?? maxS)
+  return [at[0] + lv[0] * t * lead, at[1], at[2] + lv[2] * t * lead]
+}
+
+/** Fires one drone shot at `at` (led, when its def leads). */
 function fireShot(d: Drone, def: DroneDef, shot: DroneShotDef, at: Vec3, ctx: DroneContext): void {
-  const dir = norm(sub(at, d.pos))
+  const dir = norm(sub(leadPoint(d, def, shot, at, ctx.player), d.pos))
   if (len(dir) === 0) return
   const off = def.radius + shot.radius + 0.05
   const id = ctx.ids.next++
@@ -336,6 +411,7 @@ export function stepDrones(drones: Drone[], ctx: DroneContext): void {
       if (d.mode === 'dive') {
         max = def.speed * t.speedFactor
         accel = def.accel * 2
+        if (t.track > 0 && d.sees) trackDive(d, chest, (t.track * Math.PI) / 180 * dt)
         want = norm(sub(d.aim, d.pos), max)
         if (dist(d.pos, d.aim) < def.radius + 0.3 || d.modeT > t.maxS) { d.mode = 'pullup'; d.modeT = 0; d.cooldown = Math.max(d.cooldown, def.attack.cooldownS) }
       } else if (d.mode === 'pullup') {

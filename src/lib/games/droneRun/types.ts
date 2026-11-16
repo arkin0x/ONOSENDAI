@@ -127,6 +127,14 @@ export interface DroneAttackDef {
   burst?: number
   /** Seconds between the shots of a burst. Default 0.25. */
   burstGapS?: number
+  /**
+   * How much a shot leads a moving player, 0..1 (default 0: at where the
+   * player is; 1: at the intercept with the player's level velocity). Only
+   * while the drone sees the player. sim/drones.ts has the rule.
+   */
+  lead?: number
+  /** The longest prediction a led shot makes, seconds (default 1.5). */
+  leadMaxS?: number
 }
 
 /** Optional tuning of the dive (scout) behaviour; every field has a default (sim/drones.ts DIVE_DEFAULTS). */
@@ -141,6 +149,8 @@ export interface DiveTuning {
   pullUpS?: number
   /** How high above the player it hangs while lining up a dive, gibsons. */
   hoverAbove?: number
+  /** How fast the dive re-aims at the player while it sees them, degrees a second. 0 (default): the dive keeps the point locked at the commit. */
+  track?: number
 }
 
 /** Optional tuning of the swarm behaviour (sim/drones.ts SWARM_DEFAULTS). */

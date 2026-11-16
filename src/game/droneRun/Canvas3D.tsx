@@ -23,6 +23,8 @@
  *   look, so the bob and the drawing between steps never decide a shot.
  * - The page hidden, the run pauses (runner.setPaused) and owes nothing for
  *   the time away.
+ * - The drones are heard where they fly (Voices.tsx, droneVoices.ts), the
+ *   camera as the ears.
  *
  * DroneRunScreen hands this the session's world and entry, and the level
  * (zones, entry, spawn points) once the level import supplies it; until
@@ -53,6 +55,7 @@ import { droneRunModels, type DroneRunModels } from './models'
 import { disposeView, makeView, PRIORITY, type DroneRunView } from './view'
 import { Drones } from './Drones'
 import { Effects } from './Effects'
+import { Voices } from './Voices'
 import { Viewmodel } from './Viewmodel'
 import { Zones } from './Zones'
 import { frameStats, installDevHandle } from './devHandle'
@@ -243,6 +246,7 @@ export function Canvas3D({ game, world, entry, level, seed = 0 }: Canvas3DProps)
             <OpenPools view={view} />
             <Drones view={view} />
             <Effects view={view} />
+            <Voices view={view} />
             {createPortal(<Viewmodel view={view} />, vmScene)}
             <Renderer view={view} vmScene={vmScene} vmCamera={vmCamera} />
           </>

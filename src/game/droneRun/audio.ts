@@ -23,6 +23,10 @@
  * | clear | four rising sine notes (C5 E5 G5 C6), 700 ms |
  * | fail | a triangle falling 330 to 140 Hz, 290 ms |
  *
+ * Every sound goes out through one gain (gameBus), which the mutes close.
+ * The drones' own voices, placed where each drone flies, are droneVoices.ts
+ * and go out through the same gain.
+ *
  * Ledger class (c), client: sounds are this client's own.
  */
 
@@ -62,8 +66,8 @@ const lastAt = new Map<string, number>()
 /** The least gap between two of the same sound, seconds. */
 const REPEAT_GAP_S = 0.03
 
-let noise: { ctx: AudioContext; buf: AudioBuffer } | null = null
-function noiseBuffer(ac: AudioContext): AudioBuffer {
+let noise: { ctx: BaseAudioContext; buf: AudioBuffer } | null = null
+function noiseBuffer(ac: BaseAudioContext): AudioBuffer {
   if (noise?.ctx === ac) return noise.buf
   const len = Math.floor(ac.sampleRate * 0.5)
   const buf = ac.createBuffer(1, len, ac.sampleRate)
@@ -74,7 +78,7 @@ function noiseBuffer(ac: AudioContext): AudioBuffer {
 }
 
 /** A gain envelope: up to `peak` in `attack`, down to silence by `end` (seconds from t0), into `to`. */
-function env(ac: AudioContext, to: AudioNode, t0: number, peak: number, attack: number, end: number): GainNode {
+function env(ac: BaseAudioContext, to: AudioNode, t0: number, peak: number, attack: number, end: number): GainNode {
   const g = ac.createGain()
   g.gain.setValueAtTime(0.0001, t0)
   g.gain.exponentialRampToValueAtTime(peak, t0 + attack)
@@ -83,7 +87,7 @@ function env(ac: AudioContext, to: AudioNode, t0: number, peak: number, attack: 
   return g
 }
 
-function tone(ac: AudioContext, to: AudioNode, t0: number, type: OscillatorType, f0: number, f1: number, dur: number, peak: number): void {
+function tone(ac: BaseAudioContext, to: AudioNode, t0: number, type: OscillatorType, f0: number, f1: number, dur: number, peak: number): void {
   const g = env(ac, to, t0, peak, 0.005, dur)
   const o = ac.createOscillator()
   o.type = type
@@ -94,7 +98,7 @@ function tone(ac: AudioContext, to: AudioNode, t0: number, type: OscillatorType,
   o.stop(t0 + dur + 0.02)
 }
 
-function hiss(ac: AudioContext, to: AudioNode, t0: number, filter: BiquadFilterType, f0: number, f1: number, dur: number, peak: number, q = 1): void {
+function hiss(ac: BaseAudioContext, to: AudioNode, t0: number, filter: BiquadFilterType, f0: number, f1: number, dur: number, peak: number, q = 1): void {
   const g = env(ac, to, t0, peak, 0.004, dur)
   const f = ac.createBiquadFilter()
   f.type = filter
@@ -109,9 +113,36 @@ function hiss(ac: AudioContext, to: AudioNode, t0: number, filter: BiquadFilterT
   s.stop(t0 + dur + 0.02)
 }
 
-function synth(ac: AudioContext, sound: DroneSound, weapon: number, strength: number): void {
-  const t = ac.currentTime
-  const out = ac.destination
+/**
+ * The game's own way out to the speakers: one gain on the shared context,
+ * into its destination. Every sound of the game goes through it, the drones'
+ * voices too (droneVoices.ts), so the game's mutes close it at once, a sound
+ * already ringing included, and a recording can listen to the game alone.
+ */
+let bus: { ctx: BaseAudioContext; node: GainNode } | null = null
+export function gameBus(ac: BaseAudioContext): GainNode {
+  if (bus?.ctx === ac) return bus.node
+  const node = ac.createGain()
+  node.gain.value = droneRunSilent() ? 0 : 1
+  node.connect(ac.destination)
+  bus = { ctx: ac, node }
+  return node
+}
+
+/** The bus follows the mutes: closed while the game is silent, eased so neither way clicks. */
+function followMutes(): void {
+  const b = bus
+  if (!b) return
+  try { b.node.gain.setTargetAtTime(droneRunSilent() ? 0 : 1, b.ctx.currentTime, 0.02) } catch { /* a stand-in context */ }
+}
+useDroneRunSound.subscribe(followMutes)
+useSoundMutes.subscribe(followMutes)
+
+/**
+ * One sound, scheduled at `t` on `ac`'s clock into `out`: what playSound
+ * plays now, and what a recording renders offline at the moment it played.
+ */
+export function synthAt(ac: BaseAudioContext, out: AudioNode, t: number, sound: DroneSound, weapon = 0, strength = 1): void {
   switch (sound) {
     case 'shot':
       if (weapon === 1) {
@@ -165,7 +196,7 @@ export function playSound(sound: DroneSound, weapon = 0, strength = 1): boolean 
     const prev = lastAt.get(key)
     if (prev !== undefined && ac.currentTime - prev < REPEAT_GAP_S && ac.currentTime >= prev) return false
     lastAt.set(key, ac.currentTime)
-    synth(ac, sound, weapon, strength)
+    synthAt(ac, gameBus(ac), ac.currentTime, sound, weapon, strength)
     return true
   } catch {
     return false
@@ -176,4 +207,5 @@ export function playSound(sound: DroneSound, weapon = 0, strength = 1): boolean 
 export function resetSoundsForTests(): void {
   lastAt.clear()
   noise = null
+  bus = null
 }

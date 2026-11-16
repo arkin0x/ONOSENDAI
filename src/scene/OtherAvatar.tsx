@@ -28,12 +28,14 @@
  * else an avatar is never see-through (AvatarShape, DECK-0003 §3.3).
  */
 
-import { useEffect, useId, useLayoutEffect, useRef } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { Group, Quaternion } from 'three'
+import { Quaternion, type Group } from 'three'
 import { AvatarLerp, type Vec3 } from '../lib/avatarLerp'
 import type { Position } from '../lib/space'
 import { drawnAvatars } from '../lib/targets'
+import { yawOnly } from '../lib/avatarEye'
+import { useAvatarFace } from '../store/avatarFace'
 import { usePersonCard } from '../store/usePersonCard'
 import { AvatarShape } from './AvatarShape'
 import { useAvatarOccluder } from './BuildOccluders'
@@ -118,9 +120,14 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
     drawnAvatars[pubkey] = g
     return () => { if (drawnAvatars[pubkey] === g) delete drawnAvatars[pubkey] }
   }, [pubkey])
+  // UPRIGHT (DECK-0003 §1.18): the caller's turn laid level about your
+  // view's up, render +Y, so they stand on their feet on your screen however
+  // the compass has turned the world. Idempotent on a turn already level.
+  const face = useAvatarFace(pubkey)
+  const drawnTurn = useMemo(() => (face === 'upright' ? yawOnly(turn, new Quaternion()) : turn), [face, turn])
   return (
     <group ref={placed}>
-      <group ref={drawn} quaternion={turn}>
+      <group ref={drawn} quaternion={drawnTurn}>
         <AvatarShape pubkey={pubkey} color={color} keepShape={keepShape} dim={dim} />
       </group>
       {tappable && <TapTarget measure={drawn} occluder={occluder} onTap={() => usePersonCard.getState().open(pubkey)} />}

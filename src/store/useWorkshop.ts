@@ -46,13 +46,13 @@ import {
   type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
 import { readGlow, withGlow, withPointSize, type Glow } from 'sno-core/glow'
+import { drawnFace, withFace, type FaceMode } from 'sno-core/face'
 import { GLOW_START, suggestedGlowStyle } from '../lib/pointGlow'
 import { noTable, signedTableOnly, you } from '../lib/carried'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 import { bounceOf, springboardOf, withBounce, type Bounce } from '../lib/walkBounce'
 import { withAnim } from '../lib/anim'
 import { EYE_FIELD, eyeReachTicks, flipEyeZ, usedBenchEye, withEye, type Eye } from '../lib/avatarEye'
-import { v1Eye } from '../lib/eyeV1'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
@@ -593,6 +593,13 @@ export interface WorkshopState {
    */
   setEye: (eye: Eye | undefined) => boolean
   /**
+   * FACING (DECK-0003 §1.18): how the shard turns as it moves when worn, PATH
+   * or UPRIGHT. Written through sno-core withFace, so PATH removes the field
+   * and nothing malformed is stored. No edit, and false, when it is already
+   * so. One UNDO.
+   */
+  setFace: (face: FaceMode) => boolean
+  /**
    * Turn the selected points a quarter turn about the vertical, +1 one way
    * and -1 the other, around the middle of their extent snapped to the
    * current DIVISION's grid, so every point stays on that grid.
@@ -724,9 +731,8 @@ export interface WorkshopState {
 export function shardFromText(text: string, id: string): ShardModel | null {
   let raw: unknown
   try { raw = JSON.parse(text) } catch { return null }
-  // A version 1 payload's eye into the version 2 frame, as a worn avatar's is (lib/eyeV1).
-  const m = fromPayload(raw, id)
-  return m && v1Eye(m, raw)
+  // sno-core's fromPayload (0.1.31 on) turns a version 1 payload's eye into the version 2 frame itself.
+  return fromPayload(raw, id)
 }
 
 /** Whose object a model was made from (REMIX): sno-core's, shared with snocrash. */
@@ -1639,6 +1645,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const next = withEye(m, eye)
       return JSON.stringify(m.extra?.[EYE_FIELD]) === JSON.stringify(next.extra?.[EYE_FIELD]) ? null : next
     }),
+    // Already so: no edit, so no undo step that changes nothing.
+    setFace: (face) => edit((m) => (drawnFace(m) === face ? null : withFace(m, face))),
 
     moveSelected: (axis, delta) => {
       const { selection, partSel } = get()

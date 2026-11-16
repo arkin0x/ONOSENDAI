@@ -57,6 +57,8 @@ import { BenchLookRig, BenchShard } from './benchLook'
 import { isLook } from './lookTool'
 import { BenchBloom } from './benchBloom'
 import { usedBenchEye } from '../lib/avatarEye'
+import { FacingArrow, FacingPreviewGroup } from './FacingPreview'
+import { useFacingPreview } from '../store/facingPreview'
 
 type P3 = [number, number, number]
 
@@ -125,7 +127,9 @@ function Grid(): JSX.Element {
   const division = useWorkshop((s) => s.division)
   const extent = useWorkshop((s) => s.current()?.extent ?? GRID_HALF)
   const tool = useWorkshop((s) => s.tool)
-  const places = tool === 'add' || tool === 'stamp'
+  // Not while FACING turns the shape on the bench: a tap would land where the turned shape is not (FacingPreview).
+  const facingShown = useFacingPreview((s) => s.on)
+  const places = (tool === 'add' || tool === 'stamp') && !facingShown
   const invalidate = useThree((s) => s.invalidate)
   // One quad and a shader, whatever the division and the extent (benchGrid.ts).
   const grid = useMemo(() => new BenchGrid(), [])
@@ -560,7 +564,8 @@ function Aim(): null {
 function Marquee(): null {
   const gl = useThree((s) => s.gl)
   const camera = useThree((s) => s.camera)
-  const on = useWorkshop((s) => s.tool === 'select' && s.boxSelect)
+  const facingShown = useFacingPreview((s) => s.on)
+  const on = useWorkshop((s) => s.tool === 'select' && s.boxSelect) && !facingShown
   useEffect(() => {
     if (!on) return
     const canvas = gl.domElement
@@ -747,10 +752,12 @@ function HandleProjector(): null {
   const moving = previewing && !!shard && hasAnim(shard)
   // SET EYE: the handles stand on the eye, in any tool (shell/EyeBar).
   const eyeEdit = useWorkshop((s) => s.eyeEdit)
+  // FACING turns the shape on the bench while the AVATAR sheet is open: no handles on where it is not.
+  const facingShown = useFacingPreview((s) => s.on)
   const center = useMemo(() => {
     // The eye WALK uses (an eye past the size limit pulled in), where the row and the numbers say it is.
     if (shard && eyeEdit) { const r = UP(usedBenchEye(shard)); return new Vector3(r[0], r[1], r[2]) }
-    if (!shard || look || moving || (selection.length === 0 && partSel.length === 0)) return null
+    if (!shard || look || moving || facingShown || (selection.length === 0 && partSel.length === 0)) return null
     const seen = new Set<string>()
     let x = 0, y = 0, z = 0, n = 0
     for (const i of selection) {
@@ -768,7 +775,7 @@ function HandleProjector(): null {
       const r = UP(q.at); x += r[0]; y += r[1]; z += r[2]; n++
     }
     return n ? new Vector3(x / n, y / n, z / n) : null
-  }, [shard, look, moving, selection, partSel, eyeEdit])
+  }, [shard, look, moving, selection, partSel, eyeEdit, facingShown])
   // Held, or let go: a frame, so the handles come or go even on a still bench.
   useEffect(() => { if (!center) reportHandles(null); invalidate() }, [center, invalidate])
   useEffect(() => () => reportHandles(null), [])
@@ -801,6 +808,8 @@ export function Keys(): null {
       const tag = (e.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
       const w = useWorkshop.getState()
+      // While FACING turns the shape on the bench, only UNDO and REDO: the rest would act on a shape drawn elsewhere.
+      if (useFacingPreview.getState().on && !((e.metaKey || e.ctrlKey) && (e.code === 'KeyZ' || e.code === 'KeyY'))) return
       if ((e.metaKey || e.ctrlKey) && !e.altKey) {
         if (e.code === 'KeyZ') { e.preventDefault(); if (e.shiftKey) w.redo(); else w.undo() }
         if (e.code === 'KeyY') { e.preventDefault(); w.redo() }
@@ -1170,6 +1179,7 @@ function BenchImpl(): JSX.Element {
   const previewing = useAnimPreview((s) => s.on)
   const extent = shard?.extent ?? GRID_HALF
   const showAvatar = useWorkshop((s) => s.showAvatar)
+  const facingShown = useFacingPreview((s) => s.on)
   // What the shard on the bench draws, round: Reach measures it, the home view fits it.
   const sphere = useRef<Sphere | null>(null)
   const first = useRef(true)
@@ -1249,14 +1259,17 @@ function BenchImpl(): JSX.Element {
       <Grid />
       {showAvatar && <ScaleAvatar />}
       {/* The shard: as the world draws it in LOOK, under the world's bloom; lit, with handles, in every other tool (benchLook.tsx). */}
-      <AnimClock.Provider value={benchClock}><BenchShard onFace={onFace} onPart={onPart} /></AnimClock.Provider>
+      {/* While the AVATAR sheet is open, turned as FACING would turn it on a move up and to the right (FacingPreview). */}
+      <FacingPreviewGroup><AnimClock.Provider value={benchClock}><BenchShard onFace={onFace} onPart={onPart} /></AnimClock.Provider></FacingPreviewGroup>
+      <FacingArrow />
       {look && <BenchLookRig />}
       {look && <BenchBloom />}
       <PathMarks show={previewing} />
-      <Ghost />
-      <PickLoop />
-      <FaceHighlight />
-      <Handles />
+      {/* The handles, the ghost and the face highlight stand where the shape is unturned: aside while FACING shows. */}
+      {!facingShown && <Ghost />}
+      {!facingShown && <PickLoop />}
+      {!facingShown && <FaceHighlight />}
+      {!facingShown && <Handles />}
       </OwnPartsContext.Provider>
     </Canvas>
   )

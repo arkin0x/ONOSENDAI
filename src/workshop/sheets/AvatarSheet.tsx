@@ -16,6 +16,7 @@ import { useCyberspace } from '../../store/useCyberspace'
 import { useWorkshop } from '../../store/useWorkshop'
 import { copyShard } from '../shardClipboard'
 import { EyeRow } from './EyeRow'
+import { FacingRow } from './FacingRow'
 
 export function AvatarBody(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
@@ -74,6 +75,8 @@ export function AvatarBody(): JSX.Element | null {
           </ul>
         )}
       </div>
+      {/* FACING: PATH or UPRIGHT, how you turn as you move (DECK-0003 §1.18). */}
+      <FacingRow />
       {/* FIRST-PERSON EYE: where the camera sits in WALK, and SET EYE (avatar eye, UI A). */}
       <EyeRow />
       {/* A switch, as the avatar trail, hX and region key settings are,

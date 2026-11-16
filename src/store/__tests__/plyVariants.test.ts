@@ -90,7 +90,8 @@ const lanternEls = (faceList = 'list uchar int vertex_indices'): El[] => [
  * height 2, an apex at 2.6, and a fin on its front (Blender's -Y) whose tip
  * is the one point that far forward, so which way it faces can be told.
  * `yUp` is the file Blender writes with Up set to Y and Forward to -Z,
- * (x, y, z) to (x, z, -y); otherwise the default, Forward Y and Up Z.
+ * (x, y, z) to (x, z, -y). Otherwise it is the file Blender writes with its
+ * default settings, Forward Y and Up Z, which is Blender's own frame.
  */
 function obelisk(yUp: boolean): { points: number[][]; faces: number[][]; colors: number[][] } {
   const raw = [[-0.5, -0.5, 0], [0.5, -0.5, 0], [0.5, 0.5, 0], [-0.5, 0.5, 0], [-0.25, -0.25, 2], [0.25, -0.25, 2], [0.25, 0.25, 2], [-0.25, 0.25, 2], [0, 0, 2.6], [0, -0.9, 0.3]]
@@ -288,6 +289,8 @@ describe('PLY variants through IMPORT', () => {
     const s = await imported('legacy.ply', bytes)
     expect(s.faces).toHaveLength(15)
     expect(swatches(s)).toEqual(new Set([nearest([30, 30, 220]), nearest([220, 220, 220]), nearest([255, 40, 40])]))
+    // Its default export was Up Z too, and it stands.
+    expectStanding(s)
   })
 
   it('reads a MagicaVoxel point cloud (one point per voxel) and a voxel mesh of quads', async () => {

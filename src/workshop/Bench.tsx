@@ -56,6 +56,7 @@ import { useBeginner } from './beginner'
 import { BenchLookRig, BenchShard } from './benchLook'
 import { isLook } from './lookTool'
 import { BenchBloom } from './benchBloom'
+import { benchEye } from '../lib/avatarEye'
 
 type P3 = [number, number, number]
 
@@ -744,7 +745,10 @@ function HandleProjector(): null {
   const look = useWorkshop((s) => isLook(s.tool))
   const previewing = useAnimPreview((s) => s.on)
   const moving = previewing && !!shard && hasAnim(shard)
+  // SET EYE: the handles stand on the eye, in any tool (shell/EyeBar).
+  const eyeEdit = useWorkshop((s) => s.eyeEdit)
   const center = useMemo(() => {
+    if (shard && eyeEdit) { const r = UP(benchEye(shard)); return new Vector3(r[0], r[1], r[2]) }
     if (!shard || look || moving || (selection.length === 0 && partSel.length === 0)) return null
     const seen = new Set<string>()
     let x = 0, y = 0, z = 0, n = 0
@@ -763,7 +767,7 @@ function HandleProjector(): null {
       const r = UP(q.at); x += r[0]; y += r[1]; z += r[2]; n++
     }
     return n ? new Vector3(x / n, y / n, z / n) : null
-  }, [shard, look, moving, selection, partSel])
+  }, [shard, look, moving, selection, partSel, eyeEdit])
   // Held, or let go: a frame, so the handles come or go even on a still bench.
   useEffect(() => { if (!center) reportHandles(null); invalidate() }, [center, invalidate])
   useEffect(() => () => reportHandles(null), [])
@@ -783,7 +787,7 @@ function HandleProjector(): null {
       const e = toPx(v.copy(center).add(d))
       return e ? [e[0] - c[0], e[1] - c[1]] as [number, number] : [0, 0] as [number, number]
     }) as [[number, number], [number, number], [number, number]]
-    reportHandles({ center: c, perUnit })
+    reportHandles(eyeEdit ? { center: c, perUnit, origin: toPx(v.set(0, 0, 0)) } : { center: c, perUnit })
   })
   return null
 }
@@ -823,6 +827,8 @@ function Keys(): null {
       }
       // LOOK only looks: what is held is out of sight there, so its keys leave it alone (benchLook.tsx).
       const look = isLook(w.tool)
+      // SET EYE: the same keys step the eye, in any tool (shell/EyeBar).
+      if (nudge[e.code] && w.eyeEdit) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveEye(n.axis, n.delta * w.step()); return }
       if (nudge[e.code]) { e.preventDefault(); if (look) return; const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.step()); return }
       if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (look) return; if (w.selectedFaces.length > 0) w.deleteSelectedFace(); else w.deleteSelected(); return }
       if (e.code === 'Enter') { e.preventDefault(); if (look) return; if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
@@ -843,7 +849,12 @@ function Keys(): null {
       if (e.code === 'Digit6') w.setTool('face')
       // Q and E turn the selection a quarter turn while SELECT holds one; Q turns the stamp otherwise.
       if (e.code === 'KeyQ') { if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else if (!look) w.turnStamp() }
-      if (e.code === 'KeyE') { if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(1) }
+      // E: a quarter turn while SELECT holds something; with nothing held, SET EYE in hand or put down (AVATAR's FIRST-PERSON EYE).
+      if (e.code === 'KeyE') {
+        const holding = w.selection.length > 0 || w.partSel.length > 0 || w.selectedFaces.length > 0
+        if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(1)
+        else if (!holding) w.setEyeEdit(!w.eyeEdit)
+      }
       if (e.code === 'BracketRight') w.setLevel(w.level + w.step())
       if (e.code === 'BracketLeft') w.setLevel(w.level - w.step())
     }

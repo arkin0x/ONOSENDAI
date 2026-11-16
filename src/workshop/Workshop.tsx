@@ -22,7 +22,9 @@
  * shard into what is left (Bench Framer), so a sheet never hides it.
  *
  * What you hold moves by the handles on it (shell/MoveHandles; phase 2), and
- * nothing else floats over the bench.
+ * nothing else floats over the bench. SET EYE (AVATAR's FIRST-PERSON EYE)
+ * holds the avatar's eye the same way: the handles on the eye, its slots in
+ * the strip (shell/EyeBar), WHAT YOU SEE under the view ball (EyePreview).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -163,6 +165,13 @@ export function Workshop(): JSX.Element | null {
   // MENU's paste box, kept here so it survives MENU closing and opening, as it did as a panel.
   const [paste, setPaste] = useState<{ open: boolean; text: string }>({ open: false, text: '' })
   useEffect(() => { if (sheet) setViewOpen(false) }, [sheet])
+  // SET EYE (avatar eye, UI A): the eye in hand closes the sheet it was taken
+  // from; a sheet opened, or anything else picked up, puts the eye down.
+  const eyeEdit = useWorkshop((s) => s.eyeEdit)
+  const holding = useWorkshop((s) => s.selection.length > 0 || s.partSel.length > 0 || s.selectedFaces.length > 0)
+  useEffect(() => { if (eyeEdit) setSheet(null) }, [eyeEdit])
+  useEffect(() => { if (sheet !== null && useWorkshop.getState().eyeEdit) useWorkshop.getState().setEyeEdit(false) }, [sheet])
+  useEffect(() => { if (holding && useWorkshop.getState().eyeEdit) useWorkshop.getState().setEyeEdit(false) }, [holding])
   useEffect(() => {
     if (!viewOpen) return
     const shut = (e: PointerEvent): void => {
@@ -206,6 +215,8 @@ export function Workshop(): JSX.Element | null {
     // The first-visit guide, up: Esc puts it away for this opening only (it
     // comes back next time, unless SKIP was tapped), and the workshop stays.
     else if (useBeginner.getState().step !== null && !useBeginner.getState().paused && !tutorialActive) useBeginner.getState().pause()
+    // SET EYE: Esc puts the eye down, as DONE does.
+    else if (ws.eyeEdit) ws.setEyeEdit(false)
     // Not in LOOK, where what is held is out of sight and stays held (benchLook.tsx): Esc goes on to close.
     else if (!isLook(ws.tool) && (ws.selection.length || ws.partSel.length || ws.selectedFaces.length > 0 || ws.facePick.length)) { ws.selectVertex(null); ws.clearFacePick() }
     else ws.closeWorkshop()

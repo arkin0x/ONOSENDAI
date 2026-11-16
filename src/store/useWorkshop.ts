@@ -51,6 +51,7 @@ import { noTable, signedTableOnly, you } from '../lib/carried'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 import { bounceOf, springboardOf, withBounce, type Bounce } from '../lib/walkBounce'
 import { withAnim } from '../lib/anim'
+import { EYE_FIELD, EYE_REACH, benchEye, flipEyeZ, withEye, type Eye } from '../lib/avatarEye'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
@@ -568,6 +569,27 @@ export interface WorkshopState {
   forgetColor: (hex: string) => void
   moveSelected: (axis: 0 | 1 | 2, delta: number) => void
   /**
+   * SET EYE (avatar eye, UI A "the eye on the bench"; arkinox, 2026-11-16):
+   * the eye in your hand. While on, nothing else is held: the move handles,
+   * the move keys and the strip act on the eye (shell/MoveHandles,
+   * shell/EyeBar). Off with DONE, Esc, E, a tool or a sheet, or anything held.
+   */
+  eyeEdit: boolean
+  setEyeEdit: (on: boolean) => void
+  /**
+   * The eye one move along a model axis (the bench's frame, as moveSelected
+   * moves points), `delta` ticks. An automatic eye starts from where it is and
+   * becomes CHOSEN. Refused, and false, past the 64-unit position bound
+   * (avatarEye EYE_REACH). One UNDO each, as any edit.
+   */
+  moveEye: (axis: 0 | 1 | 2, delta: number) => boolean
+  /**
+   * The eye set outright, in ticks in the payload's frame (avatarEye withEye):
+   * undefined for AUTO, which removes the field; anything malformed removes it
+   * too. No edit, and false, when nothing changes. One UNDO.
+   */
+  setEye: (eye: Eye | undefined) => boolean
+  /**
    * Turn the selected points a quarter turn about the vertical, +1 one way
    * and -1 the other, around the middle of their extent snapped to the
    * current DIVISION's grid, so every point stays on that grid.
@@ -1049,6 +1071,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     openPanel: null,
     tool: 'view',
     selection: [], partSel: [],
+    eyeEdit: false,
     invert: false,
     boxSelect: false,
     selectKind: 'points',
@@ -1080,10 +1103,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     openWorkshop: (id, panel) => {
       const { shards } = get()
       const currentId = id ?? get().currentId ?? newestId(shards) ?? get().create()
-      set({ open: true, currentId, openPanel: panel ?? null, selection: [], partSel: [], selectedFaces: [], facePick: [], tool: 'view', plane: FLOOR, aim: null, past: [], future: [], notice: null, boxSelect: false, selectKind: 'points' })
+      set({ open: true, currentId, openPanel: panel ?? null, eyeEdit: false, selection: [], partSel: [], selectedFaces: [], facePick: [], tool: 'view', plane: FLOOR, aim: null, past: [], future: [], notice: null, boxSelect: false, selectKind: 'points' })
     },
 
-    closeWorkshop: () => set({ open: false, selection: [], partSel: [], selectedFaces: [], facePick: [], aim: null }),
+    closeWorkshop: () => set({ open: false, eyeEdit: false, selection: [], partSel: [], selectedFaces: [], facePick: [], aim: null }),
 
     create: (name) => {
       const s = newShard(name ?? `Object ${get().shards.length + 1}`)
@@ -1180,7 +1203,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const st = get()
       if (tool === st.tool) return
       const letGo = tool === 'face' || tool === 'paint' || st.selectedFaces.length > 0
-      set({ tool, facePick: [], selectedFaces: [], aim: null, invert: false, paintTake: false, ...(letGo ? { selection: [], partSel: [] } : {}) })
+      set({ tool, eyeEdit: false, facePick: [], selectedFaces: [], aim: null, invert: false, paintTake: false, ...(letGo ? { selection: [], partSel: [] } : {}) })
     },
     setInvert: (on) => set({ invert: on }),
     setBoxSelect: (on) => set({ boxSelect: on }),
@@ -1583,6 +1606,27 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const palette = get().palette.filter((x) => x !== hex.toLowerCase())
       set({ palette }); savePalette(palette)
     },
+
+    setEyeEdit: (on) => {
+      if (get().eyeEdit === on) return
+      // The eye in hand is the only thing held (UI A): what was held lets go.
+      set(on ? { eyeEdit: true, selection: [], partSel: [], selectedFaces: [], facePick: [], aim: null } : { eyeEdit: false })
+    },
+
+    moveEye: (axis, delta) => {
+      const s = get().current()
+      if (!s || delta === 0) return false
+      const at = benchEye(s)
+      at[axis] += delta
+      if (at.some((t) => t < -EYE_REACH || t > EYE_REACH)) { set({ notice: 'The eye can go no further that way.' }); return false }
+      return edit((m) => withEye(m, flipEyeZ(at)))
+    },
+
+    // No edit when the field would read and write the same; a malformed one is taken out.
+    setEye: (eye) => edit((m) => {
+      const next = withEye(m, eye)
+      return JSON.stringify(m.extra?.[EYE_FIELD]) === JSON.stringify(next.extra?.[EYE_FIELD]) ? null : next
+    }),
 
     moveSelected: (axis, delta) => {
       const { selection, partSel } = get()

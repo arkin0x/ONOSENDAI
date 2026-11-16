@@ -3809,6 +3809,111 @@ select.avatars__input option:checked {
 .ws__heldbtn--count b { display: inline-flex; align-items: center; gap: 2px; font-size: 14px; font-weight: 700; }
 .ws__heldbtn--two::after { content: ''; position: absolute; top: 6px; right: 8px; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.8; }
 .ws__heldbtn--two[aria-expanded='true']::after { background: var(--accent); opacity: 1; }
+
+/* SET EYE (avatar eye, UI A "the eye on the bench"): the eye's bar in the
+   strip, a cyan edge where the held bar's is orange, and the reserved status
+   line over its slots. The line is always there while the eye is in hand, so
+   nothing jumps as the eye moves or turns from AUTO to CHOSEN. */
+.ws__strip.ws__strip--eye { height: auto; flex-direction: column; align-items: stretch; gap: 0; padding: 0 var(--ws-gutter); border-top: 2px solid var(--accent); }
+.ws__eyeline {
+  height: 26px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--fg);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.ws__eyeline > svg { flex: none; color: var(--accent); }
+.ws__eyeline-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ws__eyeline-keys { display: none; }
+.ws__eyeline-mode { flex: none; margin-left: auto; font-weight: 700; color: var(--accent); }
+.ws__eyeline-mode.is-chosen { color: var(--ok); }
+.ws__eyebar { flex: none; height: 56px; }
+.ws__heldbtn.is-on { color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent); background: rgba(0, 229, 255, 0.08); }
+.ws__heldbtn--ok { color: var(--ok); }
+.ws__eyebar-gap { border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent); border-radius: 0; }
+/* NUMBERS: X, Y and Z steppers, risen over the strip as its other questions are. */
+.benchpaste.ws__ask.ws__eyenums { left: var(--ws-gutter); right: var(--ws-gutter); width: auto; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px; }
+.ws__eyenum { display: flex; align-items: center; gap: 2px; }
+.ws__eyenum .ws__stripbtn { border: 0; background: none; }
+.ws__eyenum .ws__stepper-value { min-width: 40px; }
+.ws__eyenums-step { flex-basis: 100%; text-align: center; font-size: 9.5px; letter-spacing: 0.08em; color: var(--dim); }
+/* The eye on the bench: a cyan ring with an eye where the held middle's dot is, labelled EYE. */
+.ws__handle-hub.ws__handle-hub--eye {
+  left: -17px;
+  top: -17px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  background: rgba(6, 14, 22, 0.55);
+  border: 3px solid var(--accent);
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.45);
+}
+.ws__handle-hub--eye b {
+  position: absolute;
+  left: calc(100% + 6px);
+  bottom: calc(100% - 4px);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #fff;
+  text-shadow: 0 1px 3px #000, 0 0 6px #000;
+}
+.ws__eye-line { stroke: #fff; stroke-width: 2; stroke-dasharray: 5 5; opacity: 0.9; }
+/* 0, 0, 0 and its label, white over the scene with a dark shadow. */
+.ws__eye-origin { position: absolute; left: 0; top: 0; pointer-events: none; }
+.ws__eye-origin-dot { position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; background: rgba(6, 14, 22, 0.6); }
+.ws__eye-origin-label {
+  position: absolute;
+  left: 12px;
+  top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: #fff;
+  text-shadow: 0 1px 3px #000, 0 0 6px #000;
+}
+/* WHAT YOU SEE, under the view ball. */
+.ws__eyeview { display: flex; flex-direction: column; align-items: stretch; border-radius: 10px; overflow: hidden; background: rgba(6, 14, 22, 0.92); border: 1px solid var(--border); }
+.ws__eyeview-head {
+  height: 28px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: #fff;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.ws__eyeview-head > span { flex: 1; text-align: left; }
+.ws__eyeview-pic { display: block; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.ws__eyeview.is-big .ws__eyeview-pic { cursor: zoom-out; }
+.ws__eyeview-pic canvas { display: block; }
+.ws__eyeview.is-folded { border-radius: 14px; }
+/* FIRST-PERSON EYE, the AVATAR sheet's row: its words, the setting, SET EYE,
+   and the reserved line under it. */
+.ws__eyerow { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); padding-top: 8px; }
+.ws__eyerow-main { display: flex; align-items: center; gap: 10px; }
+.ws__eyerow-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ws__eyerow-setting { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ws__eyerow-setting b { font-size: 10px; letter-spacing: 0.08em; color: var(--accent); }
+.ws__eyerow-setting b.is-chosen { color: var(--ok); }
+.ws__eyerow-set { position: relative; flex: none; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.ws__eyerow-note { height: 14px; font-size: 10px; letter-spacing: 0.04em; line-height: 14px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Two classes, to outrank .benchpaste's own place, which comes later. */
 .benchpaste.ws__ask { left: auto; right: var(--ws-gutter); bottom: calc(100% + 8px); z-index: 4; width: 200px; }
 .benchpaste.ws__ask .workshop__btn { min-height: 44px; font-size: var(--ws-label); }
@@ -4303,6 +4408,8 @@ select.avatars__input option:checked {
   .ws__heldbtn--two::after { right: auto; left: 8px; }
   .ws__key { display: block; position: absolute; top: 3px; right: 6px; padding: 0; font-family: inherit; font-size: 9.5px; line-height: 1; letter-spacing: 0.04em; color: var(--dim); background: none; border: 0; box-shadow: none; pointer-events: none; }
   .ws__dockbtn.is-on .ws__key { color: var(--ws-ink); }
+  .ws__eyeline-keys { display: inline; flex: none; margin-left: auto; padding: 0; font-family: inherit; font-size: 9.5px; letter-spacing: 0.04em; color: var(--dim); background: none; border: 0; box-shadow: none; }
+  .ws__eyeline-keys + .ws__eyeline-mode { margin-left: 8px; }
 }
 
 /* A phone held sideways (phase 5): the top bar keeps to the top left, the
@@ -4338,6 +4445,7 @@ select.avatars__input option:checked {
   .ws__strip { order: 1; flex: 1 0 352px; min-width: 352px; height: var(--ws-dock); padding-bottom: var(--ws-safe-b); border-top: 0; border-left: 1px solid var(--border); }
   /* Eight 44px slots in 352px: the held bar fits a 667px phone held sideways beside a six-tool dock. */
   .ws__strip.ws__strip--held { padding: 0; }
+  .ws__strip.ws__strip--eye { height: auto; padding: 0 0 var(--ws-safe-b); }
   /* The guide's card keeps clear of the rail. */
   .ws__guide { left: calc(max(var(--ws-gutter), var(--ws-safe-l)) + 104px); }
   .ws__sheet,

@@ -74,6 +74,21 @@ describe('BOARD that cannot board says why', () => {
     expect(S().events).toEqual([])
   })
 
+  it('when the relays\' answer to the head check raises a choice between two chains, nothing is signed onto either', async () => {
+    // A rival chain arrives once the spawn is signed, as it can for a held
+    // spawn while the head is confirmed: the choice is raised, the head does not move.
+    const stop = useCyberspace.subscribe((st) => {
+      if (st.events.length === 1 && !st.chainConflict) useCyberspace.setState({ chainConflict: { kind: 'held' } as never })
+    })
+    try {
+      expect(await S().boardHyperspace()).toBe(BOARD_CHOOSE_FIRST_MESSAGE)
+    } finally {
+      stop()
+    }
+    expect(buildChain(S().events).map((a) => a.type)).toEqual(['spawn'])
+    expect(S().transit).toBeNull()
+  })
+
   it('and the panel shows those words where BOARD was pressed', async () => {
     useCyberspace.setState({ proof: { ...IDLE, status: 'computing' } })
     await boardFromAnywhere()

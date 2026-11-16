@@ -295,12 +295,16 @@ export async function startRide(): Promise<void> {
   const planned = await planRide()
   if (planned === null) return
   const { previousId, fromHeight, asOf, destination, destStop } = planned
-  let blocks: Array<{ height: number; blockHash: string }>
-  try {
-    blocks = rideBlocksWithHashes(fromHeight, destination)
-  } catch (err) {
-    useRideRun.setState({ error: err instanceof Error ? err.message : String(err) })
-    return
+  const kept = keptRide && keptRide.previousId === previousId && keptRide.fromHeight === fromHeight && keptRide.toHeight === destination ? keptRide : null
+  // Only a proof still to compute needs every block's hash.
+  let blocks: Array<{ height: number; blockHash: string }> = []
+  if (!kept) {
+    try {
+      blocks = rideBlocksWithHashes(fromHeight, destination)
+    } catch (err) {
+      useRideRun.setState({ error: err instanceof Error ? err.message : String(err) })
+      return
+    }
   }
   const { plane } = useCyberspace.getState()
   riding = true
@@ -310,7 +314,7 @@ export async function startRide(): Promise<void> {
   if (useCyberspace.getState().cloud.rideError !== null) useCyberspace.setState({ cloud: { ...useCyberspace.getState().cloud, rideError: null } })
   useRideRun.setState({
     error: null,
-    progress: { done: 0, total: blocks.length, etaMs: null, price: null },
+    progress: { done: 0, total: Math.abs(destination - fromHeight), etaMs: null, price: null },
     path: { fromHeight, toHeight: destination },
   })
   // The ride is a spectacle: pull back to the whole cube so the path can be
@@ -325,8 +329,7 @@ export async function startRide(): Promise<void> {
     81,
   )
   try {
-    const kept = keptRide
-    const ride: CompletedRide = kept && kept.previousId === previousId && kept.fromHeight === fromHeight && kept.toHeight === destination
+    const ride: CompletedRide = kept
       ? kept
       : {
           previousId,

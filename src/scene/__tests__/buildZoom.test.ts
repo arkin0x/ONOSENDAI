@@ -106,8 +106,8 @@ describe('the fog never darkens what the camera looks at', () => {
         for (let d = 0; d <= m.limit(e); d += 2) {
           for (const fromOrigin of [d, d + 24 * Math.sqrt(3)]) {
             const f = settled(d, fromOrigin, m.view)
-            // At least 1.5 times as far as the target, and in the third-person views 40 cells more.
-            expect(f.near, `${m.name} 2^${e} at ${d}`).toBeGreaterThanOrEqual(d * 1.5 + (m.view === 'orbit' ? 40 : 0) - 1e-6)
+            // At least 1.5 times as far as the target, and in the third-person views and WALK 40 cells more.
+            expect(f.near, `${m.name} 2^${e} at ${d}`).toBeGreaterThanOrEqual(d * 1.5 + (m.view === 'tv' ? 0 : 40) - 1e-6)
             expect(f.far).toBeLessThan(CAMERA_FAR)
             expect(f.far + fromOrigin).toBeLessThanOrEqual(f.reach + 1e-9)
             // At 2^0 in BUILD a 3 by 3 of 128 tiles' far corner (192 * sqrt 2 past the cursor, at most) is clear from

@@ -36,8 +36,9 @@ describe('the scene fog', () => {
     expect(fogBody).toMatch(/const view: FogView = useTv\.getState\(\)\.on \? 'tv' : useCyberspace\.getState\(\)\.walking \? 'walk' : 'orbit'\n/)
     // A stopped VIEW fly's drop in distance is owed and fades, as the headlamp takes it.
     expect(fogBody).toMatch(/const distance = controls \? state\.camera\.position\.distanceTo\(controls\.target\) \+ viewRig\.reachOwed : 0\n/)
-    expect(fogBody).toMatch(/f\.near = fogNear\(view, distance\)\n\s*f\.far = fogFar\(view, distance\)\n/)
-    // Fresh every frame: nothing eased, nothing remembered from the last frame but the reach.
+    expect(fogBody).toMatch(/kept\.current = stepFog\(kept\.current, view, distance, performance\.now\(\)\)\n\s*f\.near = kept\.current\.near\n\s*f\.far = kept\.current\.far\n/)
+    // Fresh every frame: nothing eased, nothing remembered from the last frame but the reach and,
+    // for a switch into or out of WALK only, what the switch still owes (fog.ts stepFog, fogFollowsZoom.test.ts).
     expect(fogBody).not.toMatch(/useRef<boolean/)
     expect(fogBody).not.toMatch(/\bdt\b/)
     // The camera's distance from the render origin never moves the fog (a re-anchor), only the reach,
@@ -51,8 +52,12 @@ describe('the scene fog', () => {
   it('takes the same distances in every mode for the same camera, and TV\'s and WALK\'s are constant over their shots', async () => {
     const { fogNear, fogFar } = await import('../fog')
     for (let d = 0; d <= 24; d += 0.25) expect([fogNear('tv', d), fogFar('tv', d)]).toEqual([48, 96])
-    // WALK's too, for an eye up to 40 cells behind the walker.
-    for (let d = 0; d <= 40; d += 0.25) expect([fogNear('walk', d), fogFar('walk', d)]).toEqual([80, 300])
+    // WALK's too, for an eye up to 26 cells behind the walker (past that it is the orbit's, further).
+    for (let d = 0; d <= 26; d += 0.25) expect([fogNear('walk', d), fogFar('walk', d)]).toEqual([80, 300])
+    for (let d = 0; d <= 1280; d += 0.5) {
+      expect(fogNear('walk', d)).toBeGreaterThanOrEqual(fogNear('orbit', d))
+      expect(fogFar('walk', d)).toBeGreaterThanOrEqual(fogFar('orbit', d))
+    }
     // Not a number is no distance.
     expect(fogFar('orbit', Number.NaN)).toBe(fogFar('orbit', 0))
     expect(fogNear('orbit', Number.POSITIVE_INFINITY)).toBe(fogNear('orbit', 0))

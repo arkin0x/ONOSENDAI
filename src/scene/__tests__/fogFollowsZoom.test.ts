@@ -11,7 +11,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { fogFar, fogNear, type FogView } from '../fog'
+import { fogFar, fogNear, stepFog, type FogState, type FogView } from '../fog'
+import { AVATAR_LERP_MS, lerpRemaining } from '../../lib/avatarLerp'
 import { nextReach, orbitMaxDistance } from '../buildZoom'
 import { ORBIT_MIN_DISTANCE } from '../camera'
 
@@ -70,7 +71,7 @@ describe('the fog follows the zoom', () => {
 
     it(`${m.name}: the target and the ground about it are clear, and the layers draw past the fog's end, at every zoom`, () => {
       for (let d = m.min; d <= m.max + 1e-9; d += Math.min(STEP * 10, m.max - m.min || STEP)) {
-        expect(fogNear(m.view, d), `${m.name} at ${d}`).toBeGreaterThanOrEqual(d * 1.5 + (m.view === 'orbit' ? 40 : 0))
+        expect(fogNear(m.view, d), `${m.name} at ${d}`).toBeGreaterThanOrEqual(d * 1.5 + (m.view === 'tv' ? 0 : 40))
         // The camera over its target, or the target at a field's corner from the origin.
         for (const fromOrigin of [d, d + 24 * Math.sqrt(3)]) {
           for (const was of [192, 768, 6144]) {
@@ -170,10 +171,70 @@ describe('WALK sees farther (arkinox, 2026-11-16: "the draw distance fog in WALK
     let last: [number, number] | null = null
     for (let d = 0; d <= 64; d += STEP) {
       const now: [number, number] = [fogNear('walk', d), fogFar('walk', d)]
-      expect(now[0]).toBeGreaterThanOrEqual(d * 1.5)
+      expect(now[0]).toBeGreaterThanOrEqual(d * 1.5 + 40)
       expect(now[0]).toBeLessThan(now[1])
       if (last) for (const i of [0, 1]) { expect(now[i]).toBeGreaterThanOrEqual(last[i]); expect(now[i] - last[i]).toBeLessThanOrEqual(MOST) }
       last = now
     }
+  })
+
+  it('eases a switch into or out of WALK with the eye\'s glide, frame by frame as the scene runs it: no step, never turning back, the walker clear, the reach past it', () => {
+    // [orbit distance, frames a second]: the usual orbit, a middle one, HOP's limit; a phone's 60 and a slow 12.
+    for (const orbit of [26, 64, 96]) {
+      for (const fps of [60, 12]) {
+        for (const leaving of [true, false]) {
+          const from = leaving ? 0.001 : orbit
+          const to = leaving ? orbit : 0.001
+          let now = 1000
+          // Settled in the view before the switch.
+          let s: FogState = { view: null, near: 0, far: 0, owed: null }
+          for (let i = 0; i < 3; i++) s = stepFog(s, leaving ? 'walk' : 'orbit', from, (now += 1000 / fps))
+          const first: [number, number] = [s.near, s.far]
+          const t0 = now + 1000 / fps
+          let reach = 192
+          const seen: Array<[number, number]> = [first]
+          const ds: number[] = [from]
+          for (let i = 1; i <= fps; i++) {
+            now = t0 + (i - 1) * (1000 / fps)
+            // The Rig's eye glide (Scene.tsx), its flag flipped on the first of these frames.
+            const d = to + (from - to) * lerpRemaining((now - t0) / AVATAR_LERP_MS)
+            s = stepFog(s, leaving ? 'orbit' : 'walk', d, now)
+            seen.push([s.near, s.far])
+            ds.push(d)
+            expect(s.near, `${orbit} ${fps} ${leaving} at ${i}`).toBeGreaterThanOrEqual(d * 1.5 + 40)
+            expect(s.near).toBeLessThan(s.far)
+            reach = nextReach(reach, s.far + d)
+            expect(reach).toBeGreaterThanOrEqual(s.far + d)
+          }
+          // Where the new view puts it, once the glide is done, and nothing still owed.
+          expect([s.near, s.far]).toEqual([fogNear(leaving ? 'orbit' : 'walk', to), fogFar(leaving ? 'orbit' : 'walk', to)])
+          expect(s.owed).toBeNull()
+          for (const i of [0, 1]) {
+            const dir = Math.sign(seen[seen.length - 1][i] - first[i])
+            for (let j = 1; j < seen.length; j++) {
+              const step = seen[j][i] - seen[j - 1][i]
+              // One way only; and at a phone's rate no frame moves it more than the eye's own move takes it
+              // (4 cells a cell at most, as a zoom does) and a tenth of what the switch owed: no jump.
+              expect(Math.sign(step) * dir, `${orbit} ${fps} ${leaving} ${i} at ${j}`).toBeGreaterThanOrEqual(0)
+              const owed = Math.abs(first[i] - (i ? fogFar : fogNear)(leaving ? 'orbit' : 'walk', from))
+              if (fps === 60) expect(Math.abs(step), `${orbit} ${leaving} ${i} at ${j}`).toBeLessThanOrEqual(4 * Math.abs(ds[j] - ds[j - 1]) + owed / 10 + 1e-9)
+            }
+          }
+        }
+      }
+    }
+    // Leaving WALK at the usual orbit, the end slides in from 300 to 251; before the ease it fell to 160 at once.
+    let s: FogState = stepFog({ view: null, near: 0, far: 0, owed: null }, 'walk', 0.001, 0)
+    s = stepFog(s, 'orbit', 0.001, 16)
+    expect(s.far).toBeCloseTo(300, 1)
+    expect(fogFar('orbit', 0.001)).toBeCloseTo(160, 1)
+  })
+
+  it('cuts at once to and from Cyberspace TV, as its shots do', () => {
+    let s: FogState = stepFog({ view: null, near: 0, far: 0, owed: null }, 'walk', 0, 0)
+    s = stepFog(s, 'tv', 0, 16)
+    expect([s.near, s.far, s.owed]).toEqual([48, 96, null])
+    s = stepFog(s, 'orbit', 26, 32)
+    expect([s.near, s.far, s.owed]).toEqual([79, 251, null])
   })
 })

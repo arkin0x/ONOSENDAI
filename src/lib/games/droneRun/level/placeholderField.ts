@@ -406,21 +406,25 @@ function fog(name: string, rx: number, ry: number, count: number, seed: number):
     seen.add(k)
     pts.push(p)
   }
-  return points(name, pts, pts.map((_, i) => i % 3), FOG, ['fog', 600, 45], { opacity: 0 })
+  return points(name, pts, pts.map((_, i) => i % 3), FOG, ['fog', 600, 32], { opacity: 0 })
 }
 
-/** A line of light points along x, `half` each way, a gibson up. */
+/**
+ * A line of light points along x, `half` each way, a gibson up, 4 apart: a
+ * row of small lamps, each with a halo of 0.6 gibsons at 45% (a wide or close
+ * halo here ran together into a wall of haze across the view).
+ */
 function lightLine(name: string, half: number, palette: RGB[]): FieldPayload {
   const pts: V3[] = []
-  for (let x = -half; x <= half; x += 2) pts.push([x, 1, 0])
-  return points(name, pts, pts.map((_, i) => i % 2), palette, ['light', 180, 60], { pointsize: 30 })
+  for (let x = -half; x <= half; x += 4) pts.push([x, 1, 0])
+  return points(name, pts, pts.map((_, i) => i % 2), palette, ['light', 72, 45], { pointsize: 30 })
 }
 
-/** A light post: a column of points `h` high. */
+/** A light post: a column of points `h` high, 2 apart, each with a small halo (0.8 gibsons, 45%). */
 function lightPost(name: string, h: number, palette: RGB[]): FieldPayload {
   const pts: V3[] = []
-  for (let y = 0; y <= h; y++) pts.push([0, y, 0])
-  return points(name, pts, pts.map((_, i) => i % 2), palette, ['light', 300, 70], { pointsize: 40 })
+  for (let y = 0; y <= h; y += 2) pts.push([0, y, 0])
+  return points(name, pts, pts.map((_, i) => i % 2), palette, ['light', 96, 45], { pointsize: 36 })
 }
 
 // ---------------------------------------------------------------- the level

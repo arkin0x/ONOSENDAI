@@ -56,11 +56,9 @@ function cube() {
 }
 
 const cls = (h: Host): string => String(h.props.className ?? '')
-const byClass = (all: Host[], c: string): Host[] => all.filter((h) => cls(h).split(/\s+/).includes(c))
 const words = (h: Host | string): string => (typeof h === 'string' ? h : h.type === '#text' ? String(h.props.text) : h.type === 'kbd' ? '' : h.children.map(words).join(''))
 const buttonsIn = (h: Host): Host[] => { const out: Host[] = []; const walkH = (n: Host | string): void => { if (typeof n === 'string') return; if (n.type === 'button') out.push(n); n.children.forEach(walkH) }; walkH(h); return out }
 const face = (): unknown => useWorkshop.getState().current()?.extra?.face
-const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5))
 
 beforeEach(() => {
   vi.stubGlobal('window', globalThis)

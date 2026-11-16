@@ -47,6 +47,7 @@ import { ItemFace, ItemIcon } from './ItemIcon'
 import { ItemForgeFields } from './ItemForgeFields'
 import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst } from './ShardFolders'
 import { ShardThumb } from './ShardThumb'
+import { SearchField } from './ui/SearchField'
 import type { ShardModel } from 'sno-core/shards'
 import { nip19 } from 'nostr-tools'
 import { forgeKey, isLockPubkey, NIP44_MAX_PLAINTEXT, sizeRefusal, templateBytes } from '../lib/chests'
@@ -193,6 +194,36 @@ export function sealedContents(entries: BagEntry[], sealer: string): ChestConten
 
 /** Which chest the modal is for: the one just placed, or one of yours already hidden (EDIT shows its name and lock, ADD only its contents). */
 export type ChestModalMode = { mode: 'place' } | { mode: 'edit'; eventId: string; fields: boolean }
+
+/**
+ * + SHARD: one of your workshop models, through your folders, with the
+ * search under the list that every list of your shards has (hud/ShardFolders,
+ * lib/shardSearch.ts). Its own component, so the search starts empty each
+ * time + SHARD opens.
+ */
+function ShardChoice({ models, onPick, onCancel }: { models: readonly ShardModel[]; onPick: (shardId: string) => void; onCancel: () => void }): JSX.Element {
+  const [query, setQuery] = useState('')
+  return (
+    <>
+      <ul className="objpick__list compose__models" aria-label="Model to seal">
+        <ShardFolders items={models} refOf={modelRef} nameOf={modelName} query={query} row={(s, f) => (
+          <li key={s.id} {...f.drag}>
+            <button className="objpick__row" onClick={() => onPick(s.id)} title={`Seal "${s.name}" in the chest`}>
+              <ShardThumb shard={s} own />
+              <span className="objpick__name">{f.mark(s.name)}</span>
+              <span className="objpick__meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} obj` : ''}</span>
+            </button>
+            {f.tool}
+          </li>
+        )} />
+      </ul>
+      <SearchField className="compose__search" value={query} onChange={setQuery} placeholder="Search shards and folders" label="Search your shards and folders" />
+      <div className="compose__row">
+        <button className="chest__act" onClick={onCancel}>CANCEL</button>
+      </div>
+    </>
+  )
+}
 
 export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: () => void; target?: ChestModalMode }): JSX.Element {
   const editing = target.mode === 'edit' ? target : null
@@ -500,23 +531,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
           </div>
         </>
       ) : adding === 'shard' ? (
-        <>
-          <ul className="objpick__list compose__models" aria-label="Model to seal">
-            <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} row={(s, f) => (
-              <li key={s.id} {...f.drag}>
-                <button className="objpick__row" onClick={() => add({ kind: 'shard', shardId: s.id })} title={`Seal "${s.name}" in the chest`}>
-                  <ShardThumb shard={s} own />
-                  <span className="objpick__name">{s.name}</span>
-                  <span className="objpick__meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} obj` : ''}</span>
-                </button>
-                {f.tool}
-              </li>
-            )} />
-          </ul>
-          <div className="compose__row">
-            <button className="chest__act" onClick={() => setAdding(null)}>CANCEL</button>
-          </div>
-        </>
+        <ShardChoice models={byRecent} onPick={(shardId) => add({ kind: 'shard', shardId })} onCancel={() => setAdding(null)} />
       ) : adding === 'item' ? (
         <div className="compose__row">
           <button className="chest__act" onClick={() => setAdding('mine')} title="The same item, every setting kept: only items you made">FROM MY ITEMS</button>

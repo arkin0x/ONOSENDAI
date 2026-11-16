@@ -5,7 +5,7 @@
  * State in hud/stash.ts; mounted once at the app root.
  */
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { formatCellSize } from 'sno-core/scale'
 import { cashuLabel } from '../lib/cashu'
@@ -15,6 +15,7 @@ import { useCashu, cashuStateLabel } from './useCashu'
 import { bagsOf, depName, goToDeployment, openFeedObjectInWorkshop, useStash, type Bag } from './stash'
 import { PublishSwitch } from './PublishSwitch'
 import { useEscape } from '../hooks/useEscape'
+import { useVisualViewport } from '../hooks/useVisualViewport'
 import { MessageCompose } from './MessageCompose'
 import { KeyCompose } from './KeyCompose'
 import { SeedCompose } from './SeedCompose'
@@ -35,13 +36,21 @@ import { ModalClose } from './ui/ModalClose'
 export const BAG_EXPLAINER =
   'A bag is a collection of one or more messages, objects, or cashu tokens encrypted to (hidden at) a location. All users can see a bag exists but they have no information about where to find it. Bags are opened automatically by attempting decryption with all your collected Region Keys.'
 
-function Shell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }): JSX.Element {
+/**
+ * `fill`: a list that grows to the full height of the screen as it needs,
+ * inside the safe area and above a phone's keyboard, with only the list
+ * scrolling (PLACE OBJECT; arkinox, 2026-11-16: "this modal needs to expand
+ * to full screen height (as needed)"). A short list keeps it compact.
+ */
+function Shell({ title, onClose, children, fill = false }: { title: string; onClose: () => void; children: React.ReactNode; fill?: boolean }): JSX.Element {
   // Escape closes it as a tap outside does (arkinox, 2026-10-01). One Shell
   // serves all three views, so moving between them keeps its place.
   useEscape('modal', true, onClose)
+  const overlay = useRef<HTMLDivElement>(null)
+  useVisualViewport(overlay, fill)
   return createPortal(
-    <div className="modal" role="dialog" aria-modal="true" aria-label={title} onPointerDown={onClose}>
-      <div className="modal__card login stash-modal" onPointerDown={(e) => e.stopPropagation()}>
+    <div ref={overlay} className={`modal ${fill ? 'modal--fill' : ''}`} role="dialog" aria-modal="true" aria-label={title} onPointerDown={onClose}>
+      <div className={`modal__card login stash-modal ${fill ? 'stash-modal--fill' : ''}`} onPointerDown={(e) => e.stopPropagation()}>
         <div className="login__head">
           <h2 className="modal__title">{title}</h2>
           <ModalClose onClose={onClose} />
@@ -256,7 +265,7 @@ export function StashModals(): JSX.Element | null {
   }
   if (models) {
     return (
-      <Shell title="Place an object" onClose={close}>
+      <Shell title="Place an object" onClose={close} fill>
         <PlaceObjectPicker />
       </Shell>
     )

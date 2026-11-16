@@ -7492,7 +7492,21 @@ select.avatars__input option:checked {
 /* OPACITY in SHARD (Workshop OpacityRow): the hyperspace scrubber's rail, with
    a ring while the keys have it, since its arrows move it. */
 .ws__opacity-rail { flex: 1 1 60px; min-width: 60px; }
-.ws__opacity-value { flex: none; width: 4.5ch; text-align: right; }
+.ws__opacity-value { flex: none; width: 6ch; text-align: right; }
+/* The SHARD sheet's slider rows (workshop/railRow.tsx): one label width, so
+   OPACITY, POINT SIZE, RADIUS and GLOW STRENGTH line their rails up. */
+.ws__raillabel { flex: none; width: 64px; line-height: 1.25; }
+/* Greyed, never hidden (owner, 2026-11-15): the row dims as one, values kept. */
+.ws__railrow.is-off { opacity: 0.4; }
+.ws__railrow.is-off .workshop__btn:disabled,
+.ws__railrow.is-off .workshop__mode:disabled { opacity: 1; cursor: default; }
+.ws__railrow.is-off .explorer__rail { cursor: default; }
+/* A distance in gibsons: the figure, and the word small under it. */
+.ws__gibsons { display: inline-flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }
+.ws__gibsons-word { font-size: 9px; letter-spacing: 0.02em; }
+/* GLOW's buttons carry a lucide icon; the style that suits the colors wears an outline while GLOW is OFF. */
+.ws__glowbtn { display: inline-flex; align-items: center; gap: 5px; }
+.ws__glowbtn.is-suggested { border-color: var(--accent); }
 .ws__opacity-rail:focus { outline: none; }
 .ws__opacity-rail:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 

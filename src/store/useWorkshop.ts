@@ -45,6 +45,8 @@ import {
   type ShardModel,
   type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
+import { readGlow, withGlow, withPointSize, type Glow } from 'sno-core/glow'
+import { GLOW_START, suggestedGlowStyle } from '../lib/pointGlow'
 import { noTable, signedTableOnly, you } from '../lib/carried'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 import { bounceOf, springboardOf, withBounce, type Bounce } from '../lib/walkBounce'
@@ -476,9 +478,29 @@ export interface WorkshopState {
   /**
    * How solid the shard draws, a whole percent (DECK-0003 §1.11): 100 is
    * solid and is stored as no opacity at all, the wire's canonical form;
-   * anything else is kept between the floor (10) and 99. Undoable like MODE.
+   * anything else is kept between 0 and 99 (no floor: at 0 the object draws
+   * nothing of its own, and its glow still shows). Undoable like MODE.
    */
   setOpacity: (percent: number) => void
+  /**
+   * POINT SIZE (DECK-0003 §1.15): the width of every point in ticks of the
+   * shard's own grid, 0 (no dots) to 7,680, or undefined for the reader's own
+   * size, which removes the field. Written through sno-core withPointSize, so
+   * a value out of range removes the field too. Kept in every mode, drawn in
+   * POINTS. Undoable like MODE.
+   */
+  setPointSize: (ticks: number | undefined) => void
+  /**
+   * GLOW (DECK-0003 §1.16): null turns it OFF and removes the field; anything
+   * else is merged over the shard's glow. Turning it on from OFF starts from
+   * the radius and strength last used this session (glowLast), and from the
+   * suggested style (lib/pointGlow suggestedGlowStyle) when no style is given.
+   * Written through sno-core withGlow, so nothing malformed is stored. Kept in
+   * every mode, drawn in POINTS. Undoable like MODE.
+   */
+  setGlow: (patch: Partial<Glow> | null) => void
+  /** The radius (ticks) and GLOW STRENGTH the last glow written had, so OFF then LIGHT puts them back. This session only. */
+  glowLast: { radius: number; strength: number }
   /**
    * Whether a walker can cross the shard in WALK (DECK-0003 §1.12,
    * lib/walkConstrain.ts): off, all of its faces, or only while it draws
@@ -1033,6 +1055,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     stampObject: null,
     showAvatar: loadShowAvatar(),
     color: [0, 0.9, 1],
+    glowLast: { ...GLOW_START },
     stampKind: 'block',
     stampSize: 2,
     stampFacing: 0,
@@ -1101,6 +1124,28 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     setMode: (mode) => edit((s) => ({ ...s, mode })),
     setOpacity: (percent) => edit((s) => withOpacity(s, percent)),
+    // Already so: the same object back, so no edit and no empty undo step.
+    setPointSize: (ticks) => edit((s) => { const n = withPointSize(s, ticks === undefined ? undefined : Math.round(ticks)); return n.extra?.pointsize === s.extra?.pointsize ? null : n }),
+    setGlow: (patch) => {
+      const { glowLast, color } = get()
+      let wrote: Glow | undefined
+      const changed = edit((s) => {
+        const had = readGlow(s.extra?.glow)
+        if (patch === null) {
+          // OFF remembers the glow it clears, a glow the shard arrived with included, so LIGHT or FOG puts it back.
+          wrote = had
+          return s.extra?.glow === undefined ? null : withGlow(s, undefined)
+        }
+        const g: Glow = { ...(had ?? { style: suggestedGlowStyle(s, color), ...glowLast }), ...patch }
+        // sno-core clears the field on a fractional value: whole ticks and whole percent only.
+        g.radius = Math.round(g.radius)
+        g.strength = Math.round(g.strength)
+        const n = withGlow(s, g)
+        wrote = readGlow(n.extra?.glow)
+        return had && wrote && had.style === wrote.style && had.radius === wrote.radius && had.strength === wrote.strength ? null : n
+      })
+      if (changed && wrote) set({ glowLast: { radius: wrote.radius, strength: wrote.strength } })
+    },
     // Already so: no edit, so no undo step that changes nothing.
     setConstrain: (c) => edit((s) => (authoredConstrainOf(s) === c ? null : withConstrain(s, c))),
     // Already so: the same object back, so no edit and no empty undo step.

@@ -1,18 +1,18 @@
 /**
  * shardRows.tsx - the SHARD sheet's rows that carry their own state: BOUNCE,
  * OPACITY, and the bouncy shard's chip that MENU's list wears too. Moved out
- * of Workshop.tsx unchanged when the workshop was split by place (workshop
- * redesign, phase 1).
+ * of Workshop.tsx when the workshop was split by place (workshop redesign,
+ * phase 1). OPACITY's rail is the shared RailRow (railRow.tsx) that POINT
+ * SIZE, RADIUS and GLOW STRENGTH use too (glowRows.tsx).
  */
 
-import { useEffect, useRef, useState } from 'react'
-import { Hash } from 'lucide-react'
 import type { ShardModel } from 'sno-core/shards'
 import { Field, Switch } from '../hud/ui/Switch'
-import { noCallout, useRepeatable } from '../hooks/useRepeatable'
-import { OPACITY_MIN, clampOpacity, dragHistory, opacityAt, opacityFraction, opacityPercent, stepOpacity } from '../lib/opacityStep'
+import { useRepeatable } from '../hooks/useRepeatable'
+import { OPACITY_MIN, clampOpacity, opacityAt, opacityFraction, opacityPercent, stepOpacity } from '../lib/opacityStep'
 import { BOUNCE_MAX, BOUNCE_MIN, BOUNCE_PRESETS, BOUNCE_REFLECT, BOUNCE_START, bounceChip, bounceChipTip, bounceOf, clampBounce, springboardOf } from '../lib/walkBounce'
 import { useWorkshop } from '../store/useWorkshop'
+import { RailRow } from './railRow'
 
 /**
  * BOUNCE (lib/walkBounce.ts; arkinox, 2026-11-10: "can i make bounce surfaces
@@ -73,124 +73,34 @@ export function BounceRow(): JSX.Element {
 
 /**
  * OPACITY in SHARD (arkinox, 2026-10-23: "turn this into a slider with
- * number entry like the hyperspace chip"): the hyperspace scrubber's rail,
- * from 0 to 100 in whole percent, with − and + in fives either side
- * as before, and # beside it to type a percent, as the block line has. 100
- * is solid and writes nothing (lib/opacityStep).
- *
- * A drag is one edit: every whole percent it passes draws at once, and when
- * the finger lifts the history keeps only the shard as it was before the
- * drag, so one UNDO puts the whole drag back, as one press of − does.
+ * number entry like the hyperspace chip"): the shared rail (railRow.tsx),
+ * from 0 to 100 in whole percent, with − and + in fives either side, and #
+ * beside it to type a percent, as the block line has. 100 is solid and
+ * writes nothing (lib/opacityStep). There is no floor (owner, 2026-11-15):
+ * at 0% the object draws nothing of its own, and its glow still shows.
  */
 export function OpacityRow(): JSX.Element {
   const percent = useWorkshop((s) => opacityPercent(s.current()?.opacity))
-  const bind = useRepeatable()
   const w = useWorkshop.getState
-  const rail = useRef<HTMLDivElement>(null)
-  // The history and the shard as they were when the drag began.
-  const drag = useRef<{ id: string; past: ShardModel[]; before: ShardModel } | null>(null)
-  // The typed percent, open while # is pressed.
-  const [typing, setTyping] = useState<string | null>(null)
-  const setTo = (p: number | null): void => {
-    if (p === null || p === opacityPercent(w().current()?.opacity)) return
-    w().setOpacity(p)
-  }
-  const slideTo = (clientX: number): void => {
-    const r = rail.current?.getBoundingClientRect()
-    if (!r || r.width === 0) return
-    setTo(opacityAt((clientX - r.left) / r.width))
-  }
-  const endDrag = (): void => {
-    const d = drag.current
-    drag.current = null
-    const st = w()
-    const now = st.current()
-    if (!d || !now || st.currentId !== d.id || now === d.before) return
-    useWorkshop.setState({ past: dragHistory(d.past, d.before, st.past) })
-  }
-  // A drag the panel closed under (Esc) still ends as one edit.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => endDrag, [])
-  const typed = typing !== null && /^\d+$/.test(typing) ? clampOpacity(Number(typing)) : null
-  const goTyped = (): void => {
-    if (typed === null) return
-    setTo(typed)
-    setTyping(null)
-  }
-  const keyStep: Record<string, number | 'floor' | 'top'> = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, PageDown: -10, PageUp: 10, Home: 'floor', End: 'top' }
-  const fraction = opacityFraction(percent)
   return (
-    <>
-      <div className="workshop__row" role="group" aria-label="Opacity">
-        <span className="workshop__label">OPACITY</span>
-        <button className="workshop__btn" {...bind(() => w().setOpacity(stepOpacity(w().current()?.opacity, -1)))} disabled={percent <= OPACITY_MIN} aria-label="More see-through" title="More see-through">−</button>
-        <div
-          className="explorer__rail ws__opacity-rail"
-          ref={rail}
-          role="slider"
-          tabIndex={0}
-          aria-label="Opacity"
-          aria-valuemin={OPACITY_MIN}
-          aria-valuemax={100}
-          aria-valuenow={percent}
-          aria-valuetext={`${percent}%`}
-          {...noCallout}
-          onPointerDown={(e) => {
-            e.preventDefault(); e.stopPropagation()
-            const st = w()
-            const s = st.current()
-            if (!s) return
-            drag.current = { id: s.id, past: st.past, before: s }
-            ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-            ;(e.currentTarget as HTMLElement).focus()
-            slideTo(e.clientX)
-          }}
-          onPointerMove={(e) => { if (drag.current) slideTo(e.clientX) }}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-          onLostPointerCapture={endDrag}
-          onKeyDown={(e) => {
-            const k = keyStep[e.key]
-            if (k === undefined || e.metaKey || e.ctrlKey || e.altKey) return
-            // The bench nudges the selection with the arrows: these are the slider's.
-            e.preventDefault(); e.stopPropagation()
-            setTo(k === 'floor' ? OPACITY_MIN : k === 'top' ? 100 : clampOpacity(percent + k))
-          }}
-        >
-          <span className="explorer__line" />
-          <span className="explorer__walked" style={{ width: `${fraction * 100}%` }} />
-          <span className="explorer__mark" style={{ left: `${fraction * 100}%` }} />
-        </div>
-        <button className="workshop__btn" {...bind(() => w().setOpacity(stepOpacity(w().current()?.opacity, 1)))} disabled={percent >= 100} aria-label="More solid" title="More solid">+</button>
-        {/* A fixed width: a number that narrowed from 100% to 99% moved the rail under the finger mid-drag (arkinox, 2026-10-25). */}
-        <span className="workshop__value ws__opacity-value">{percent}%</span>
-        <button
-          className={`workshop__btn linescrub__hash ${typing !== null ? 'is-on' : ''}`}
-          title="Type a percent"
-          aria-label="Type an opacity percent"
-          aria-expanded={typing !== null}
-          onClick={() => setTyping((t) => (t === null ? '' : null))}
-        ><Hash size={12} strokeWidth={2.5} aria-hidden /></button>
-      </div>
-      {typing !== null && (
-        <form className="linescrub__goto" onSubmit={(e) => { e.preventDefault(); goTyped() }}>
-          <input
-            className="linescrub__goto-input"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={3}
-            autoFocus
-            placeholder={`${OPACITY_MIN} to 100`}
-            aria-label="Opacity percent"
-            value={typing}
-            onChange={(e) => setTyping(e.target.value.replace(/[^\d]/g, ''))}
-            // Escape puts the field away and nothing else; preventDefault keeps the panel open (useKeyboard).
-            onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); setTyping(null) } }}
-          />
-          <button className="workshop__btn" type="submit" disabled={typed === null}>SET</button>
-        </form>
-      )}
-    </>
+    <RailRow
+      label="OPACITY"
+      name="Opacity"
+      value={percent}
+      read={() => opacityPercent(w().current()?.opacity)}
+      write={(p) => w().setOpacity(p)}
+      at={opacityAt}
+      fraction={opacityFraction}
+      step={stepOpacity}
+      nudge={(v, by) => clampOpacity(v + by) ?? v}
+      min={OPACITY_MIN}
+      max={100}
+      valueText={`${percent}%`}
+      shown={`${percent}%`}
+      less="More see-through"
+      more="More solid"
+      typing={{ hashTitle: 'Type a percent', hashLabel: 'Type an opacity percent', fieldLabel: 'Opacity percent', placeholder: `${OPACITY_MIN} to 100`, maxLength: 3, parse: (t) => (/^\d+$/.test(t) ? clampOpacity(Number(t)) : null) }}
+    />
   )
 }
 

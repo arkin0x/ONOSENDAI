@@ -322,6 +322,10 @@ export interface VoiceSettings {
   near: number
   /** How quickly it falls beyond `near` (1 is the plain inverse law). */
   rolloff: number
+  /** The least share of full level a drone in reach is heard at, however far, before the fade at the edge of reach (0..1). */
+  farFloor: number
+  /** The level of all the voices together, after the gentle compressor they meet in (which adds its own make-up gain). */
+  mix: number
   /** The attack cue's closeness: none beyond `cueFar` gibsons, all of its share within `cueNear`. */
   cueNear: number
   cueFar: number

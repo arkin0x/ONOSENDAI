@@ -21,12 +21,16 @@
  *
  *   3 oscillators + band-passed noise -> chop (LFO on its gain, and on the
  *   pitch) -> low-pass (brightness, and muffling behind a wall) <- whine
- *   -> level -> panner (HRTF on a desktop, equal power on a phone) -> bus
+ *   -> level -> panner (HRTF on a desktop, equal power on a phone) -> the
+ *   voices' compressor -> the game's bus
  *
  * - How loud is worked out here, not by the panner (its rolloff is 0, as
- *   hidden audio's is): an inverse law from `near` gibsons, fading to
- *   nothing at `reach` times the drone's detection range, so a drone is
- *   heard from past the fog.
+ *   hidden audio's is): full out to `near` gibsons, a gentle inverse law
+ *   beyond with a floor, fading to nothing at `reach` times the drone's
+ *   detection range, so a drone is plainly heard coming from well past the
+ *   fog (owner, phone test 2026-11-16).
+ * - All the voices meet in one gentle compressor before the game's bus, so
+ *   many distant drones together never clip or drown the guns.
  * - Behind a solid (the simulation's segmentClear from the eye to the
  *   drone), the low-pass closes and the level drops. A few voices are
  *   checked each update, in turn, never all every frame.
@@ -81,7 +85,7 @@ const waveOf = (x: unknown, d: SoundWave): SoundWave => (typeof x === 'string' &
 
 /** The last resort, used only where even the base variant has no sounds: how voices behave, and a soft hum. */
 const FALLBACK_SETTINGS: VoiceSettings = {
-  phone: 6, desktop: 10, reach: 1.5, near: 4, rolloff: 0.6, cueNear: 4, cueFar: 18,
+  phone: 6, desktop: 10, reach: 2, near: 11, rolloff: 0.35, farFloor: 0.3, mix: 0.22, cueNear: 4, cueFar: 18,
   doppler: { c: 60, min: 0.85, max: 1.18 },
   occluded: { cutoff: 0.16, floor: 260, gain: 0.55 },
   checks: 3,
@@ -130,6 +134,8 @@ function settingsOf(g: unknown, d: VoiceSettings): VoiceSettings {
     reach: fin(o.reach, d.reach, 0.1, 10),
     near: fin(o.near, d.near, 0.1, 1000),
     rolloff: fin(o.rolloff, d.rolloff, 0, 10),
+    farFloor: fin(o.farFloor, d.farFloor, 0, 1),
+    mix: fin(o.mix, d.mix, 0, 2),
     cueNear,
     cueFar: Math.max(cueNear + 0.1, fin(o.cueFar, d.cueFar, 0, 1000)),
     doppler: { c: fin(dp.c, d.doppler.c, 1, 10000), min: fin(dp.min, d.doppler.min, 0.1, 1), max: fin(dp.max, d.doppler.max, 1, 10) },
@@ -174,11 +180,20 @@ const smooth = (a: number, b: number, x: number): number => {
   return t * t * (3 - 2 * t)
 }
 
-/** How loud a drone `d` gibsons away is, 0..1: full within `near`, an inverse law beyond, fading to 0 from 70% of `reach` to `reach`. */
-export function distanceGain(d: number, v: Pick<VoiceSettings, 'near' | 'rolloff'>, reach: number): number {
+/** Where the fade at the edge of reach begins, as a share of reach. */
+const EDGE_FROM = 0.85
+
+/**
+ * How loud a drone `d` gibsons away is, 0..1: full within `near`, a gentle
+ * inverse law beyond, never under `farFloor` while in reach, fading to 0
+ * over the last 15% of `reach`. So a drone at the fog's edge and well past
+ * it is plainly heard, and the attack cue (louder and brighter, close) is
+ * still the peak.
+ */
+export function distanceGain(d: number, v: Pick<VoiceSettings, 'near' | 'rolloff' | 'farFloor'>, reach: number): number {
   if (!(d < reach)) return 0
   const inv = d <= v.near ? 1 : v.near / (v.near + v.rolloff * (d - v.near))
-  return inv * (1 - smooth(reach * 0.7, reach, d))
+  return Math.max(inv, v.farFloor) * (1 - smooth(reach * EDGE_FROM, reach, d))
 }
 
 /** The pitch ratio for a source closing at `closing` gibsons a second (negative: going away), clamped. */
@@ -303,6 +318,8 @@ const FADE_S = 0.09
 const FREE_AFTER_S = 0.45
 /** The voices update at most this often, seconds. */
 const UPDATE_S = 1 / 30
+/** The voices' compressor: dB, dB, ratio, seconds, seconds. */
+const COMP = { threshold: -24, knee: 12, ratio: 4, attack: 0.01, release: 0.25 }
 /** The attack's pitch rise eases over this, seconds: a bend, not a step. */
 const RISE_S = 0.25
 
@@ -509,6 +526,8 @@ export class DroneVoices {
   private ctx: BaseAudioContext | null = null
   private readonly playing = new Set<string>()
   private readonly cands: { key: string; dist: number; act: number; d: VoiceDrone }[] = []
+  /** Where every voice meets: one compressor into the game's bus, made with the first voice. */
+  private mix: { comp: DynamicsCompressorNode; trim: GainNode; to: AudioNode } | null = null
 
   constructor(readonly sounds: DroneRunSounds, readonly phone: boolean) {
     this.cap = phone ? sounds.voices.phone : sounds.voices.desktop
@@ -519,6 +538,28 @@ export class DroneVoices {
   /** The drones heard now, by key ("d" + id). */
   heard(): string[] {
     return this.slots.filter((s) => s.key !== null).map((s) => s.key as string)
+  }
+
+  /**
+   * The voices' compressor into `out`, made once per pool: gentle (4:1 over
+   * -24 dB, soft knee), so a crowd of drones sits under the guns. Web Audio's
+   * compressor adds its own make-up gain, so a trim after it (voices.mix)
+   * sets the level of all the voices together.
+   */
+  private mixOf(ac: BaseAudioContext, out: AudioNode): AudioNode {
+    if (this.mix && this.mix.to === out) return this.mix.comp
+    const comp = ac.createDynamicsCompressor()
+    comp.threshold.value = COMP.threshold
+    comp.knee.value = COMP.knee
+    comp.ratio.value = COMP.ratio
+    comp.attack.value = COMP.attack
+    comp.release.value = COMP.release
+    const trim = ac.createGain()
+    trim.gain.value = this.sounds.voices.mix
+    comp.connect(trim)
+    trim.connect(out)
+    this.mix = { comp, trim, to: out }
+    return comp
   }
 
   /** Closing speed: the drone's velocity toward the eye, less the eye's away from it, gibsons a second. */
@@ -562,7 +603,7 @@ export class DroneVoices {
     for (const key of chosen) {
       if (this.playing.has(key)) continue
       let slot = this.slots.find((s) => s.key === null && t >= s.freeAt)
-      if (!slot && this.slots.length < this.poolMax) { slot = new VoiceSlot(ac, out, this.phone, t); this.slots.push(slot) }
+      if (!slot && this.slots.length < this.poolMax) { slot = new VoiceSlot(ac, this.mixOf(ac, out), this.phone, t); this.slots.push(slot) }
       if (!slot) { waiting++; continue }
       const d = byKey.get(key) as VoiceDrone
       slot.assign(key, d.def.id, voiceFor(this.sounds, d.def.id), d.id, t)
@@ -608,8 +649,15 @@ export class DroneVoices {
    */
   dispose(t?: number): void {
     const gone = this.slots.slice()
+    const mix = this.mix
+    this.mix = null
     for (const s of gone) s.dispose(t)
-    if (t !== undefined && gone.length) setTimeout(() => { for (const s of gone) s.part() }, (FREE_AFTER_S + 0.1) * 1000)
+    const part = (): void => {
+      for (const s of gone) s.part()
+      try { mix?.comp.disconnect(); mix?.trim.disconnect() } catch { /* apart */ }
+    }
+    // At once, each voice parted itself; the compressor goes with it. Faded, all of it once silent.
+    if (t === undefined) { try { mix?.comp.disconnect(); mix?.trim.disconnect() } catch { /* apart */ } } else if (gone.length || mix) setTimeout(part, (FREE_AFTER_S + 0.1) * 1000)
     this.slots.length = 0
     this.last = -Infinity
     this.ctx = null

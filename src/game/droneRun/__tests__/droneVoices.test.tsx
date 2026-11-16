@@ -61,6 +61,7 @@ function fakeContext(): BaseAudioContext {
   return {
     state: 'running', get currentTime() { return clock.now }, sampleRate: 8000, destination: {},
     createGain: () => node(), createBiquadFilter: () => node(), createPanner: () => node(),
+    createDynamicsCompressor: () => node({ threshold: param(), knee: param(), ratio: param(), attack: param(), release: param() }),
     createOscillator: () => source(), createBufferSource: () => source(),
     createBuffer: (_c: number, len: number) => ({ getChannelData: () => new Float32Array(len) }),
     resume: () => Promise.resolve(),
@@ -242,15 +243,45 @@ describe('which drones are heard', () => {
 })
 
 describe('how loud and how bright', () => {
-  it('full within near, falling with distance, nothing at reach, still something past the fog', () => {
-    const reach = 82.5
+  it('full within near, falling gently with distance, nothing at reach, plainly heard past the fog', () => {
+    const reach = V.reach * def('scout').detect
     expect(distanceGain(2, V, reach)).toBe(1)
-    expect(distanceGain(4, V, reach)).toBe(1)
-    const g = [8, 16, 30, 55, 70].map((d) => distanceGain(d, V, reach))
+    expect(distanceGain(V.near, V, reach)).toBe(1)
+    const g = [15, 25, 40, 55, 70].map((d) => distanceGain(d, V, reach))
     for (let i = 1; i < g.length; i++) expect(g[i]).toBeLessThan(g[i - 1])
-    expect(distanceGain(55, V, reach)).toBeGreaterThan(0.05)
+    // At the fog's edge (55) and at 1.5 times the detection range, at least the far floor.
+    expect(distanceGain(55, V, reach)).toBeGreaterThanOrEqual(V.farFloor)
+    expect(distanceGain(1.5 * def('scout').detect, V, reach)).toBeGreaterThanOrEqual(V.farFloor)
     expect(distanceGain(reach, V, reach)).toBe(0)
     expect(distanceGain(200, V, reach)).toBe(0)
+  })
+
+  it('a drone at the fog\'s edge is no more than about 12 dB under the attack peak, and the attack is still the loudest', () => {
+    const fog = 55
+    for (const e of enemies) {
+      const k = DEFAULT_SOUNDS.kinds[e.id]
+      const s = { reach: V.reach * e.detect, act: 0, charge: 0, occluded: false, ratio: 1, spreadCents: 0 }
+      const far = voiceTargets(k, V, { ...s, dist: fog, cue: 0 }).level
+      const peak = voiceTargets(k, V, { ...s, dist: 3, cue: 1, act: 1 }).level
+      const db = 20 * Math.log10(far / peak)
+      expect(db).toBeGreaterThan(-12.5)
+      expect(db).toBeLessThan(-6)
+    }
+  })
+
+  it('every voice meets in one gentle compressor before the game\'s bus', () => {
+    const v = new DroneVoices(DEFAULT_SOUNDS, false)
+    const made0 = made.nodes
+    const ac = fakeContext() as BaseAudioContext & { createDynamicsCompressor: () => unknown }
+    let comps = 0
+    const real = ac.createDynamicsCompressor
+    ac.createDynamicsCompressor = () => { comps++; return real() }
+    v.frame(ac, OUT, input(Array.from({ length: 8 }, (_, i) => drone(i, 'heavy', [i, 4, -40]))), 0)
+    expect(comps).toBe(1)
+    expect(made.nodes).toBeGreaterThan(made0)
+    // The voices' default trim after it comes from the data.
+    expect(DEFAULT_SOUNDS.voices.mix).toBeGreaterThan(0)
+    expect(DEFAULT_SOUNDS.voices.mix).toBeLessThan(1)
   })
 
   it('behind a wall the low-pass closes and the level drops (segmentClear says blocked)', () => {

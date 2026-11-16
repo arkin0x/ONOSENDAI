@@ -478,9 +478,11 @@
       "voices": {
         "phone": 6,
         "desktop": 10,
-        "reach": 1.5,
-        "near": 4,
-        "rolloff": 0.6,
+        "reach": 2,
+        "near": 11,
+        "rolloff": 0.35,
+        "farFloor": 0.3,
+        "mix": 0.22,
         "cueNear": 4,
         "cueFar": 18,
         "doppler": {

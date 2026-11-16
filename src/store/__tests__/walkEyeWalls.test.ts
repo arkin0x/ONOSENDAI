@@ -21,10 +21,11 @@ vi.hoisted(() => {
 })
 vi.mock('../../lib/contacts', () => ({ GENERAL_RELAYS: [], followsOf: async () => [], fetchContacts: async () => [] }))
 
-import { newShard, type ShardModel } from 'sno-core/shards'
+import { newShard, toPayload, type ShardModel } from 'sno-core/shards'
 import { withConstrain } from '../../lib/walkConstrain'
+import { setLocalAuthor } from '../../lib/carried'
 import type { AxisName, Position } from '../../lib/space'
-import { clearWalls, eyeReach, type WallItem } from '../walkWalls'
+import { clearWalls, eyeReach, wallsBuilt, type WallItem } from '../walkWalls'
 
 const AXES: AxisName[] = ['x', 'y', 'z']
 const AT: Position = { x: 1n << 60n, y: 3n << 58n, z: 5n << 57n }
@@ -44,6 +45,21 @@ function slab(axis: AxisName, dir: 1 | -1, near: number, half = 2, unit = 0): Sh
   const q = (a: number, b: number, c: number, e: number): number[][] => [[a, b, c], [a, c, e]]
   const faces = [...q(0, 1, 2, 3), ...q(4, 7, 6, 5), ...q(0, 4, 5, 1), ...q(1, 5, 6, 2), ...q(2, 6, 7, 3), ...q(3, 7, 4, 0)] as Array<[number, number, number]>
   return withConstrain({ ...newShard('Slab'), unit, mode: 'solid', vertices: verts, faces }, 'all')
+}
+
+/** A ramp through the walker's point, rising one in one toward +Z (cyberspace), two units each way, two ticks thick. */
+function ramp(): ShardModel {
+  const v = (x: number, y: number, z: number): ShardModel['vertices'][number] => {
+    const t = [x, y, z]
+    const p = t.map((q) => Math.floor(q / 120)) as [number, number, number]
+    const r = t.map((q, i) => q - p[i] * 120) as [number, number, number]
+    return r.some((q) => q !== 0) ? { p, t: r, c: [1, 1, 1] } : { p, c: [1, 1, 1] }
+  }
+  // Cyberspace z is model -z on the wire's own frame after the read; the model holds cyberspace axes, so y = z here.
+  const verts = [v(-240, -240, -240), v(240, -240, -240), v(240, 240, 240), v(-240, 240, 240), v(-240, -242, -240), v(240, -242, -240), v(240, 238, 240), v(-240, 238, 240)]
+  const q = (a: number, b: number, c: number, e: number): number[][] => [[a, b, c], [a, c, e]]
+  const faces = [...q(0, 1, 2, 3), ...q(4, 7, 6, 5), ...q(0, 4, 5, 1), ...q(1, 5, 6, 2), ...q(2, 6, 7, 3), ...q(3, 7, 4, 0)] as Array<[number, number, number]>
+  return withConstrain({ ...newShard('Ramp'), mode: 'solid', vertices: verts, faces }, 'all')
 }
 
 let n = 0
@@ -100,9 +116,13 @@ describe('eyeReach', () => {
     // An eye 0.45 to the side, a wall 0.5 to that side: 0.05 away, inside the near plane's room.
     const at = placed([0.45, 0, 0], [item(slab('x', 1, 0.5))])
     expect(0.5 - at[0]).toBeGreaterThanOrEqual(ROOM - 1e-9)
-    // A wall 0.1 beside the whole line up to the eye: back down to the walker.
-    const up = placed([0, 1, 0], [item(slab('x', 1, 0.1))])
-    expect(up[1]).toBeLessThan(ROOM)
+    // A wall 0.1 beside the walker and the whole line up to the eye: stepping
+    // back cannot clear it, and the eye is no nearer it than the walker is,
+    // so the eye stays up (it does not fall back into the floor).
+    expect(eyeReach(AT, [0, 0, 0], [0, 1.3, 0], ROOM, [item(slab('x', 1, 0.1)), item(slab('y', -1, 0))])).toBe(1)
+    // An eye that leans toward that wall is held from coming nearer it than the walker is.
+    const lean = placed([0.3, 1, 0], [item(slab('x', 1, 0.1))])
+    expect(lean[0]).toBeLessThanOrEqual(1e-9 + 0.075)
     // A short wall beside the walker that the eye rises clear of: it stays.
     expect(eyeReach(AT, [0, 0, 0], [0, 1, 0], ROOM, [item(slab('x', 1, 0.1, 0.25))])).toBe(1)
   })
@@ -123,6 +143,90 @@ describe('eyeReach', () => {
     expect(eyeReach(AT, [0, 0, 0], [0, 3, 0], ROOM, [item(slab('y', 1, 1, 2, 2))])).toBe(1)
     const [, y] = placed([0, 6, 0], [item(slab('y', 1, 1, 2, 2))])
     expect(y).toBeLessThanOrEqual(4 - ROOM + 1e-9)
+  })
+
+  it('holds any eye at the walker standing in a wall\u2019s plane', () => {
+    // A wall across X through the walker's point (a walker walks into its plane along it).
+    const wall = [item(slab('x', 1, 0))]
+    expect(eyeReach(AT, [0, 0, 0], [2, 0.5, 0], ROOM, wall)).toBe(0)
+    expect(eyeReach(AT, [0, 0, 0], [-2, 0.5, 0], ROOM, wall)).toBe(0)
+    expect(eyeReach(AT, [0, 0, 0], [0, 0.5, 3], ROOM, wall)).toBe(0)
+    // Straight up, inside the wall's plane: edge-on, it would see both sides.
+    expect(eyeReach(AT, [0, 0, 0], [0, 1.3, 0], ROOM, wall)).toBe(0)
+  })
+
+  it('lets the eye rise from a ramp the walker stands on, and holds an eye behind and below it', () => {
+    const r = item(ramp())
+    expect(eyeReach(AT, [0, 0, 0], [0, 1.3, 0], ROOM, [r])).toBe(1)
+    // The ramp rises toward +Z: an eye behind (+Z) and a little up is under it.
+    expect(eyeReach(AT, [0, 0, 0], [0, 0.5, 4], ROOM, [r])).toBe(0)
+    // Toward -Z and a little up the ramp falls away: clear.
+    expect(eyeReach(AT, [0, 0, 0], [0, 0.5, -2], ROOM, [r])).toBe(1)
+  })
+
+  it('reads up from the gravity it is given', () => {
+    // A floor across Z through the walker, gravity along -Z: an eye toward -Z is below it.
+    const floor = [item(slab('z', -1, 0))]
+    expect(eyeReach(AT, [0, 0, 0], [0, 0, -0.5], ROOM, floor, { axis: 'z', dir: 1 })).toBe(0)
+    expect(eyeReach(AT, [0, 0, 0], [0, 0, 0.5], ROOM, floor, { axis: 'z', dir: 1 })).toBe(1)
+    // The same eye with gravity along -Y: the slab is a wall through the walker.
+    expect(eyeReach(AT, [0, 0, 0], [0, 0, 0.5], ROOM, floor)).toBe(0)
+  })
+
+  it('keeps the near plane\u2019s room from every face it leaves the eye near', () => {
+    let seed = 11
+    const rnd = (): number => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 }
+    for (let trial = 0; trial < 80; trial++) {
+      clearWalls()
+      const items: WallItem[] = []
+      const boxes: Array<{ lo: number[]; hi: number[] }> = []
+      for (let w = 0; w < 3; w++) {
+        const axis = AXES[Math.floor(rnd() * 3)], dir = rnd() < 0.5 ? 1 : -1
+        const near = Math.round((0.3 + rnd() * 2) * 12) / 12, half = Math.round((0.5 + rnd() * 2) * 12) / 12
+        items.push(item(slab(axis, dir, near, half)))
+        // The slab as a box, in gibsons from the walker (the model's axes are cyberspace's).
+        const i = AXES.indexOf(axis)
+        const lo = [-half, -half, -half], hi = [half, half, half]
+        const a = near * dir, b = (near + 2 / 120) * dir
+        lo[i] = Math.min(a, b); hi[i] = Math.max(a, b)
+        boxes.push({ lo, hi })
+      }
+      const eye: [number, number, number] = [(rnd() - 0.5) * 6, (rnd() - 0.3) * 6, (rnd() - 0.5) * 6]
+      const k = eyeReach(AT, [0, 0, 0], eye, ROOM, items)
+      const at = eye.map((v) => v * k)
+      const dist = (p: number[], bx: { lo: number[]; hi: number[] }): number => Math.hypot(...p.map((v, q) => Math.max(bx.lo[q] - v, 0, v - bx.hi[q])))
+      // Every slab is at least the room from where the eye ends, or no nearer it than the walker is.
+      for (const bx of boxes) {
+        const d = dist(at, bx)
+        expect(d >= ROOM - 1e-9 || d >= dist([0, 0, 0], bx) - 1e-9, JSON.stringify({ eye, k, bx, d })).toBe(true)
+      }
+    }
+  })
+
+  it('asks a shard\u2019s placed walls, and holds the eye at the walker while they are still being built', async () => {
+    const ME = 'a'.repeat(64)
+    const wallAt = `33331:${ME}:wall`
+    // A maze: its wall across -Z carried in the table and placed 3 out.
+    const maze = withConstrain({ ...newShard('Maze'), mode: 'solid', vertices: [], faces: [], author: ME, refs: [['a', wallAt]], parts: [{ ref: 0, at: [0, 0, -360], turn: [0, 0, 0], step: 0 }], objects: { [wallAt]: toPayload(slab('z', -1, 0)) } }, 'off') as ShardModel
+    setLocalAuthor(() => ME)
+    try {
+      const m = { ...item(maze), mine: true, author: ME }
+      const out = { pending: false }
+      expect(eyeReach(AT, [0, 0, 0], [0, 0.5, -5], ROOM, [m], undefined, out)).toBe(0)
+      expect(out.pending).toBe(true)
+      await wallsBuilt()
+      const k = eyeReach(AT, [0, 0, 0], [0, 0.5, -5], ROOM, [m], undefined, out)
+      expect(out.pending).toBe(false)
+      const z = -5 * k
+      expect(z).toBeGreaterThanOrEqual(-3 + ROOM - 1e-9)
+      expect(z).toBeLessThan(-2)
+    } finally { setLocalAuthor(null) }
+  })
+
+  it('leaves out a shard\u2019s own faces outside its region, where they are not drawn', () => {
+    // At height 1 the region is the 2-gibson block holding AT: a ceiling 3 up is outside it.
+    expect(eyeReach(AT, [0, 0, 0], [0, 3.5, 0], ROOM, [{ ...item(slab('y', 1, 3)), height: 1 }])).toBe(1)
+    expect(eyeReach(AT, [0, 0, 0], [0, 3.5, 0], ROOM, [item(slab('y', 1, 3))])).toBeLessThan(1)
   })
 
   it('never leaves the line from the walker to the eye crossing a face', () => {

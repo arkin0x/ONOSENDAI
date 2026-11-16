@@ -37,7 +37,8 @@ import { keepPrograms } from '../lib/keepPrograms'
 import { sortWithoutBoxing } from '../lib/sortNoAlloc'
 import { FrameDriver } from './frameDriver'
 import { BG } from '../lib/palette'
-import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, placeCentre, renderDirection, viewAxes, type AxisName, type Position } from '../lib/space'
+import { GRID_RADIUS, cellDelta, claimScreenAxes, itemCentre, levelScreenAxes, originShift, placeCentre, renderDirection, viewAxes, type AxisName, type Position } from '../lib/space'
+import { upOf } from '../lib/walkDown'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
 import { setWalkFacing, walkBody, walkEye, walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
@@ -654,6 +655,7 @@ function Rig(): JSX.Element {
   const eyeShift = useRef(new Vector3())
   const eyeMix = useRef(0)
   const eyeVec = useMemo(() => new Vector3(), [])
+  const eyeFwd = useMemo(() => new Vector3(), [])
 
   // Locked means the camera travels with the cursor, so an axis-aligned view
   // stays framed on it as you drive. Aligning with Shift+WASD re-locks; orbiting
@@ -999,9 +1001,13 @@ function Rig(): JSX.Element {
     let tx = live[0] + (lag ? lag[0] : 0)
     let ty = live[1] + (lag ? lag[1] : 0)
     let tz = live[2] + (lag ? lag[2] : 0)
-    // The cursor's own centre, before a fall lifts the eye: the walls behind
-    // the avatar's eye are asked from the eased point's distance from it.
-    const cx = tx, cy = ty, cz = tz
+    // The centre of the cursor's own gibson as drawn: the walls behind the
+    // avatar's eye are asked from the eased walker point's distance from it
+    // (walkEyeRig.ts), and they stand on gibsons, not on the zoom's cells.
+    const gibson = s.walking || eye.current ? itemCentre(s.cursor, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, s.axes()) : null
+    const gx = gibson ? gibson[0] + (lag ? lag[0] : 0) : 0
+    const gy = gibson ? gibson[1] + (lag ? lag[1] : 0) : 0
+    const gz = gibson ? gibson[2] + (lag ? lag[2] : 0) : 0
     // In a fall the eye is above or below the cursor (the point the fall
     // left off from), along the fall's up, and follows that height exactly.
     const falling = s.walking && walkFall.active
@@ -1180,13 +1186,15 @@ function Rig(): JSX.Element {
         axes: s.axes(),
         plane: s.plane,
         cursor: s.cursor,
-        lead: [smooth.current.x - cx, smooth.current.y - cy, smooth.current.z - cz],
-        look: state.camera.quaternion,
-        up: walkFallUp,
+        lead: [smooth.current.x - gx, smooth.current.y - gy, smooth.current.z - gz],
+        forward: eyeFwd.copy(along).negate(),
+        up: upOf(walkDown()),
         walls: s.walking,
         now: performance.now(),
       }, eyeVec)
       eyeShift.current.copy(eyeVec).multiplyScalar(eyeMix.current)
+      // The body's turn for Avatar.tsx, from the same heading: your heading, never the look up or down.
+      walkBody.copy(eyeRig.body)
       c.object.position.copy(smooth.current).add(eyeShift.current).addScaledVector(along.normalize(), d)
       c.minDistance = Math.min(ORBIT_MIN_DISTANCE, d * 0.5)
       locked.current = true
@@ -1300,8 +1308,6 @@ function Rig(): JSX.Element {
     c.update()
     viewRig.pivot(c.object.position, c.target, smooth.current, !c.autoRotate)
     if (s.walking) (walkLook.current ??= new Vector3()).copy(c.object.position).sub(c.target).normalize()
-    // The body's turn for Avatar.tsx: your heading, never the look up or down.
-    if (s.walking) eyeRig.bodyTurn(state.camera.quaternion, walkBody)
   })
 
   return (

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { Euler, Quaternion, Vector3 } from 'three'
 import { fromPayload, newShard, type ShardModel } from 'sno-core/shards'
 import { MARKER_EYE, autoEye, eyeChosen, eyeOf, readEye, walkEyeLocal, yawOnly } from '../avatarEye'
-import { MAX_AVATAR_RADIUS } from '../avatar'
+import { MAX_AVATAR_RADIUS, avatarFromEvent } from '../avatar'
 
 /** arkinox's Ship, his kind 11333 avatar (0000045c...): built 0.8 to 1.4 gibsons above its origin. */
 const SHIP = {"v":2,"name":"Ship","unit":0,"extent":8,"mode":"solid","vertices":[[0,1,0],[-1,1,0],[0,1,-2],[0,1,1],[-1,1,0],[0,1,0],[0,1,0],[0,0,0],[-1,0,0],[1,0,0],[-1,1,0],[-1,1,1],[-1,1,0],[0,1,1],[0,1,0],[0,1,0],[0,1,1],[-1,1,1]],"ticks":[[48,0,0],[72,0,0],[0,0,96],-1,[72,24,72],[48,24,72],[0,48,0],[0,96,0],[0,96,72],[0,96,72],[48,0,96],[96,0,0],[72,24,96],[24,0,0],[72,0,96],[48,24,96],[48,0,24],[72,0,24]],"colors":[64,64,64,251,59,59,64,251,59,59,249,249,249,249,249,249,238,238],"faces":[[9,0,5],[4,1,8],[2,0,7],[1,2,7],[2,6,0],[1,6,2],[6,1,3],[3,0,6],[3,7,0],[3,1,7],[3,0,9],[3,8,1],[4,3,1],[5,0,3],[4,8,3],[5,3,9],[15,14,13],[11,10,12],[17,12,10],[12,17,11],[10,11,17],[15,13,16],[14,15,16],[14,16,13]],"opacity":95}
@@ -137,5 +137,28 @@ describe('yawOnly', () => {
     const body = yawOnly(cam, new Quaternion())
     const want = new Vector3(0, 0, -1).applyQuaternion(new Quaternion().setFromEuler(new Euler(0, 0.3, 0)))
     expect(nose(body).distanceTo(want)).toBeLessThan(1e-6)
+  })
+})
+
+describe('an avatar event’s eye', () => {
+  const base = { name: 'Tri', unit: 0, mode: 'solid', vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], faces: [[0, 1, 2]] }
+  const read = (payload: Record<string, unknown>): ShardModel => avatarFromEvent({ kind: 11333, pubkey: 'ab'.repeat(32), content: JSON.stringify(payload), tags: [] })!
+
+  it('keeps a version 2 eye as written', () => {
+    expect(read({ ...base, v: 2, colors: [1, 1, 1], eye: [0, 10, 120] }).extra?.eye).toEqual([0, 10, 120])
+  })
+
+  it('puts a version 1 eye into the version 2 frame, as its vertices are', () => {
+    const m = read({ ...base, v: 1, colors: [[1, 1, 1], [1, 1, 1], [1, 1, 1]], eye: [0, 10, 120] })
+    expect(m.extra?.eye).toEqual([0, 10, -120])
+    expect(eyeOf(m)).toEqual([0, 10, -120])
+  })
+})
+
+describe('the size limit', () => {
+  it('brings a far eye inside it as a whole, keeping its direction', () => {
+    const e = walkEyeLocal(ship({ eye: [7680, 120, 0] }), 0, 1)
+    expect(e[0]).toBeCloseTo(MAX_AVATAR_RADIUS, 12)
+    expect(e[1]).toBeCloseTo(MAX_AVATAR_RADIUS / 64, 12)
   })
 })

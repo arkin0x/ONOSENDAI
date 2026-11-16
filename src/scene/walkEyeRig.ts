@@ -9,16 +9,17 @@
  * render cells, ready to add to the orbit's target.
  *
  * The walls are asked from where the camera's line really starts, the eased
- * walker point the rig draws (not the cell the step is heading to), so a step
- * out from under a low ceiling keeps the eye under it until the walker is
- * out. The question is asked again only when that point, the eye or the walls
- * have changed; the walls a walker meets are listed again at most every
- * ITEMS_MS, or at once when it reaches a new gibson.
+ * walker point the rig draws, measured from the centre of the walker's own
+ * gibson (`lead`), so a step out from under a low ceiling keeps the eye under
+ * it until the walker is out. The question is asked again when that point
+ * moves by more than a sliver of the near plane's room, when the eye turns,
+ * or when the walls are listed again: at most every ITEMS_MS, at once on a new
+ * gibson, and on every frame while a shard in reach is still being built.
  */
 
 import { Quaternion, Vector3 } from 'three'
 import type { ShardModel } from 'sno-core/shards'
-import { walkEyeLocal, yawOnly } from '../lib/avatarEye'
+import { walkEyeLocal, yawFromForward } from '../lib/avatarEye'
 import { spectatorScale } from '../lib/avatar'
 import { csDirection } from '../lib/pose'
 import type { AxisDirection, Position, ViewAxes } from '../lib/space'
@@ -35,6 +36,9 @@ export const EYE_ROOM = 3 * CAMERA_NEAR
 /** How long the walls a walker meets are kept before they are listed again, in milliseconds. */
 const ITEMS_MS = 300
 
+/** How finely the question's key tells one walker point or eye from another, as a share of EYE_ROOM. */
+const KEY_STEP = 1 / 16
+
 /** What one frame needs to know. */
 export interface EyeFrame {
   /** The avatar worn, or null for the icosahedron. */
@@ -42,13 +46,13 @@ export interface EyeFrame {
   scaleExp: number
   axes: ViewAxes
   plane: number
-  /** The cell the walk is heading to (the cursor). */
+  /** The gibson the walk is heading to (the cursor). */
   cursor: Position
-  /** The eased walker point less the cursor's own centre, render cells: a step under way, a fall between gibsons. */
+  /** The eased walker point less the centre of `cursor`'s gibson as drawn, render cells: a step under way, a fall between gibsons. */
   lead: readonly [number, number, number]
-  /** The camera's turn last frame: the body takes its heading. */
-  look: Quaternion
-  /** Up for the walker (the fall's up): an eye below the walker's floor is held by it. */
+  /** Where the camera looks, render space: the body takes its heading. */
+  forward: { x: number; y: number; z: number }
+  /** Up for the walker, against gravity: a face it stands in holds an eye below it. */
   up: AxisDirection
   /** Whether to ask the walls: in WALK. Gliding out, the last answer stands. */
   walls: boolean
@@ -56,27 +60,24 @@ export interface EyeFrame {
 }
 
 export class WalkEyeRig {
-  private body = new Quaternion()
+  /** The body's turn: the heading, kept when looking straight up or down. */
+  readonly body = new Quaternion()
   private items: WallItem[] = []
   private itemsKey = ''
   private itemsAt = -Infinity
   private askKey = ''
   private share = 1
+  private pending = { pending: false }
 
-  /** The eye's offset from the walker's point this frame, render cells, into `out`. */
+  /** The eye's offset from the walker's point this frame, render cells, into `out`; the body's heading is updated too. */
   offset(f: EyeFrame, out: Vector3): Vector3 {
+    yawFromForward(f.forward, this.body)
     const e = walkEyeLocal(f.shard, f.scaleExp, spectatorScale(f.scaleExp))
     out.set(e[0], e[1], e[2])
     if (out.lengthSq() === 0) return out
-    yawOnly(f.look, this.body)
     out.applyQuaternion(this.body)
     if (f.walls) this.share = this.ask(f, out)
     return out.multiplyScalar(this.share)
-  }
-
-  /** The body's turn in WALK: the heading of `look`, about up only (Avatar.tsx draws the shape with it). */
-  bodyTurn(look: Quaternion, out: Quaternion): Quaternion {
-    return yawOnly(look, out)
   }
 
   /** Forget the walls and the answer: a new WALK starts afresh. */
@@ -101,9 +102,13 @@ export class WalkEyeRig {
     // Render cells to cyberspace gibsons: the view's axes, the zoom.
     const lead = csDirection(f.axes, [f.lead[0], f.lead[1], f.lead[2]]).map((v) => v * g) as [number, number, number]
     const off = csDirection(f.axes, [eye.x, eye.y, eye.z]).map((v) => v * g) as [number, number, number]
-    const key = `${cell}|${f.scaleExp}|${f.up.axis}${f.up.dir}|${lead.map((v) => v.toFixed(4)).join(',')}|${off.map((v) => v.toFixed(4)).join(',')}`
+    const step = EYE_ROOM * g * KEY_STEP
+    const q = (v: number): number => Math.round(v / step)
+    const key = `${cell}|${f.scaleExp}|${f.up.axis}${f.up.dir}|${lead.map(q).join(',')}|${off.map(q).join(',')}`
     if (key === this.askKey) return this.share
-    this.askKey = key
-    return eyeReach(c, lead, off, EYE_ROOM * g, this.items, f.up)
+    const share = eyeReach(c, lead, off, EYE_ROOM * g, this.items, f.up, this.pending)
+    // A shard still being built is asked about again next frame; until then the eye stays at the walker.
+    this.askKey = this.pending.pending ? '' : key
+    return share
   }
 }

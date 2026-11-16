@@ -104,9 +104,25 @@ export function walkEyeLocal(shard: ShardModel | null, scaleExp: number, spectat
   if (!shard || draw === 'marker') return [0, MARKER_EYE * spectator, 0]
   const e = eyeOf(shard)
   const k = avatarScale(shard) / TICKS_PER_UNIT
+  // Gibsons at true scale, then brought inside the size limit as a whole, so
+  // an eye far off keeps its direction from the origin.
+  const g = [e[0] * k, e[1] * k, e[2] * k]
+  const far = Math.max(Math.abs(g[0]), Math.abs(g[1]), Math.abs(g[2]))
+  const fit = far > MAX_AVATAR_RADIUS ? MAX_AVATAR_RADIUS / far : 1
   const zoom = 2 ** -scaleExp
-  const cap = (v: number): number => Math.max(-MAX_AVATAR_RADIUS, Math.min(MAX_AVATAR_RADIUS, v * k)) * zoom
-  return [cap(e[0]), cap(e[1]), cap(e[2])]
+  return [g[0] * fit * zoom + 0, g[1] * fit * zoom + 0, g[2] * fit * zoom + 0]
+}
+
+/**
+ * The heading of a camera looking along `forward` (render space), as a turn
+ * about render up only, into `out`: the yaw that takes the model's nose
+ * (render -Z) to `forward` laid level. Looking straight up or down there is
+ * no heading to read, and `out` is left as it was.
+ */
+export function yawFromForward(forward: { x: number; y: number; z: number }, out: Quaternion): Quaternion {
+  const hx = forward.x, hz = forward.z
+  if (hx * hx + hz * hz < 1e-10) return out
+  return out.setFromAxisAngle(Y, Math.atan2(-hx, -hz))
 }
 
 const fwd = new Vector3()

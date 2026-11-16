@@ -49,7 +49,7 @@ import { aimShown, drawStick, DroneRunHud, reactTo } from '../DroneRunHud'
 import { TouchPad } from '../TouchPad'
 import { ASSIST_PX, BASE_WEAPONS, COPY, FIRE_PX, IDLE_HUD, JUMP_PX, STICK_PX, assistShown, staminaOf, weaponsOfHud, type HudState } from '../model'
 import { AssistBox } from '../AssistBox'
-import { AIM_SCALE, aimingNow, lookRateNow, lookState, lookStickRate, readInput, resetInput, tickLook } from '../../input'
+import { AIM_SCALE, aimingNow, lookRateNow, lookState, lookStickRate, noteSprintLocked, readInput, resetInput, tickLook } from '../../input'
 import { readFileSync } from 'node:fs'
 import type { RunEvent } from '../../../../lib/games/droneRun/sim/events'
 
@@ -76,7 +76,7 @@ function props(over: Partial<HudState> = {}, more: Partial<HudViewProps> = {}): 
 
 const cls = (h: Host): string => String(h.props.className ?? '')
 /** The fixed slots: every element whose class is one of these, as a sorted list of class names. */
-const SLOTS = ['drun-top', 'drun-pips', 'drun-wave', 'drun-left', 'drun-clock', 'drun-sound', 'drun-prompt', 'drun-prompt__title', 'drun-prompt__line', 'drun-cross', 'drun-bottom', 'drun-gun', 'drun-gun__name', 'drun-gauge', 'drun-gauge__status', 'drun-hints', 'drun-stick', 'drun-btn', 'drun-radar', 'drun-assist']
+const SLOTS = ['drun-top', 'drun-pips', 'drun-wave', 'drun-left', 'drun-clock', 'drun-sound', 'drun-prompt', 'drun-prompt__title', 'drun-prompt__line', 'drun-cross', 'drun-bottom', 'drun-gun', 'drun-gun__name', 'drun-gauge', 'drun-gauge__status', 'drun-hints', 'drun-stick', 'drun-btn', 'drun-radar', 'drun-assist', 'drun-stamina']
 function slots(all: Host[]): string[] {
   return all.flatMap((h) => cls(h).split(' ').filter((c) => SLOTS.includes(c) || c.startsWith('drun-btn--') || c.startsWith('drun-stick--'))).sort()
 }
@@ -495,7 +495,7 @@ describe('aim: the rail charging turns the MOVE stick into AIM', () => {
     const find = (c: string): Host => m.all().find((h) => cls(h).split(' ').includes(c))!
     const on = (h: Host, name: string, e: Record<string, unknown>): void => (h.props[name] as Handler)({ pointerType: 'touch', preventDefault: () => {}, stopPropagation: () => {}, currentTarget: { clientWidth: W, clientHeight: H, setPointerCapture: () => {} }, ...e })
     const touch = (name: string, id: number, x = 0, y = 0): void => on(find('drun-layer'), name, { pointerId: id, clientX: x, clientY: y })
-    const button = (mod: string, name: string, id: number): void => on(find(`drun-btn--${mod}`), name, { pointerId: id })
+    const button = (mod: string, name: string, id: number, timeStamp?: number): void => on(find(`drun-btn--${mod}`), name, { pointerId: id, timeStamp })
     const hud = async (over: Partial<HudState>): Promise<void> => { set!({ ...IDLE_HUD, phase: 'wave', ...start, ...over }); await tick() }
     /** What the sticks show now. */
     const shows = () => {
@@ -600,13 +600,15 @@ describe('aim: the rail charging turns the MOVE stick into AIM', () => {
   })
 
   it('aimShown: a phone, no card, a finger on FIRE, a charge gun, not overheated', () => {
-    const h = { weapon: RAIL, overheated: false }
+    const h = { weapon: RAIL, overheated: false, switching: false }
     expect(aimShown(true, false, true, h, BASE_WEAPONS)).toBe(true)
     expect(aimShown(false, false, true, h, BASE_WEAPONS)).toBe(false)
     expect(aimShown(true, true, true, h, BASE_WEAPONS)).toBe(false)
     expect(aimShown(true, false, false, h, BASE_WEAPONS)).toBe(false)
     expect(aimShown(true, false, true, { ...h, overheated: true }, BASE_WEAPONS)).toBe(false)
     expect(aimShown(true, false, true, { ...h, weapon: PULSE }, BASE_WEAPONS)).toBe(false)
+    // Still switching in, the rail cannot charge: the stick keeps moving.
+    expect(aimShown(true, false, true, { ...h, switching: true }, BASE_WEAPONS)).toBe(false)
   })
 
   it('SPRINT: held sprints, per finger, with move and look and fire at once; the button lights while held', async () => {
@@ -617,21 +619,73 @@ describe('aim: the rail charging turns the MOVE stick into AIM', () => {
     touch('onPointerDown', 2, LOOK.cx, LOOK.cy)
     touch('onPointerMove', 2, LOOK.cx + 40, LOOK.cy)
     button('fire', 'onPointerDown', 3)
-    button('sprint', 'onPointerDown', 4)
+    button('sprint', 'onPointerDown', 4, 1000)
     await tick()
     expect(sprintCls()).toContain('is-held')
     tickLook(0.1)
     const a = readInput()
     expect([a.sprint, a.fire, a.move.fwd > 0.99, a.yaw < 0]).toEqual([true, true, true, true])
-    // A second finger on SPRINT, the first lifting: still sprinting.
-    button('sprint', 'onPointerDown', 5)
-    button('sprint', 'onPointerUp', 4)
+    // A second finger on SPRINT, the first lifting after a hold: still sprinting.
+    button('sprint', 'onPointerDown', 5, 1500)
+    button('sprint', 'onPointerUp', 4, 2000)
     expect(readInput().sprint).toBe(true)
-    button('sprint', 'onLostPointerCapture', 5)
+    button('sprint', 'onLostPointerCapture', 5, 2100)
     await tick()
     expect(readInput().sprint).toBe(false)
     expect(sprintCls()).not.toContain('is-held')
+    expect(sprintCls()).not.toContain('is-latched')
     expect(readInput().move.fwd).toBeCloseTo(1)
+    await m.unmount()
+  })
+
+  it('SPRINT tapped latches on and lights; a second tap, the MOVE stick let go, the lockout, a card and blur each turn it off', async () => {
+    const { m, touch, button, hud } = await hudWith({ weapon: PULSE })
+    const sprintCls = (): string => cls(m.all().find((h) => cls(h).includes('drun-btn--sprint'))!)
+    const tap = async (id: number, at: number): Promise<void> => { button('sprint', 'onPointerDown', id, at); button('sprint', 'onPointerUp', id, at + 90); button('sprint', 'onLostPointerCapture', id, at + 91); await tick() }
+    // One thumb: tap SPRINT, then the MOVE stick.
+    await tap(4, 1000)
+    expect(sprintCls()).toContain('is-latched')
+    expect(sprintCls()).toContain('is-held')
+    touch('onPointerDown', 1, MOVE.cx, MOVE.cy)
+    touch('onPointerMove', 1, MOVE.cx, MOVE.cy - 60)
+    const a = readInput()
+    expect([a.sprint, a.move.fwd > 0.99]).toEqual([true, true])
+    // A second tap.
+    await tap(4, 2000)
+    expect(sprintCls()).not.toContain('is-latched')
+    expect(readInput().sprint).toBe(false)
+    // The MOVE thumb lifting.
+    await tap(4, 3000)
+    expect(readInput().sprint).toBe(true)
+    touch('onPointerUp', 1)
+    await tick()
+    expect(readInput().sprint).toBe(false)
+    expect(sprintCls()).not.toContain('is-latched')
+    // The lockout (the runner tells input.ts each step).
+    await tap(4, 4000)
+    noteSprintLocked(true)
+    await tick()
+    expect(readInput().sprint).toBe(false)
+    expect(sprintCls()).not.toContain('is-latched')
+    // A card.
+    await tap(4, 5000)
+    await hud({ weapon: PULSE, phase: 'failed', hp: 0 })
+    expect(readInput().sprint).toBe(false)
+    await hud({ weapon: PULSE })
+    expect(sprintCls()).not.toContain('is-latched')
+    // Blur, and the page hidden.
+    await tap(4, 6000)
+    winEvents.dispatchEvent(new Event('blur'))
+    await tick()
+    expect(readInput().sprint).toBe(false)
+    await tap(4, 7000)
+    expect(readInput().sprint).toBe(true)
+    doc.visibilityState = 'hidden'
+    docEvents.dispatchEvent(new Event('visibilitychange'))
+    await tick()
+    expect(readInput().sprint).toBe(false)
+    expect(sprintCls()).not.toContain('is-latched')
+    doc.visibilityState = 'visible'
     await m.unmount()
   })
 })
@@ -670,10 +724,63 @@ describe('the SPRINT button\'s stamina ring', () => {
     expect(staminaOf({ ...IDLE_HUD, stamina: Number.NaN } as HudState).stamina).toBe(1)
   })
 
+  it('tapped on (latched), the button is lit and pressed', async () => {
+    const on = await mount(createElement(TouchPad, { hud: IDLE_HUD, weapons: BASE_WEAPONS, move: sticks(), look: sticks(), sprintLatched: true }))
+    expect(cls(sprint(on.all()))).toContain('is-latched')
+    expect(cls(sprint(on.all()))).toContain('is-held')
+    expect(sprint(on.all()).props['aria-pressed']).toBe(true)
+    await on.unmount()
+    const off = await mount(createElement(TouchPad, { hud: IDLE_HUD, weapons: BASE_WEAPONS, move: sticks(), look: sticks() }))
+    expect(cls(sprint(off.all()))).not.toContain('is-latched')
+    expect(sprint(off.all()).props['aria-pressed']).toBe(false)
+    await off.unmount()
+  })
+
   it('the CSS dims it while locked out and draws the ring inside its border', () => {
     const css = readFileSync(new URL('../../../../styles.css', import.meta.url), 'utf8')
-    expect(css).toMatch(/\.drun-btn--sprint\.is-locked \{ opacity: 0\.5; \}/)
+    // Locked out, the ring and the background dim, never the white word (no opacity on the button).
+    expect(css).toMatch(/\.drun-btn--sprint\.is-locked \{ background: [^;]+; border-color: [^;]+; box-shadow: none; \}/)
+    expect(css).toMatch(/\.drun-btn--sprint\.is-locked \.drun-meter__fill \{ stroke: /)
+    expect(css).not.toMatch(/\.drun-btn--sprint\.is-locked[^{]*\{[^}]*opacity/)
+    // Latched (tapped on), it is lit.
+    expect(css).toMatch(/\.drun-btn--sprint\.is-latched \{ background: /)
     expect(css).toMatch(/\.drun-meter \{ position: absolute; inset: 0;/)
+  })
+})
+
+describe('the desktop\'s stamina gauge', () => {
+  const gauge = (all: Host[]): Host | undefined => all.find((h) => cls(h).split(' ').includes('drun-stamina'))
+  const bar = (all: Host[]): Host => all.find((h) => h.props.role === 'meter' && h.props['aria-label'] === COPY.stamina)!
+
+  it('shown on a desktop with stamina, in its own slot in every phase; drains with it; dims in the lockout', async () => {
+    const full = await mount(createElement(HudView, props()))
+    expect(gauge(full.all())).toBeDefined()
+    expect(bar(full.all()).props['aria-valuenow']).toBe(100)
+    expect(full.says(COPY.stamina)).toBe(true)
+    await full.unmount()
+    const draining = await mount(createElement(HudView, props({ stamina: 0.35, sprinting: true } as Partial<HudState>)))
+    expect(bar(draining.all()).props['aria-valuenow']).toBe(35)
+    expect(cls(gauge(draining.all())!)).toContain('is-sprinting')
+    expect(cls(gauge(draining.all())!)).not.toContain('is-locked')
+    await draining.unmount()
+    const locked = await mount(createElement(HudView, props({ stamina: 0, sprintLocked: true } as Partial<HudState>)))
+    expect(cls(gauge(locked.all())!)).toContain('is-locked')
+    await locked.unmount()
+  })
+
+  it('not on a phone (the ring round SPRINT is its gauge), nor for a variant without stamina', async () => {
+    const phone = await mount(createElement(HudView, props({}, { touch: true })))
+    expect(gauge(phone.all())).toBeUndefined()
+    await phone.unmount()
+    const none = await mount(createElement(HudView, props({ hasStamina: false } as Partial<HudState>)))
+    expect(gauge(none.all())).toBeUndefined()
+    await none.unmount()
+  })
+
+  it('the CSS places it in a fixed slot of its own and dims its bar in the lockout', () => {
+    const css = readFileSync(new URL('../../../../styles.css', import.meta.url), 'utf8')
+    expect(css).toMatch(/\.drun-stamina \{\n  position: absolute;\n  left: 16px;\n  bottom: var\(--drun-bottom\);\n  width: 120px;/)
+    expect(css).toMatch(/\.drun-stamina\.is-locked \.drun-bar__fill \{ background: /)
   })
 })
 

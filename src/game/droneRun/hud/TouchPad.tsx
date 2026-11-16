@@ -14,6 +14,11 @@
  * | above SPRINT (beside the MOVE stick on a short landscape screen) | the gun button: the gun in hand's icon, name and gauge; a tap goes to the next gun |
  * | above the gun button (beside it on a short screen) | RELOAD, only for the gun with a magazine (its place is kept for the others) |
  *
+ * SPRINT tapped latches sprint on (lit), so one thumb can tap it and go
+ * back to the MOVE stick; a second tap, the MOVE stick let go, the lockout,
+ * a card or the page losing focus turn it off. Held longer than a tap, it
+ * sprints only while held (input.ts pressSprintPad).
+ *
  * While the rail charges (FIRE held with the CHARGE RAIL in hand) the MOVE
  * stick aims: its label reads AIM, its knob carries a crosshair and it takes
  * the rail's blue; the LOOK stick is hidden (its place kept). Both come back
@@ -30,7 +35,7 @@
 import type { RefObject } from 'react'
 import { Crosshair, RotateCcw } from 'lucide-react'
 import { noCallout } from '../../../hooks/useRepeatable'
-import { pressCycle, pressJump, pressReload, setFire, setSprint } from '../input'
+import { pressCycle, pressJump, pressReload, pressSprintPad, releaseSprintPad, setFire } from '../input'
 import { Gauge } from './HudView'
 import { COPY, staminaOf, weaponIcon, type HudState, type HudWeapon } from './model'
 
@@ -50,6 +55,9 @@ export const fireSource = (pointerId: number): string => `pad:fire:${pointerId}`
 /** SPRINT's source for one finger. */
 export const sprintSource = (pointerId: number): string => `pad:sprint:${pointerId}`
 
+/** A press's time, ms: the event's own, or the clock's when it carries none. */
+const when = (e: Press): number => (Number.isFinite(e.timeStamp) ? e.timeStamp : Date.now())
+
 /** The stamina ring's radius in its 100-unit box: just inside the button's own border. */
 const METER_R = 44
 
@@ -62,9 +70,11 @@ export interface TouchPadProps {
   aiming?: boolean
   /** A finger (or Shift) holds sprint: the button is lit. */
   sprintHeld?: boolean
+  /** SPRINT is latched on by a tap: the button is lit. */
+  sprintLatched?: boolean
 }
 
-export function TouchPad({ hud, weapons, move, look, aiming = false, sprintHeld = false }: TouchPadProps): JSX.Element {
+export function TouchPad({ hud, weapons, move, look, aiming = false, sprintHeld = false, sprintLatched = false }: TouchPadProps): JSX.Element {
   const weapon = weapons[hud.weapon]
   const stamina = staminaOf(hud)
   const Icon = weaponIcon(weapon)
@@ -78,9 +88,11 @@ export function TouchPad({ hud, weapons, move, look, aiming = false, sprintHeld 
   const sprintDown = (e: Press): void => {
     own(e)
     try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* fine */ }
-    setSprint(sprintSource(e.pointerId), true)
+    pressSprintPad(sprintSource(e.pointerId), when(e))
   }
-  const sprintUp = (e: Press): void => { e.stopPropagation(); setSprint(sprintSource(e.pointerId), false) }
+  const sprintUp = (e: Press): void => { e.stopPropagation(); releaseSprintPad(sprintSource(e.pointerId), when(e)) }
+  /** A cancelled touch, or the capture lost without a lift: it ends a hold and never latches. */
+  const sprintGone = (e: Press): void => { e.stopPropagation(); releaseSprintPad(sprintSource(e.pointerId), when(e), false) }
   return (
     <div className="drun-touch" aria-label="game controls">
       <div ref={move.base} className={`drun-stick drun-stick--move${aiming ? ' is-aim' : ''}`} aria-label={aiming ? COPY.stickAim : COPY.move}>
@@ -94,16 +106,16 @@ export function TouchPad({ hud, weapons, move, look, aiming = false, sprintHeld 
       <button className="drun-btn drun-btn--fire" aria-label={COPY.fire} {...noCallout} onPointerDown={fireDown} onPointerUp={fireUp} onPointerCancel={fireUp} onLostPointerCapture={fireUp}>{COPY.fire}</button>
       <button className="drun-btn drun-btn--jump" aria-label={COPY.jump} {...noCallout} onPointerDown={(e) => { own(e); pressJump() }}>{COPY.jump}</button>
       <button
-        className={`drun-btn drun-btn--sprint${sprintHeld ? ' is-held' : ''}${stamina.sprinting ? ' is-sprinting' : ''}${stamina.locked ? ' is-locked' : ''}`}
+        className={`drun-btn drun-btn--sprint${sprintHeld || sprintLatched ? ' is-held' : ''}${sprintLatched ? ' is-latched' : ''}${stamina.sprinting ? ' is-sprinting' : ''}${stamina.locked ? ' is-locked' : ''}`}
         aria-label={COPY.sprint}
-        aria-pressed={sprintHeld}
+        aria-pressed={sprintHeld || sprintLatched}
         hidden={!stamina.shown}
         disabled={!stamina.shown}
         {...noCallout}
         onPointerDown={sprintDown}
         onPointerUp={sprintUp}
-        onPointerCancel={sprintUp}
-        onLostPointerCapture={sprintUp}
+        onPointerCancel={sprintGone}
+        onLostPointerCapture={sprintGone}
       >
         <svg className="drun-meter" viewBox="0 0 100 100" role="meter" aria-label={COPY.stamina} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(stamina.stamina * 100)}>
           <circle className="drun-meter__track" cx={50} cy={50} r={METER_R} />

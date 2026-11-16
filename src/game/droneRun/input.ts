@@ -20,6 +20,7 @@
  * | 1 2 3 | select: that gun, for the one step that reads it |
  * | Q, the wheel, the phone's gun button | select: the next gun (the wheel back: the one before) |
  * | R, RELOAD | reload: an edge |
+ * | SPRINT on the phone, tapped | sprint, latched on (sprintLatched) until a second tap, the MOVE stick let go, the lockout (stamina run dry), a card, or the page losing focus; held longer than SPRINT_TAP_MS it sprints only while held, so two fingers can still hold it. Shift stays a hold |
  *
  * Edges (jump, select, reload) are kept until a step reads them, then
  * cleared, so a tap shorter than a step is never lost and never read twice.
@@ -88,6 +89,10 @@ export function keyAction(code: string): KeyAction | null {
 const held = new Map<string, Dir>()
 const firing = new Set<string>()
 const sprinting = new Set<string>()
+/** SPRINT tapped on the phone: sprint stays on without a finger on it (one thumb can tap it, then go back to the MOVE stick). */
+let latched = false
+/** Each SPRINT finger's press: when it went down and whether the latch was on then. */
+const sprintPresses = new Map<string, { at: number; wasLatched: boolean }>()
 /** The rail charging on a phone: the MOVE stick aims (TouchTracker.setAim) and the steps read no movement. */
 let aiming = false
 let stick: Dir = { fwd: 0, strafe: 0 }
@@ -126,7 +131,7 @@ export function readInput(): RunInput {
   if (select !== null) weapons.current = select
   const out: RunInput = paused
     ? { move: { fwd: 0, strafe: 0 }, yaw: lookState.yaw, pitch: lookState.pitch, jump: false, fire: false, select: null, reload: false, sprint: false }
-    : { move: moveNow(), yaw: lookState.yaw, pitch: lookState.pitch, jump: edges.jump, fire: firing.size > 0, select, reload: edges.reload, sprint: sprinting.size > 0 }
+    : { move: moveNow(), yaw: lookState.yaw, pitch: lookState.pitch, jump: edges.jump, fire: firing.size > 0, select, reload: edges.reload, sprint: sprinting.size > 0 || latched }
   edges = { jump: false, reload: false, select: null, cycle: 0 }
   return out
 }
@@ -188,8 +193,48 @@ export function padFiring(): boolean {
   for (const s of firing) if (s.startsWith('pad:fire:')) return true
   return false
 }
-/** Whether anything holds sprint. */
-export function sprintHeld(): boolean { return sprinting.size > 0 }
+/** Whether anything holds sprint, or the phone's SPRINT is latched on. */
+export function sprintHeld(): boolean { return sprinting.size > 0 || latched }
+
+/** A press on the phone's SPRINT shorter than this, milliseconds, is a tap (it toggles the latch); longer, a hold. */
+export const SPRINT_TAP_MS = 250
+
+/** Whether the phone's SPRINT is latched on (tapped). */
+export function sprintLatched(): boolean { return latched }
+
+/** The latch on or off; the HUD hears it (the button lit). */
+export function setSprintLatch(on: boolean): void {
+  if (latched === on) return
+  latched = on
+  heard()
+}
+
+/**
+ * A finger goes down on the phone's SPRINT at `now` (ms): it sprints at
+ * once while held. Latched already, the press is the second tap: the latch
+ * comes off (the finger still sprints while it stays down).
+ */
+export function pressSprintPad(source: string, now: number): void {
+  if (paused) return
+  sprintPresses.set(source, { at: now, wasLatched: latched })
+  setSprintLatch(false)
+  setSprint(source, true)
+}
+
+/**
+ * That finger lifts at `now` (ms). A tap (shorter than SPRINT_TAP_MS, and
+ * the latch off when it went down) latches sprint on; a hold just ends.
+ * `tap` false (a cancelled touch) never latches.
+ */
+export function releaseSprintPad(source: string, now: number, tap = true): void {
+  const p = sprintPresses.get(source)
+  sprintPresses.delete(source)
+  setSprint(source, false)
+  if (tap && p && !p.wasLatched && !paused && now - p.at < SPRINT_TAP_MS) setSprintLatch(true)
+}
+
+/** Stamina ran dry (the lockout runs): the latch comes off, so sprint is tapped on again when it is back (the runner tells it each step). */
+export function noteSprintLocked(locked: boolean): void { if (locked) setSprintLatch(false) }
 /** The rail charging on a phone (TouchTracker.setAim sets it): the steps read no movement while it is on. */
 export function setAiming(on: boolean): void { aiming = on }
 export function aimingNow(): boolean { return aiming }
@@ -211,10 +256,12 @@ export function inputPaused(): boolean { return paused }
 
 /** Let go of everything held, and drop the edges not yet read. */
 export function releaseAll(): void {
-  const any = firing.size > 0 || sprinting.size > 0
+  const any = firing.size > 0 || sprinting.size > 0 || latched
   held.clear()
   firing.clear()
   sprinting.clear()
+  sprintPresses.clear()
+  latched = false
   aiming = false
   stick = { fwd: 0, strafe: 0 }
   lookRate.yaw = 0
@@ -575,6 +622,8 @@ export class TouchTracker {
     if (id === this.stick?.id) {
       this.stick = null
       setStick(0, 0)
+      // The run is let go: a tapped SPRINT ends with it.
+      setSprintLatch(false)
       if (this.aim) setLookRate(0, 0)
       this.knob = { dx: 0, dy: 0 }
     }
@@ -589,7 +638,7 @@ export class TouchTracker {
 
   /** Every finger gone (the screen lost focus, a card came up). */
   clear(): void {
-    if (this.stick) setStick(0, 0)
+    if (this.stick) { setStick(0, 0); setSprintLatch(false) }
     if (this.lookStick || (this.aim && this.stick)) setLookRate(0, 0)
     this.stick = null
     this.lookStick = null

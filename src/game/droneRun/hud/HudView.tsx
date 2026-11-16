@@ -11,6 +11,7 @@
  * | centre | the crosshair; a small X on it when a shot hits; on a phone with an assist gun (the PULSE RIFLE) in hand, the aim assist's box round it (AssistBox.tsx, model.ts assistShown) |
  * | edges | a red flash when you are hit |
  * | under the top bar | the safe zone's line: the wave's name, then "Leave the safe zone to start the wave." (kept empty, not removed, in other phases) |
+ * | bottom left (desktop) | the stamina: STAMINA over a bar that drains while sprinting (Shift) and dims in the lockout; only for a variant with stamina (the phone's is the ring round SPRINT) |
  * | bottom (desktop) | the guns 1 2 3 with the one in hand lit, its name and its gauge; the key hints under it, folded during a wave |
  * | middle | the cards: RUN FAILED (RESTART, EXIT GAME) and WAVE n CLEAR (time, drones downed, NEXT WAVE, EXIT GAME) |
  *
@@ -21,7 +22,7 @@
 import { Drone, Heart, Volume2, VolumeX } from 'lucide-react'
 import { formatClearTime } from '../../../lib/games/progress'
 import { AssistBox } from './AssistBox'
-import { assistShown, COPY, weaponIcon, type HudState, type HudWeapon } from './model'
+import { assistShown, COPY, staminaOf, weaponIcon, type HudState, type HudWeapon } from './model'
 import { Radar } from './Radar'
 
 export interface Pulses {
@@ -76,6 +77,19 @@ export function Gauge({ hud, weapon }: { hud: HudState; weapon: HudWeapon | unde
   )
 }
 
+/** The desktop's stamina: its label over a bar, in a slot of its own; dimmed in the lockout. */
+export function StaminaGauge({ hud }: { hud: HudState }): JSX.Element {
+  const st = staminaOf(hud)
+  return (
+    <span className={`drun-stamina${st.sprinting ? ' is-sprinting' : ''}${st.locked ? ' is-locked' : ''}`}>
+      <span className="drun-stamina__label" aria-hidden>{COPY.stamina}</span>
+      <span className="drun-bar" role="meter" aria-label={COPY.stamina} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(st.stamina * 100)}>
+        <span className="drun-bar__fill" style={{ width: pct(st.stamina) }} />
+      </span>
+    </span>
+  )
+}
+
 export function HudView(p: HudViewProps): JSX.Element {
   const { hud, weapons, touch, pulses } = p
   const pips = Array.from({ length: Math.max(1, hud.maxHp) }, (_, i) => i < hud.hp)
@@ -118,6 +132,8 @@ export function HudView(p: HudViewProps): JSX.Element {
         <span className="drun-prompt__title">{hud.phase === 'safe' ? `${COPY.wave(hud.wave)}${hud.waveName ? `  ${hud.waveName}` : ''}` : ''}</span>
         <span className="drun-prompt__line">{hud.phase === 'safe' ? COPY.safePrompt : ''}</span>
       </div>
+
+      {!touch && staminaOf(hud).shown && <StaminaGauge hud={hud} />}
 
       {!touch && (
         <div className="drun-bottom">

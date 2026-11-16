@@ -11,7 +11,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  attachDesktop, keyAction, lookBy, lookRateNow, lookState, lookStickRate, noteWeapons, padFiring, pointer, readInput, releaseAll, resetInput, ringAt, setFire, setInputPaused, setLookRate, setSprint, stickVector, tickLook,
+  attachDesktop, keyAction, lookBy, noteSprintLocked, pressSprintPad, releaseSprintPad, sprintHeld, sprintLatched, SPRINT_TAP_MS, lookRateNow, lookState, lookStickRate, noteWeapons, padFiring, pointer, readInput, releaseAll, resetInput, ringAt, setFire, setInputPaused, setLookRate, setSprint, stickVector, tickLook,
   TouchTracker, MOUSE_RAD_PER_PX, DRAG_RAD_PER_PX, STICK_DEAD, TOUCH_RAD_PER_PX, PITCH_LIMIT, LOOK_DEAD, LOOK_CURVE, LOOK_MAX_YAW, LOOK_MAX_PITCH, AIM_SCALE, RING_MARGIN, aimingNow,
 } from '../../input'
 
@@ -186,6 +186,102 @@ describe('keys to a RunInput', () => {
     expect(readInput().sprint).toBe(true)
     setSprint('pad:sprint:2', false)
     expect(readInput().sprint).toBe(false)
+  })
+
+  describe('the phone\'s SPRINT: a tap latches, a hold holds', () => {
+    const SRC = 'pad:sprint:7'
+    const tap = (at: number, id = SRC): void => { pressSprintPad(id, at); releaseSprintPad(id, at + 80) }
+
+    it('a tap latches sprint on; a second tap clears it', () => {
+      tap(1000)
+      expect(sprintLatched()).toBe(true)
+      expect(sprintHeld()).toBe(true)
+      expect(readInput().sprint).toBe(true)
+      expect(readInput().sprint).toBe(true)
+      // The second tap: off as the finger lands, and its lift does not latch again.
+      pressSprintPad(SRC, 2000)
+      expect(sprintLatched()).toBe(false)
+      releaseSprintPad(SRC, 2080)
+      expect(sprintLatched()).toBe(false)
+      expect(readInput().sprint).toBe(false)
+    })
+
+    it('held longer than a tap, it sprints only while held and latches nothing', () => {
+      pressSprintPad(SRC, 1000)
+      expect(readInput().sprint).toBe(true)
+      releaseSprintPad(SRC, 1000 + SPRINT_TAP_MS + 400)
+      expect(sprintLatched()).toBe(false)
+      expect(readInput().sprint).toBe(false)
+      // A cancelled touch never latches either.
+      pressSprintPad(SRC, 3000)
+      releaseSprintPad(SRC, 3050, false)
+      expect(readInput().sprint).toBe(false)
+      // Latched, a second finger held then let go keeps nothing on (the hold's press cleared the latch).
+      tap(4000)
+      pressSprintPad('pad:sprint:8', 5000)
+      expect(readInput().sprint).toBe(true)
+      releaseSprintPad('pad:sprint:8', 6000)
+      expect(readInput().sprint).toBe(false)
+    })
+
+    it('the MOVE stick let go clears it; a stick finger landing after the tap does not', () => {
+      const t = new TouchTracker(() => ({ cx: 80, cy: 700, radius: 60 }))
+      // One thumb: tap SPRINT, then take the MOVE stick and push.
+      tap(1000)
+      t.down(1, 80, 700, 400)
+      t.move(1, 80, 640)
+      const a = readInput()
+      expect([a.sprint, a.move.fwd > 0.9]).toEqual([true, true])
+      t.up(1)
+      expect(sprintLatched()).toBe(false)
+      expect(readInput().sprint).toBe(false)
+      // Every finger gone (blur, a card) does too.
+      t.down(2, 80, 700, 400)
+      tap(2000)
+      t.clear()
+      expect(readInput().sprint).toBe(false)
+    })
+
+    it('the lockout clears it (the runner tells it each step); a card and blur clear it', () => {
+      tap(1000)
+      noteSprintLocked(false)
+      expect(sprintLatched()).toBe(true)
+      noteSprintLocked(true)
+      expect(sprintLatched()).toBe(false)
+      expect(readInput().sprint).toBe(false)
+      // A card.
+      tap(2000)
+      setInputPaused(true)
+      expect(sprintLatched()).toBe(false)
+      expect(readInput().sprint).toBe(false)
+      // A tap while the card is up does nothing.
+      tap(2500)
+      expect(sprintLatched()).toBe(false)
+      setInputPaused(false)
+      // Blur and a hidden page (the desktop wiring lets go of everything).
+      const h = host()
+      tap(3000)
+      h.win.fire('blur', {})
+      expect(sprintLatched()).toBe(false)
+      tap(4000)
+      expect(sprintLatched()).toBe(true)
+      Object.assign(h.doc, { visibilityState: 'hidden' })
+      h.doc.fire('visibilitychange', {})
+      expect(sprintLatched()).toBe(false)
+      tap(5000)
+      releaseAll()
+      expect(readInput().sprint).toBe(false)
+      h.detach()
+    })
+
+    it('Shift on the desktop stays a hold: a quick press latches nothing', () => {
+      const h = host()
+      key(h, 'keydown', 'ShiftLeft', { key: 'Shift' })
+      key(h, 'keyup', 'ShiftLeft', { key: 'Shift' })
+      expect(sprintLatched()).toBe(false)
+      expect(readInput().sprint).toBe(false)
+      h.detach()
+    })
   })
 
   it('unwires every listener it added', () => {

@@ -37,7 +37,7 @@ import {
 import type { WorldShard } from '../../lib/games/play'
 import type { Position } from '../../lib/space'
 import { lerp3, simYaw, toSimInput } from './frame'
-import { noteWeapons, readInput, resetInput } from './input'
+import { noteSprintLocked, noteWeapons, readInput, resetInput } from './input'
 import { applyAssist } from './assist'
 
 /** The longest frame the clock honours, seconds: a longer one (a stall, a tab coming back) owes no more than this. */
@@ -292,6 +292,8 @@ export class DroneRunner {
     const input = toSimInput(this.input(), this.simInput)
     this.assist?.(st, input)
     stepRun(st, input)
+    // Stamina ran dry: a tapped SPRINT comes off.
+    if (this.hud) noteSprintLocked(st.body.sprintLock > 0)
     this.steps++
     this.sinceHud++
     for (const ev of st.events) for (const l of listeners) l(ev, st)

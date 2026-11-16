@@ -12461,6 +12461,23 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   border-radius: 11px;
   background: rgba(6, 14, 22, 0.55);
 }
+/* The stamina (desktop, a variant with stamina): its own slot at the bottom left, a label over a bar; the bar dims in the
+ * lockout. Fixed in place, so nothing moves when it drains or locks. */
+.drun-stamina {
+  position: absolute;
+  left: 16px;
+  bottom: var(--drun-bottom);
+  width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.drun-stamina .drun-bar { height: 6px; }
+.drun-stamina.is-sprinting .drun-bar { border-color: #fff; }
+.drun-stamina.is-locked .drun-bar { border-color: rgba(255, 255, 255, 0.35); }
+.drun-stamina.is-locked .drun-bar__fill { background: rgba(255, 255, 255, 0.4); }
 .drun-hints kbd, .drun-card kbd {
   margin-right: 5px;
   padding: 0 4px;
@@ -12601,7 +12618,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   letter-spacing: 0.1em;
 }
 /* SPRINT: JUMP's size and look, just above the MOVE stick toward the middle (its centre over the stick's rim). A ring
- * inside its border is the stamina: it drains clockwise while sprinting and dims while emptied (the lockout). */
+ * inside its border is the stamina: it drains clockwise while sprinting and dims while emptied (the lockout). Tapped on
+ * (latched), it is lit and glows; in the lockout only its ring and its background dim, never the white word. */
 .drun-btn--sprint {
   left: calc(20px + var(--drun-stick) - var(--drun-jump) / 2);
   bottom: var(--drun-above-stick);
@@ -12616,13 +12634,15 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   padding: 0;
 }
 .drun-btn--sprint:active, .drun-btn--sprint.is-held { background: rgba(255, 59, 107, 0.55); }
+.drun-btn--sprint.is-latched { background: rgba(255, 59, 107, 0.8); border-color: #fff; box-shadow: 0 0 12px rgba(255, 90, 130, 0.95); }
 .drun-btn__word { position: relative; }
 .drun-meter { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); pointer-events: none; }
 .drun-meter circle { fill: none; stroke-width: 7; }
 .drun-meter__track { stroke: rgba(255, 255, 255, 0.18); }
 .drun-meter__fill { stroke: #fff; stroke-linecap: butt; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9)); }
-.drun-btn--sprint.is-locked { opacity: 0.5; }
+.drun-btn--sprint.is-locked { background: rgba(255, 59, 107, 0.12); border-color: rgba(255, 90, 130, 0.4); box-shadow: none; }
 .drun-btn--sprint[hidden] { display: block; visibility: hidden; }
+.drun-btn--sprint.is-locked .drun-meter__track { stroke: rgba(255, 255, 255, 0.08); }
 .drun-btn--sprint.is-locked .drun-meter__fill { stroke: rgba(255, 255, 255, 0.45); }
 /* The gun: over SPRINT; RELOAD above it. */
 .drun-btn--gun {

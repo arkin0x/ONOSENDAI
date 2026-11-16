@@ -12,7 +12,7 @@
  *
  * On a phone it turns the view each screen frame by the LOOK stick's rate
  * (input.ts tickLook), and while the rail charges (FIRE held with a charge
- * gun in hand, not overheated, no card up) it switches the MOVE stick to aim
+ * gun in hand and switched in, not overheated, no card up) it switches the MOVE stick to aim
  * (TouchTracker.setAim): the steps read no movement and the LOOK stick
  * hides; FIRE let go, another gun, a card or the page losing focus (which
  * lets go of FIRE) switch it back.
@@ -35,7 +35,7 @@ import type { RunEvent } from '../../../lib/games/droneRun/sim/events'
 import { useGame } from '../../../store/useGame'
 import { useSoundMutes } from '../../../store/useSoundMutes'
 import { playSound, toggleDroneRunSound, useDroneRunSound, warmSound } from '../audio'
-import { attachDesktop, held$, noteWeapons, padFiring, pointer, releaseAll, releasePointer, setAiming, setInputPaused, sprintHeld, tickLook, TouchTracker, type Pt, type StickPlace } from '../input'
+import { attachDesktop, held$, noteWeapons, padFiring, pointer, releaseAll, releasePointer, setAiming, setInputPaused, sprintHeld, sprintLatched, tickLook, TouchTracker, type Pt, type StickPlace } from '../input'
 import { HudView, type Pulses } from './HudView'
 import { TouchPad } from './TouchPad'
 import { IDLE_HUD, STICK_PX, weaponsOfHud, type HudState, type HudWeapon } from './model'
@@ -94,11 +94,12 @@ function useHeld(get: () => boolean): boolean {
 
 /**
  * Whether the MOVE stick aims: a phone, no card up, a charge gun (the rail)
- * in hand and not overheated, and a finger on FIRE. The rail fires on
- * release, so FIRE let go is the shot (or the fizzle).
+ * in hand, ready (not still switching in) and not overheated, and a finger
+ * on FIRE. The rail fires on release, so FIRE let go is the shot (or the
+ * fizzle). While it switches in it cannot charge, so the stick still moves.
  */
-export function aimShown(touch: boolean, card: boolean, padFire: boolean, hud: Pick<HudState, 'weapon' | 'overheated'>, weapons: readonly HudWeapon[]): boolean {
-  return touch && !card && padFire && !hud.overheated && weapons[hud.weapon]?.gauge === 'charge'
+export function aimShown(touch: boolean, card: boolean, padFire: boolean, hud: Pick<HudState, 'weapon' | 'overheated' | 'switching'>, weapons: readonly HudWeapon[]): boolean {
+  return touch && !card && padFire && !hud.overheated && !hud.switching && weapons[hud.weapon]?.gauge === 'charge'
 }
 
 function usePointerLocked(): boolean {
@@ -142,6 +143,7 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
   const card = hud.phase === 'failed' || hud.phase === 'cleared'
   const padFire = useHeld(padFiring)
   const sprinting = useHeld(sprintHeld)
+  const sprintOn = useHeld(sprintLatched)
   const aiming = aimShown(touch, card, padFire, hud, weapons)
   /** How far each ring is moved from its resting place now, px (so its resting place can be read back from where it is drawn). */
   const shifted = useRef({ move: { x: 0, y: 0 }, look: { x: 0, y: 0 } })
@@ -273,7 +275,7 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
         onExit={leave}
         onToggleSound={toggleDroneRunSound}
       />
-      {touch && <TouchPad hud={hud} weapons={weapons} move={move} look={look} aiming={aiming} sprintHeld={sprinting} />}
+      {touch && <TouchPad hud={hud} weapons={weapons} move={move} look={look} aiming={aiming} sprintHeld={sprinting} sprintLatched={sprintOn} />}
     </div>
   )
 }

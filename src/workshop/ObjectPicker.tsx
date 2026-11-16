@@ -27,6 +27,7 @@ import { ShardFolders, useNewestFirst } from '../hud/ShardFolders'
 import { useScrollMemory } from '../hooks/useScrollMemory'
 import { useShardFolders } from '../store/useShardFolders'
 import { ShardThumb } from '../hud/ShardThumb'
+import { SearchField } from '../hud/ui/SearchField'
 
 const OBJECT_KIND = 33331
 const NONE: Found[] = []
@@ -83,6 +84,7 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
   const [address, setAddress] = useState('')
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [query, setQuery] = useState('')
 
   useEffect(() => {
     let live = true
@@ -139,13 +141,15 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
           <span className="login__label">Yours</span>
           {mine === null && <p className="login__note">Reading the relays…</p>}
           {mine !== null && mine.length === 0 && <p className="login__note">No published objects under this key yet.</p>}
+          {/* Above the list: the sheet scrolls as a whole, so under a long list the box would be out of reach. */}
+          {mine !== null && (mine.length > 1 || query !== '') && <SearchField className="workshop__search" value={query} onChange={setQuery} placeholder="Search shards and folders" label="Search your published objects and folders" />}
           {mine !== null && mine.length > 0 && (
             <ul className="objpick__list" ref={listScroll}>
-              <ShardFolders items={byRecent} refOf={foundRef} nameOf={foundName} row={(o, f) => (
+              <ShardFolders items={byRecent} refOf={foundRef} nameOf={foundName} query={query} row={(o, f) => (
                 <li key={o.address} {...f.drag}>
                   <button className="objpick__row" onClick={() => choose({ ref: refOf(o.address), name: o.shard.name, shard: o.shard })}>
                     <ShardThumb shard={o.shard} />
-                    <span className="objpick__name">{o.shard.name}</span>
+                    <span className="objpick__name">{f.mark(o.shard.name)}</span>
                     <span className="objpick__meta">{o.shard.vertices.length} v · {o.shard.faces.length} f{o.shard.parts?.length ? ` · ${o.shard.parts.length} obj` : ''}</span>
                   </button>
                   {f.tool}

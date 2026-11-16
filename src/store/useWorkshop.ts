@@ -53,7 +53,6 @@ import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain }
 import { bounceOf, springboardOf, withBounce, type Bounce } from '../lib/walkBounce'
 import { withAnim } from '../lib/anim'
 import { EYE_FIELD, eyeReachTicks, flipEyeZ, usedBenchEye, withEye, type Eye } from '../lib/avatarEye'
-import { v1Eye } from '../lib/eyeV1'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
@@ -732,9 +731,8 @@ export interface WorkshopState {
 export function shardFromText(text: string, id: string): ShardModel | null {
   let raw: unknown
   try { raw = JSON.parse(text) } catch { return null }
-  // A version 1 payload's eye into the version 2 frame, as a worn avatar's is (lib/eyeV1).
-  const m = fromPayload(raw, id)
-  return m && v1Eye(m, raw)
+  // sno-core's fromPayload (0.1.31 on) turns a version 1 payload's eye into the version 2 frame itself.
+  return fromPayload(raw, id)
 }
 
 /** Whose object a model was made from (REMIX): sno-core's, shared with snocrash. */

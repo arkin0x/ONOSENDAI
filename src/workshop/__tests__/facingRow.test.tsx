@@ -85,7 +85,7 @@ describe('FACING in the AVATAR sheet', () => {
     const row = groups.find((h) => h.props['aria-label'] === 'Facing' && cls(h).includes('ws__eyerow'))!
     expect(row).toBeTruthy()
     expect(words(row)).toContain('FACING')
-    expect(words(row)).toContain('How you turn as you move.')
+    expect(words(row)).toContain('You tilt with each move.')
     const buttons = buttonsIn(row)
     expect(buttons.map(words)).toEqual(['PATH', 'UPRIGHT'])
     expect(buttons.map((b) => b.props['aria-pressed'])).toEqual([true, false])
@@ -102,6 +102,7 @@ describe('FACING in the AVATAR sheet', () => {
     expect(face()).toBe('upright')
     const row = m.all().find((h) => h.props['aria-label'] === 'Facing' && cls(h).includes('ws__eyerow'))!
     expect(buttonsIn(row).map((b) => b.props['aria-pressed'])).toEqual([false, true])
+    expect(words(row)).toContain('You stay upright.')
     const steps = useWorkshop.getState().past.length
     await m.press('UPRIGHT')
     expect(useWorkshop.getState().past.length).toBe(steps)

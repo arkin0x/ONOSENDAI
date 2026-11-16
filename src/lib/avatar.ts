@@ -19,7 +19,6 @@ import { AVATAR_CONTENT_MAX, AVATAR_CONTENT_WARN, avatarContentBytes, verifyAvat
 import { TICKS_PER_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
 import { keepOwnTable, withoutCarried } from './carried'
 import { CLIENT_TAG } from './client'
-import { v1Eye } from './eyeV1'
 
 export const AVATAR_KIND = 11333
 
@@ -75,7 +74,8 @@ export function avatarFromEvent(ev: { kind: number; pubkey: string; content: str
   try {
     const raw = JSON.parse(ev.content)
     const shard = fromPayload(raw, `avatar:${ev.pubkey}`)
-    return shard && keepOwnTable(v1Eye(shard, raw), ev.pubkey)
+    // sno-core (0.1.31 on) reads a version 1 payload's eye into the version 2 frame itself.
+    return shard && keepOwnTable(shard, ev.pubkey)
   } catch {
     return null
   }

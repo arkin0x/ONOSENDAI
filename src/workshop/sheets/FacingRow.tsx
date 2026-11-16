@@ -18,6 +18,12 @@ export const FACE_TIPS: Record<FaceMode, string> = {
   upright: 'Turn only left and right, and stay upright to whoever sees you',
 }
 
+/** The gray line under FACING: what the lit choice does, one short line, since a tooltip never shows on a phone. */
+export const FACE_HINTS: Record<FaceMode, string> = {
+  path: 'You tilt with each move.',
+  upright: 'You stay upright.',
+}
+
 export function FacingRow(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
   if (!shard) return null
@@ -27,7 +33,7 @@ export function FacingRow(): JSX.Element | null {
       <div className="ws__eyerow-main">
         <span className="ws__eyerow-text">
           <span className="ui-field__label">FACING</span>
-          <span className="ui-field__hint">How you turn as you move.</span>
+          <span className="ui-field__hint">{FACE_HINTS[face]}</span>
         </span>
         <div className="workshop__modes ws__facerow-modes" role="group" aria-label="Facing">
           {FACE_MODES.map((m) => (

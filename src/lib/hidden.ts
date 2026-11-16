@@ -145,6 +145,11 @@ export function isReference(x: unknown): x is Reference {
   return Array.isArray(x) && (x[0] === 'a' || x[0] === 'e') && typeof x[1] === 'string' && x[1].length > 0 && x.every((v) => typeof v === 'string')
 }
 
+/** One entry of a decrypted bag's list as it may be read: a reference, or an object with a numeric `kind`. */
+export function isEntryShaped(e: unknown): e is BagEntry {
+  return isReference(e) || (!!e && !Array.isArray(e) && typeof e === 'object' && typeof (e as NostrEvent).kind === 'number')
+}
+
 /**
  * A stable identity for an entry, for de-duplicating a bag's list. A
  * reference's point is part of it: one object placed at two points is two
@@ -834,12 +839,15 @@ export interface BagSettings {
   heightTag: boolean
   hint: HintHeights | null
   riddle: string
-  /** Publish what is inside, by kind and count, money left out unless `money` (`contents` tags; bagContentsTags). */
+  /** Publish what is inside, by kind and count, money and NFTs left out unless `money` (`contents` tags; bagContentsTags). */
   contents: boolean
   /**
-   * Publish that money is inside, when a cashu token is: its count with
-   * `contents`, the cashu row alone without (bagContentsTags). Off unless the
-   * hider turns it on (arkinox, 2026-11-15: "money off by default").
+   * Publish that money or NFTs are inside, when a cashu token or an NFT claim
+   * link is: their counts with `contents`, their rows alone without
+   * (bagContentsTags). Off unless the hider turns it on (arkinox, 2026-11-15:
+   * "money off by default"; owner ruling 2026-11-16: NFT claim links are
+   * hidden by default the same way, spec §7.7 Claimable kinds). Named for
+   * money because the saved choice was money's first (store/deployHintPrefs.ts).
    */
   money: boolean
 }
@@ -910,27 +918,40 @@ export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: Re
 export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft', 'audio', 'door', 'seed', 'dna'] as const
 
 /**
+ * The kinds anyone who reads them can redeem: a Cashu token and an NFT claim
+ * link (spec §7.7 Claimable kinds). An NFT is not money; it is claimable.
+ */
+export const CLAIMABLE_KINDS = ['cashu', 'nft'] as const
+
+function isClaimable(kind: string): boolean {
+  return (CLAIMABLE_KINDS as readonly string[]).includes(kind)
+}
+
+/**
  * The public tags a bag's contents settings write (arkinox, 2026-10-18:
  * "a hint type that indicates money is hidden" and "an optional contents
  * hint toggle that advertises what is in the bag"). Worked out from what is
- * in the bag each time it is sealed, so they are never stale: with
- * `contents`, one `["contents", kind, count]` per kind present, NFTs
- * included (arkinox, 2026-10-22: an `nft` count, as the `cashu` one);
- * with `money` alone, `["contents", "cashu"]` while a token is inside,
- * and nothing once none is. Spec §7.7 "Contents" (#75).
+ * in the bag each time it is sealed, so they are never stale. Spec §7.7
+ * "Contents" (#75) and "Claimable kinds".
  *
- * Money is said only with `money` on (arkinox, 2026-11-15: "money off by
- * default"). With `contents` on and `money` off, the cashu row is left out
- * entirely, count and all, and no row says money another way: there is no
- * total, and a message that holds a token counts as a message, as any other
- * does (spec §7.7). With both on, cashu is counted beside the rest. Money is
- * cashu alone: an NFT is not money (spec §7.7), so it stays with `contents`.
+ * The claimable kinds, cashu tokens and NFT claim links, are said only with
+ * `money` on (arkinox, 2026-11-15: "money off by default"; owner ruling
+ * 2026-11-16: NFTs the same way, since whoever finds a claim link can
+ * redeem it). With `contents` on and `money` off, one
+ * `["contents", kind, count]` per other kind present, and the cashu and nft
+ * rows left out entirely, count and all: no row says them another way,
+ * there is no total, and a message that holds a token or a link counts as a
+ * message, as any other does. So a bag with them says exactly what it would
+ * without them. With both on, cashu and NFTs are counted beside the rest.
+ * With `money` alone, `["contents", "cashu"]` while a token is inside and
+ * `["contents", "nft"]` while a link is, with no count, and nothing once
+ * neither is.
  */
 export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], settings: Pick<BagSettings, 'contents' | 'money'>, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): string[][] {
   if (!settings.contents && !settings.money) return []
   const c = bagContents(inners, held)
-  if (settings.contents) return CONTENTS_KINDS.filter((k) => c[k] > 0 && (k !== 'cashu' || settings.money)).map((k) => ['contents', k, String(c[k])])
-  return c.cashu > 0 ? [['contents', 'cashu']] : []
+  if (settings.contents) return CONTENTS_KINDS.filter((k) => c[k] > 0 && (settings.money || !isClaimable(k))).map((k) => ['contents', k, String(c[k])])
+  return CLAIMABLE_KINDS.filter((k) => c[k] > 0).map((k) => ['contents', k])
 }
 
 /**
@@ -947,25 +968,27 @@ export type ContentsCounts = Partial<Record<keyof BagContents, string>>
  * What a bag's public tags say it holds (spec §7.7 "Reading contents"). A
  * row of a kind this client does not know is ignored, and so is a row whose
  * count is there but is not a count (CONTENTS_COUNT). What is left: whether
- * money is inside (a counted cashu row, or the cashu row with no count, the
- * one form that says only that), whether the money-alone form was written,
- * whether an NFT is (a counted nft row; there is
- * no NFT-alone form), and the counts when given. A claim, for display only:
- * what the bag holds is its plaintext.
+ * money is inside (a counted cashu row, or the cashu row with no count),
+ * whether the money-alone form was written, whether an NFT is (a counted nft
+ * row, or the nft row with no count: the claimable kinds are the ones with a
+ * count-free form, spec §7.7 Claimable alone), and the counts when given. A
+ * row of any other kind with no count says nothing. A claim, for display
+ * only: what the bag holds is its plaintext.
  */
-export function readBagContents(tags: string[][]): { money: boolean; moneyAlone: boolean; nft: boolean; counts: ContentsCounts | null } {
+export function readBagContents(tags: string[][]): { money: boolean; moneyAlone: boolean; nft: boolean; nftAlone: boolean; counts: ContentsCounts | null } {
   const counts: ContentsCounts = {}
   let counted = false
   let moneyAlone = false
+  let nftAlone = false
   for (const t of tags) {
     if (t[0] !== 'contents' || !(CONTENTS_KINDS as readonly string[]).includes(t[1] ?? '')) continue
     const kind = t[1] as keyof BagContents
-    if (t[2] === undefined) { if (kind === 'cashu') moneyAlone = true; continue }
+    if (t[2] === undefined) { if (kind === 'cashu') moneyAlone = true; if (kind === 'nft') nftAlone = true; continue }
     if (typeof t[2] !== 'string' || !CONTENTS_COUNT.test(t[2])) continue
     counts[kind] = t[2]
     counted = true
   }
-  return { money: moneyAlone || counts.cashu !== undefined, moneyAlone, nft: counts.nft !== undefined, counts: counted ? counts : null }
+  return { money: moneyAlone || counts.cashu !== undefined, moneyAlone, nft: nftAlone || counts.nft !== undefined, nftAlone, counts: counted ? counts : null }
 }
 
 function sameHint(a: HintHeights | null, b: HintHeights | null): boolean {
@@ -1002,18 +1025,44 @@ export function resolveBagSettings(chosen: BagSettings, seed: BagSettings, curre
  * itself states no height; a hint the spec calls malformed is read as absent
  * (§7.7). A bag read by a legacy `h` reads as `heightTag: true`, so rewriting
  * it carries its height forward as `H`.
+ *
+ * `holds` is what the bag's plaintext holds of the claimable kinds
+ * (bagContents of its entries), which `money` is read against.
  */
-export function bagSettingsOf(ev: NostrEvent, height: number): BagSettings {
+export function bagSettingsOf(ev: NostrEvent, height: number, holds: Pick<BagContents, 'cashu' | 'nft'>): BagSettings {
   const h = heightHint(ev)
   const hint = parseHint(ev.tags, h ?? height)
   const said = readBagContents(ev.tags)
-  // Money in either form: since money is its own switch (arkinox,
-  // 2026-11-15), a counted cashu row says the hider turned money on, so a
-  // rewrite that is not a hide (a DELETE, a broadcast) keeps saying it, as
-  // a bag already out keeps its hints until you hide into it again. A hide
-  // sends money as the deploy bar shows it (store/deployHintPrefs.ts asShown),
-  // so turning contents off no longer leaves money said (review of #378).
-  return { heightTag: h !== null, hint: hint ? hint.heights : null, riddle: ev.content.slice(0, MAX_RIDDLE_LENGTH), contents: said.counts !== null, money: said.money }
+  // The money switch (money or NFTs) in either form: since it is its own
+  // switch (arkinox, 2026-11-15), a cashu or nft row says the hider turned
+  // it on, so a rewrite that is not a hide (a DELETE, a broadcast) keeps
+  // saying it, as a bag already out keeps its hints until you hide into it
+  // again. A hide sends it as the deploy bar shows it
+  // (store/deployHintPrefs.ts asShown), so turning contents off no longer
+  // leaves money said (review of #378).
+  //
+  // ON only where the bag already says every claimable kind it holds, so
+  // that such a rewrite never says one it did not: a bag written before NFTs
+  // joined the switch (owner ruling 2026-11-16) counted its NFTs with the
+  // contents and may hold a token it kept quiet, and one that said only that
+  // money is inside never said its NFTs. Such a bag reads OFF, and a
+  // rewrite drops the row rather than add one.
+  const money = (said.money || said.nft) && (said.money || holds.cashu === 0) && (said.nft || holds.nft === 0)
+  return { heightTag: h !== null, hint: hint ? hint.heights : null, riddle: ev.content.slice(0, MAX_RIDDLE_LENGTH), contents: said.counts !== null, money }
+}
+
+/**
+ * How many cashu tokens and NFT claim links a decrypted bag's list holds, for
+ * bagSettingsOf. A list another client wrote that cannot be counted reads as
+ * holding both, so the money switch reads ON only where both are said.
+ */
+export function claimableHeld(entries: readonly unknown[]): Pick<BagContents, 'cashu' | 'nft'> {
+  try {
+    const c = bagContents(entries.filter(isEntryShaped))
+    return { cashu: c.cashu, nft: c.nft }
+  } catch {
+    return { cashu: 1, nft: 1 }
+  }
 }
 
 /** Where a bag's region is, for a hint's base: any point inside the region will do (lib/hint.ts). */
@@ -1232,7 +1281,7 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
   if (seen) seen.references = entries.filter(isReference).length
   const keyHex = bytesToHex(regionKey)
   const regionHeight = height ?? heightHint(outer) ?? 0
-  const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight), ...(room ? { room } : {}) }
+  const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight, claimableHeld(entries)), ...(room ? { room } : {}) }
   const heightKnown = height !== undefined || heightHint(outer) !== null
   const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as Rumor, outer, keyHex, facts, heightKnown, origin)))
   const refs = entries.map((e, i) => [e, i] as const).filter(([e]) => isReference(e))
@@ -1262,6 +1311,14 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
     await Promise.all(Array.from({ length: Math.min(REFERENCE_CONCURRENCY, fetched.length) }, worker))
   }
   const items = firstOfEach(out.filter((h): h is Hidden => h !== null))
+  // The money switch read again now that the sealed entries are open: one
+  // holding a token or a claim link the bag never said reads it OFF
+  // (bagSettingsOf). In place, since every item shares these facts.
+  if (facts.bag.money) {
+    const before = claimableHeld(entries)
+    const opened = claimableHeld(out.filter((h): h is Hidden => h !== null).map((h) => h.inner))
+    facts.bag.money = bagSettingsOf(outer, regionHeight, { cashu: Math.max(before.cashu, opened.cashu), nft: Math.max(before.nft, opened.nft) }).money
+  }
   noteReading(outer.id, { entries: entries.length, readable: items.length, opaque: false, ...(skipped > 0 ? { skipped } : {}), ...(tally.refused > 0 ? { refused: tally.refused } : {}) })
   return items
 }
@@ -1525,7 +1582,7 @@ export async function bagEntries(outer: NostrEvent, regionKey: Uint8Array): Prom
   try {
     const arr = JSON.parse(json)
     if (!Array.isArray(arr)) return []
-    return arr.filter((e): e is BagEntry => isReference(e) || (!!e && !Array.isArray(e) && typeof e === 'object' && typeof (e as NostrEvent).kind === 'number'))
+    return arr.filter(isEntryShaped)
   } catch { return [] }
 }
 

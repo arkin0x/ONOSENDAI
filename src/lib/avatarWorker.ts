@@ -1,5 +1,6 @@
 /**
- * avatarWorker.ts - the main thread's handle on an avatar mining job.
+ * avatarWorker.ts - the main thread's handle on a mining job (a seed's work,
+ * DECK-0008; avatars no longer mine, spec 8.10, so the name is historical).
  *
  * `mineInWorker` starts a worker per spare core, each on its own residue of
  * the nonce, and resolves with the first find; cancel terminates them all and

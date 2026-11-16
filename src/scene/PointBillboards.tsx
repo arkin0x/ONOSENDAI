@@ -24,7 +24,7 @@ import { dissolveShare } from '../lib/ceremony'
 import type { Box } from '../lib/clip'
 import { useLayers } from '../store/useLayers'
 import { clipWalls, reducedMotionNow } from './animMotion'
-import { DOTS_ORDER, OVERLAY_ORDER } from './shardFaces'
+import { DOTS_ORDER, NO_BLOOM_BLEND, OVERLAY_ORDER } from './shardFaces'
 import { billboardsOf, createCoreMaterial, createHaloMaterial, flowHalos, keepHaloBlend, noRaycast, syncBillboards } from './glowHalos'
 import { glowLimits, haloKey, joinGlow, spendGlow, type HaloEntry } from './glowBudget'
 
@@ -124,13 +124,19 @@ interface CoreProps {
   clipPlanes?: Plane[]
   /** A still object's region box, in its own frame: cut at those walls on the GPU too. */
   walls?: Box
+  /** Kept out of the bloom (the placing ghost in the world, shardFaces.ts NO_BLOOM_BLEND). */
+  noBloom?: boolean
 }
 
 /** The points at a POINT SIZE: billboards with the disc's look. */
-export function PointCores({ plain, size, opacity, glow, headlamp, clipPlanes, walls }: CoreProps): JSX.Element {
+export function PointCores({ plain, size, opacity, glow, headlamp, clipPlanes, walls, noBloom = false }: CoreProps): JSX.Element {
   const gl = useThree((s) => s.gl)
   const geometry = useMemo(() => billboardsOf(plain), [plain])
-  const material = useMemo(() => createCoreMaterial(size, glow, opacity, headlamp), [size, glow, opacity, headlamp])
+  const material = useMemo(() => {
+    const m = createCoreMaterial(size, glow, opacity, headlamp)
+    if (noBloom) Object.assign(m, NO_BLOOM_BLEND)
+    return m
+  }, [size, glow, opacity, headlamp, noBloom])
   useEffect(() => () => material.dispose(), [material])
   const wallPlanes = useWallPlanes(walls, clipPlanes)
   useEffect(() => {

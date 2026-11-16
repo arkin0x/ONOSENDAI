@@ -1,20 +1,16 @@
 /**
  * AvatarSheet.tsx - AVATAR, a top-level area with its own sheet (workshop
  * redesign, phase 1; arkinox, 2026-10-23): what you wear, the ghost for
- * scale, and the way to change it, with the work it costs. Moved from the
- * old panel unchanged.
+ * scale, and the way to change it, with its size against the size limit.
  */
 
 import { useMemo } from 'react'
 import { ClipboardCopy, CopyPlus } from 'lucide-react'
 import { toPayload } from 'sno-core/shards'
-import { avatarReach, avatarWork } from 'cyberspace-core'
+import { avatarReach } from 'cyberspace-core'
 import { Field, Switch } from '../../hud/ui/Switch'
 import { ShardThumb } from '../../hud/ShardThumb'
-import { avatarTemplate } from '../../lib/avatar'
-import { clock, describeDuration, expectedTries, minedIn, serializeEvent, triesPerSec } from '../../lib/avatarMine'
-import { minerCount } from '../../lib/avatarWorker'
-import { useCalibration } from '../../lib/calibration'
+import { avatarContent, avatarKb, avatarSize } from '../../lib/avatar'
 import { useAvatars } from '../../store/useAvatars'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useWorkshop } from '../../store/useWorkshop'
@@ -26,24 +22,19 @@ export function AvatarBody(): JSX.Element | null {
   const showAvatar = useWorkshop((s) => s.showAvatar)
   const me = useCyberspace((s) => s.identity.pubkey)
   const myAvatar = useAvatars((s) => s.shards[me] ?? null)
-  const mining = useAvatars((s) => s.mining)
   const phase = useAvatars((s) => s.phase)
-  const minedMs = useAvatars((s) => s.minedMs)
   const adoptError = useAvatars((s) => s.adoptError)
   const minePublished = useAvatars((s) => s.minePublished)
   const live = useCyberspace((s) => s.live)
-  const sha256PerSec = useCalibration((s) => s.sha256PerSec)
-  // The avatar's price (spec 8.10), memoised on the geometry; computed only
-  // while this sheet is open, which is what shows it and acts on it.
+  // What the avatar is (spec 8.10): its reach, its detail and its size against
+  // the size limit, memoised on the shard; computed only while this sheet
+  // is open, which is what shows it and acts on it.
   const buildable = shard !== null && shard.vertices.length > 0 && shard.faces.length > 0
-  const work = useMemo(() => {
-    if (!shard || !buildable) return { required: 0, reach: 0, detail: 0, bytes: 0 }
-    const payload = toPayload(shard)
-    // The bytes hashed per try: the serialized event with a nonce tag of typical width.
-    const bytes = new TextEncoder().encode(serializeEvent({ ...avatarTemplate(shard, 1_800_000_000), pubkey: me })).length + 40
-    return { required: avatarWork(payload), reach: Math.max(1, avatarReach(payload)), detail: shard.vertices.length + shard.faces.length, bytes }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildable, shard?.vertices, shard?.faces, shard?.unit, shard?.name, me])
+  const info = useMemo(() => {
+    if (!shard || !buildable) return { reach: 0, detail: 0, size: avatarSize('') }
+    // Measured as adopt signs it: without what came to you sealed.
+    return { reach: Math.max(1, avatarReach(toPayload(shard))), detail: shard.vertices.length + shard.faces.length, size: avatarSize(avatarContent(shard)) }
+  }, [buildable, shard])
   const w = useWorkshop.getState
   const say = (notice: string): void => useWorkshop.setState({ notice })
   if (!shard) return null
@@ -62,7 +53,7 @@ export function AvatarBody(): JSX.Element | null {
             (arkinox found this by doing it). It gets a row anyway so the
             shape you are wearing is visible and can be copied back into the
             workshop, and no row that would change it: the way to change an
-            avatar is USE THIS SHARD or DODECAHEDRON under SET AVATAR. */}
+            avatar is USE THIS SHARD or ICOSAHEDRON under SET AVATAR. */}
         {myAvatar && (
           <ul className="workshop__list">
             <li className="workshop__list-avatar">
@@ -101,50 +92,53 @@ export function AvatarBody(): JSX.Element | null {
             OBJECT and PASTE do. On the name's line a long object name pushed
             them off the edge (arkinox, 2026-09-15). */}
         <div className="workshop__list-row">
-        {/* Adopted while LOCAL: signed and kept and drawn for you, but no relay has it. */}
-        {myAvatar && !minePublished && !phase && (
+        {/* Adopted while LOCAL: signed and kept and drawn for you, but no relay has it.
+            Every button stays in its place while an adopt runs, disabled, so nothing jumps. */}
+        {myAvatar && !minePublished && (
           live
-            ? <button className="workshop__btn workshop__btn--warn" onClick={() => { void useAvatars.getState().broadcastMine().then((ok) => say(ok ? 'Your avatar is published.' : useAvatars.getState().adoptError ?? 'No relay took the avatar.')) }} title="Send the avatar you adopted while LOCAL to the relays">BROADCAST</button>
+            ? <button className="workshop__btn workshop__btn--warn" disabled={!!phase} onClick={() => { void useAvatars.getState().broadcastMine().then((ok) => say(ok ? 'Your avatar is published.' : useAvatars.getState().adoptError ?? 'No relay took the avatar.')) }} title="Send the avatar you adopted while LOCAL to the relays">BROADCAST</button>
             : <span className="workshop__value">LOCAL</span>
         )}
-        {phase === 'mining' ? (
-          <button className="workshop__btn workshop__btn--danger" onClick={() => useAvatars.getState().cancelAdopt()} title="Stop mining; your avatar stays as it is">CANCEL</button>
-        ) : phase ? (
+        {phase ? (
           <button className="workshop__btn" disabled title={phase === 'signing' ? 'Waiting for your signer' : 'Publishing to the relays'}>{phase === 'signing' ? 'SIGNING' : 'PUBLISHING'}</button>
         ) : (
           <button
             className="workshop__btn"
-            disabled={!buildable}
+            disabled={!buildable || info.size.over}
             onClick={() => {
-              const started = Date.now()
               void useAvatars.getState().adopt(shard).then((ok) => {
                 const st = useAvatars.getState()
-                const took = describeDuration((Date.now() - started) / 1000).replace('about ', '')
-                if (!ok) { say(st.adoptError ?? 'Mining cancelled. Your avatar is as it was.'); return }
+                if (!ok) { say(st.adoptError ?? 'Your avatar is as it was.'); return }
                 say(st.minePublished
-                  ? `"${shard.name}" is your avatar now: ${work.required} bits of work in ${took}.`
-                  : `"${shard.name}" is your avatar on this device: ${work.required} bits of work in ${took}. You are LOCAL, so no relay has it. BROADCAST sends it when you go LIVE.`)
+                  ? `"${shard.name}" is your avatar now.`
+                  : `"${shard.name}" is your avatar on this device. You are LOCAL, so no relay has it. BROADCAST sends it when you go LIVE.`)
               })
             }}
-            title="Publish this object as the shape others see for you, at true scale: the white avatar on the grid is the size of one cell. Its size and detail are paid for in proof of work first."
+            title={info.size.over
+              ? 'Over the 128 KB size limit for an avatar. Make it smaller to wear it.'
+              : 'Publish this object as the shape others see for you, at true scale: the white avatar on the grid is the size of one cell.'}
           >USE THIS SHARD</button>
         )}
-        {myAvatar && !phase && (
-          <button className="workshop__btn" onClick={() => { void useAvatars.getState().adopt(null).then((ok) => say(ok ? 'The icosahedron is your avatar again.' : useAvatars.getState().adoptError ?? 'No relay took the change.')) }} title="Back to the icosahedron; it owes no work">ICOSAHEDRON</button>
+        {myAvatar && (
+          <button className="workshop__btn" disabled={!!phase} onClick={() => { void useAvatars.getState().adopt(null).then((ok) => say(ok ? 'The icosahedron is your avatar again.' : useAvatars.getState().adoptError ?? 'No relay took the change.')) }} title="Back to the icosahedron">ICOSAHEDRON</button>
         )}
         </div>
-        {/* The price (spec 8.10): 16 bits for any avatar, 6 more per doubling of
-            its reach in gibsons, 3 per doubling of vertices plus faces beyond 32;
-            the whole event is hashed per try, so bytes cost as well. */}
+        {/* What others will download and draw: its reach, its detail and its
+            size. Over the 128 KB size limit no client draws it (spec 8.10);
+            above 64,000 bytes some remote signers refuse to sign it. */}
         {buildable && (
-          <span className="workshop__work" aria-live="polite">
-            {mining
-              ? `MINING ${mining.required} BITS · ${clock(mining.elapsedMs)} ELAPSED · ${mining.elapsedMs > 1000 ? describeDuration(expectedTries(mining.required) / (mining.tries / (mining.elapsedMs / 1000))).toUpperCase() + ' EXPECTED · ' : ''}${mining.elapsedMs > 1000 ? Math.round(mining.tries / (mining.elapsedMs / 1000) / 1000) + 'K TRIES/S' : 'MEASURING'}`
-              : phase === 'signing'
-                ? `MINED IN ${minedIn(minedMs ?? 0).toUpperCase()} · WAITING FOR YOUR SIGNER`
-                : phase === 'publishing'
-                  ? `MINED IN ${minedIn(minedMs ?? 0).toUpperCase()} · SIGNED · PUBLISHING`
-                  : `${adoptError ? `LAST ATTEMPT: ${adoptError.toUpperCase()} · ` : ''}WORK ${work.required} BITS · ${work.reach.toFixed(work.reach >= 10 ? 0 : 1)} GIBSON REACH · ${work.detail} VERTICES + FACES · ${sha256PerSec ? describeDuration(expectedTries(work.required) / triesPerSec(sha256PerSec, work.bytes, minerCount())).toUpperCase() + ' ON THIS DEVICE' : 'TIME UNKNOWN UNTIL CALIBRATED'}`}
+          <span
+            className="workshop__work"
+            aria-live="polite"
+            title={!phase && info.size.warn ? 'A remote signer (NIP-46) may fail to sign an avatar this big. A browser extension or a key on this device signs it.' : undefined}
+          >
+            {phase === 'signing'
+              ? 'WAITING FOR YOUR SIGNER'
+              : phase === 'publishing'
+                ? 'SIGNED · PUBLISHING'
+                : `${adoptError ? `LAST ATTEMPT: ${adoptError.toUpperCase()} · ` : ''}${info.size.over
+                  ? `OVER THE 128 KB SIZE LIMIT · ${avatarKb(info.size.bytes, Math.ceil)} KB`
+                  : `${info.reach.toFixed(info.reach >= 10 ? 0 : 1)} GIBSON REACH · ${info.detail} VERTICES + FACES · ${avatarKb(info.size.bytes, Math.ceil)} KB${info.size.warn ? ' · SOME REMOTE SIGNERS REFUSE EVENTS THIS BIG' : ''}`}`}
           </span>
         )}
       </div>

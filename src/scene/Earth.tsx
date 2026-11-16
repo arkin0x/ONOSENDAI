@@ -31,6 +31,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { viewHyperspace } from '../store/useHyperspace'
 import { useCoastline } from '../hooks/useCoastline'
 import { WorldLabel } from './WorldLabel'
+import { useDrawReach } from './buildZoom'
 
 /** §9.7: 1 km = 1000 * 2^33 gibsons. */
 const GIBSONS_PER_KM = 1000n * (1n << 33n)
@@ -64,6 +65,8 @@ export function Earth({ axes }: Props): JSX.Element | null {
   const plane = useCyberspace((s) => s.anchorPlane)
   // The coarsest shoreline tier, whole: 5k points, 41 KB, fetched once.
   const coast = useCoastline(plane === 0 ? '110m' : null)
+  // The reach every culled layer shares (buildZoom.ts), never less than the least: the fog is black inside it.
+  const drawReach = useDrawReach((s) => Math.max(GRID_RADIUS * 8, s.reach))
 
   const globe = useMemo(() => {
     // Ideaspace has no physical mapping at all (§9.1), so there is no planet in
@@ -87,11 +90,11 @@ export function Earth({ axes }: Props): JSX.Element | null {
 
     // Off in the dark somewhere. Building a sphere nobody can see is wasted
     // work, and at a random spawn this is the overwhelmingly common case.
-    const reach = GRID_RADIUS * 8 + radius
+    const reach = drawReach + radius
     if (Math.hypot(...centre) > reach) return null
 
     return { centre, radius }
-  }, [position, scaleExp, plane, axes])
+  }, [position, scaleExp, plane, axes, drawReach])
 
   // The graticule, replacing the old view-relative wireframe: a sphere
   // mesh's poles follow the camera's up axis, so its "meridians" were

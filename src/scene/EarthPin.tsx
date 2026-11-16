@@ -99,7 +99,7 @@ export function EarthPin({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane = useCyberspace((s) => s.anchorPlane)
   const places = useStarred((s) => s.places)
-  // Further out while BUILD is pulled back (buildZoom.ts), as StarredMarks.
+  // As far as the fog's end needs (buildZoom.ts), as StarredMarks.
   const reach = useDrawReach((s) => Math.max(PIN_REACH, s.reach))
 
   const built = useMemo(() => {

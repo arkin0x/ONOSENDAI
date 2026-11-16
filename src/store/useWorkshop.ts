@@ -717,6 +717,19 @@ export function readLastUsedFrom(read: () => Readonly<Record<string, number>> | 
 }
 
 /**
+ * A duplicate goes into the folder its source is in (arkinox, 2026-11-16:
+ * "when i duplicate a shard ... it gets copied to the root instead of the
+ * current folder"). The folder store hands this over too, for the same
+ * import-cycle reason as readLastUsedFrom; until it does, a copy is filed
+ * nowhere, which is the top. Called before the copy joins the list, so the
+ * list never draws it at the top for a moment first.
+ */
+let fileCopy: (copy: string, source: string) => void = () => undefined
+export function fileCopiesWith(file: (copy: string, source: string) => void): void {
+  fileCopy = file
+}
+
+/**
  * The object first in the workshop list's order: edited or deployed most
  * recently, by the sort every list uses (lib/shardFolders.ts newestFirst)
  * (2026-10-23). That is the newest wherever it is filed, not the first row
@@ -1091,6 +1104,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const src = get().shards.find((s) => s.id === id)
       if (!src) return id
       const copy: ShardModel = { ...src, id: uuid(), name: `${src.name} copy`, vertices: src.vertices.map(cloneVertex), faces: src.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
+      // Beside its source, in the same folder; a source at the top keeps the copy there.
+      // Filing is a nicety: a fault in it never costs the copy itself.
+      try { fileCopy(copy.id, src.id) } catch (err) { console.warn('[workshop] could not file the copy in its folder', err) }
       const list = [...get().shards, copy]
       set({ shards: list, currentId: copy.id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null }); save(list)
       return copy.id

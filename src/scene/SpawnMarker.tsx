@@ -91,7 +91,7 @@ function Model({ pubkey, axes }: Props): JSX.Element | null {
     materials: Record<string, Material>
   }
 
-  // Further out while BUILD is pulled back (buildZoom.ts).
+  // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const at = useMemo(() => {
     // A spawn is a coordinate in one plane; in the other plane it is not here.

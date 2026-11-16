@@ -149,7 +149,7 @@ export function placeShard(
 /**
  * The shards of `items` that can be drawn from here: in the view's plane, not
  * too small to show a pixel at any distance, and within `reach` of the render
- * origin (REACH, or further while BUILD is pulled back). Placed in the
+ * origin (REACH, or further as the fog's end needs). Placed in the
  * render frame anchored at `anchor`. Cyberspace TV draws its own finds with
  * this (TvFinds).
  */
@@ -232,7 +232,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
   const me = useCyberspace((s) => s.identity.pubkey)
   useEffect(() => { readFollows() }, [me])
 
-  // Further out while BUILD is pulled back (buildZoom.ts).
+  // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const fresh = useMemo(() => {
     return drawableShards(useShards.getState().drawnItems(), anchor, anchorPlane, scaleExp, axes, reach)

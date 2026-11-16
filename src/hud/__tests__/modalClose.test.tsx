@@ -114,8 +114,9 @@ const TOUCHED = [
  * - ViewMenu: the camera pad, a control strip, not a modal.
  * - DeployBar: the bar a deploy is aimed and confirmed from, with its own CANCEL.
  * - Workshop: the workshop screen itself, closed from its top bar.
+ * - DRONE RUN's HUD: its RUN FAILED and WAVE CLEAR cards, whose ways on are RESTART, NEXT WAVE and EXIT GAME, as GameView's CLEAR card.
  */
-const NOT_MODALS = ['game/GameView.tsx', 'hud/ViewMenu.tsx', 'hud/DeployBar.tsx', 'workshop/Workshop.tsx']
+const NOT_MODALS = ['game/GameView.tsx', 'hud/ViewMenu.tsx', 'hud/DeployBar.tsx', 'workshop/Workshop.tsx', 'game/droneRun/hud/HudView.tsx']
 
 function sources(dir: URL, rel = ''): string[] {
   const out: string[] = []

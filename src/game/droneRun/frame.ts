@@ -53,13 +53,12 @@ export function toSimInput(input: RunInput, out?: RunInput): RunInput {
   return o
 }
 
-/** The screen yaw and pitch that look from `eye` at `target` (region-local). */
+/** The yaw and pitch, in the simulation's terms (RunInput's look and aim), that look from `eye` at `target` (region-local). */
 export function lookAtScreen(eye: Readonly<Vec3>, target: Readonly<Vec3>): { yaw: number; pitch: number } {
   const dx = target[0] - eye[0], dy = target[1] - eye[1], dz = target[2] - eye[2]
   const len = Math.hypot(dx, dy, dz) || 1
   // The sim's look direction: (sin y cos p, sin p, -cos y cos p).
-  const y = Math.atan2(dx, -dz)
-  return { yaw: simYaw(y), pitch: Math.asin(Math.max(-1, Math.min(1, dy / len))) }
+  return { yaw: Math.atan2(dx, -dz), pitch: Math.asin(Math.max(-1, Math.min(1, dy / len))) }
 }
 
 /** a + (b - a) * t into `out`, three numbers. */

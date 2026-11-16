@@ -65,7 +65,7 @@ Every field below is tagged:
 | `heat` | `{ perShot, coolPerS, overheatAt, lockS }`; cools while holstered too | (b) |
 | `ammo` | `{ mag, reloadS }`; empty reloads by itself; switching away cancels a reload | (b) |
 | `readyS` | Seconds after switching before it fires (default 0.3) | (b) |
-| `assist` | `"auto"`: the gun may take aimed shots (`RunInput.aim`, below); hitscan guns only. The base variant gives it to the PULSE RIFLE alone. The simulation reads it (an aim is honoured only for such a gun), so it is a rule; when a client sends aims (ONOSENDAI: only on a touch screen, while a drone is in the box round the reticle) is the client's (c) | (b) |
+| `assist` | `"auto"`: the gun may take aimed shots (`RunInput.aim`, below); only on a hitscan gun whose `mode` is `"auto"`, and `createRun` rejects it anywhere else (a semi gun fires once a press, so a held assisted trigger would latch; a charge gun fires on release, which a held trigger never gives, and its release step carries no aim). The base variant gives it to the PULSE RIFLE alone. The simulation reads it (an aim is honoured only for such a gun), so it is a rule; when a client sends aims (ONOSENDAI: only on a touch screen, while a drone is in the box round the reticle) is the client's (c) | (b) |
 
 Exactly one of `heat` or `ammo`.
 
@@ -114,7 +114,7 @@ A checker cannot tell an aim sent by an assist from an aimbot's: the log only sh
 1. Copy `variants/drone-run-base.json` to `variants/<new-id>.json` and change `id` and `name`.
 2. Change numbers in `spec`: guns, drones, waves, scoring. Spawn points named in waves must exist in the level.
 3. Keep `world.level` pointing at a built level, and `client` for the look.
-4. Load it like the base variant; `createRun` checks it (unknown enemy or spawn point, a gun with both or neither of heat and ammo) and throws with a plain message.
+4. Load it like the base variant; `createRun` checks it (unknown enemy or spawn point, a gun with both or neither of heat and ammo, `assist` on a gun that is not auto hitscan) and throws with a plain message.
 
 ## The simulation in one paragraph
 

@@ -7,12 +7,19 @@
  * relay.
  */
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+/** Counts the assist's own body steps (eyeAfterStep): the run steps its body through sim/player directly, so only the assist's calls go through here. */
+const bodySteps = { n: 0 }
+vi.mock('../../../lib/games/droneRun/sim', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../../lib/games/droneRun/sim')>()
+  return { ...real, stepPlayer: (...a: Parameters<typeof real.stepPlayer>) => { bodySteps.n++; return real.stepPlayer(...a) } }
+})
 import { PerspectiveCamera } from 'three'
 import { createRun, eyeOf, stepRun, stateHash, type DroneRunVariant, type RunInput, type RunState, type Solids, type Target, type Vec3 } from '../../../lib/games/droneRun/sim'
 import { makeDrone } from '../../../lib/games/droneRun/sim/drones'
 import { GROUND, boxes, input, testLevel, variant } from '../../../lib/games/droneRun/sim/__tests__/helpers'
-import { applyAssist, assistState, eyeAfterStep, pickAssistTarget, setAssistBox, setAssistView } from '../assist'
+import { anyNearBox, applyAssist, assistState, eyeAfterStep, pickAssistTarget, setAssistBox, setAssistView, type AssistAt } from '../assist'
 import { DroneRunner } from '../runner'
 import { cameraYaw, lookAtScreen, toRender } from '../frame'
 
@@ -29,12 +36,17 @@ function cameraAt(eye: Readonly<Vec3>, yaw: number, pitch: number): PerspectiveC
   return c
 }
 
+/** The lens of a phone's camera in portrait, as Canvas3D hands it over: only the projection is read. */
+const LENS = new PerspectiveCamera(55, W / H, 0.05, 600)
+/** The box and the lens as the HUD and the canvas would set them. */
+const AT: AssistAt = { halfPx: HALF, projection: LENS.projectionMatrix, width: W, height: H }
+
 const EYE: Vec3 = [128, 65.75, 128]
 const field = boxes(GROUND)
 const t = (id: number, pos: Vec3, radius = 0.5): Target => ({ id, pos, radius, hp: 1 })
 
 function pick(drones: Target[], solids: Solids = field, over: { yaw?: number; pitch?: number; halfPx?: number; range?: number } = {}) {
-  return pickAssistTarget({ camera: cameraAt(EYE, over.yaw ?? 0, over.pitch ?? 0), width: W, height: H, halfPx: over.halfPx ?? HALF, eye: EYE, drones, range: over.range ?? 60, solids })
+  return pickAssistTarget({ projection: LENS.projectionMatrix, width: W, height: H, halfPx: over.halfPx ?? HALF, eye: EYE, yaw: over.yaw ?? 0, pitch: over.pitch ?? 0, drones, range: over.range ?? 60, solids })
 }
 
 afterEach(() => { setAssistBox(null); setAssistView(null) })
@@ -108,7 +120,7 @@ describe('auto-fire', () => {
     const e = eye(st)
     st.drones.push(makeDrone(st.ids.next++, st.world.variant.spec.enemies, 0, [e[0] + 0.6, e[1] + 1, e[2] - 30], e, st.rng.drones))
     const inp = input()
-    const p = applyAssist(st, inp, { halfPx: HALF, camera: cameraAt(e, 0, 0), width: W, height: H })
+    const p = applyAssist(st, inp, AT)
     expect(p).not.toBeNull()
     expect(inp.fire).toBe(true)
     expect(inp.aim).toBeDefined()
@@ -122,7 +134,7 @@ describe('auto-fire', () => {
       const st = standing(quiet(), field)
       const e = eye(st)
       st.drones.push(makeDrone(st.ids.next++, st.world.variant.spec.enemies, 0, [e[0], e[1] + 1, e[2] - 30], e, st.rng.drones))
-      const cam = { halfPx: HALF, camera: cameraAt(e, 0, 0), width: W, height: H }
+      const cam = AT
       // Switching to it this step.
       const sw = input({ select: w })
       expect(applyAssist(st, sw, cam)).toBeNull()
@@ -164,7 +176,7 @@ describe('auto-fire', () => {
     st.drones.push(makeDrone(st.ids.next++, st.world.variant.spec.enemies, 0, [e[0], e[1] + 1, e[2] - 30], e, st.rng.drones))
     st.arsenal.guns[0].lock = 1
     const inp = input()
-    applyAssist(st, inp, { halfPx: HALF, camera: cameraAt(e, 0, 0), width: W, height: H })
+    applyAssist(st, inp, AT)
     expect(inp.fire).toBe(true)
     stepRun(st, inp)
     expect(st.events.some((x) => x.type === 'shot')).toBe(false)
@@ -179,8 +191,64 @@ describe('auto-fire', () => {
     const e2 = eye(st)
     st.drones.push(makeDrone(st.ids.next++, st.world.variant.spec.enemies, 0, [e2[0], e2[1] + 1, e2[2] - 30], e2, st.rng.drones))
     const inp = input()
-    expect(applyAssist(st, inp, { halfPx: HALF, camera: cameraAt(e2, 0, 0), width: W, height: H })).toBeNull()
+    expect(applyAssist(st, inp, AT)).toBeNull()
     expect(inp.fire).toBe(false)
+  })
+
+  it('never for a gun whose mode is not auto, even if a variant slipped assist onto it (a semi gun latches, a charge gun never releases)', () => {
+    for (const mode of ['semi', 'charge'] as const) {
+      const st = standing(quiet(), field)
+      const e = eye(st)
+      st.drones.push(makeDrone(st.ids.next++, st.world.variant.spec.enemies, 0, [e[0], e[1] + 1, e[2] - 30], e, st.rng.drones))
+      // createRun would refuse this variant; the assist refuses it on its own too.
+      st.world.variant.spec.weapons[0].mode = mode
+      const inp = input()
+      expect(applyAssist(st, inp, AT)).toBeNull()
+      expect(inp.fire).toBe(false)
+      expect(inp.aim).toBeUndefined()
+    }
+  })
+
+  it('one source: the box is the simulation\'s view (this step\'s eye and look), not the drawn camera', () => {
+    const st = standing(quiet(), field)
+    const e = eye(st)
+    st.drones.push(makeDrone(st.ids.next++, st.world.variant.spec.enemies, 0, [e[0], e[1] + 1, e[2] - 30], e, st.rng.drones))
+    setAssistBox(HALF)
+    // The drawn camera turned right round and bobbed up: it does not matter, only its lens is read.
+    setAssistView(cameraAt([e[0], e[1] + 0.3, e[2]], Math.PI, 0.4), W, H)
+    expect(applyAssist(st, input({ yaw: 0, pitch: 0 }))?.target).toBe(st.drones[0].id)
+    // The look turned away this step: nothing in the box, whatever the drawn camera shows.
+    setAssistView(cameraAt(e, 0, 0), W, H)
+    const away = input({ yaw: Math.PI / 2, pitch: 0 })
+    expect(applyAssist(st, away)).toBeNull()
+    expect(away.fire).toBe(false)
+  })
+
+  it('the body is stepped on a copy only when a drone is near the box', () => {
+    const st = standing(quiet(), field)
+    const e = eye(st)
+    // Far out to the side: the cheap pass finds nothing, no copy of the body is stepped.
+    st.drones.push(makeDrone(st.ids.next++, st.world.variant.spec.enemies, 0, [e[0] + 20, e[1], e[2] - 25], e, st.rng.drones))
+    bodySteps.n = 0
+    expect(applyAssist(st, input({ move: { fwd: 1, strafe: 0 } }), AT)).toBeNull()
+    expect(bodySteps.n).toBe(0)
+    // One in the box: one copy stepped, and it is picked.
+    st.drones.push(makeDrone(st.ids.next++, st.world.variant.spec.enemies, 0, [e[0], e[1] + 1, e[2] - 30], e, st.rng.drones))
+    expect(applyAssist(st, input({ move: { fwd: 1, strafe: 0 } }), AT)?.target).toBe(st.drones[1].id)
+    expect(bodySteps.n).toBe(1)
+  })
+
+  it('the cheap pass widens the box by what a step\'s move can shift a drone, so it never drops one the exact pick would take', () => {
+    const q = { projection: LENS.projectionMatrix, width: W, height: H, halfPx: HALF, eye: EYE, yaw: 0, pitch: 0, range: 60 }
+    // Just outside the box from here, inside once the eye has slid 0.4 to the right (toward -X facing -Z).
+    const d = t(1, [EYE[0] - 2.8, EYE[1], EYE[2] - 30])
+    expect(pick([d])).toBeNull()
+    const moved: Vec3 = [EYE[0] - 0.4, EYE[1], EYE[2]]
+    expect(pickAssistTarget({ ...q, eye: moved, drones: [d], solids: field })?.target).toBe(1)
+    expect(anyNearBox({ ...q, drones: [d] }, 0.5)).toBe(true)
+    // Far off to the side, or out of range, it is dropped.
+    expect(anyNearBox({ ...q, drones: [t(2, [EYE[0] + 20, EYE[1], EYE[2] - 25])] }, 0.5)).toBe(false)
+    expect(anyNearBox({ ...q, drones: [t(3, [EYE[0], EYE[1], EYE[2] - 70])] }, 0.5)).toBe(false)
   })
 
   it('aims from the eye after this step\'s move: the copy of the body moves exactly as the run will', () => {
@@ -218,7 +286,7 @@ function playAssisted(seed: number, steps: number) {
     const out = st.phase === 'safe' || st.waveStep < 30
     const inp = input({ move: { fwd: out ? 1 : 0, strafe: out ? 0 : Math.sin(i / 70) }, yaw, pitch, jump: !out && i % 90 === 0 })
     const e = eye(st)
-    applyAssist(st, inp, { halfPx: HALF, camera: cameraAt(e, yaw, pitch), width: W, height: H })
+    applyAssist(st, inp, AT)
     log.push(JSON.parse(JSON.stringify(inp)) as RunInput)
     stepRun(st, inp)
     const shots = st.events.filter((x) => x.type === 'shot').length
@@ -292,6 +360,20 @@ describe('in the runner', () => {
     const again = createRun(v, hedges, { level: testLevel(), seed: 3 })
     for (const inp of stepped) stepRun(again, inp)
     expect(stateHash(again)).toBe(runner.hash())
+  })
+
+  it('while a card is up (the run paused) no step runs, so the assist is never asked', () => {
+    let asked = 0
+    const r = new DroneRunner(busy(3), hedges, { level: testLevel(), seed: 3, hud: false, input: () => input({ move: { fwd: 1, strafe: 0 } }), assist: () => { asked++ } })
+    for (let k = 0; k < 30; k++) r.frame(1 / 60)
+    expect(asked).toBe(30)
+    r.setPaused(true, 'card')
+    for (let k = 0; k < 60; k++) expect(r.frame(1 / 60)).toBe(0)
+    expect(asked).toBe(30)
+    r.setPaused(false, 'card')
+    r.frame(1 / 60)
+    r.frame(1 / 60)
+    expect(asked).toBeGreaterThan(30)
   })
 
   it('with the box never set (a desktop), the runner fires only when told', () => {

@@ -17,8 +17,10 @@
  *   its index too. The entry marker is not drawn (runLevel.ts drawnWorld).
  * - Two passes a frame (Renderer): the world, then, with the depth cleared,
  *   the gun from a camera at the eye with the same lens (Viewmodel.tsx).
- * - The touch aim assist (assist.ts) projects drones through this camera,
- *   so it is handed the camera and the canvas size each frame.
+ * - The touch aim assist (assist.ts) borrows this camera's lens: it is
+ *   handed the camera (only its projection matrix is read) and the canvas
+ *   size each frame, and builds its own view from the simulation's eye and
+ *   look, so the bob and the drawing between steps never decide a shot.
  * - The page hidden, the run pauses (runner.setPaused) and owes nothing for
  *   the time away.
  *

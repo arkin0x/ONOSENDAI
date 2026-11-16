@@ -116,7 +116,7 @@ describe('aimed shots', () => {
     expect(aimDir(input({ aim: { yaw: 0.5, pitch: -0.2 } }))).toEqual(lookDir(0.5, -0.2))
   })
 
-  it('a variant may give assist only as "auto", and only to a hitscan gun', () => {
+  it('a variant may give assist only as "auto", and only to a hitscan gun whose mode is auto', () => {
     const lv = testLevel(), field = boxes(GROUND)
     const bad1 = variant()
     ;(bad1.spec.weapons[0] as { assist?: string }).assist = 'always'
@@ -124,6 +124,14 @@ describe('aimed shots', () => {
     const bad2 = variant()
     bad2.spec.weapons[0] = { ...bad2.spec.weapons[0], fire: 'projectile', projectileSpeed: 80 }
     expect(() => createRun(bad2, field, { level: lv })).toThrow(/assist/)
+    // A semi gun latches; a charge gun never releases while the assist holds the trigger.
+    for (const mode of ['semi', 'charge'] as const) {
+      const bad = variant()
+      bad.spec.weapons[0] = { ...bad.spec.weapons[0], mode, charge: { minS: 0.2, maxS: 1, damageMax: 3, rangeMax: 80 } }
+      expect(() => createRun(bad, field, { level: lv })).toThrow(/assist must be "auto", on a hitscan gun whose mode is "auto"/)
+    }
+    // The base variant (an auto hitscan gun) is fine.
+    expect(() => createRun(variant(), field, { level: lv })).not.toThrow()
   })
 })
 

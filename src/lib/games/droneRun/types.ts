@@ -86,7 +86,7 @@ export interface WeaponDef {
   /**
    * "auto": this gun may take an aimed shot (RunInput.aim): a shot fired on
    * a step that carries an aim goes exactly along it, with no spread. Only
-   * a hitscan gun may carry it. Without it, the simulation ignores any aim
+   * a hitscan gun whose mode is "auto" may carry it (createRun checks). Without it, the simulation ignores any aim
    * and the gun fires along the look. A client decides when to send an aim
    * (ONOSENDAI: a touch screen's aim assist, which also pulls the trigger
    * when a drone is in the box around the reticle).

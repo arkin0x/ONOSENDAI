@@ -164,18 +164,26 @@ export interface GunContext {
   ids: { next: number }
 }
 
-/** What a hitscan line from `o` along unit `d` meets within `range`: where the first solid stops it, and the live drones it crosses before that, nearest first. */
-export function castHitscan(solids: Solids, targets: readonly Target[], o: Vec3, d: Vec3, range: number): { stop: number; along: Array<{ t: number; id: number }> } {
-  const end: Vec3 = [o[0] + d[0] * range, o[1] + d[1] * range, o[2] + d[2] * range]
-  const wall = segmentCast(solids, o, end)
+/** What a hitscan line meets: where the first solid stops it, and the live drones it crosses before that, nearest first. */
+export interface HitscanCast { stop: number; along: Array<{ t: number; id: number }> }
+
+/** Scratch: the far end of a hitscan line (read by segmentCast only during the call). */
+const castEnd: Vec3 = [0, 0, 0]
+
+/** What a hitscan line from `o` along unit `d` meets within `range`. Fills and returns `out` when given (its list emptied first), so a caller that casts every step makes no new lists. */
+export function castHitscan(solids: Solids, targets: readonly Target[], o: Vec3, d: Vec3, range: number, out?: HitscanCast): HitscanCast {
+  castEnd[0] = o[0] + d[0] * range; castEnd[1] = o[1] + d[1] * range; castEnd[2] = o[2] + d[2] * range
+  const wall = segmentCast(solids, o, castEnd)
   const stop = wall ? wall.t * range : range
-  const along: Array<{ t: number; id: number }> = []
+  const along = out ? out.along : []
+  along.length = 0
   for (const tg of targets) {
     if (tg.hp <= 0) continue
     const t = raySphere(o, d, tg.pos, tg.radius)
     if (t >= 0 && t <= stop) along.push({ t, id: tg.id })
   }
   along.sort((a, b) => a.t - b.t || a.id - b.id)
+  if (out) { out.stop = stop; return out }
   return { stop, along }
 }
 

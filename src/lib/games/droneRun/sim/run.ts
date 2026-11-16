@@ -134,7 +134,8 @@ export function checkVariant(v: DroneRunVariant, level: RunLevel): void {
     if (!!w.heat === !!w.ammo) throw new Error(`Weapon ${w.id} needs exactly one of heat or ammo.`)
     if (!(w.rate > 0)) throw new Error(`Weapon ${w.id} needs a rate above 0.`)
     if (w.mode === 'charge' && !w.charge) throw new Error(`Weapon ${w.id} is a charge gun with no charge.`)
-    if (w.assist !== undefined && (w.assist !== 'auto' || w.fire !== 'hitscan')) throw new Error(`Weapon ${w.id}: assist must be "auto", on a hitscan gun.`)
+    // A semi gun latches (one shot a press) and a charge gun never lets go while held and fires its release step without an aim, so only an auto hitscan gun may be aimed.
+    if (w.assist !== undefined && (w.assist !== 'auto' || w.fire !== 'hitscan' || w.mode !== 'auto')) throw new Error(`Weapon ${w.id}: assist must be "auto", on a hitscan gun whose mode is "auto".`)
   }
   if (!s.waves.length) throw new Error('A variant needs at least one wave.')
   const enemies = new Set(s.enemies.map((e) => e.id))

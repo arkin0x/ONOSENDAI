@@ -3538,7 +3538,7 @@ select.avatars__input option:checked {
 .ws__topbtn--close { flex: 0 0 var(--ws-bar); border-radius: 50%; }
 .ws__topbtn.ws__topbtn--deploy { flex: 1.3 1 0; color: var(--ws-ink); background: var(--ok); border-color: var(--ok); font-weight: 700; }
 .ws__topbtn.ws__topbtn--deploy:disabled { opacity: 0.35; }
-/* The avatar being mined, signed or published: a ring turning round AVATAR. */
+/* The avatar being signed or published: a ring round AVATAR. */
 .ws__topbtn-ring {
   position: absolute;
   inset: -1px;

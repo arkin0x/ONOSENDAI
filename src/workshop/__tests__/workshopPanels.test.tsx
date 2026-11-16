@@ -71,8 +71,8 @@ const MOVED: Record<'shard' | 'avatar', string[]> = {
     '>USE THIS SHARD</button>',
     '>ICOSAHEDRON</button>',
     '>BROADCAST</button>',
-    'useAvatars.getState().cancelAdopt()',
-    'WORK ${work.required} BITS',
+    'OVER THE 128 KB SIZE LIMIT',
+    'SOME REMOTE SIGNERS REFUSE EVENTS THIS BIG',
   ],
 }
 
@@ -123,7 +123,7 @@ describe('the workshop top bar (workshop redesign, phase 1)', () => {
     expect(ALL.split('aria-label="Raise the grid floor"').length - 1).toBe(1)
   })
 
-  it('shows the avatar being mined as a ring on AVATAR, which opens AVATAR', () => {
+  it('shows the avatar being signed or published as a ring on AVATAR, which opens AVATAR', () => {
     expect(TOPBAR).toContain("const busy = area === 'avatar' && work !== null")
     expect(TOPBAR).toContain('{busy && <span className="ws__topbtn-ring" aria-hidden />}')
     expect(TOPBAR).toContain('`${work}: see AVATAR`')

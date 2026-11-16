@@ -330,7 +330,7 @@ export const DEMO_SCRIPT: DemoScript = {
     // 8. Others
     {
       id: 'avatars', chapter: 'others', title: 'Avatars',
-      caption: 'People choose shapes to be seen as. An avatar is an event with proof of work priced by the shape\'s size and detail.',
+      caption: 'People choose shapes to be seen as. An avatar is an event that carries the shape, up to 128 KB.',
       scene: { target: 'self', scale: 0 },
     },
     {

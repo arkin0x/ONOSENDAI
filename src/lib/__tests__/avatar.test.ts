@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { AVATAR_KIND, AVATAR_MARKER_HALF, SPECTATOR_SCALE_MIN_EXP, avatarDraw, avatarDrawKept, avatarFromEvent, avatarScale, avatarTemplate, spectatorScale } from '../avatar'
+import { AVATAR_CONTENT_MAX, AVATAR_CONTENT_WARN } from 'cyberspace-core'
+import { AVATAR_KIND, AVATAR_MARKER_HALF, SPECTATOR_SCALE_MIN_EXP, avatarDraw, avatarDrawKept, avatarFromEvent, avatarKb, avatarScale, avatarSize, avatarTemplate, spectatorScale } from '../avatar'
 import { newShard, ticksOf } from 'sno-core/shards'
 
 const built = () => {
@@ -127,5 +128,24 @@ describe('avatarDrawKept (Cyberspace TV)', () => {
     expect(kept.mesh).toBeGreaterThan(0)
     // Never smaller as the zoom goes on out: it holds the marker's size.
     expect(avatarDrawKept(shard, far + 10, 1).mesh).toBeCloseTo(kept.mesh)
+  })
+})
+
+describe('avatar size', () => {
+  it('warns above 64,000 bytes and refuses above the 128 KB size limit, counting UTF-8 bytes', () => {
+    expect(AVATAR_CONTENT_WARN).toBe(64_000)
+    expect(AVATAR_CONTENT_MAX).toBe(131_072)
+    expect(avatarSize('{}')).toEqual({ bytes: 2, over: false, warn: false })
+    expect(avatarSize('a'.repeat(64_000))).toEqual({ bytes: 64_000, over: false, warn: false })
+    expect(avatarSize('a'.repeat(64_001))).toEqual({ bytes: 64_001, over: false, warn: true })
+    expect(avatarSize('a'.repeat(131_072))).toMatchObject({ over: false, warn: true })
+    expect(avatarSize('a'.repeat(131_073))).toMatchObject({ over: true, warn: false })
+    expect(avatarSize('é'.repeat(65_537))).toMatchObject({ bytes: 131_074, over: true })
+  })
+
+  it('reads kilobytes so the limit is 128 KB', () => {
+    expect(avatarKb(131_072)).toBe(128)
+    expect(avatarKb(131_073, Math.ceil)).toBe(129)
+    expect(avatarKb(98_097, Math.ceil)).toBe(96)
   })
 })

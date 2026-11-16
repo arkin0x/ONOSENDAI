@@ -26,10 +26,8 @@ vi.mock('../../lib/relay', async (importOriginal) => ({
 }))
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
-import { avatarWork } from 'cyberspace-core'
-import { newShard, toPayload } from 'sno-core/shards'
+import { newShard } from 'sno-core/shards'
 import { avatarTemplate } from '../../lib/avatar'
-import { mineChunk, nonceTagged } from '../../lib/avatarMine'
 import type { NostrEvent } from '../../lib/events'
 import { useCyberspace } from '../useCyberspace'
 import {
@@ -45,7 +43,7 @@ const someone = (pubkey: string, over: Partial<Person> = {}): Person => ({
   pubkey, position: { ...here, x: here.x + 3n }, plane: 0, lastActive: NOW - 60, type: 'hop', checkedAt: NOW - 60, actionId: 'e'.repeat(64), ...over,
 })
 
-/** XOR's avatar: a paid kind 11333, mined here as the worker would. */
+/** XOR's avatar: a kind 11333, signed as the workshop would. */
 function xorAvatar(): { pubkey: string; event: NostrEvent } {
   const sk = generateSecretKey()
   const pubkey = getPublicKey(sk)
@@ -54,12 +52,7 @@ function xorAvatar(): { pubkey: string; event: NostrEvent } {
   s.vertices = [{ p: [0, 0, 0], c: [0, 0.9, 1] }, { p: [1, 0, 0], c: [0, 0.9, 1] }, { p: [0, 1, 0], c: [0, 0.9, 1] }]
   s.faces = [[0, 1, 2]]
   s.mode = 'solid'
-  const template = { ...avatarTemplate(s, NOW), pubkey }
-  const target = avatarWork(toPayload(s))
-  let found = null
-  for (let from = 0; found === null; from += 4096) found = mineChunk(template, target, from, 4096)
-  const { pubkey: _, ...unsigned } = nonceTagged(template, found.nonce, target)
-  return { pubkey, event: finalizeEvent(unsigned, sk) as NostrEvent }
+  return { pubkey, event: finalizeEvent(avatarTemplate(s, NOW), sk) as NostrEvent }
 }
 
 beforeEach(() => {
@@ -123,11 +116,18 @@ describe('the spectated avatar is drawn once', () => {
 })
 
 describe('the avatar cache', () => {
-  it('round-trips a paid avatar, and a stale one is not drawn', () => {
+  it('round-trips an avatar, and a stale one is not drawn', () => {
     const { pubkey, event } = xorAvatar()
     keepAvatar(event, 1_000)
     expect(loadAvatarCache(1_000)[pubkey]?.name).toBe('Stella Octangula')
     expect(loadAvatarCache(1_000 + AVATARS_CACHE_MAX_AGE_MS + 1)[pubkey]).toBeUndefined()
+  })
+
+  it('a kept avatar over the size limit is not drawn', () => {
+    const { pubkey, event } = xorAvatar()
+    const big = { ...event, content: event.content.replace(/}$/, `,"pad":"${'a'.repeat(131_072)}"}`) }
+    keepAvatar(big, 1_000)
+    expect(loadAvatarCache(1_000)[pubkey]).toBeUndefined()
   })
 
   it('forgets a shape its author dropped for the dodecahedron', () => {

@@ -8,12 +8,12 @@
  *
  * A big feature area gets its own button here rather than a section at the
  * bottom of another panel (arkinox, 2026-11-14, of MOTION: "It's too much
- * for appending to the bottom of the shard menu"). The avatar's mining, which
- * had a chip of its own that wrapped the old row, is a ring on AVATAR.
+ * for appending to the bottom of the shard menu"). An avatar waiting for its
+ * signer or the relays, which had a chip of its own that wrapped the old row,
+ * is a ring on AVATAR.
  */
 
 import { Box, Grid3x3, Menu, Orbit, Play, VenetianMask, X, type LucideIcon } from 'lucide-react'
-import { clock } from '../../lib/avatarMine'
 import { useAvatars } from '../../store/useAvatars'
 import { useShards } from '../../store/useShards'
 import { useWorkshop } from '../../store/useWorkshop'
@@ -33,9 +33,8 @@ export function TopBar({ open, onArea }: { open: Area | null; onArea: (a: Area) 
   const phase = useAvatars((s) => s.phase)
   // The first-visit guide, done: DEPLOY lights up for a moment (shell/Guide).
   const deployGlow = useBeginner((b) => b.glow === 'deploy')
-  const mining = useAvatars((s) => s.mining)
   const w = useWorkshop.getState
-  const work = phase === 'mining' ? `MINING ${mining ? clock(mining.elapsedMs) : ''}`.trim() : phase === 'signing' ? 'SIGN IT' : phase === 'publishing' ? 'PUBLISHING' : null
+  const work = phase === 'signing' ? 'SIGN IT' : phase === 'publishing' ? 'PUBLISHING' : null
   return (
     <header className="ws__topbar" role="toolbar" aria-label="Workshop">
       <button className="ws__topbtn ws__topbtn--close" onClick={() => w().closeWorkshop()} title="Close the workshop (Esc)" aria-label="Close the workshop">

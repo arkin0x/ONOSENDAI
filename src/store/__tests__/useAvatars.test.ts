@@ -16,30 +16,12 @@ vi.mock('../../lib/relay', () => ({
   query: vi.fn(async () => []),
 }))
 
-import { verifyAvatarWork } from 'cyberspace-core'
+import { verifyAvatar } from 'cyberspace-core'
 import { publish, query } from '../../lib/relay'
-import { AVATAR_KIND, avatarTemplate } from '../../lib/avatar'
-import { eventId, mineChunk, nonceTagged } from '../../lib/avatarMine'
-import { MineCancelled, type AvatarMiner } from '../../lib/avatarWorker'
-import { newShard } from 'sno-core/shards'
+import { AVATAR_KIND, avatarSize, avatarTemplate } from '../../lib/avatar'
+import { newShard, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from '../useCyberspace'
-import { AVATAR_SIGN_PATIENCE_MS, setAvatarMiner, useAvatars } from '../useAvatars'
-
-// The work, inline: the same loop the worker runs, with a hook to cancel.
-const inline: AvatarMiner = (template, target, onProgress) => {
-  let cancelled = false
-  const done = new Promise<{ nonce: string; id: string; tries: number; elapsedMs: number }>((resolve, reject) => {
-    setTimeout(() => {
-      if (cancelled) { reject(new MineCancelled()); return }
-      let found = null
-      let from = 0
-      for (; found === null && from < 2 ** 24; from += 4096) { found = mineChunk(template, target, from, 4096); onProgress({ tries: from + 4096, elapsedMs: 1 }) }
-      resolve({ ...found!, tries: from, elapsedMs: 1 })
-    }, 0)
-  })
-  return { done, cancel: () => { cancelled = true } }
-}
-setAvatarMiner(inline)
+import { AVATAR_SIGN_PATIENCE_MS, avatarShard, useAvatars } from '../useAvatars'
 
 const built = () => {
   const s = newShard('me')
@@ -51,21 +33,20 @@ const built = () => {
 }
 
 describe('useAvatars', () => {
-  beforeEach(() => { useAvatars.setState({ shards: {}, asked: {}, mining: null, phase: null, minedMs: null, adoptError: null, mineEvent: null, minePublished: false }); useCyberspace.setState({ live: true }); localStorage.clear(); vi.mocked(query).mockClear(); vi.mocked(publish).mockClear() })
+  beforeEach(() => { useAvatars.setState({ shards: {}, asked: {}, phase: null, adoptError: null, mineEvent: null, minePublished: false }); useCyberspace.setState({ live: true }); localStorage.clear(); vi.mocked(query).mockClear(); vi.mocked(publish).mockClear() })
 
-  it('adopting a shard signs a kind 11333 event with no d tag, publishes it and keeps a copy', async () => {
+  it('adopting a shard signs a kind 11333 event with no d tag and no work, publishes it and keeps a copy', async () => {
     const me = useCyberspace.getState().identity.pubkey
     expect(await useAvatars.getState().adopt(built())).toBe(true)
     const ev = vi.mocked(publish).mock.calls[0][0]
     expect(ev.kind).toBe(AVATAR_KIND)
     expect(ev.pubkey).toBe(me)
     expect(ev.tags[0]).toEqual(['name', 'Arches'])
-    // Replaceable: no `d` tag at all (spec 8.10). The rest is the nonce.
+    // Replaceable: no `d` tag at all (spec 8.10), and no work: no nonce tag.
     expect(ev.tags.some((t: string[]) => t[0] === 'd')).toBe(false)
-    // Paid: the floor for a one-gibson triangle, committed before mining and carried by the id.
-    expect(ev.tags.find((t: string[]) => t[0] === 'nonce')).toEqual(['nonce', expect.any(String), '16'])
-    expect(verifyAvatarWork(ev)).toMatchObject({ ok: true, required: 16, committed: 16 })
-    expect(useAvatars.getState().mining).toBeNull()
+    expect(ev.tags.some((t: string[]) => t[0] === 'nonce')).toBe(false)
+    expect(verifyAvatar(ev)).toEqual({ ok: true, reason: 'ok' })
+    expect(useAvatars.getState().phase).toBeNull()
     expect(useAvatars.getState().shards[me]?.name).toBe('Arches')
     // Kept for the next load, before any relay answers.
     useAvatars.setState({ shards: {} })
@@ -79,24 +60,33 @@ describe('useAvatars', () => {
     expect(await useAvatars.getState().adopt(null)).toBe(true)
     const ev = vi.mocked(publish).mock.calls[1][0]
     expect(ev.content).toBe('')
-    // The dodecahedron owes nothing: no nonce, no mining.
+    // The dodecahedron: an empty content.
     expect(ev.tags.some((t) => t[0] === 'nonce')).toBe(false)
     expect(useAvatars.getState().shards[me]).toBeNull()
   })
 
-  it('cancelling the work leaves the avatar as it was, with no error', async () => {
+  it('refuses a shard over the size limit without asking the signer', async () => {
     const me = useCyberspace.getState().identity.pubkey
-    const pending = useAvatars.getState().adopt(built())
-    expect(useAvatars.getState().mining).toMatchObject({ required: 16, tries: 0 })
-    useAvatars.getState().cancelAdopt()
-    expect(await pending).toBe(false)
-    expect(useAvatars.getState().mining).toBeNull()
-    expect(useAvatars.getState().adoptError).toBeNull()
-    expect(vi.mocked(publish)).not.toHaveBeenCalled()
-    expect(me in useAvatars.getState().shards).toBe(false)
+    const original = useCyberspace.getState().signEvent
+    const signs: unknown[] = []
+    useCyberspace.setState({ signEvent: (t, p) => { signs.push(t); return original(t, p) } })
+    try {
+      const heavy: ShardModel = { ...built(), name: 'Heavy' }
+      // About 200 KB of content: over the 128 KB size limit.
+      heavy.vertices = Array.from({ length: 10_000 }, (_, i) => ({ p: [i, i, i] as [number, number, number], c: [0.123, 0.456, 0.789] as [number, number, number] }))
+      expect(avatarSize(avatarTemplate(heavy, 1).content).over).toBe(true)
+      expect(await useAvatars.getState().adopt(heavy)).toBe(false)
+      expect(useAvatars.getState().adoptError).toMatch(/128 KB size limit/)
+      expect(useAvatars.getState().phase).toBeNull()
+      expect(signs).toEqual([])
+      expect(vi.mocked(publish)).not.toHaveBeenCalled()
+      expect(me in useAvatars.getState().shards).toBe(false)
+    } finally {
+      useCyberspace.setState({ signEvent: original })
+    }
   })
 
-  it('walks mining, signing and publishing, refusing a second adopt the whole way', async () => {
+  it('walks signing and publishing, refusing a second adopt the whole way', async () => {
     const original = useCyberspace.getState().signEvent
     let release: (() => void) | null = null
     const patience: number[] = []
@@ -108,11 +98,9 @@ describe('useAvatars', () => {
     })
     try {
       const pending = useAvatars.getState().adopt(built())
-      expect(useAvatars.getState().phase).toBe('mining')
-      await vi.waitFor(() => { expect(useAvatars.getState().phase).toBe('signing') })
-      expect(useAvatars.getState().mining).toBeNull()
-      expect(useAvatars.getState().minedMs).not.toBeNull()
-      // The signer's prompt is open: a second press must not mine and ask again.
+      // No work first: straight to the signer.
+      expect(useAvatars.getState().phase).toBe('signing')
+      // The signer's prompt is open: a second press must not ask again.
       expect(await useAvatars.getState().adopt(built())).toBe(false)
       expect(patience).toEqual([AVATAR_SIGN_PATIENCE_MS])
       release!()
@@ -124,7 +112,7 @@ describe('useAvatars', () => {
     }
   })
 
-  it('a second adopt while one is mining is refused', async () => {
+  it('a second adopt while one is signing is refused', async () => {
     const pending = useAvatars.getState().adopt(built())
     expect(await useAvatars.getState().adopt(built())).toBe(false)
     expect(await pending).toBe(true)
@@ -160,14 +148,14 @@ describe('useAvatars', () => {
       expect(vi.mocked(publish)).not.toHaveBeenCalled()
       const kept = useAvatars.getState().mineEvent
       expect(kept).not.toBeNull()
-      expect(verifyAvatarWork(kept!)).toMatchObject({ ok: true })
+      expect(verifyAvatar(kept!)).toMatchObject({ ok: true })
 
       // Broadcasting while still LOCAL refuses rather than publishing.
       expect(await useAvatars.getState().broadcastMine()).toBe(false)
       expect(vi.mocked(publish)).not.toHaveBeenCalled()
       expect(useAvatars.getState().adoptError).toMatch(/LOCAL/)
 
-      // Live: the very event that was mined goes out, no second mine.
+      // Live: the very event that was signed goes out, not signed again.
       useCyberspace.setState({ live: true })
       expect(await useAvatars.getState().broadcastMine()).toBe(true)
       expect(vi.mocked(publish)).toHaveBeenCalledTimes(1)
@@ -178,24 +166,34 @@ describe('useAvatars', () => {
     }
   })
 
-  it('an avatar that has not paid is the dodecahedron to everyone', async () => {
+  it('draws an avatar with no nonce tag, and one published with work, its nonce tag ignored', async () => {
     const pk = 'ef'.repeat(32)
     const shard = built()
-    const unpaid = { ...avatarTemplate(shard, 30), pubkey: pk, id: 'ff'.repeat(32), sig: '' }
-    vi.mocked(query).mockResolvedValueOnce([unpaid as never])
+    const plain = { ...avatarTemplate(shard, 30), pubkey: pk, id: 'ff'.repeat(32), sig: '' }
+    vi.mocked(query).mockResolvedValueOnce([plain as never])
+    useAvatars.getState().ensure(pk)
+    await vi.waitFor(() => { expect(useAvatars.getState().shards[pk]?.name).toBe('Arches') })
+    // Published while avatars were paid for in work: the tag is ignored, met or not.
+    const t = avatarTemplate(shard, 31)
+    for (const nonce of [['nonce', '12345', '16'], ['nonce', '0', '42']]) {
+      const old = { ...t, tags: [...t.tags, nonce], pubkey: pk, id: 'ff'.repeat(32), sig: '' }
+      expect(avatarShard(old)?.name).toBe('Arches')
+    }
+  })
+
+  it('an event that is not an avatar every client draws is the dodecahedron to everyone', async () => {
+    const pk = 'ab'.repeat(32)
+    const t = avatarTemplate(built(), 30)
+    // Over the size limit, whatever it carries.
+    const big = { ...t, content: t.content.replace(/}$/, `,"pad":"${'a'.repeat(131_072)}"}`), pubkey: pk, id: 'ff'.repeat(32), sig: '' }
+    expect(avatarShard(big)).toBeNull()
+    vi.mocked(query).mockResolvedValueOnce([big as never])
     useAvatars.getState().ensure(pk)
     await vi.waitFor(() => { expect(pk in useAvatars.getState().shards).toBe(true) })
     expect(useAvatars.getState().shards[pk]).toBeNull()
-    // The same shape with its work done is drawn.
-    const t = { ...avatarTemplate(shard, 31), pubkey: pk }
-    let found = null
-    for (let from = 0; found === null; from += 4096) found = mineChunk(t, 16, from, 4096)
-    const paid = { ...nonceTagged(t, found!.nonce, 16), id: found!.id, sig: '' }
-    expect(eventId(paid)).toBe(paid.id)
-    useAvatars.setState({ asked: {} })
-    vi.mocked(query).mockResolvedValueOnce([paid as never])
-    useAvatars.getState().ensure(pk)
-    await vi.waitFor(() => { expect(useAvatars.getState().shards[pk]?.name).toBe('Arches') })
+    // Unreadable, or another kind.
+    expect(avatarShard({ ...t, content: 'not json', pubkey: pk })).toBeNull()
+    expect(avatarShard({ ...t, kind: 1, pubkey: pk })).toBeNull()
   })
 
   it('asks the relay once per pubkey and reads the newest event', async () => {

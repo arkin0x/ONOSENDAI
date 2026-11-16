@@ -15,6 +15,7 @@
  * puts the dodecahedron back.
  */
 
+import { AVATAR_CONTENT_MAX, AVATAR_CONTENT_WARN, avatarContentBytes } from 'cyberspace-core'
 import { TICKS_PER_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
 import { keepOwnTable } from './carried'
 import { CLIENT_TAG } from './client'
@@ -29,11 +30,33 @@ export function avatarTemplate(shard: ShardModel | null, createdAt: number): Ava
     kind: AVATAR_KIND,
     created_at: createdAt,
     // No `d`: a replaceable kind has no second key, and writing one would
-    // only invite a reader to filter on it. The client tag is here and not
-    // added at signing because the work is mined over these tags (client.ts).
+    // only invite a reader to filter on it. The client tag is written here,
+    // where a signer would add it anyway (client.ts).
     tags: shard ? [['name', shard.name], [...CLIENT_TAG]] : [[...CLIENT_TAG]],
     content: shard ? JSON.stringify(toPayload(shard)) : '',
   }
+}
+
+/** Where an avatar's content stands against the size limit (spec 8.10). */
+export interface AvatarSize {
+  /** UTF-8 bytes of the content, as the limit counts them. */
+  bytes: number
+  /** Over the 128 KB size limit: no client draws it, so it is never signed. */
+  over: boolean
+  /** Within the limit but big enough that some remote signers (NIP-46) refuse it. */
+  warn: boolean
+}
+
+/** The content against the size limit and the size some remote signers refuse. */
+export function avatarSize(content: string): AvatarSize {
+  const bytes = avatarContentBytes(content)
+  const over = bytes > AVATAR_CONTENT_MAX
+  return { bytes, over, warn: !over && bytes > AVATAR_CONTENT_WARN }
+}
+
+/** Kilobytes as the AVATAR sheet shows them: 1 KB is 1,024 bytes, so the limit reads 128 KB. */
+export function avatarKb(bytes: number, round: (n: number) => number = Math.round): number {
+  return round(bytes / 1024)
 }
 
 /** The shard an avatar event carries, or null when it carries none or is not one. */

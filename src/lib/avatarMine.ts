@@ -1,15 +1,14 @@
+
 /**
- * avatarMine.ts - the work an avatar owes, done.
+ * avatarMine.ts - NIP-13 work on an event, done: the seed's (DECK-0008).
  *
- * Spec 8.10: a kind 11333 avatar is paid for in NIP-13 work on the event
- * itself, `required = ceil(16 + 6 log2(reach) + 3 log2(detail / 32))` bits,
- * the target committed in the nonce tag before mining. This is the loop
- * that finds the nonce: the NIP-01 serialization is built once around a
- * marker, the nonce's decimal digits are written into a reusable buffer,
- * and only the hash runs per try. cyberspace-core's `avatarWork` prices
- * the shape and `verifyAvatarWork` judges the result; the worker
- * (workers/avatar.worker.ts) runs this off the main thread in chunks so
- * progress and cancel stay live.
+ * The name is from when avatars were paid for in work as well; they no
+ * longer are (spec 8.10), and a seed is what mines here now. The target is
+ * committed in the nonce tag before mining. This is the loop that finds the
+ * nonce: the NIP-01 serialization is built once around a marker, the
+ * nonce's decimal digits are written into a reusable buffer, and only the
+ * hash runs per try. The worker (workers/avatar.worker.ts) runs it off the
+ * main thread in chunks so progress and cancel stay live.
  */
 
 import { sha256 } from '@noble/hashes/sha2.js'
@@ -119,16 +118,4 @@ export function describeDuration(seconds: number): string {
   if (seconds < 36 * 3600) return `about ${Math.round(seconds / 3600)} h`
   if (seconds < 400 * 86400) return `about ${Math.round(seconds / 86400)} days`
   return `about ${Math.round(seconds / (365.25 * 86400))} years`
-}
-
-/** How long a mine took, for a sentence: "under a second" or m:ss. */
-export function minedIn(ms: number): string {
-  return ms < 1000 ? 'under a second' : clock(ms)
-}
-
-/** m:ss for an elapsed span. */
-export function clock(ms: number): string {
-  const s = Math.floor(ms / 1000)
-  const m = Math.floor(s / 60)
-  return `${m}:${String(s % 60).padStart(2, '0')}`
 }

@@ -118,7 +118,8 @@ describe('the spec vectors (§7.6 Golden vectors)', () => {
     const door = JSON.parse((await openSealed(reject.door.sealed.event, regionKey))!) as NostrEvent
     expect(door.kind).toBe(3341)
     expect(door.tags.some((t) => t[0] === 'door')).toBe(true)
-  })
+    // A cold import of DiscoveredPanel alone takes about five seconds on a loaded machine, as it did before this file changed.
+  }, 20000)
 })
 
 describe('reading rules (§7.6 Reading)', () => {

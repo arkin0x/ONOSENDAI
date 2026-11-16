@@ -31,6 +31,8 @@ import { Chamfer, THUMB_PX } from './ui/Chamfer'
 import { useMutes } from '../store/useMutes'
 import { useCyberspace } from '../store/useCyberspace'
 import { withoutMuted } from '../lib/muteList'
+import { matches, searchKey } from '../lib/shardSearch'
+import { Highlight } from './ui/SearchField'
 
 /** A tile's picture, at the size a listing's GIF is shown, in the chamfered frame every row picture has (owner, 2026-11-15). */
 function FeedThumb({ object }: { object: FeedObject }): JSX.Element {
@@ -43,13 +45,13 @@ function Author({ pubkey }: { pubkey: string }): JSX.Element {
   return <>{profileLabel(profile, nip19.npubEncode(pubkey))}</>
 }
 
-function Tile({ object, onPick, onOpen, actions }: { object: FeedObject; onPick?: (o: FeedObject) => void; onOpen?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode }): JSX.Element {
+function Tile({ object, onPick, onOpen, actions, query = '' }: { object: FeedObject; onPick?: (o: FeedObject) => void; onOpen?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode; query?: string }): JSX.Element {
   const s = object.shard
   const body = (
     <>
       <FeedThumb object={object} />
       <span className="feed__text">
-        <span className="feed__name">{s.name}</span>
+        <span className="feed__name"><Highlight text={s.name} query={query} /></span>
         <span className="feed__by"><Author pubkey={object.pubkey} /></span>
         <span className="feed__meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} obj` : ''}</span>
       </span>
@@ -85,7 +87,7 @@ function ListingPic({ listing }: { listing: FeedListing }): JSX.Element {
 }
 
 /** An object for sale: never placed (no shape until bought), bought from its seller's page. */
-export function ListingTile({ listing }: { listing: FeedListing }): JSX.Element {
+export function ListingTile({ listing, query = '' }: { listing: FeedListing; query?: string }): JSX.Element {
   const title = listing.title || 'Untitled'
   const link = useSellerLink(listing)
   return (
@@ -93,7 +95,7 @@ export function ListingTile({ listing }: { listing: FeedListing }): JSX.Element 
       <div className="feed__pick" title="For sale: its shape is sealed until bought">
         <ListingPic listing={listing} />
         <span className="feed__text">
-          <span className="feed__name">{title}</span>
+          <span className="feed__name"><Highlight text={title} query={query} /></span>
           <span className="feed__by"><Author pubkey={listing.pubkey} /></span>
           <span className="feed__price">{satsLabel(listing.priceSats)}</span>
         </span>
@@ -112,7 +114,18 @@ export function ListingTile({ listing }: { listing: FeedListing }): JSX.Element 
   )
 }
 
-export function FeedList({ onPick, onOpen, actions }: { onPick?: (o: FeedObject) => void; onOpen?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode }): JSX.Element {
+/** A feed entry's name, as the search matches it: an object's name, a listing's title. */
+export function feedName(o: FeedObject | FeedListing): string {
+  return isListing(o) ? o.title || 'Untitled' : o.shard.name
+}
+
+/**
+ * `query` is the search typed under the list (PLACE OBJECT, the hide bar's
+ * Model): only entries whose name holds it are shown, the matched part
+ * marked. Pages keep coming while the end of the list is in view, so a
+ * search reaches past the first page.
+ */
+export function FeedList({ onPick, onOpen, actions, query = '' }: { onPick?: (o: FeedObject) => void; onOpen?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode; query?: string }): JSX.Element {
   const allObjects = useFeed((s) => s.objects)
   const allListings = useFeed((s) => s.listings)
   // Less what the mute list hides: someone blocked, or one muted by its id (store/useMutes).
@@ -121,7 +134,9 @@ export function FeedList({ onPick, onOpen, actions }: { onPick?: (o: FeedObject)
   const objects = useMemo(() => withoutMuted(allObjects, muted, me), [allObjects, muted, me])
   const listings = useMemo(() => withoutMuted(allListings, muted, me), [allListings, muted, me])
   // Objects and listings, newest first, merged once per change (not per render).
-  const items = useMemo(() => feedItems({ objects, listings }), [objects, listings])
+  const all = useMemo(() => feedItems({ objects, listings }), [objects, listings])
+  const key = searchKey(query)
+  const items = useMemo(() => (key === '' ? all : all.filter((o) => matches(feedName(o), key))), [all, key])
   const loading = useFeed((s) => s.loading)
   const exhausted = useFeed((s) => s.exhausted)
   const end = useRef<HTMLLIElement>(null)
@@ -149,13 +164,13 @@ export function FeedList({ onPick, onOpen, actions }: { onPick?: (o: FeedObject)
     <div className="feed">
       <ul className="feed__list" ref={setList}>
         {items.map((o) => isListing(o)
-          ? <ListingTile key={o.address} listing={o} />
-          : <Tile key={o.address} object={o} onPick={onPick} onOpen={onOpen} actions={actions} />)}
+          ? <ListingTile key={o.address} listing={o} query={key} />
+          : <Tile key={o.address} object={o} onPick={onPick} onOpen={onOpen} actions={actions} query={key} />)}
         <li className="feed__end" ref={end}>
           {loading || (items.length === 0 && !exhausted)
-            ? 'Reading the relays…'
+            ? key !== '' && items.length === 0 ? 'No matches yet. Reading the relays…' : 'Reading the relays…'
             : items.length === 0
-              ? 'No published objects found on these relays yet.'
+              ? key !== '' ? 'No matches' : 'No published objects found on these relays yet.'
               : exhausted ? 'That is everything on these relays.' : ''}
         </li>
       </ul>

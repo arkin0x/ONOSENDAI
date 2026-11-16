@@ -73,7 +73,7 @@ describe('tapping a shard in MENU', () => {
     // onOpen is called once in the list, by the pick, and by nothing else in the row.
     expect(list.split('onOpen()').length - 1).toBe(1)
     for (const tool of ['w().duplicate(s.id)', 'copyShardById(s.id)', 'w().remove(s.id)', '{f.tool}']) expect(list).toContain(tool)
-    expect(menu).toContain('<ShardList currentId={currentId} onOpen={onOpen} />')
+    expect(menu).toContain('<ShardList currentId={currentId} onOpen={onOpen} query={query} />')
     expect(workshop).toContain('<MenuBody currentId={shard.id} onOpen={closeSheet}')
     expect(workshop).toContain('const closeSheet = useCallback(() => setSheet(null), [])')
   })

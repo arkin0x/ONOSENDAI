@@ -161,12 +161,17 @@ export function enterWalk(): void {
   if (useCyberspace.getState().walking) useWalk.setState({ from })
 }
 
+/** How many times WALK has been left the pad's way (leaveWalk), so SET EYE's TRY WALK can tell that from any other end (store/tryEye.ts). */
+let leaves = 0
+export const walkLeaves = (): number => leaves
+
 /**
  * Out of WALK, back to the mode it was entered from: the walk ends as leaving
  * WALK always has (steps not yet proved are dropped, what was signed stays),
  * then VIEW, BUILD or SCAN comes back on at your avatar.
  */
 export function leaveWalk(): void {
+  leaves++
   const { from } = useWalk.getState()
   useWalk.getState().exit()
   if (useCyberspace.getState().walking) return

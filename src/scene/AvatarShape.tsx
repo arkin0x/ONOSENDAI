@@ -19,6 +19,7 @@ import { EdgesGeometry, IcosahedronGeometry } from 'three'
 import { avatarDraw, avatarDrawKept, spectatorScale } from '../lib/avatar'
 import { useAvatarShard } from '../store/useAvatars'
 import { useCyberspace } from '../store/useCyberspace'
+import { useTryEye } from '../store/tryEye'
 import { ShardMesh } from './ShardMesh'
 import { markerMaterialProps } from './avatarMarker'
 
@@ -59,7 +60,10 @@ interface Props {
 }
 
 export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, firstPerson = false, outline = false, keepShape = false, dim = 1 }: Props): JSX.Element | null {
-  const shard = useAvatarShard(pubkey)
+  const worn = useAvatarShard(pubkey)
+  // SET EYE's TRY WALK: your own avatar drawn as the workshop shard you look from, on this device only (store/tryEye.ts).
+  const tried = useTryEye((t) => (t.pubkey === pubkey ? t.shard : null))
+  const shard = tried ?? worn
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const spectator = spectatorScale(scaleExp)
   const draw = !outline && shard && shard.vertices.length > 0 ? (keepShape ? avatarDrawKept(shard, scaleExp, spectator) : avatarDraw(shard, scaleExp)) : 'marker'

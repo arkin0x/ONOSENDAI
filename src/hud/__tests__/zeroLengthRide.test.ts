@@ -42,6 +42,8 @@ vi.mock('../../store/useHyperspace', async (importOriginal) => ({
     height, kind: 'port', merkleRoot: 'ab'.repeat(32), blockHash: 'cd'.repeat(32),
     coordExact: (5n << 200n) + 1n, coordApprox: (5n << 200n) + 1n,
   }),
+  getBlockHash: () => 'cd'.repeat(32),
+  firstUnhashedHeight: () => null,
 }))
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'

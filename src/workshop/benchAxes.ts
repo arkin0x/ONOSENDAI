@@ -233,8 +233,12 @@ export function requestView(ask: ViewAsk): void {
  * screen pixels one unit along it covers, in canvas pixels. Model +Z is
  * render -Z, which the bench folds in before it reports. Null while nothing
  * is held or nothing held is in front of the camera.
+ *
+ * In SET EYE (shell/EyeBar) the middle is the eye, and `origin` is where the
+ * model's 0, 0, 0 stands on screen, for the dashed line and TODAY'S EYE
+ * (null when it is behind the camera); absent otherwise.
  */
-export interface HandleFrame { center: [number, number]; perUnit: [[number, number], [number, number], [number, number]] }
+export interface HandleFrame { center: [number, number]; perUnit: [[number, number], [number, number], [number, number]]; origin?: [number, number] | null }
 
 type HandleSink = (frame: HandleFrame | null) => void
 let handleSink: HandleSink | null = null

@@ -273,6 +273,34 @@ export function stopByHeight(index: StopIndex, height: number): Stop | undefined
   return row === -1 ? undefined : stopAt(index, row)
 }
 
+/**
+ * The block hash at a height straight from the columns, or null when the
+ * height is absent or carries none. Unlike stopByHeight it materializes no
+ * Stop and caches nothing: a ride reads every block it passes, up to the
+ * whole line, and a Stop per block in stopCache (two hex strings, a bigint
+ * and a map entry each) was hundreds of megabytes and many seconds on the
+ * main thread for a ride of 500,000 blocks (2026-11-16).
+ */
+export function blockHashByHeight(index: StopIndex, height: number): string | null {
+  const row = rowByHeight(index, height)
+  if (row === -1 || (index.kinds[row] & HAS_HASH) === 0) return null
+  const col = row * 32
+  return bytesToHex(index.hashes.subarray(col, col + 32))
+}
+
+/**
+ * The lowest height in lo..hi (inclusive) with no block hash in the index, or
+ * null when every one has its hash. Reads only the height and kind columns:
+ * no string, no Stop, nothing allocated, whatever the span.
+ */
+export function firstHeightWithoutHash(index: StopIndex, lo: number, hi: number): number | null {
+  for (let h = lo; h <= hi; h++) {
+    const row = rowByHeight(index, h)
+    if (row === -1 || (index.kinds[row] & HAS_HASH) === 0) return h
+  }
+  return null
+}
+
 // ---------------------------------------------------------------------------
 // Key comparison
 // ---------------------------------------------------------------------------

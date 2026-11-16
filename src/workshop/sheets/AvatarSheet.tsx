@@ -15,6 +15,7 @@ import { useAvatars } from '../../store/useAvatars'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useWorkshop } from '../../store/useWorkshop'
 import { copyShard } from '../shardClipboard'
+import { EyeRow } from './EyeRow'
 
 export function AvatarBody(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
@@ -73,6 +74,8 @@ export function AvatarBody(): JSX.Element | null {
           </ul>
         )}
       </div>
+      {/* FIRST-PERSON EYE: where the camera sits in WALK, and SET EYE (avatar eye, UI A). */}
+      <EyeRow />
       {/* A switch, as the avatar trail, hX and region key settings are,
           in the workshop's own green (arkinox, 2026-10-10). */}
       <div className="workshop__row">

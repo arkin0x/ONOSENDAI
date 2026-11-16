@@ -43,6 +43,8 @@ vi.mock('../../lib/hyperspace/station', async (o) => ({ ...(await o() as object)
 vi.mock('../../store/useHyperspace', async (o) => ({
   ...(await o() as object),
   getStopByHeight: (height: number) => ({ height, kind: 'port', merkleRoot: 'ab'.repeat(32), blockHash: line.get(height), coordExact: (5n << 200n) + 1n, coordApprox: (5n << 200n) + 1n }),
+  getBlockHash: (height: number) => line.get(height) ?? null,
+  firstUnhashedHeight: (lo: number, hi: number) => { for (let h = lo; h <= hi; h++) if (!line.get(h)) return h; return null },
 }))
 vi.mock('../../lib/chains', async (o) => ({ ...(await o() as object), fetchChainEvents: vi.fn(async () => []), confirmChainEvents: vi.fn(async () => []) }))
 

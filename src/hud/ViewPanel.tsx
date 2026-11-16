@@ -31,6 +31,7 @@ import type { ReactNode } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
 import { useWalk } from '../store/useWalk'
+import { useFluidWalk } from '../store/fluidSwitch'
 import { useHidesSync } from '../store/hidesSync'
 import { Field, Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
@@ -52,6 +53,7 @@ export function ViewPanel(): JSX.Element {
   const audioSpheres = useLayers((s) => s.audioSpheres)
   const glow = useLayers((s) => s.glow)
   const gravity = useWalk((s) => s.gravity)
+  const fluidWalk = useFluidWalk((s) => s.on)
   const showTrail = useCyberspace((s) => s.showTrail)
   const showSecrets = useCyberspace((s) => s.showSecrets)
   const hidesSync = useHidesSync((s) => s.enabled)
@@ -106,6 +108,17 @@ export function ViewPanel(): JSX.Element {
       hint: 'Fall, land and jump.',
       on: gravity,
       set: (v) => useWalk.getState().setGravity(v),
+    },
+    // Fluid WALK (store/walkFluid.ts, store/fluidSwitch.ts): the walk keys
+    // speed you up instead of stepping, and moves still land on whole
+    // gibsons. Off is the step WALK exactly as it was. ?fluidwalk=1 or 0
+    // sets it for one visit.
+    {
+      id: 'view-walk-fluid',
+      title: 'Fluid WALK',
+      hint: 'Hold to glide. Moves still land on whole gibsons.',
+      on: fluidWalk,
+      set: (v) => useFluidWalk.getState().set(v),
     },
     {
       id: 'view-chain-trail',

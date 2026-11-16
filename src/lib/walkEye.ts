@@ -28,6 +28,16 @@ export const walkEye = new Vector3()
 export const walkFall = { active: false, offset: 0 }
 
 /**
+ * Fluid WALK (store/walkFluid.ts): the eye is `x`, `y`, `z` steps (2^zoom
+ * gibsons) from the cursor's middle, by cyberspace axis, while `active`.
+ * While `exact` (fluid WALK running) the rig follows it exactly every frame,
+ * never easing and never snapping to the grid; after it (leaving WALK, the
+ * switch turned off) the offset fades to nothing, the glide onto the
+ * anchor. Written once a frame by tickFluid, read once a frame by the rig.
+ */
+export const walkGlide = { active: false, exact: false, x: 0, y: 0, z: 0 }
+
+/**
  * Which way a fall's up is (walkFall): cyberspace `axis` in direction `dir`,
  * against the fall's gravity (lib/walkDown.ts), +Y unless the view is
  * turned. Written when a fall begins or the view turns its gravity.

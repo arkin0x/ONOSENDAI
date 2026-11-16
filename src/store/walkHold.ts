@@ -52,6 +52,8 @@
 import { useCyberspace } from './useCyberspace'
 import { useWalk } from './useWalk'
 import { walkInputOpen } from './walkInput'
+import { fluidOn, noteNudge } from './fluidSwitch'
+import { FLUID_NUDGE_MS } from '../lib/fluidWalk'
 import type { HeldDir } from '../lib/walkKeys'
 
 export type { HeldDir }
@@ -106,6 +108,10 @@ function beat(): void {
     if (held.size === 0) return
   }
   const d = heldNow()
+  // Fluid WALK (store/walkFluid.ts): what is held accelerates, read every
+  // frame; nothing is pressed, except under GRAVITY Up and Down, which are
+  // still a jump and Down as they were.
+  if (fluidOn()) { if (useWalk.getState().gravity) verticalPress(d.vert); return }
   if (useWalk.getState().gravity) { verticalPress(d.vert); levelPress(d) }
   else if (!levelPress(d)) verticalPress(d.vert)
 }
@@ -136,6 +142,16 @@ export function holdStart(source: string, dir: HeldDir): void {
   const now = heldNow()
   // JUMP freshly pressed in the air: the double jump, Down held or not.
   const doubled = dir.vert > 0 && useWalk.getState().falling && useWalk.getState().doubleJump()
+  if (fluidOn()) {
+    // Fluid WALK: a press pushes for at least FLUID_NUDGE_MS (a tap is a
+    // short nudge) and a hold accelerates; under GRAVITY Up and Down are
+    // still a jump and Down, pressed as they were.
+    const gravity = useWalk.getState().gravity
+    if (gravity && dir.vert !== 0 && !doubled) verticalPress(now.vert)
+    if (dir.fwd !== 0 || dir.strafe !== 0 || (!gravity && dir.vert !== 0)) noteNudge(dir, performance.now() + FLUID_NUDGE_MS)
+    restart()
+    return
+  }
   if (dir.vert !== 0 && !doubled) verticalPress(now.vert)
   if (dir.fwd !== 0 || dir.strafe !== 0) levelPress(now)
   restart()

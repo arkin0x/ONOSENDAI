@@ -120,6 +120,7 @@ import { launchHeight } from '../lib/walkBounce'
 import { walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
 import { heldNow, holdReleaseAll } from './walkHold'
 import { noteWallContact } from './wallHint'
+import { FLUID_LINE_SLACK, onLine } from '../lib/fluidWalk'
 
 /**
  * What the LOSING SYNC warning waits for: this many moves not yet proven.
@@ -151,6 +152,13 @@ export interface WalkSegment {
   from: Position
   /** Where it ends now: the view is here. */
   end: Position
+  /**
+   * Fluid WALK (store/walkFluid.ts): the gibsons walked since `from`, in
+   * order. The segment grows while one straight hop stays within
+   * FLUID_LINE_SLACK of all of them (lib/fluidWalk.ts onLine), instead of
+   * while the heading stays the same. Absent in the step WALK.
+   */
+  cells?: Position[]
 }
 
 /**
@@ -415,6 +423,72 @@ export const useWalk = create<WalkState>((set, get) => ({
 }))
 
 /**
+ * What a fluid WALK crossing did (fluidCross): moved one step, from where
+ * to where; held by a wall (`by`) or by the edge safety; or waiting for
+ * walls on their way, to be asked again next frame.
+ */
+export type FluidCross = { kind: 'moved'; from: Position; to: Position } | { kind: 'held'; by: boolean } | { kind: 'wait' }
+
+/**
+ * Fluid WALK (store/walkFluid.ts, lib/fluidWalk.ts): the smooth position's
+ * nearest gibson changed, so the anchor takes one legal step there, along
+ * `main` (and `side` too, for a diagonal), exactly as a press would take
+ * it: through planWalkMove and walkStep, so the walls, the stairs, the
+ * corner rule, the floors and the bounce pads all hold as they do for a
+ * press; in the air, as a mid-air press (B). The step is queued the way a
+ * press's is: the open segment grows to it while one straight hop stays in
+ * line with every gibson walked since the segment began (lib/fluidWalk.ts
+ * onLine) and within the segment budget, else that segment goes to be
+ * proved and this step starts the next. Nothing published is ever anything
+ * but a whole gibson.
+ *
+ * `edgeSafe` (under GRAVITY, on the ground): the step is a drift off the
+ * way you are walking, so it is never taken off a ledge, as the 8-direction
+ * walk's snapping never let a slight angle walk you off a walkway.
+ */
+export function fluidCross(main: AxisDirection, side: AxisDirection | null, edgeSafe = false): FluidCross {
+  const cs = useCyberspace.getState()
+  if (!cs.walking || !cs.atHead()) return { kind: 'held', by: false }
+  if (againWhenBuilt) return { kind: 'wait' }
+  const heading: WalkHeading = { main, side, lean: null }
+  if (fall) return airStep(fall, heading, true)
+  const gravity = useWalk.getState().gravity
+  const g = gravity ? down : WORLD_DOWN
+  const { queue, open } = useWalk.getState()
+  const from = open?.end ?? queue[queue.length - 1] ?? cs.position
+  const items = wallItemsAt(cs.plane, from)
+  takeWallWait()
+  const stands = gravity ? (at: Position): boolean => standing(at, items, true, g) : undefined
+  const move = planWalkMove(from, heading, stepFor(cs.scaleExp), stepperFor(items, gravity, g), { stands, down: g })
+  if (takeWallWait()) return { kind: 'wait' }
+  if (!move.along || samePosition(move.to, from)) {
+    if (move.by) wallChip(move.by)
+    return { kind: 'held', by: move.by !== null }
+  }
+  if (edgeSafe && stands && !stands(move.to) && stands(from)) return { kind: 'held', by: false }
+  if (move.by) wallChip(move.by)
+  const next: Position = { ...move.to }
+  const budget = open !== null && segmentAffordable(open.from, next, cs.plane)
+  if (open && open.cells && budget && onLine(open.from, open.cells, next)) {
+    setOpen({ ...open, end: next, cells: [...open.cells, next] })
+  } else {
+    if (open) closeOpen()
+    setOpen({ axis: move.along.axis, dir: move.along.dir, ...(move.side ? { side: move.side } : {}), from, end: next, cells: [next] })
+    if (open) pump()
+  }
+  useCyberspace.setState({ cursor: { ...next } })
+  clearSettle()
+  settleTimer = setTimeout(() => { settleTimer = null; useWalk.getState().settle() }, WALK_SETTLE_MS)
+  if (gravity) fallIfAirborne()
+  if (gravity && !fall) padLaunch(next, heightOf(next, g) > heightOf(from, g), items)
+  return { kind: 'moved', from, to: next }
+}
+
+function setOpen(open: WalkSegment): void {
+  useWalk.setState({ open })
+}
+
+/**
  * A move that met a shard whose walls are on their way (store/walkWalls.ts
  * stepLimit: a step that could enter a shard still waiting for its first
  * build waits for it), made again as soon as they are built, which is within
@@ -526,8 +600,8 @@ interface Fall {
   base: number
   /** Seconds into the arc when `top` was set: a ceiling is met no earlier than that. */
   topSince: number
-  /** The last mid-air press's heading and where its hop starts: a press the same way after it grows that hop. */
-  air: { axis: AxisName; dir: 1 | -1; side?: AxisDirection; from: Position } | null
+  /** The last mid-air press's heading and where its hop starts: a press the same way after it grows that hop. Fluid WALK keeps the gibsons that hop has crossed (`cells`), as a segment does. */
+  air: { axis: AxisName; dir: 1 | -1; side?: AxisDirection; from: Position; cells?: Position[] } | null
   /** The walls known when it began, or at its last bounce: the only geometry it meets. */
   items: WallItem[]
   plane: number
@@ -850,17 +924,32 @@ function hopsOf(f: Fall, final: Position): Position[] {
  * walk's budget.
  */
 function airPress(f: Fall, heading: WalkHeading): void {
+  airStep(f, heading, false)
+}
+
+/**
+ * airPress's step, for a press (`fluid` false, exactly as it was) or for a
+ * fluid WALK crossing (store/walkFluid.ts): then a wall still on its way is
+ * not waited for here (the frame asks again), and the hop grows while it
+ * stays in line with the gibsons it has crossed, across gravity (the arc is
+ * the fall's), instead of while the heading stays the same.
+ */
+function airStep(f: Fall, heading: WalkHeading, fluid: boolean): FluidCross {
   const scaleExp = useCyberspace.getState().scaleExp
   const now = nowMs()
   const at = reachedPoint(f, now)
   takeWallWait()
   const g = f.down
   const move = planWalkMove(at, heading, stepFor(scaleExp), stepperFor(f.items, true, g), { down: g })
-  // Made again once the walls are built, only under the same gravity: a turn
-  // of the view meanwhile can put the heading along the new down (review).
-  if (waitedForWalls(() => { if (fall && sameDir(fall.down, g)) airPress(fall, heading) })) return
+  if (fluid) {
+    if (takeWallWait()) return { kind: 'wait' }
+  } else if (waitedForWalls(() => { if (fall && sameDir(fall.down, g)) airPress(fall, heading) })) {
+    // Made again once the walls are built, only under the same gravity: a turn
+    // of the view meanwhile can put the heading along the new down (review).
+    return { kind: 'wait' }
+  }
   if (move.by) wallChip(move.by)
-  if (!move.along || samePosition(move.to, at)) return
+  if (!move.along || samePosition(move.to, at)) return { kind: 'held', by: move.by !== null }
   const { axis, dir: sign } = move.along
   const side = move.side
   const p = { ...move.to }
@@ -884,11 +973,15 @@ function airPress(f: Fall, heading: WalkHeading): void {
   f.bottom = rel - limit.drop
   f.lands = limit.lands
   const air = f.air
-  if (air && sameHeading(air, move.along, side) && f.waypoints.length > 0 && segmentAffordable(air.from, p, f.plane)) {
+  const grows = fluid
+    ? air !== null && air.cells !== undefined && f.waypoints.length > 0 && onLine(air.from, air.cells, p, FLUID_LINE_SLACK, g.axis) && segmentAffordable(air.from, p, f.plane)
+    : air !== null && sameHeading(air, move.along, side) && f.waypoints.length > 0 && segmentAffordable(air.from, p, f.plane)
+  if (air && grows) {
     // The same way again: the hop from where the last one started grows to here.
     f.waypoints[f.waypoints.length - 1] = p
+    if (fluid) air.cells = [...(air.cells ?? []), p]
   } else {
-    f.air = { axis, dir: sign, ...(side ? { side } : {}), from: f.anchor }
+    f.air = { axis, dir: sign, ...(side ? { side } : {}), from: f.anchor, ...(fluid ? { cells: [p] } : {}) }
     f.waypoints.push(p)
   }
   f.anchor = p
@@ -896,6 +989,7 @@ function airPress(f: Fall, heading: WalkHeading): void {
   // The eye stays where the arc is: its offset now counts from the new point, with the cursor.
   walkFall.offset = r - f.base
   useCyberspace.setState({ cursor: { ...p } })
+  return { kind: 'moved', from: at, to: p }
 }
 
 /**

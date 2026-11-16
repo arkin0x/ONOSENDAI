@@ -149,7 +149,7 @@ export default defineConfig(async () => ({
   },
   test: {
     // Tests never touch a live relay: a WebSocket opened in one fails it (src/test/noNetwork.ts).
-    setupFiles: ['src/test/noNetwork.ts'],
+    setupFiles: ['src/test/noNetwork.ts', 'src/test/fluidWalkOff.ts'],
     // HOSAKA, in tests, is one that cannot be reached (src/test/noNetwork.ts
     // answers it so, without a connection): every move is routed locally, as
     // the app does when HOSAKA is down, and nothing asks the real one.

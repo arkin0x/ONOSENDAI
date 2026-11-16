@@ -36,7 +36,7 @@ export function seedDraftName(draft: SeedDraft): string {
   return read.ok ? read.name : 'seed'
 }
 
-/** The miner: the avatar's NIP-13 workers. Replaced in tests, where there is no Worker. */
+/** The miner: the NIP-13 workers (lib/avatarWorker.ts). Replaced in tests, where there is no Worker. */
 let miner: AvatarMiner = mineInWorker
 export function setSeedMiner(m: AvatarMiner | null): void {
   miner = m ?? mineInWorker
@@ -147,7 +147,7 @@ export async function plantedTemplate(pending: { type: 'seed'; seed: SeedDraft }
   const tip = trustedTip()
   if (tip === null) throw new Error('No block yet to plant at. Try again in a moment.')
   if (!o.current()) throw new MineCancelled()
-  // Attributed before it is mined, as an avatar is (lib/client.ts): the signer adds no client tag to a
+  // Attributed before it is mined (lib/client.ts): the signer adds no client tag to a
   // template that names one, so the work, done over every tag, still holds on what it signs.
   const template = attributed(seedTemplate({ dnaId: dna.event.id, relayHint: dna.hint, planted: clockAtAnchor(tip), scale: draft.scale, at: o.at, plane: o.plane, title: draft.title, createdAt: o.createdAt, ...(o.stand ? { stand: o.stand } : {}) }))
   o.note('Mining the seed')

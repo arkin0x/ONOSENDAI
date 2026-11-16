@@ -36,7 +36,7 @@ export function eyeNote(shard: ShardModel, worn: ShardModel | null): string {
     const face = drawnFace(worn) !== drawnFace(shard)
     if (eye && face) return 'YOUR WORN AVATAR STILL USES ITS OLD EYE AND FACING. USE THIS SHARD TO UPDATE IT.'
     if (eye) return `YOUR WORN AVATAR STILL USES ${eyeChosen(worn) ? eyeLabel(worn) : 'AUTO'}. USE THIS SHARD TO UPDATE IT.`
-    if (face) return `YOUR WORN AVATAR STILL USES ${drawnFace(worn).toUpperCase()}. USE THIS SHARD TO UPDATE IT.`
+    if (face) return `YOUR WORN AVATAR STILL USES ${drawnFace(worn).toUpperCase()} FACING. USE THIS SHARD TO UPDATE IT.`
   }
   return 'USE THIS SHARD PUBLISHES THE EYE AND FACING.'
 }

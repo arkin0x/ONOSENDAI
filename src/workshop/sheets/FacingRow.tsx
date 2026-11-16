@@ -35,7 +35,7 @@ export function FacingRow(): JSX.Element | null {
           <span className="ui-field__label">FACING</span>
           <span className="ui-field__hint">{FACE_HINTS[face]}</span>
         </span>
-        <div className="workshop__modes ws__facerow-modes" role="group" aria-label="Facing">
+        <div className="workshop__modes ws__facerow-modes">
           {FACE_MODES.map((m) => (
             <button
               key={m}

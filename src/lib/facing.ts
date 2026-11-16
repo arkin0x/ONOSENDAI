@@ -141,6 +141,19 @@ export function crossesUp(from: Position, to: Position, axes: ViewAxes): boolean
 export function headingPair<T extends { position: Position }>(chain: T[], index: number | null, face: FaceMode, axes: ViewAxes): [T, T] | null {
   const pair = facingPair(chain, index)
   if (!pair || face !== 'upright') return pair
+  // Asked on every store change for the avatar on show (scene/Avatar.tsx), and
+  // the walk back can cover a whole chain of climbing: the last answer is kept
+  // for the same chain array, link and view frame (viewAxes keeps one object per view).
+  const last = headingMemo
+  if (last && last.chain === chain && last.index === index && last.axes === axes) return last.pair as [T, T] | null
+  const found = uprightPair(chain, index, pair, axes)
+  headingMemo = { chain, index, axes, pair: found }
+  return found
+}
+
+let headingMemo: { chain: unknown[]; index: number | null; axes: ViewAxes; pair: unknown } | null = null
+
+function uprightPair<T extends { position: Position }>(chain: T[], index: number | null, pair: [T, T], axes: ViewAxes): [T, T] | null {
   if (crossesUp(pair[0].position, pair[1].position, axes)) return pair
   const n = chain.length
   const i = index === null ? n - 1 : Math.max(0, Math.min(n - 1, index))

@@ -63,8 +63,10 @@ export function FacingPreviewGroup({ children }: { children: React.ReactNode }):
 export function FacingArrow(): JSX.Element | null {
   const on = useFacingPreview((s) => s.on)
   const shard = useWorkshop((s) => s.current())
-  const r = useMemo(() => reachOf(shard), [shard])
+  // Measured only while it shows: an edit with the sheet shut costs nothing here.
+  const r = useMemo(() => (on ? reachOf(shard) : null), [on, shard])
   const line = useMemo(() => {
+    if (!r) return null
     const len = Math.max(1, (r.top - r.bottom) * 0.6)
     const x0 = r.side + Math.max(0.5, len * 0.4)
     const y0 = r.bottom
@@ -83,8 +85,8 @@ export function FacingArrow(): JSX.Element | null {
     l.renderOrder = OVERLAY_ORDER
     return l
   }, [r])
-  useLayoutEffect(() => () => { line.geometry.dispose(); (line.material as LineDashedMaterial).dispose() }, [line])
-  if (!on) return null
+  useLayoutEffect(() => () => { if (line) { line.geometry.dispose(); (line.material as LineDashedMaterial).dispose() } }, [line])
+  if (!on || !line) return null
   return <primitive object={line} />
 }
 

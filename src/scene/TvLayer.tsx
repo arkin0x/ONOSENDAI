@@ -72,14 +72,17 @@ function TapeAvatar({ pubkey, centre, position, from, born, place, subject, scal
   // UPRIGHT (DECK-0003 §1.18) keeps its heading on a move straight up or
   // down the view: the last tape move that went across the view's up.
   const face = useAvatarFace(pubkey)
+  const view = useCyberspace((s) => s.view)
   const level = useRef<[Position, Position] | null>(null)
   const turn = useMemo(() => {
     const axes = useCyberspace.getState().axes()
     const move: [Position, Position] | null = from ? [from, position] : null
     if (face !== 'upright') return facingTurn(axes, move, face)
     if (move && crossesUp(move[0], move[1], axes)) level.current = move
-    return facingTurn(axes, level.current ?? move, face)
-  }, [from, position, face])
+    // A kept move counts only while it still goes across the view's up: a compass turn can make it a climb.
+    const kept = level.current && crossesUp(level.current[0], level.current[1], axes) ? level.current : null
+    return facingTurn(axes, kept ?? move, face)
+  }, [from, position, face, view])
   // As large as the stream's text asked, for its share of the frame (lib/tv/broadcast); as it is on the site.
   const frameW = useThree((st) => st.size.width)
   const labelPx = TV_LABEL_PX * broadcastScale(TV_LABEL_PX, frameW)

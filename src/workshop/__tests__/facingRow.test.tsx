@@ -137,8 +137,8 @@ describe('FACING in the AVATAR sheet', () => {
   it('says when the avatar you wear is this shape with another facing', () => {
     const s = useWorkshop.getState().current()!
     const up = withFace(s, 'upright')
-    expect(eyeNote(up, s)).toBe('YOUR WORN AVATAR STILL USES PATH. USE THIS SHARD TO UPDATE IT.')
-    expect(eyeNote(s, up)).toBe('YOUR WORN AVATAR STILL USES UPRIGHT. USE THIS SHARD TO UPDATE IT.')
+    expect(eyeNote(up, s)).toBe('YOUR WORN AVATAR STILL USES PATH FACING. USE THIS SHARD TO UPDATE IT.')
+    expect(eyeNote(s, up)).toBe('YOUR WORN AVATAR STILL USES UPRIGHT FACING. USE THIS SHARD TO UPDATE IT.')
     expect(eyeNote(withEye(up, [0, 240, 0]), s)).toBe('YOUR WORN AVATAR STILL USES ITS OLD EYE AND FACING. USE THIS SHARD TO UPDATE IT.')
     expect(eyeNote(up, up)).toBe('USE THIS SHARD PUBLISHES THE EYE AND FACING.')
   })

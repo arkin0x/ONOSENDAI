@@ -32,10 +32,18 @@
  * or from another tab, can be gone back into (resume) or left (exit); the
  * chain alone says which game and from where; you are shown at the last game
  * position on the record, or at the entry point when there is none.
+ *
+ * DRONE RUN (GameDef play `drone-run`, lib/games/droneRun/game.ts) uses only
+ * the bracket and the world from here: enter, exit, resume and loadWorld. Its
+ * run is its own simulation, drawn by game/droneRun/DroneRunScreen; none of
+ * the dungeon's step, jump, fall, pad, key, door or clock logic runs for it,
+ * and nothing of its run is kept on this device. A game whose world is a
+ * bundled fixture (a DEV placeholder) is entered only in LOCAL, so no entry
+ * naming its throwaway key is ever published (localOnlyRefusal).
  */
 
 import { create } from 'zustand'
-import { gameEventRefusal, useCyberspace, whyNoMove, type CyberspaceState } from './useCyberspace'
+import { GAME_NEEDS_CHAIN_MESSAGE, gameEventRefusal, useCyberspace, whyNoMove, type CyberspaceState } from './useCyberspace'
 import { useWalk } from './useWalk'
 import { openBracket, positionHex, type ActionEvent } from '../lib/events'
 import { teleportTemplate } from '../lib/games/bracket'
@@ -48,7 +56,9 @@ import { inRegion, padUnder, stepIn, type WorldShard } from '../lib/games/play'
 import { jump as jumpBody, move as moveBody, tick as tickBody, type Arc, type Body } from '../lib/games/gravity'
 import { DOOR_REACH, KEY_REACH, offerHere, openDoor, reachExit, startProgress, takeKey, within, type Offer, type Progress } from '../lib/games/progress'
 import { doorKey, doorSecretWith, inKeyBag, keyItemHeld, readKeyBag, readRoom, sceneNow, thingsNow } from '../lib/games/keyDoor'
-import { loadWorld } from '../lib/games/world'
+import { loadWorld, type World } from '../lib/games/world'
+import type { Level } from '../lib/games/droneRun/level/level'
+import type { FieldSource } from '../lib/games/droneRun/levelSource'
 import { useInventory } from './useInventory'
 import type { Hidden } from '../lib/hidden'
 import type { HeldItem } from '../lib/inventory'
@@ -69,6 +79,16 @@ export interface GameSession {
   resumeAt: Position | null
   /** The world's shards, null while they load. */
   world: WorldShard[] | null
+  /** The world's entry point (DECK-0002 §2.2) once it is read, null before: where DRONE RUN starts every run. */
+  entry: Position | null
+  /**
+   * DRONE RUN only, once the world is read: the level played (zones, entry,
+   * spawns, patrol; lib/games/droneRun/level/level.ts) and which field it is,
+   * the built-in field or one imported on this device (lib/games/droneRun/
+   * levelSource.ts). Absent or null for any other game, and while loading.
+   */
+  level?: Level | null
+  field?: FieldSource | null
   /** The world's DECK-0004 door, or null: no door is the LEGACY world (game-only key and gate). */
   door: Hidden | null
   /** The key bag (GameDef keyBag): not read yet, being read, read, or failed (read again once you leave its region and come back). */
@@ -132,10 +152,24 @@ export const ENTER_CANCELLED_MESSAGE = 'You left before the game opened.'
 export const EXIT_STOPPED_MESSAGE = 'The exit was not signed: your identity changed meanwhile.'
 /** The bracket was closed from somewhere else (another tab or device): in-game mode ends. */
 const LEFT_ELSEWHERE_MESSAGE = 'Your chain is no longer in this game: it was left, or changed, from another tab or device.'
+/** A fixture world (a DEV placeholder) entered while LIVE: refused, so no entry naming its throwaway key is ever published. */
+export const LOCAL_ONLY_MESSAGE = 'This test game plays in LOCAL only.'
+/** DRONE RUN asked for a place in cyberspace to enter from, and none could be had. */
+export const NO_PLACE_MESSAGE = 'You need a place in cyberspace first. Try again in a moment.'
 /** The key bag held no key when read: said, never shown as a platform with nothing on it. */
 export const KEY_BAG_MISSING_MESSAGE = 'The key could not be found here yet. Step off the platform and back on to look again.'
 /** Something threw where a refusal was expected: said, never left hanging (review of #660). */
 const failed = (err: unknown): string => `Something went wrong: ${err instanceof Error ? err.message : String(err)}`
+
+/** Whether `game` is played by DRONE RUN's own code, not the dungeon's (GameDef play). */
+export function isDroneRun(game: Pick<GameDef, 'play'> | null | undefined): boolean {
+  return game?.play?.kind === 'drone-run'
+}
+
+/** Why `game` cannot be entered now for being a test game: a bundled fixture world (a DEV key) while LIVE. Null otherwise. */
+export function localOnlyRefusal(game: Pick<GameDef, 'world'>): string | null {
+  return game.world.kind === 'fixture' && useCyberspace.getState().live ? LOCAL_ONLY_MESSAGE : null
+}
 
 function snapshotView(): ViewSnapshot {
   const s = useCyberspace.getState()
@@ -249,7 +283,7 @@ export const useGame = create<GameState>((set, get) => {
    * left the region and come back.
    */
   const reveal = (session: GameSession): void => {
-    if (!session.door || !session.at || !session.world || session.worldError) return
+    if (isDroneRun(session.game) || !session.door || !session.at || !session.world || session.worldError) return
     const inside = inKeyBag(session.game, session.at)
     if (session.keyBag === 'failed' && !inside) { set({ session: { ...session, keyBag: 'unread' } }); return }
     if (session.keyBag !== 'unread' || !inside) return
@@ -291,14 +325,19 @@ export const useGame = create<GameState>((set, get) => {
 
   /** After a move or a landing: a pad under a player who stands on it sends them on. */
   const onPad = (session: GameSession): void => {
-    if (session.arc || !session.at) return
+    if (isDroneRun(session.game) || session.arc || !session.at) return
     const pad = padUnder(session.game, session.at)
     if (pad) void teleport(session.game, session.entryId, pad.to, session.at, 'teleporting')
   }
 
   /** Start reading the world of `session`'s game; lands only while that session stands. */
   const readWorld = (session: GameSession): void => {
-    loadWorld(session.game).then(
+    // DRONE RUN's world comes from the field chosen on this device: the built-in field (the fixture, read as any world is)
+    // or a level imported here (lib/games/droneRun/levelSource.ts, loaded only now). The bracket is the same either way.
+    const reading: Promise<World & { level?: Level; field?: FieldSource }> = isDroneRun(session.game)
+      ? import('../lib/games/droneRun/levelSource').then((m) => m.loadDroneRunWorld(session.game))
+      : loadWorld(session.game)
+    reading.then(
       // You appear at the entry point by virtue of having entered (DECK-0002 §2.2), or where the record left you.
       (world) => {
         const now = get().session
@@ -306,7 +345,7 @@ export const useGame = create<GameState>((set, get) => {
         // The gate kept open from this entry counts only for the gate it was opened on: progress kept from the other world
         // (the world switched between a reload and the next) starts shut, so no gate stands open that its key did not open.
         const progress = now.progress.doorOpen && (now.progress.doorId ?? null) !== (world.door?.eventId ?? null) ? { ...now.progress, doorOpen: false, doorId: undefined } : now.progress
-        const next: GameSession = { ...now, progress, world: world.shards, door: world.door, at: now.at ?? now.resumeAt ?? world.entry, worldError: world.shards.length ? null : 'This game has no world yet.' }
+        const next: GameSession = { ...now, progress, world: world.shards, door: world.door, entry: world.entry, ...(world.level ? { level: world.level, field: world.field ?? null } : {}), at: now.at ?? now.resumeAt ?? world.entry, worldError: world.shards.length ? null : 'This game has no world yet.' }
         if (progress !== now.progress) saveProgress(next.entryId, progress)
         set({ session: next })
         reveal(next)
@@ -345,6 +384,17 @@ export const useGame = create<GameState>((set, get) => {
     const refuse = (why: string): string => { set({ message: why }); return why }
     let entryId: string
     try {
+      // DRONE RUN from a fresh identity (?game=drone-run on a first visit): the spawn first, signed by this same tap,
+      // so there is a place on the chain to be held at. LOCAL already (enter checked it), so it stays on this device.
+      if (isDroneRun(game) && useCyberspace.getState().events.length === 0) {
+        const placed = await useCyberspace.getState().signSpawn()
+        if (ticket.cancelled && !placed) { set({ busy: null }); return ENTER_CANCELLED_MESSAGE }
+        // False also when the relays placed you on a chain this identity already has: then go on from its head.
+        if (!placed && useCyberspace.getState().events.length === 0) { set({ busy: null }); return refuse(useCyberspace.getState().proof.message ?? NO_PLACE_MESSAGE) }
+      }
+      // Asked again just before signing: LIVE may have been switched on since ENTER was pressed.
+      const local = localOnlyRefusal(game)
+      if (local) { set({ busy: null }); return ticket.cancelled ? ENTER_CANCELLED_MESSAGE : refuse(local) }
       const entered = await useCyberspace.getState().enterGame(game)
       if ('refused' in entered) { set({ busy: null }); return ticket.cancelled ? ENTER_CANCELLED_MESSAGE : refuse(entered.refused) }
       entryId = entered.event.id
@@ -370,8 +420,9 @@ export const useGame = create<GameState>((set, get) => {
     // No arrival is signed: entering is the arrival (DECK-0002 §2.2). The world says where the entry point is.
     // The clock starts now, at the entry (lib/games/progress.ts).
     const progress = startProgress(Date.now())
-    saveProgress(entryId, progress)
-    const session: GameSession = { game, entryId, at: null, resumeAt: null, world: null, door: null, keyBag: 'unread', keys: [], room: null, worldError: null, snapshot, arc: null, doubled: false, progress }
+    // DRONE RUN keeps nothing of its run on this device: no key, gate or clock of the dungeon's (its runs restart in the safe zone).
+    if (!isDroneRun(game)) saveProgress(entryId, progress)
+    const session: GameSession = { game, entryId, at: null, resumeAt: null, world: null, entry: null, door: null, keyBag: 'unread', keys: [], room: null, worldError: null, snapshot, arc: null, doubled: false, progress }
     set({ session, busy: null, ...(stillIn ? { message: stillIn } : {}) })
     // Found, for the GAMES panel (lib/games/discovered.ts): kept past a respawn, which forgets the chain.
     noteFoundGame(useCyberspace.getState().identity.pubkey, game.pubkey)
@@ -388,6 +439,9 @@ export const useGame = create<GameState>((set, get) => {
       if (!gameEnabled(game)) return GAMES_OFF_MESSAGE
       if (get().session || get().busy) return GAME_ALREADY_MESSAGE
       const refuse = (why: string): string => { set({ message: why }); return why }
+      // A test game (a fixture world on a DEV key) never enters while LIVE: its entry would be published, naming the throwaway key.
+      const local = localOnlyRefusal(game)
+      if (local) return refuse(local)
       if (walkBusy()) return refuse(WALK_BUSY_MESSAGE)
       if (useWorkshop.getState().open || tvIsOn()) return refuse(COVERED_MESSAGE)
       const snapshot = snapshotView()
@@ -405,7 +459,7 @@ export const useGame = create<GameState>((set, get) => {
       if (!open || !game || !useCyberspace.getState().atHead()) return false
       // The clock goes on from the entry: kept on this device, or the entry's own time when this device never saw it.
       const progress = loadProgress(open.id) ?? startProgress(open.createdAt * 1000)
-      const session: GameSession = { game, entryId: open.id, at: null, resumeAt: recordedPosition(chain, open, game), world: null, door: null, keyBag: 'unread', keys: [], room: null, worldError: null, snapshot: null, arc: null, doubled: false, progress }
+      const session: GameSession = { game, entryId: open.id, at: null, resumeAt: recordedPosition(chain, open, game), world: null, entry: null, door: null, keyBag: 'unread', keys: [], room: null, worldError: null, snapshot: null, arc: null, doubled: false, progress }
       set({ session, message: null })
       noteFoundGame(useCyberspace.getState().identity.pubkey, game.pubkey)
       readWorld(session)
@@ -438,7 +492,9 @@ export const useGame = create<GameState>((set, get) => {
       // The last game position, written in the exit's free `c` (DECK-0002 §7): where you are, or, left without going back
       // in (after a reload), the last one on the record of a game played here (review of #697).
       const game = session?.game ?? gameFor(open?.game?.pubkey)
-      const lastAt = session ? (session.at ?? session.resumeAt) : open && game ? recordedPosition(useCyberspace.getState().actions(), open, game) : null
+      // DRONE RUN writes none: its run is never on the record (no teleport or move inside its bracket), every run starts
+      // in the safe zone again, and a position nobody can check would only be a claim (DECK-0002 §7 makes `c` optional).
+      const lastAt = isDroneRun(game) ? null : session ? (session.at ?? session.resumeAt) : open && game ? recordedPosition(useCyberspace.getState().actions(), open, game) : null
       const entryId = session?.entryId ?? open?.id
       let left: Awaited<ReturnType<CyberspaceState['exitGame']>>
       try {
@@ -469,7 +525,7 @@ export const useGame = create<GameState>((set, get) => {
     step: (axis, dir, now = perfNow()) => {
       const { session, busy } = get()
       // No world, or one that could not be read: no walls are known, so nobody moves.
-      if (!session || busy || !session.world || session.worldError || !session.at || session.progress.clearedMs !== null) return
+      if (!session || busy || isDroneRun(session.game) || !session.world || session.worldError || !session.at || session.progress.clearedMs !== null) return
       const solid = solidOf(session)
       if (session.game.gravity) {
         if (axis === 'y') return
@@ -489,7 +545,7 @@ export const useGame = create<GameState>((set, get) => {
 
     jump: (now = perfNow()) => {
       const { session, busy } = get()
-      if (!session || busy || !session.game.gravity || !session.world || session.worldError || session.progress.clearedMs !== null) return
+      if (!session || busy || isDroneRun(session.game) || !session.game.gravity || !session.world || session.worldError || session.progress.clearedMs !== null) return
       if (!session.at) return
       const before = bodyOf(session, session.at)
       const body = jumpBody(session.game, before, now, solidOf(session))
@@ -498,7 +554,7 @@ export const useGame = create<GameState>((set, get) => {
 
     tick: (now = perfNow()) => {
       const { session, busy } = get()
-      if (!session || busy || !session.game.gravity || !session.world || session.worldError || !session.at) return
+      if (!session || busy || isDroneRun(session.game) || !session.game.gravity || !session.world || session.worldError || !session.at) return
       const { body, landed } = tickBody(session.game, bodyOf(session, session.at), now, solidOf(session))
       if (body.at === session.at && body.arc === session.arc) return
       const next = { ...session, ...body }
@@ -508,7 +564,7 @@ export const useGame = create<GameState>((set, get) => {
 
     take: () => {
       const session = get().session
-      if (!session?.at || get().busy) return
+      if (!session?.at || get().busy || isDroneRun(session.game)) return
       if (!session.door) {
         // LEGACY: the game-only key into hand.
         const progress = takeKey(session.game, session.progress, session.at)
@@ -525,7 +581,7 @@ export const useGame = create<GameState>((set, get) => {
 
     open: () => {
       const session = get().session
-      if (!session?.at || get().busy) return
+      if (!session?.at || get().busy || isDroneRun(session.game)) return
       if (!session.door) {
         // LEGACY: the game-only gate, with the key in hand.
         const progress = openDoor(session.game, session.progress, session.at)
@@ -564,6 +620,20 @@ export function enterBlocked(): string | null {
   if (useWorkshop.getState().open || tvIsOn()) return COVERED_MESSAGE
   const cs = useCyberspace.getState()
   return gameEventRefusal(cs) ?? whyNoMove(cs.actions())
+}
+
+/**
+ * Why `game` cannot be entered right now, or null: a test game while LIVE
+ * (localOnlyRefusal), then everything enterBlocked says, except that DRONE RUN
+ * may be entered by an identity with no chain yet, since its ENTER signs the
+ * spawn first (signEnter). The GAMES panel greys each game's ENTER out by it.
+ */
+export function enterBlockedFor(game: GameDef): string | null {
+  const local = localOnlyRefusal(game)
+  if (local) return local
+  const why = enterBlocked()
+  if (why === GAME_NEEDS_CHAIN_MESSAGE && isDroneRun(game) && useCyberspace.getState().events.length === 0) return null
+  return why
 }
 
 /**

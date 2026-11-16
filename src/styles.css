@@ -11783,6 +11783,14 @@ html.tv-broadcast body { overflow: hidden; }
 /* GAMES (hud/GamesPanel.tsx): a game's name, its ENTER; under it, when the game says where it is entered from, those words. */
 .games__row { grid-template-columns: 1fr auto; }
 .games__where { grid-column: 1 / -1; font-size: 8px; letter-spacing: 0.08em; color: var(--dim); }
+/* DRONE RUN's field and IMPORT LEVEL under its row (hud/DroneRunFields.tsx): two halves, then one line kept for a note
+   and REMOVE, so nothing moves when either shows. */
+.games__field { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; }
+.games__field-row { margin: 0; }
+.games__field-pick { flex: 1 1 0; min-width: 0; height: 30px; text-overflow: ellipsis; }
+.games__field-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; }
+.games__field-note { min-width: 0; color: #fff; text-shadow: 0 1px 2px #000; font-size: 10px; line-height: 1.3; }
+.games__field-remove { flex: none; }
 
 /* The Straylight route's identity panel (hud/StraylightIdentity.tsx): the warning in the warn colour, the key in the backup's box. */
 .straylight-id { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
@@ -12014,3 +12022,355 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .keyinfo__about { margin: 0 0 12px; font-size: 12px; line-height: 1.5; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
 .keyinfo__chips { margin-bottom: 12px; }
 .keyinfo__nothread { margin: 0 0 4px; color: var(--fg); }
+
+/* ---------- DRONE RUN: HUD, controls (game/droneRun/hud/) ----------
+ * White words with a dark shadow over the scene, every slot fixed so nothing
+ * moves between phases. The view layer (.drun-layer) takes the presses meant
+ * for the game (pointer lock, the phone's stick and look); the game bar stays
+ * above it all. Phone controls follow WALK's sides: move on the left, look,
+ * FIRE and JUMP on the right. Classes start drun-. */
+.gameview:has(.drun-hud) > .gameview__bar,
+.gameview:has(.drun-hud) > .gameview__note { z-index: 5; }
+.drun-hud {
+  --drun-top: calc(max(12px, env(safe-area-inset-top)) + 46px);
+  --drun-bottom: max(20px, env(safe-area-inset-bottom));
+  --drun-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 6px rgba(0, 0, 0, 0.75);
+  --drun-red: #ff3b6b;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  color: #fff;
+  font-family: var(--mono);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.drun-layer { position: absolute; inset: 0; touch-action: none; cursor: crosshair; }
+.drun-hudview { position: absolute; inset: 0; pointer-events: none; text-shadow: var(--drun-shadow); }
+
+/* The top row: HP pips left; wave, drones left, clock and sound right. */
+.drun-top {
+  position: absolute;
+  top: var(--drun-top);
+  left: 16px;
+  right: 16px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+.drun-pips { display: inline-flex; gap: 4px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9)); }
+.drun-pip.is-full { color: var(--drun-red); }
+.drun-pip.is-lost { color: rgba(255, 255, 255, 0.55); animation: drun-pip-lost 360ms ease-out; }
+.drun-pips.is-blinking .drun-pip.is-full { animation: drun-blink 240ms steps(2, jump-none) infinite; }
+@keyframes drun-pip-lost { from { transform: scale(1.7); color: var(--drun-red); } to { transform: scale(1); } }
+@keyframes drun-blink { from { opacity: 1; } to { opacity: 0.3; } }
+.drun-top__right { display: inline-flex; align-items: center; gap: 12px; }
+.drun-left { display: inline-flex; align-items: center; gap: 4px; min-width: 3.2em; }
+.drun-left svg { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9)); }
+.drun-clock { min-width: 6ch; text-align: right; }
+.drun-sound {
+  position: relative;
+  pointer-events: auto;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 6px;
+  background: rgba(6, 14, 22, 0.6);
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+}
+.drun-sound__key { position: absolute; right: -5px; bottom: -6px; font-size: 8px; padding: 0 2px; border-radius: 2px; background: rgba(6, 14, 22, 0.9); border: 1px solid rgba(255, 255, 255, 0.5); line-height: 10px; text-shadow: none; }
+
+/* The safe zone's line, its slot kept in every phase. */
+.drun-prompt {
+  position: absolute;
+  top: calc(var(--drun-top) + 52px);
+  left: 16px;
+  right: 16px;
+  height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+.drun-prompt__title { height: 14px; font-size: 11px; letter-spacing: 0.16em; white-space: pre; }
+.drun-prompt__line { height: 18px; font-size: 14px; }
+
+/* The crosshair and the hit marker. */
+.drun-cross {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  filter: drop-shadow(0 0 1px #000) drop-shadow(0 0 2px rgba(0, 0, 0, 0.85));
+}
+.drun-cross__h, .drun-cross__v, .drun-cross__dot { position: absolute; display: block; }
+.drun-cross__h { left: 0; right: 0; top: 12px; height: 2px; background: linear-gradient(to right, #fff 0 9px, transparent 9px 17px, #fff 17px); }
+.drun-cross__v { top: 0; bottom: 0; left: 12px; width: 2px; background: linear-gradient(to bottom, #fff 0 9px, transparent 9px 17px, #fff 17px); }
+.drun-cross__dot { left: 12px; top: 12px; width: 2px; height: 2px; background: #fff; }
+.drun-hitmark {
+  position: absolute;
+  inset: -6px;
+  background:
+    linear-gradient(45deg, transparent calc(50% - 1px), #fff calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)),
+    linear-gradient(-45deg, transparent calc(50% - 1px), #fff calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px));
+  -webkit-mask: radial-gradient(circle, transparent 9px, #000 9.5px);
+  mask: radial-gradient(circle, transparent 9px, #000 9.5px);
+  animation: drun-hit 180ms ease-out forwards;
+}
+@keyframes drun-hit { from { opacity: 1; transform: scale(0.85); } to { opacity: 0; transform: scale(1.25); } }
+
+/* A hit taken: the screen's edges flash red. */
+.drun-flash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 38%, rgba(255, 30, 60, 0.55) 80%, rgba(255, 30, 60, 0.8) 100%);
+  box-shadow: inset 0 0 0 4px rgba(255, 40, 70, 0.85);
+  animation: drun-flash 450ms ease-out forwards;
+}
+@keyframes drun-flash { from { opacity: 1; } to { opacity: 0; } }
+
+/* The gun (desktop): slots 1 2 3, its name, its gauge; the key hints under it. */
+.drun-bottom {
+  position: absolute;
+  left: 50%;
+  bottom: var(--drun-bottom);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.drun-gun {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(6, 14, 22, 0.55);
+}
+.drun-slots { display: inline-flex; gap: 4px; }
+.drun-slot {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  opacity: 0.6;
+}
+.drun-slot.is-on { opacity: 1; border-color: var(--game); background: rgba(255, 122, 217, 0.18); }
+.drun-slot__key { position: absolute; right: 2px; bottom: 0; font-size: 8px; line-height: 10px; }
+.drun-gun__name { width: 13ch; font-size: 12px; letter-spacing: 0.08em; white-space: nowrap; }
+.drun-gauge {
+  display: grid;
+  grid-template-columns: 110px 9ch;
+  grid-template-rows: 14px 4px;
+  grid-template-areas: "main status" "sub sub";
+  column-gap: 8px;
+  align-items: center;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.drun-gauge__main { grid-area: main; display: flex; align-items: center; }
+.drun-gauge__sub { grid-area: sub; display: flex; align-items: center; width: 110px; }
+.drun-gauge__status { grid-area: status; white-space: nowrap; }
+.drun-gauge.is-hot .drun-gauge__status { color: var(--drun-red); }
+.drun-gauge__count { font-size: 14px; font-variant-numeric: tabular-nums; }
+.drun-bar {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+.drun-bar--thin { height: 3px; border-width: 0; background: rgba(255, 255, 255, 0.15); }
+.drun-bar__fill { position: absolute; left: 0; top: 0; bottom: 0; background: #fff; }
+.drun-gauge--charge .drun-gauge__main .drun-bar__fill { background: #00e5ff; }
+.drun-gauge.is-hot .drun-bar__fill { background: var(--drun-red); }
+.drun-hints {
+  height: 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.drun-hints kbd, .drun-card kbd {
+  margin-right: 5px;
+  padding: 0 4px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 3px;
+  font: inherit;
+  font-size: 10px;
+  background: rgba(6, 14, 22, 0.75);
+}
+
+/* The cards: RUN FAILED and WAVE n CLEAR, in the game's card style (GameView's CLEAR). */
+.drun-card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(300px, calc(100% - 32px));
+  box-sizing: border-box;
+  padding: 20px 20px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--game);
+  background: rgba(6, 14, 22, 0.94);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  pointer-events: auto;
+  text-shadow: none;
+}
+.drun-card__title { color: var(--game); letter-spacing: 0.14em; font-size: 13px; }
+.drun-card__title.is-failed { color: var(--drun-red); }
+.drun-card__time { font-size: 34px; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+.drun-card__stat { font-size: 12px; letter-spacing: 0.08em; }
+.drun-card__stat b { font-weight: 400; margin-left: 6px; font-variant-numeric: tabular-nums; }
+.drun-card__row { display: flex; gap: 8px; width: 100%; margin-top: 4px; }
+.drun-card__go, .drun-card__exit {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--game);
+  background: rgba(6, 14, 22, 0.9);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.drun-card__go { background: rgba(255, 122, 217, 0.2); }
+.drun-card__go kbd { margin: 0 0 0 2px; }
+.drun-card__exit:disabled { opacity: 0.5; cursor: default; }
+
+/* The phone's controls: the stick bottom left; FIRE, JUMP, the gun button and RELOAD bottom right. */
+.drun-touch { position: absolute; inset: 0; pointer-events: none; }
+.drun-hud.is-card .drun-touch { visibility: hidden; }
+.drun-stick {
+  position: absolute;
+  left: 20px;
+  bottom: calc(var(--drun-bottom) + 4px);
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 122, 217, 0.55);
+  background: rgba(6, 14, 22, 0.35);
+}
+.drun-stick__knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  margin: -26px 0 0 -26px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 122, 217, 0.95);
+  background: rgba(255, 122, 217, 0.3);
+}
+.drun-btn {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 122, 217, 0.6);
+  background: rgba(6, 14, 22, 0.7);
+  color: #fff;
+  font: inherit;
+  text-shadow: var(--drun-shadow);
+}
+.drun-btn:active { background: rgba(255, 122, 217, 0.3); }
+.drun-btn--fire {
+  right: 16px;
+  bottom: var(--drun-bottom);
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  border-color: rgba(255, 90, 130, 0.95);
+  background: rgba(255, 59, 107, 0.28);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+.drun-btn--fire:active { background: rgba(255, 59, 107, 0.55); }
+.drun-btn--jump {
+  right: 116px;
+  bottom: var(--drun-bottom);
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+.drun-btn--gun {
+  right: 16px;
+  bottom: calc(var(--drun-bottom) + 100px);
+  width: 150px;
+  height: 56px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 5px;
+}
+.drun-gunbtn__head { display: flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: 0.08em; }
+.drun-btn--gun .drun-gauge { grid-template-columns: 1fr 9ch; column-gap: 6px; font-size: 9px; }
+.drun-btn--gun .drun-gauge__sub { width: auto; }
+.drun-btn--gun .drun-gauge__count { font-size: 12px; }
+.drun-btn--reload {
+  right: 16px;
+  bottom: calc(var(--drun-bottom) + 164px);
+  width: 110px;
+  height: 36px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+.drun-btn--reload[hidden] { display: inline-flex; visibility: hidden; }
+/* A short landscape phone: the right column comes down a size. */
+@media (max-height: 520px) {
+  .drun-stick { width: 100px; height: 100px; }
+  .drun-btn--fire { width: 72px; height: 72px; }
+  .drun-btn--jump { right: 100px; width: 56px; height: 56px; }
+  .drun-btn--gun { bottom: calc(var(--drun-bottom) + 82px); }
+  .drun-btn--reload { bottom: calc(var(--drun-bottom) + 146px); }
+  .drun-prompt { top: calc(var(--drun-top) + 36px); }
+}
+/* ---------- end DRONE RUN ---------- */

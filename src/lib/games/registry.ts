@@ -1,6 +1,7 @@
 /**
  * registry.ts - the games this client implements (DECK-0002, "implements a
- * game"): today only the first-arrival tutorial's dungeon. A game is its
+ * game"): the first-arrival tutorial's dungeon, and DRONE RUN (a placeholder
+ * on its DEV key, lib/games/droneRun/game.ts). A game is its
  * pubkey, so this is how a chain's open bracket is matched to rules this
  * client knows. Behind THE SWITCH (lib/games/flag.ts gameEnabled): a game
  * that is neither live nor switched on for this device is not implemented
@@ -9,9 +10,11 @@
 
 import { gameEnabled } from './flag'
 import { TUTORIAL_GAME } from './tutorialGame'
+import { DRONE_RUN_DEV_PUBKEY, DRONE_RUN_GAME } from './droneRun/game'
 import type { GameDef } from './types'
 
-const GAMES: readonly GameDef[] = [TUTORIAL_GAME]
+/** In the order the GAMES panel lists them. DRONE RUN is a placeholder (DEV key, fixture world): on only by the device switch, never on the production host. */
+const GAMES: readonly GameDef[] = [TUTORIAL_GAME, DRONE_RUN_GAME]
 
 /**
  * Every game pubkey this client has ever shipped, never shrinking: a chain
@@ -21,6 +24,7 @@ const GAMES: readonly GameDef[] = [TUTORIAL_GAME]
  */
 const EVER_SHIPPED: ReadonlySet<string> = new Set([
   '718c171d3e5a21c631dfd33159befec43f8687efb91bd42802f380c4afd37663', // the tutorial dungeon's placeholder DEV key, 2026-11-10
+  DRONE_RUN_DEV_PUBKEY, // DRONE RUN's placeholder DEV key, 2026-11-16
   ...GAMES.map((g) => g.pubkey),
 ])
 

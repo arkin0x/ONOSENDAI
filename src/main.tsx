@@ -14,6 +14,7 @@ import { wireLocalObjects } from './store/localObjects'
 import { diagWanted } from './lib/diagGate'
 import { applyTutorialFlag, applyTutorialRoute, landedPath, noteLanding } from './tutorial/gate'
 import { takeArrivalMode } from './store/arrivalMode'
+import { takeGameArrival } from './store/gameArrival'
 import { inject } from '@vercel/analytics'
 import { startAnalytics } from './lib/analytics'
 
@@ -28,6 +29,9 @@ applyTutorialFlag()
 applyTutorialRoute()
 // ?mode=view or ?mode=region: taken off the address now, applied once the app can (store/arrivalMode.ts).
 takeArrivalMode()
+// ?game=drone-run (off the production host): LOCAL and games on now, before anything can be signed; DRONE RUN
+// offered in GAMES once the app can (store/gameArrival.ts). After takeArrivalMode, which resets the arrival note.
+takeGameArrival()
 // /tv?broadcast=1, the 24/7 stream: no pointer on the page (lib/tv/broadcast.ts).
 markBroadcastPage()
 // Vercel Web Analytics: page views as coarse routes only, never on the stream (lib/analytics.ts).

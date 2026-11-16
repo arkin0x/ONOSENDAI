@@ -25,7 +25,7 @@ import { startProgress } from '../../lib/games/progress'
 
 function session(over: Partial<GameSession> = {}): GameSession {
   return {
-    game: TUTORIAL_GAME, entryId: 'ab'.repeat(32), at: null, resumeAt: null, world: null, door: null, keyBag: 'unread', keys: [],
+    game: TUTORIAL_GAME, entryId: 'ab'.repeat(32), at: null, resumeAt: null, world: null, entry: null, door: null, keyBag: 'unread', keys: [],
     room: null, worldError: null, snapshot: null, arc: null, doubled: false, progress: startProgress(0), ...over,
   }
 }

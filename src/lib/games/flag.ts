@@ -23,6 +23,7 @@
  */
 
 import { TUTORIAL_DEV_PUBKEY } from './tutorialGame'
+import { DRONE_RUN_DEV_PUBKEY } from './droneRun/game'
 import type { GameDef } from './types'
 
 const KEY = 'onosendai:games'
@@ -53,15 +54,44 @@ export function gamesEnabled(): boolean {
   try { return localStorage.getItem(KEY) === '1' } catch { return false }
 }
 
+/** Whether this host honours the device switch: anywhere but the production host, and everywhere in a dev build. */
+export function deviceSwitchHonoured(): boolean {
+  return !productionHost() || !!import.meta.env.DEV
+}
+
+/** Turn games on for this device, as ?games=1 does (store/gameArrival.ts). Never on the production host. Returns whether they are on. */
+export function turnGamesOnHere(): boolean {
+  if (!deviceSwitchHonoured()) return false
+  try { localStorage.setItem(KEY, '1') } catch { return false }
+  return gamesEnabled()
+}
+
 /**
  * Keys that are never a real game's: placeholders generated on a build
  * machine, whose entries must never reach production. Never shrinking.
  */
-const PLACEHOLDER_KEYS: ReadonlySet<string> = new Set([TUTORIAL_DEV_PUBKEY])
+const PLACEHOLDER_KEYS: ReadonlySet<string> = new Set([TUTORIAL_DEV_PUBKEY, DRONE_RUN_DEV_PUBKEY])
+
+/** Whether `pubkey` is a placeholder game's key (PLACEHOLDER_KEYS): its events are kept on this device for good. */
+export function isPlaceholderGame(pubkey: string | undefined): boolean {
+  return !!pubkey && PLACEHOLDER_KEYS.has(pubkey)
+}
 
 /** Whether `game` is live: a real key (64 lowercase hex, not a placeholder), and its world read from the relays. */
 export function gameLive(game: Pick<GameDef, 'pubkey' | 'world'>): boolean {
   return game.world.kind === 'relays' && /^[0-9a-f]{64}$/.test(game.pubkey) && !PLACEHOLDER_KEYS.has(game.pubkey)
+}
+
+/**
+ * Whether `event` enters a placeholder game: an enter-virtual whose `p`
+ * marked `game` names a key on PLACEHOLDER_KEYS. The publisher never sends
+ * one (lib/publisher.ts): a test run played in LOCAL stays on this device
+ * even if LIVE is switched on later, and with it everything signed after it,
+ * since the chain goes out in order.
+ */
+export function entersPlaceholderGame(event: { tags: string[][] }): boolean {
+  if (!event.tags.some((t) => t[0] === 'A' && t[1] === 'enter-virtual')) return false
+  return event.tags.some((t) => t[0] === 'p' && t[3] === 'game' && PLACEHOLDER_KEYS.has(t[1]))
 }
 
 /** Whether `game` is on here: everywhere once it is live, else only by this device's switch (gamesEnabled). */

@@ -130,6 +130,7 @@ import { lookBeforeMove, movementBlocked, useVersionGate, VERSION_BLOCKED_MESSAG
 import { enterVirtualTemplate, exitVirtualTemplate, type Links } from '../lib/games/bracket'
 import type { GameDef } from '../lib/games/types'
 import { canLeave, gameFor } from '../lib/games/registry'
+import { isPlaceholderGame } from '../lib/games/flag'
 import { cancelProof, postProof, PROOF_WORKER_FAILED_MESSAGE, type ProofMode, type ProofResponse } from '../lib/workers'
 import { staleFormatCut } from '../lib/staleFormat'
 import { offloadFrom, cloudSeconds } from '../lib/crossover'
@@ -3788,13 +3789,17 @@ async function signGameEvent(
   set: (partial: Partial<CyberspaceState>) => void,
   check: (chain: ActionEvent[]) => string | null,
   build: (links: Links, chain: ActionEvent[]) => EventTemplate,
+  placeholder = false,
 ): Promise<GameSigned> {
   const before = get()
   const now = gameEventRefusal(before)
   if (now) return { refused: now }
   const early = check(parsedChain(before.events))
   if (early) return { refused: early }
-  const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+  // A placeholder game's events, signed in LOCAL, never leave this device (lib/publisher.ts stops
+  // at its entry for good), so no fork with another device can follow from them: the look at the
+  // relays is skipped, and a test run plays with no relay in reach.
+  const refusal = placeholder && !before.live ? null : await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
   if (get().proof.message === HEAD_RETRYING_MESSAGE) set({ proof: IDLE_PROOF })
   if (refusal === STALE_CONFIRMATION) return { refused: GAME_STALE_MESSAGE }
   if (refusal) return { refused: refusal }
@@ -6284,14 +6289,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const here = chainHead(chain)?.coordHex
     if (!here) throw new Error(GAME_NEEDS_CHAIN_MESSAGE)
     return enterVirtualTemplate({ ...links, coordHex: here, game })
-  }),
+  }, isPlaceholderGame(game.pubkey)),
 
   signGameAction: async (game, entryId, build) => signGameEvent(get, set, (chain) => {
     const open = openBracket(chain)
     if (!open || open.game?.pubkey !== game.pubkey) return GAME_NOT_OPEN_MESSAGE
     if (open.id !== entryId) return GAME_OTHER_BRACKET_MESSAGE
     return stoppedChainMessage(chain)
-  }, (links) => build(links)),
+  }, (links) => build(links), isPlaceholderGame(game.pubkey)),
 
   exitGame: async (entryId, gameHex) => signGameEvent(get, set, (chain) => {
     const open = openBracket(chain)
@@ -6303,7 +6308,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (!open) throw new Error(GAME_NOT_OPEN_MESSAGE)
     // The base position held since the entry: its `c`, which an enter-virtual's coordHex is (events.ts).
     return exitVirtualTemplate({ ...links, entryId: open.id, coordHex: open.coordHex, ...(gameHex ? { gameHex } : {}) })
-  }),
+  }, isPlaceholderGame(openBracket(parsedChain(get().events))?.game?.pubkey)),
 
   confirmHeadNow: async () => {
     const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))

@@ -3811,13 +3811,15 @@ select.avatars__input option:checked {
 .ws__heldbtn--two[aria-expanded='true']::after { background: var(--accent); opacity: 1; }
 
 /* SET EYE (avatar eye, UI A "the eye on the bench"): the eye's bar in the
-   strip, a cyan edge where the held bar's is orange, and the reserved status
-   line over its slots, all inside the strip's own height, so the bench does
-   not re-frame as the eye is taken up or put down, and nothing jumps as the
-   eye moves or turns from AUTO to CHOSEN. */
-.ws__strip.ws__strip--eye { flex-direction: column; align-items: stretch; gap: 0; padding: 0 var(--ws-gutter); border-top: 2px solid var(--accent); }
+   strip, a cyan edge where the held bar's is orange, its slots as tall as
+   the held bar's (48px), and the status line in its own reserved row over
+   them. The strip takes that row once, as SET EYE opens, and keeps the same
+   height until DONE, so nothing jumps as the eye moves or turns from AUTO
+   to CHOSEN. */
+.ws__strip.ws__strip--eye { height: calc(var(--ws-strip) + var(--ws-eyeline)); flex-direction: column; align-items: stretch; gap: 0; padding: 0 var(--ws-gutter); border-top: 2px solid var(--accent); }
+.workshop { --ws-eyeline: 18px; }
 .ws__eyeline {
-  height: 17px;
+  height: var(--ws-eyeline);
   flex: none;
   display: flex;
   align-items: center;
@@ -3837,8 +3839,6 @@ select.avatars__input option:checked {
 /* A narrow phone keeps EYE x, y, z and AUTO or CHOSEN; the rest of the sentence goes. */
 @media (max-width: 400px) { .ws__eyeline-from { display: none; } }
 .ws__eyebar { flex: 1 1 0; min-height: 0; }
-.ws__eyebar .ws__heldbtn { height: 100%; gap: 1px; }
-.ws__eyebar .ws__heldbtn svg { width: 16px; height: 16px; }
 .ws__heldbtn.is-on { color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent); background: rgba(0, 229, 255, 0.08); }
 .ws__heldbtn--ok { color: var(--ok); }
 .ws__eyebar-gap { border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent); border-radius: 0; }
@@ -4473,7 +4473,7 @@ select.avatars__input option:checked {
   .ws__strip { order: 1; flex: 1 0 352px; min-width: 352px; height: var(--ws-dock); padding-bottom: var(--ws-safe-b); border-top: 0; border-left: 1px solid var(--border); }
   /* Eight 44px slots in 352px: the held bar fits a 667px phone held sideways beside a six-tool dock. */
   .ws__strip.ws__strip--held { padding: 0; }
-  .ws__strip.ws__strip--eye { padding: 0 0 var(--ws-safe-b); }
+  .ws__strip.ws__strip--eye { height: calc(var(--ws-dock) + var(--ws-eyeline)); padding: 0 0 var(--ws-safe-b); }
   /* The guide's card keeps clear of the rail. */
   .ws__guide { left: calc(max(var(--ws-gutter), var(--ws-safe-l)) + 104px); }
   .ws__sheet,

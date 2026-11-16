@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from 'react'
 import { Check, CircleDot, Crosshair, Footprints, Hash, ScanEye, Sparkles } from 'lucide-react'
-import { benchEye, centerEye, eyeChosen, eyeLabel, gibsonsLabel } from '../../lib/avatarEye'
+import { centerEye, eyeChosen, eyeLabel, gibsonsLabel, usedBenchEye } from '../../lib/avatarEye'
 import { useEscape } from '../../hooks/useEscape'
 import { noCallout, useRepeatable } from '../../hooks/useRepeatable'
 import { useWorkshop } from '../../store/useWorkshop'
@@ -35,7 +35,7 @@ function EyeNumbers(): JSX.Element | null {
   const step = useWorkshop((s) => s.step())
   const bind = useRepeatable()
   if (!shard) return null
-  const at = benchEye(shard)
+  const at = usedBenchEye(shard)
   const w = useWorkshop.getState
   return (
     <div className="benchpaste ws__ask ws__eyenums" role="group" aria-label="The eye's place in gibsons">
@@ -61,7 +61,7 @@ export function EyeBar(): JSX.Element | null {
   if (!shard) return null
   const w = useWorkshop.getState
   const chosen = eyeChosen(shard)
-  const at = benchEye(shard)
+  const at = usedBenchEye(shard)
   const atOrigin = chosen && at.every((t) => t === 0)
   const status = eyeStatus(eyeLabel(shard))
   return (

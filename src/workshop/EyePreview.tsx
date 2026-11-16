@@ -21,12 +21,14 @@
  *
  * Cheap: its own small canvas that draws only when the eye or the shape
  * changes (frameloop "demand"), and none at all while folded. Tap the picture
- * to make it bigger; the fold button puts it away to free the view. The bench
- * frames the shard clear of it (Workshop useBenchInsets reads its box).
+ * to make it bigger (a look over the bench for a moment); the fold button
+ * puts it away. The bench frames the shard clear of the small picture for
+ * the whole of SET EYE (Workshop useBenchInsets), so nothing re-frames as it
+ * folds, opens or grows. Its size follows the window.
  */
 
 import { Canvas, useThree } from '@react-three/fiber'
-import { useLayoutEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronUp, Eye } from 'lucide-react'
 import { EdgesGeometry, IcosahedronGeometry, type PerspectiveCamera } from 'three'
 import type { ShardModel } from 'sno-core/shards'
@@ -41,6 +43,8 @@ import { useWorkshop } from '../store/useWorkshop'
 
 /** The picture's width, CSS pixels, small and tapped bigger; its height follows the screen's shape. */
 export const PREVIEW_WIDTH = { small: 90, big: 180 }
+/** The picture's frame, both sides together, CSS pixels: the bench's right inset counts it (Workshop useBenchInsets). */
+export const PREVIEW_BORDER = 2
 /** Never taller than this share of the screen, so a tall phone keeps its bench. */
 const MAX_HEIGHT_SHARE = { small: 0.25, big: 0.5 }
 
@@ -50,6 +54,29 @@ export function previewSize(w: number, h: number, big: boolean): { width: number
   const aspect = w > 0 && h > 0 ? h / w : 812 / 375
   const height = Math.min(Math.round(PREVIEW_WIDTH[k] * aspect), Math.round(h * MAX_HEIGHT_SHARE[k]))
   return { width: Math.round(height / aspect), height }
+}
+
+/**
+ * The bench's right inset for the whole of SET EYE, CSS pixels: the gap at
+ * the screen's right edge, the small picture and its frame. The same whether
+ * the picture is folded, open or BIGGER, so the bench never re-frames while
+ * the eye is in hand (Workshop useBenchInsets). Pure.
+ */
+export function eyeBenchInset(gutter: number, w: number, h: number): number {
+  return Math.max(0, Math.round(gutter)) + previewSize(w, h, false).width + PREVIEW_BORDER
+}
+
+/** The window's size, kept as it changes (a phone turned, a desktop window dragged). */
+function useWindowSize(): { w: number; h: number } {
+  const read = (): { w: number; h: number } => (typeof window !== 'undefined' ? { w: window.innerWidth, h: window.innerHeight } : { w: 375, h: 812 })
+  const [size, setSize] = useState(read)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.addEventListener) return
+    const on = (): void => setSize(read())
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  return size
 }
 
 /** The camera at the eye, looking level along the nose (render -Z). */
@@ -114,8 +141,9 @@ export function EyePreview(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
   const [folded, setFolded] = useState(false)
   const [big, setBig] = useState(false)
+  const win = useWindowSize()
   if (!shard) return null
-  const size = previewSize(typeof window !== 'undefined' ? window.innerWidth : 375, typeof window !== 'undefined' ? window.innerHeight : 812, big)
+  const size = previewSize(win.w, win.h, big)
   return (
     <div className={`ws__eyeview${folded ? ' is-folded' : ''}${big ? ' is-big' : ''}`} role="group" aria-label="What you see">
       {!folded && (

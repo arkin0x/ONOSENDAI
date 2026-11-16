@@ -143,9 +143,11 @@ describe('FIRST-PERSON EYE in the AVATAR sheet', () => {
   it('keeps the strip one height, the eye\'s status line inside it, and the guide card away', () => {
     const css = readFileSync(join(__dirname, '..', '..', 'styles.css'), 'utf8')
     const rule = (sel: string): string => { const at = css.indexOf(`\n${sel} {`); expect(at, sel).toBeGreaterThan(-1); return css.slice(at, css.indexOf('}', at)) }
-    // The eye's strip sets no height of its own: it keeps .ws__strip's.
-    expect(rule('.ws__strip.ws__strip--eye')).not.toMatch(/height/)
-    expect(rule('.ws__eyebar')).toContain('flex: 1 1 0')
+    // The eye's strip is the strip and one reserved row for its status line, the same height from SET EYE to DONE.
+    expect(rule('.ws__strip.ws__strip--eye')).toContain('height: calc(var(--ws-strip) + var(--ws-eyeline))')
+    expect(rule('.ws__eyeline')).toContain('height: var(--ws-eyeline)')
+    // Its slots keep the held bar's 48px: no rule shrinks them.
+    expect(css).not.toMatch(/\.ws__eyebar \.ws__heldbtn \{[^}]*height/)
     const ws = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
     expect(ws).toContain('{sheet === null && !eyeEdit && <Guide />}')
   })
@@ -266,10 +268,34 @@ describe('the eye in hand', () => {
     expect(eye()).toEqual([120, 240, 0])
   })
 
-  it('prints only the eye WALK uses: one past the size limit is brought in along its line', () => {
+  it('prints only the eye WALK uses: one past the size limit is brought in along its line', async () => {
     // 9 gibsons up, written by hand: WALK brings it to 4.
     useWorkshop.getState().setEye([0, 1080, 0])
     expect(eyeSetting(useWorkshop.getState().current()!)).toEqual({ mode: 'CHOSEN', place: '0, 4, 0' })
+    // NUMBERS shows the same eye.
+    useWorkshop.getState().setEyeEdit(true)
+    const m = await mount(<Workshop />)
+    await m.press('NUMBERS')
+    const y = byClass(m.all(), 'ws__eyenum').find((h) => h.props['aria-label'] === 'Y')!
+    expect(words(y)).toBe('\u22124Y+')
+    await m.unmount()
+  })
+
+  it('moves from the eye WALK uses, so an eye left past the limit comes back inside on the first move', () => {
+    const w = useWorkshop.getState
+    // At unit 0, 480 ticks is the limit, 4 gibsons. The unit raised to 1, the limit is 240 ticks.
+    w().setEye([0, 480, 0])
+    useWorkshop.setState({ shards: [{ ...w().current()!, unit: 1 }] })
+    // Away from the middle: refused, nothing written.
+    expect(w().moveEye(1, 120)).toBe(false)
+    expect(eye()).toEqual([0, 480, 0])
+    // Back toward the middle: from the pulled-in 240, one step down, written inside the limit.
+    expect(w().moveEye(1, -120)).toBe(true)
+    expect(eye()).toEqual([0, 120, 0])
+    // Sideways from a far eye: pulled in first, then the step.
+    w().setEye([0, 960, 0])
+    expect(w().moveEye(0, 120)).toBe(true)
+    expect(eye()).toEqual([120, 240, 0])
   })
 })
 

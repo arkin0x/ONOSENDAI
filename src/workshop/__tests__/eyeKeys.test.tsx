@@ -25,7 +25,7 @@ vi.mock('@react-three/fiber', async (real) => ({
 const { createElement } = await import('react')
 const { mount } = await import('../../test/elementRoot')
 const { Keys } = await import('../Bench')
-const { EyePreview, previewSize } = await import('../EyePreview')
+const { EyePreview, eyeBenchInset, previewSize } = await import('../EyePreview')
 const { useWorkshop } = await import('../../store/useWorkshop')
 const { newShard, toRender, TICKS_PER_UNIT } = await import('sno-core/shards')
 const { benchEye, walkEyeLocal, withEye } = await import('../../lib/avatarEye')
@@ -113,6 +113,27 @@ describe('WHAT YOU SEE', () => {
     expect(canvas()).toHaveLength(0)
     await m.press('WHAT YOU SEE')
     expect(canvas()).toHaveLength(1)
+    await m.unmount()
+  })
+
+  it('gives the bench one right inset for the whole of SET EYE: the small picture, whatever the picture is doing', () => {
+    // 12px gap, the small picture 90 wide, its 2px frame.
+    expect(eyeBenchInset(12, 375, 812)).toBe(12 + previewSize(375, 812, false).width + 2)
+    expect(eyeBenchInset(12, 375, 812)).toBe(104)
+  })
+
+  it('follows the window: a resize gives a new size', async () => {
+    useWorkshop.getState().setEyeEdit(true)
+    const resize = new Set<() => void>()
+    vi.stubGlobal('window', { addEventListener: (t: string, f: () => void) => { if (t === 'resize') resize.add(f) }, removeEventListener: (t: string, f: () => void) => { if (t === 'resize') resize.delete(f) }, innerWidth: 375, innerHeight: 812 })
+    const m = await mount(createElement(EyePreview))
+    const pic = (): { width: number; height: number } => m.all().find((h) => h.props.className === 'ws__eyeview-pic')!.props.style as { width: number; height: number }
+    expect(pic()).toEqual(previewSize(375, 812, false))
+    ;(window as unknown as { innerWidth: number; innerHeight: number }).innerWidth = 1440
+    ;(window as unknown as { innerWidth: number; innerHeight: number }).innerHeight = 900
+    for (const f of resize) f()
+    await new Promise((r) => setTimeout(r, 5))
+    expect(pic()).toEqual(previewSize(1440, 900, false))
     await m.unmount()
   })
 

@@ -136,15 +136,17 @@ export function eyeReachTicks(shard: ShardModel): number {
 }
 
 /**
- * The eye as WALK uses it, in ticks in the bench's frame: an eye past the
- * size limit brought in as a whole along its line, as walkEyeLocal does, so
- * the workshop never prints a place WALK will not use.
+ * The eye as WALK uses it, in whole ticks in the bench's frame: an eye past
+ * the size limit (the unit raised, vertices deleted, a far eye pasted in)
+ * brought in as a whole along its line, as walkEyeLocal does, each axis
+ * rounded toward the origin so it stays inside. The workshop draws, prints
+ * and moves this eye, never a place WALK will not use.
  */
 export function usedBenchEye(shard: ShardModel): [number, number, number] {
   const e = benchEye(shard)
   const reach = eyeReachTicks(shard)
   const far = Math.max(Math.abs(e[0]), Math.abs(e[1]), Math.abs(e[2]))
-  return far > reach ? (e.map((t) => (t * reach) / far + 0) as [number, number, number]) : e
+  return far > reach ? (e.map((t) => Math.trunc((t * reach) / far) + 0) as [number, number, number]) : e
 }
 
 /**

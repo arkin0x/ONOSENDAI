@@ -56,7 +56,7 @@ import { useBeginner } from './beginner'
 import { BenchLookRig, BenchShard } from './benchLook'
 import { isLook } from './lookTool'
 import { BenchBloom } from './benchBloom'
-import { benchEye } from '../lib/avatarEye'
+import { usedBenchEye } from '../lib/avatarEye'
 
 type P3 = [number, number, number]
 
@@ -748,7 +748,8 @@ function HandleProjector(): null {
   // SET EYE: the handles stand on the eye, in any tool (shell/EyeBar).
   const eyeEdit = useWorkshop((s) => s.eyeEdit)
   const center = useMemo(() => {
-    if (shard && eyeEdit) { const r = UP(benchEye(shard)); return new Vector3(r[0], r[1], r[2]) }
+    // The eye WALK uses (an eye past the size limit pulled in), where the row and the numbers say it is.
+    if (shard && eyeEdit) { const r = UP(usedBenchEye(shard)); return new Vector3(r[0], r[1], r[2]) }
     if (!shard || look || moving || (selection.length === 0 && partSel.length === 0)) return null
     const seen = new Set<string>()
     let x = 0, y = 0, z = 0, n = 0

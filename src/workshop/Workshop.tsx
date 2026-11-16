@@ -39,7 +39,7 @@ import { useShardFolders } from '../store/useShardFolders'
 import { routeImport, useShardImport } from '../store/useShardImport'
 import { useWorkshop } from '../store/useWorkshop'
 import { Bench } from './Bench'
-import { EyePreview } from './EyePreview'
+import { EyePreview, eyeBenchInset } from './EyePreview'
 import { useBenchView } from './benchAxes'
 import { StorageWarning, Toast } from './Notices'
 import { Guide } from './shell/Guide'
@@ -96,15 +96,18 @@ function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind 
       const side = !!sheetEl && getComputedStyle(sheetEl).position === 'fixed'
       const guide = el.querySelector('.ws__guide')?.getBoundingClientRect().top
       const edge = (!side && sheetBox ? sheetBox.top : guide) ?? strip
-      // SET EYE's WHAT YOU SEE, open: a right inset too, so the bench frames the eye clear of the picture.
-      const eyeView = el.querySelector('.ws__eyeview:not(.is-folded)')?.getBoundingClientRect()
-      const right = Math.max(side && sheetBox ? Math.max(0, Math.round(box.right - sheetBox.left)) : 0, eyeView ? Math.max(0, Math.round(box.right - eyeView.left)) : 0)
+      // SET EYE: a right inset as wide as WHAT YOU SEE's small picture, for
+      // the whole time the eye is in hand, folded or not and BIGGER or not,
+      // so the bench frames the eye clear of it and never re-frames meanwhile.
+      const viewRight = el.querySelector('.ws__view')?.getBoundingClientRect().right ?? box.right
+      const eyeInset = eyeEdit ? eyeBenchInset(box.right - viewRight, box.width, box.height) : 0
+      const right = Math.max(side && sheetBox ? Math.max(0, Math.round(box.right - sheetBox.left)) : 0, eyeInset)
       const insets = { top: Math.max(0, Math.round(top - box.top)), bottom: Math.max(0, Math.round(box.bottom - edge)), rest: Math.max(0, Math.round(box.bottom - strip)), right }
       const now = useBenchView.getState().insets
       if (now.top !== insets.top || now.bottom !== insets.bottom || now.rest !== insets.rest || now.right !== insets.right) useBenchView.setState({ insets })
     }
     const ro = new ResizeObserver(measure)
-    for (const sel of ['.ws__topbar', '.ws__bottom', '.ws__sheet', '.ws__guide', '.ws__eyeview']) { const n = el.querySelector(sel); if (n) ro.observe(n) }
+    for (const sel of ['.ws__topbar', '.ws__bottom', '.ws__sheet', '.ws__guide']) { const n = el.querySelector(sel); if (n) ro.observe(n) }
     window.addEventListener('resize', measure)
     measure()
     return () => { ro.disconnect(); window.removeEventListener('resize', measure) }
@@ -188,7 +191,7 @@ export function Workshop(): JSX.Element | null {
   const root = useRef<HTMLDivElement>(null)
   // The guide's card stands over the strip too, and the shard is framed above it.
   const guiding = useBeginner((s) => s.step !== null && !s.paused) && !tutorialActive
-  useBenchInsets(root, sheet, open, guiding, eyeEdit && !viewOpen)
+  useBenchInsets(root, sheet, open, guiding, eyeEdit)
   // Every hook above this line, none below it: the early return that follows
   // changes which hooks run, and React counts them. One sat after the
   // return for a day and opening the workshop threw React #310 (2026-09-24).

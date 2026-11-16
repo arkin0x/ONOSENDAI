@@ -51,7 +51,7 @@ import { noTable, signedTableOnly, you } from '../lib/carried'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 import { bounceOf, springboardOf, withBounce, type Bounce } from '../lib/walkBounce'
 import { withAnim } from '../lib/anim'
-import { EYE_FIELD, benchEye, eyeReachTicks, flipEyeZ, withEye, type Eye } from '../lib/avatarEye'
+import { EYE_FIELD, eyeReachTicks, flipEyeZ, usedBenchEye, withEye, type Eye } from '../lib/avatarEye'
 import { v1Eye } from '../lib/eyeV1'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
@@ -1621,7 +1621,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     moveEye: (axis, delta) => {
       const s = get().current()
       if (!s || delta === 0) return false
-      const at = benchEye(s)
+      // From the eye WALK uses: one past the size limit is pulled in first, so a move back toward the middle is never refused.
+      const at = usedBenchEye(s)
       // Onto the snap's grid on the way: an eye off it (AUTO, CENTER) lands on
       // the next grid line in the move's direction, then steps along the grid.
       const grid = get().step()

@@ -7,8 +7,8 @@
 import type { Vec3 } from '../types'
 
 export type RunEvent =
-  /** The player fired a pellet: where it began, its direction, and where it stopped (a solid, the last drone it hit, or its range). Projectile guns report `end` as the muzzle and fly as `projectile`. */
-  | { type: 'shot'; weapon: number; origin: Vec3; dir: Vec3; end: Vec3; projectile?: number }
+  /** The player fired a pellet: where it began, its direction, and where it stopped (a solid, the last drone it hit, or its range). Projectile guns report `end` as the muzzle and fly as `projectile`. `wide`: an aimed shot the assist roll sent wide of its drone. */
+  | { type: 'shot'; weapon: number; origin: Vec3; dir: Vec3; end: Vec3; projectile?: number; wide?: true }
   /** A charge gun let go before its minimum charge. */
   | { type: 'charge-fizzled'; weapon: number }
   /** A shot or projectile of the player's hit a drone. */

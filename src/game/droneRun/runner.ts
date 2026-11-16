@@ -19,8 +19,9 @@
  * - Paused (the page hidden, a card up): no steps, and the time away is
  *   dropped, not owed.
  * - The HUD: useDroneRunHud, a zustand store set only when a value it shows
- *   changed; heat, charge and the clock move every step, so they are rounded
- *   and refreshed at most 10 times a second (every HUD_EVERY steps).
+ *   changed; heat, charge, stamina and the clock move every step, so they
+ *   are rounded and refreshed at most 10 times a second (every HUD_EVERY
+ *   steps).
  * - Events: onDroneRunEvent(cb) hears every step's events (sim/events.ts) in
  *   order, for the HUD's flashes and sounds and the view's effects.
  *
@@ -77,6 +78,14 @@ export interface DroneRunHud {
   switching: boolean
   /** Seconds since the wave began (the clear time once cleared). Rounded to 0.1. */
   runTime: number
+  /** Sprint stamina, 0..1 of its max (spec.player.stamina; 0 without it). Rounded to 0.02, refreshed at most 10 times a second like heat. */
+  stamina: number
+  /** Stamina ran dry: sprint does nothing until the lockout ends. */
+  sprintLocked: boolean
+  /** The last step sprinted. */
+  sprinting: boolean
+  /** Whether the variant has stamina at all (the HUD hides the meter without it). */
+  hasStamina: boolean
   kills: number
   score: number
 }
@@ -84,7 +93,7 @@ export interface DroneRunHud {
 const EMPTY_HUD: DroneRunHud = {
   phase: 'safe', hp: 0, maxHp: 0, invulnerable: false, wave: 1, waveName: '', wavesTotal: 0, dronesLeft: 0,
   weapon: 0, weaponNames: [], weaponKinds: [], weaponCharges: [], weaponAssists: [], heat: 0, overheated: false, ammo: 0, mag: 0, reloading: false,
-  charge: 0, switching: false, runTime: 0, kills: 0, score: 0,
+  charge: 0, switching: false, runTime: 0, stamina: 0, sprintLocked: false, sprinting: false, hasStamina: false, kills: 0, score: 0,
 }
 
 /** The HUD's store: one snapshot, replaced only when a value in it changed. */
@@ -135,6 +144,8 @@ export function hudOf(st: RunState, held: DroneRunHud | null, moving: boolean): 
   const time = st.phase === 'cleared' ? (st.clearTimeS ?? 0) : st.waveStep >= 0 ? st.waveStep * STEP_S : 0
   const c = def.charge
   const charge = g.charging && c ? Math.min(1, g.charge / Math.max(1e-6, c.maxS)) : 0
+  const sp = spec.player.stamina
+  const stamina = sp ? round(Math.max(0, Math.min(1, st.body.stamina / sp.max)), 0.02) : 0
   return {
     phase: st.phase,
     hp: st.hp,
@@ -154,6 +165,10 @@ export function hudOf(st: RunState, held: DroneRunHud | null, moving: boolean): 
     charge: moving || !held ? round(charge, 0.05) : held.charge,
     switching: st.arsenal.ready > 0,
     runTime: moving || !held || st.phase !== 'wave' ? round(time, 0.1) : held.runTime,
+    stamina: moving || !held ? stamina : held.stamina,
+    sprintLocked: st.body.sprintLock > 0,
+    sprinting: st.body.sprinting,
+    hasStamina: !!sp,
     kills,
     score: st.score,
   }

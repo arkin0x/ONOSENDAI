@@ -35,6 +35,7 @@ Every field below is tagged:
 | `player.hp` | HP at the start (3) | (b) |
 | `player.invulnMs` | After a hit, no damage for this long (ms) | (b) |
 | `player.height`, `radius`, `eye` | The body: 2 tall, 0.35 radius, eye 1.75 above the feet | (b) |
+| `player.stamina` | Sprint (RunInput.sprint, below): `{ max, drainPerS, refillPerS, refillDelayS, lockoutS, speedMul }`; base 100, 35, 25, 0.6 s, 1.2 s, 1.6. Without it, sprint does nothing | (b) |
 | `zones.start`, `zones.finish` | Copied from the level by the build; the simulation reads the level's own | (b) |
 | `start` | `{ kind: "leave-zone", zone: "start" }`: the wave starts on the first step the body's box no longer overlaps the start zone | (b) |
 | `win` | `{ kind: "reach-zone", zone: "finish" }`: cleared on the first step the body's box overlaps the finish zone | (b) |
@@ -65,6 +66,8 @@ Every field below is tagged:
 | `heat` | `{ perShot, coolPerS, overheatAt, lockS }`; cools while holstered too | (b) |
 | `ammo` | `{ mag, reloadS }`; empty reloads by itself; switching away cancels a reload | (b) |
 | `readyS` | Seconds after switching before it fires (default 0.3) | (b) |
+| `assistHit` | Share of aimed pulls that land, 0..1 (default 1). Each aimed pull rolls on the run's assist stream (the assist roll, below); a roll at or above this goes wide. Only with `assist`. Base PULSE RIFLE: 0.85 | (b) |
+| `assistMissBy` | How far a wide aimed pull clears the drone's surface, gibsons (default 1). Only with `assist` | (b) |
 | `assist` | `"auto"`: the gun may take aimed shots (`RunInput.aim`, below); only on a hitscan gun whose `mode` is `"auto"`, and `createRun` rejects it anywhere else (a semi gun fires once a press, so a held assisted trigger would latch; a charge gun fires on release, which a held trigger never gives, and its release step carries no aim). The base variant gives it to the PULSE RIFLE alone. The simulation reads it (an aim is honoured only for such a gun), so it is a rule; when a client sends aims (ONOSENDAI: only on a touch screen, while a drone is in the box round the reticle) is the client's (c) | (b) |
 
 Exactly one of `heat` or `ammo`.
@@ -101,9 +104,24 @@ Exactly one of `heat` or `ammo`.
 
 | Field | Meaning | Class |
 |---|---|---|
-| `aim` | Optional `{ yaw, pitch }`, in the look's terms. On a step where the gun in hand fires and its def has `assist: "auto"`, every pellet goes exactly along the aim, with no spread, instead of along the look. The look (camera, body) is untouched. Ignored on a step with no shot, by any other gun, and when not finite. The two spread draws are still taken, so the guns' random stream is the same with or without aims. It is in the input log, so a replay is exact | (b) |
+| `aim` | Optional `{ yaw, pitch }`, in the look's terms. On a step where the gun in hand fires and its def has `assist: "auto"`, every pellet goes exactly along the aim, with no spread, instead of along the look, unless the assist roll (below) sends the pull wide. The look (camera, body) is untouched. Ignored on a step with no shot, by any other gun, and when not finite. The two spread draws are still taken, so the guns' random stream is the same with or without aims. It is in the input log, so a replay is exact | (b) |
 
 A checker cannot tell an aim sent by an assist from an aimbot's: the log only shows that the player's client chose the direction. What the rules can say is which guns may carry an aim (`assist`); a stricter rule set could also cap how far an aim may stray from the look.
+
+### The assist roll (which aimed shots miss)
+
+A rule (b): which shots may miss changes where shots land, so a checker must roll exactly as the simulation does.
+
+- The stream: the run's fourth generator, mulberry32 (sim/rng.ts) seeded `mixSeeds(mixSeeds(run seed, wave seed), 4)` (the guns' spread is 1, the drones 2, the spawns 3). Only aimed pulls draw from it, so a run with no aims never touches it, and every other stream draws exactly what it would without the roll.
+- The draws: every aimed pull of an assist gun (a step whose gun in hand fires and whose input carries a finite `aim`) draws two numbers, always both, in this order: `roll`, then `turn`. One pair a pull, whatever the pellet count.
+- Hit or wide: `roll < assistHit` lands along the aim. Otherwise the pull goes wide: the aimed drone is the first live drone the aimed line meets before a solid, within the gun's range (the hitscan cast, from the eye, at the drones where the last step left them). Every pellet then leaves along the line from the eye to that drone's centre, tilted away from it by the angle whose sine is `(radius + assistMissBy) / distance` (90 degrees when the eye is closer than that), toward the side `turn * 2 pi` names round the line, in the spread cone's basis (sim/weapons.ts `tilt`). Its closest pass to the centre is `radius + assistMissBy`, so it clears the drone by `assistMissBy` and passes visibly beside it. It can still hit another drone in its way. A wide pull whose aimed line meets no drone keeps its aim.
+- The shot event carries `wide: true` for a wide pellet, for the view (class c how it looks).
+
+### RunInput.sprint
+
+| Field | Meaning | Class |
+|---|---|---|
+| `sprint` | Optional, held (absent is false). While held, a move is held (the wish is not zero) and stamina is above 0 with no lockout running, the top speed is `speedMul` times fluid WALK's and stamina drains `drainPerS` a second; the refill delay restarts. Running dry starts a lockout of `lockoutS`, during which sprint does nothing. Any step not sprinting counts the lockout and the delay down, then refills `refillPerS` a second up to `max`. Acceleration and braking stay fluid WALK's (let go above the walking top speed, the body brakes at FLUID_DECEL). It is in the input log, so a replay is exact | (b) |
 
 ### What the simulation reads from the level
 
@@ -114,11 +132,11 @@ A checker cannot tell an aim sent by an assist from an aimbot's: the log only sh
 1. Copy `variants/drone-run-base.json` to `variants/<new-id>.json` and change `id` and `name`.
 2. Change numbers in `spec`: guns, drones, waves, scoring. Spawn points named in waves must exist in the level.
 3. Keep `world.level` pointing at a built level, and `client` for the look.
-4. Load it like the base variant; `createRun` checks it (unknown enemy or spawn point, a gun with both or neither of heat and ammo, `assist` on a gun that is not auto hitscan) and throws with a plain message.
+4. Load it like the base variant; `createRun` checks it (unknown enemy or spawn point, a gun with both or neither of heat and ammo, `assist` on a gun that is not auto hitscan, `assistHit` outside 0 to 1 or either assist number without `assist`, a stamina number below 0 or a zero `max` or `speedMul`) and throws with a plain message.
 
 ## The simulation in one paragraph
 
-`createRun(variant, solids, { level, seed, wave })` makes a run; `stepRun(state, input)` advances it one fixed step of 1/60 s, mutating the state in place, and lists what happened in `state.events`. Inputs are `{ move: { fwd, strafe }, yaw, pitch, jump, fire, select, reload, aim? }`. Within a step the body moves first, then the guns fire (from the moved eye, at the drones where the last step left them), then drones spawn, move and attack. `restart` and `nextWave` return fresh states; `stateHash` fingerprints a state. The run is a pure function of the variant, the solids, the level, the seed and the input log, so another client can replay it.
+`createRun(variant, solids, { level, seed, wave })` makes a run; `stepRun(state, input)` advances it one fixed step of 1/60 s, mutating the state in place, and lists what happened in `state.events`. Inputs are `{ move: { fwd, strafe }, yaw, pitch, jump, fire, select, reload, aim?, sprint? }`. Within a step the body moves first, then the guns fire (from the moved eye, at the drones where the last step left them), then drones spawn, move and attack. `restart` and `nextWave` return fresh states; `stateHash` fingerprints a state. The run is a pure function of the variant, the solids, the level, the seed and the input log, so another client can replay it.
 
 ### Replay across engines
 

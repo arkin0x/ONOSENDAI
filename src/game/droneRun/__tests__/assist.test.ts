@@ -2,9 +2,11 @@
  * assist.test.ts - the touch aim assist (assist.ts): which drone it picks
  * (inside the box, most central, in front, in range, in sight), that it
  * fires only the assist gun and only while the box is shown, that every
- * shot it fires hits drones that are moving, that it never fires through a
- * wall, and that a run with assisted aims replays exactly. No canvas, no
- * relay.
+ * shot it fires hits drones that are moving unless the simulation's assist
+ * roll says miss (about 15% for the base PULSE RIFLE, sent visibly wide),
+ * that it never fires through a wall, that its auto-fire can overheat the
+ * rifle in a busy fight, and that a run with assisted aims replays exactly,
+ * misses and all. No canvas, no relay.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -115,8 +117,10 @@ function eye(st: RunState): Vec3 {
 }
 
 describe('auto-fire', () => {
-  it('fires the PULSE RIFLE at a drone in the box, and the shot hits', () => {
-    const st = standing(quiet(), field)
+  it('fires the PULSE RIFLE at a drone in the box, and the shot hits (with the roll set to always hit: the aim is what is checked)', () => {
+    const v = quiet()
+    v.spec.weapons[0].assistHit = 1
+    const st = standing(v, field)
     const e = eye(st)
     st.drones.push(makeDrone(st.ids.next++, st.world.variant.spec.enemies, 0, [e[0] + 0.6, e[1] + 1, e[2] - 30], e, st.rng.drones))
     const inp = input()
@@ -280,21 +284,32 @@ const hedges = boxes(GROUND, [[112, 63.5, 160], [122, 67, 161]], [[132, 63.5, 15
 function playAssisted(seed: number, steps: number) {
   const st = createRun(busy(seed), hedges, { level: testLevel(), seed })
   let yaw = 0, pitch = 0.15
-  let assistedShots = 0, assistedHits = 0, fired = 0
+  let assistedShots = 0, assistedHits = 0, fired = 0, wide = 0, overheats = 0
   const log: RunInput[] = []
+  /** The steps whose aimed shot went wide. */
+  const wideAt: number[] = []
   for (let i = 0; i < steps && (st.phase === 'safe' || st.phase === 'wave'); i++) {
     const out = st.phase === 'safe' || st.waveStep < 30
     const inp = input({ move: { fwd: out ? 1 : 0, strafe: out ? 0 : Math.sin(i / 70) }, yaw, pitch, jump: !out && i % 90 === 0 })
     const e = eye(st)
-    applyAssist(st, inp, AT)
+    const pick = applyAssist(st, inp, AT)
     log.push(JSON.parse(JSON.stringify(inp)) as RunInput)
     stepRun(st, inp)
-    const shots = st.events.filter((x) => x.type === 'shot').length
-    if (inp.aim) {
-      assistedShots += shots
-      assistedHits += st.events.filter((x) => x.type === 'hit').length
+    const shots = st.events.filter((x) => x.type === 'shot')
+    if (pick) {
+      for (const sh of shots) {
+        assistedShots++
+        const hitIt = st.events.some((x) => x.type === 'hit' && x.drone === pick.target)
+        if (sh.type === 'shot' && sh.wide) {
+          wide++
+          wideAt.push(st.step)
+          // Wide: the drone it was aimed at is not hit.
+          expect(hitIt).toBe(false)
+        } else if (hitIt) assistedHits++
+      }
     }
-    fired += shots
+    overheats += st.events.filter((x) => x.type === 'overheated').length
+    fired += shots.length
     // The look follows the nearest drone, a little off and lagging, as a thumb would.
     if (st.drones.length) {
       const near = [...st.drones].sort((a, b) => Math.hypot(a.pos[0] - e[0], a.pos[1] - e[1], a.pos[2] - e[2]) - Math.hypot(b.pos[0] - e[0], b.pos[1] - e[1], b.pos[2] - e[2]))[0]
@@ -305,29 +320,42 @@ function playAssisted(seed: number, steps: number) {
       pitch += (want.pitch - pitch) * 0.12
     }
   }
-  return { st, assistedShots, assistedHits, fired, log }
+  return { st, assistedShots, assistedHits, fired, wide, wideAt, overheats, log }
 }
 
-describe('every assisted shot hits', () => {
-  it('against moving scouts and swarmers, over several seeds', () => {
-    let total = 0
-    for (const seed of [1, 2, 3, 4]) {
+describe('every assisted shot hits unless the simulation\'s roll says miss', () => {
+  it('against moving scouts and swarmers, over several seeds: every shot the roll lets through hits, and about 85% do', () => {
+    let total = 0, hits = 0, wide = 0, overheats = 0
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
       const r = playAssisted(seed, 60 * 30)
-      expect(r.assistedHits).toBe(r.assistedShots)
-      expect(r.assistedShots).toBeGreaterThan(20)
-      total += r.assistedShots
+      // A shot that is not wide hits the drone it was aimed at.
+      expect(r.assistedHits).toBe(r.assistedShots - r.wide)
+      expect(r.assistedShots).toBeGreaterThan(12)
+      total += r.assistedShots; hits += r.assistedHits; wide += r.wide; overheats += r.overheats
       let kills = 0
       for (const k in r.st.kills) kills += r.st.kills[k]
       expect(kills).toBeGreaterThan(0)
     }
-    expect(total).toBeGreaterThan(100)
+    expect(total).toBeGreaterThan(150)
+    // 85% of the assisted shots hit, within a tolerance for the sample.
+    expect(hits / total).toBeGreaterThan(0.78)
+    expect(hits / total).toBeLessThan(0.92)
+    expect(wide).toBeGreaterThan(0)
+    // The auto-fire heats the rifle like any trigger: a busy fight trips the overheat.
+    expect(overheats).toBeGreaterThan(0)
   })
 
-  it('a run with assisted aims replays exactly from its input log', () => {
+  it('a run with assisted aims replays exactly from its input log, missing exactly the same shots', () => {
     const r = playAssisted(2, 60 * 20)
     expect(r.log.some((x) => x.aim)).toBe(true)
+    expect(r.wideAt.length).toBeGreaterThan(0)
     const again = createRun(busy(2), hedges, { level: testLevel(), seed: 2 })
-    for (const inp of r.log) stepRun(again, inp)
+    const wideAgain: number[] = []
+    for (const inp of r.log) {
+      stepRun(again, inp)
+      if (again.events.some((x) => x.type === 'shot' && x.wide)) wideAgain.push(again.step)
+    }
+    expect(wideAgain).toEqual(r.wideAt)
     expect(stateHash(again)).toBe(stateHash(r.st))
   })
 })

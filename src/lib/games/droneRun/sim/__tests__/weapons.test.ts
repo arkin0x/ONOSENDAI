@@ -57,8 +57,8 @@ describe('weapons', () => {
     const even = count(Array.from({ length: a.steps }, () => STEP_S))
     expect(even.steps).toBe(a.steps)
     expect(a.shots).toBe(even.shots)
-    // 5 a second: one at the first step, then one each 12 steps.
-    expect(a.shots).toBe(Math.floor((a.steps - 1) / 12) + 1)
+    // 4 a second: one at the first step, then one each 15 steps.
+    expect(a.shots).toBe(Math.floor((a.steps - 1) / 15) + 1)
   })
 
   it('a rate that does not divide 60 never drifts: 1.4 a second for 100 s', () => {
@@ -70,16 +70,16 @@ describe('weapons', () => {
     expect(n).toBe(140)
   })
 
-  it('range limit: a drone at 59 is hit, one at 61 is not', () => {
+  it('range limit: the PULSE RIFLE reaches 40, so a drone at 39 is hit, one at 41 is not', () => {
     const t = (z: number): Target => ({ id: 1, pos: [0, 0, -z], radius: 0.5, hp: 1 })
-    const near = rig(straight(PULSE), [t(59)])
+    const near = rig(straight(PULSE), [t(39)])
     near.step({ fire: true })
     expect(near.hits.length).toBe(1)
-    const far = rig(straight(PULSE), [t(61)])
+    const far = rig(straight(PULSE), [t(41)])
     far.step({ fire: true })
     expect(far.hits.length).toBe(0)
     const ev = far.events.find((e) => e.type === 'shot')!
-    expect(ev.type === 'shot' && ev.end[2]).toBeCloseTo(-60, 9)
+    expect(ev.type === 'shot' && ev.end[2]).toBeCloseTo(-40, 9)
   })
 
   it('a solid stops a shot before the drone behind it', () => {
@@ -117,16 +117,16 @@ describe('weapons', () => {
   it('falloff: full to start, straight down to minFactor at end, minFactor beyond', () => {
     const f = defs[PULSE].falloff!
     expect(falloffAt(f, 10)).toBe(1)
-    expect(falloffAt(f, 40)).toBe(1)
-    expect(falloffAt(f, 50)).toBeCloseTo(0.75, 12)
-    expect(falloffAt(f, 60)).toBe(0.5)
+    expect(falloffAt(f, 25)).toBe(1)
+    expect(falloffAt(f, 32.5)).toBeCloseTo(0.75, 12)
+    expect(falloffAt(f, 40)).toBe(0.5)
     expect(falloffAt(f, 99)).toBe(0.5)
-    const g = rig(straight(PULSE), [{ id: 1, pos: [0, 0, -50.5], radius: 0.5, hp: 1 }])
+    const g = rig(straight(PULSE), [{ id: 1, pos: [0, 0, -33], radius: 0.5, hp: 1 }])
     g.step({ fire: true })
     expect(g.hits[0].damage).toBeCloseTo(0.75, 9)
   })
 
-  it('heat: PULSE RIFLE overheats on its 21st shot of a held trigger (4 s), locks 1.4 s, then fires again', () => {
+  it('heat: PULSE RIFLE overheats on its 12th shot of a held trigger (2.75 s), locks 1.6 s, then fires again', () => {
     const g = rig()
     let n = 0, at = -1
     for (let i = 0; i < 60 * 25 && at < 0; i++) {
@@ -134,16 +134,16 @@ describe('weapons', () => {
       n += shots(g.events)
       if (g.events.some((e) => e.type === 'overheated')) at = i
     }
-    // Heat after n shots 0.2 s apart: 9 + (9 - 22 * 0.2) * (n - 1) = 9 + 4.6 (n - 1), so past 100 at the 21st, 4 s in.
-    expect(n).toBe(21)
-    expect(at * STEP_S).toBeCloseTo(4, 6)
+    // Heat after n shots 0.25 s apart: 13 + (13 - 18 * 0.25) * (n - 1) = 13 + 8.5 (n - 1), so past 100 at the 12th, 2.75 s in.
+    expect(n).toBe(12)
+    expect(at * STEP_S).toBeCloseTo(2.75, 6)
     let locked = 0
     while (shots(g.events) === 0 || locked === 0) { g.step({ fire: true }); if (shots(g.events) === 0) locked++; else break }
-    expect(locked * STEP_S).toBeCloseTo(1.4, 1)
-    // Cooling while not firing: 22 a second.
+    expect(locked * STEP_S).toBeCloseTo(1.6, 1)
+    // Cooling while not firing: 18 a second.
     const h = g.a.guns[PULSE].heat
     for (let i = 0; i < 30; i++) g.step()
-    expect(g.a.guns[PULSE].heat).toBeCloseTo(Math.max(0, h - 11), 6)
+    expect(g.a.guns[PULSE].heat).toBeCloseTo(Math.max(0, h - 9), 6)
   })
 
   it('heat: CHARGE RAIL fired as fast as it charges locks out on its 3rd shot', () => {

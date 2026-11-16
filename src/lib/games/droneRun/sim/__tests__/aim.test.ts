@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { makeArsenal, stepGuns, stepProjectiles, type DamageHit, type GunContext, type Projectile, type Target } from '../weapons'
-import { makeRng } from '../rng'
+import { makeRng, next } from '../rng'
 import { buildSolids } from '../solids'
 import { aimDir, createRun, stepRun, STEP_S, type RunState } from '../run'
 import { stateHash } from '../hash'
@@ -52,10 +52,11 @@ describe('aimed shots', () => {
   })
 
   it('an aimed hitscan shot hits a small drone at range that spread shots miss some of the time', () => {
-    // A swarmer-sized sphere 58 out: the 0.4 degree cone reaches 0.4 off the line there, past its 0.3 radius.
+    // A swarmer-sized sphere 58 out (the rifle's range stretched to 60 and its heat off for this): the 0.4 degree cone reaches 0.4 off the line there, past its 0.3 radius.
+    const long = defs.map((d, k) => (k === PULSE ? { ...d, range: 60, heat: { ...d.heat!, perShot: 0 } } : d))
     const tg: Target = { id: 1, pos: [0, 0, -58], radius: 0.3, hp: 1e9 }
-    const plain = rig([tg])
-    const aimed = rig([tg])
+    const plain = rig([tg], 7, long)
+    const aimed = rig([tg], 7, long)
     const dir = aimAt(tg.pos).dir
     let plainShots = 0, aimedShots = 0
     for (let i = 0; i < 60 * 20; i++) {
@@ -71,7 +72,7 @@ describe('aimed shots', () => {
   })
 
   it('an aimed shot goes where it is aimed, not along the look: a drone well off the reticle is hit', () => {
-    const tg: Target = { id: 1, pos: [12, 4, -40], radius: 0.5, hp: 1e9 }
+    const tg: Target = { id: 1, pos: [12, 4, -30], radius: 0.5, hp: 1e9 }
     const g = rig([tg])
     g.step(true)
     expect(g.hits.length).toBe(0)
@@ -194,5 +195,136 @@ describe('aims in the input log', () => {
     const replay = play(variant(), read)
     expect(stateHash(replay)).toBe(stateHash(live))
     expect(replay.kills).toEqual(live.kills)
+  })
+})
+
+describe('the assist roll (WeaponDef.assistHit, assistMissBy)', () => {
+  /** A rig whose aimed pulls roll on their own assist stream, as the run's do. */
+  function rolled(targets: Target[], seed = 7, d: WeaponDef[] = defs) {
+    const g = rig(targets, seed, d)
+    g.ctx.assistRng = makeRng(seed ^ 0x5a5a)
+    return g
+  }
+
+  it('the base PULSE RIFLE hits with 85% of its aimed pulls and misses by 1 gibson beyond the drone', () => {
+    expect(defs[PULSE].assistHit).toBe(0.85)
+    expect(defs[PULSE].assistMissBy).toBe(1)
+  })
+
+  it('about 85% of aimed pulls hit; every wide one clears the drone by assistMissBy and hits nothing', () => {
+    const tg: Target = { id: 1, pos: [3, 2, -25], radius: 0.5, hp: 1e9 }
+    const g = rolled([tg])
+    const aim = aimAt(tg.pos).dir
+    let shots = 0, wide = 0, hitShots = 0
+    for (let i = 0; i < 60 * 600 && shots < 2000; i++) {
+      const before = g.hits.length
+      g.step(true, aim)
+      // The heat lock would stop a held trigger: cool it, the roll is what is measured here.
+      g.a.guns[PULSE].heat = 0
+      for (const e of g.events) {
+        if (e.type !== 'shot') continue
+        shots++
+        if (e.wide) {
+          wide++
+          // The closest pass of the wide line to the drone's centre is radius + assistMissBy.
+          const c = tg.pos, d = e.dir
+          const t = c[0] * d[0] + c[1] * d[1] + c[2] * d[2]
+          const pass = Math.hypot(c[0] - d[0] * t, c[1] - d[1] * t, c[2] - d[2] * t)
+          expect(pass).toBeCloseTo(0.5 + 1, 9)
+        }
+      }
+      const hit = g.hits.length - before
+      if (hit) hitShots++
+      if (g.events.some((e) => e.type === 'shot' && e.wide)) expect(hit).toBe(0)
+    }
+    expect(shots).toBe(2000)
+    expect(hitShots).toBe(shots - wide)
+    // 85% within a few points (2000 pulls: one standard deviation is 0.8 points).
+    expect(hitShots / shots).toBeGreaterThan(0.82)
+    expect(hitShots / shots).toBeLessThan(0.88)
+  })
+
+  it('the roll draws from the assist stream only: the guns\' stream is the same as without it', () => {
+    const tg: Target = { id: 1, pos: [0, 0, -20], radius: 0.5, hp: 1e9 }
+    const plain = rig([tg]), withRoll = rolled([tg])
+    const aim = aimAt(tg.pos).dir
+    for (let i = 0; i < 600; i++) { plain.step(i % 50 < 30, aim); withRoll.step(i % 50 < 30, aim) }
+    expect(withRoll.a.pulls).toBe(plain.a.pulls)
+    expect(withRoll.ctx.rng.s).toBe(plain.ctx.rng.s)
+    // Two draws an aimed pull.
+    const r = makeRng(7 ^ 0x5a5a)
+    for (let k = 0; k < plain.a.pulls * 2; k++) next(r)
+    expect(withRoll.ctx.assistRng!.s).toBe(r.s)
+  })
+
+  it('assistHit 1 never goes wide and 0 always does; an unaimed pull never rolls', () => {
+    const tg: Target = { id: 1, pos: [0, 0, -20], radius: 0.5, hp: 1e9 }
+    const aim = aimAt(tg.pos).dir
+    for (const [hit, wideAll] of [[1, false], [0, true]] as const) {
+      const g = rolled([tg], 7, defs.map((d, k) => (k === PULSE ? { ...d, assistHit: hit } : d)))
+      for (let i = 0; i < 120; i++) {
+        g.step(true, aim)
+        for (const e of g.events) if (e.type === 'shot') expect(!!e.wide).toBe(wideAll)
+      }
+    }
+    const g = rolled([tg])
+    const s0 = g.ctx.assistRng!.s
+    for (let i = 0; i < 120; i++) g.step(true)
+    expect(g.a.pulls).toBeGreaterThan(5)
+    expect(g.ctx.assistRng!.s).toBe(s0)
+  })
+
+  it('a variant may set assistHit (0 to 1) and assistMissBy (0 or more) only on an assist gun', () => {
+    const lv = testLevel(), field = boxes(GROUND)
+    const bad1 = variant(); bad1.spec.weapons[0].assistHit = 1.5
+    expect(() => createRun(bad1, field, { level: lv })).toThrow(/assistHit/)
+    const bad2 = variant(); bad2.spec.weapons[0].assistMissBy = -1
+    expect(() => createRun(bad2, field, { level: lv })).toThrow(/assistMissBy/)
+    const bad3 = variant(); bad3.spec.weapons[1].assistHit = 0.5
+    expect(() => createRun(bad3, field, { level: lv })).toThrow(/need assist/)
+  })
+})
+
+describe('the assist roll in a run', () => {
+  const field = boxes(GROUND)
+
+  it('a run without aims never draws from the assist stream, so its other streams are what they always were', () => {
+    const st = createRun(variant(), field, { level: testLevel(), seed: 5, wave: 2 })
+    const a0 = st.rng.assist.s
+    for (let i = 0; i < 60 * 20; i++) stepRun(st, input({ move: { fwd: i < 200 ? 1 : 0, strafe: 0 }, yaw: Math.sin(i / 80) * 0.5, pitch: 0.2, fire: i % 60 < 35 }))
+    expect(st.arsenal.pulls).toBeGreaterThan(20)
+    expect(st.rng.assist.s).toBe(a0)
+  })
+
+  it('a replayed log goes wide on exactly the same shots', () => {
+    const play = (inputs: RunInput[] | null) => {
+      const st = createRun(variant(), field, { level: testLevel(), seed: 5, wave: 2 })
+      const log: RunInput[] = []
+      const wideAt: number[] = []
+      const n = inputs ? inputs.length : 60 * 30
+      for (let i = 0; i < n && (st.phase === 'safe' || st.phase === 'wave'); i++) {
+        let inp: RunInput
+        if (inputs) inp = inputs[i]
+        else {
+          inp = input({ move: { fwd: i < 150 ? 1 : 0, strafe: 0 }, pitch: 0.2 })
+          const eye: Vec3 = [st.body.pos[0], st.body.pos[1] + 1.75, st.body.pos[2]]
+          const near = st.drones[0]
+          if (near) {
+            const dx = near.pos[0] - eye[0], dy = near.pos[1] - eye[1], dz = near.pos[2] - eye[2]
+            inp.aim = { yaw: Math.atan2(dx, -dz), pitch: Math.asin(dy / Math.hypot(dx, dy, dz)) }
+            inp.fire = true
+          }
+        }
+        log.push(JSON.parse(JSON.stringify(inp)) as RunInput)
+        stepRun(st, inp)
+        if (st.events.some((e) => e.type === 'shot' && e.wide)) wideAt.push(st.step)
+      }
+      return { st, log, wideAt }
+    }
+    const live = play(null)
+    expect(live.wideAt.length).toBeGreaterThan(2)
+    const again = play(live.log)
+    expect(again.wideAt).toEqual(live.wideAt)
+    expect(stateHash(again.st)).toBe(stateHash(live.st))
   })
 })

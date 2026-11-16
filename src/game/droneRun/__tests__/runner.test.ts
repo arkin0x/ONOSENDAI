@@ -158,6 +158,32 @@ describe('the HUD store', () => {
     stop()
   })
 
+  it('shows sprint stamina (0..1, at most 10 times a second like heat), whether sprinting, and the lockout', () => {
+    const idle: RunInput = { move: { fwd: 0, strafe: 0 }, yaw: 0, pitch: 0, jump: false, fire: false, select: null, reload: false }
+    let cur = idle
+    const r = new DroneRunner(variant(), SOLIDS, { level: LEVEL, input: () => cur })
+    expect(useDroneRunHud.getState()).toMatchObject({ stamina: 1, sprinting: false, sprintLocked: false, hasStamina: true })
+    let sets = 0
+    const stop = useDroneRunHud.subscribe(() => { sets++ })
+    // Sprinting (sprint passes from the input through toSimInput): stamina falls, the store moves at most every HUD_EVERY steps.
+    cur = { ...idle, move: { fwd: 1, strafe: 0 }, sprint: true }
+    for (let k = 0; k < 60; k++) r.frame(1 / 60)
+    const h = useDroneRunHud.getState()
+    expect(h.sprinting).toBe(true)
+    expect(h.stamina).toBeGreaterThan(0.6)
+    expect(h.stamina).toBeLessThan(0.7)
+    expect(Math.round(h.stamina * 50)).toBe(h.stamina * 50)
+    expect(sets).toBeLessThanOrEqual(Math.ceil(60 / HUD_EVERY) + 3)
+    // Run dry: the lockout shows.
+    for (let k = 0; k < 120 && !useDroneRunHud.getState().sprintLocked; k++) r.frame(1 / 60)
+    // (The step that ran it dry was still a sprinting step.)
+    expect(useDroneRunHud.getState().sprintLocked).toBe(true)
+    // The meter catches up within a tenth of a second (it is one of the 10 Hz values).
+    for (let k = 0; k < HUD_EVERY; k++) r.frame(1 / 60)
+    expect(useDroneRunHud.getState()).toMatchObject({ stamina: 0, sprintLocked: true, sprinting: false })
+    stop()
+  })
+
   it('a snapshot compares equal to itself and differs on any field', () => {
     const st = createRun(variant(), SOLIDS, { level: LEVEL })
     const a = hudOf(st, null, true)

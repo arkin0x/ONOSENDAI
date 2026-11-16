@@ -36,6 +36,7 @@ export function stateHash(st: RunState): string {
   h.num(st.wave); h.str(st.phase); h.num(st.step); h.num(st.waveStep); h.num(st.hp); h.num(st.invuln)
   const b = st.body
   h.vec(b.pos); h.vec(b.vel); h.bool(b.grounded); h.bool(b.doubled); h.num(b.coyote); h.num(b.jumpBuffer); h.num(b.yaw); h.num(b.pitch)
+  h.num(b.stamina); h.num(b.staminaWait); h.num(b.sprintLock); h.bool(b.sprinting)
   const a = st.arsenal
   h.num(a.current); h.num(a.ready); h.num(a.pulls)
   for (const g of a.guns) { h.num(g.cool); h.num(g.heat); h.num(g.lock); h.num(g.mag); h.num(g.reload); h.num(g.charge); h.bool(g.charging); h.bool(g.latched) }
@@ -50,7 +51,7 @@ export function stateHash(st: RunState): string {
   h.num(st.projectiles.length)
   for (const p of st.projectiles) { h.num(p.id); h.num(p.weapon); h.vec(p.pos); h.vec(p.vel); h.num(p.travelled); h.num(p.range); h.num(p.damage); h.num(p.pierceLeft); h.vec(p.hit) }
   for (const l of st.waveState.lines) { h.bool(l.started); h.num(l.startAt); h.num(l.spawned) }
-  h.num(st.rng.guns.s); h.num(st.rng.drones.s); h.num(st.rng.spawns.s); h.num(st.ids.next)
+  h.num(st.rng.guns.s); h.num(st.rng.drones.s); h.num(st.rng.spawns.s); h.num(st.rng.assist.s); h.num(st.ids.next)
   for (const k of Object.keys(st.kills).sort()) { h.str(k); h.num(st.kills[k]) }
   h.num(st.clearTimeS ?? -1); h.num(st.score)
   return h.hex()

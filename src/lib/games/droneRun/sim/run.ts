@@ -21,8 +21,11 @@
  *
  * The run is a pure function of (variant, solids, level, seed, inputs):
  * fixed step STEP_S, seeded generators kept in the state (one each for the
- * guns' spread, the drones, and the spawns, so firing never changes where a
- * drone wanders), and no clock read anywhere. Order within a step: the body
+ * guns' spread, the drones, the spawns and the assist roll, so firing never
+ * changes where a drone wanders, and an aimed pull's roll never changes the
+ * spread or anything else a run without aims draws), and no clock read
+ * anywhere. Each is seeded mixSeeds(mixSeeds(run seed, wave seed), k), k
+ * 1 guns, 2 drones, 3 spawns, 4 assist. Order within a step: the body
  * moves, then the guns fire (from the moved eye, at the drones where the
  * last step left them), then spawns, then the drones move and attack. stepRun MUTATES the state in
  * place and returns it, for speed; restart and nextWave return a new state.
@@ -89,7 +92,8 @@ export interface RunState {
   droneShots: DroneShot[]
   projectiles: Projectile[]
   waveState: WaveState
-  rng: { guns: Rng; drones: Rng; spawns: Rng }
+  /** Seeded generators: the guns' spread, the drones, the spawns, and the assist roll (drawn only by aimed pulls). */
+  rng: { guns: Rng; drones: Rng; spawns: Rng; assist: Rng }
   ids: { next: number }
   kills: Record<string, number>
   /** Seconds from the wave's start to the clear, once cleared. */
@@ -136,7 +140,12 @@ export function checkVariant(v: DroneRunVariant, level: RunLevel): void {
     if (w.mode === 'charge' && !w.charge) throw new Error(`Weapon ${w.id} is a charge gun with no charge.`)
     // A semi gun latches (one shot a press) and a charge gun never lets go while held and fires its release step without an aim, so only an auto hitscan gun may be aimed.
     if (w.assist !== undefined && (w.assist !== 'auto' || w.fire !== 'hitscan' || w.mode !== 'auto')) throw new Error(`Weapon ${w.id}: assist must be "auto", on a hitscan gun whose mode is "auto".`)
+    if ((w.assistHit !== undefined || w.assistMissBy !== undefined) && w.assist === undefined) throw new Error(`Weapon ${w.id}: assistHit and assistMissBy need assist.`)
+    if (w.assistHit !== undefined && !(w.assistHit >= 0 && w.assistHit <= 1)) throw new Error(`Weapon ${w.id}: assistHit must be from 0 to 1.`)
+    if (w.assistMissBy !== undefined && !(w.assistMissBy >= 0)) throw new Error(`Weapon ${w.id}: assistMissBy must be 0 or more.`)
   }
+  const sp = s.player.stamina
+  if (sp && !([sp.max, sp.drainPerS, sp.refillPerS, sp.refillDelayS, sp.lockoutS].every((x) => Number.isFinite(x) && x >= 0) && sp.max > 0 && sp.speedMul > 0)) throw new Error('player.stamina needs max and speedMul above 0 and every other number 0 or more.')
   if (!s.waves.length) throw new Error('A variant needs at least one wave.')
   const enemies = new Set(s.enemies.map((e) => e.id))
   for (const wave of s.waves) for (const sp of wave.spawns) {
@@ -159,14 +168,14 @@ export function createRun(variant: DroneRunVariant, solids: Solids, opts: RunOpt
   const script = scriptOf(variant, wave)
   const base = mixSeeds(opts.seed ?? 0, script.seed)
   const p = variant.spec.player
-  const body = makeBody(level.entry, level.entryYaw)
+  const body = makeBody(level.entry, level.entryYaw, p.stamina?.max ?? 0)
   placeBody(body, p, solids, bounds)
   return {
     world: { variant, solids, level, bounds, options: opts },
     wave, phase: 'safe', step: 0, waveStep: -1, hp: p.hp, invuln: 0,
     body, arsenal: makeArsenal(variant.spec.weapons), drones: [], droneShots: [], projectiles: [],
     waveState: makeWaveState(script),
-    rng: { guns: makeRng(mixSeeds(base, 1)), drones: makeRng(mixSeeds(base, 2)), spawns: makeRng(mixSeeds(base, 3)) },
+    rng: { guns: makeRng(mixSeeds(base, 1)), drones: makeRng(mixSeeds(base, 2)), spawns: makeRng(mixSeeds(base, 3)), assist: makeRng(mixSeeds(base, 4)) },
     ids: { next: 1 }, kills: {}, clearTimeS: null, score: 0, events: [],
   }
 }
@@ -220,7 +229,7 @@ export function stepRun(st: RunState, input: RunInput): RunState {
   // The guns.
   const eye = eyeOf(st.body, p)
   const hits: DamageHit[] = []
-  const gunCtx = { defs: spec.weapons, solids, targets: st.drones, rng: st.rng.guns, eye, dir: lookDir(st.body.yaw, st.body.pitch), aim: aimDir(input), dt, events: ev, hits, projectiles: st.projectiles, ids: st.ids }
+  const gunCtx = { defs: spec.weapons, solids, targets: st.drones, rng: st.rng.guns, assistRng: st.rng.assist, eye, dir: lookDir(st.body.yaw, st.body.pitch), aim: aimDir(input), dt, events: ev, hits, projectiles: st.projectiles, ids: st.ids }
   stepGuns(st.arsenal, input, gunCtx)
   stepProjectiles(gunCtx)
   applyHits(st, hits)

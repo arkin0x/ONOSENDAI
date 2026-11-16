@@ -26,10 +26,24 @@
  *   (RunInput.aim) when it carries one, dead straight (no spread; the two
  *   spread draws are still taken, so the random stream does not depend on
  *   aiming). Any other gun ignores the aim.
+ * - The assist roll: each aimed pull draws two numbers from the run's
+ *   assist stream (never the guns' stream, so a run without aims draws
+ *   exactly what it always drew), always both, in this order: `roll`, then
+ *   `turn`. When roll >= the gun's `assistHit` (default 1: never), the pull
+ *   goes wide: the first live drone the aimed line meets before a solid,
+ *   within range, is the one it was aimed at; every pellet then leaves along
+ *   the line from the eye to that drone's centre, tilted away from it by the
+ *   angle whose sine is (radius + assistMissBy) / distance (90 degrees when
+ *   the eye is that close), toward the side `turn` names (turn * 2 pi round
+ *   the line, in the same basis as the spread cone). Its closest pass to the
+ *   centre is then radius + assistMissBy: it clears the drone by
+ *   assistMissBy. A wide pull whose aimed line meets no drone keeps its aim
+ *   (it misses anyway). The shot event says `wide: true`.
  * - Switching takes readyS (default 0.3 s) before the new gun fires; a
  *   charge in progress is dropped.
  *
- * Mutates the arsenal in place; draws spread from the run's weapons RNG only.
+ * Mutates the arsenal in place; draws spread from the run's weapons RNG and
+ * the assist roll from the run's assist RNG, nothing else.
  */
 
 import type { FalloffDef, RunInput, Vec3, WeaponDef } from '../types'
@@ -41,6 +55,8 @@ import { segmentCast, type Solids } from './solids'
 export const DEFAULT_READY_S = 0.3
 /** A player projectile's radius when its def says none. */
 export const DEFAULT_PROJECTILE_RADIUS = 0.1
+/** How far a wide assisted shot clears the drone's surface when its def says none, gibsons. */
+export const DEFAULT_ASSIST_MISS_BY = 1
 /** Float slack on the cadence clock. */
 const CADENCE_EPS = 1e-9
 
@@ -113,7 +129,11 @@ export function coneSample(dir: Vec3, deg: number, rng: Rng): Vec3 {
   const cosMax = Math.cos((deg * Math.PI) / 180)
   const cosT = 1 - a * (1 - cosMax)
   const sinT = Math.sqrt(Math.max(0, 1 - cosT * cosT))
-  const phi = 2 * Math.PI * b
+  return tilt(dir, cosT, sinT, 2 * Math.PI * b)
+}
+
+/** Unit `dir` tilted by the angle whose cosine and sine are `cosT` and `sinT`, toward the side `phi` (radians round dir, in a fixed basis across it). */
+export function tilt(dir: Vec3, cosT: number, sinT: number, phi: number): Vec3 {
   // A basis across dir.
   const ref: Vec3 = Math.abs(dir[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]
   let ux = dir[1] * ref[2] - dir[2] * ref[1], uy = dir[2] * ref[0] - dir[0] * ref[2], uz = dir[0] * ref[1] - dir[1] * ref[0]
@@ -156,6 +176,12 @@ export interface GunContext {
    * ignores it.
    */
   aim?: Vec3 | null
+  /**
+   * The run's assist stream: two draws an aimed pull (the roll, then the
+   * side of a miss). Absent (a test rig), every aimed pull hits as aimed and
+   * nothing is drawn.
+   */
+  assistRng?: Rng
   dt: number
   events: RunEvent[]
   hits: DamageHit[]
@@ -187,8 +213,33 @@ export function castHitscan(solids: Solids, targets: readonly Target[], o: Vec3,
   return { stop, along }
 }
 
+/** Scratch for the assist roll's cast. */
+const rollCast: HitscanCast = { stop: 0, along: [] }
+
+/**
+ * An aimed pull's direction after the assist roll (see the file header):
+ * `aim` as it is on a hit, or the line to the aimed drone tilted wide of it
+ * on a miss (with `wide` set on `out`). Draws two numbers from `rng`.
+ */
+export function rollAim(def: WeaponDef, aim: Vec3, range: number, ctx: Pick<GunContext, 'solids' | 'targets' | 'eye'>, rng: Rng, out: { wide: boolean }): Vec3 {
+  const roll = next(rng), turn = next(rng)
+  out.wide = false
+  if (!(roll >= (def.assistHit ?? 1))) return aim
+  out.wide = true
+  const o = ctx.eye
+  const { along } = castHitscan(ctx.solids, ctx.targets, o, aim, range, rollCast)
+  const id = along.length ? along[0].id : -1
+  const tg = id < 0 ? undefined : ctx.targets.find((x) => x.id === id)
+  if (!tg) return aim
+  const cx = tg.pos[0] - o[0], cy = tg.pos[1] - o[1], cz = tg.pos[2] - o[2]
+  const dist = Math.hypot(cx, cy, cz)
+  if (!(dist > 1e-9)) return aim
+  const sinT = Math.min(1, (tg.radius + Math.max(0, def.assistMissBy ?? DEFAULT_ASSIST_MISS_BY)) / dist)
+  return tilt([cx / dist, cy / dist, cz / dist], Math.sqrt(1 - sinT * sinT), sinT, 2 * Math.PI * turn)
+}
+
 /** One hitscan pellet along `d`: hits up to 1 + pierce drones before the first solid, within `range`. */
-function hitscan(ctx: GunContext, w: number, d: Vec3, range: number, damage: number, pierce: number, falloff: FalloffDef | undefined): void {
+function hitscan(ctx: GunContext, w: number, d: Vec3, range: number, damage: number, pierce: number, falloff: FalloffDef | undefined, wide = false): void {
   const o = ctx.eye
   const { stop, along } = castHitscan(ctx.solids, ctx.targets, o, d, range)
   let last = stop
@@ -199,8 +250,12 @@ function hitscan(ctx: GunContext, w: number, d: Vec3, range: number, damage: num
     ctx.hits.push({ target: id, damage: damage * falloffAt(falloff, t), point })
     if (i === 1 + pierce - 1) last = t
   }
-  ctx.events.push({ type: 'shot', weapon: w, origin: [o[0], o[1], o[2]], dir: d, end: [o[0] + d[0] * last, o[1] + d[1] * last, o[2] + d[2] * last] })
+  const end: Vec3 = [o[0] + d[0] * last, o[1] + d[1] * last, o[2] + d[2] * last]
+  ctx.events.push(wide ? { type: 'shot', weapon: w, origin: [o[0], o[1], o[2]], dir: d, end, wide: true } : { type: 'shot', weapon: w, origin: [o[0], o[1], o[2]], dir: d, end })
 }
+
+/** Scratch: whether this pull's assist roll went wide. */
+const rolled = { wide: false }
 
 /** One trigger pull of gun `w` at charge factor `k` (0 for a non-charge gun). */
 function pull(ctx: GunContext, a: Arsenal, w: number, k: number): void {
@@ -210,7 +265,9 @@ function pull(ctx: GunContext, a: Arsenal, w: number, k: number): void {
   const pellets = Math.max(1, Math.floor(def.pellets ?? 1))
   const pierce = Math.max(0, Math.floor(def.pierce ?? 0))
   // An aimed shot skips the cone but draws the same two numbers, so the guns' random stream is the same whether or not a step was aimed.
-  const aimed = def.assist === 'auto' && ctx.aim ? ctx.aim : null
+  // Its assist roll draws from the assist stream alone, once a pull.
+  rolled.wide = false
+  const aimed = def.assist === 'auto' && ctx.aim ? (ctx.assistRng ? rollAim(def, ctx.aim, range, ctx, ctx.assistRng, rolled) : ctx.aim) : null
   for (let p = 0; p < pellets; p++) {
     const d = aimed ? coneSample(aimed, 0, ctx.rng) : coneSample(ctx.dir, def.spread, ctx.rng)
     if (def.fire === 'projectile') {
@@ -218,7 +275,7 @@ function pull(ctx: GunContext, a: Arsenal, w: number, k: number): void {
       const id = ctx.ids.next++
       ctx.projectiles.push({ id, weapon: w, pos: [ctx.eye[0], ctx.eye[1], ctx.eye[2]], vel: [d[0] * speed, d[1] * speed, d[2] * speed], radius: def.projectileRadius ?? DEFAULT_PROJECTILE_RADIUS, travelled: 0, range, damage, pierceLeft: pierce, hit: [] })
       ctx.events.push({ type: 'shot', weapon: w, origin: [ctx.eye[0], ctx.eye[1], ctx.eye[2]], dir: d, end: [ctx.eye[0], ctx.eye[1], ctx.eye[2]], projectile: id })
-    } else hitscan(ctx, w, d, range, damage, pierce, def.falloff)
+    } else hitscan(ctx, w, d, range, damage, pierce, def.falloff, rolled.wide)
   }
   a.pulls++
   g.cool += 1 / def.rate

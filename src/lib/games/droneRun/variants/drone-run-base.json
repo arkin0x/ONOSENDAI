@@ -17,7 +17,15 @@
       "invulnMs": 1200,
       "height": 2,
       "radius": 0.35,
-      "eye": 1.75
+      "eye": 1.75,
+      "stamina": {
+        "max": 100,
+        "drainPerS": 35,
+        "refillPerS": 25,
+        "refillDelayS": 0.6,
+        "lockoutS": 1.2,
+        "speedMul": 1.6
+      }
     },
     "zones": {
       "start": {
@@ -62,12 +70,12 @@
         "name": "PULSE RIFLE",
         "fire": "hitscan",
         "mode": "auto",
-        "rate": 5,
+        "rate": 4,
         "damage": 1,
-        "range": 60,
+        "range": 40,
         "falloff": {
-          "start": 40,
-          "end": 60,
+          "start": 25,
+          "end": 40,
           "minFactor": 0.5
         },
         "spread": 0.4,
@@ -75,11 +83,13 @@
         "pierce": 0,
         "readyS": 0.3,
         "assist": "auto",
+        "assistHit": 0.85,
+        "assistMissBy": 1,
         "heat": {
-          "perShot": 9,
-          "coolPerS": 22,
+          "perShot": 13,
+          "coolPerS": 18,
           "overheatAt": 100,
-          "lockS": 1.4
+          "lockS": 1.6
         }
       },
       {
@@ -134,7 +144,7 @@
       {
         "id": "scout",
         "name": "SCOUT",
-        "hp": 1,
+        "hp": 2,
         "radius": 0.5,
         "speed": 10,
         "accel": 22,
@@ -249,14 +259,14 @@
         "id": "wave-1",
         "name": "FIRST CONTACT",
         "seed": 1101,
-        "maxAlive": 6,
+        "maxAlive": 8,
         "spawns": [
           {
             "at": "s1",
             "enemy": "scout",
-            "count": 3,
+            "count": 4,
             "delayS": 1,
-            "every": 1.5
+            "every": 1
           },
           {
             "at": "s3",
@@ -267,16 +277,16 @@
           {
             "at": "s2",
             "enemy": "scout",
-            "count": 2,
+            "count": 3,
             "delayS": 7,
-            "every": 2
+            "every": 1.2
           },
           {
             "at": "s5",
             "enemy": "scout",
-            "count": 3,
+            "count": 4,
             "delayS": 0,
-            "every": 1,
+            "every": 0.6,
             "trigger": {
               "kind": "player-z-below",
               "value": 140

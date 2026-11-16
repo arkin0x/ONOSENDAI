@@ -26,6 +26,11 @@
  *   speed along a wall is kept and speed into it is lost. Failing that, each
  *   level axis alone is tried.
  * - The region's walls hold it too: the body never leaves the region box.
+ * - Sprint (RunInput.sprint, spec.player.stamina): while held, moving and
+ *   with stamina, the top speed is multiplied by speedMul and stamina
+ *   drains; it refills after a delay; running dry locks sprint out for a
+ *   while (stepStamina). Acceleration is fluid WALK's either way; let go
+ *   above the walking top speed, the body brakes at FLUID_DECEL.
  *
  * Kept small and documented, for feel (class c candidates):
  * - COYOTE_S: a jump within 0.1 s of walking off an edge is still a ground jump.
@@ -61,7 +66,7 @@ export const MAX_FALL = 60
 /** The look's pitch is held inside this, radians. */
 export const PITCH_LIMIT = 1.45
 
-/** The body. `pos` is the middle of the feet, region-local gibsons. */
+/** The body. `pos` is the middle of the feet, region-local gibsons. Every field is a number, a boolean or a fresh Vec3, so a copy with new pos and vel arrays is independent (assist.ts steps one). */
 export interface Body {
   pos: Vec3
   vel: Vec3
@@ -72,6 +77,14 @@ export interface Body {
   jumpBuffer: number
   yaw: number
   pitch: number
+  /** Sprint stamina, 0..spec.stamina.max (0 without stamina). */
+  stamina: number
+  /** Seconds before stamina starts to refill (set to refillDelayS on each sprinting step). */
+  staminaWait: number
+  /** Seconds of lockout left after stamina ran out: sprint does nothing meanwhile. */
+  sprintLock: number
+  /** The last step sprinted. */
+  sprinting: boolean
 }
 
 /** The box the body may move in: the region, as a solid box. */
@@ -91,9 +104,39 @@ export interface BodyEvents {
   landed: boolean
 }
 
-/** A body standing at `pos` facing `yaw`. */
-export function makeBody(pos: Vec3, yaw = 0): Body {
-  return { pos: [pos[0], pos[1], pos[2]], vel: [0, 0, 0], grounded: false, doubled: false, coyote: 0, jumpBuffer: 0, yaw, pitch: 0 }
+/** A body standing at `pos` facing `yaw`, with `stamina` (full: spec.player.stamina.max). */
+export function makeBody(pos: Vec3, yaw = 0, stamina = 0): Body {
+  return { pos: [pos[0], pos[1], pos[2]], vel: [0, 0, 0], grounded: false, doubled: false, coyote: 0, jumpBuffer: 0, yaw, pitch: 0, stamina, staminaWait: 0, sprintLock: 0, sprinting: false }
+}
+
+/** Float slack on the stamina clocks. */
+const STAMINA_EPS = 1e-9
+
+/**
+ * One step of sprint stamina (spec.player.stamina), before the run: the top
+ * speed this step. Sprinting needs sprint held, a move held (the wish is
+ * not zero) and stamina above 0 with no lockout running. A sprinting step
+ * multiplies the top speed by speedMul, drains drainPerS * dt and restarts
+ * the refill delay; reaching 0 starts the lockout. Any other step counts
+ * the lockout and the delay down (one step each), and once the delay has
+ * run out refills refillPerS * dt, up to max. Without stamina in the spec,
+ * sprint does nothing.
+ */
+export function stepStamina(b: Body, spec: PlayerSpec, sprint: boolean, moving: boolean, dt: number): number {
+  const sp = spec.stamina
+  b.sprinting = false
+  if (!sp) return FLUID_MAX_SPEED
+  if (b.sprintLock > 0) b.sprintLock = b.sprintLock - dt <= STAMINA_EPS ? 0 : b.sprintLock - dt
+  if (sprint && moving && b.sprintLock <= 0 && b.stamina > 0) {
+    b.sprinting = true
+    b.stamina = Math.max(0, b.stamina - sp.drainPerS * dt)
+    b.staminaWait = sp.refillDelayS
+    if (b.stamina <= STAMINA_EPS) { b.stamina = 0; b.sprintLock = sp.lockoutS }
+    return FLUID_MAX_SPEED * sp.speedMul
+  }
+  if (b.staminaWait > 0) b.staminaWait = b.staminaWait - dt <= STAMINA_EPS ? 0 : b.staminaWait - dt
+  else b.stamina = Math.min(sp.max, b.stamina + sp.refillPerS * dt)
+  return FLUID_MAX_SPEED
 }
 
 /** The eye, region-local. */
@@ -275,7 +318,8 @@ export function stepPlayer(b: Body, spec: PlayerSpec, s: Solids, bounds: Bounds,
   if (Number.isFinite(input.pitch)) b.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, input.pitch))
   const v = { x: b.vel[0], y: 0, z: b.vel[2] }
   const wish = wishFor(b.yaw, input.move.fwd, input.move.strafe)
-  accelerate(v, wish, FLUID_MAX_SPEED, b.grounded ? FLUID_ACCEL : FLUID_AIR_ACCEL, b.grounded ? FLUID_DECEL : FLUID_AIR_DECEL, dt)
+  const top = stepStamina(b, spec, input.sprint === true, Math.hypot(wish.x, wish.y, wish.z) > 1e-9, dt)
+  accelerate(v, wish, top, b.grounded ? FLUID_ACCEL : FLUID_AIR_ACCEL, b.grounded ? FLUID_DECEL : FLUID_AIR_DECEL, dt)
   b.vel[0] = v.x; b.vel[2] = v.z
 
   const groundJump = (): void => { b.vel[1] = JUMP_SPEED; b.grounded = false; b.coyote = 0; b.jumpBuffer = 0; ev.jumped = 1 }

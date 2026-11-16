@@ -92,6 +92,15 @@ export interface WeaponDef {
    * when a drone is in the box around the reticle).
    */
   assist?: 'auto'
+  /**
+   * The share of aimed pulls that go where they are aimed, 0..1 (default 1).
+   * Each aimed pull rolls once on the run's assist stream (sim/weapons.ts);
+   * a roll at or above this goes wide of the drone it was aimed at. Only
+   * with `assist`.
+   */
+  assistHit?: number
+  /** How far a wide aimed pull clears the drone's surface, gibsons (default 1). Only with `assist`. */
+  assistMissBy?: number
 }
 
 /** A drone's projectile: slow enough to see and dodge, stopped by any solid. */

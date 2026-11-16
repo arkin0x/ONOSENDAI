@@ -171,3 +171,96 @@ describe('player body', () => {
     expect(b.pos[0]).toBeCloseTo(-0.5 + spec.radius, 1)
   })
 })
+
+describe('sprint and stamina (RunInput.sprint, spec.player.stamina)', () => {
+  const flat = boxes(GROUND)
+  const st = spec.stamina!
+  const sprintFwd = (sprint = true): RunInput => input({ move: { fwd: 1, strafe: 0 }, sprint })
+  const speed = (b: Body): number => Math.hypot(b.vel[0], b.vel[2])
+
+  function fresh(): Body {
+    const b = makeBody([128, 64, 230], 0, st.max)
+    placeBody(b, spec, flat, bounds)
+    return b
+  }
+
+  it('the base variant: 100 of stamina, 35 a second sprinting, 25 a second back after 0.6 s, a 1.2 s lockout, 1.6 times the speed', () => {
+    expect(st).toEqual({ max: 100, drainPerS: 35, refillPerS: 25, refillDelayS: 0.6, lockoutS: 1.2, speedMul: 1.6 })
+  })
+
+  it('sprinting multiplies the top speed by speedMul; walking keeps fluid WALK\'s', () => {
+    const b = fresh()
+    run(flat, b, 60, sprintFwd())
+    expect(b.sprinting).toBe(true)
+    expect(speed(b)).toBeCloseTo(FLUID_MAX_SPEED * st.speedMul, 6)
+    const w = fresh()
+    run(flat, w, 60, sprintFwd(false))
+    expect(w.sprinting).toBe(false)
+    expect(speed(w)).toBeCloseTo(FLUID_MAX_SPEED, 6)
+    // Let go, the body brakes back down to the walking top speed.
+    run(flat, b, 30, sprintFwd(false))
+    expect(speed(b)).toBeCloseTo(FLUID_MAX_SPEED, 6)
+  })
+
+  it('drains drainPerS a second while sprinting', () => {
+    const b = fresh()
+    run(flat, b, 60, sprintFwd())
+    expect(b.stamina).toBeCloseTo(st.max - st.drainPerS, 9)
+  })
+
+  it('standing still, sprint does nothing: no drain, no sprinting', () => {
+    const b = fresh()
+    run(flat, b, 120, input({ sprint: true }))
+    expect(b.sprinting).toBe(false)
+    expect(b.stamina).toBe(st.max)
+    expect(speed(b)).toBe(0)
+  })
+
+  it('refills refillPerS a second, only once refillDelayS has passed since the last sprinting step, up to max', () => {
+    const b = fresh()
+    run(flat, b, 60, sprintFwd())
+    const left = b.stamina
+    // 0.6 s (36 steps) of nothing...
+    run(flat, b, 36, sprintFwd(false))
+    expect(b.stamina).toBe(left)
+    // ...then 25 a second.
+    run(flat, b, 60, sprintFwd(false))
+    expect(b.stamina).toBeCloseTo(left + st.refillPerS, 9)
+    // A sprinting step restarts the delay.
+    run(flat, b, 1, sprintFwd())
+    const again = b.stamina
+    run(flat, b, 36, sprintFwd(false))
+    expect(b.stamina).toBe(again)
+    run(flat, b, 600, sprintFwd(false))
+    expect(b.stamina).toBe(st.max)
+  })
+
+  it('running dry locks sprint out for lockoutS, even held; then it sprints again on what has refilled', () => {
+    const b = fresh()
+    let empty = -1
+    run(flat, b, 400, sprintFwd(), (x, i) => { if (empty < 0 && x.stamina === 0) empty = i })
+    // 100 at 35 a second: dry on the 172nd step.
+    expect(empty).toBe(171)
+    const c = fresh()
+    run(flat, c, 172, sprintFwd())
+    expect(c.stamina).toBe(0)
+    expect(c.sprintLock).toBe(st.lockoutS)
+    const sprinted: boolean[] = []
+    run(flat, c, 72, sprintFwd(), (x) => sprinted.push(x.sprinting))
+    // 71 steps locked out (sprint held all along), sprinting again on the 72nd: 1.2 s.
+    expect(sprinted.slice(0, 71).every((s) => !s)).toBe(true)
+    expect(sprinted[71]).toBe(true)
+    expect(speed(c)).toBeLessThan(FLUID_MAX_SPEED + 1)
+    // The refill ran during the lockout once its delay had passed: 35 steps at 25 a second, less the sprinting step.
+    expect(c.stamina).toBeCloseTo((35 * st.refillPerS) / 60 - st.drainPerS / 60, 9)
+  })
+
+  it('without stamina in the variant, sprint does nothing', () => {
+    const plain = { ...spec, stamina: undefined }
+    const b = makeBody([128, 64, 230])
+    placeBody(b, plain, flat, bounds)
+    for (let i = 0; i < 60; i++) stepPlayer(b, plain, flat, bounds, sprintFwd(), STEP_S)
+    expect(b.sprinting).toBe(false)
+    expect(speed(b)).toBeCloseTo(FLUID_MAX_SPEED, 6)
+  })
+})

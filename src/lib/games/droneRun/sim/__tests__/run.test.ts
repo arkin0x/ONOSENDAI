@@ -186,7 +186,7 @@ describe('determinism', () => {
     for (let i = 0; i < steps; i++) {
       yaw += (next(r) - 0.5) * 0.05
       pitch = Math.max(-0.6, Math.min(0.6, pitch + (next(r) - 0.5) * 0.04))
-      log.push({ move: { fwd: next(r) < 0.85 ? 1 : 0, strafe: next(r) < 0.2 ? (next(r) < 0.5 ? -1 : 1) : 0 }, yaw, pitch, jump: next(r) < 0.02, fire: next(r) < 0.6, select: next(r) < 0.005 ? Math.floor(next(r) * 3) : null, reload: next(r) < 0.003 })
+      log.push({ move: { fwd: next(r) < 0.85 ? 1 : 0, strafe: next(r) < 0.2 ? (next(r) < 0.5 ? -1 : 1) : 0 }, yaw, pitch, jump: next(r) < 0.02, fire: next(r) < 0.6, select: next(r) < 0.005 ? Math.floor(next(r) * 3) : null, reload: next(r) < 0.003, sprint: Math.floor(i / 90) % 3 === 0 })
     }
     return log
   }
@@ -206,6 +206,15 @@ describe('determinism', () => {
     expect(a.drones.length + Object.keys(a.kills).length).toBeGreaterThan(0)
     // A different seed is a different run.
     expect(stateHash(play(variant(), log, 4))).not.toBe(stateHash(a))
+  })
+
+  it('sprint is in the log: the same log without it is a different run, and with it replays exactly', () => {
+    const log = inputLog(13, 60 * 10)
+    expect(log.some((x) => x.sprint)).toBe(true)
+    const a = play(variant(), log), b = play(variant(), log)
+    expect(stateHash(a)).toBe(stateHash(b))
+    const walked = play(variant(), log.map((x) => ({ ...x, sprint: false })))
+    expect(stateHash(walked)).not.toBe(stateHash(a))
   })
 
   it('a recorded input log, written out and read back, replays to the same result', () => {

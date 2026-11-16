@@ -1,7 +1,15 @@
 /**
  * assist.ts - aim assist for touch screens: a square box around the
  * reticle; while a drone is inside it, the gun in hand fires at it by itself
- * and every such shot is aimed so that it hits.
+ * and every such shot is aimed so that it hits, unless the simulation's
+ * assist roll says miss.
+ *
+ * - The roll is the simulation's, not the view's (sim/weapons.ts): each
+ *   aimed pull draws from the run's own assist stream, and a roll at or
+ *   above the gun's `assistHit` (0.85 for the base PULSE RIFLE) sends the
+ *   pull visibly wide, clearing the drone by `assistMissBy`. So which shots
+ *   miss follows from the seed and the input log, and a replay misses the
+ *   same shots. Nothing here knows or decides which.
  *
  * - Which guns: only one whose def says `assist: "auto"` (the variant's data;
  *   the base variant gives it to the PULSE RIFLE alone), and only a hitscan
@@ -43,7 +51,9 @@
  * - What it does to the input (applyAssist, once a fixed step, from the
  *   runner): sets `fire` and `aim` (RunInput.aim). The look is untouched.
  *   Manual FIRE still works as before; an overheated gun still refuses (the
- *   simulation decides). The aim is in the input log, so a replay is exact.
+ *   simulation decides), and the auto-fire heats the gun like any trigger,
+ *   so a long fight can overheat it. The aim is in the input log, so a
+ *   replay is exact.
  *
  * Nothing here is drawn; the HUD reads `assistState.target` to brighten its
  * brackets while a drone is locked.
@@ -239,7 +249,8 @@ export interface AssistAt extends AssistLens {
 /**
  * One fixed step's assist, on the input about to be stepped (mutated): with
  * the box shown, the gun in hand an auto hitscan assist gun and a target
- * found, fire at it with an aim that hits. `given` overrides the module's
+ * found, fire at it with an aim that hits (unless the simulation's assist
+ * roll sends the pull wide). `given` overrides the module's
  * box and lens (tests).
  */
 export function applyAssist(st: RunState, input: RunInput, given?: AssistAt | null): AssistPick | null {

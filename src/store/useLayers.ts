@@ -15,7 +15,10 @@
  * them unlit, exactly as before. A sixth, audioSpheres, draws the blue
  * rings around each hidden sound in the world: its full-volume sphere,
  * DECK-0007 `fade` (scene/AudioSpheres.tsx; arkinox, 2026-11-01); it
- * defaults on. These are view
+ * defaults on. A seventh, glow, draws the halos round a POINTS object's points
+ * (DECK-0003 §1.16; scene/PointBillboards.tsx) in the world and in games, for
+ * slow phones; it defaults on, and the workshop's bench draws them either
+ * way. These are view
  * preferences only: nothing about the proof, the movement, the cursor or the
  * chain reads them.
  *
@@ -27,13 +30,13 @@
 
 import { create } from 'zustand'
 
-export type SceneLayer = 'dots' | 'boxes' | 'walkAvatarHidden' | 'walkLookSphere' | 'headlamp' | 'audioSpheres'
+export type SceneLayer = 'dots' | 'boxes' | 'walkAvatarHidden' | 'walkLookSphere' | 'headlamp' | 'audioSpheres' | 'glow'
 
 export type SceneLayers = Record<SceneLayer, boolean>
 
 export const LAYERS_KEY = 'onosendai:layers'
 
-export const DEFAULT_LAYERS: SceneLayers = { dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true }
+export const DEFAULT_LAYERS: SceneLayers = { dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true, glow: true }
 
 /** The stored choice, or the defaults when there is none or it cannot be read. */
 export function loadLayers(): SceneLayers {
@@ -53,6 +56,8 @@ export function loadLayers(): SceneLayers {
       headlamp: p?.headlamp !== false,
       // On unless explicitly off.
       audioSpheres: p?.audioSpheres !== false,
+      // On unless explicitly off.
+      glow: p?.glow !== false,
     }
   } catch {
     return { ...DEFAULT_LAYERS }
@@ -70,7 +75,7 @@ interface LayersState extends SceneLayers {
 
 export const useLayers = create<LayersState>((set, get) => {
   const put = (layer: SceneLayer, on: boolean): void => {
-    const next = { dots: get().dots, boxes: get().boxes, walkAvatarHidden: get().walkAvatarHidden, walkLookSphere: get().walkLookSphere, headlamp: get().headlamp, audioSpheres: get().audioSpheres, [layer]: on }
+    const next = { dots: get().dots, boxes: get().boxes, walkAvatarHidden: get().walkAvatarHidden, walkLookSphere: get().walkLookSphere, headlamp: get().headlamp, audioSpheres: get().audioSpheres, glow: get().glow, [layer]: on }
     set({ [layer]: on })
     saveLayers(next)
   }
@@ -80,3 +85,8 @@ export const useLayers = create<LayersState>((set, get) => {
     toggleLayer: (layer) => put(layer, !get()[layer]),
   }
 })
+
+// DEV window handle, the house pattern (__store, __shards): the browser captures flip a switch (points glow GLOW_OFF).
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  ;(window as unknown as { __layers?: unknown }).__layers = useLayers
+}

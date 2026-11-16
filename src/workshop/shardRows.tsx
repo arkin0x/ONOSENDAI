@@ -7,10 +7,10 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Hash } from 'lucide-react'
-import { OPACITY_FLOOR, type ShardModel } from 'sno-core/shards'
+import type { ShardModel } from 'sno-core/shards'
 import { Field, Switch } from '../hud/ui/Switch'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
-import { clampOpacity, dragHistory, opacityAt, opacityFraction, opacityPercent, stepOpacity } from '../lib/opacityStep'
+import { OPACITY_MIN, clampOpacity, dragHistory, opacityAt, opacityFraction, opacityPercent, stepOpacity } from '../lib/opacityStep'
 import { BOUNCE_MAX, BOUNCE_MIN, BOUNCE_PRESETS, BOUNCE_REFLECT, BOUNCE_START, bounceChip, bounceChipTip, bounceOf, clampBounce, springboardOf } from '../lib/walkBounce'
 import { useWorkshop } from '../store/useWorkshop'
 
@@ -74,7 +74,7 @@ export function BounceRow(): JSX.Element {
 /**
  * OPACITY in SHARD (arkinox, 2026-10-23: "turn this into a slider with
  * number entry like the hyperspace chip"): the hyperspace scrubber's rail,
- * from the floor to 100 in whole percent, with − and + in fives either side
+ * from 0 to 100 in whole percent, with − and + in fives either side
  * as before, and # beside it to type a percent, as the block line has. 100
  * is solid and writes nothing (lib/opacityStep).
  *
@@ -123,14 +123,14 @@ export function OpacityRow(): JSX.Element {
     <>
       <div className="workshop__row" role="group" aria-label="Opacity">
         <span className="workshop__label">OPACITY</span>
-        <button className="workshop__btn" {...bind(() => w().setOpacity(stepOpacity(w().current()?.opacity, -1)))} disabled={percent <= OPACITY_FLOOR} aria-label="More see-through" title="More see-through">−</button>
+        <button className="workshop__btn" {...bind(() => w().setOpacity(stepOpacity(w().current()?.opacity, -1)))} disabled={percent <= OPACITY_MIN} aria-label="More see-through" title="More see-through">−</button>
         <div
           className="explorer__rail ws__opacity-rail"
           ref={rail}
           role="slider"
           tabIndex={0}
           aria-label="Opacity"
-          aria-valuemin={OPACITY_FLOOR}
+          aria-valuemin={OPACITY_MIN}
           aria-valuemax={100}
           aria-valuenow={percent}
           aria-valuetext={`${percent}%`}
@@ -154,7 +154,7 @@ export function OpacityRow(): JSX.Element {
             if (k === undefined || e.metaKey || e.ctrlKey || e.altKey) return
             // The bench nudges the selection with the arrows: these are the slider's.
             e.preventDefault(); e.stopPropagation()
-            setTo(k === 'floor' ? OPACITY_FLOOR : k === 'top' ? 100 : clampOpacity(percent + k))
+            setTo(k === 'floor' ? OPACITY_MIN : k === 'top' ? 100 : clampOpacity(percent + k))
           }}
         >
           <span className="explorer__line" />
@@ -180,7 +180,7 @@ export function OpacityRow(): JSX.Element {
             pattern="[0-9]*"
             maxLength={3}
             autoFocus
-            placeholder={`${OPACITY_FLOOR} to 100`}
+            placeholder={`${OPACITY_MIN} to 100`}
             aria-label="Opacity percent"
             value={typing}
             onChange={(e) => setTyping(e.target.value.replace(/[^\d]/g, ''))}

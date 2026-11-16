@@ -21,6 +21,7 @@
  */
 
 import { Canvas, useThree } from '@react-three/fiber'
+import { GlowWorldCanvas } from './PointBillboards'
 import { OrbitControls } from '@react-three/drei'
 import { EffectComposer } from '@react-three/postprocessing'
 import { WorldBloom, resolveColourOnly } from './worldBloom'
@@ -1336,7 +1337,8 @@ export const Scene = memo(function Scene(): JSX.Element {
       {isPortraitBroadcast() && <PortraitLens />}
       <CellMetric />
       <ScreenAxes />
-      <World />
+      {/* Glow halos here keep the bloom's tag, follow the Settings switch, and are strangers' unless a shard is trusted (scene/PointBillboards.tsx). */}
+      <GlowWorldCanvas><World /></GlowWorldCanvas>
       {/* Camera-pinned, so it lives outside the world group: hyperspace is a
           state, not a place. Mounts only while riding, or while Cyberspace
           TV shows a hyperjump's ride (its warp). */}

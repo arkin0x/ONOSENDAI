@@ -126,8 +126,8 @@ export const OVERLAY_ORDER = 2
 export const GHOST_OPACITY = 0.45
 
 /**
- * What a shard is drawn at: its own opacity (sno-core drawnOpacity, with the
- * 10% floor), times a ghost's. An avatar ignores its own (DECK-0003 §3.3:
+ * What a shard is drawn at: its own opacity (sno-core drawnOpacity, 0 to 1
+ * with no floor), times a ghost's. An avatar ignores its own (DECK-0003 §3.3:
  * proof of work prices an avatar's size, not its visibility). A placed
  * object passes its own model here, never its parent's (§1.10).
  */

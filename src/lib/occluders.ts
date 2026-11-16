@@ -257,6 +257,8 @@ function testOne(o: Object3D): void {
   const mesh = o as Mesh
   const g = mesh.geometry
   if (!g?.attributes?.position || !mesh.material) return
+  // A billboard (glow halos, points at a POINT SIZE: scene/glowHalos.ts) is no face: its square's corners are not where it draws.
+  if ((g as { isInstancedBufferGeometry?: boolean }).isInstancedBufferGeometry) return
   if (!g.boundingSphere) g.computeBoundingSphere()
   const s = g.boundingSphere!
   // 1. The sphere against the cone: no ray comes nearer the axis than coneR.

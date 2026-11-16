@@ -11,6 +11,7 @@
 
 import { ScanEye } from 'lucide-react'
 import { toPayload, type ShardModel } from 'sno-core/shards'
+import { drawnFace, withFace } from 'sno-core/face'
 import { eyeChosen, eyeLabel, withEye } from '../../lib/avatarEye'
 import { useAvatars } from '../../store/useAvatars'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -21,19 +22,23 @@ export function eyeSetting(shard: Parameters<typeof eyeLabel>[0]): { mode: 'AUTO
   return { mode: eyeChosen(shard) ? 'CHOSEN' : 'AUTO', place: eyeLabel(shard) }
 }
 
-/** The shape without its eye, as a payload's text: two shards that differ only in `eye` read the same. */
-const shapeKey = (s: ShardModel): string => { const { name: _n, ...rest } = toPayload(withEye(s, undefined)) as unknown as Record<string, unknown>; return JSON.stringify(rest) }
+/** The shape without its eye and facing, as a payload's text: two shards that differ only in `eye` or `face` read the same. */
+const shapeKey = (s: ShardModel): string => { const { name: _n, ...rest } = toPayload(withFace(withEye(s, undefined), 'path')) as unknown as Record<string, unknown>; return JSON.stringify(rest) }
 
 /**
- * The reserved line's words. When the avatar you wear is this shard's shape
- * with another eye, it says what the worn one still uses; otherwise how the
- * eye is published.
+ * The reserved line's words, for the eye and the FACING row above it. When
+ * the avatar you wear is this shard's shape with another eye or facing, it
+ * says what the worn one still uses; otherwise how both are published.
  */
 export function eyeNote(shard: ShardModel, worn: ShardModel | null): string {
-  if (worn && eyeLabel(worn) + eyeChosen(worn) !== eyeLabel(shard) + eyeChosen(shard) && shapeKey(worn) === shapeKey(shard)) {
-    return `YOUR WORN AVATAR STILL USES ${eyeChosen(worn) ? eyeLabel(worn) : 'AUTO'}. USE THIS SHARD TO UPDATE IT.`
+  if (worn && shapeKey(worn) === shapeKey(shard)) {
+    const eye = eyeLabel(worn) + eyeChosen(worn) !== eyeLabel(shard) + eyeChosen(shard)
+    const face = drawnFace(worn) !== drawnFace(shard)
+    if (eye && face) return 'YOUR WORN AVATAR STILL USES ITS OLD EYE AND FACING. USE THIS SHARD TO UPDATE IT.'
+    if (eye) return `YOUR WORN AVATAR STILL USES ${eyeChosen(worn) ? eyeLabel(worn) : 'AUTO'}. USE THIS SHARD TO UPDATE IT.`
+    if (face) return `YOUR WORN AVATAR STILL USES ${drawnFace(worn).toUpperCase()}. USE THIS SHARD TO UPDATE IT.`
   }
-  return 'USE THIS SHARD PUBLISHES THE EYE.'
+  return 'USE THIS SHARD PUBLISHES THE EYE AND FACING.'
 }
 
 export function EyeRow(): JSX.Element | null {

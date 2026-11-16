@@ -57,6 +57,8 @@ import { BenchLookRig, BenchShard } from './benchLook'
 import { isLook } from './lookTool'
 import { BenchBloom } from './benchBloom'
 import { usedBenchEye } from '../lib/avatarEye'
+import { FacingArrow, FacingPreviewGroup } from './FacingPreview'
+import { useFacingPreview } from '../store/facingPreview'
 
 type P3 = [number, number, number]
 
@@ -1170,6 +1172,7 @@ function BenchImpl(): JSX.Element {
   const previewing = useAnimPreview((s) => s.on)
   const extent = shard?.extent ?? GRID_HALF
   const showAvatar = useWorkshop((s) => s.showAvatar)
+  const facingShown = useFacingPreview((s) => s.on)
   // What the shard on the bench draws, round: Reach measures it, the home view fits it.
   const sphere = useRef<Sphere | null>(null)
   const first = useRef(true)
@@ -1249,14 +1252,17 @@ function BenchImpl(): JSX.Element {
       <Grid />
       {showAvatar && <ScaleAvatar />}
       {/* The shard: as the world draws it in LOOK, under the world's bloom; lit, with handles, in every other tool (benchLook.tsx). */}
-      <AnimClock.Provider value={benchClock}><BenchShard onFace={onFace} onPart={onPart} /></AnimClock.Provider>
+      {/* While the AVATAR sheet is open, turned as FACING would turn it on a move up and to the right (FacingPreview). */}
+      <FacingPreviewGroup><AnimClock.Provider value={benchClock}><BenchShard onFace={onFace} onPart={onPart} /></AnimClock.Provider></FacingPreviewGroup>
+      <FacingArrow />
       {look && <BenchLookRig />}
       {look && <BenchBloom />}
       <PathMarks show={previewing} />
-      <Ghost />
+      {/* The handles, the ghost and the face highlight stand where the shape is unturned: aside while FACING shows. */}
+      {!facingShown && <Ghost />}
       <PickLoop />
-      <FaceHighlight />
-      <Handles />
+      {!facingShown && <FaceHighlight />}
+      {!facingShown && <Handles />}
       </OwnPartsContext.Provider>
     </Canvas>
   )

@@ -40,6 +40,7 @@ import { routeImport, useShardImport } from '../store/useShardImport'
 import { useWorkshop } from '../store/useWorkshop'
 import { Bench } from './Bench'
 import { EyePreview, eyeBenchInset } from './EyePreview'
+import { useFacingPreview } from '../store/facingPreview'
 import { useBenchView } from './benchAxes'
 import { StorageWarning, Toast } from './Notices'
 import { Guide } from './shell/Guide'
@@ -159,6 +160,11 @@ export function Workshop(): JSX.Element | null {
   // MENU's paste box, kept here so it survives MENU closing and opening, as it did as a panel.
   const [paste, setPaste] = useState<{ open: boolean; text: string }>({ open: false, text: '' })
   useEffect(() => { if (sheet) setViewOpen(false) }, [sheet])
+  // FACING on the bench while the AVATAR sheet is open (FacingPreview).
+  useEffect(() => {
+    useFacingPreview.setState({ on: open && area === 'avatar' })
+    return () => useFacingPreview.setState({ on: false })
+  }, [open, area])
   // SET EYE (avatar eye, UI A): the eye in hand closes the sheet it was taken
   // from; a sheet opened, or anything else picked up, puts the eye down.
   const eyeEdit = useWorkshop((s) => s.eyeEdit)

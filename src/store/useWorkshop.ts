@@ -46,6 +46,7 @@ import {
   type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
 import { readGlow, withGlow, withPointSize, type Glow } from 'sno-core/glow'
+import { drawnFace, withFace, type FaceMode } from 'sno-core/face'
 import { GLOW_START, suggestedGlowStyle } from '../lib/pointGlow'
 import { noTable, signedTableOnly, you } from '../lib/carried'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
@@ -592,6 +593,13 @@ export interface WorkshopState {
    * too. No edit, and false, when nothing changes. One UNDO.
    */
   setEye: (eye: Eye | undefined) => boolean
+  /**
+   * FACING (DECK-0003 §1.18): how the shard turns as it moves when worn, PATH
+   * or UPRIGHT. Written through sno-core withFace, so PATH removes the field
+   * and nothing malformed is stored. No edit, and false, when it is already
+   * so. One UNDO.
+   */
+  setFace: (face: FaceMode) => boolean
   /**
    * Turn the selected points a quarter turn about the vertical, +1 one way
    * and -1 the other, around the middle of their extent snapped to the
@@ -1639,6 +1647,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const next = withEye(m, eye)
       return JSON.stringify(m.extra?.[EYE_FIELD]) === JSON.stringify(next.extra?.[EYE_FIELD]) ? null : next
     }),
+    // Already so: no edit, so no undo step that changes nothing.
+    setFace: (face) => edit((m) => (drawnFace(m) === face ? null : withFace(m, face))),
 
     moveSelected: (axis, delta) => {
       const { selection, partSel } = get()

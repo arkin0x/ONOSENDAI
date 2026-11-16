@@ -2,8 +2,10 @@
  * facing.ts - which way an avatar points.
  *
  * After a hop or a sidestep the avatar turns to face the way it went, so a
- * shape with a front reads as going somewhere. A shard's front is its +Z,
- * which the scene draws as render -Z (shards.ts toRender), and it turns
+ * shape with a front reads as going somewhere. A shard's front is its +Z
+ * as held here, in cyberspace axes after the flip, which is the payload's -Z
+ * (DECK-0003 §1.18, ruled 2026-11-16) and which the scene draws as render -Z
+ * (shards.ts toRender), and it turns
  * about its own center with its top kept to cyberspace up wherever the move
  * allows. Worked out in cyberspace axes and then turned to the view, so the
  * avatar turns with the world when the compass turns it.

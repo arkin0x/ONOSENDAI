@@ -93,7 +93,7 @@ describe('FIRST-PERSON EYE in the AVATAR sheet', () => {
     expect(words(row)).toContain('Where your camera sits in WALK.')
     expect(words(row)).toContain('AUTO')
     expect(words(row)).toContain('0, 0.88, 0')
-    expect(words(row)).toContain('USE THIS SHARD PUBLISHES THE EYE.')
+    expect(words(row)).toContain('USE THIS SHARD PUBLISHES THE EYE AND FACING.')
     expect(cls(byClass(m.all(), 'ws__eyerow-note')[0])).toBe('ws__eyerow-note')
     expect(buttonsIn(row).map(words)).toEqual(['SET EYE'])
     useWorkshop.getState().setEye([0, 240, 120])
@@ -130,14 +130,14 @@ describe('FIRST-PERSON EYE in the AVATAR sheet', () => {
   it('says when the avatar you wear is this shape with another eye', () => {
     const s = useWorkshop.getState().current()!
     // Not worn, or worn with the same eye: how the eye is published.
-    expect(eyeNote(s, null)).toBe('USE THIS SHARD PUBLISHES THE EYE.')
-    expect(eyeNote(s, { ...s, name: 'Worn' })).toBe('USE THIS SHARD PUBLISHES THE EYE.')
+    expect(eyeNote(s, null)).toBe('USE THIS SHARD PUBLISHES THE EYE AND FACING.')
+    expect(eyeNote(s, { ...s, name: 'Worn' })).toBe('USE THIS SHARD PUBLISHES THE EYE AND FACING.')
     // The workshop's eye moved, the worn one still automatic.
     const chosen = withEye(s, [0, 240, 0])
     expect(eyeNote(chosen, s)).toBe('YOUR WORN AVATAR STILL USES AUTO. USE THIS SHARD TO UPDATE IT.')
     expect(eyeNote(s, chosen)).toBe('YOUR WORN AVATAR STILL USES 0, 2, 0. USE THIS SHARD TO UPDATE IT.')
     // Another shape altogether: nothing to compare.
-    expect(eyeNote(chosen, { ...s, vertices: s.vertices.slice(0, 2) })).toBe('USE THIS SHARD PUBLISHES THE EYE.')
+    expect(eyeNote(chosen, { ...s, vertices: s.vertices.slice(0, 2) })).toBe('USE THIS SHARD PUBLISHES THE EYE AND FACING.')
   })
 
   it('keeps the strip one height, the eye\'s status line inside it, and the guide card away', () => {

@@ -3839,11 +3839,11 @@ select.avatars__input option:checked {
 .ws__heldbtn--ok { color: var(--ok); }
 .ws__eyebar-gap { border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent); border-radius: 0; }
 /* NUMBERS: X, Y and Z steppers in one row, risen over the strip as its other questions are. */
-.benchpaste.ws__ask.ws__eyenums { left: var(--ws-gutter); right: var(--ws-gutter); width: auto; display: grid; grid-template-columns: repeat(3, auto); justify-content: space-around; align-items: center; gap: 0 4px; padding: 4px 6px; }
+.benchpaste.ws__ask.ws__eyenums { left: var(--ws-gutter); right: var(--ws-gutter); width: auto; display: grid; grid-template-columns: repeat(3, auto); justify-content: space-between; align-items: center; gap: 0 2px; padding: 4px 6px; }
 .ws__eyenum { display: flex; align-items: center; gap: 0; }
 .ws__eyenum .ws__stripbtn { border: 0; background: none; }
-.ws__eyenum .ws__stripbtn--sq { width: 36px; }
-.ws__eyenum .ws__stepper-value { min-width: 36px; }
+.ws__eyenum .ws__stripbtn.ws__stripbtn--sq { width: 38px; min-width: 0; padding: 0; }
+.ws__eyenum .ws__stepper-value { min-width: 34px; }
 .ws__eyenums-step { grid-column: 1 / -1; text-align: center; font-size: 9.5px; letter-spacing: 0.08em; color: var(--dim); }
 /* The eye on the bench: a cyan ring with an eye where the held middle's dot is, labelled EYE. */
 .ws__handle-hub.ws__handle-hub--eye {

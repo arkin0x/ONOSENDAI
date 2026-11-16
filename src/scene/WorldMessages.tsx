@@ -319,7 +319,7 @@ export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null,
   at: [number, number, number]
   opacity?: number
   wears?: ItemWears
-  /** The region's walls about the item, gibsons, render frame (regionBox at unit 0). */
+  /** The region's cut about the item, half a gibson outside its walls, gibsons, render frame (regionBox at unit 0). */
   region?: Box | null
   axes?: ViewAxes
   onTap?: () => void

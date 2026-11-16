@@ -4,10 +4,11 @@
  * has the timeline, store/useOpenCeremony who is playing).
  *
  * Its model and name fade over the blue box that stays (WorldMessages), the
- * model's own cut at its region's walls kept (ItemModelMark), with the chest's
+ * model's own cut at its region kept (ItemModelMark, half a gibson outside
+ * the walls: lib/clip.ts REGION_CUT_MARGIN), with the chest's
  * gold glints round it (ChestCeremony Twinkles): points, so the scene's bloom
  * sees them, one draw call and no meshes, so nothing is asked of the budget.
- * The sparkles keep within the region too. On the calm path (reduced motion)
+ * The sparkles keep within that cut too. On the calm path (reduced motion)
  * it is a short plain fade with no sparkles. A frame writes numbers and
  * allocates nothing. Nothing here is kept: a reload draws the box.
  *
@@ -57,7 +58,7 @@ function sparklePlaces(): Float32Array {
   return (unitBall = out)
 }
 
-/** The room the sparkles have, about the place, in gibsons: to the nearest wall of its region. */
+/** The room the sparkles have, about the place, in gibsons: to the nearest side of its region's cut (regionBox). */
 export function wallRoom(region: Box | null | undefined): number {
   if (!region) return Infinity
   let room = Infinity

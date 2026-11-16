@@ -60,7 +60,7 @@ import type { ShardModel } from 'sno-core/shards'
 import { you } from '../lib/carried'
 import { chargeByTrust, onFollows, readFollows, resetFollows, setFollows, trustedPlacement } from '../lib/trust'
 import { fetchSettled, resolvePartsShared } from '../lib/parts'
-import { regionBox, type Box } from '../lib/clip'
+import { WALK_CUT_MARGIN, regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
 import type { AxisDirection, AxisName, Position, ViewAxes } from '../lib/space'
 import { WORLD_DOWN, upOf } from '../lib/walkDown'
@@ -400,7 +400,7 @@ function build(w: WallItem, placed: readonly Placed[], starved = false, first = 
   const mesh = wallMesh(w.shard, placed, pose)
   if (!bounceBuilt && (!!mesh.ownBounce || mesh.placements.some((p) => !!p.bounce))) bounceBuilt = true
   const missingAt = placed.some(function gone(p): boolean { return p.missing === 'unreachable' || p.children.some(gone) }) ? Date.now() : null
-  return { item: w, starved, first, walk: walkNo, shard: w.shard, missingAt, where: whereOf(w), mesh, clip: w.uncut ? NO_CUT : regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
+  return { item: w, starved, first, walk: walkNo, shard: w.shard, missingAt, where: whereOf(w), mesh, clip: w.uncut ? NO_CUT : regionBox(w.at, w.height, w.shard.unit, WALL_AXES, WALK_CUT_MARGIN), reach: reachOf(mesh, w.shard.unit) }
 }
 
 /** The walls of one placed shard, built now or kept from before; its parts follow when they resolve. */

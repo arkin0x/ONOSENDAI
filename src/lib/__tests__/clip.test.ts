@@ -12,6 +12,8 @@ import {
 } from '../space'
 import { alignedOrigin } from '../../store/useCyberspace'
 
+// These measure where the region's own walls land (margin 0); the cut runs
+// half a gibson outside them (REGION_CUT_MARGIN, clipTangent.test.ts).
 describe('the region box in a shard frame', () => {
   const axes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } } as const
 
@@ -19,7 +21,7 @@ describe('the region box in a shard frame', () => {
     // at is aligned to 2^4; unit 0 (one gibson per model unit). The frame's
     // origin is at + half a gibson.
     const at = { x: 32n, y: 64n, z: 96n }
-    const box = regionBox(at, 4, 0, axes as never)
+    const box = regionBox(at, 4, 0, axes as never, 0)
     expect(box.min[0]).toBeCloseTo(-0.5)
     expect(box.max[0]).toBeCloseTo(15.5)
     // The out axis points the other way: the range flips sign.
@@ -29,13 +31,13 @@ describe('the region box in a shard frame', () => {
 
   it('scales with the model unit', () => {
     const at = { x: 32n, y: 64n, z: 96n }
-    const box = regionBox(at, 4, 2, axes as never)
+    const box = regionBox(at, 4, 2, axes as never, 0)
     expect(box.max[0] - box.min[0]).toBeCloseTo(16 / 4)
   })
 
   it('a shard in the middle of its region sees walls on both sides', () => {
     const at = { x: 40n, y: 64n, z: 96n }
-    const box = regionBox(at, 4, 0, axes as never)
+    const box = regionBox(at, 4, 0, axes as never, 0)
     expect(box.min[0]).toBeCloseTo(-8.5)
     expect(box.max[0]).toBeCloseTo(7.5)
   })
@@ -87,7 +89,7 @@ describe('the clip box is the same at every zoom and sits on its region', () => 
   it('is exactly what it was at 2^0', () => {
     for (const height of [0, 4, 9, 30]) {
       for (const unit of [0, 1, 3]) {
-        for (const ax of VIEWS) expect(regionBox(AT, height, unit, ax)).toEqual(cellFrameBoxAtZero(AT, height, unit, ax))
+        for (const ax of VIEWS) expect(regionBox(AT, height, unit, ax, 0)).toEqual(cellFrameBoxAtZero(AT, height, unit, ax))
       }
     }
   })
@@ -104,7 +106,7 @@ describe('the clip box is the same at every zoom and sits on its region', () => 
         const cellsPerUnit = 2 ** (unit - scaleExp)
         for (const ax of VIEWS) {
           const drawn = itemCentre(AT, origin, scaleExp, ax)
-          const box = regionBox(AT, height, unit, ax)
+          const box = regionBox(AT, height, unit, ax, 0)
           const h = BigInt(height)
           const lowCorner: Position = { x: (AT.x >> h) << h, y: (AT.y >> h) << h, z: (AT.z >> h) << h }
           const highCorner: Position = { x: lowCorner.x + (1n << h), y: lowCorner.y + (1n << h), z: lowCorner.z + (1n << h) }

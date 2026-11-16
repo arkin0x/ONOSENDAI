@@ -7,10 +7,14 @@
  * The three are PUBLISH HEIGHT HINT (the bag's `H` tag, spec §8.6), PUBLISH
  * SECTOR HINT (the sector hint, spec §7.7, §10) and PUBLISH CONTENTS (what is
  * inside, by kind and count; lib/hidden.ts bagContentsTags). All three start
- * ON for a player who never touched them. A fourth, PUBLISH THAT MONEY IS
- * INSIDE, starts OFF (arkinox, 2026-11-15: "money off by default"): money is
- * said only when the player turns it on, whatever PUBLISH CONTENTS says
- * (lib/hidden.ts bagContentsTags). A switch flipped by hand in the
+ * ON for a player who never touched them. A fourth, PUBLISH THAT MONEY OR
+ * NFTS ARE INSIDE, starts OFF (arkinox, 2026-11-15: "money off by default";
+ * owner ruling 2026-11-16: NFT claim links hidden by default the same way,
+ * spec §7.7 Claimable kinds): cashu tokens and NFT claim links are said only
+ * when the player turns it on, whatever PUBLISH CONTENTS says (lib/hidden.ts
+ * bagContentsTags). It was PUBLISH THAT MONEY IS INSIDE, saved as `money`;
+ * the name and the key stay, so a choice saved for money now covers NFTs
+ * too, and a player who never touched it has both OFF. A switch flipped by hand in the
  * deploy bar (useShards `setDeployBag`) is saved here and every later hide
  * starts from it: a new bag, your bag already in the region, an EDIT or a
  * MOVE alike, across hides, reloads and sessions. What the switches show is
@@ -43,9 +47,9 @@ export interface HintPrefs {
   height: boolean
   /** PUBLISH SECTOR HINT. */
   sector: boolean
-  /** PUBLISH CONTENTS: every kind inside but money. */
+  /** PUBLISH CONTENTS: every kind inside but money and NFTs. */
   contents: boolean
-  /** PUBLISH THAT MONEY IS INSIDE: cashu, said only with this on. */
+  /** PUBLISH THAT MONEY OR NFTS ARE INSIDE: cashu and NFT claim links, said only with this on. */
   money: boolean
 }
 

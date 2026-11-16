@@ -214,6 +214,25 @@ export interface PlayerSpec {
   radius: number
   /** Eye height above the feet, gibsons. */
   eye: number
+  /** Sprint stamina (RunInput.sprint). Without it, sprint does nothing. */
+  stamina?: StaminaSpec
+}
+
+/**
+ * Sprint stamina, 0..max. While sprint is held, the body is moving and
+ * stamina is above 0 (and no lockout is running), top speed is multiplied by
+ * `speedMul` and stamina drains `drainPerS` a second. When it reaches 0, a
+ * lockout of `lockoutS` starts, during which sprint does nothing. Not
+ * sprinting, it refills `refillPerS` a second once `refillDelayS` have passed
+ * since the last sprinting step.
+ */
+export interface StaminaSpec {
+  max: number
+  drainPerS: number
+  refillPerS: number
+  refillDelayS: number
+  lockoutS: number
+  speedMul: number
 }
 
 /** Points for a clear (optional). */
@@ -368,4 +387,12 @@ export interface RunInput {
    * where a shot lands.
    */
   aim?: { yaw: number; pitch: number }
+  /**
+   * Sprint, held (optional; absent is false). While held, moving and with
+   * stamina left (and not locked out), the body's top speed is multiplied by
+   * spec.player.stamina.speedMul and stamina drains; see StaminaSpec. It is
+   * part of the input log, so a replay is exact. Game-spec candidate (b): it
+   * changes movement.
+   */
+  sprint?: boolean
 }

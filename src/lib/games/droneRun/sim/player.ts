@@ -26,8 +26,8 @@
  *   speed along a wall is kept and speed into it is lost. Failing that, each
  *   level axis alone is tried.
  * - The region's walls hold it too: the body never leaves the region box.
- * - Sprint (RunInput.sprint, spec.player.stamina): while held, moving and
- *   with stamina, the top speed is multiplied by speedMul and stamina
+ * - Sprint (RunInput.sprint, spec.player.stamina): while held, moving (a
+ *   push of at least SPRINT_MIN_PUSH) and with stamina, the top speed is multiplied by speedMul and stamina
  *   drains; it refills after a delay; running dry locks sprint out for a
  *   while (stepStamina). Acceleration is fluid WALK's either way; let go
  *   above the walking top speed, the body brakes at FLUID_DECEL.
@@ -111,11 +111,14 @@ export function makeBody(pos: Vec3, yaw = 0, stamina = 0): Body {
 
 /** Float slack on the stamina clocks. */
 const STAMINA_EPS = 1e-9
+/** The least push that sprints: the held move's length (0..1) must be at least this, so a thumb resting on the stick spends no stamina. */
+export const SPRINT_MIN_PUSH = 0.2
 
 /**
  * One step of sprint stamina (spec.player.stamina), before the run: the top
- * speed this step. Sprinting needs sprint held, a move held (the wish is
- * not zero) and stamina above 0 with no lockout running. A sprinting step
+ * speed this step. Sprinting needs sprint held, a move held (`moving`:
+ * the wish at least SPRINT_MIN_PUSH long) and stamina above 0 with no
+ * lockout running. A sprinting step
  * multiplies the top speed by speedMul, drains drainPerS * dt and restarts
  * the refill delay; reaching 0 starts the lockout. Any other step counts
  * the lockout and the delay down (one step each), and once the delay has
@@ -318,7 +321,7 @@ export function stepPlayer(b: Body, spec: PlayerSpec, s: Solids, bounds: Bounds,
   if (Number.isFinite(input.pitch)) b.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, input.pitch))
   const v = { x: b.vel[0], y: 0, z: b.vel[2] }
   const wish = wishFor(b.yaw, input.move.fwd, input.move.strafe)
-  const top = stepStamina(b, spec, input.sprint === true, Math.hypot(wish.x, wish.y, wish.z) > 1e-9, dt)
+  const top = stepStamina(b, spec, input.sprint === true, Math.hypot(wish.x, wish.y, wish.z) >= SPRINT_MIN_PUSH, dt)
   accelerate(v, wish, top, b.grounded ? FLUID_ACCEL : FLUID_AIR_ACCEL, b.grounded ? FLUID_DECEL : FLUID_AIR_DECEL, dt)
   b.vel[0] = v.x; b.vel[2] = v.z
 

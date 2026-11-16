@@ -7,8 +7,9 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { canSee, interceptTime, makeDrone, moveSphere, stepDrones, stepDroneShots, trackDive, type Drone, type DroneContext, type PlayerTarget } from '../drones'
+import { canSee, chestOf, closestApproachTime, interceptTime, leadPoint, makeDrone, moveSphere, stepDrones, stepDroneShots, trackDive, type Drone, type DroneContext, type PlayerTarget } from '../drones'
 import { regionBounds } from '../player'
+import { FLUID_MAX_SPEED } from '../fluid'
 import { makeRng, next } from '../rng'
 import { buildSolids, groundBelow, segmentCast, sphereHits, type Solids } from '../solids'
 import { trianglesFromShards } from '../fromShards'
@@ -292,6 +293,57 @@ describe('leading shots (attack.lead) and tracking dives (dive.track)', () => {
     }
     expect(fired).toBe(true)
     expect(hit).toBe(false)
+  })
+
+  it('with no intercept (the player sprinting across a heavy, faster than its bolt) the shot aims at the closest approach, never 3 s ahead', () => {
+    const heavy = enemies[HEAVY]
+    const shot = heavy.attack.shot!
+    const sprint = FLUID_MAX_SPEED * variant().spec.player.stamina!.speedMul
+    expect(sprint).toBeGreaterThan(shot.speed)
+    const off = heavy.radius + shot.radius + 0.05
+    // Straight across at 30 gibsons: no intercept, and the closest approach is now, so it aims at the chest.
+    const p: PlayerTarget = { ...player([128, 64, 128]), vel: [sprint, 0, 0] }
+    const chest = chestOf(p)
+    const d = makeDrone(1, enemies, HEAVY, [128, 66, 98], p.eye, makeRng(1))
+    d.sees = true
+    expect(interceptTime(d.pos, chest, [sprint, 0, 0], shot.speed, off)).toBeNull()
+    expect(closestApproachTime(d.pos, chest, [sprint, 0, 0])).toBe(0)
+    expect(leadPoint(d, heavy, shot, chest, p)).toEqual(chest)
+    // Across and a little toward it: still no intercept, so it aims at where the player passes closest, a short way ahead.
+    const slant: Vec3 = [sprint, 0, -2]
+    const q: PlayerTarget = { ...p, vel: slant }
+    expect(interceptTime(d.pos, chest, slant, shot.speed, off)).toBeNull()
+    const tc = closestApproachTime(d.pos, chest, slant)
+    expect(tc).toBeGreaterThan(0)
+    expect(tc).toBeLessThan(0.5)
+    const aim = leadPoint(d, heavy, shot, chest, q)
+    expect(Math.hypot(aim[0] - chest[0], aim[2] - chest[2])).toBeCloseTo(Math.hypot(sprint, -2) * tc * heavy.attack.lead!, 9)
+    // Moving away: 0, aimed at the chest.
+    expect(closestApproachTime(d.pos, chest, [0, 0, 20])).toBe(0)
+    expect(closestApproachTime(d.pos, chest, [0, 0, 0])).toBe(0)
+  })
+
+  it('a heavy firing on a player sprinting across it at 30 gibsons aims its bolts within a few gibsons of them', () => {
+    const sprint = FLUID_MAX_SPEED * variant().spec.player.stamina!.speedMul
+    const p: PlayerTarget = { ...player([128, 64, 128]), vel: [sprint, 0, 0] }
+    const g = rig(open, p)
+    g.add(HEAVY, [128, 68, 98])
+    const misses: number[] = []
+    for (let i = 0; i < 60 * 12 && misses.length < 3; i++) {
+      g.step()
+      for (const e of g.events) {
+        if (e.type !== 'drone-shot') continue
+        // How far the bolt's line passes from the chest it was fired at.
+        const c = chestOf(p)
+        const v = e.vel, vl = Math.hypot(...v)
+        const w: Vec3 = [c[0] - e.origin[0], c[1] - e.origin[1], c[2] - e.origin[2]]
+        const along = (w[0] * v[0] + w[1] * v[1] + w[2] * v[2]) / vl
+        misses.push(Math.sqrt(Math.max(0, w[0] ** 2 + w[1] ** 2 + w[2] ** 2 - along * along)))
+      }
+    }
+    expect(misses.length).toBeGreaterThan(0)
+    // The old rule aimed leadMaxS (3 s) ahead: 0.7 x 14.5 x 3, about 30 gibsons off.
+    for (const m of misses) expect(m).toBeLessThan(3)
   })
 
   it('trackDive turns the dive\'s level bearing toward the chest by at most its turn, keeping its descent and distance', () => {

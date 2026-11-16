@@ -238,7 +238,8 @@ export interface PlayerSpec {
 }
 
 /**
- * Sprint stamina, 0..max. While sprint is held, the body is moving and
+ * Sprint stamina, 0..max. While sprint is held, the body is moving (a push
+ * of at least 0.2, sim/player.ts SPRINT_MIN_PUSH) and
  * stamina is above 0 (and no lockout is running), top speed is multiplied by
  * `speedMul` and stamina drains `drainPerS` a second. When it reaches 0, a
  * lockout of `lockoutS` starts, during which sprint does nothing. Not

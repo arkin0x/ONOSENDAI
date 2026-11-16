@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { makeBody, placeBody, regionBounds, stepPlayer, type Body } from '../player'
+import { SPRINT_MIN_PUSH, makeBody, placeBody, regionBounds, stepPlayer, type Body } from '../player'
 import { FLUID_MAX_SPEED } from '../fluid'
 import { STEP_S } from '../run'
 import type { Solids } from '../solids'
@@ -214,6 +214,18 @@ describe('sprint and stamina (RunInput.sprint, spec.player.stamina)', () => {
     expect(b.sprinting).toBe(false)
     expect(b.stamina).toBe(st.max)
     expect(speed(b)).toBe(0)
+  })
+
+  it('a push under SPRINT_MIN_PUSH spends nothing and does not sprint; at it, it sprints and drains', () => {
+    expect(SPRINT_MIN_PUSH).toBe(0.2)
+    const soft = fresh()
+    run(flat, soft, 120, input({ move: { fwd: 0.15, strafe: 0.1 }, sprint: true }))
+    expect(soft.sprinting).toBe(false)
+    expect(soft.stamina).toBe(st.max)
+    const firm = fresh()
+    run(flat, firm, 60, input({ move: { fwd: 0.2, strafe: 0 }, sprint: true }))
+    expect(firm.sprinting).toBe(true)
+    expect(firm.stamina).toBeCloseTo(st.max - st.drainPerS, 9)
   })
 
   it('refills refillPerS a second, only once refillDelayS has passed since the last sprinting step, up to max', () => {

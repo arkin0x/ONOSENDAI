@@ -34,7 +34,9 @@
  *   player's level velocity (vertical left out: a jump is not predicted)
  *   times lead times t, where t is when a bolt from the drone would meet a
  *   target moving at full level velocity (the intercept, counting the
- *   muzzle offset), held to leadMaxS (leadMaxS when there is none). Lead 1
+ *   muzzle offset), held to leadMaxS. With no intercept (the player faster
+ *   than the bolt) t is when the player passes closest to the drone, held
+ *   to leadMaxS, and 0 when that is not after now. Lead 1
  *   hits a player running in a straight line at constant speed; lead 0 aims
  *   where the player is. A sidestep or a change of direction after the
  *   shot still dodges it.
@@ -359,8 +361,22 @@ export function leadPoint(d: Drone, def: DroneDef, shot: DroneShotDef, at: Vec3,
   const lv: Vec3 = [v[0], 0, v[2]]
   if (lv[0] === 0 && lv[2] === 0) return at
   const maxS = def.attack.leadMaxS ?? DEFAULT_LEAD_MAX_S
-  const t = Math.min(maxS, interceptTime(d.pos, at, lv, shot.speed, def.radius + shot.radius + 0.05) ?? maxS)
+  const hit = interceptTime(d.pos, at, lv, shot.speed, def.radius + shot.radius + 0.05)
+  const t = Math.min(maxS, hit ?? closestApproachTime(d.pos, at, lv))
   return [at[0] + lv[0] * t * lead, at[1], at[2] + lv[2] * t * lead]
+}
+
+/**
+ * When a target at `at` moving at constant `vel` passes closest to `from`:
+ * the t minimising |at + vel t - from|, or 0 when that is not after now (the
+ * target already moving away, or not moving). A led shot with no intercept
+ * (the player faster than the bolt) aims there rather than far ahead.
+ */
+export function closestApproachTime(from: Vec3, at: Vec3, vel: Vec3): number {
+  const vv = vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2]
+  if (!(vv > 1e-12)) return 0
+  const t = -((at[0] - from[0]) * vel[0] + (at[1] - from[1]) * vel[1] + (at[2] - from[2]) * vel[2]) / vv
+  return t > 0 ? t : 0
 }
 
 /** Fires one drone shot at `at` (led, when its def leads). */

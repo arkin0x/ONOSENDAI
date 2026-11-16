@@ -170,7 +170,8 @@ describe('how loud and how bright', () => {
     expect(blocked.length).toBeGreaterThan(0)
     expect(walled.slots[0].occluded).toBe(true)
     expect(open.slots[0].occluded).toBe(false)
-    expect(walled.slots[0].last.cutoff).toBeLessThan(open.slots[0].last.cutoff * 0.3)
+    expect(walled.slots[0].last.cutoff).toBeLessThan(open.slots[0].last.cutoff * 0.5)
+    expect(walled.slots[0].last.cutoff).toBeGreaterThanOrEqual(V.occluded.floor)
     expect(walled.slots[0].last.level).toBeLessThan(open.slots[0].last.level)
   })
 
@@ -204,7 +205,7 @@ describe('how loud and how bright', () => {
     v.frame(fakeContext(), {} as AudioNode, input([drone(1, 'scout', [0, 5, -20], { mode: 'hunt' })]), 0)
     w.frame(fakeContext(), {} as AudioNode, input([drone(1, 'scout', [0, 5, -20], { mode: 'dive' })]), 0)
     const calm = v.slots[0].last, diving = w.slots[0].last
-    expect(diving.level).toBeGreaterThan(calm.level * 1.5)
+    expect(diving.level).toBeGreaterThan(calm.level * 1.3)
     expect(diving.cutoff).toBeGreaterThan(calm.cutoff * 1.8)
     expect(diving.cents - calm.cents).toBeCloseTo(DEFAULT_SOUNDS.kinds.scout.attack.pitch, 5)
   })

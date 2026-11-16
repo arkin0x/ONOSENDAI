@@ -308,8 +308,8 @@ export interface VoiceSettings {
   cueFar: number
   /** Doppler: the speed of sound in gibsons a second, and the clamp on the pitch ratio. */
   doppler: { c: number; min: number; max: number }
-  /** Behind a solid: the low-pass and the level are multiplied by these. */
-  occluded: { cutoff: number; gain: number }
+  /** Behind a solid: the low-pass is multiplied by `cutoff` (never below `floor` Hz) and the level by `gain`. */
+  occluded: { cutoff: number; floor: number; gain: number }
   /** Voices checked for a wall each update. */
   checks: number
 }

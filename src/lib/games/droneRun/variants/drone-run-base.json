@@ -490,6 +490,7 @@
         },
         "occluded": {
           "cutoff": 0.16,
+          "floor": 120,
           "gain": 0.55
         },
         "checks": 3
@@ -534,7 +535,7 @@
         },
         "attack": {
           "pitch": 700,
-          "gain": 1.8,
+          "gain": 1.5,
           "bright": 2.2
         }
       },
@@ -671,7 +672,7 @@
         },
         "filter": 3800,
         "q": 0.8,
-        "gain": 0.04,
+        "gain": 0.032,
         "spread": {
           "cents": 60,
           "rate": 0.3

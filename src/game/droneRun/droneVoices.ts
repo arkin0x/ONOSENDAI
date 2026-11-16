@@ -69,7 +69,7 @@ export const DEFAULT_SOUNDS: DroneRunSounds = {
   voices: {
     phone: 6, desktop: 10, reach: 1.5, near: 4, rolloff: 0.6, cueNear: 4, cueFar: 18,
     doppler: { c: 60, min: 0.85, max: 1.18 },
-    occluded: { cutoff: 0.16, gain: 0.55 },
+    occluded: { cutoff: 0.16, floor: 120, gain: 0.55 },
     checks: 3,
   },
   kinds: {
@@ -80,7 +80,7 @@ export const DEFAULT_SOUNDS: DroneRunSounds = {
       lfo: { rate: 46, amp: 0.35, pitch: 0, wave: 'sine' },
       filter: 2400, q: 1, gain: 0.065,
       spread: { cents: 25, rate: 0.1 },
-      attack: { pitch: 700, gain: 1.8, bright: 2.2 },
+      attack: { pitch: 700, gain: 1.5, bright: 2.2 },
     },
     sniper: {
       base: 72,
@@ -107,7 +107,7 @@ export const DEFAULT_SOUNDS: DroneRunSounds = {
       oscs: [{ wave: 'triangle', ratio: 1, mix: 0.4 }, { wave: 'triangle', ratio: 1, detune: 18, mix: 0.35 }, { wave: 'sawtooth', ratio: 1.5, detune: -10, mix: 0.25 }],
       noise: { band: 4200, q: 2, mix: 0.1 },
       lfo: { rate: 27, amp: 0.7, pitch: 30, wave: 'sawtooth' },
-      filter: 3800, q: 0.8, gain: 0.04,
+      filter: 3800, q: 0.8, gain: 0.032,
       spread: { cents: 60, rate: 0.3 },
       attack: { pitch: 150, gain: 1.6, bright: 1.8 },
     },
@@ -212,7 +212,8 @@ export interface VoiceTargets {
 export function voiceTargets(def: VoiceDef, v: VoiceSettings, s: { dist: number; reach: number; cue: number; act: number; charge: number; occluded: boolean; ratio: number; spreadCents: number }): VoiceTargets {
   const a = def.attack
   const level = def.gain * distanceGain(s.dist, v, s.reach) * (1 + (a.gain - 1) * s.cue) * (s.occluded ? v.occluded.gain : 1)
-  const cutoff = clamp(def.filter * (1 + (a.bright - 1) * s.cue) * (s.occluded ? v.occluded.cutoff : 1), 60, 18000)
+  const open = def.filter * (1 + (a.bright - 1) * s.cue)
+  const cutoff = clamp(s.occluded ? Math.min(open, Math.max(open * v.occluded.cutoff, v.occluded.floor)) : open, 60, 18000)
   const cents = s.spreadCents + 1200 * Math.log2(s.ratio) + a.pitch * s.act
   const w = def.whine
   const whineHz = w ? w.from * Math.pow(w.to / w.from, s.charge) : 0

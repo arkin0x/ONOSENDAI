@@ -20,7 +20,7 @@ import { useWorkshop } from '../../store/useWorkshop'
 import { useBeginner } from '../beginner'
 import { MOTION_READY, type Area } from '../sheets/areas'
 
-const AREAS: Array<{ area: Area; label: string; icon: LucideIcon }> = [
+export const AREAS: Array<{ area: Area; label: string; icon: LucideIcon }> = [
   { area: 'menu', label: 'MENU', icon: Menu },
   { area: 'shard', label: 'SHARD', icon: Box },
   { area: 'motion', label: 'MOTION', icon: Orbit },

@@ -13,7 +13,7 @@
 
 import { create } from 'zustand'
 import { anchorIndex, runAnchorSync, type SyncSource } from '../lib/hyperspace/anchors'
-import { stopByHeight } from '../lib/hyperspace/compactIndex'
+import { blockHashByHeight, firstHeightWithoutHash, stopByHeight } from '../lib/hyperspace/compactIndex'
 import type { Stop } from '../lib/hyperspace/stops'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import type { StopIndex } from '../lib/hyperspace/station'
@@ -165,6 +165,16 @@ export function getStopIndex(): StopIndex {
 
 export function getStopByHeight(height: number): Stop | undefined {
   return stopByHeight(anchorIndex, height)
+}
+
+/** A block's hash without materializing its Stop (compactIndex blockHashByHeight): for reads over a whole ride. */
+export function getBlockHash(height: number): string | null {
+  return blockHashByHeight(anchorIndex, height)
+}
+
+/** The lowest height in lo..hi with no hash in the index yet, or null (compactIndex firstHeightWithoutHash). */
+export function firstUnhashedHeight(lo: number, hi: number): number | null {
+  return firstHeightWithoutHash(anchorIndex, lo, hi)
 }
 
 export function stopCount(): number {

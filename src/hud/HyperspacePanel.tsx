@@ -22,7 +22,7 @@ import { coordToHex, coordToXyz, hexToCoord, xyzToCoord, type Plane } from 'cybe
 import { coordToLatLon } from '../lib/hyperspace/landfall'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { formatLatLonDeg } from '../lib/earthSurface'
-import { expectedPricePairs, expectedRidePairs, lineStateOf, rideBlocks, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
+import { expectedPricePairs, expectedRidePairs, lineStateOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
 import { calibrate, computeRideProof, leafBenchmarkMs, rideFraction, type RideProgress } from '../lib/hyperspace/ridePool'
 import { findStation } from '../lib/hyperspace/station'
 import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
@@ -44,7 +44,7 @@ function formatDuration(ms: number): string {
 }
 import { GAME_HOLDS_MESSAGE, IN_GAME_HERE_MESSAGE, RELAY_STOPPED_MESSAGE, STALE_CONFIRMATION, useCyberspace, whyNoMove, type CompletedRide } from '../store/useCyberspace'
 import { useV1HopList } from '../hooks/useChainStop'
-import { closeScrubber, exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, stopScale, useHyperspace, viewHyperspace } from '../store/useHyperspace'
+import { closeScrubber, exitHyperspaceView, firstUnhashedHeight, getBlockHash, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, stopScale, useHyperspace, viewHyperspace } from '../store/useHyperspace'
 import { Explanation } from './Explanation'
 import { useChainUi } from '../store/useChainUi'
 
@@ -89,11 +89,13 @@ interface RideRun {
   hosaka: boolean
   /** The endpoints of the ride being proven, for the scene's transit ghost. */
   path: { fromHeight: number; toHeight: number } | null
-  /** Why the last attempt did not produce a signed hyperjump. */
+  /** Why the last attempt did not produce a signed hyperjump, or a BOARD that did not board. */
   error: string | null
+  /** True from a press of BOARD until it boarded or said why not. */
+  boarding: boolean
 }
 
-export const useRideRun = create<RideRun>(() => ({ progress: null, hosaka: false, path: null, error: null }))
+export const useRideRun = create<RideRun>(() => ({ progress: null, hosaka: false, path: null, error: null, boarding: false }))
 
 let riding = false
 let rideAbort: AbortController | null = null
@@ -120,7 +122,6 @@ interface PlannedRide {
   asOf: number | undefined
   destination: number
   destStop: Stop
-  blocks: Array<{ height: number; blockHash: string }>
 }
 
 /**
@@ -222,17 +223,33 @@ async function planRide(): Promise<PlannedRide | null> {
   }
   // Every passed block's hash seeds its leaf work (§5.3); a gap means the
   // sync has not covered that stretch of the line yet. A ride via HOSAKA
-  // needs them too: its proof is checked here against these hashes.
+  // needs them too: its proof is checked here against these hashes. Checked
+  // on the index columns, never by materializing a Stop per block: that put
+  // every block of the ride into the stop cache for good, and a ride of
+  // 500,000 blocks froze or killed the tab before HOSAKA was ever asked
+  // (2026-11-16, a player's ride of 517,354 blocks).
+  const gap = firstUnhashedHeight(Math.min(fromHeight, destination) + 1, Math.max(fromHeight, destination))
+  if (gap !== null) {
+    useRideRun.setState({ error: `Block ${gap} has no hash in the index yet; let the sync finish` })
+    return null
+  }
+  return { previousId, fromHeight, asOf, destination, destStop }
+}
+
+/**
+ * The blocks a ride computed here passes, with their hashes, for the worker
+ * pool. Read from the index columns (getBlockHash), so nothing is cached per
+ * block; only RIDE HERE needs them all, and planRide has already checked
+ * every one is there.
+ */
+function rideBlocksWithHashes(fromHeight: number, toHeight: number): Array<{ height: number; blockHash: string }> {
   const blocks: Array<{ height: number; blockHash: string }> = []
-  for (const height of rideBlocks(fromHeight, destination)) {
-    const blockHash = getStopByHeight(height)?.blockHash
-    if (!blockHash) {
-      useRideRun.setState({ error: `Block ${height} has no hash in the index yet; let the sync finish` })
-      return null
-    }
+  for (let height = Math.min(fromHeight, toHeight) + 1, hi = Math.max(fromHeight, toHeight); height <= hi; height++) {
+    const blockHash = getBlockHash(height)
+    if (!blockHash) throw new Error(`Block ${height} has no hash in the index yet; let the sync finish`)
     blocks.push({ height, blockHash })
   }
-  return { previousId, fromHeight, asOf, destination, destStop, blocks }
+  return blocks
 }
 
 /**
@@ -249,10 +266,23 @@ export function returnToAvatarForRide(): void {
   if (useCyberspace.getState().focus !== null) useCyberspace.getState().clearFocus()
 }
 
-/** BOARD: back to your avatar from any view, then board from your chain head. */
+/**
+ * BOARD: back to your avatar from any view, then board from your chain head.
+ * Every press ends boarded or with the reason on the panel, never silent: a
+ * BOARD that did nothing read as a broken game (2026-11-16).
+ */
 export async function boardFromAnywhere(): Promise<void> {
+  if (useRideRun.getState().boarding) return
   returnToAvatarForRide()
-  await useCyberspace.getState().boardHyperspace()
+  useRideRun.setState({ boarding: true, error: null })
+  try {
+    const refusal = await useCyberspace.getState().boardHyperspace()
+    if (refusal) useRideRun.setState({ error: refusal })
+  } catch (err) {
+    useRideRun.setState({ error: err instanceof Error ? err.message : String(err) })
+  } finally {
+    useRideRun.setState({ boarding: false })
+  }
 }
 
 /**
@@ -264,7 +294,14 @@ export async function startRide(): Promise<void> {
   if (riding || useRideRun.getState().hosaka) return
   const planned = await planRide()
   if (planned === null) return
-  const { previousId, fromHeight, asOf, destination, destStop, blocks } = planned
+  const { previousId, fromHeight, asOf, destination, destStop } = planned
+  let blocks: Array<{ height: number; blockHash: string }>
+  try {
+    blocks = rideBlocksWithHashes(fromHeight, destination)
+  } catch (err) {
+    useRideRun.setState({ error: err instanceof Error ? err.message : String(err) })
+    return
+  }
   const { plane } = useCyberspace.getState()
   riding = true
   const controller = new AbortController()
@@ -401,6 +438,7 @@ export function HyperspacePanel(): JSX.Element {
   const progress = useRideRun((s) => s.progress)
   const rideError = useRideRun((s) => s.error)
   const hosakaPlanning = useRideRun((s) => s.hosaka)
+  const boarding = useRideRun((s) => s.boarding)
   const cloud = useCyberspace((s) => s.cloud)
   const profile = useCyberspace((s) => s.cloudPrefs.profile)
   const ready = sync.status === 'ready'
@@ -442,13 +480,13 @@ export function HyperspacePanel(): JSX.Element {
     if (destination === null) return null
     // From a stop, the ride starts at the stop; no station is involved.
     if (line !== null && line.fromHeight !== null) {
-      return { from: line.fromHeight, fromLabel: 'At block', length: rideBlocks(line.fromHeight, destination).length }
+      return { from: line.fromHeight, fromLabel: 'At block', length: Math.abs(destination - line.fromHeight) }
     }
     const here = xyzToCoord(position.x, position.y, position.z, plane)
     const asOf = useHyperspace.getState().tipHeight
     const station = findStation(getStopIndex(), here, Math.max(asOf ?? destination, destination))
     if (station === null) return null
-    return { from: station.stop.height, fromLabel: 'Station', length: rideBlocks(station.stop.height, destination).length }
+    return { from: station.stop.height, fromLabel: 'Station', length: Math.abs(destination - station.stop.height) }
   }, [destination, position, plane, indexVersion, line])
 
   // A destination that is where the ride would start: refused before RIDE
@@ -642,9 +680,9 @@ export function HyperspacePanel(): JSX.Element {
           {!onLine && (
             <button
               className="hyper__btn hyper__btn--board"
-              disabled={inGame || !ownChain || !ready || destination === null}
+              disabled={inGame || !ownChain || !ready || destination === null || boarding}
               onClick={() => void boardFromAnywhere()}
-            >BOARD</button>
+            >{boarding ? 'BOARDING' : 'BOARD'}</button>
           )}
           {hosakaRiding ? (
             <>

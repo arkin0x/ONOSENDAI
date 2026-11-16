@@ -19,6 +19,9 @@
  * stopMutedVoices), and is not started again. TV's own music is stepped down while any of it is heard
  * (useTvMusic duckMusic).
  *
+ * A game opening (store/useGame) stops every world voice too: the scene's
+ * frames stop under a game, and the ears are the game's meanwhile.
+ *
  * NOW PLAYING's mutes are not the mute list: a track muted there is started
  * and played as any other, silent (store/useSoundMutes), by its lineage id,
  * so it still raises NOW PLAYING. Only it does not step TV's music down,
@@ -36,6 +39,13 @@ import { muteSubject, useShards, type WorldItem } from '../store/useShards'
 import { useMutes } from '../store/useMutes'
 import { audioListener, moveListener, placeWorld, setWorldDuck, setWorldGain, startWorld, stopWorld, worldFailed, worldPending, worldVoices } from '../store/useHiddenAudio'
 import { trackSilenced } from '../store/useSoundMutes'
+import { useGame } from '../store/useGame'
+
+/** Stop every world voice (never a card's PLAY), and let TV's music step back up. */
+export function silenceWorld(): void {
+  for (const key of worldVoices()) stopWorld(key)
+  setWorldDuck(false)
+}
 
 /** How often the world is planned, ms: often enough that a step into a sphere sounds at once. */
 const PLAN_MS = 100
@@ -48,10 +58,14 @@ export function HiddenAudio({ axes }: { axes: ViewAxes }): null {
   const cache = useRef<{ from: unknown[]; items: WorldItem[] }>({ from: [], items: [] })
 
   // Leaving the scene (TV on, the app closing) stops every world voice, and the music steps back up.
-  useEffect(() => () => {
-    for (const key of worldVoices()) stopWorld(key)
-    setWorldDuck(false)
-  }, [])
+  useEffect(() => () => silenceWorld(), [])
+  // A game on screen stops this scene's frames (scene/frameDriver), so no
+  // plan would ever stop them, and the ears are the game's (game/droneRun/
+  // Voices.tsx): every world voice stops when a game opens, as on leaving.
+  // The first plan after the game starts them again. A card's PLAY, which
+  // the person started, plays on.
+  const inGame = useGame((s) => s.session !== null)
+  useEffect(() => { if (inGame) silenceWorld() }, [inGame])
 
   useFrame(({ camera }) => {
     if (audioListener() === null) return

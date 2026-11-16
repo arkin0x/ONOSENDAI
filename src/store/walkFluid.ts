@@ -44,6 +44,9 @@ const GLIDE_MAX = 64
 /** The longest frame stepped at once, in seconds; a longer gap (a hidden tab) is cut to it. */
 const MAX_DT = 0.05
 
+/** How far from the middle, in steps, the smooth position asks whether the next gibson its way can be entered. */
+const PROBE_FROM = 0.05
+
 /** A held face is asked again this often while you push on it, in ms (a door opens, a wall arrives). */
 const RECHECK_MS = 1000
 
@@ -70,9 +73,37 @@ const st = {
   wasFalling: false,
   /** Faces and edges that held a crossing from this anchor, by `axis` and sign. */
   held: new Map<string, Held>(),
+  /** Ways out of this anchor already asked and found open, by `axis` and sign. */
+  open: new Set<string>(),
 }
 
 const key = (axis: AxisName, dir: number): string => `${axis}${dir > 0 ? '+' : '-'}`
+
+/**
+ * Fluid WALK's movement, the stable surface for features built on it (a
+ * game riding the walk, a probe): where the walker is (its anchor gibson,
+ * which the chain holds or will, plus `offset` steps from that gibson's
+ * middle, by cyberspace axis, the glide onto a new anchor included), how
+ * fast it goes (`velocity`, steps per second), and how many gibsons a step
+ * is (2^zoom). `anchor` is null while fluid WALK is not running. Plain
+ * copies: changing them changes nothing. The look direction is
+ * walkLookDirection; the input is store/walkHold.ts (holdStart, holdEnd,
+ * heldNow), the same for the keys and the pad.
+ */
+export interface FluidMotion { anchor: Position | null; offset: Vec; velocity: Vec; stepGibsons: number }
+export function fluidMotion(): FluidMotion {
+  return {
+    anchor: st.anchor ? { ...st.anchor } : null,
+    offset: { x: st.frac.x + st.glide.x, y: st.frac.y + st.glide.y, z: st.frac.z + st.glide.z },
+    velocity: { ...st.v },
+    stepGibsons: 2 ** st.scaleExp,
+  }
+}
+
+/** Which way the WALK camera looks, in cyberspace axes (unit vectors): `valid` false until the scene has written it this WALK. A copy. */
+export function walkLookDirection(): { valid: boolean; forward: Vec; right: Vec } {
+  return { valid: walkFacing.valid, forward: { ...walkFacing.forward }, right: { ...walkFacing.right } }
+}
 
 /** Fluid WALK's state, for tests and the DEV handle: read only. */
 export function fluidState(): Readonly<typeof st> {
@@ -87,7 +118,7 @@ export function resetFluid(): void {
   st.anchor = null
   st.last = null
   st.wasFalling = false
-  st.held.clear()
+  clearAsked()
   writeEye(false)
 }
 
@@ -115,7 +146,7 @@ function glideOnto(delta: Vec): void {
   }
   st.frac = zero()
   st.v = zero()
-  st.held.clear()
+  clearAsked()
 }
 
 /** `a` minus `b`, in steps of `length` gibsons. */
@@ -157,12 +188,12 @@ export function tickFluid(now: number = performance.now()): boolean {
     st.frac = zero()
     st.v = zero()
     st.glide = zero()
-    st.held.clear()
+    clearAsked()
   } else if (!same(st.anchor, cs.cursor)) {
     const delta = stepsBetween(st.anchor, cs.cursor, length)
     if (falling || st.wasFalling) delta[g.axis] = 0
     if (AXES.some((a) => delta[a] !== 0)) glideOnto(delta)
-    st.held.clear()
+    clearAsked()
   }
   st.anchor = { ...cs.cursor }
   st.scaleExp = cs.scaleExp
@@ -182,16 +213,36 @@ export function tickFluid(now: number = performance.now()): boolean {
   if (gravity) st.v[g.axis] = 0
   for (const a of AXES) st.frac[a] += st.v[a] * dt
 
+  // A drift off the way you push (under 22.5 degrees of it) never walks off a ledge.
+  const w = len(wish)
+  const edgeSafe = (a: AxisName): boolean => gravity && !falling && w > 1e-9 && Math.abs(wish[a]) < DRIFT * w
+
+  // Heading out of the middle along an axis not yet asked from this anchor:
+  // ask now whether the next gibson that way can be entered, so a wall is
+  // met at its face (the eye slows to it) instead of passed and put back.
+  for (const a of AXES) {
+    if (Math.abs(st.frac[a]) < PROBE_FROM || st.frac[a] * st.v[a] <= 0) continue
+    const dir: 1 | -1 = st.frac[a] > 0 ? 1 : -1
+    const k = key(a, dir)
+    if (st.held.has(k) || st.open.has(k)) continue
+    const res = fluidCross({ axis: a, dir }, null, edgeSafe(a), true)
+    if (res.kind === 'moved') st.open.add(k)
+    else if (res.kind === 'held') holdAt({ axis: a, dir }, res.by ? wallLimit({ axis: a, dir }, length) : FLUID_EDGE_REACH, now, !res.by)
+  }
+
   // Faces and edges already known to hold: the smooth position stays inside, and the speed into them stops.
   for (const a of AXES) {
     if (st.frac[a] === 0) continue
     const dir: 1 | -1 = st.frac[a] > 0 ? 1 : -1
     const h = st.held.get(key(a, dir))
-    if (!h || Math.abs(st.frac[a]) <= h.limit) continue
+    if (!h) continue
+    // An edge held only a drift: turned to walk that way on purpose, it lets go.
+    if (h.edge && !edgeSafe(a)) { st.held.delete(key(a, dir)); continue }
+    if (Math.abs(st.frac[a]) <= h.limit) continue
     // Pushing on it a while: asked again where it stands (a door opened, a
     // wall went), so the eye never drifts off the face and back.
     if (now - h.at >= RECHECK_MS && st.v[a] * dir > 0) {
-      const res = fluidCross({ axis: a, dir }, null, h.edge)
+      const res = fluidCross({ axis: a, dir }, null, edgeSafe(a))
       if (res.kind === 'moved') { moved(res, { axis: a, dir }, null, length); continue }
       h.at = now
     }
@@ -209,10 +260,7 @@ export function tickFluid(now: number = performance.now()): boolean {
     if (factor === 0) { holdEdges(); break }
     const known = st.held.get(key(main.axis, main.dir))
     if (known) { holdAt(main, known.limit, known.at, known.edge); continue }
-    // A drift off the way you push (under 22.5 degrees of it) never walks off a ledge.
-    const w = len(wish)
-    const edgeSafe = gravity && !falling && w > 1e-9 && Math.abs(wish[main.axis]) < DRIFT * w
-    const res = fluidCross(main, side, edgeSafe)
+    const res = fluidCross(main, side, edgeSafe(main.axis))
     if (res.kind === 'moved') { moved(res, main, side, length); continue }
     if (res.kind === 'wait') { holdEdges(); break }
     // Held: by a wall, measured to its face; by the edge safety, near the edge.
@@ -287,7 +335,7 @@ function moved(res: { from: Position; to: Position }, main: AxisDirection, side:
     else st.glide[a] -= d[a]
   }
   st.anchor = { ...useCyberspace.getState().cursor }
-  st.held.clear()
+  clearAsked()
 }
 
 /** Keep the smooth position within `limit` steps of the middle along `d`, stop the speed that way, and remember it for this anchor (`edge`: the edge safety held it, not a wall). */
@@ -303,6 +351,12 @@ function decay(dt: number): void {
   if (dt <= 0) return
   const k = Math.exp(-dt / GLIDE_TAU_S)
   for (const a of AXES) st.glide[a] = Math.abs(st.glide[a] * k) < 1e-4 ? 0 : st.glide[a] * k
+}
+
+/** Forget what was asked from the old anchor. */
+function clearAsked(): void {
+  st.held.clear()
+  st.open.clear()
 }
 
 function same(a: Position, b: Position): boolean {

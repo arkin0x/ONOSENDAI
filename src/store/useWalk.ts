@@ -445,12 +445,25 @@ export type FluidCross = { kind: 'moved'; from: Position; to: Position } | { kin
  * `edgeSafe` (under GRAVITY, on the ground): the step is a drift off the
  * way you are walking, so it is never taken off a ledge, as the 8-direction
  * walk's snapping never let a slight angle walk you off a walkway.
+ *
+ * `probe`: only ask whether the step would go, and change nothing (the
+ * WALL chip aside, which is the walker reaching the wall): the smooth
+ * position asks before it gets near the edge of its gibson, so it slows to a
+ * wall's face instead of passing it and being put back.
  */
-export function fluidCross(main: AxisDirection, side: AxisDirection | null, edgeSafe = false): FluidCross {
+export function fluidCross(main: AxisDirection, side: AxisDirection | null, edgeSafe = false, probe = false): FluidCross {
   const cs = useCyberspace.getState()
   if (!cs.walking || !cs.atHead()) return { kind: 'held', by: false }
   if (againWhenBuilt) return { kind: 'wait' }
   const heading: WalkHeading = { main, side, lean: null }
+  if (fall && probe) {
+    const at = reachedPoint(fall, nowMs())
+    takeWallWait()
+    const air = planWalkMove(at, heading, stepFor(cs.scaleExp), stepperFor(fall.items, true, fall.down), { down: fall.down })
+    if (takeWallWait()) return { kind: 'wait' }
+    if (!air.along || samePosition(air.to, at)) { if (air.by) wallChip(air.by); return { kind: 'held', by: air.by !== null } }
+    return { kind: 'moved', from: at, to: air.to }
+  }
   if (fall) return airStep(fall, heading, true)
   const gravity = useWalk.getState().gravity
   const g = gravity ? down : WORLD_DOWN
@@ -466,6 +479,7 @@ export function fluidCross(main: AxisDirection, side: AxisDirection | null, edge
     return { kind: 'held', by: move.by !== null }
   }
   if (edgeSafe && stands && !stands(move.to) && stands(from)) return { kind: 'held', by: false }
+  if (probe) return { kind: 'moved', from, to: move.to }
   if (move.by) wallChip(move.by)
   const next: Position = { ...move.to }
   const budget = open !== null && segmentAffordable(open.from, next, cs.plane)

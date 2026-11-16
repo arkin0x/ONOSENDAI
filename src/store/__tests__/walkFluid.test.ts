@@ -302,8 +302,8 @@ describe('walls', () => {
 describe('floors from Landscape Kit tiles', () => {
   it('walks up the Grass Ramp Up standing on it, a step at a time, under gravity', async () => {
     const ramp = withConstrain(fromPayload(RAMP, 'ramp')!, 'all')
-    // The tile's flat foot (its ground top at 0, x -24) is just under the walker; the ramp rises along +X.
-    world(start, [ramp, [24, -1, 0]])
+    // The tile's flat foot (x -24, its ground a hair under 0) is just under the walker; the ramp rises along +X.
+    world(start, [ramp, [24, 0, 0]])
     face(90) // facing +X
     walk(true)
     await wallsBuilt()
@@ -402,10 +402,10 @@ describe('the queue stays honest', () => {
     let still = 0
     let stillest = 0
     let last = rel(start)
-    // Turn 90 degrees every 300 ms: a new segment at every turn, and no proof ever lands.
-    for (let t = 0; t < 9000; t += 16) {
-      if (t % 600 === 0) face(0)
-      if (t % 600 === 300) face(90)
+    // Turn 90 degrees every 0.7 s: a new segment at every turn, and no proof ever lands.
+    for (let t = 0; t < 16000; t += 16) {
+      if (t % 1408 === 0) face(0)
+      if (t % 1408 === 704) face(90)
       frame(16)
       most = Math.max(most, useWalk.getState().behind)
       const c = rel(start)

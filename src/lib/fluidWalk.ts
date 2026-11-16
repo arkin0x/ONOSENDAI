@@ -18,7 +18,7 @@
  * | FLUID_ACCEL | 45 steps/s^2 | full speed in 0.2 s: quick, but you feel it pick up |
  * | FLUID_DECEL | 60 steps/s^2 | stops from full speed in 0.15 s, coasting about 0.7 of a step |
  * | FLUID_AIR_ACCEL / FLUID_AIR_DECEL | 30 / 8 steps/s^2 | steering in the air is softer, and a running jump keeps its speed |
- * | FLUID_NUDGE_MS | 120 ms | a tap pushes this long: about half a step, enough to cross into the next gibson from the middle of one |
+ * | FLUID_NUDGE_MS | 140 ms | a tap pushes this long: about three quarters of a step, into the next gibson from the middle of one |
  *
  * A step is 2^zoom gibsons, the length a press walked: at the usual 2^0 it
  * is one gibson.
@@ -41,8 +41,8 @@ export const FLUID_AIR_ACCEL = 30
 /** Slowing in the air with nothing held: a running jump mostly keeps its speed. */
 export const FLUID_AIR_DECEL = 8
 
-/** How long a tap pushes, in ms: a tap is a short nudge, about half a step. */
-export const FLUID_NUDGE_MS = 120
+/** How long a tap pushes, in ms: a tap is a short nudge, about three quarters of a step. */
+export const FLUID_NUDGE_MS = 140
 
 /**
  * How near a corner both ways have to be for a crossing to be one diagonal

@@ -22,6 +22,10 @@
  *   too; reaching overheatAt locks the gun for lockS. Ammo: each pull spends
  *   one round; an empty mag, or a reload press, reloads for reloadS (on the
  *   gun in hand; switching away cancels it).
+ * - Aimed shots: a gun with `assist: "auto"` fires along the step's aim
+ *   (RunInput.aim) when it carries one, dead straight (no spread; the two
+ *   spread draws are still taken, so the random stream does not depend on
+ *   aiming). Any other gun ignores the aim.
  * - Switching takes readyS (default 0.3 s) before the new gun fires; a
  *   charge in progress is dropped.
  *
@@ -146,6 +150,12 @@ export interface GunContext {
   rng: Rng
   eye: Vec3
   dir: Vec3
+  /**
+   * An aimed shot's unit direction this step (RunInput.aim), or null. A gun
+   * with `assist: "auto"` fires along it with no spread; any other gun
+   * ignores it.
+   */
+  aim?: Vec3 | null
   dt: number
   events: RunEvent[]
   hits: DamageHit[]
@@ -154,19 +164,25 @@ export interface GunContext {
   ids: { next: number }
 }
 
-/** One hitscan pellet along `d`: hits up to 1 + pierce drones before the first solid, within `range`. */
-function hitscan(ctx: GunContext, w: number, d: Vec3, range: number, damage: number, pierce: number, falloff: FalloffDef | undefined): void {
-  const o = ctx.eye
+/** What a hitscan line from `o` along unit `d` meets within `range`: where the first solid stops it, and the live drones it crosses before that, nearest first. */
+export function castHitscan(solids: Solids, targets: readonly Target[], o: Vec3, d: Vec3, range: number): { stop: number; along: Array<{ t: number; id: number }> } {
   const end: Vec3 = [o[0] + d[0] * range, o[1] + d[1] * range, o[2] + d[2] * range]
-  const wall = segmentCast(ctx.solids, o, end)
+  const wall = segmentCast(solids, o, end)
   const stop = wall ? wall.t * range : range
   const along: Array<{ t: number; id: number }> = []
-  for (const tg of ctx.targets) {
+  for (const tg of targets) {
     if (tg.hp <= 0) continue
     const t = raySphere(o, d, tg.pos, tg.radius)
     if (t >= 0 && t <= stop) along.push({ t, id: tg.id })
   }
   along.sort((a, b) => a.t - b.t || a.id - b.id)
+  return { stop, along }
+}
+
+/** One hitscan pellet along `d`: hits up to 1 + pierce drones before the first solid, within `range`. */
+function hitscan(ctx: GunContext, w: number, d: Vec3, range: number, damage: number, pierce: number, falloff: FalloffDef | undefined): void {
+  const o = ctx.eye
+  const { stop, along } = castHitscan(ctx.solids, ctx.targets, o, d, range)
   let last = stop
   const n = Math.min(along.length, 1 + pierce)
   for (let i = 0; i < n; i++) {
@@ -185,8 +201,10 @@ function pull(ctx: GunContext, a: Arsenal, w: number, k: number): void {
   const range = def.charge ? def.range + (def.charge.rangeMax - def.range) * k : def.range
   const pellets = Math.max(1, Math.floor(def.pellets ?? 1))
   const pierce = Math.max(0, Math.floor(def.pierce ?? 0))
+  // An aimed shot skips the cone but draws the same two numbers, so the guns' random stream is the same whether or not a step was aimed.
+  const aimed = def.assist === 'auto' && ctx.aim ? ctx.aim : null
   for (let p = 0; p < pellets; p++) {
-    const d = coneSample(ctx.dir, def.spread, ctx.rng)
+    const d = aimed ? coneSample(aimed, 0, ctx.rng) : coneSample(ctx.dir, def.spread, ctx.rng)
     if (def.fire === 'projectile') {
       const speed = def.projectileSpeed ?? 60
       const id = ctx.ids.next++

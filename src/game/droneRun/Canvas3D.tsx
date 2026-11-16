@@ -17,6 +17,8 @@
  *   its index too. The entry marker is not drawn (runLevel.ts drawnWorld).
  * - Two passes a frame (Renderer): the world, then, with the depth cleared,
  *   the gun from a camera at the eye with the same lens (Viewmodel.tsx).
+ * - The touch aim assist (assist.ts) projects drones through this camera,
+ *   so it is handed the camera and the canvas size each frame.
  * - The page hidden, the run pauses (runner.setPaused) and owes nothing for
  *   the time away.
  *
@@ -52,6 +54,7 @@ import { Effects } from './Effects'
 import { Viewmodel } from './Viewmodel'
 import { Zones } from './Zones'
 import { frameStats, installDevHandle } from './devHandle'
+import { setAssistView } from './assist'
 
 /** The game's frame, as the game view's: cyberspace X right, Y up, Z into the screen (render Z flipped). */
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
@@ -108,7 +111,9 @@ function EyeCamera({ view, bobSize }: { view: DroneRunView; bobSize: number }): 
     camera.position.y += Math.sin(view.bob.phase * 2) * view.bob.amount
     camera.rotation.set(lookState.pitch, cameraYaw(lookState.yaw), 0, 'YXZ')
     camera.updateMatrixWorld()
+    setAssistView(camera, width, height)
   }, PRIORITY.camera)
+  useEffect(() => () => setAssistView(null), [])
   return null
 }
 

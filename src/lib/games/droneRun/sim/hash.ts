@@ -27,7 +27,7 @@ class Hasher {
   }
   bool(v: boolean): void { this.byte(v ? 1 : 2) }
   vec(v: readonly number[]): void { for (const x of v) this.num(x) }
-  hex(): string { return this.a.toString(16).padStart(8, '0') + this.b.toString(16).padStart(8, '0') }
+  hex(): string { return (this.a >>> 0).toString(16).padStart(8, '0') + (this.b >>> 0).toString(16).padStart(8, '0') }
 }
 
 /** A 64-bit hex fingerprint of `st` (see the file header). */

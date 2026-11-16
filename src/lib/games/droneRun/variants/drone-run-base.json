@@ -74,6 +74,7 @@
         "pellets": 1,
         "pierce": 0,
         "readyS": 0.3,
+        "assist": "auto",
         "heat": {
           "perShot": 9,
           "coolPerS": 22,

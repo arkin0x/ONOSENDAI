@@ -83,6 +83,15 @@ export interface WeaponDef {
   readyS?: number
   heat?: HeatDef
   ammo?: AmmoDef
+  /**
+   * "auto": this gun may take an aimed shot (RunInput.aim): a shot fired on
+   * a step that carries an aim goes exactly along it, with no spread. Only
+   * a hitscan gun may carry it. Without it, the simulation ignores any aim
+   * and the gun fires along the look. A client decides when to send an aim
+   * (ONOSENDAI: a touch screen's aim assist, which also pulls the trigger
+   * when a drone is in the box around the reticle).
+   */
+  assist?: 'auto'
 }
 
 /** A drone's projectile: slow enough to see and dodge, stopped by any solid. */
@@ -287,4 +296,14 @@ export interface RunInput {
   select: number | null
   /** Pressed this step (an edge). */
   reload: boolean
+  /**
+   * An aimed shot (optional): a shot the gun in hand fires this step goes
+   * along this yaw and pitch (the same terms as the look) with no spread,
+   * instead of along the look. Honoured only for a gun whose def has
+   * `assist: "auto"`; ignored otherwise, and on a step with no shot. The
+   * look, and so the camera and the body, are untouched. It is part of the
+   * input log, so a replay is exact. Game-spec candidate (b): it changes
+   * where a shot lands.
+   */
+  aim?: { yaw: number; pitch: number }
 }

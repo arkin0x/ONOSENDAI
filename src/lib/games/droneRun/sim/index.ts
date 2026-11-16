@@ -15,16 +15,17 @@ import { buildSolids, type Solids } from './solids'
 export type * from '../types'
 export type { RunEvent } from './events'
 export {
-  STEP_S, createRun, stepRun, restart, nextWave, nextWaveIndex, advance, dronesLeft, readLevel, zoneBox, bodyBox, overlaps,
+  STEP_S, createRun, stepRun, aimDir, restart, nextWave, nextWaveIndex, advance, dronesLeft, readLevel, zoneBox, bodyBox, overlaps,
   type RunState, type RunOptions, type RunLevel, type Phase, type Box3,
 } from './run'
 export { stateHash } from './hash'
 export { buildSolids, segmentCast, segmentClear, sphereHits, groundBelow, ceilingAbove, type Solids, type Hit } from './solids'
 export { trianglesFromShards, piecesFromWorld, type PlacedShard } from './fromShards'
-export { eyeOf, type Body } from './player'
+export { eyeOf, stepPlayer, type Body } from './player'
 export { lookDir, forwardOf, rightOf } from './fluid'
 export type { Drone, DroneShot, DroneMode } from './drones'
-export type { Arsenal, GunState, Projectile } from './weapons'
+export { castHitscan } from './weapons'
+export type { Arsenal, GunState, Projectile, Target } from './weapons'
 
 /** The solids of shards placed where they stand (sim/fromShards.ts), indexed. */
 export function solidsFromShards(pieces: readonly PlacedShard[]): Solids {

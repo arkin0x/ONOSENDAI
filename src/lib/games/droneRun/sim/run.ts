@@ -22,7 +22,9 @@
  * The run is a pure function of (variant, solids, level, seed, inputs):
  * fixed step STEP_S, seeded generators kept in the state (one each for the
  * guns' spread, the drones, and the spawns, so firing never changes where a
- * drone wanders), and no clock read anywhere. stepRun MUTATES the state in
+ * drone wanders), and no clock read anywhere. Order within a step: the body
+ * moves, then the guns fire (from the moved eye, at the drones where the
+ * last step left them), then spawns, then the drones move and attack. stepRun MUTATES the state in
  * place and returns it, for speed; restart and nextWave return a new state.
  * The state is plain data apart from its references to the variant, the
  * solids and the level, which are never changed.
@@ -132,6 +134,7 @@ export function checkVariant(v: DroneRunVariant, level: RunLevel): void {
     if (!!w.heat === !!w.ammo) throw new Error(`Weapon ${w.id} needs exactly one of heat or ammo.`)
     if (!(w.rate > 0)) throw new Error(`Weapon ${w.id} needs a rate above 0.`)
     if (w.mode === 'charge' && !w.charge) throw new Error(`Weapon ${w.id} is a charge gun with no charge.`)
+    if (w.assist !== undefined && (w.assist !== 'auto' || w.fire !== 'hitscan')) throw new Error(`Weapon ${w.id}: assist must be "auto", on a hitscan gun.`)
   }
   if (!s.waves.length) throw new Error('A variant needs at least one wave.')
   const enemies = new Set(s.enemies.map((e) => e.id))
@@ -216,7 +219,7 @@ export function stepRun(st: RunState, input: RunInput): RunState {
   // The guns.
   const eye = eyeOf(st.body, p)
   const hits: DamageHit[] = []
-  const gunCtx = { defs: spec.weapons, solids, targets: st.drones, rng: st.rng.guns, eye, dir: lookDir(st.body.yaw, st.body.pitch), dt, events: ev, hits, projectiles: st.projectiles, ids: st.ids }
+  const gunCtx = { defs: spec.weapons, solids, targets: st.drones, rng: st.rng.guns, eye, dir: lookDir(st.body.yaw, st.body.pitch), aim: aimDir(input), dt, events: ev, hits, projectiles: st.projectiles, ids: st.ids }
   stepGuns(st.arsenal, input, gunCtx)
   stepProjectiles(gunCtx)
   applyHits(st, hits)
@@ -250,6 +253,13 @@ export function stepRun(st: RunState, input: RunInput): RunState {
     }
   }
   return finishStep(st, dt)
+}
+
+/** The unit direction of the input's aim (RunInput.aim), or null when it has none or it is not finite. */
+export function aimDir(input: RunInput): Vec3 | null {
+  const a = input.aim
+  if (!a || !Number.isFinite(a.yaw) || !Number.isFinite(a.pitch)) return null
+  return lookDir(a.yaw, a.pitch)
 }
 
 function finishStep(st: RunState, dt: number): RunState {

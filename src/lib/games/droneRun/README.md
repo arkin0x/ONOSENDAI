@@ -65,6 +65,7 @@ Every field below is tagged:
 | `heat` | `{ perShot, coolPerS, overheatAt, lockS }`; cools while holstered too | (b) |
 | `ammo` | `{ mag, reloadS }`; empty reloads by itself; switching away cancels a reload | (b) |
 | `readyS` | Seconds after switching before it fires (default 0.3) | (b) |
+| `assist` | `"auto"`: the gun may take aimed shots (`RunInput.aim`, below); hitscan guns only. The base variant gives it to the PULSE RIFLE alone. The simulation reads it (an aim is honoured only for such a gun), so it is a rule; when a client sends aims (ONOSENDAI: only on a touch screen, while a drone is in the box round the reticle) is the client's (c) | (b) |
 
 Exactly one of `heat` or `ammo`.
 
@@ -96,6 +97,14 @@ Exactly one of `heat` or `ammo`.
 | `spawns[].delayS`, `every` | First drone `delayS` after the line starts, then one each `every` (all at once without) | (b) |
 | `spawns[].trigger` | `{ kind: "time", value }` (seconds into the wave) or `{ kind: "player-z-below", value }`; without one the line starts with the wave | (b) |
 
+### RunInput.aim (an aimed shot)
+
+| Field | Meaning | Class |
+|---|---|---|
+| `aim` | Optional `{ yaw, pitch }`, in the look's terms. On a step where the gun in hand fires and its def has `assist: "auto"`, every pellet goes exactly along the aim, with no spread, instead of along the look. The look (camera, body) is untouched. Ignored on a step with no shot, by any other gun, and when not finite. The two spread draws are still taken, so the guns' random stream is the same with or without aims. It is in the input log, so a replay is exact | (b) |
+
+A checker cannot tell an aim sent by an assist from an aimbot's: the log only shows that the player's client chose the direction. What the rules can say is which guns may carry an aim (`assist`); a stricter rule set could also cap how far an aim may stray from the look.
+
 ### What the simulation reads from the level
 
 `level.json` (the level agent's format) must carry `zones.start`, `zones.finish`, `entry` (a point at or a little above the floor, or `{ at, yaw }`) and `spawns` (a list of `{ id, at }` or a map from id to point). Zones should reach well above the floor: jumping out of the top of the start zone counts as leaving it.
@@ -109,7 +118,7 @@ Exactly one of `heat` or `ammo`.
 
 ## The simulation in one paragraph
 
-`createRun(variant, solids, { level, seed, wave })` makes a run; `stepRun(state, input)` advances it one fixed step of 1/60 s, mutating the state in place, and lists what happened in `state.events`. Inputs are `{ move: { fwd, strafe }, yaw, pitch, jump, fire, select, reload }`. `restart` and `nextWave` return fresh states; `stateHash` fingerprints a state. The run is a pure function of the variant, the solids, the level, the seed and the input log, so another client can replay it.
+`createRun(variant, solids, { level, seed, wave })` makes a run; `stepRun(state, input)` advances it one fixed step of 1/60 s, mutating the state in place, and lists what happened in `state.events`. Inputs are `{ move: { fwd, strafe }, yaw, pitch, jump, fire, select, reload, aim? }`. Within a step the body moves first, then the guns fire (from the moved eye, at the drones where the last step left them), then drones spawn, move and attack. `restart` and `nextWave` return fresh states; `stateHash` fingerprints a state. The run is a pure function of the variant, the solids, the level, the seed and the input log, so another client can replay it.
 
 ### Replay across engines
 

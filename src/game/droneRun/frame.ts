@@ -48,6 +48,8 @@ export function toSimInput(input: RunInput, out?: RunInput): RunInput {
   o.fire = input.fire
   o.select = input.select
   o.reload = input.reload
+  if (input.aim) o.aim = { yaw: simYaw(input.aim.yaw), pitch: input.aim.pitch }
+  else delete o.aim
   return o
 }
 

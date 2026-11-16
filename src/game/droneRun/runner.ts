@@ -9,8 +9,10 @@
  *   and runs a fixed step for each STEP_S it owes (at most MAX_FRAME_S of a
  *   frame, so a stall never runs away). Each step reads its own input, once
  *   (input.ts readInput clears the edges it hands over), turned into the
- *   simulation's terms (frame.ts toSimInput). The run is therefore a pure
- *   function of the input each step read, whatever the frame times were.
+ *   simulation's terms (frame.ts toSimInput), then touched by the touch aim
+ *   assist (assist.ts: fire and an aim while a drone is in the box). The run
+ *   is therefore a pure function of the input each step read, whatever the
+ *   frame times were.
  * - Drawing between steps: before each step the runner keeps where the eye,
  *   every drone and every shot were (`prev`); `alpha()` is the share of a
  *   step the carry holds, so the view draws prev + (now - prev) * alpha.
@@ -35,6 +37,7 @@ import type { WorldShard } from '../../lib/games/play'
 import type { Position } from '../../lib/space'
 import { lerp3, simYaw, toSimInput } from './frame'
 import { noteWeapons, readInput, resetInput } from './input'
+import { applyAssist } from './assist'
 
 /** The longest frame the clock honours, seconds: a longer one (a stall, a tab coming back) owes no more than this. */
 export const MAX_FRAME_S = 0.25
@@ -190,6 +193,8 @@ export interface RunnerOptions {
   input?: () => RunInput
   /** Keep the HUD store and the input module in step (default true; tests of the pure clock turn it off). */
   hud?: boolean
+  /** Touches each step's input before it is stepped: the touch aim assist (assist.ts applyAssist) by default; false for none. */
+  assist?: ((st: RunState, input: RunInput) => unknown) | false
 }
 
 /** The solids of the session's world, region-local (sim/fromShards.ts). */
@@ -211,6 +216,7 @@ export class DroneRunner {
   readonly prev: Prev = { eye: [0, 0, 0], drones: new Map(), shots: new Map(), projectiles: new Map() }
   private readonly input: () => RunInput
   private readonly hud: boolean
+  private readonly assist: ((st: RunState, input: RunInput) => unknown) | null
   private readonly simInput: RunInput = { move: { fwd: 0, strafe: 0 }, yaw: 0, pitch: 0, jump: false, fire: false, select: null, reload: false }
   private skipNext = false
   private sinceHud = HUD_EVERY
@@ -218,6 +224,7 @@ export class DroneRunner {
   constructor(variant: DroneRunVariant, solids: Solids, opts: RunnerOptions) {
     this.input = opts.input ?? readInput
     this.hud = opts.hud ?? true
+    this.assist = opts.assist === false ? null : (opts.assist ?? applyAssist)
     this.state = createRun(variant, solids, { level: opts.level, seed: opts.seed ?? 0, wave: opts.wave ?? 0 })
     this.began()
   }
@@ -263,7 +270,9 @@ export class DroneRunner {
     this.keepPrev()
     const g = st.arsenal.guns[st.arsenal.current]
     this.chargeBefore = g.charging ? g.charge : 0
-    stepRun(st, toSimInput(this.input(), this.simInput))
+    const input = toSimInput(this.input(), this.simInput)
+    this.assist?.(st, input)
+    stepRun(st, input)
     this.steps++
     this.sinceHud++
     for (const ev of st.events) for (const l of listeners) l(ev, st)

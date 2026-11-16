@@ -17,6 +17,7 @@
  * With anything held, in any tool but LOOK, it is the held bar (HeldBar),
  * whose slots never move; LOOK shows the shard as the world does, so what is
  * held stays out of sight there (workshop/benchLook.tsx). FACE's corner picking is not holding: its strip stays.
+ * In SET EYE, in any tool, it is the eye's bar (EyeBar), its status line over it.
  */
 
 import { useEffect, useState } from 'react'
@@ -27,6 +28,7 @@ import { noCallout, useRepeatable } from '../../hooks/useRepeatable'
 import { useWorkshop, type PaintMode, type SelectKind, type Tool } from '../../store/useWorkshop'
 import { requestView } from '../benchAxes'
 import { slotOf } from './Dock'
+import { EyeBar } from './EyeBar'
 import { HeldBar, useHolding } from './HeldBar'
 import { isLook } from '../lookTool'
 
@@ -240,6 +242,14 @@ export function Strip({ onPickObject, onMore, moreBadge }: { onPickObject: () =>
   useEffect(() => { setHelp(false); setTiles(false) }, [tool, holding])
   useEscape('modal', help, () => setHelp(false))
   useEscape('modal', tiles, () => setTiles(false))
+  const eyeEdit = useWorkshop((s) => s.eyeEdit)
+  if (eyeEdit) {
+    return (
+      <div className="ws__strip ws__strip--eye">
+        <EyeBar />
+      </div>
+    )
+  }
   // Not in LOOK, which shows the shard as the world does: what is held stays held, out of sight until an editing tool (workshop/benchLook.tsx).
   if (holding && !isLook(tool)) {
     return (

@@ -22,7 +22,9 @@
  * shard into what is left (Bench Framer), so a sheet never hides it.
  *
  * What you hold moves by the handles on it (shell/MoveHandles; phase 2), and
- * nothing else floats over the bench.
+ * nothing else floats over the bench. SET EYE (AVATAR's FIRST-PERSON EYE)
+ * holds the avatar's eye the same way: the handles on the eye, its slots in
+ * the strip (shell/EyeBar), WHAT YOU SEE under the view ball (EyePreview).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -37,6 +39,7 @@ import { useShardFolders } from '../store/useShardFolders'
 import { routeImport, useShardImport } from '../store/useShardImport'
 import { useWorkshop } from '../store/useWorkshop'
 import { Bench } from './Bench'
+import { EyePreview, eyeBenchInset } from './EyePreview'
 import { useBenchView } from './benchAxes'
 import { StorageWarning, Toast } from './Notices'
 import { Guide } from './shell/Guide'
@@ -76,7 +79,7 @@ const REGION: Record<Area, string> = { menu: 'Menu', shard: 'Shard', grid: 'Grid
  * in what is left (benchAxes BenchInsets). Measured again whenever any of
  * them changes size, the window does, or a sheet comes or goes.
  */
-function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind | null, open: boolean, guiding: boolean): void {
+function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind | null, open: boolean, guiding: boolean, eyeEdit = false): void {
   useLayoutEffect(() => {
     const el = root.current
     if (!open || !el || typeof ResizeObserver === 'undefined') return
@@ -93,7 +96,12 @@ function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind 
       const side = !!sheetEl && getComputedStyle(sheetEl).position === 'fixed'
       const guide = el.querySelector('.ws__guide')?.getBoundingClientRect().top
       const edge = (!side && sheetBox ? sheetBox.top : guide) ?? strip
-      const right = side && sheetBox ? Math.max(0, Math.round(box.right - sheetBox.left)) : 0
+      // SET EYE: a right inset as wide as WHAT YOU SEE's small picture, for
+      // the whole time the eye is in hand, folded or not and BIGGER or not,
+      // so the bench frames the eye clear of it and never re-frames meanwhile.
+      const viewRight = el.querySelector('.ws__view')?.getBoundingClientRect().right ?? box.right
+      const eyeInset = eyeEdit ? eyeBenchInset(box.right - viewRight, box.width, box.height) : 0
+      const right = Math.max(side && sheetBox ? Math.max(0, Math.round(box.right - sheetBox.left)) : 0, eyeInset)
       const insets = { top: Math.max(0, Math.round(top - box.top)), bottom: Math.max(0, Math.round(box.bottom - edge)), rest: Math.max(0, Math.round(box.bottom - strip)), right }
       const now = useBenchView.getState().insets
       if (now.top !== insets.top || now.bottom !== insets.bottom || now.rest !== insets.rest || now.right !== insets.right) useBenchView.setState({ insets })
@@ -103,7 +111,7 @@ function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind 
     window.addEventListener('resize', measure)
     measure()
     return () => { ro.disconnect(); window.removeEventListener('resize', measure) }
-  }, [root, sheet, open, guiding])
+  }, [root, sheet, open, guiding, eyeEdit])
   // Shut, the bench frames nothing: the next opening starts from the middle.
   useEffect(() => { if (!open) useBenchView.setState({ insets: { top: 0, bottom: 0, rest: 0, right: 0 } }) }, [open])
 }
@@ -151,6 +159,13 @@ export function Workshop(): JSX.Element | null {
   // MENU's paste box, kept here so it survives MENU closing and opening, as it did as a panel.
   const [paste, setPaste] = useState<{ open: boolean; text: string }>({ open: false, text: '' })
   useEffect(() => { if (sheet) setViewOpen(false) }, [sheet])
+  // SET EYE (avatar eye, UI A): the eye in hand closes the sheet it was taken
+  // from; a sheet opened, or anything else picked up, puts the eye down.
+  const eyeEdit = useWorkshop((s) => s.eyeEdit)
+  const holding = useWorkshop((s) => s.selection.length > 0 || s.partSel.length > 0 || s.selectedFaces.length > 0)
+  useEffect(() => { if (eyeEdit) setSheet(null) }, [eyeEdit])
+  useEffect(() => { if (sheet !== null && useWorkshop.getState().eyeEdit) useWorkshop.getState().setEyeEdit(false) }, [sheet])
+  useEffect(() => { if (holding && useWorkshop.getState().eyeEdit) useWorkshop.getState().setEyeEdit(false) }, [holding])
   useEffect(() => {
     if (!viewOpen) return
     const shut = (e: PointerEvent): void => {
@@ -176,7 +191,7 @@ export function Workshop(): JSX.Element | null {
   const root = useRef<HTMLDivElement>(null)
   // The guide's card stands over the strip too, and the shard is framed above it.
   const guiding = useBeginner((s) => s.step !== null && !s.paused) && !tutorialActive
-  useBenchInsets(root, sheet, open, guiding)
+  useBenchInsets(root, sheet, open, guiding, eyeEdit)
   // Every hook above this line, none below it: the early return that follows
   // changes which hooks run, and React counts them. One sat after the
   // return for a day and opening the workshop threw React #310 (2026-09-24).
@@ -194,6 +209,8 @@ export function Workshop(): JSX.Element | null {
     // The first-visit guide, up: Esc puts it away for this opening only (it
     // comes back next time, unless SKIP was tapped), and the workshop stays.
     else if (useBeginner.getState().step !== null && !useBeginner.getState().paused && !tutorialActive) useBeginner.getState().pause()
+    // SET EYE: Esc puts the eye down, as DONE does.
+    else if (ws.eyeEdit) ws.setEyeEdit(false)
     // Not in LOOK, where what is held is out of sight and stays held (benchLook.tsx): Esc goes on to close.
     else if (!isLook(ws.tool) && (ws.selection.length || ws.partSel.length || ws.selectedFaces.length > 0 || ws.facePick.length)) { ws.selectVertex(null); ws.clearFacePick() }
     else ws.closeWorkshop()
@@ -264,6 +281,8 @@ export function Workshop(): JSX.Element | null {
       <TopBar open={area} onArea={toggle} />
       <Rail />
       <ViewBall open={viewOpen} onToggle={toggleView} onClose={() => setViewOpen(false)} />
+      {/* SET EYE's WHAT YOU SEE, under the view ball and under the handles too, so a handle is never hidden behind it. */}
+      {eyeEdit && !viewOpen && <EyePreview />}
       {/* The move handles, on what is held, in any tool. */}
       <MoveHandles />
 
@@ -286,8 +305,8 @@ export function Workshop(): JSX.Element | null {
         {sheet === 'palette' && <PaletteModal onClose={closeSheet} foldAsk={foldAsk} />}
         {sheet === 'object' && <ObjectPicker onClose={closeSheet} />}
         {/* The first visit's guide and the tool's fading hint, over the strip; neither over a sheet. */}
-        {sheet === null && <Guide />}
-        <ToolHint hidden={sheet !== null} />
+        {sheet === null && !eyeEdit && <Guide />}
+        <ToolHint hidden={sheet !== null || eyeEdit} />
         <Strip onPickObject={() => setSheet('object')} onMore={() => toggle('more')} moreBadge={stacked} />
         <Dock onColor={tapColor} colorOpen={sheet === 'palette'} />
       </div>

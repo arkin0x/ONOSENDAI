@@ -44,6 +44,7 @@ import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
 import { setWalkFacing, walkBody, walkEye, walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
 import { WalkEyeRig } from './walkEyeRig'
 import { useAvatars } from '../store/useAvatars'
+import { tryEyeFor } from '../store/tryEye'
 import { clearWalkLook, lookRadPerPx, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
 import { tickFall, useWalk, walkDown } from '../store/useWalk'
 import { orbitOffset } from '../workshop/benchAxes'
@@ -1185,7 +1186,8 @@ function Rig(): JSX.Element {
       const mixTo = s.walking ? 1 : 0
       eyeMix.current = mixTo + (eye.current.mixFrom - mixTo) * lerpRemaining(t)
       eyeRig.offset({
-        shard: useAvatars.getState().shards[s.focusPubkey()] ?? null,
+        // SET EYE's TRY WALK looks from the workshop shard's eye, unpublished (store/tryEye.ts).
+        shard: tryEyeFor(s.focusPubkey()) ?? useAvatars.getState().shards[s.focusPubkey()] ?? null,
         scaleExp: s.scaleExp,
         axes: s.axes(),
         plane: s.plane,

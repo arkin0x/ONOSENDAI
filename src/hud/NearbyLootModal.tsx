@@ -7,7 +7,7 @@
  * first among things made in the same second, undated things last. Reached from the found chip,
  * which says how many, and from NEARBY on the DISCOVERED panel. VIEW flies to
  * the thing the way the bag record's VIEW does. A key row has TAKE until it
- * is held; a chest row has its OPEN, and a door row its OPEN or CLOSE, beside
+ * is held, and INFO (KeyItemInfo); a chest row has its OPEN, and a door row its OPEN or CLOSE, beside
  * VIEW and the same size, VIEW on the right (arkinox, 2026-11-12). A seed's
  * row names its DNA, how far it has grown and who planted it; its name opens
  * its card (BloomCard) and its VIEW frames the bloom at the seed's scale
@@ -31,8 +31,9 @@ import { profileLabel } from '../store/useProfiles'
 import { useShards } from '../store/useShards'
 import { rememberNearbyReturn } from '../lib/nearbyReturn'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
-import { ChestBlock, KeyComments, KeyLine, listedOnce, useChestOpen } from './ItemRows'
-import { subjectOfWorldItem } from '../lib/commentSubjects'
+import { ChestBlock, KeyLine, listedOnce, useChestOpen } from './ItemRows'
+import { isGuideKey, subjectOfWorldItem } from '../lib/commentSubjects'
+import { KeyInfo, type KeyInfoSource } from './KeyItemInfo'
 import { useEscape } from '../hooks/useEscape'
 import { NEARBY_TABS, byTab, firstFilledTab, type NearbyTab } from '../lib/nearbyTabs'
 import { lockWord, useOpenedChests } from '../store/useOpenedChests'
@@ -98,8 +99,10 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
   const chest = item.type === 'chest' && !!item.chest
   const key = item.type === 'key' && !!item.keyItem
   const coin = item.type === 'message' && findCashuToken(item.text) !== null
-  // A key item's COMMENT, before and after TAKE: the thread its card opens (lib/commentSubjects).
-  const commentSubject = useMemo(() => (key ? subjectOfWorldItem(item) : null), [key, item])
+  // A key item's INFO, before and after TAKE: who hid it, and the thread its card opens (lib/commentSubjects).
+  const info = useMemo((): KeyInfoSource | null => (key && item.keyItem
+    ? { id: item.key, event: item.event, key: item.keyItem, forger: item.event?.pubkey ?? author, hider: author || null, guide: isGuideKey(author), subject: subjectOfWorldItem(item) }
+    : null), [key, item, author])
   return (
     <li className="secrets__row nearby__row">
       <ItemThumb type={item.type} coin={coin} shard={item.type === 'shard' ? item.shard : undefined} image={item.keyItem?.image} model={item.keyItem?.model} />
@@ -119,7 +122,7 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
       </div>
       <span className="nearby__acts">
         {(chest || key) && <span className="nearby__door" ref={setActs} />}
-        {commentSubject && item.keyItem && <KeyComments subject={commentSubject} name={item.keyItem.name} author={author} image={item.keyItem.image} />}
+        {info && <KeyInfo info={info} />}
         <button className="avatars__go nearby__view" onClick={() => onView(item)} title="Fly to it">VIEW<GoArrow /></button>
       </span>
       {chest && <div className="nearby__contents" ref={setContents} />}

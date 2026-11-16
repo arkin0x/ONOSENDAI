@@ -12006,3 +12006,11 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .stash-modal--fill .objpick__body > .feed { flex: 1 1 auto; min-height: 0; }
 .stash-modal--fill .objpick__body > .feed > .feed__list { flex: 1 1 auto; min-height: 0; max-height: none; }
 .stash-modal--fill .objpick__body > .feed > .feed__refresh { flex: none; }
+/* A key item's INFO card (KeyItemInfo), laid out as the shard's card: the
+   picture in the chamfered frame when it wears no model, who hid and who
+   forged it, its description, then its chips over the reactions. */
+.keyinfo__thumb { padding: 6px 0; }
+.keyinfo__role { margin: 6px 0 0; font-size: 11px; color: var(--fg); }
+.keyinfo__about { margin: 0 0 12px; font-size: 12px; line-height: 1.5; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.keyinfo__chips { margin-bottom: 12px; }
+.keyinfo__nothread { margin: 0 0 4px; color: var(--fg); }

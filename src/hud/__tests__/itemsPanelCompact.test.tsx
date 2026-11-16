@@ -276,7 +276,7 @@ describe('KEY ITEMS > FEED', () => {
 })
 
 describe('key item buttons', () => {
-  it('are one ACTIONS button a row, opening DETAILS, COMMENT, COPY, PLACE, PUBLISH and ARCHIVE in a labelled line under it, all chest__act; no DELETE under MINE', async () => {
+  it('are one ACTIONS button a row, opening DETAILS, INFO, COPY, PLACE, PUBLISH and ARCHIVE in a labelled line under it, all chest__act; no DELETE under MINE', async () => {
     const { restore } = seed()
     const m = await openKind(KEY_ITEMS_LABEL)
     const [held] = rowsOf(m.all(), true)
@@ -287,7 +287,7 @@ describe('key item buttons', () => {
     await m.press(/^ACTIONS$/)
     const [open] = rowsOf(m.all(), true)
     const heldButtons = buttonsIn(open)
-    expect(heldButtons.map(textOf)).toEqual(['ACTIONS', 'DETAILS', 'COMMENT', 'COPY', 'PLACE', 'PUBLISH', 'ARCHIVE'])
+    expect(heldButtons.map(textOf)).toEqual(['ACTIONS', 'DETAILS', 'INFO', 'COPY', 'PLACE', 'PUBLISH', 'ARCHIVE'])
     expect(heldButtons[0].props['aria-expanded']).toBe(true)
     const group = m.all().find((h) => cls(h) === 'held__menu')!
     expect(group.props.role).toBe('group')
@@ -365,7 +365,7 @@ describe('key item buttons', () => {
       expect(chips.children.filter((c): c is Host => typeof c !== 'string' && c.type === 'span').map(textOf)).toContain('LISTED')
       await m.press(/^ACTIONS$/)
       const held = buttonsIn(rowsOf(m.all(), true)[0]).map(textOf)
-      expect(held).toEqual(['ACTIONS', 'DETAILS', 'COMMENT', 'COPY', 'PLACE', 'ARCHIVE'])
+      expect(held).toEqual(['ACTIONS', 'DETAILS', 'INFO', 'COPY', 'PLACE', 'ARCHIVE'])
       expect(m.buttons(/LISTED|PUBLISH/)).toHaveLength(0)
       await m.unmount()
     } finally {

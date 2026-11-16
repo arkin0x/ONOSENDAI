@@ -27,7 +27,7 @@ import { forgeKey, revealedIn, type ChestEntry } from '../chests'
 import { KEY_KIND, keyInnerTemplate, type Hidden } from '../hidden'
 import { COMMENT_KIND, PLACEHOLDER, commentsFilter, itemParent, openComments, sealedComment, commentTemplate } from '../comments'
 import { heldFromEntry, heldFromFind, heldFromForged, heldFromPasted, placeOf } from '../inventory'
-import { heldBagAuthor, isGuideKey, subjectOfHeld, subjectOfHidden, subjectOfWorldItem } from '../commentSubjects'
+import { heldBagAuthor, isGuideKey, reactionTargetOf, subjectOfHeld, subjectOfHidden, subjectOfWorldItem } from '../commentSubjects'
 import { setGuideBags } from '../../tutorial/guideBags'
 import { GUIDE_KEY, guideKey } from '../../tutorial/guide'
 import { lookupIdOf } from '../regionKeyCheck'
@@ -167,5 +167,27 @@ describe('no thread', () => {
   it('for something that is not a key item', () => {
     const held = { ...heldFromFind(ME, found, T)!, type: 'message' as const }
     expect(subjectOfHeld(held, HIDER)).toBeNull()
+  })
+})
+
+describe('reactionTargetOf: what INFO\'s reactions answer', () => {
+  it('the key item\'s lineage, its kind and its hider, the same event the thread\'s parent names; never the bag', () => {
+    const subject = subjectOfHidden(found)!
+    const { target, alsoTell } = reactionTargetOf(subject)
+    const parent = itemParent(subject)
+    expect(target).toEqual({ id: parent.id, pubkey: HIDER, kind: KEY_KIND, address: undefined })
+    expect(target.id).toBe(found.eventId)
+    expect(alsoTell).toEqual([HIDER])
+    // Held in ITEMS, the same.
+    expect(reactionTargetOf(subjectOfHeld(heldFromFind(ME, found, T)!, HIDER)!)).toEqual({ target, alsoTell })
+    const out = JSON.stringify({ target, alsoTell })
+    expect(out).not.toContain(found.key!.secretHex)
+    expect(out).not.toContain(bytesToHex(BAG_KEY))
+    expect(out).not.toContain(LOOKUP)
+  })
+
+  it('a LIVE LINK is reacted to as the public object alone, as its card does', () => {
+    const subject = { ...subjectOfHidden(found)!, target: { kind: 33331, pubkey: ME, address: `33331:${ME}:x`, id: 'f'.repeat(64), public: true as const } }
+    expect(reactionTargetOf(subject)).toEqual({ target: { id: 'f'.repeat(64), pubkey: ME, kind: 33331, address: `33331:${ME}:x` }, alsoTell: [] })
   })
 })

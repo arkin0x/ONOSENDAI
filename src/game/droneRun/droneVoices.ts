@@ -13,8 +13,8 @@
  * | Kind | Its voice |
  * |---|---|
  * | SCOUT | a high, fast buzz (a saw and a triangle an octave up, chopped at 46 Hz, a little hiss) that bends up as it dives |
- * | SNIPER | a low, steady sine hum with soft overtones, and a whine rising through each bolt's windup, fading on its top note |
- * | HEAVY | a deep thrum: three low saws a few cents apart, beating, chopped at 9 Hz over a low rumble; a spin-up whine before a burst |
+ * | SNIPER | a low, steady 72 Hz sine hum with a soft fifth partial (360 Hz) and a narrow hiss there, so a phone speaker carries it; a whine rising through each bolt's windup, fading on its top note |
+ * | HEAVY | a deep thrum: two low saws a few cents apart, beating, and a triangle three octaves up beating against their overtones (the part a phone speaker plays), chopped at 9 Hz over a rotor wash; a spin-up whine before a burst |
  * | SWARMER | a small chittering buzz (detuned triangles chopped by a fast saw LFO); every swarmer a little off the others, so a group is a cloud |
  *
  * One voice, from the drone to the ears:

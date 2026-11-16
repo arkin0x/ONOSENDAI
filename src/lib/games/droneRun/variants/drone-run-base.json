@@ -490,7 +490,7 @@
         },
         "occluded": {
           "cutoff": 0.16,
-          "floor": 120,
+          "floor": 400,
           "gain": 0.55
         },
         "checks": 3
@@ -545,24 +545,24 @@
           {
             "wave": "sine",
             "ratio": 1,
-            "mix": 0.6
+            "mix": 0.45
           },
           {
             "wave": "triangle",
             "ratio": 2,
             "detune": 3,
-            "mix": 0.3
+            "mix": 0.25
           },
           {
             "wave": "sine",
-            "ratio": 3,
-            "mix": 0.1
+            "ratio": 5,
+            "mix": 0.3
           }
         ],
         "noise": {
-          "band": 240,
-          "q": 0.7,
-          "mix": 0.08
+          "band": 360,
+          "q": 4,
+          "mix": 0.12
         },
         "lfo": {
           "rate": 0.45,
@@ -570,9 +570,9 @@
           "pitch": 4,
           "wave": "sine"
         },
-        "filter": 650,
+        "filter": 1000,
         "q": 0.7,
-        "gain": 0.09,
+        "gain": 0.07,
         "spread": {
           "cents": 8,
           "rate": 0.1
@@ -594,24 +594,24 @@
           {
             "wave": "sawtooth",
             "ratio": 1,
-            "mix": 0.4
+            "mix": 0.45
           },
           {
             "wave": "sawtooth",
             "ratio": 1,
             "detune": 34,
-            "mix": 0.33
+            "mix": 0.3
           },
           {
-            "wave": "sawtooth",
-            "ratio": 1,
+            "wave": "triangle",
+            "ratio": 8,
             "detune": -27,
-            "mix": 0.27
+            "mix": 0.25
           }
         ],
         "noise": {
-          "band": 160,
-          "q": 0.8,
+          "band": 330,
+          "q": 1.5,
           "mix": 0.3
         },
         "lfo": {
@@ -620,8 +620,8 @@
           "pitch": 0,
           "wave": "sine"
         },
-        "filter": 340,
-        "q": 1.2,
+        "filter": 900,
+        "q": 1.0,
         "gain": 0.11,
         "spread": {
           "cents": 6,

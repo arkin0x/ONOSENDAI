@@ -2688,6 +2688,8 @@ export const useShards = create<ShardsState>((set, get) => {
     const still = (): void => { if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED) }
     let relay: BagEntry[] = []
     let settings = localSettings
+    /** The relays' copy whose settings these are, read again against everything the rewrite holds (below). */
+    let settingsFrom: NostrEvent | null = null
     let heard = false
     try {
       const answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [owner], '#d': [lookupId] })
@@ -2723,6 +2725,7 @@ export const useShards = create<ShardsState>((set, get) => {
       // A relay copy that does not open with this key is not this bag.
       if (newest && relay.length > 0) {
         settings = bagSettingsOf(newest, height, claimableHeld(relay))
+        settingsFrom = newest
         // A row the relays' newer bag no longer holds was changed from another
         // device: its old self does not go back in beside the new one (§3.7.5;
         // a moved item, review of #595).
@@ -2738,7 +2741,13 @@ export const useShards = create<ShardsState>((set, get) => {
     // bag for good, or delete the whole bag as empty. A relay that answers with
     // nothing is an answer: there is no bag to lose.
     if (relay.length === 0 && !heard && claimableRows().some((d) => d.lookupId === lookupId && d.published)) throw new Error(BAG_NOT_READ)
-    return gathered(mergeEntries(relay, ownRows().filter(inItsBag).map(entryOf)), settings, heard ? relay : null)
+    const entries = mergeEntries(relay, ownRows().filter(inItsBag).map(entryOf))
+    // The money switch (money or NFTs) read against everything the rewrite
+    // will hold, this device's rows that only it lists included: a row of
+    // yours with a token or a claim link the relays' copy never said is not
+    // said by a rewrite that is not a hide (bagSettingsOf; review of the NFT hint).
+    if (settingsFrom && settings) settings = { ...settings, money: bagSettingsOf(settingsFrom, height, claimableHeld(entries)).money }
+    return gathered(entries, settings, heard ? relay : null)
   }
 
   /**

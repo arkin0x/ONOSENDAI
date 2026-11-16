@@ -223,3 +223,26 @@ describe('mixed and many references', () => {
     expect(openedTitle(bag.id, 3)).toBe('Opened: 3 items. 5 more not fetched')
   })
 })
+
+describe('the money switch read from a found bag (owner ruling 2026-11-16: NFTs go with money)', () => {
+  const TOKEN = 'cashuBo2FteBtodHRwczovL21pbnQubWluaWJpdHMuY2FzaC9CaXRjb2luYXVjc2F0YXSBomFpSABQBVDwSUFGYXCBpGFhAmFzeEAzZjNlYTU2YTk3ZjE3MDAxMjZkZjVlZDNlNDNmYjU2NjAzMmQ0YWQyNTNkNmNiODEyZGI0N2E1OTA0MjZmNDVjYWNYIQKr8zhNlxrJ0lMVMXKkXy9Ww7GjPU2LaH3sz5Y1HlgLv2Fko2FlWCCa5DHXKlbV8GLuXtnZsc2vJ8fsoTHpp6W3t3q0B2-ZomFzWCCTJGYFX4d0fwWhP6rgrgIX1xZpCCr0K0jj4Z3vKYIhR2FyWCBqvA'
+  const LINK = `https://nonfungible.cash/claim/${'6f'.repeat(16)}#${'A'.repeat(43)}`
+
+  it('reads OFF once a sealed entry opens to a claim link the bag never said', async () => {
+    const { getEventHash } = await import('nostr-tools/pure')
+    const base = JSON.parse(V.message.plaintext) as NostrEvent
+    const rumor = (content: string, at: number) => { const r = { ...base, content, created_at: at }; return { ...r, id: getEventHash(r) } }
+    const coin = rumor(`for you ${TOKEN}`, base.created_at + 1)
+    const nft = rumor(`and ${LINK}`, base.created_at + 2)
+    const sealed = await sealOf(nft, 'dd'.repeat(16))
+    const ref: Reference = ['a', `33335:${K.hider}:${'dd'.repeat(16)}`, '', COORD]
+    // Written by a writer that never opened the sealed entry: it says the coin, not the link.
+    const bag = finalizeEvent(await bagTemplate([coin, ref], regionKey, K.lookup_id, 12, 1791800100, HIDDEN_KIND, { heightTag: true, hint: null, riddle: '', contents: true, money: true }), hiderSk) as NostrEvent
+    expect(bag.tags.filter((t) => t[0] === 'contents')).toEqual([['contents', 'message', '1'], ['contents', 'cashu', '1']])
+    forgetSealedItems()
+    const found = await unbag(bag, regionKey, resolverOf([sealed]), undefined, 12)
+    expect(found.map((h) => h.eventId).sort()).toEqual([coin.id, nft.id].sort())
+    // A rewrite from this reading must not say the link: the switch reads OFF.
+    for (const h of found) expect(h.bag?.money).toBe(false)
+  })
+})

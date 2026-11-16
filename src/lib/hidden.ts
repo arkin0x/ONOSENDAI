@@ -1311,6 +1311,14 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
     await Promise.all(Array.from({ length: Math.min(REFERENCE_CONCURRENCY, fetched.length) }, worker))
   }
   const items = firstOfEach(out.filter((h): h is Hidden => h !== null))
+  // The money switch read again now that the sealed entries are open: one
+  // holding a token or a claim link the bag never said reads it OFF
+  // (bagSettingsOf). In place, since every item shares these facts.
+  if (facts.bag.money) {
+    const before = claimableHeld(entries)
+    const opened = claimableHeld(out.filter((h): h is Hidden => h !== null).map((h) => h.inner))
+    facts.bag.money = bagSettingsOf(outer, regionHeight, { cashu: Math.max(before.cashu, opened.cashu), nft: Math.max(before.nft, opened.nft) }).money
+  }
   noteReading(outer.id, { entries: entries.length, readable: items.length, opaque: false, ...(skipped > 0 ? { skipped } : {}), ...(tally.refused > 0 ? { refused: tally.refused } : {}) })
   return items
 }

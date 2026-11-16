@@ -552,6 +552,25 @@ describe('NFT claim links hidden by default, as money is (owner ruling 2026-11-1
     expect(saysNft(lastBag())).toBe(false)
   })
 
+  it('a row of yours the relays\' copy does not hold, with a claim link, is not said by a rewrite that is not a hide', async () => {
+    // The relays' copy says money alone, and holds no link.
+    await hide(`a ${TOKEN}`, { contents: false, money: true })
+    relayBags = [lastBag()]
+    await hide('plain')
+    const saidMoney = lastBag()
+    expect(contentsRows(saidMoney)).toEqual([['contents', 'cashu']])
+    // This device, switch off, hides a link; the relays still answer with the older copy.
+    localStorage.clear()
+    relayBags = [saidMoney]
+    await hide(`n ${LINK}`)
+    expect(saysNft(lastBag())).toBe(false)
+    relayBags = [saidMoney]
+    sent.length = 0
+    // A DELETE of another item rewrites the bag without the bar: the link this device holds is never said.
+    await S().deleteInstance(S().mine.find((d) => d.text === 'plain')!.eventId)
+    expect(saysNft(lastBag())).toBe(false)
+  })
+
   it('a bag that counted its NFT before this, and kept a token quiet, does not count the token on a rewrite that is not a hide', async () => {
     // The bag as the client wrote it before NFTs joined the switch: contents on, money off, the NFT counted.
     await hide(`for you ${TOKEN}`)

@@ -15,9 +15,9 @@
  * puts the dodecahedron back.
  */
 
-import { AVATAR_CONTENT_MAX, AVATAR_CONTENT_WARN, avatarContentBytes } from 'cyberspace-core'
+import { AVATAR_CONTENT_MAX, AVATAR_CONTENT_WARN, avatarContentBytes, verifyAvatar } from 'cyberspace-core'
 import { TICKS_PER_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
-import { keepOwnTable } from './carried'
+import { keepOwnTable, withoutCarried } from './carried'
 import { CLIENT_TAG } from './client'
 
 export const AVATAR_KIND = 11333
@@ -35,6 +35,14 @@ export function avatarTemplate(shard: ShardModel | null, createdAt: number): Ava
     tags: shard ? [['name', shard.name], [...CLIENT_TAG]] : [[...CLIENT_TAG]],
     content: shard ? JSON.stringify(toPayload(shard)) : '',
   }
+}
+
+/**
+ * The content an avatar of this shard is published with: what came to you
+ * sealed is left out (an avatar is public, withoutCarried), as adopt signs it.
+ */
+export function avatarContent(shard: ShardModel): string {
+  return avatarTemplate(withoutCarried(shard), 0).content
 }
 
 /** Where an avatar's content stands against the size limit (spec 8.10). */
@@ -69,6 +77,18 @@ export function avatarFromEvent(ev: { kind: number; pubkey: string; content: str
   } catch {
     return null
   }
+}
+
+/**
+ * The shard an avatar event is drawn as: none for an empty content (the
+ * dodecahedron), none for one that is not an avatar every client draws
+ * (spec 8.10, verifyAvatar: the kind, the size limit, a readable payload).
+ * Tags are not read, so a nonce tag on an older avatar changes nothing.
+ */
+export function avatarShard(ev: { kind: number; pubkey: string; content: string; tags: string[][] }): ShardModel | null {
+  if (!ev.content) return null
+  if (!verifyAvatar(ev).ok) return null
+  return avatarFromEvent(ev)
 }
 
 /**

@@ -21,7 +21,7 @@ import { withoutCarried } from '../lib/carried'
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { verifyAvatar } from 'cyberspace-core'
-import { AVATAR_KIND, avatarFromEvent, avatarSize, avatarTemplate } from '../lib/avatar'
+import { AVATAR_KIND, avatarShard, avatarSize, avatarTemplate } from '../lib/avatar'
 import type { NostrEvent } from '../lib/events'
 import { publish, query } from '../lib/relay'
 import { SignerAccountMismatch } from '../lib/signers'
@@ -44,6 +44,12 @@ const REFRESH_MS = 5 * 60_000
 export const AVATARS_CACHE_KEY = 'onosendai:avatars'
 /** The most avatars kept, the most recently fetched first: shards can be large, and localStorage is a few megabytes. */
 export const AVATARS_KEPT = 60
+/**
+ * The most characters the kept avatars take, the newest kept first: an avatar
+ * may be up to 128 KB, and sixty of those would fill localStorage and leave
+ * no room for your own (remember).
+ */
+export const AVATARS_KEPT_CHARS = 1_500_000
 /** An avatar fetched longer ago than this is not drawn from the cache. */
 export const AVATARS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -69,7 +75,9 @@ export function keepAvatar(event: NostrEvent, now = Date.now()): void {
   try {
     const raw = localStorage.getItem(AVATARS_CACHE_KEY)
     const kept = { ...(raw ? (JSON.parse(raw) as Record<string, KeptAvatar>) : {}), [event.pubkey]: { event, at: now } }
-    const trimmed = Object.fromEntries(Object.entries(kept).sort((a, b) => b[1].at - a[1].at).slice(0, AVATARS_KEPT))
+    let chars = 0
+    const newest = Object.entries(kept).sort((a, b) => b[1].at - a[1].at).slice(0, AVATARS_KEPT)
+    const trimmed = Object.fromEntries(newest.filter(([, k], i) => { chars += JSON.stringify(k).length; return i === 0 || chars <= AVATARS_KEPT_CHARS }))
     localStorage.setItem(AVATARS_CACHE_KEY, JSON.stringify(trimmed))
   } catch { /* quota or private mode */ }
 }
@@ -224,8 +232,11 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
       if (!raw) return
       const kept = JSON.parse(raw) as { pubkey?: string; payload?: unknown; event?: NostrEvent; published?: boolean }
       if (kept.pubkey !== me) return
-      const read = kept.payload ? fromPayload(kept.payload, `avatar:${me}`) : null
-      const shard = read && keepOwnTable(read, me)
+      // The kept event is checked as everyone else's is, so you are not drawn
+      // in a shape no one else sees; the payload only for a copy kept before
+      // the event was.
+      const read = kept.event ? null : kept.payload ? fromPayload(kept.payload, `avatar:${me}`) : null
+      const shard = kept.event ? avatarShard(kept.event) : read && keepOwnTable(read, me)
       set({
         shards: { ...get().shards, [me]: shard },
         mineEvent: kept.event ?? null,
@@ -236,28 +247,24 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
   },
 }))
 
-/**
- * The shard an avatar event is drawn as: none for an empty content (the
- * dodecahedron), none for one that is not an avatar every client draws
- * (spec 8.10: the kind, the size limit, a readable payload).
- */
-export function avatarShard(ev: { kind: number; pubkey: string; content: string; tags: string[][] }): ShardModel | null {
-  if (!ev.content) return null
-  if (!verifyAvatar(ev).ok) return null
-  return avatarFromEvent(ev)
-}
-
 function remember(shard: ShardModel | null, event: NostrEvent | null, published: boolean): void {
+  const kept = JSON.stringify({
+    pubkey: useCyberspace.getState().identity.pubkey,
+    payload: shard ? toPayload(shard) : null,
+    // Kept whole, signature and all, so an avatar adopted while LOCAL can
+    // be broadcast later without asking the signer again.
+    event,
+    published,
+  })
   try {
-    localStorage.setItem(MINE_KEY, JSON.stringify({
-      pubkey: useCyberspace.getState().identity.pubkey,
-      payload: shard ? toPayload(shard) : null,
-      // Kept whole, signature and all, so an avatar adopted while LOCAL can
-      // be broadcast later without asking the signer again.
-      event,
-      published,
-    }))
-  } catch { /* private mode */ }
+    localStorage.setItem(MINE_KEY, kept)
+  } catch {
+    // Full: everyone else's kept avatars give way to yours, which may exist nowhere else.
+    try {
+      localStorage.removeItem(AVATARS_CACHE_KEY)
+      localStorage.setItem(MINE_KEY, kept)
+    } catch { /* private mode */ }
+  }
 }
 
 /** The shard a pubkey is drawn as, or null for the dodecahedron; asks the relay as needed. */

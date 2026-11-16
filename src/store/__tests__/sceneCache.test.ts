@@ -33,7 +33,7 @@ import { useCyberspace } from '../useCyberspace'
 import {
   PRESENCE_CACHE_MAX_AGE_S, loadPresenceCache, presenceDrawn, savePresenceCache, startPresence, stopPresence, usePresence, type Person,
 } from '../usePresence'
-import { AVATARS_CACHE_MAX_AGE_MS, keepAvatar, loadAvatarCache } from '../useAvatars'
+import { AVATARS_CACHE_MAX_AGE_MS, AVATARS_KEPT_CHARS, keepAvatar, loadAvatarCache } from '../useAvatars'
 
 const SECTOR = 1n << 30n
 const here = { x: 5n * SECTOR + 7n, y: 9n * SECTOR + 1n, z: 3n * SECTOR + 2n }
@@ -127,7 +127,20 @@ describe('the avatar cache', () => {
     const { pubkey, event } = xorAvatar()
     const big = { ...event, content: event.content.replace(/}$/, `,"pad":"${'a'.repeat(131_072)}"}`) }
     keepAvatar(big, 1_000)
+    // Kept, and still not drawn.
+    expect(JSON.parse(localStorage.getItem('onosendai:avatars')!)[pubkey]).toBeDefined()
     expect(loadAvatarCache(1_000)[pubkey]).toBeUndefined()
+  })
+
+  it('keeps the newest avatars within a size budget, so your own still fits', () => {
+    const { event } = xorAvatar()
+    const bulk = event.content.replace(/}$/, `,"pad":"${'a'.repeat(100_000)}"}`)
+    for (let i = 0; i < 30; i++) keepAvatar({ ...event, pubkey: i.toString(16).padStart(64, '0'), content: bulk }, 1_000 + i)
+    const kept = JSON.parse(localStorage.getItem('onosendai:avatars')!) as Record<string, unknown>
+    expect(localStorage.getItem('onosendai:avatars')!.length).toBeLessThanOrEqual(AVATARS_KEPT_CHARS + 1000)
+    expect(Object.keys(kept).length).toBeLessThan(30)
+    expect(kept[(29).toString(16).padStart(64, '0')]).toBeDefined()
+    expect(kept['0'.repeat(64)]).toBeUndefined()
   })
 
   it('forgets a shape its author dropped for the dodecahedron', () => {

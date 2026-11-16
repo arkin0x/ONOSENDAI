@@ -10,7 +10,7 @@ import { toPayload } from 'sno-core/shards'
 import { avatarReach } from 'cyberspace-core'
 import { Field, Switch } from '../../hud/ui/Switch'
 import { ShardThumb } from '../../hud/ShardThumb'
-import { avatarKb, avatarSize } from '../../lib/avatar'
+import { avatarContent, avatarKb, avatarSize } from '../../lib/avatar'
 import { useAvatars } from '../../store/useAvatars'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useWorkshop } from '../../store/useWorkshop'
@@ -31,8 +31,8 @@ export function AvatarBody(): JSX.Element | null {
   const buildable = shard !== null && shard.vertices.length > 0 && shard.faces.length > 0
   const info = useMemo(() => {
     if (!shard || !buildable) return { reach: 0, detail: 0, size: avatarSize('') }
-    const payload = toPayload(shard)
-    return { reach: Math.max(1, avatarReach(payload)), detail: shard.vertices.length + shard.faces.length, size: avatarSize(JSON.stringify(payload)) }
+    // Measured as adopt signs it: without what came to you sealed.
+    return { reach: Math.max(1, avatarReach(toPayload(shard))), detail: shard.vertices.length + shard.faces.length, size: avatarSize(avatarContent(shard)) }
   }, [buildable, shard])
   const w = useWorkshop.getState
   const say = (notice: string): void => useWorkshop.setState({ notice })
@@ -52,7 +52,7 @@ export function AvatarBody(): JSX.Element | null {
             (arkinox found this by doing it). It gets a row anyway so the
             shape you are wearing is visible and can be copied back into the
             workshop, and no row that would change it: the way to change an
-            avatar is USE THIS SHARD or DODECAHEDRON under SET AVATAR. */}
+            avatar is USE THIS SHARD or ICOSAHEDRON under SET AVATAR. */}
         {myAvatar && (
           <ul className="workshop__list">
             <li className="workshop__list-avatar">
@@ -89,10 +89,11 @@ export function AvatarBody(): JSX.Element | null {
             OBJECT and PASTE do. On the name's line a long object name pushed
             them off the edge (arkinox, 2026-09-15). */}
         <div className="workshop__list-row">
-        {/* Adopted while LOCAL: signed and kept and drawn for you, but no relay has it. */}
-        {myAvatar && !minePublished && !phase && (
+        {/* Adopted while LOCAL: signed and kept and drawn for you, but no relay has it.
+            Every button stays in its place while an adopt runs, disabled, so nothing jumps. */}
+        {myAvatar && !minePublished && (
           live
-            ? <button className="workshop__btn workshop__btn--warn" onClick={() => { void useAvatars.getState().broadcastMine().then((ok) => say(ok ? 'Your avatar is published.' : useAvatars.getState().adoptError ?? 'No relay took the avatar.')) }} title="Send the avatar you adopted while LOCAL to the relays">BROADCAST</button>
+            ? <button className="workshop__btn workshop__btn--warn" disabled={!!phase} onClick={() => { void useAvatars.getState().broadcastMine().then((ok) => say(ok ? 'Your avatar is published.' : useAvatars.getState().adoptError ?? 'No relay took the avatar.')) }} title="Send the avatar you adopted while LOCAL to the relays">BROADCAST</button>
             : <span className="workshop__value">LOCAL</span>
         )}
         {phase ? (
@@ -115,8 +116,8 @@ export function AvatarBody(): JSX.Element | null {
               : 'Publish this object as the shape others see for you, at true scale: the white avatar on the grid is the size of one cell.'}
           >USE THIS SHARD</button>
         )}
-        {myAvatar && !phase && (
-          <button className="workshop__btn" onClick={() => { void useAvatars.getState().adopt(null).then((ok) => say(ok ? 'The icosahedron is your avatar again.' : useAvatars.getState().adoptError ?? 'No relay took the change.')) }} title="Back to the icosahedron; it owes no work">ICOSAHEDRON</button>
+        {myAvatar && (
+          <button className="workshop__btn" disabled={!!phase} onClick={() => { void useAvatars.getState().adopt(null).then((ok) => say(ok ? 'The icosahedron is your avatar again.' : useAvatars.getState().adoptError ?? 'No relay took the change.')) }} title="Back to the icosahedron">ICOSAHEDRON</button>
         )}
         </div>
         {/* What others will download and draw: its reach, its detail and its

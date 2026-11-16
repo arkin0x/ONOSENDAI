@@ -1,4 +1,3 @@
-
 /**
  * avatarMine.ts - NIP-13 work on an event, done: the seed's (DECK-0008).
  *

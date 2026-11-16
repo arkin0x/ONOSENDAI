@@ -18,10 +18,10 @@ vi.mock('../../lib/relay', () => ({
 
 import { verifyAvatar } from 'cyberspace-core'
 import { publish, query } from '../../lib/relay'
-import { AVATAR_KIND, avatarSize, avatarTemplate } from '../../lib/avatar'
+import { AVATAR_KIND, avatarShard, avatarSize, avatarTemplate } from '../../lib/avatar'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from '../useCyberspace'
-import { AVATAR_SIGN_PATIENCE_MS, avatarShard, useAvatars } from '../useAvatars'
+import { AVATAR_SIGN_PATIENCE_MS, useAvatars } from '../useAvatars'
 
 const built = () => {
   const s = newShard('me')
@@ -179,6 +179,20 @@ describe('useAvatars', () => {
       const old = { ...t, tags: [...t.tags, nonce], pubkey: pk, id: 'ff'.repeat(32), sig: '' }
       expect(avatarShard(old)?.name).toBe('Arches')
     }
+  })
+
+  it('your own kept avatar is checked on load as everyone else\'s is', () => {
+    const me = useCyberspace.getState().identity.pubkey
+    const t = avatarTemplate(built(), 30)
+    const big = { ...t, content: t.content.replace(/}$/, `,"pad":"${'a'.repeat(131_072)}"}`), pubkey: me, id: 'ff'.repeat(32), sig: '' }
+    localStorage.setItem('onosendai:avatar', JSON.stringify({ pubkey: me, payload: JSON.parse(t.content), event: big, published: false }))
+    useAvatars.getState().loadMine()
+    expect(useAvatars.getState().shards[me]).toBeNull()
+    expect(useAvatars.getState().mineEvent?.id).toBe(big.id)
+    // Within the limit, drawn from the kept event.
+    localStorage.setItem('onosendai:avatar', JSON.stringify({ pubkey: me, payload: JSON.parse(t.content), event: { ...big, content: t.content }, published: false }))
+    useAvatars.getState().loadMine()
+    expect(useAvatars.getState().shards[me]?.name).toBe('Arches')
   })
 
   it('an event that is not an avatar every client draws is the dodecahedron to everyone', async () => {

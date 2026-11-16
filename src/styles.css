@@ -7444,7 +7444,7 @@ select.avatars__input option:checked {
 .comments__empty { margin: 4px 0 0; font-size: 10px; letter-spacing: 0.05em; color: var(--dim); line-height: 1.4; }
 .comments__error { margin: 4px 0 0; font-size: 10px; color: #ff6b6b; }
 
-/* The avatar's price and, while it is mined, the progress: one dim line under the row. */
+/* The avatar's reach, detail and size, or where an adopt is: one dim line under the row. */
 .workshop__work {
   flex-basis: 100%;
   font-size: 10px;

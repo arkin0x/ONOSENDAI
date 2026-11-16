@@ -7,8 +7,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import { AVATAR_CONTENT_MAX, AVATAR_KIND, verifyAvatar } from 'cyberspace-core'
-import { avatarSize } from '../avatar'
-import { avatarShard } from '../../store/useAvatars'
+import { fromPayload } from 'sno-core/shards'
+import { avatarShard, avatarSize } from '../avatar'
 import vectors from './fixtures/avatar-vectors.json'
 
 interface Recipe { prefix: string; fill: string; count: number; suffix: string }
@@ -28,8 +28,11 @@ describe('avatar golden vectors (spec 8.10)', () => {
       const e = row.event as VectorEvent
       const event = { ...e, content: contentOf(e) }
       expect(verifyAvatar(event), row.name).toEqual(row.verdict)
-      // What every avatar is drawn by: nothing the spec refuses, and nothing for the default avatar.
-      if (!row.verdict.ok) expect(avatarShard(event), row.name).toBeNull()
+      // What every avatar is drawn by: nothing the spec refuses, nothing for the default avatar,
+      // and everything else that is valid SNO (DECK-0003 1.9; some vectors are not), tags unread.
+      if (!row.verdict.ok) { expect(avatarShard(event), row.name).toBeNull(); continue }
+      const sno = fromPayload(JSON.parse(event.content), 'vector')
+      expect(avatarShard(event) !== null, row.name).toBe(sno !== null)
     }
   })
 

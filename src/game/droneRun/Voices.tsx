@@ -18,11 +18,15 @@
  * - The game's sound switch (M, the speaker on the HUD) and MUTE ALL
  *   (store/useSoundMutes) silence the voices: they fade out and every node
  *   is stopped and parted.
- * - The page hidden or the screen gone: every node stopped and parted at
- *   once. The run paused (a card up): each voice fades and keeps its drone.
+ * - The page hidden or the screen gone: every voice fades out, is stopped
+ *   on schedule and parted. The run paused (a card up): each voice fades
+ *   and keeps its drone.
+ * - Voices that throw (sound data the checks missed) are stopped for the
+ *   rest of the run; the game plays on.
  *
- * A recording can listen in (setVoiceTap): it is handed each frame's facts
- * and the camera, so it can render the same voices offline.
+ * A recording can listen in (setVoiceTap, only where the DEV handle is
+ * allowed): it is handed each frame's facts and the camera, so it can
+ * render the same voices offline.
  */
 
 import { useEffect, useMemo } from 'react'
@@ -34,6 +38,7 @@ import { audioListener, moveListener } from '../../store/useHiddenAudio'
 import { droneRunSilent, gameBus } from './audio'
 import { DroneVoices, soundsOf, type VoiceDrone, type VoiceInput } from './droneVoices'
 import { PRIORITY, type DroneRunView } from './view'
+import { devHandleAllowed } from './devHandle'
 
 /** Whether this is a phone: a coarse pointer (fewer voices, equal-power panning). */
 function phoneLike(): boolean {
@@ -42,9 +47,14 @@ function phoneLike(): boolean {
 
 export type VoiceTap = (input: VoiceInput, camera: Camera) => void
 let tap: VoiceTap | null = null
-/** A recording's ear on every frame's facts (development and recordings only; null to stop). */
+/** A recording's ear on every frame's facts; null to stop. Only where the DEV handle is allowed (devHandle.ts: development, or ?droneRunDebug=1 off the production hosts). */
 export function setVoiceTap(fn: VoiceTap | null): void {
-  tap = fn
+  tap = fn && devHandleAllowed() ? fn : null
+}
+
+/** The shared context's time while it runs, so a teardown fades and stops on schedule; else undefined (silent anyway: at once). */
+function nowIfRunning(): number | undefined {
+  return audioRunning() ? audioContext()?.currentTime : undefined
 }
 
 /** The voices' facts for this frame, from the runner, into reused objects. */
@@ -82,24 +92,23 @@ export function Voices({ view }: { view: DroneRunView }): null {
   }), [view])
   const pool = useMemo<VoiceDrone[]>(() => [], [view])
 
-  // The screen gone or the page hidden: every node stopped and parted at once.
+  // The screen gone or the page hidden: every voice fades out, stops, and is parted.
   useEffect(() => {
-    const hide = (): void => { if (document.visibilityState === 'hidden') voices.dispose() }
+    const hide = (): void => { if (document.visibilityState === 'hidden') voices.dispose(nowIfRunning()) }
     document.addEventListener('visibilitychange', hide)
     return () => {
       document.removeEventListener('visibilitychange', hide)
-      voices.dispose()
+      voices.dispose(nowIfRunning())
     }
   }, [voices])
+  // Voices that threw (bad sound data the checks missed) stay off for this run rather than stop the game.
+  const failed = useMemo(() => ({ on: false }), [voices])
 
   useFrame(({ camera }) => {
     const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden'
-    const live = !hidden && !droneRunSilent() && audioRunning()
+    const live = !hidden && !failed.on && !droneRunSilent() && audioRunning()
     if (!live) {
-      if (voices.slots.length) {
-        const ac = audioContext()
-        voices.dispose(ac && !hidden ? ac.currentTime : undefined)
-      }
+      if (voices.slots.length) voices.dispose(nowIfRunning())
       if (!tap) return
     }
     fill(view, input, pool)
@@ -108,7 +117,13 @@ export function Voices({ view }: { view: DroneRunView }): null {
     const ac = audioContext()
     if (!ac || audioListener() === null) return
     moveListener(camera)
-    voices.frame(ac, gameBus(ac), input, ac.currentTime)
+    try {
+      voices.frame(ac, gameBus(ac), input, ac.currentTime)
+    } catch (e) {
+      failed.on = true
+      voices.dispose(nowIfRunning())
+      console.warn('DRONE RUN: drone voices stopped', e)
+    }
   }, PRIORITY.fill)
   return null
 }

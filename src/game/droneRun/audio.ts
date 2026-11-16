@@ -67,9 +67,10 @@ const lastAt = new Map<string, number>()
 const REPEAT_GAP_S = 0.03
 
 let noise: { ctx: BaseAudioContext; buf: AudioBuffer } | null = null
-function noiseBuffer(ac: BaseAudioContext): AudioBuffer {
+/** Two seconds of white noise per context: the one-shots' hiss, and the drones' looped rotor wash (long enough that its loop is not heard). */
+export function noiseBuffer(ac: BaseAudioContext): AudioBuffer {
   if (noise?.ctx === ac) return noise.buf
-  const len = Math.floor(ac.sampleRate * 0.5)
+  const len = Math.floor(ac.sampleRate * 2)
   const buf = ac.createBuffer(1, len, ac.sampleRate)
   const data = buf.getChannelData(0)
   for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1

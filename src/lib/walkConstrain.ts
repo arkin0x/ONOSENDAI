@@ -590,3 +590,134 @@ export function enclosed(mesh: WallMesh, p: readonly [number, number, number], c
   }
   return false
 }
+
+/** One placement's corners where it stands, for the eye's triangles (trianglesNear): their own, so they never share firstHit's. */
+let eyeScratch = new Float64Array(0)
+
+/** Whether triangle a, b, c (in `t`) has corners on both sides of, or inside, the box lo..hi on every axis. */
+function triMeetsBox(t: Float64Array, a: number, b: number, c: number, lo: readonly number[], hi: readonly number[]): boolean {
+  for (let q = 0; q < 3; q++) {
+    if (Math.max(t[a + q], t[b + q], t[c + q]) < lo[q]) return false
+    if (Math.min(t[a + q], t[b + q], t[c + q]) > hi[q]) return false
+  }
+  return true
+}
+
+/**
+ * The blocking triangles of `mesh` that come into the box `lo`..`hi` (the
+ * shard's render frame, model units), nine numbers each, for the WALK eye's
+ * tests (store/walkWalls.ts eyeReach): gathered once a question, so the
+ * questions it asks again and again as it steps the eye back look only at
+ * what is near. A placement wholly outside the box is passed by. With
+ * `clip`, the shard's own triangles wholly outside the region box are left
+ * out, where they are not drawn; one that crosses the region's wall is kept
+ * whole, which can only hold the eye further back, never let it through.
+ */
+export function trianglesNear(mesh: WallMesh, lo: readonly number[], hi: readonly number[], clip?: Box): Float64Array {
+  const out: number[] = []
+  const take = (t: Float64Array, a: number, b: number, c: number): void => {
+    out.push(t[a], t[a + 1], t[a + 2], t[b], t[b + 1], t[b + 2], t[c], t[c + 1], t[c + 2])
+  }
+  const t = mesh.tris
+  for (let n = 0; n < t.length; n += 9) {
+    if (!triMeetsBox(t, n, n + 3, n + 6, lo, hi)) continue
+    if (clip && !triMeetsBox(t, n, n + 3, n + 6, clip.min, clip.max)) continue
+    take(t, n, n + 3, n + 6)
+  }
+  for (const p of mesh.placements) {
+    let apart = false
+    for (let q = 0; q < 3; q++) if (hi[q] < p.min[q] - NEAR || lo[q] > p.max[q] + NEAR) apart = true
+    if (apart) continue
+    const { corners, tris } = p.walls
+    const f = p.f
+    if (eyeScratch.length < corners.length) eyeScratch = new Float64Array(Math.max(corners.length, eyeScratch.length * 2))
+    for (let q = 0; q < corners.length; q += 3) {
+      const r0 = corners[q], r1 = corners[q + 1], r2 = corners[q + 2]
+      eyeScratch[q] = f[0] * r0 + f[4] * r1 + f[8] * r2 + f[12]
+      eyeScratch[q + 1] = f[1] * r0 + f[5] * r1 + f[9] * r2 + f[13]
+      eyeScratch[q + 2] = f[2] * r0 + f[6] * r1 + f[10] * r2 + f[14]
+    }
+    for (let n = 0; n < tris.length; n += 3) {
+      const a = tris[n] * 3, b = tris[n + 1] * 3, c = tris[n + 2] * 3
+      if (triMeetsBox(eyeScratch, a, b, c, lo, hi)) take(eyeScratch, a, b, c)
+    }
+  }
+  return Float64Array.from(out)
+}
+
+/** Triangle `n` of `tris` (trianglesNear)'s normal, unit length, into `out`; false for a sliver with none. */
+export function triangleNormal(tris: Float64Array, n: number, out: number[]): boolean {
+  const e1x = tris[n + 3] - tris[n], e1y = tris[n + 4] - tris[n + 1], e1z = tris[n + 5] - tris[n + 2]
+  const e2x = tris[n + 6] - tris[n], e2y = tris[n + 7] - tris[n + 1], e2z = tris[n + 8] - tris[n + 2]
+  const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x
+  const len = Math.hypot(nx, ny, nz)
+  if (!(len > FLAT * Math.hypot(e1x, e1y, e1z) * Math.hypot(e2x, e2y, e2z)) || !(len > 0)) return false
+  out[0] = nx / len; out[1] = ny / len; out[2] = nz / len
+  return true
+}
+
+/**
+ * The first triangle of `tris` (trianglesNear) a straight segment crosses, in
+ * any direction: the WALK eye's line from the walker's point out to the eye,
+ * which unlike a step need not run along an axis. The segment is `o + s * d`
+ * for `s` in (`minS`, 1]. Returns the share `s` of the nearest hit and how
+ * squarely the segment meets that face (the cosine between them, 0 edge-on to
+ * 1 head-on), or null when it crosses nothing.
+ */
+export function segmentHit(tris: Float64Array, o: readonly [number, number, number], d: readonly [number, number, number], minS: number): { s: number; square: number } | null {
+  const len = Math.hypot(d[0], d[1], d[2])
+  if (!(len > 0)) return null
+  let best: { s: number; square: number } | null = null
+  for (let a = 0; a < tris.length; a += 9) {
+    const b = a + 3, c = a + 6
+    // Moller and Trumbore, as `enclosed` crosses.
+    const e1x = tris[b] - tris[a], e1y = tris[b + 1] - tris[a + 1], e1z = tris[b + 2] - tris[a + 2]
+    const e2x = tris[c] - tris[a], e2y = tris[c + 1] - tris[a + 1], e2z = tris[c + 2] - tris[a + 2]
+    const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x
+    const det = e1x * px + e1y * py + e1z * pz
+    const size = Math.hypot(e1x, e1y, e1z) * Math.hypot(e2x, e2y, e2z)
+    if (!(Math.abs(det) > FLAT * size * len)) continue
+    const tx = o[0] - tris[a], ty = o[1] - tris[a + 1], tz = o[2] - tris[a + 2]
+    const u = (tx * px + ty * py + tz * pz) / det
+    if (u < -EDGE_SLACK || u > 1 + EDGE_SLACK) continue
+    const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x
+    const v = (d[0] * qx + d[1] * qy + d[2] * qz) / det
+    if (v < -EDGE_SLACK || u + v > 1 + EDGE_SLACK) continue
+    const s = (e2x * qx + e2y * qy + e2z * qz) / det
+    if (!(s > minS) || s > 1) continue
+    if (best !== null && s >= best.s) continue
+    // |n . d| / (|n| |d|), with n = e1 x e2.
+    const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x
+    best = { s, square: Math.abs(nx * d[0] + ny * d[1] + nz * d[2]) / (Math.hypot(nx, ny, nz) * len) }
+  }
+  return best
+}
+
+/** How far `p` is from triangle `n` of `tris` (Ericson, Real-Time Collision Detection 5.1.5). */
+export function triangleDistance(tris: Float64Array, n: number, p: readonly number[]): number {
+  const ax = tris[n], ay = tris[n + 1], az = tris[n + 2]
+  const abx = tris[n + 3] - ax, aby = tris[n + 4] - ay, abz = tris[n + 5] - az
+  const acx = tris[n + 6] - ax, acy = tris[n + 7] - ay, acz = tris[n + 8] - az
+  const at = (x: number, y: number, z: number): number => Math.hypot(p[0] - x, p[1] - y, p[2] - z)
+  const apx = p[0] - ax, apy = p[1] - ay, apz = p[2] - az
+  const d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz
+  if (d1 <= 0 && d2 <= 0) return at(ax, ay, az)
+  const bpx = p[0] - tris[n + 3], bpy = p[1] - tris[n + 4], bpz = p[2] - tris[n + 5]
+  const d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz
+  if (d3 >= 0 && d4 <= d3) return at(tris[n + 3], tris[n + 4], tris[n + 5])
+  const vc = d1 * d4 - d3 * d2
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) { const v = d1 / (d1 - d3); return at(ax + abx * v, ay + aby * v, az + abz * v) }
+  const cpx = p[0] - tris[n + 6], cpy = p[1] - tris[n + 7], cpz = p[2] - tris[n + 8]
+  const d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz
+  if (d6 >= 0 && d5 <= d6) return at(tris[n + 6], tris[n + 7], tris[n + 8])
+  const vb = d5 * d2 - d1 * d6
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) { const w = d2 / (d2 - d6); return at(ax + acx * w, ay + acy * w, az + acz * w) }
+  const va = d3 * d6 - d5 * d4
+  if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
+    const w = (d4 - d3) / ((d4 - d3) + (d5 - d6))
+    return at(tris[n + 3] + (tris[n + 6] - tris[n + 3]) * w, tris[n + 4] + (tris[n + 7] - tris[n + 4]) * w, tris[n + 5] + (tris[n + 8] - tris[n + 5]) * w)
+  }
+  const den = 1 / (va + vb + vc)
+  const v = vb * den, w = vc * den
+  return at(ax + abx * v + acx * w, ay + aby * v + acy * w, az + abz * v + acz * w)
+}

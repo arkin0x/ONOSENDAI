@@ -12,11 +12,22 @@
  * changes every frame, and nothing should re-render because of it.
  */
 
-import { Vector3 } from 'three'
+import { Quaternion, Vector3 } from 'three'
 import type { AxisName, ViewAxes } from './space'
 
-/** The eye's target in render cells: the predicted head the walk is easing toward. */
+/**
+ * The walker's point in render cells: the predicted head the walk is easing
+ * toward, where the avatar is drawn. The camera itself sits at the avatar's
+ * eye, above or about this point (scene/walkEyeRig.ts).
+ */
 export const walkEye = new Vector3()
+
+/**
+ * The body's turn in WALK, render space: the camera's heading about up only
+ * (lib/avatarEye.ts yawOnly), so the avatar turns left and right with you and
+ * does not tip when you look up or down. Written once a frame by the rig.
+ */
+export const walkBody = new Quaternion()
 
 /**
  * A fall in WALK (store/useWalk.ts), as the rig draws it: while `active`,

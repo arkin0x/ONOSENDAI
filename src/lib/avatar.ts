@@ -72,8 +72,9 @@ export function avatarFromEvent(ev: { kind: number; pubkey: string; content: str
   if (ev.kind !== AVATAR_KIND) return null
   if (!ev.content) return null
   try {
-    const shard = fromPayload(JSON.parse(ev.content), `avatar:${ev.pubkey}`)
-    return shard && keepOwnTable(shard, ev.pubkey)
+    const raw = JSON.parse(ev.content)
+    const shard = fromPayload(raw, `avatar:${ev.pubkey}`)
+    return shard && keepOwnTable(v1Eye(shard, raw), ev.pubkey)
   } catch {
     return null
   }
@@ -89,6 +90,19 @@ export function avatarShard(ev: { kind: number; pubkey: string; content: string;
   if (!ev.content) return null
   if (!verifyAvatar(ev).ok) return null
   return avatarFromEvent(ev)
+}
+
+/**
+ * An eye (lib/avatarEye.ts) is in its payload's own frame, as the vertices
+ * are. A version 1 payload's Z points the other way (DECK-0003 §2), and its
+ * vertices are read with it negated; its eye is put into the version 2 frame
+ * here, the one every other reader and writer of `extra` assumes, so a copy
+ * written back out as version 2 keeps its eye where it was.
+ */
+function v1Eye(shard: ShardModel, raw: unknown): ShardModel {
+  const eye = shard.extra?.eye
+  if ((raw as { v?: unknown } | null)?.v !== 1 || !Array.isArray(eye) || eye.length !== 3 || typeof eye[2] !== 'number') return shard
+  return { ...shard, extra: { ...shard.extra, eye: [eye[0], eye[1], eye[2] === 0 ? 0 : -eye[2]] } }
 }
 
 /**

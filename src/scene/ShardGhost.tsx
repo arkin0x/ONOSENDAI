@@ -1,9 +1,13 @@
 /**
  * ShardGhost.tsx — the thing about to be placed, at the cursor.
  *
- * While deploying, this draws what you are aiming, dimmed, where and at the
- * size it would land: a shard at 2^(unit - scaleExp) cells per model unit, or a
- * message as a note. Moving the cursor moves it, so you place by looking.
+ * While deploying, this draws what you are aiming, see-through, where and at
+ * the size it would land: a shard at 2^(unit - scaleExp) cells per model unit,
+ * or a message as a note. Moving the cursor moves it, so you place by looking.
+ * A shard looks as it will once placed (its own colours and the headlamp's
+ * shading, at GHOST_OPACITY), with thin crisp edges (ShardMesh GHOST_EDGES)
+ * and no bloom, so it lines up with what stands around it (owner, 2026-11-16:
+ * "its hard to line up what we are placing").
  *
  * The unit is the deploy bar's `deployUnit`, not the workshop model's, because
  * the two can differ: SCALE MULTIPLIER changes the size this deployment goes
@@ -173,7 +177,8 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   return (
     <>
       <group ref={group}>
-        <ShardMesh shard={shard} scale={scale} ghost headlamp clip={clip} pose={pose} />
+        {/* As the world draws what lands: its own colours and shading, see-through, crisp edges, no bloom (shardFaces.ts GHOST_OPACITY). */}
+        <ShardMesh shard={shard} scale={scale} ghost headlamp world noBloom edges clip={clip} pose={pose} />
       </group>
       {sealed}
       {pending.type === 'chest' && pending.name && <WorldLabel text={`▣ ${pending.name}`} color="#ffd27d" follow={landingAt} align="center" px={13} opacity={0.5} />}

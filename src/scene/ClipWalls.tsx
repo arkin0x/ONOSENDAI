@@ -27,7 +27,7 @@ import {
 } from 'three'
 import { WorldLabel } from './WorldLabel'
 import { FACE_TAG_STENCIL } from './ShardMesh'
-import { OVERLAY_ORDER } from './shardFaces'
+import { NO_BLOOM_BLEND, OVERLAY_ORDER } from './shardFaces'
 
 /** Seconds one outward breath of a clipped wall takes. */
 const WALL_CYCLE = 1.6
@@ -96,9 +96,16 @@ interface Props {
   label?: string | null
   /** A filled translucent plane (the default), or only its outline (a door's room: see the file's comment). */
   look?: 'fill' | 'frame'
+  /**
+   * False keeps the walls out of the bloom everywhere, not only over shard
+   * faces: one material, the alpha under it kept (shardFaces.ts
+   * NO_BLOOM_BLEND). BUILD's deploy region box, whose breathing walls glowed
+   * green across what was being lined up (owner, 2026-11-16).
+   */
+  bloom?: boolean
 }
 
-export function ClipWalls({ centre, size, faces, color, hideNear = false, opacity = WALL_OPACITY, label = 'ZOOM OUT', look = 'fill' }: Props): JSX.Element | null {
+export function ClipWalls({ centre, size, faces, color, hideNear = false, opacity = WALL_OPACITY, label = 'ZOOM OUT', look = 'fill', bloom = true }: Props): JSX.Element | null {
   const walls = useMemo<Wall[]>(() => faces.map(({ slot, sign }) => {
     // PlaneGeometry faces +Z; rotate it to face the slot's render axis. Its
     // extents are the face's own two render axes, so the plane is exactly
@@ -125,7 +132,7 @@ export function ClipWalls({ centre, size, faces, color, hideNear = false, opacit
   // depthWrite off, so a translucent plane never punches a hole in what sits
   // behind it.
   // A frame is lines, which neither tag nor cover a face: one material, no split.
-  const materials = useMemo(() => (look === 'frame' ? [new LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false, toneMapped: false })] : [OFF_FACES, OVER_FACES].map((split) => new MeshBasicMaterial({
+  const materials = useMemo(() => (look === 'frame' ? [new LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false, toneMapped: false, ...(bloom ? {} : NO_BLOOM_BLEND) })] : (bloom ? [OFF_FACES, OVER_FACES] : [NO_BLOOM_BLEND]).map((split) => new MeshBasicMaterial({
     color,
     transparent: true,
     opacity,
@@ -135,7 +142,7 @@ export function ClipWalls({ centre, size, faces, color, hideNear = false, opacit
     depthWrite: false,
     toneMapped: false,
     ...split,
-  }))), [color, opacity, look])
+  }))), [color, opacity, look, bloom])
   useEffect(() => () => { for (const m of materials) m.dispose() }, [materials])
 
   const meshes = useRef<Array<Group | null>>([])

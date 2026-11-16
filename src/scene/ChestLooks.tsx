@@ -117,7 +117,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const follows = useSyncExternalStore(onFollows, followsVersion)
   const frames = useRef<KeptLookFrames>(new Map())
 
-  // Further out while BUILD is pulled back (buildZoom.ts).
+  // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const placed = useMemo<PlacedLook[]>(() => {
     if (!markShown('note', scaleExp)) { frames.current.clear(); return [] }

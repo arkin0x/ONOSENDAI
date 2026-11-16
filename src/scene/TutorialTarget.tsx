@@ -99,7 +99,7 @@ export function TutorialTarget({ axes }: { axes: ViewAxes }): JSX.Element | null
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
 
-  // Further out while BUILD is pulled back (buildZoom.ts).
+  // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const at = useMemo(() => targetMark(phase !== 'off', layout, anchor, anchorPlane, scaleExp, axes, reach), [phase, layout, anchorPlane, anchor, scaleExp, axes, reach])
   const guiding = phase === 'guiding'

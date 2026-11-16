@@ -48,7 +48,7 @@ export function TargetAvatars({ axes }: Props): JSX.Element | null {
   }, [anchor, scaleExp, axes])
 
   const blocked = useMutes((s) => s.muted.pubkeys)
-  // Further out while BUILD is pulled back (buildZoom.ts).
+  // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const near = useMemo(() => {
     if (scaleExp >= AVATAR_SCALE_LIMIT) return []

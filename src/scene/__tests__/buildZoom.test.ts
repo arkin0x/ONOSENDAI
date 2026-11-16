@@ -3,9 +3,9 @@
  * Landscape Kit tiles (arkinox, 2026-11-15: "when building the landscape
  * tiles i feel like i can't zoom out far enough"); in every view the fog
  * never darkens what the camera looks at ("the darkness is obscuring my
- * avatar at near the maximum zoom-out", in HOP); the layers' reach doubles
- * ahead of the fog so nothing seen is undrawn; and at the usual orbit every
- * view keeps its fog and its reach.
+ * avatar at near the maximum zoom-out", in HOP); and the layers' reach
+ * doubles ahead of the fog so nothing seen is undrawn. How the fog follows
+ * the zoom is fogFollowsZoom.test.ts.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -13,16 +13,13 @@ import { readFileSync } from 'node:fs'
 import {
   BUILD_MAX_GIBSONS,
   cameraNear,
-  LAG_SLACK,
-  nextAim,
   nextReach,
   orbitMaxDistance,
-  reachNeed,
   reachStep,
   stepOrbitLimit,
   useDrawReach,
 } from '../buildZoom'
-import { CULL_REACH, FOG_START_SHARE, fogFar, fogFarStep, TARGET_FOG_SHARE } from '../fog'
+import { CULL_REACH, fogFar, fogNear } from '../fog'
 import { CAMERA_FAR, CAMERA_NEAR, FOV, ORBIT_MAX_DISTANCE } from '../camera'
 import { distanceShare, headlampReach, NEAR_SHARE, REACH_MAX } from '../headlamp'
 
@@ -30,16 +27,14 @@ import { distanceShare, headlampReach, NEAR_SHARE, REACH_MAX } from '../headlamp
 const halfWidthAt = (distance: number, aspect: number): number => distance * Math.tan((FOV * Math.PI) / 360) * aspect
 
 /** A SceneFog frame, as Scene.tsx runs it. */
-interface Fog { far: number; aim: number; reach: number; mode: boolean | null }
-function frame(f: Fog, distance: number, fromOrigin: number, base = false, dt = 1 / 60): Fog {
-  const aim = nextAim(f.aim, reachNeed(distance, fromOrigin))
-  const far = fogFarStep(f.far, f.mode, base, fromOrigin, dt, aim, distance)
-  const settled = Math.abs(far - fogFar(base, fromOrigin, aim, distance)) < 0.5
-  return { far, aim, reach: nextReach(f.reach, aim, far + fromOrigin, settled), mode: base }
+interface Fog { near: number; far: number; reach: number }
+function frame(f: Fog, distance: number, fromOrigin: number, base = false): Fog {
+  const far = fogFar(base, distance)
+  return { near: fogNear(base, distance), far, reach: nextReach(f.reach, far + fromOrigin) }
 }
-const fresh = (): Fog => ({ far: 166, aim: CULL_REACH, reach: CULL_REACH, mode: false })
-/** The fog after the camera has held `distance` from its target and `fromOrigin` from the origin for ten seconds. */
-const settled = (distance: number, fromOrigin: number, base = false): Fog => { let f = fresh(); for (let i = 0; i < 600; i++) f = frame(f, distance, fromOrigin, base); return f }
+const fresh = (): Fog => ({ near: fogNear(false, 26), far: fogFar(false, 26), reach: CULL_REACH })
+/** The fog after the camera has held `distance` from its target and `fromOrigin` from the origin for a while. */
+const settled = (distance: number, fromOrigin: number, base = false): Fog => { let f = fresh(); for (let i = 0; i < 10; i++) f = frame(f, distance, fromOrigin, base); return f }
 
 describe('how far the orbit pulls back', () => {
   it('is 96 cells outside BUILD at every zoom', () => {
@@ -89,29 +84,13 @@ describe('how far the orbit pulls back', () => {
 })
 
 describe('the fog never darkens what the camera looks at', () => {
-  it('at the usual orbit (40 cells or nearer) every view keeps its fog and its 192-cell reach', () => {
-    for (let d = 2; d <= 40; d += 1) {
-      for (const fromOrigin of [d, d + 24 * Math.sqrt(3)]) {
-        const f = settled(d, fromOrigin)
-        expect(f.reach).toBe(CULL_REACH)
-        expect(f.far).toBeCloseTo(Math.max(96, Math.min(192, CULL_REACH - fromOrigin)), 6)
-        // TV's and WALK's own 96.
-        expect(settled(d, fromOrigin, true).far).toBe(96)
-      }
-    }
-    expect(settled(26, 26).far).toBeCloseTo(166, 6)
-    // fogFar with the usual reach is the old one, for any camera.
-    for (let o = 0; o <= 300; o += 0.5) expect(fogFar(false, o)).toBe(Math.max(96, Math.min(192, CULL_REACH - o)))
-  })
-
   it('HOP and VIEW at their 96-cell limit: the target and the ground about it fully coloured (it sat at the fog\'s black end)', () => {
-    // Before: the avatar 96 out, the fog black at 96.
-    expect(fogFar(false, 96 + 24)).toBe(96)
     const f = settled(96, 96 + 24)
-    expect(f.reach).toBe(384)
-    expect(f.far).toBeCloseTo(384 - 120, 6)
-    // The avatar, and 100 cells of ground past it, nearer than where the fog starts.
-    expect(96 + 100).toBeLessThan(f.far * FOG_START_SHARE)
+    expect(f.near).toBeCloseTo(184, 6)
+    expect(f.far).toBeCloseTo(496, 6)
+    expect(f.reach).toBe(768)
+    // The avatar, and 80 cells of ground past it, nearer than where the fog starts.
+    expect(96 + 80).toBeLessThan(f.near)
   })
 
   it('in every mode at every zoom out to its limit, the target is well inside the unfogged range, and the fog black inside the reach', () => {
@@ -126,14 +105,15 @@ describe('the fog never darkens what the camera looks at', () => {
         for (let d = 0; d <= m.limit(e); d += 2) {
           for (const fromOrigin of [d, d + 24 * Math.sqrt(3)]) {
             const f = settled(d, fromOrigin, m.base)
-            const start = f.far * FOG_START_SHARE
-            // At least 1.5 times as far as the target, or 80 cells clear in TV and WALK.
-            expect(start, `${m.name} 2^${e} at ${d}`).toBeGreaterThanOrEqual(Math.min(d * 1.5, 80) + (d * 1.5 > 80 ? d * 1.5 - 80 : 0) - 1e-6)
-            expect(start).toBeGreaterThanOrEqual(Math.min(d * TARGET_FOG_SHARE, f.far) * FOG_START_SHARE - 1e-6)
+            // At least 1.5 times as far as the target, and in the third-person views 40 cells more.
+            expect(f.near, `${m.name} 2^${e} at ${d}`).toBeGreaterThanOrEqual(d * 1.5 + (m.base ? 0 : 40) - 1e-6)
             expect(f.far).toBeLessThan(CAMERA_FAR)
-            if (!m.base) expect(f.far + fromOrigin).toBeLessThanOrEqual(f.reach + 1e-9)
-            // At 2^0 in BUILD, from 400 cells out, a 3 by 3 of 128 tiles' far corner (192 * sqrt 2 past the cursor) is clear too.
-            if (m.name === 'BUILD' && e === 0 && d >= 400) expect(d + 192 * Math.SQRT2).toBeLessThan(start)
+            expect(f.far + fromOrigin).toBeLessThanOrEqual(f.reach + 1e-9)
+            // At 2^0 in BUILD a 3 by 3 of 128 tiles' far corner (192 * sqrt 2 past the cursor, at most) is clear from
+            // 480 cells out, and from 400 the fog has taken no more than 5% of it.
+            const corner = d + 192 * Math.SQRT2
+            if (m.name === 'BUILD' && e === 0 && d >= 480) expect(corner).toBeLessThan(f.near)
+            if (m.name === 'BUILD' && e === 0 && d >= 400) expect((corner - f.near) / (f.far - f.near)).toBeLessThan(0.05)
           }
         }
       }
@@ -142,66 +122,74 @@ describe('the fog never darkens what the camera looks at', () => {
 
   it('the reach doubles from 192 as far as the fog needs: 6144 at BUILD\'s 1280-cell limit', () => {
     expect(reachStep(0)).toBe(192)
-    expect(reachStep(193)).toBe(384)
+    expect(reachStep(193)).toBe(272)
+    expect(reachStep(273)).toBe(384)
     expect(reachStep(2700)).toBe(3072)
+    expect(reachStep(5000)).toBe(6144)
+    expect(reachStep(1e9)).toBe(192 * 1024)
+    // Never more than the square root of 2 past what was asked (a cell rounded up), from the least step up.
+    for (let need = 192; need < 100000; need *= 1.01) expect(reachStep(need) / need).toBeLessThanOrEqual(Math.SQRT2 * 1.001)
     const f = settled(1280, 1280 + 24 * Math.sqrt(3))
     expect(f.reach).toBe(6144)
-    // As far as the reach allows: about 4822 cells, inside the far plane.
-    expect(f.far).toBeCloseTo(6144 - 1280 - 24 * Math.sqrt(3), 6)
+    expect(f.far).toBeCloseTo(160 + 3.5 * 1280, 6)
     expect(f.far).toBeLessThan(CAMERA_FAR)
   })
 
-  it('zooming out and back in, then leaving BUILD: the fog heads inside the reach, lags it by less than LAG_SLACK, and comes back to the old fog and reach', () => {
+  it('zooming out and back in, then leaving BUILD: the fog black inside the reach every frame, one change of reach a step, no flipping near a step', () => {
     let f = fresh()
     let d = 26
-    let worst = 0
     let changes = 0
-    const check = (): void => {
-      // Where the fog is going is inside the reach.
-      expect(fogFar(false, d, f.aim, d) + d).toBeLessThanOrEqual(f.reach + 1e-9)
-      worst = Math.max(worst, f.far + d - f.reach)
+    const step = (): void => {
+      const was = f.reach
+      f = frame(f, d, d)
+      if (f.reach !== was) changes++
+      expect(f.far + d).toBeLessThanOrEqual(f.reach + 1e-9)
+      expect(f.near).toBeGreaterThan(d * 1.5)
     }
-    const step = (): void => { const was = f.reach; f = frame(f, d, d); if (f.reach !== was) changes++; check() }
     // A wheel held out: the orbit grows 10% a frame to the limit, faster than a hand.
     while (d < 1280) { d = Math.min(1280, d * 1.1); step() }
     for (let i = 0; i < 120; i++) step()
     expect(f.reach).toBe(6144)
-    // One change of reach a doubling: 384, 768, 1536, 3072, 6144.
-    expect(changes).toBe(5)
-    // The fog easing in behind the pull-back is never further out than the slack.
-    expect(worst).toBeLessThan(LAG_SLACK)
+    // One change of reach a step: 384, 544, 768, 1087, 1536, 2173, 3072, 4345, 6144.
+    expect(changes).toBe(9)
     // And back in, held near a step to see it does not flip.
     while (d > 200) { d = Math.max(200, d / 1.1); step() }
-    // The reach comes in behind the fog as it settles.
     for (let i = 0; i < 300; i++) step()
-    expect(f.reach).toBe(768)
+    expect(f.reach).toBe(1536)
     changes = 0
     for (let i = 0; i < 300; i++) { d = 200 + 10 * Math.sin(i / 5); step() }
-    expect(changes).toBeLessThanOrEqual(1)
+    expect(changes).toBe(0)
     // Leaving BUILD 200 cells out: the camera eases in to HOP's 96 and the reach steps down behind the fog.
     for (let i = 0; i < 600; i++) { d = stepOrbitLimit(d, 96, 1 / 60, d); step() }
-    expect(f.reach).toBe(384)
-    // Then back to the usual orbit: the old fog and reach.
+    expect(f.reach).toBe(768)
+    // Then back to the usual orbit, the cursor at the origin.
     for (let i = 0; i < 600; i++) { d = Math.max(26, d - 1); step() }
-    expect(f.reach).toBe(CULL_REACH)
-    expect(f.far).toBeCloseTo(166, 6)
-    expect(worst).toBeLessThan(LAG_SLACK)
+    expect(f.reach).toBe(384)
+    expect(f.far).toBeCloseTo(251, 6)
   })
 
-  it('the reach comes back in once the fog has settled, even held at its 96-cell floor outside the reach', () => {
-    expect(nextReach(384, CULL_REACH, 300, false)).toBe(384)
-    expect(nextReach(384, CULL_REACH, 300, true)).toBe(CULL_REACH)
-    // Growing never waits for it.
-    expect(nextReach(CULL_REACH, 384, 100, false)).toBe(384)
-  })
-
-  it('a re-anchor at the usual orbit never changes the reach', () => {
-    let f = fresh()
+  it('a re-anchor never moves the fog, and at the usual orbit never changes the reach', () => {
+    let f = settled(26, 26)
+    const { near, far } = f
     for (let k = 0; k < 20; k++) {
       // The cursor leaves the field: the camera is up to 24 cells further from the origin in each axis, in one frame.
       const fromOrigin = k % 2 ? 26 : 26 + 24 * Math.sqrt(3)
-      for (let i = 0; i < 30; i++) { f = frame(f, 26, fromOrigin); expect(f.reach).toBe(CULL_REACH) }
+      for (let i = 0; i < 30; i++) {
+        f = frame(f, 26, fromOrigin)
+        expect(f.reach).toBe(384)
+        expect([f.near, f.far]).toEqual([near, far])
+      }
     }
+  })
+
+  it('the reach grows at once and shrinks only once the fog\'s end is well inside the smaller one', () => {
+    expect(nextReach(CULL_REACH, 300)).toBe(384)
+    expect(nextReach(384, 300)).toBe(384)
+    // 230 is more than 0.8 of 272: held.
+    expect(nextReach(384, 230)).toBe(384)
+    expect(nextReach(384, 210)).toBe(272)
+    expect(nextReach(384, 150)).toBe(CULL_REACH)
+    expect(nextReach(6144, 100)).toBe(CULL_REACH)
   })
 
   it('the reach store starts at CULL_REACH', () => {
@@ -254,11 +242,9 @@ describe('the scene is wired to it', () => {
     expect(scene).not.toMatch(/GRID_RADIUS \* 4/)
   })
 
-  it('the fog aims and sets the layers\' reach, and the headlamp takes the orbit\'s limit', () => {
+  it('the fog sets the layers\' reach beyond its end, and the headlamp takes the orbit\'s limit', () => {
     const fog = scene.slice(scene.indexOf('function SceneFog()'), scene.indexOf('\n}\n', scene.indexOf('function SceneFog()')))
-    expect(fog).toMatch(/aim\.current = nextAim\(aim\.current, reachNeed\(distance, fromOrigin\)\)/)
-    expect(fog).toMatch(/f\.far = fogFarStep\(f\.far, mode\.current, base, fromOrigin, dt, aim\.current, distance\)/)
-    expect(fog).toMatch(/nextReach\(was, aim\.current, f\.far \+ fromOrigin, settled\)/)
+    expect(fog).toMatch(/const reach = nextReach\(was, f\.far \+ state\.camera\.position\.length\(\)\)/)
     expect(fog).toMatch(/useDrawReach\.setState\(\{ reach \}\)/)
     expect(scene).toMatch(/headlampReach\(state\.camera\.position\.distanceTo\(controls\.target\) \+ viewRig\.reachOwed, controls\.maxDistance\)/)
   })

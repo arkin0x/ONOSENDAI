@@ -81,7 +81,7 @@ export function AudioSpheres({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const discovered = useShards((s) => s.discovered)
   const curated = useShards((s) => s.curated)
   const muted = useMutes((s) => s.muted)
-  // Further out while BUILD is pulled back (buildZoom.ts).
+  // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const spheres = useMemo(
     () => worldSpheres(on, anchor, plane, scaleExp, axes, reach),

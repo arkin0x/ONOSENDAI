@@ -147,7 +147,7 @@ export function Avatar(): JSX.Element | null {
   // range, your true position inside its cell in it.
   const anchor = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  // Further out while BUILD is pulled back (buildZoom.ts).
+  // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const at = useMemo(() => {
     const axes = useCyberspace.getState().axes()

@@ -68,7 +68,7 @@ export function WorldSeeds({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const births = useCeremony((s) => s.births)
   const views = useBlooms((s) => s.views)
 
-  // Further out while BUILD is pulled back (buildZoom.ts).
+  // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   // The seeds in this plane and in reach, read with every check before their DNA (§8.2).
   const near = useMemo(() => {

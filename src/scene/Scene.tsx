@@ -44,6 +44,7 @@ import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
 import { setWalkFacing, walkBody, walkEye, walkFacing, walkFall, walkFallUp, walkGlide } from '../lib/walkEye'
 import { WalkEyeRig } from './walkEyeRig'
 import { useAvatars } from '../store/useAvatars'
+import { tryEyeFor } from '../store/tryEye'
 import { clearWalkLook, lookRadPerPx, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
 import { tickFall, useWalk, walkDown } from '../store/useWalk'
 import { tickFluid } from '../store/walkFluid'
@@ -116,7 +117,7 @@ import { headlampReach, headlampUniforms } from './headlamp'
 import { lineFade } from './nearFade'
 import { COMPOSER_SAMPLES } from './composerBudget'
 import './radialFog'
-import { fogFar, fogNear } from './fog'
+import { fogFar, fogNear, stepFog, type FogState, type FogView } from './fog'
 import { cameraNear, nextReach, orbitMaxDistance, stepOrbitLimit, useDrawReach } from './buildZoom'
 import { flyGesture, panGesture, sceneMouse, steerToSpend, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
 import { StartLock } from '../lib/viewCamera'
@@ -391,7 +392,8 @@ const HEADLAMP_PRIORITY = 0.75
 
 /**
  * The scene's fog, its start and end following the camera's distance from
- * what it looks at (fog.ts fogNear, fogFar), smoothly, never stepping, and
+ * what it looks at (fog.ts fogNear, fogFar), smoothly, never stepping (a
+ * switch into or out of WALK eases with the eye's glide, fog.ts stepFog), and
  * the layers' reach set beyond its end (buildZoom.ts nextReach). One Fog for
  * the page, its distances moved in place every frame: a new Fog object would
  * send every fogged material back for its program (three compares the fog by
@@ -399,6 +401,7 @@ const HEADLAMP_PRIORITY = 0.75
  */
 function SceneFog(): JSX.Element {
   const fog = useRef<Fog>(null)
+  const kept = useRef<FogState>({ view: null, near: 0, far: 0, owed: null })
   const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
   useLayoutEffect(() => {
     // The browser harness reads and sets it, as it reads __rig.
@@ -413,11 +416,13 @@ function SceneFog(): JSX.Element {
       f.near = pin[0]
       f.far = pin[1]
     } else {
-      const base = useTv.getState().on || useCyberspace.getState().walking
+      // TV's own fog over a walk it shows; WALK's reaches far ahead of the walker (fog.ts WALK_FOG_FAR).
+      const view: FogView = useTv.getState().on ? 'tv' : useCyberspace.getState().walking ? 'walk' : 'orbit'
       // A stopped VIEW fly brings the target in close; the distance it drops is owed and fades (ViewFly.ts reachOwed).
       const distance = controls ? state.camera.position.distanceTo(controls.target) + viewRig.reachOwed : 0
-      f.near = fogNear(base, distance)
-      f.far = fogFar(base, distance)
+      kept.current = stepFog(kept.current, view, distance, performance.now())
+      f.near = kept.current.near
+      f.far = kept.current.far
     }
     // The layers draw at least as far as the fog's end can be seen from the
     // camera, out at once and in only well inside it: a step is in the black.
@@ -425,7 +430,7 @@ function SceneFog(): JSX.Element {
     const reach = nextReach(was, f.far + state.camera.position.length())
     if (reach !== was) useDrawReach.setState({ reach })
   }, HEADLAMP_PRIORITY)
-  return <fog ref={fog} attach="fog" args={[0x000000, fogNear(false, 0), fogFar(false, 0)]} />
+  return <fog ref={fog} attach="fog" args={[0x000000, fogNear('orbit', 0), fogFar('orbit', 0)]} />
 }
 
 /**
@@ -1211,7 +1216,8 @@ function Rig(): JSX.Element {
       const mixTo = s.walking ? 1 : 0
       eyeMix.current = mixTo + (eye.current.mixFrom - mixTo) * lerpRemaining(t)
       eyeRig.offset({
-        shard: useAvatars.getState().shards[s.focusPubkey()] ?? null,
+        // SET EYE's TRY WALK looks from the workshop shard's eye, unpublished (store/tryEye.ts).
+        shard: tryEyeFor(s.focusPubkey()) ?? useAvatars.getState().shards[s.focusPubkey()] ?? null,
         scaleExp: s.scaleExp,
         axes: s.axes(),
         plane: s.plane,

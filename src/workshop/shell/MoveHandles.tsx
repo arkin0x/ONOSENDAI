@@ -12,9 +12,15 @@
  * mistake (orbit a little to reach it). The bench reports where they stand
  * every frame it draws (benchAxes reportHandles); they are moved here without
  * React, as the compass labels are.
+ *
+ * In SET EYE (AVATAR's FIRST-PERSON EYE; shell/EyeBar) the same handles move
+ * the eye: the middle is an eye marker, a cyan ring with an eye, and a dashed
+ * line runs from it to the model's 0, 0, 0, labelled TODAY'S EYE, the eye
+ * every avatar had before it could choose one.
  */
 
 import { useEffect, useRef } from 'react'
+import { Eye } from 'lucide-react'
 import { TICKS_PER_UNIT } from 'sno-core/shards'
 import { dragHistory } from '../../lib/opacityStep'
 import { useWorkshop } from '../../store/useWorkshop'
@@ -42,8 +48,18 @@ export function handleAt(frame: HandleFrame, axis: 0 | 1 | 2, reach = HANDLE_REA
   return [frame.center[0] + (dx / len) * reach, frame.center[1] + (dy / len) * reach]
 }
 
+/** One move of what the handles hold: the eye in SET EYE, else the selection. */
+function moveHeld(axis: 0 | 1 | 2, delta: number): void {
+  const w = useWorkshop.getState()
+  if (w.eyeEdit) w.moveEye(axis, delta)
+  else w.moveSelected(axis, delta)
+}
+
 export function MoveHandles(): JSX.Element {
+  const eyeEdit = useWorkshop((s) => s.eyeEdit)
   const root = useRef<HTMLDivElement>(null)
+  const eyeLine = useRef<SVGLineElement>(null)
+  const origin = useRef<HTMLSpanElement>(null)
   const lines = useRef<Array<SVGLineElement | null>>([])
   const knobs = useRef<Array<HTMLButtonElement | null>>([])
   const hub = useRef<HTMLSpanElement>(null)
@@ -59,6 +75,16 @@ export function MoveHandles(): JSX.Element {
       el.hidden = f === null
       if (!f) return
       if (hub.current) hub.current.style.transform = `translate(${f.center[0]}px, ${f.center[1]}px)`
+      // SET EYE: the dashed line down to 0, 0, 0 and its label, where the origin is in front of the camera.
+      const o = f.origin ?? null
+      if (eyeLine.current) {
+        eyeLine.current.style.display = o ? '' : 'none'
+        if (o) { eyeLine.current.setAttribute('x1', String(f.center[0])); eyeLine.current.setAttribute('y1', String(f.center[1])); eyeLine.current.setAttribute('x2', String(o[0])); eyeLine.current.setAttribute('y2', String(o[1])) }
+      }
+      if (origin.current) {
+        origin.current.style.display = o ? '' : 'none'
+        if (o) origin.current.style.transform = `translate(${o[0]}px, ${o[1]}px)`
+      }
       AXES.forEach(({ axis }) => {
         const at = handleAt(f, axis)
         const line = lines.current[axis]
@@ -97,7 +123,7 @@ export function MoveHandles(): JSX.Element {
     const step = w.step()
     const steps = handleSteps(dx, dy, d.perUnit, TICKS_PER_UNIT, step)
     if (steps !== d.steps) {
-      w.moveSelected(d.axis, (steps - d.steps) * step)
+      moveHeld(d.axis, (steps - d.steps) * step)
       d.steps = steps
     }
   }
@@ -107,7 +133,7 @@ export function MoveHandles(): JSX.Element {
     drag.current = null
     const w = useWorkshop.getState()
     // A tap: one step the handle's way.
-    if (d.travel < d.slop && e.type === 'pointerup') { w.moveSelected(d.axis, w.step()); return }
+    if (d.travel < d.slop && e.type === 'pointerup') { moveHeld(d.axis, w.step()); return }
     // A drag: every step it made, one UNDO, as an OPACITY drag is (shardRows),
     // a full history too: the history keeps its cap, so its length tells nothing.
     const now = useWorkshop.getState()
@@ -115,25 +141,35 @@ export function MoveHandles(): JSX.Element {
   }
 
   return (
-    <div className="ws__handles" ref={root} hidden aria-label="Move handles">
+    <div className={`ws__handles${eyeEdit ? ' ws__handles--eye' : ''}`} ref={root} hidden aria-label={eyeEdit ? 'Move the eye' : 'Move handles'}>
       <svg className="ws__handles-lines" aria-hidden>
+        {/* Under the handles' lines: the eye's line down to 0, 0, 0. */}
+        {eyeEdit && <line ref={eyeLine} className="ws__eye-line" style={{ display: 'none' }} />}
         {AXES.map(({ axis, cls }) => <line key={cls} ref={(el) => { lines.current[axis] = el }} className={`ws__handle-line ws__handle-line--${cls}`} />)}
       </svg>
-      <span className="ws__handle-hub" ref={hub} aria-hidden />
+      {/* The origin's label stays put while the eye moves off it. */}
+      {eyeEdit && (
+        <span className="ws__eye-origin" ref={origin} style={{ display: 'none' }} aria-hidden>
+          <i className="ws__eye-origin-dot" /><span className="ws__eye-origin-label">0, 0, 0 · TODAY'S EYE</span>
+        </span>
+      )}
+      {eyeEdit
+        ? <span className="ws__handle-hub ws__handle-hub--eye" ref={hub} aria-hidden><Eye size={16} strokeWidth={2.25} /><b>EYE</b></span>
+        : <span className="ws__handle-hub" ref={hub} aria-hidden />}
       {AXES.map(({ axis, label, cls }) => (
         <button
           key={cls}
           ref={(el) => { knobs.current[axis] = el }}
           className={`ws__handle ws__handle--${cls}`}
-          aria-label={`Move along ${label.slice(1)}: drag, or tap for one step`}
-          title={`Drag to move along ${label.slice(1)} in grid steps; tap for one step`}
+          aria-label={`Move ${eyeEdit ? 'the eye ' : ''}along ${label.slice(1)}: drag, or tap for one step`}
+          title={`Drag to move ${eyeEdit ? 'the eye ' : ''}along ${label.slice(1)} in grid steps; tap for one step`}
           onPointerDown={down(axis)}
           onPointerMove={move}
           onPointerUp={up}
           onPointerCancel={up}
           onContextMenu={(e) => e.preventDefault()}
           // From the keyboard: one step, as a tap.
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); const w = useWorkshop.getState(); w.moveSelected(axis, w.step()) } }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); moveHeld(axis, useWorkshop.getState().step()) } }}
         >
           <span>{label}</span>
         </button>

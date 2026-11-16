@@ -1106,8 +1106,14 @@ export interface CyberspaceState {
   clearFocus: (keepScale?: boolean) => void
   /** Hyperspace transit: non-null from boarding until arrival (DECK-0001 v3). */
   transit: TransitState | null
-  /** §3: sign and queue an enter-hyperspace event from the current position. */
-  boardHyperspace: () => Promise<void>
+  /**
+   * §3: sign and queue an enter-hyperspace event from the current position.
+   * An identity never placed signs its spawn first: BOARD is a deliberate
+   * first act, as a first move is. Resolves null when it boarded (or the
+   * press belongs to a chain that is gone), and otherwise the words saying
+   * why it did not, so the press that asked is never left without an answer.
+   */
+  boardHyperspace: () => Promise<string | null>
   /**
    * DECK-0002 §2: enter `game` from where you stand. The head is confirmed,
    * then enter-virtual (spec §8.11.1) is signed and queued: `c` and `C` the
@@ -2162,6 +2168,19 @@ onAskAgain(() => {
 
 /** Said while a move asks the relays again for your latest move. */
 export const HEAD_RETRYING_MESSAGE = "Can't confirm your latest move; retrying."
+
+/** BOARD while a move or a HOSAKA job holds the head. */
+export const BOARD_MOVE_COMPUTING_MESSAGE = 'A move is computing. Let it finish or cancel it, then BOARD.'
+/** BOARD from history or a spectation. */
+export const BOARD_OWN_CHAIN_MESSAGE = 'BOARD starts from your own chain. Stop spectating or leave history first.'
+/** BOARD while a choice between two chains is waiting. */
+export const BOARD_CHOOSE_FIRST_MESSAGE = 'Two versions of your chain are waiting. Choose which to keep, then BOARD.'
+/** BOARD on a new identity whose spawn was not signed, with no other reason given. */
+export const BOARD_NO_SPAWN_MESSAGE = 'BOARD could not place you. Press BOARD again.'
+/** BOARD on a new identity while its first move is signing the spawn. */
+export const BOARD_FIRST_MOVE_PLACING_MESSAGE = 'Your first move is placing you. BOARD again in a moment.'
+/** BOARD on a new identity the relays turned out to hold a chain for. */
+export const BOARD_PLACED_BY_RELAYS_MESSAGE = 'This identity already has a chain on the relays, and you are at its head now. BOARD again from here.'
 /** Said once a proof is done and before it is signed: the look at the relays. */
 export const CHECKING_RELAYS_MESSAGE = 'Checking the relays.'
 /** Said while a remote signer has a finished proof's event. */
@@ -4745,9 +4764,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * kept for RESUME. Lazy import: useHyperspace imports this store.
    */
   const rideBlockHash = (id: number) => async (height: number): Promise<string> => {
-    const { getStopByHeight } = await import('./useHyperspace')
+    const { getBlockHash } = await import('./useHyperspace')
     for (let waited = 0; ; waited += LINE_POLL_MS) {
-      const hash = getStopByHeight(height)?.blockHash
+      const hash = getBlockHash(height)
       if (hash) return hash
       if (id !== requestId) throw new Error('canceled')
       if (waited >= LINE_WAIT_MS) throw new Error(`block ${height} is not on this device's line yet`)
@@ -6252,24 +6271,59 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   boardHyperspace: async () => {
-    const { events, genesisId, prevEventId, position, proof, transit } = get()
-    if (transit !== null || proof.status === 'computing') return
+    // Already on the line: the panel draws no BOARD then, and nothing is owed.
+    if (get().transit !== null) return null
+    if (get().proof.status === 'computing') return BOARD_MOVE_COMPUTING_MESSAGE
     // Your own chain, at its head: never from history or a spectation. A view
     // (a block, EARTH, a /C/ link, VIEW) does not stand in the way: boarding
     // acts on the chain head, never on the place on screen, and its coordinate
     // below comes from the chain (arkinox, 2026-10-15: "the board button
     // should always be available if I have a destination set").
-    if (get().exploreIndex !== null || get().spectate !== null) return
-    // A provisional identity has no chain to board from; move once first.
-    if (events.length === 0 || !genesisId || !prevEventId) return
+    if (get().exploreIndex !== null || get().spectate !== null) return BOARD_OWN_CHAIN_MESSAGE
+    // A choice between two chains is waiting: a boarding signed now would extend one of them blind.
+    if (get().chainConflict) return BOARD_CHOOSE_FIRST_MESSAGE
     // A game holds the avatar (GAME_HOLDS_MESSAGE): boarding is a base action.
     // The Hyperspace panel withholds BOARD and says why; this is the backstop.
-    if (whyNoMove(get().actions())) return
+    const blocked = whyNoMove(get().actions())
+    if (blocked) return blocked
+    // An identity never placed (a new key in a private tab, or one logged in
+    // and never moved) has no chain to board from. It used to end here without
+    // a word, and BOARD looked dead (2026-11-16, the owner in a private tab).
+    // BOARD is a deliberate first act, as a first move is, so it signs the
+    // spawn the same way (signFirstSpawn: the self-check has its short say,
+    // and a chain the relays already hold places you instead), then boards.
+    const pubkey = get().identity.pubkey
+    if (get().events.length === 0) {
+      // A first move already placing you: its spawn is the one to board from.
+      if (firstMoveInFlight) return BOARD_FIRST_MOVE_PLACING_MESSAGE
+      const spawned = await signFirstSpawn(() => false)
+      // An identity switch while it waited: this press belongs to a chain that is gone.
+      if (get().identity.pubkey !== pubkey) return null
+      if (!spawned) {
+        if (get().events.length > 0) return BOARD_PLACED_BY_RELAYS_MESSAGE
+        // signFirstSpawn writes its reason (the signer refused) as an infeasible proof; nothing else is this press's.
+        return get().proof.status === 'infeasible' && get().proof.message ? get().proof.message! : BOARD_NO_SPAWN_MESSAGE
+      }
+    }
+    const { events, genesisId, prevEventId, position } = get()
+    if (events.length === 0 || !genesisId || !prevEventId) return BOARD_NO_SPAWN_MESSAGE
     // The head is confirmed before the boarding is signed (confirmHead).
     const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
-    if (refusal === STALE_CONFIRMATION) return
-    if (refusal) { set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: refusal } }); return }
-    if (get().prevEventId !== prevEventId) { set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: headMovedWords(get().events, 'Board again from where you are now.') } }); return }
+    if (refusal === STALE_CONFIRMATION || get().identity.pubkey !== pubkey) return null
+    if (refusal) { set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: refusal } }); return refusal }
+    // What the relays' answer brought in may stand in the way now: a rival
+    // chain to choose between (a held spawn is exactly when one turns up), a
+    // game, a broken chain, or a move started during the wait. Checked again
+    // here, as commit does, so a boarding never extends one side of a choice.
+    if (get().chainConflict) return BOARD_CHOOSE_FIRST_MESSAGE
+    const nowBlocked = whyNoMove(get().actions())
+    if (nowBlocked) return nowBlocked
+    if (get().proof.status === 'computing') return BOARD_MOVE_COMPUTING_MESSAGE
+    if (get().prevEventId !== prevEventId) {
+      const moved = headMovedWords(get().events, 'Board again from where you are now.')
+      set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: moved } })
+      return moved
+    }
     if (get().proof.message === HEAD_RETRYING_MESSAGE) set({ proof: IDLE_PROOF })
     const head = events[events.length - 1]
     // Where the chain says you stand, plane bit included: the last recognized
@@ -6279,7 +6333,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // wrong plane, so its c no longer matched the C before it and the chain
     // was invalid from there (2026-10-06, a published chain on the relay).
     const here = chainHead(parsedChain(events))?.coordHex
-    if (!here) return
+    if (!here) return BOARD_NO_SPAWN_MESSAGE
     const proofHash = computeEnterProof(hexToCoord(here), prevEventId)
     const template = enterHyperspaceTemplate({
       createdAt: nextCreatedAt(head),
@@ -6295,12 +6349,15 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // The signer refused, or answered with a signature that does not
       // verify: no boarding, said where a hop's refusal is said. Unless the
       // chain moved on meanwhile, when this refusal is about nothing current.
-      if (get().prevEventId !== prevEventId) return
-      set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: signingFailed(err) } })
-      return
+      if (get().identity.pubkey !== pubkey) return null
+      if (get().prevEventId !== prevEventId) return headMovedWords(get().events, 'Board again from where you are now.')
+      const words = signingFailed(err)
+      set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: words } })
+      return words
     }
     // The chain may have advanced while a remote signer thought about it.
-    if (get().prevEventId !== prevEventId) return
+    if (get().identity.pubkey !== pubkey) return null
+    if (get().prevEventId !== prevEventId) return headMovedWords(get().events, 'Board again from where you are now.')
     const published: Record<string, PublishStatus> = { ...get().published, [event.id]: 'queued' }
     const nextEvents = [...get().events, event]
     set({
@@ -6311,6 +6368,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       transit: { stage: 'boarded', enterEventId: event.id, enterCoordHex: here },
     })
     saveChain(nextEvents, published, get().chain)
+    return null
   },
 
   // Brackets never nest (spec §8.11.4 rule 3), and an entry on a broken

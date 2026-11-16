@@ -20,8 +20,8 @@
  * its centre. So does a custom avatar while it is drawn as that icosahedron
  * (zoomed far out), since its own eye would be smaller than what is drawn.
  *
- * Read only here, never written: writing waits for the workshop's SET EYE and
- * the spec. sno-core will carry the same reader; this one goes when it does.
+ * Written by the workshop's SET EYE (withEye, below). sno-core will carry the
+ * same reader and writer; these go when it does.
  */
 
 import { Quaternion, Vector3 } from 'three'
@@ -79,6 +79,91 @@ export function eyeOf(shard: Pick<ShardModel, 'vertices' | 'extra'>): Eye {
 /** Whether an avatar's eye is its own `eye` (CHOSEN) rather than the automatic one. */
 export function eyeChosen(shard: Pick<ShardModel, 'extra'>): boolean {
   return readEye(shard.extra?.[EYE_FIELD]) !== undefined
+}
+
+/**
+ * `s` with its eye set: three integers of ticks in the payload's frame, or
+ * removed for the automatic eye when `eye` is undefined. A value that is not
+ * a valid eye removes the field too, so a publisher never writes a malformed
+ * one; `[0, 0, 0]` is a valid eye and is written. The same semantics as
+ * sno-core's `withEye` (sno-core 0.1.31, branch eye-reader, not released):
+ * this local copy swaps to sno-core's once that is out.
+ */
+export function withEye<T extends Pick<ShardModel, 'extra'>>(s: T, eye: Eye | undefined): T {
+  const v = eye === undefined ? undefined : readEye(eye)
+  const next: Record<string, unknown> = { ...(s.extra ?? {}) }
+  if (v === undefined) delete next[EYE_FIELD]
+  else next[EYE_FIELD] = v
+  const { extra: _old, ...bare } = s
+  return (Object.keys(next).length ? { ...bare, extra: next } : bare) as T
+}
+
+/**
+ * Between the payload's frame (the eye's, +Z toward the viewer) and the
+ * workshop's model frame (the vertices', the wire's with Z negated, the frame
+ * the bench's handles and MORE's numbers use): Z negated, `0 - z` so a zero
+ * stays a zero. Its own inverse.
+ */
+export const flipEyeZ = (e: Eye): Eye => [e[0], e[1], 0 - e[2]]
+
+/** The eye in the workshop's model frame, in ticks: what the bench draws and its handles move. */
+export const benchEye = (shard: Pick<ShardModel, 'vertices' | 'extra'>): Eye => flipEyeZ(eyeOf(shard))
+
+/**
+ * CENTER: the middle of the shape's box, in ticks in the payload's frame,
+ * each axis rounded to a whole tick. The origin for a shape with no vertices.
+ */
+export function centerEye(shard: Pick<ShardModel, 'vertices'>): Eye {
+  if (shard.vertices.length === 0) return [0, 0, 0]
+  const lo = [Infinity, Infinity, Infinity]
+  const hi = [-Infinity, -Infinity, -Infinity]
+  for (const v of shard.vertices) {
+    const t = ticksOf(v)
+    for (let a = 0; a < 3; a++) { if (t[a] < lo[a]) lo[a] = t[a]; if (t[a] > hi[a]) hi[a] = t[a] }
+  }
+  const mid = (a: number): number => { const m = Math.round((lo[a] + hi[a]) / 2); return m === 0 ? 0 : m }
+  return flipEyeZ([mid(0), mid(1), mid(2)])
+}
+
+/**
+ * How far from the origin an eye may be on each axis, in ticks of the shard's
+ * grid: the avatar size limit, MAX_AVATAR_RADIUS gibsons, at the avatar's true
+ * scale (avatarScale), which is as far as WALK carries it (walkEyeLocal brings
+ * anything farther in), and never past the 64-unit position bound.
+ */
+export function eyeReachTicks(shard: ShardModel): number {
+  return Math.min(EYE_REACH, Math.floor((MAX_AVATAR_RADIUS * TICKS_PER_UNIT) / avatarScale(shard)))
+}
+
+/**
+ * The eye as WALK uses it, in whole ticks in the bench's frame: an eye past
+ * the size limit (the unit raised, vertices deleted, a far eye pasted in)
+ * brought in as a whole along its line, as walkEyeLocal does, each axis
+ * rounded toward the origin so it stays inside. The workshop draws, prints
+ * and moves this eye, never a place WALK will not use.
+ */
+export function usedBenchEye(shard: ShardModel): [number, number, number] {
+  const e = benchEye(shard)
+  const reach = eyeReachTicks(shard)
+  const far = Math.max(Math.abs(e[0]), Math.abs(e[1]), Math.abs(e[2]))
+  return far > reach ? (e.map((t) => Math.trunc((t * reach) / far) + 0) as [number, number, number]) : e
+}
+
+/**
+ * Ticks of the shard's grid as gibsons, to two decimals, as the eye row and
+ * the eye strip print them: at the avatar's true scale (avatarScale, the
+ * shrink of an avatar past the size limit included). Worked in whole
+ * hundredths so 159 ticks prints 1.33 as the arithmetic says, never 1.32
+ * from a float. Never "-0".
+ */
+export function gibsonsLabel(ticks: number, shard: ShardModel): string {
+  const hundredths = Math.round((ticks * avatarScale(shard) * 100) / TICKS_PER_UNIT)
+  return String(hundredths / 100 + 0)
+}
+
+/** The eye as the workshop prints it: "0, 1.33, 0", in gibsons in the bench's frame. */
+export function eyeLabel(shard: ShardModel): string {
+  return usedBenchEye(shard).map((t) => gibsonsLabel(t, shard)).join(', ')
 }
 
 /**
@@ -149,3 +234,6 @@ export function yawOnly(q: Quaternion, out: Quaternion): Quaternion {
   if (hx * hx + hz * hz < 1e-20) return out.identity()
   return out.setFromAxisAngle(Y, Math.atan2(-hx, -hz))
 }
+
+/** A version 1 payload's eye into the version 2 frame: shared with every payload reader (lib/eyeV1). */
+export { v1Eye } from './eyeV1'

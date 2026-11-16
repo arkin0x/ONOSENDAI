@@ -57,6 +57,7 @@ import {
   HIDDEN_KIND,
   bagEntries,
   bagSettingsOf,
+  claimableHeld,
   newBagSettings,
   resolveBagSettings,
   type BagSettings,
@@ -1298,7 +1299,7 @@ export function regionOf(at: Position, plane: Plane, height: number): string {
 }
 
 /** Your bag in a region, as this device knows it: its settings and how many of your things it holds. */
-export interface OwnBag { region: string; settings: BagSettings; count: number; /** A cashu token is written in one of its messages. */ cashu: boolean }
+export interface OwnBag { region: string; settings: BagSettings; count: number; /** A cashu token or an NFT claim link is written in one of its messages (claimableText). */ claimable: boolean }
 
 /**
  * Your bag in this region, from `mine`, or null when this device knows of none.
@@ -1310,36 +1311,47 @@ export function ownBagIn(mine: MyDeployment[], region: string): OwnBag | null {
   const items = mine.filter((d) => !d.room && regionOf(positionOf(d), d.plane, d.height) === region)
   if (items.length === 0) return null
   const newest = items.reduce((a, b) => (b.createdAt > a.createdAt ? b : a))
-  return { region, settings: { ...DEFAULT_BAG_SETTINGS, ...(newest.bag ?? {}) }, count: items.length, cashu: items.some((d) => d.inner.kind === MESSAGE_KIND && findCashuToken(d.inner.content) !== null) }
+  return { region, settings: { ...DEFAULT_BAG_SETTINGS, ...(newest.bag ?? {}) }, count: items.length, claimable: holdsClaimable(items.map((d) => d.inner)) }
 }
 
 /**
- * Whether the deploy bar shows PUBLISH THAT MONEY IS INSIDE: the message being
- * hidden holds a cashu token, or your bag in the region does as far as this
- * device knows (ownBagIn). The deploy reads the same answer, and a bag goes
- * out saying money only when the row was there to see and was ON (arkinox,
- * 2026-11-15: "money off by default"), so a switch saved ON for one bag
- * never speaks for another whose cashu this device does not list.
+ * Whether a message's text holds something claimable: a cashu token or an
+ * NFT claim link, which whoever reads it can redeem (spec §7.7 Claimable
+ * kinds). Both are said in public only with PUBLISH THAT MONEY OR NFTS ARE
+ * INSIDE on (owner ruling 2026-11-16: NFTs hidden by default, as money is).
  */
-export function moneyRowShown(pending: Pick<NonNullable<ShardsState['pending']>, 'type'> & { text?: string } | null, bag: Pick<OwnBag, 'cashu'> | null): boolean {
-  return (pending?.type === 'message' && typeof pending.text === 'string' && findCashuToken(pending.text) !== null) || (bag?.cashu ?? false)
+export function claimableText(text: string | null | undefined): boolean {
+  return typeof text === 'string' && (findCashuToken(text) !== null || hasNftLink(text))
 }
 
 /**
- * The bag settings for a write that ADDS a cashu token without the deploy
- * bar (HIDE AGAIN, a room's entries moving out to an ordinary bag): money
- * stays said only while this device's saved switch is ON as well, so such a
- * write never says money the player would have seen OFF, and never turns
- * it on. A write that adds no token keeps what the bag says until you hide
- * into it again (deployHintPrefs.ts).
+ * Whether the deploy bar shows PUBLISH THAT MONEY OR NFTS ARE INSIDE: the
+ * message being hidden holds a cashu token or an NFT claim link, or your bag
+ * in the region does as far as this device knows (ownBagIn). The deploy
+ * reads the same answer, and a bag goes out saying them only when the row
+ * was there to see and was ON (arkinox, 2026-11-15: "money off by default";
+ * owner ruling 2026-11-16: NFTs the same way), so a switch saved ON for one
+ * bag never speaks for another whose tokens and links this device does not list.
  */
-export function moneyAsSaved(settings: BagSettings, addsCashu: boolean): BagSettings {
-  return addsCashu && settings.money && !loadHintPrefs().money ? { ...settings, money: false } : settings
+export function moneyRowShown(pending: Pick<NonNullable<ShardsState['pending']>, 'type'> & { text?: string } | null, bag: Pick<OwnBag, 'claimable'> | null): boolean {
+  return (pending?.type === 'message' && claimableText(pending.text)) || (bag?.claimable ?? false)
 }
 
-/** Whether any of these items is a message holding a cashu token. */
-function holdsCashu(items: readonly Pick<NostrEvent, 'kind' | 'content'>[]): boolean {
-  return items.some((e) => e.kind === MESSAGE_KIND && findCashuToken(e.content) !== null)
+/**
+ * The bag settings for a write that ADDS a cashu token or an NFT claim link
+ * without the deploy bar (HIDE AGAIN, a room's entries moving out to an
+ * ordinary bag): they stay said only while this device's saved switch is ON
+ * as well, so such a write never says money or NFTs the player would have
+ * seen OFF, and never turns the switch on. A write that adds neither keeps
+ * what the bag says until you hide into it again (deployHintPrefs.ts).
+ */
+export function moneyAsSaved(settings: BagSettings, addsClaimable: boolean): BagSettings {
+  return addsClaimable && settings.money && !loadHintPrefs().money ? { ...settings, money: false } : settings
+}
+
+/** Whether any of these items is a message holding a cashu token or an NFT claim link. */
+function holdsClaimable(items: readonly Pick<NostrEvent, 'kind' | 'content'>[]): boolean {
+  return items.some((e) => e.kind === MESSAGE_KIND && claimableText(e.content))
 }
 
 /** How long the upload of PLACE AGAIN's fresh audio copy waits on the signer: a person reads the prompt. */
@@ -2676,6 +2688,8 @@ export const useShards = create<ShardsState>((set, get) => {
     const still = (): void => { if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED) }
     let relay: BagEntry[] = []
     let settings = localSettings
+    /** The relays' copy whose settings these are, read again against everything the rewrite holds (below). */
+    let settingsFrom: NostrEvent | null = null
     let heard = false
     try {
       const answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [owner], '#d': [lookupId] })
@@ -2710,7 +2724,8 @@ export const useShards = create<ShardsState>((set, get) => {
       }
       // A relay copy that does not open with this key is not this bag.
       if (newest && relay.length > 0) {
-        settings = bagSettingsOf(newest, height)
+        settings = bagSettingsOf(newest, height, claimableHeld(relay))
+        settingsFrom = newest
         // A row the relays' newer bag no longer holds was changed from another
         // device: its old self does not go back in beside the new one (§3.7.5;
         // a moved item, review of #595).
@@ -2726,7 +2741,13 @@ export const useShards = create<ShardsState>((set, get) => {
     // bag for good, or delete the whole bag as empty. A relay that answers with
     // nothing is an answer: there is no bag to lose.
     if (relay.length === 0 && !heard && claimableRows().some((d) => d.lookupId === lookupId && d.published)) throw new Error(BAG_NOT_READ)
-    return gathered(mergeEntries(relay, ownRows().filter(inItsBag).map(entryOf)), settings, heard ? relay : null)
+    const entries = mergeEntries(relay, ownRows().filter(inItsBag).map(entryOf))
+    // The money switch (money or NFTs) read against everything the rewrite
+    // will hold, this device's rows that only it lists included: a row of
+    // yours with a token or a claim link the relays' copy never said is not
+    // said by a rewrite that is not a hide (bagSettingsOf; review of the NFT hint).
+    if (settingsFrom && settings) settings = { ...settings, money: bagSettingsOf(settingsFrom, height, claimableHeld(entries)).money }
+    return gathered(entries, settings, heard ? relay : null)
   }
 
   /**
@@ -3346,7 +3367,7 @@ export const useShards = create<ShardsState>((set, get) => {
     // that does not fit, before anything is signed. A resealed object keeps
     // its reference entry (the same address), so it is measured as it is.
     const target = await gatherInners(to.lookupId, to.key, targetLive, to.height, me)
-    const settings = to.room ? ROOM_BAG_SETTINGS : moneyAsSaved(target.settings ?? DEFAULT_BAG_SETTINGS, holdsCashu(rows.map((r) => r.inner)))
+    const settings = to.room ? ROOM_BAG_SETTINGS : moneyAsSaved(target.settings ?? DEFAULT_BAG_SETTINGS, holdsClaimable(rows.map((r) => r.inner)))
     const place = { at: positionOf(src), plane: src.plane }
     // An item in a sealed entry goes sealed again into the target, under the
     // target's key and a fresh `d` (spec §7.6 The key: a sealed entry belongs
@@ -3571,7 +3592,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const rumor = d.type === 'message' || d.type === 'audio'
       const key = hexToBytes(d.keyHex)
       const existing = await gatherInners(d.lookupId, key, true, d.height, owner)
-      const settings = d.room ? ROOM_BAG_SETTINGS : moneyAsSaved(existing.settings ?? d.bag ?? DEFAULT_BAG_SETTINGS, holdsCashu([template]))
+      const settings = d.room ? ROOM_BAG_SETTINGS : moneyAsSaved(existing.settings ?? d.bag ?? DEFAULT_BAG_SETTINGS, holdsClaimable([template]))
       // Whether the copy fits inline, before it is signed: a shard goes by
       // reference when the bag would not hold it inline (lib/bagFit.ts), and
       // a bag that cannot hold it either way refuses it now, in words.
@@ -4824,7 +4845,7 @@ export const useShards = create<ShardsState>((set, get) => {
         const region = regionOf(at, plane, deployHeight)
         const seeded = deployBagFrom?.region === region ? deployBagFrom.settings : newBagSettings(deployHeight)
         // The hint and money switches go out as the bar shows them (asShown):
-        // money OFF where the bar showed no money row (moneyRowShown).
+        // money and NFTs OFF where the bar showed no such row (moneyRowShown).
         const shown = moneyRowShown(pending, ownBagIn(get().mine, region)) ? deployBag : { ...deployBag, money: false }
         const settingsOf = (current: BagSettings | null): BagSettings => (into ? ROOM_BAG_SETTINGS : asShown(resolveBagSettings(deployBag, seeded, current, deployHeight), shown, deployHeight))
         let settings: BagSettings = settingsOf(existing.settings)

@@ -78,8 +78,8 @@ export function contentsWords(counts: ContentsCounts | null): string | null {
 /** What the chiron says a segment's author did. */
 export function segmentDoing(item: TapeItem): string {
   if (item.kind === 'bag') {
-    // Money said alone beside counted rows of other kinds is still said (spec 7.7: a reader keeps both).
-    const inside = [contentsWords(item.counts), item.money && item.counts?.cashu === undefined ? 'CASHU INSIDE' : null].filter(Boolean).join(' · ') || null
+    // Money or an NFT said alone beside counted rows of other kinds is still said (spec 7.7 Claimable alone: a reader keeps both).
+    const inside = [contentsWords(item.counts), item.money && item.counts?.cashu === undefined ? 'CASHU INSIDE' : null, item.nft && item.counts?.nft === undefined ? 'NFT INSIDE' : null].filter(Boolean).join(' · ') || null
     return ['SEALED A BAG', placeable(item.hint) ? 'HINT BOX PUBLIC' : null, inside].filter(Boolean).join(' · ')
   }
   if (item.kind === 'object') return 'PUBLISHED AN OBJECT'

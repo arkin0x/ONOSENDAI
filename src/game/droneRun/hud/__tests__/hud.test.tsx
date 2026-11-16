@@ -3,9 +3,13 @@
  * same fixed slots, so nothing moves between them (owner: no layout jumps);
  * the cards' buttons call RESTART, NEXT WAVE and EXIT GAME, and Enter or R
  * press the first; each gun shows its own gauge; the phone's buttons write
- * the controls, three and four fingers at once; the aim assist box shows
- * only on a phone with the PULSE RIFLE and tells the assist its size; the
- * run's events play their sounds and restart the pulses.
+ * the controls, three and four fingers at once; the floating sticks' rings
+ * draw where a finger lands; the rail charging turns the MOVE stick into AIM
+ * (LOOK hidden) and every way the charge ends turns it back; SPRINT holds
+ * sprint and its ring shows the stamina; no two controls or HUD boxes overlap
+ * at the five phone sizes; the aim assist box shows only on a phone with the
+ * PULSE RIFLE and tells the assist its size; the run's events play their
+ * sounds and restart the pulses.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -38,14 +42,14 @@ vi.mock('../../audio', async (importOriginal) => ({
   warmSound: () => {},
 }))
 
-import { createElement } from 'react'
+import { createElement, useState } from 'react'
 import { mount, textOf, type Host } from '../../../../test/elementRoot'
 import { HudView, type HudViewProps } from '../HudView'
-import { DroneRunHud, reactTo } from '../DroneRunHud'
+import { aimShown, drawStick, DroneRunHud, reactTo } from '../DroneRunHud'
 import { TouchPad } from '../TouchPad'
-import { ASSIST_PX, BASE_WEAPONS, COPY, FIRE_PX, IDLE_HUD, JUMP_PX, STICK_PX, assistShown, weaponsOfHud, type HudState } from '../model'
+import { ASSIST_PX, BASE_WEAPONS, COPY, FIRE_PX, IDLE_HUD, JUMP_PX, STICK_PX, assistShown, staminaOf, weaponsOfHud, type HudState } from '../model'
 import { AssistBox } from '../AssistBox'
-import { lookState, lookStickRate, readInput, resetInput, tickLook } from '../../input'
+import { AIM_SCALE, aimingNow, lookRateNow, lookState, lookStickRate, readInput, resetInput, tickLook } from '../../input'
 import { readFileSync } from 'node:fs'
 import type { RunEvent } from '../../../../lib/games/droneRun/sim/events'
 
@@ -159,6 +163,12 @@ describe('the gauge follows the gun in hand', () => {
     expect(wave.says('CLICKAIM')).toBe(true)
     expect(wave.says('1 2 3 QGUNS')).toBe(true)
     await wave.unmount()
+  })
+
+  it('desktop: SHIFT SPRINT among the printed keys in the safe zone', async () => {
+    const safe = await mount(createElement(HudView, props({ phase: 'safe' })))
+    expect(safe.says('SHIFTSPRINT')).toBe(true)
+    await safe.unmount()
   })
 })
 
@@ -303,7 +313,7 @@ describe('three fingers at once, and a fourth on JUMP (phone)', () => {
     const m = await mount(createElement(DroneRunHud, { hud: { ...IDLE_HUD, phase: 'wave' }, restart: vi.fn(), nextWave: vi.fn(), subscribe: () => () => {}, exit: vi.fn(), touch: true }))
     const find = (c: string): Host => m.all().find((h) => cls(h).split(' ').includes(c))!
     const layer = find('drun-layer')
-    const on = (h: Host, name: string, e: Record<string, unknown>): void => (h.props[name] as Handler)({ pointerType: 'touch', preventDefault: () => {}, stopPropagation: () => {}, currentTarget: { clientWidth: W, setPointerCapture: () => {} }, ...e })
+    const on = (h: Host, name: string, e: Record<string, unknown>): void => (h.props[name] as Handler)({ pointerType: 'touch', preventDefault: () => {}, stopPropagation: () => {}, currentTarget: { clientWidth: W, clientHeight: H, setPointerCapture: () => {} }, ...e })
     const touch = (name: 'onPointerDown' | 'onPointerMove' | 'onPointerUp' | 'onPointerCancel' | 'onLostPointerCapture', id: number, x = 0, y = 0): void => on(layer, name, { pointerId: id, clientX: x, clientY: y })
     const button = (mod: string, name: string, id: number): void => on(find(`drun-btn--${mod}`), name, { pointerId: id })
     return { m, touch, button }
@@ -331,8 +341,10 @@ describe('three fingers at once, and a fourth on JUMP (phone)', () => {
 
   it('move, look and fire held together; lifting one leaves the others; JUMP on top', async () => {
     const { m, touch, button } = await pad()
-    touch('onPointerDown', 1, MOVE.cx, MOVE.cy - 60)
-    touch('onPointerDown', 2, LOOK.cx + 40, LOOK.cy)
+    touch('onPointerDown', 1, MOVE.cx, MOVE.cy)
+    touch('onPointerMove', 1, MOVE.cx, MOVE.cy - 60)
+    touch('onPointerDown', 2, LOOK.cx, LOOK.cy)
+    touch('onPointerMove', 2, LOOK.cx + 40, LOOK.cy)
     button('fire', 'onPointerDown', 3)
     tickLook(0.1)
     const a = readInput()
@@ -349,7 +361,8 @@ describe('three fingers at once, and a fourth on JUMP (phone)', () => {
     expect(b.move.fwd).toBeCloseTo(1)
     expect(b.fire).toBe(true)
     // A fourth finger on JUMP: an edge, while the others hold.
-    touch('onPointerDown', 2, LOOK.cx - 40, LOOK.cy)
+    touch('onPointerDown', 2, LOOK.cx, LOOK.cy)
+    touch('onPointerMove', 2, LOOK.cx - 40, LOOK.cy)
     button('jump', 'onPointerDown', 4)
     tickLook(0.1)
     const c = readInput()
@@ -363,8 +376,9 @@ describe('three fingers at once, and a fourth on JUMP (phone)', () => {
 
   it('a finger that slides off its control keeps it; cancel and lost capture let go of that finger only; blur of all', async () => {
     const { m, touch, button } = await pad()
-    touch('onPointerDown', 1, MOVE.cx, MOVE.cy - 60)
-    touch('onPointerDown', 2, LOOK.cx + 60, LOOK.cy)
+    touch('onPointerDown', 1, MOVE.cx, MOVE.cy)
+    touch('onPointerDown', 2, LOOK.cx, LOOK.cy)
+    touch('onPointerMove', 2, LOOK.cx + 60, LOOK.cy)
     button('fire', 'onPointerDown', 3)
     // The MOVE finger slides far onto the right half; another finger on the left is not a second stick.
     touch('onPointerMove', 1, 330, MOVE.cy)
@@ -392,8 +406,10 @@ describe('three fingers at once, and a fourth on JUMP (phone)', () => {
     button('fire', 'onLostPointerCapture', 7)
     expect(readInput().fire).toBe(false)
     // All three again, then the window loses focus: everything lets go.
-    touch('onPointerDown', 8, MOVE.cx, MOVE.cy - 60)
-    touch('onPointerDown', 9, LOOK.cx + 60, LOOK.cy)
+    touch('onPointerDown', 8, MOVE.cx, MOVE.cy)
+    touch('onPointerMove', 8, MOVE.cx, MOVE.cy - 60)
+    touch('onPointerDown', 9, LOOK.cx, LOOK.cy)
+    touch('onPointerMove', 9, LOOK.cx + 60, LOOK.cy)
     button('fire', 'onPointerDown', 10)
     winEvents.dispatchEvent(new Event('blur'))
     const y2 = lookState.yaw
@@ -403,10 +419,355 @@ describe('three fingers at once, and a fourth on JUMP (phone)', () => {
     expect(b.fire).toBe(false)
     expect(b.yaw).toBe(y2)
     // The controls take new fingers after.
-    touch('onPointerDown', 11, MOVE.cx, MOVE.cy - 60)
+    touch('onPointerDown', 11, MOVE.cx, MOVE.cy)
+    touch('onPointerMove', 11, MOVE.cx, MOVE.cy - 60)
     expect(readInput().move.fwd).toBeCloseTo(1)
     await m.unmount()
   })
+})
+
+describe('the floating sticks\' rings, as the HUD draws them', () => {
+  /** A stand-in for a stick's ring: its resting box at (cx, cy), moved by whatever translate its style holds, as a browser measures it. */
+  function ring(cx: number, cy: number, r: number) {
+    const el = {
+      style: { transform: '' },
+      getBoundingClientRect: () => {
+        const m = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(el.style.transform)
+        const dx = m ? Number(m[1]) : 0, dy = m ? Number(m[2]) : 0
+        return { left: cx - r + dx, top: cy - r + dy, width: 2 * r, height: 2 * r }
+      },
+    }
+    return el
+  }
+
+  it('the ring moves to where the finger landed, follows a new landing, and goes back to rest on lift; the knob from its centre', () => {
+    const base = ring(80, 728, 60), knob = { style: { transform: '' } }
+    const moved = { x: 0, y: 0 }
+    const fallback = { cx: 0, cy: 0, radius: 60 }
+    drawStick(base as never, knob as never, { x: 150, y: 500 }, { dx: 0, dy: 0 }, moved, fallback)
+    expect(base.style.transform).toBe('translate(70px, -228px)')
+    const r = base.getBoundingClientRect()
+    expect([r.left + 60, r.top + 60]).toEqual([150, 500])
+    // Drawn again while moved: measured from its resting place, not from where it is drawn.
+    drawStick(base as never, knob as never, { x: 160, y: 510 }, { dx: 12, dy: -5 }, moved, fallback)
+    expect(base.style.transform).toBe('translate(80px, -218px)')
+    expect(knob.style.transform).toBe('translate(12px, -5px)')
+    drawStick(base as never, knob as never, null, { dx: 0, dy: 0 }, moved, fallback)
+    expect(base.style.transform).toBe('')
+    expect(moved).toEqual({ x: 0, y: 0 })
+  })
+})
+
+describe('aim: the rail charging turns the MOVE stick into AIM', () => {
+  type Handler = (e: unknown) => void
+  const W = 375, H = 812
+  const MOVE = { cx: 20 + STICK_PX / 2, cy: H - 24 - STICK_PX / 2 }
+  const LOOK = { cx: W - 20 - STICK_PX / 2, cy: H - 24 - STICK_PX / 2 }
+  const g = globalThis as unknown as Record<string, unknown>
+  let saved: Record<string, unknown> = {}
+  let winEvents: EventTarget
+  let docEvents: EventTarget
+  let doc: { visibilityState: string }
+  beforeEach(() => {
+    saved = { innerWidth: g.innerWidth, innerHeight: g.innerHeight, document: g.document, addEventListener: g.addEventListener, removeEventListener: g.removeEventListener }
+    winEvents = new EventTarget()
+    docEvents = new EventTarget()
+    g.innerWidth = W
+    g.innerHeight = H
+    g.addEventListener = (t: string, f: EventListener) => winEvents.addEventListener(t, f)
+    g.removeEventListener = (t: string, f: EventListener) => winEvents.removeEventListener(t, f)
+    doc = { visibilityState: 'visible', addEventListener: (t: string, f: EventListener) => docEvents.addEventListener(t, f), removeEventListener: (t: string, f: EventListener) => docEvents.removeEventListener(t, f) } as never
+    g.document = doc
+  })
+  afterEach(() => { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete g[k]; else g[k] = v } })
+
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5))
+  const RAIL = 2, PULSE = 0
+
+  async function hudWith(start: Partial<HudState>) {
+    let set: ((h: HudState) => void) | null = null
+    function Wrap(): JSX.Element {
+      const [hud, setHud] = useState<HudState>({ ...IDLE_HUD, phase: 'wave', ...start })
+      set = setHud
+      return createElement(DroneRunHud, { hud, restart: vi.fn(), nextWave: vi.fn(), subscribe: () => () => {}, exit: vi.fn(), touch: true })
+    }
+    const m = await mount(createElement(Wrap))
+    const find = (c: string): Host => m.all().find((h) => cls(h).split(' ').includes(c))!
+    const on = (h: Host, name: string, e: Record<string, unknown>): void => (h.props[name] as Handler)({ pointerType: 'touch', preventDefault: () => {}, stopPropagation: () => {}, currentTarget: { clientWidth: W, clientHeight: H, setPointerCapture: () => {} }, ...e })
+    const touch = (name: string, id: number, x = 0, y = 0): void => on(find('drun-layer'), name, { pointerId: id, clientX: x, clientY: y })
+    const button = (mod: string, name: string, id: number): void => on(find(`drun-btn--${mod}`), name, { pointerId: id })
+    const hud = async (over: Partial<HudState>): Promise<void> => { set!({ ...IDLE_HUD, phase: 'wave', ...start, ...over }); await tick() }
+    /** What the sticks show now. */
+    const shows = () => {
+      const move = find('drun-stick--move'), look = find('drun-stick--look')
+      return {
+        aim: cls(move).split(' ').includes('is-aim'),
+        label: textOf(move),
+        crosshair: m.all().some((h) => cls(h).includes('drun-stick__aim')),
+        lookHidden: cls(look).split(' ').includes('is-hidden'),
+      }
+    }
+    return { m, touch, button, hud, shows }
+  }
+  const AIMING = { aim: true, label: COPY.stickAim, crosshair: true, lookHidden: true }
+  const PLAIN = { aim: false, label: COPY.move, crosshair: false, lookHidden: false }
+
+  it('FIRE held with the rail: the left stick aims (move 0, the view turns finely), LOOK hidden; FIRE let go: back, a held finger re-centred', async () => {
+    const { m, touch, button, shows } = await hudWith({ weapon: RAIL })
+    expect(shows()).toEqual(PLAIN)
+    touch('onPointerDown', 1, MOVE.cx, MOVE.cy)
+    touch('onPointerMove', 1, MOVE.cx, MOVE.cy - 60)
+    expect(readInput().move.fwd).toBeCloseTo(1)
+    button('fire', 'onPointerDown', 3)
+    await tick()
+    expect(shows()).toEqual(AIMING)
+    expect(aimingNow()).toBe(true)
+    // The finger already down is re-centred where it is: nothing turns until it moves on from there.
+    const a = readInput()
+    expect(a.move).toEqual({ fwd: 0, strafe: 0 })
+    expect(a.fire).toBe(true)
+    expect(lookRateNow()).toEqual({ yaw: 0, pitch: 0 })
+    touch('onPointerMove', 1, MOVE.cx + 30, MOVE.cy - 60)
+    const want = lookStickRate(30, 0, STICK_PX / 2, AIM_SCALE).yaw
+    expect(lookRateNow().yaw).toBeCloseTo(want)
+    const y = lookState.yaw
+    tickLook(0.1)
+    expect(lookState.yaw).toBeCloseTo(y + want * 0.1)
+    expect(readInput().move).toEqual({ fwd: 0, strafe: 0 })
+    // A touch on the right while it aims takes no LOOK stick.
+    touch('onPointerDown', 2, LOOK.cx, LOOK.cy)
+    touch('onPointerMove', 2, LOOK.cx + 60, LOOK.cy)
+    expect(lookRateNow().yaw).toBeCloseTo(want)
+    // The shot: FIRE let go. Both sticks back; the left finger, still down, moves from where it is now.
+    button('fire', 'onPointerUp', 3)
+    await tick()
+    expect(shows()).toEqual(PLAIN)
+    expect(aimingNow()).toBe(false)
+    expect(lookRateNow()).toEqual({ yaw: 0, pitch: 0 })
+    expect(readInput().move).toEqual({ fwd: 0, strafe: 0 })
+    touch('onPointerMove', 1, MOVE.cx + 30, MOVE.cy - 120)
+    expect(readInput().move.fwd).toBeCloseTo(1)
+    await m.unmount()
+    expect(aimingNow()).toBe(false)
+  })
+
+  it('a gun switch, a card, the page hidden and blur each end the aim; overheat ends it; another gun never aims', async () => {
+    const { m, button, hud, shows } = await hudWith({ weapon: RAIL })
+    button('fire', 'onPointerDown', 3)
+    await tick()
+    expect(shows()).toEqual(AIMING)
+    // Another gun in hand, FIRE still held.
+    await hud({ weapon: PULSE })
+    expect(shows()).toEqual(PLAIN)
+    expect(aimingNow()).toBe(false)
+    // Back to the rail with FIRE still held: aiming again.
+    await hud({ weapon: RAIL })
+    expect(shows()).toEqual(AIMING)
+    // Overheated, the charge is dropped.
+    await hud({ weapon: RAIL, overheated: true })
+    expect(shows()).toEqual(PLAIN)
+    await hud({ weapon: RAIL })
+    expect(shows()).toEqual(AIMING)
+    // A card: every control lets go.
+    await hud({ weapon: RAIL, phase: 'failed', hp: 0 })
+    expect(aimingNow()).toBe(false)
+    expect(shows().aim).toBe(false)
+    await hud({ weapon: RAIL })
+    expect(shows()).toEqual(PLAIN)
+    // The window loses focus.
+    button('fire', 'onPointerDown', 4)
+    await tick()
+    expect(shows()).toEqual(AIMING)
+    winEvents.dispatchEvent(new Event('blur'))
+    await tick()
+    expect(shows()).toEqual(PLAIN)
+    expect(aimingNow()).toBe(false)
+    // The page hidden.
+    button('fire', 'onPointerDown', 5)
+    await tick()
+    expect(shows()).toEqual(AIMING)
+    doc.visibilityState = 'hidden'
+    docEvents.dispatchEvent(new Event('visibilitychange'))
+    await tick()
+    expect(shows()).toEqual(PLAIN)
+    doc.visibilityState = 'visible'
+    // FIRE with the PULSE RIFLE moves as ever.
+    await hud({ weapon: PULSE })
+    button('fire', 'onPointerDown', 6)
+    await tick()
+    expect(shows()).toEqual(PLAIN)
+    await m.unmount()
+  })
+
+  it('aimShown: a phone, no card, a finger on FIRE, a charge gun, not overheated', () => {
+    const h = { weapon: RAIL, overheated: false }
+    expect(aimShown(true, false, true, h, BASE_WEAPONS)).toBe(true)
+    expect(aimShown(false, false, true, h, BASE_WEAPONS)).toBe(false)
+    expect(aimShown(true, true, true, h, BASE_WEAPONS)).toBe(false)
+    expect(aimShown(true, false, false, h, BASE_WEAPONS)).toBe(false)
+    expect(aimShown(true, false, true, { ...h, overheated: true }, BASE_WEAPONS)).toBe(false)
+    expect(aimShown(true, false, true, { ...h, weapon: PULSE }, BASE_WEAPONS)).toBe(false)
+  })
+
+  it('SPRINT: held sprints, per finger, with move and look and fire at once; the button lights while held', async () => {
+    const { m, touch, button } = await hudWith({ weapon: PULSE })
+    const sprintCls = (): string => cls(m.all().find((h) => cls(h).includes('drun-btn--sprint'))!)
+    touch('onPointerDown', 1, MOVE.cx, MOVE.cy)
+    touch('onPointerMove', 1, MOVE.cx, MOVE.cy - 60)
+    touch('onPointerDown', 2, LOOK.cx, LOOK.cy)
+    touch('onPointerMove', 2, LOOK.cx + 40, LOOK.cy)
+    button('fire', 'onPointerDown', 3)
+    button('sprint', 'onPointerDown', 4)
+    await tick()
+    expect(sprintCls()).toContain('is-held')
+    tickLook(0.1)
+    const a = readInput()
+    expect([a.sprint, a.fire, a.move.fwd > 0.99, a.yaw < 0]).toEqual([true, true, true, true])
+    // A second finger on SPRINT, the first lifting: still sprinting.
+    button('sprint', 'onPointerDown', 5)
+    button('sprint', 'onPointerUp', 4)
+    expect(readInput().sprint).toBe(true)
+    button('sprint', 'onLostPointerCapture', 5)
+    await tick()
+    expect(readInput().sprint).toBe(false)
+    expect(sprintCls()).not.toContain('is-held')
+    expect(readInput().move.fwd).toBeCloseTo(1)
+    await m.unmount()
+  })
+})
+
+describe('the SPRINT button\'s stamina ring', () => {
+  const meter = (all: Host[]): Host => all.find((h) => h.props.role === 'meter' && h.props['aria-label'] === COPY.stamina)!
+  const fill = (all: Host[]): Host => all.find((h) => cls(h) === 'drun-meter__fill')!
+  const sprint = (all: Host[]): Host => all.find((h) => cls(h).includes('drun-btn--sprint'))!
+
+  it('full when the runner says nothing of stamina; drains with it; dims while locked out', async () => {
+    expect(staminaOf(IDLE_HUD)).toEqual({ stamina: 1, sprinting: false, locked: false, shown: true })
+    const full = await mount(createElement(TouchPad, { hud: IDLE_HUD, weapons: BASE_WEAPONS, move: sticks(), look: sticks() }))
+    expect(meter(full.all()).props['aria-valuenow']).toBe(100)
+    expect(fill(full.all()).props.strokeDashoffset).toBe(0)
+    expect(textOf(sprint(full.all()))).toBe(COPY.sprint)
+    await full.unmount()
+    const draining = await mount(createElement(TouchPad, { hud: { ...IDLE_HUD, stamina: 0.4, sprinting: true, sprintLocked: false } as HudState, weapons: BASE_WEAPONS, move: sticks(), look: sticks(), sprintHeld: true }))
+    expect(meter(draining.all()).props['aria-valuenow']).toBe(40)
+    expect(fill(draining.all()).props.strokeDashoffset).toBeCloseTo(60)
+    expect(cls(sprint(draining.all()))).toContain('is-sprinting')
+    expect(cls(sprint(draining.all()))).toContain('is-held')
+    expect(cls(sprint(draining.all()))).not.toContain('is-locked')
+    await draining.unmount()
+    const locked = await mount(createElement(TouchPad, { hud: { ...IDLE_HUD, stamina: 0.1, sprinting: false, sprintLocked: true } as HudState, weapons: BASE_WEAPONS, move: sticks(), look: sticks() }))
+    expect(meter(locked.all()).props['aria-valuenow']).toBe(10)
+    expect(cls(sprint(locked.all()))).toContain('is-locked')
+    await locked.unmount()
+    // A variant with no stamina: SPRINT does nothing there, so it is not shown (its place kept).
+    const none = await mount(createElement(TouchPad, { hud: { ...IDLE_HUD, stamina: 0, hasStamina: false } as HudState, weapons: BASE_WEAPONS, move: sticks(), look: sticks() }))
+    expect(sprint(none.all()).props.hidden).toBe(true)
+    expect(sprint(none.all()).props.disabled).toBe(true)
+    await none.unmount()
+    // Out of range or missing, it stays sane.
+    expect(staminaOf({ ...IDLE_HUD, stamina: 7 } as HudState).stamina).toBe(1)
+    expect(staminaOf({ ...IDLE_HUD, stamina: -1 } as HudState).stamina).toBe(0)
+    expect(staminaOf({ ...IDLE_HUD, stamina: Number.NaN } as HudState).stamina).toBe(1)
+  })
+
+  it('the CSS dims it while locked out and draws the ring inside its border', () => {
+    const css = readFileSync(new URL('../../../../styles.css', import.meta.url), 'utf8')
+    expect(css).toMatch(/\.drun-btn--sprint\.is-locked \{ opacity: 0\.5; \}/)
+    expect(css).toMatch(/\.drun-meter \{ position: absolute; inset: 0;/)
+  })
+})
+
+describe('the controls at the five phone sizes: no two boxes overlap', () => {
+  const css = readFileSync(new URL('../../../../styles.css', import.meta.url), 'utf8')
+  const section = css.slice(css.indexOf('/* ---------- DRONE RUN: HUD'), css.indexOf('/* ---------- end DRONE RUN'))
+  const block = (q: string): string => {
+    const at = section.indexOf(`@media (${q}) {`)
+    expect(at).toBeGreaterThan(-1)
+    return section.slice(at, section.indexOf('\n}', at))
+  }
+  const px = (body: string, name: string): number => Number(new RegExp(`${name}: (\\d+)px`).exec(body)?.[1] ?? NaN)
+  const tall = section.slice(0, section.indexOf('.drun-layer {'))
+  const short = block('max-height: 520px'), shorter = block('max-height: 440px')
+
+  it('the rules the boxes below are computed from are the CSS\'s own', () => {
+    expect(section).toContain('--drun-above-stick: calc(var(--drun-bottom) + 4px + var(--drun-stick) + 14px);')
+    expect(section).toContain('--drun-above-sprint: calc(var(--drun-above-stick) + var(--drun-jump) + 10px);')
+    expect(section).toMatch(/\.drun-btn--sprint \{\n  left: calc\(20px \+ var\(--drun-stick\) - var\(--drun-jump\) \/ 2\);\n  bottom: var\(--drun-above-stick\);\n  width: var\(--drun-jump\);\n  height: var\(--drun-jump\);/)
+    expect(section).toMatch(/\.drun-btn--gun \{\n  left: 16px;\n  bottom: var\(--drun-above-sprint\);\n  width: 150px;\n  height: 56px;/)
+    expect(section).toMatch(/\.drun-btn--reload \{\n  left: 16px;\n  bottom: calc\(var\(--drun-above-sprint\) \+ 64px\);\n  width: 110px;\n  height: 36px;/)
+    expect(short).toContain('.drun-btn--reload { left: calc(16px + 150px + 8px); bottom: calc(var(--drun-above-sprint) + 10px); }')
+    expect(shorter).toContain('--drun-beside-move: calc(20px + var(--drun-stick) + 10px);')
+    expect(shorter).toContain('.drun-btn--gun { left: var(--drun-beside-move); bottom: calc(var(--drun-bottom) + 4px); }')
+    expect(shorter).toContain('.drun-btn--reload { left: var(--drun-beside-move); bottom: calc(var(--drun-bottom) + 4px + 56px + 8px); }')
+    expect(px(tall, '--drun-stick')).toBe(STICK_PX)
+  })
+
+  type Box = { name: string; x0: number; y0: number; x1: number; y1: number }
+  /** Every box on a phone at w x h, screen px, from the CSS's sizes and rules (no safe-area insets). */
+  function boxes(w: number, h: number): Box[] {
+    const isShort = h <= 520, isShorter = h <= 440
+    const from = (name: string): number => px(isShorter && !Number.isNaN(px(shorter, name)) ? shorter : isShort && !Number.isNaN(px(short, name)) ? short : tall, name)
+    const stick = from('--drun-stick'), fire = from('--drun-fire'), jump = from('--drun-jump')
+    const radar = w >= 900 && h >= 600 ? 120 : from('--drun-radar')
+    const bottom = 20, top = 12 + 46
+    const aboveStick = bottom + 4 + stick + 14
+    const aboveSprint = aboveStick + jump + 10
+    const b = (name: string, x0: number, y0: number, bw: number, bh: number): Box => ({ name, x0, y0, x1: x0 + bw, y1: y0 + bh })
+    const up = (name: string, left: number, fromBottom: number, bw: number, bh: number): Box => b(name, left, h - fromBottom - bh, bw, bh)
+    const assist = (stick + fire) / 2
+    // The safe zone's line: centred words (its longest line, 37 characters of 14px mono), under the radar on a narrow screen, higher on a short one.
+    const promptTop = isShort ? top + 36 : w <= 640 ? top + 38 + radar + 10 : top + 52
+    const promptW = Math.min(37 * 14 * 0.6, w - 32)
+    const out = [
+      b('top row', 16, top, w - 32, 30),
+      b('radar', 16, top + 38, radar, radar),
+      b('safe zone line', (w - promptW) / 2, promptTop, promptW, 44),
+      b('crosshair', w / 2 - 13, h / 2 - 13, 26, 26),
+      b('assist box', w / 2 - assist / 2, h / 2 - assist / 2, assist, assist),
+      up('MOVE', 20, bottom + 4, stick, stick),
+      up('LOOK', w - 20 - stick, bottom + 4, stick, stick),
+      up('FIRE', w - 16 - fire, aboveStick, fire, fire),
+      up('JUMP', w - 16 - fire - 10 - jump, aboveStick, jump, jump),
+      up('SPRINT', 20 + stick - jump / 2, aboveStick, jump, jump),
+    ]
+    if (isShorter) {
+      out.push(up('gun', 20 + stick + 10, bottom + 4, 150, 56), up('RELOAD', 20 + stick + 10, bottom + 4 + 56 + 8, 110, 36))
+    } else if (isShort) {
+      out.push(up('gun', 16, aboveSprint, 150, 56), up('RELOAD', 16 + 150 + 8, aboveSprint + 10, 110, 36))
+    } else {
+      out.push(up('gun', 16, aboveSprint, 150, 56), up('RELOAD', 16, aboveSprint + 64, 110, 36))
+    }
+    return out
+  }
+  const overlap = (a: Box, c: Box): boolean => a.x0 < c.x1 && c.x0 < a.x1 && a.y0 < c.y1 && c.y0 < a.y1
+  // The assist box is drawn round the crosshair on purpose; the faint box under the safe zone's centred words on a very
+  // short screen is the layout before this change (the words are the safe zone's, before a wave).
+  const allowed = new Set(['crosshair|assist box', 'safe zone line|assist box'])
+
+  for (const [w, h] of [[375, 812], [412, 915], [812, 375], [800, 360], [640, 320]]) {
+    it(`${w}x${h}`, () => {
+      const all = boxes(w, h)
+      for (const a of all) {
+        expect(a.x0, `${a.name} in from the left`).toBeGreaterThanOrEqual(0)
+        expect(a.x1, `${a.name} in from the right`).toBeLessThanOrEqual(w)
+        expect(a.y0, `${a.name} below the top`).toBeGreaterThanOrEqual(0)
+        expect(a.y1, `${a.name} above the bottom`).toBeLessThanOrEqual(h)
+      }
+      const hits: string[] = []
+      for (let i = 0; i < all.length; i++) {
+        for (let j = i + 1; j < all.length; j++) {
+          const key = `${all[i].name}|${all[j].name}`
+          if (!allowed.has(key) && overlap(all[i], all[j])) hits.push(key)
+        }
+      }
+      expect(hits).toEqual([])
+      // SPRINT sits above the MOVE stick, the gun never over SPRINT.
+      const sprint = all.find((x) => x.name === 'SPRINT')!, move = all.find((x) => x.name === 'MOVE')!
+      expect(sprint.y1).toBeLessThanOrEqual(move.y0)
+      expect(sprint.x0).toBeGreaterThan(move.x0)
+      expect(sprint.x0).toBeLessThan(move.x1)
+    })
+  }
 })
 
 describe('a short landscape phone: nothing on the left reaches the radar', () => {
@@ -421,7 +782,7 @@ describe('a short landscape phone: nothing on the left reaches the radar', () =>
   const px = (body: string, name: string): number => Number(new RegExp(`${name}: (\\d+)px`).exec(body)?.[1] ?? NaN)
 
   it('at 812x375, 800x360 and 640x320 the radar ends above the gun button and RELOAD (the sizes the CSS gives)', () => {
-    const short = block(520), shorter = block(380)
+    const short = block(520), shorter = block(440)
     const stick = px(short, '--drun-stick'), radar = px(shorter, '--drun-radar')
     expect(radar).toBe(56)
     expect(shorter).toContain('.drun-btn--gun { left: var(--drun-beside-move); bottom: calc(var(--drun-bottom) + 4px); }')

@@ -3,14 +3,19 @@
  *
  * It lays a view layer over the canvas that takes the presses meant for the
  * game: on a desktop a press locks the pointer (input.ts attachDesktop), and
- * on a phone the touches that land on no button drive the MOVE stick (left
- * half), the LOOK stick (on it) or the look drag (the rest of the right
- * half), each finger by its pointer id (input.ts TouchTracker). Over it the
- * HUD (HudView) and, on a phone, the controls (TouchPad). The game bar
- * (name, EXIT GAME) stays above all of it.
+ * on a phone the touches that land on no button drive the floating MOVE
+ * stick (left half), the floating LOOK stick (right half) or, with a second
+ * finger on the right, the look drag, each finger by its pointer id (input.ts
+ * TouchTracker). It draws each stick's ring where its finger landed and puts
+ * it back on lift. Over it the HUD (HudView) and, on a phone, the controls
+ * (TouchPad). The game bar (name, EXIT GAME) stays above all of it.
  *
  * On a phone it turns the view each screen frame by the LOOK stick's rate
- * (input.ts tickLook).
+ * (input.ts tickLook), and while the rail charges (FIRE held with a charge
+ * gun in hand, not overheated, no card up) it switches the MOVE stick to aim
+ * (TouchTracker.setAim): the steps read no movement and the LOOK stick
+ * hides; FIRE let go, another gun, a card or the page losing focus (which
+ * lets go of FIRE) switch it back.
  *
  * It also:
  * - plays the sounds from the run's events (audio.ts), and flashes the
@@ -30,7 +35,7 @@ import type { RunEvent } from '../../../lib/games/droneRun/sim/events'
 import { useGame } from '../../../store/useGame'
 import { useSoundMutes } from '../../../store/useSoundMutes'
 import { playSound, toggleDroneRunSound, useDroneRunSound, warmSound } from '../audio'
-import { attachDesktop, noteWeapons, pointer, releaseAll, releasePointer, setInputPaused, tickLook, TouchTracker, type StickPlace } from '../input'
+import { attachDesktop, held$, noteWeapons, padFiring, pointer, releaseAll, releasePointer, setAiming, setInputPaused, sprintHeld, tickLook, TouchTracker, type Pt, type StickPlace } from '../input'
 import { HudView, type Pulses } from './HudView'
 import { TouchPad } from './TouchPad'
 import { IDLE_HUD, STICK_PX, weaponsOfHud, type HudState, type HudWeapon } from './model'
@@ -78,6 +83,24 @@ export function useLastPointerFinger(touch: boolean): boolean {
   return touch && finger
 }
 
+/** Whether `get` holds, re-read whenever FIRE or SPRINT goes down or up (input.ts held$). */
+function useHeld(get: () => boolean): boolean {
+  return useSyncExternalStore(
+    (l) => { held$.listeners.add(l); return () => { held$.listeners.delete(l) } },
+    get,
+    () => false,
+  )
+}
+
+/**
+ * Whether the MOVE stick aims: a phone, no card up, a charge gun (the rail)
+ * in hand and not overheated, and a finger on FIRE. The rail fires on
+ * release, so FIRE let go is the shot (or the fizzle).
+ */
+export function aimShown(touch: boolean, card: boolean, padFire: boolean, hud: Pick<HudState, 'weapon' | 'overheated'>, weapons: readonly HudWeapon[]): boolean {
+  return touch && !card && padFire && !hud.overheated && weapons[hud.weapon]?.gauge === 'charge'
+}
+
 function usePointerLocked(): boolean {
   return useSyncExternalStore(
     (l) => { pointer.listeners.add(l); return () => { pointer.listeners.delete(l) } },
@@ -117,18 +140,22 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
   const touchRef = useRef(touch)
   touchRef.current = touch
   const card = hud.phase === 'failed' || hud.phase === 'cleared'
+  const padFire = useHeld(padFiring)
+  const sprinting = useHeld(sprintHeld)
+  const aiming = aimShown(touch, card, padFire, hud, weapons)
+  /** How far each ring is moved from its resting place now, px (so its resting place can be read back from where it is drawn). */
+  const shifted = useRef({ move: { x: 0, y: 0 }, look: { x: 0, y: 0 } })
   const leave = exit ?? ((): void => { void useGame.getState().exit() })
 
-  // The sticks' centres and reach, read from where they are drawn (before that, from the layout's default places).
+  // The sticks' resting places and reach, read from where they are drawn (before that, from the layout's default places).
   const tracker = useMemo(() => new TouchTracker(
-    () => placeOf(move.base.current) ?? defaultPlace('move'),
-    { look: () => (touchRef.current ? placeOf(look.base.current) ?? defaultPlace('look') : null) },
+    () => placeOf(move.base.current, shifted.current.move) ?? defaultPlace('move'),
+    { look: () => (touchRef.current ? placeOf(look.base.current, shifted.current.look) ?? defaultPlace('look') : null) },
   ), [])
+  /** Each stick's ring where its finger landed (or at rest), and its knob. */
   const drawKnob = (): void => {
-    const k = move.knob.current
-    if (k?.style) k.style.transform = `translate(${tracker.knob.dx}px, ${tracker.knob.dy}px)`
-    const l = look.knob.current
-    if (l?.style) l.style.transform = `translate(${tracker.lookKnob.dx}px, ${tracker.lookKnob.dy}px)`
+    drawStick(move.base.current, move.knob.current, tracker.ring, tracker.knob, shifted.current.move, defaultPlace('move'))
+    drawStick(look.base.current, look.knob.current, tracker.lookRing, tracker.lookKnob, shifted.current.look, defaultPlace('look'))
   }
 
   // The keyboard and the mouse, while the screen is up.
@@ -145,7 +172,13 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
     setRunPaused(card)
     if (card) { releasePointer(); tracker.clear(); drawKnob() }
   }, [card])
-  useEffect(() => () => { setInputPaused(false) }, [])
+  useEffect(() => () => { setInputPaused(false); setAiming(false) }, [])
+
+  // The rail charging: the MOVE stick aims and the LOOK stick rests; a finger already down is re-centred where it is.
+  useEffect(() => {
+    tracker.setAim(aiming)
+    drawKnob()
+  }, [aiming])
 
   // Away from the page (an app switch on a phone, a hidden tab): every finger lets go, so the stick and the look take
   // the next touch, even when the old touches never sent their pointerup.
@@ -198,7 +231,7 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
   const onTouchDown = (e: React.PointerEvent<HTMLDivElement>): void => {
     if (e.pointerType !== 'touch' || card) return
     warmSound()
-    const took = tracker.down(e.pointerId, e.clientX, e.clientY, e.currentTarget.clientWidth || window.innerWidth)
+    const took = tracker.down(e.pointerId, e.clientX, e.clientY, e.currentTarget.clientWidth || window.innerWidth, e.currentTarget.clientHeight || window.innerHeight)
     if (!took) return
     try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* fine */ }
     if (took !== 'look') drawKnob()
@@ -240,18 +273,39 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
         onExit={leave}
         onToggleSound={toggleDroneRunSound}
       />
-      {touch && <TouchPad hud={hud} weapons={weapons} move={move} look={look} />}
+      {touch && <TouchPad hud={hud} weapons={weapons} move={move} look={look} aiming={aiming} sprintHeld={sprinting} />}
     </div>
   )
 }
 
 type DesktopDoc = Parameters<typeof attachDesktop>[0]['doc']
 
-/** A stick's centre and reach from its ring as drawn, or null before it is drawn (or with no DOM). */
-function placeOf(el: HTMLElement | null): StickPlace | null {
+/** A stick's resting centre and reach from its ring as drawn (less how far it is moved now), or null before it is drawn (or with no DOM). */
+function placeOf(el: HTMLElement | null, moved: Pt = { x: 0, y: 0 }): StickPlace | null {
   if (!el || typeof el.getBoundingClientRect !== 'function') return null
   const r = el.getBoundingClientRect()
-  return r.width > 0 ? { cx: r.left + r.width / 2, cy: r.top + r.height / 2, radius: r.width / 2 } : null
+  return r.width > 0 ? { cx: r.left + r.width / 2 - moved.x, cy: r.top + r.height / 2 - moved.y, radius: r.width / 2 } : null
+}
+
+/**
+ * Draws one stick: its ring moved from its resting place to `ring` (or back
+ * when null), its knob at `knob` from the ring's centre. `moved` is kept up
+ * to date with how far the ring is moved.
+ */
+export function drawStick(base: HTMLElement | null, knobEl: HTMLElement | null, ring: Pt | null, knob: { dx: number; dy: number }, moved: Pt, fallback: StickPlace): void {
+  if (base?.style) {
+    if (ring) {
+      const rest = placeOf(base, moved) ?? fallback
+      moved.x = ring.x - rest.cx
+      moved.y = ring.y - rest.cy
+      base.style.transform = `translate(${moved.x}px, ${moved.y}px)`
+    } else {
+      moved.x = 0
+      moved.y = 0
+      base.style.transform = ''
+    }
+  }
+  if (knobEl?.style) knobEl.style.transform = `translate(${knob.dx}px, ${knob.dy}px)`
 }
 
 /** Where a stick stands by the layout's defaults (styles.css: 20px in from the side, 24px up, STICK_PX across). */

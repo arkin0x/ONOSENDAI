@@ -3,13 +3,16 @@
  * RunInput, edges cleared once read, held keys, the wheel and Q cycling the
  * guns, the pointer lock and its fallback to a drag, the phone's stick math
  * (dead zone, analog magnitude), the LOOK stick's turn rate (dead zone,
- * curve, top rate, directions) and every finger by its pointer id.
+ * curve, top rate, directions), both sticks floating (every touch starts at
+ * nothing, measured from where it landed, the ring drawn there and back on
+ * lift), the aim while the rail charges, sprint (Shift and the pad's
+ * sources) and every finger by its pointer id.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  attachDesktop, keyAction, lookBy, lookState, lookStickRate, noteWeapons, pointer, readInput, releaseAll, resetInput, setInputPaused, setLookRate, stickVector, tickLook,
-  TouchTracker, MOUSE_RAD_PER_PX, DRAG_RAD_PER_PX, STICK_DEAD, TOUCH_RAD_PER_PX, PITCH_LIMIT, LOOK_DEAD, LOOK_CURVE, LOOK_MAX_YAW, LOOK_MAX_PITCH, LOOK_GRAB,
+  attachDesktop, keyAction, lookBy, lookRateNow, lookState, lookStickRate, noteWeapons, padFiring, pointer, readInput, releaseAll, resetInput, ringAt, setFire, setInputPaused, setLookRate, setSprint, stickVector, tickLook,
+  TouchTracker, MOUSE_RAD_PER_PX, DRAG_RAD_PER_PX, STICK_DEAD, TOUCH_RAD_PER_PX, PITCH_LIMIT, LOOK_DEAD, LOOK_CURVE, LOOK_MAX_YAW, LOOK_MAX_PITCH, AIM_SCALE, RING_MARGIN, aimingNow,
 } from '../../input'
 
 type Fn = (e: unknown) => void
@@ -60,6 +63,8 @@ describe('the key map', () => {
     expect(keyAction('KeyQ')).toEqual({ kind: 'cycle', by: 1 })
     expect(keyAction('KeyR')).toEqual({ kind: 'reload' })
     expect(keyAction('KeyM')).toEqual({ kind: 'mute' })
+    expect(keyAction('ShiftLeft')).toEqual({ kind: 'sprint' })
+    expect(keyAction('ShiftRight')).toEqual({ kind: 'sprint' })
     expect(keyAction('KeyE')).toBeNull()
     expect(keyAction('Escape')).toBeNull()
   })
@@ -149,6 +154,38 @@ describe('keys to a RunInput', () => {
     h.win.fire('blur', {})
     expect(readInput().move).toEqual({ fwd: 0, strafe: 0 })
     h.detach()
+  })
+
+  it('Shift held sprints, with either Shift; let go, it stops; a card or blur lets go', () => {
+    const h = host()
+    expect(readInput().sprint).toBe(false)
+    key(h, 'keydown', 'ShiftLeft', { key: 'Shift' })
+    key(h, 'keydown', 'KeyW')
+    const a = readInput()
+    expect(a.sprint).toBe(true)
+    expect(a.move.fwd).toBe(1)
+    key(h, 'keydown', 'ShiftRight', { key: 'Shift' })
+    key(h, 'keyup', 'ShiftLeft', { key: 'Shift' })
+    expect(readInput().sprint).toBe(true)
+    key(h, 'keyup', 'ShiftRight', { key: 'Shift' })
+    expect(readInput().sprint).toBe(false)
+    key(h, 'keydown', 'ShiftLeft', { key: 'Shift' })
+    setInputPaused(true)
+    expect(readInput().sprint).toBe(false)
+    setInputPaused(false)
+    key(h, 'keydown', 'ShiftLeft', { key: 'Shift' })
+    h.win.fire('blur', {})
+    expect(readInput().sprint).toBe(false)
+    h.detach()
+  })
+
+  it('sprint sources by name: one finger lifting leaves another\'s', () => {
+    setSprint('pad:sprint:1', true)
+    setSprint('pad:sprint:2', true)
+    setSprint('pad:sprint:1', false)
+    expect(readInput().sprint).toBe(true)
+    setSprint('pad:sprint:2', false)
+    expect(readInput().sprint).toBe(false)
   })
 
   it('unwires every listener it added', () => {
@@ -261,9 +298,12 @@ describe('the phone\'s stick', () => {
     expect(out.fwd).toBeCloseTo(-Math.SQRT1_2)
   })
 
-  it('the left half drives the stick from its centre, the right half looks, each finger by its id', () => {
+  it('the left half floats the stick from where the thumb lands, the right half looks, each finger by its id', () => {
     const t = new TouchTracker(() => ({ cx: 80, cy: 700, radius: 60 }))
+    // Landing well away from the stick's resting centre moves nothing: the stick starts where the thumb is.
     expect(t.down(7, 80, 640, 375)).toBe('stick')
+    expect(readInput().move).toEqual({ fwd: 0, strafe: 0 })
+    t.move(7, 80, 580)
     expect(readInput().move.fwd).toBeCloseTo(1)
     // A second finger on the left is not a second stick.
     expect(t.down(8, 100, 600, 375)).toBeNull()
@@ -273,7 +313,7 @@ describe('the phone\'s stick', () => {
     expect(lookState.yaw).toBeCloseTo(-30 * TOUCH_RAD_PER_PX)
     expect(lookState.pitch).toBeCloseTo(20 * TOUCH_RAD_PER_PX)
     // The knob is drawn at the rim, not past it.
-    t.move(7, 80, 500)
+    t.move(7, 80, 440)
     expect(t.knob).toEqual({ dx: 0, dy: -60 })
     expect(readInput().move.fwd).toBeCloseTo(1)
     // The look finger lifting leaves the stick held.
@@ -293,6 +333,7 @@ describe('the phone\'s stick', () => {
     const t = new TouchTracker(() => ({ cx: 80, cy: 700, radius: 60 }))
     key(h, 'keydown', 'KeyW')
     t.down(1, 140, 700, 375)
+    t.move(1, 200, 700)
     const m = readInput().move
     expect(Math.hypot(m.fwd, m.strafe)).toBeCloseTo(1)
     expect(m.fwd).toBeCloseTo(Math.SQRT1_2)
@@ -363,39 +404,105 @@ describe('the LOOK stick\'s turn rate', () => {
   })
 })
 
-describe('the phone\'s fingers: MOVE stick, LOOK stick, look drag', () => {
+describe('the phone\'s fingers: floating MOVE and LOOK sticks, the look drag', () => {
+  const W = 375, H = 812
   const MOVE = { cx: 80, cy: 728, radius: 60 }
   const LOOK = { cx: 295, cy: 728, radius: 60 }
   const tracker = () => new TouchTracker(() => MOVE, { look: () => LOOK })
 
-  it('a finger on the LOOK stick holds it; elsewhere on the right it drags; each its own finger', () => {
+  it('LOOK: a touch anywhere on the right starts at no turn; the rate grows with the distance from where it landed', () => {
+    for (const [x, y] of [[LOOK.cx + 50, LOOK.cy], [W - 30, 200], [W / 2 + 10, 500], [300, H - 10]]) {
+      resetInput(0, 0)
+      const t = tracker()
+      expect(t.down(1, x, y, W, H)).toBe('lookstick')
+      expect(lookRateNow()).toEqual({ yaw: 0, pitch: 0 })
+      tickLook(0.1)
+      expect(lookState.yaw).toBe(0)
+      // Inside the dead zone, still nothing.
+      t.move(1, x - LOOK_DEAD * LOOK.radius + 0.5, y)
+      expect(lookRateNow().yaw).toBe(0)
+      // Farther from the landing point is faster, along the curve, wherever the stick's resting place is.
+      let prev = 0
+      for (const d of [10, 20, 30, 45, 60]) {
+        t.move(1, x - d, y)
+        const r = lookRateNow().yaw
+        expect(r).toBeCloseTo(lookStickRate(-d, 0, LOOK.radius).yaw)
+        expect(r).toBeGreaterThan(prev)
+        prev = r
+      }
+      t.up(1)
+      expect(lookRateNow()).toEqual({ yaw: 0, pitch: 0 })
+    }
+  })
+
+  it('the ring is drawn where the thumb lands (kept on screen and on its half), and goes back on lift', () => {
     const t = tracker()
-    expect(t.down(1, LOOK.cx + 40, LOOK.cy, 375)).toBe('lookstick')
-    expect(t.down(2, LOOK.cx, LOOK.cy - LOOK.radius * LOOK_GRAB - 5, 375)).toBe('look')
-    // A second finger on the LOOK stick is not a second stick.
-    expect(t.down(3, LOOK.cx, LOOK.cy, 375)).toBeNull()
+    expect(t.ring).toBeNull()
+    expect(t.lookRing).toBeNull()
+    t.down(1, 100, 500, W, H)
+    t.down(2, 260, 420, W, H)
+    expect(t.ring).toEqual({ x: 100, y: 500 })
+    expect(t.lookRing).toEqual({ x: 260, y: 420 })
+    // The ring stays with the landing point while the finger moves (the knob moves).
+    t.move(2, 290, 420)
+    expect(t.lookRing).toEqual({ x: 260, y: 420 })
+    expect(t.lookKnob).toEqual({ dx: 30, dy: 0 })
+    t.up(1)
+    t.up(2)
+    expect(t.ring).toBeNull()
+    expect(t.lookRing).toBeNull()
+    expect(t.lookKnob).toEqual({ dx: 0, dy: 0 })
+    // Near the edge: the ring is moved in to stay whole on screen, but the turn still starts at nothing and the knob in its middle.
+    t.down(3, W - 5, H - 5, W, H)
+    const ring = t.lookRing!
+    expect(ring.x).toBe(W - LOOK.radius - RING_MARGIN)
+    expect(ring.y).toBe(H - LOOK.radius - RING_MARGIN)
+    expect(lookRateNow()).toEqual({ yaw: 0, pitch: 0 })
+    expect(t.lookKnob).toEqual({ dx: 0, dy: 0 })
+    // Just right of the middle: the ring stays on the right half.
+    t.up(3)
+    t.down(4, W / 2 + 2, 400, W, H)
+    expect(t.lookRing!.x - LOOK.radius).toBeGreaterThanOrEqual(W / 2)
+    // MOVE's ring stays on the left half.
+    t.down(5, W / 2 - 2, 400, W, H)
+    expect(t.ring!.x + MOVE.radius).toBeLessThanOrEqual(W / 2)
+    expect(t.ring!.x - MOVE.radius).toBeGreaterThanOrEqual(0)
+    expect(readInput().move).toEqual({ fwd: 0, strafe: 0 })
+  })
+
+  it('ringAt keeps a ring whole on screen and on its half', () => {
+    expect(ringAt(10, 10, 50, 'left', 400, 300)).toEqual({ x: 50 + RING_MARGIN, y: 50 + RING_MARGIN })
+    expect(ringAt(190, 150, 50, 'left', 400, 300)).toEqual({ x: 150, y: 150 })
+    expect(ringAt(210, 290, 50, 'right', 400, 300)).toEqual({ x: 250, y: 300 - 50 - RING_MARGIN })
+    expect(ringAt(300, 150, 50, 'right', 400, 300)).toEqual({ x: 300, y: 150 })
+  })
+
+  it('a second finger on the right drags the look while LOOK is held; a third is ignored', () => {
+    const t = tracker()
+    expect(t.down(1, LOOK.cx, LOOK.cy, W, H)).toBe('lookstick')
+    expect(t.down(2, 250, 300, W, H)).toBe('look')
+    expect(t.down(3, 260, 320, W, H)).toBeNull()
     expect(t.holding).toEqual({ stick: null, lookStick: 1, look: 2 })
-    expect(t.lookKnob).toEqual({ dx: 40, dy: 0 })
+    t.move(1, LOOK.cx + 40, LOOK.cy)
     tickLook(0.1)
     expect(lookState.yaw).toBeCloseTo(lookStickRate(40, 0, 60).yaw * 0.1)
     // The drag adds its own turn on top.
     const y = lookState.yaw
-    t.move(2, LOOK.cx + 10, LOOK.cy - 200)
+    t.move(2, 260, 300)
     expect(lookState.yaw).toBeCloseTo(y - 10 * TOUCH_RAD_PER_PX)
     // Lifting the stick stops the turning; the drag keeps working.
     t.up(1)
     const y2 = lookState.yaw
     tickLook(0.1)
     expect(lookState.yaw).toBe(y2)
-    expect(t.lookKnob).toEqual({ dx: 0, dy: 0 })
-    t.move(2, LOOK.cx + 20, LOOK.cy - 200)
+    t.move(2, 270, 300)
     expect(lookState.yaw).toBeCloseTo(y2 - 10 * TOUCH_RAD_PER_PX)
   })
 
   it('a finger keeps its stick wherever it slides, until it lifts', () => {
     const t = tracker()
-    t.down(1, MOVE.cx, MOVE.cy - 60, 375)
-    t.down(2, LOOK.cx + 60, LOOK.cy, 375)
+    t.down(1, MOVE.cx, MOVE.cy, W, H)
+    t.down(2, LOOK.cx, LOOK.cy, W, H)
     // The MOVE finger slides over to the right half, the LOOK finger to the left: each keeps its own.
     t.move(1, 300, MOVE.cy)
     t.move(2, 20, LOOK.cy)
@@ -405,6 +512,7 @@ describe('the phone\'s fingers: MOVE stick, LOOK stick, look drag', () => {
     expect(lookState.yaw).toBeGreaterThan(0)
     t.clear()
     expect(t.holding).toEqual({ stick: null, lookStick: null, look: null })
+    expect(t.ring).toBeNull()
     expect(readInput().move).toEqual({ fwd: 0, strafe: 0 })
     const y = lookState.yaw
     tickLook(0.1)
@@ -413,6 +521,109 @@ describe('the phone\'s fingers: MOVE stick, LOOK stick, look drag', () => {
 
   it('without a LOOK stick on screen (a desktop touch screen) the right half drags as before', () => {
     const t = new TouchTracker(() => MOVE)
-    expect(t.down(1, LOOK.cx, LOOK.cy, 375)).toBe('look')
+    expect(t.down(1, LOOK.cx, LOOK.cy, W, H)).toBe('look')
+  })
+})
+
+describe('aim: the MOVE stick aims while the rail charges', () => {
+  const W = 375, H = 812
+  const MOVE = { cx: 80, cy: 728, radius: 60 }
+  const LOOK = { cx: 295, cy: 728, radius: 60 }
+  const tracker = () => new TouchTracker(() => MOVE, { look: () => LOOK })
+
+  it('the MOVE stick turns the view at the finer rate, from where it lands; the steps read no movement', () => {
+    const t = tracker()
+    t.setAim(true)
+    expect(aimingNow()).toBe(true)
+    expect(t.down(1, 120, 600, W, H)).toBe('stick')
+    expect(lookRateNow()).toEqual({ yaw: 0, pitch: 0 })
+    t.move(1, 160, 560)
+    const r = lookRateNow()
+    const want = lookStickRate(40, -40, MOVE.radius, AIM_SCALE)
+    expect(r.yaw).toBeCloseTo(want.yaw)
+    expect(r.pitch).toBeCloseTo(want.pitch)
+    expect(r.yaw).toBeLessThan(0)
+    expect(r.pitch).toBeGreaterThan(0)
+    // Finer than LOOK at the same push.
+    expect(Math.abs(r.yaw)).toBeCloseTo(Math.abs(lookStickRate(40, -40, MOVE.radius).yaw) * AIM_SCALE)
+    expect(readInput().move).toEqual({ fwd: 0, strafe: 0 })
+    tickLook(0.1)
+    expect(lookState.yaw).toBeCloseTo(want.yaw * 0.1)
+    // Even the keys move nothing while it aims.
+    t.up(1)
+    expect(lookRateNow()).toEqual({ yaw: 0, pitch: 0 })
+    t.setAim(false)
+    expect(aimingNow()).toBe(false)
+  })
+
+  it('a finger held through the switch re-centres where it is, both ways, so neither the aim nor the run jumps', () => {
+    const t = tracker()
+    t.down(1, MOVE.cx, MOVE.cy, W, H)
+    t.move(1, MOVE.cx, MOVE.cy - 60)
+    expect(readInput().move.fwd).toBeCloseTo(1)
+    t.setAim(true)
+    expect(readInput().move).toEqual({ fwd: 0, strafe: 0 })
+    expect(lookRateNow()).toEqual({ yaw: 0, pitch: 0 })
+    expect(t.knob).toEqual({ dx: 0, dy: 0 })
+    expect(t.ring).toEqual({ x: MOVE.cx, y: MOVE.cy - 60 })
+    // A small nudge from there aims a little, not a full push up.
+    t.move(1, MOVE.cx + 20, MOVE.cy - 60)
+    expect(lookRateNow().yaw).toBeCloseTo(lookStickRate(20, 0, MOVE.radius, AIM_SCALE).yaw)
+    expect(lookRateNow().pitch).toBeCloseTo(0)
+    t.setAim(false)
+    expect(lookRateNow()).toEqual({ yaw: 0, pitch: 0 })
+    expect(readInput().move).toEqual({ fwd: 0, strafe: 0 })
+    t.move(1, MOVE.cx + 20, MOVE.cy - 120)
+    expect(readInput().move.fwd).toBeCloseTo(1)
+  })
+
+  it('the LOOK stick rests: its finger turns nothing and new touches on the right are not taken; back after, from where it is', () => {
+    const t = tracker()
+    t.down(2, LOOK.cx, LOOK.cy, W, H)
+    t.move(2, LOOK.cx + 60, LOOK.cy)
+    expect(lookRateNow().yaw).toBeLessThan(0)
+    t.setAim(true)
+    expect(lookRateNow()).toEqual({ yaw: 0, pitch: 0 })
+    t.move(2, LOOK.cx + 90, LOOK.cy - 30)
+    expect(lookRateNow()).toEqual({ yaw: 0, pitch: 0 })
+    expect(t.down(3, 250, 300, W, H)).toBeNull()
+    // The aim drives, and the resting LOOK finger lifting does not stop it.
+    t.down(1, 100, 600, W, H)
+    t.move(1, 140, 600)
+    const aim = lookRateNow().yaw
+    expect(aim).toBeLessThan(0)
+    expect(t.down(4, 300, 300, W, H)).toBeNull()
+    // Aim off: the LOOK finger still down is re-centred where it is now, so it starts at no turn.
+    t.setAim(false)
+    expect(lookRateNow()).toEqual({ yaw: 0, pitch: 0 })
+    t.move(2, LOOK.cx + 90 + 30, LOOK.cy - 30)
+    expect(lookRateNow().yaw).toBeCloseTo(lookStickRate(30, 0, LOOK.radius).yaw)
+    t.clear()
+  })
+
+  it('the LOOK finger lifting under the aim leaves the aim turning', () => {
+    const t = tracker()
+    t.down(2, LOOK.cx, LOOK.cy, W, H)
+    t.setAim(true)
+    t.down(1, 100, 600, W, H)
+    t.move(1, 140, 600)
+    const aim = lookRateNow().yaw
+    t.up(2)
+    expect(lookRateNow().yaw).toBe(aim)
+    t.clear()
+    expect(lookRateNow()).toEqual({ yaw: 0, pitch: 0 })
+  })
+
+  it('FIRE\'s pad fingers are known by name (the HUD reads them for the aim); letting go of everything ends the aim', () => {
+    expect(padFiring()).toBe(false)
+    setFire('mouse', true)
+    expect(padFiring()).toBe(false)
+    setFire('pad:fire:4', true)
+    expect(padFiring()).toBe(true)
+    const t = tracker()
+    t.setAim(true)
+    releaseAll()
+    expect(padFiring()).toBe(false)
+    expect(aimingNow()).toBe(false)
   })
 })

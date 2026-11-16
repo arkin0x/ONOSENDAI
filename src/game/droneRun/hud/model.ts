@@ -73,6 +73,7 @@ export function weaponIcon(w: HudWeapon | undefined): LucideIcon {
  */
 export const STICK_PX = 120
 export const FIRE_PX = 88
+/** JUMP's side, and SPRINT's (the same size and look). */
 export const JUMP_PX = 64
 /** The aim assist box's side: halfway between FIRE and the MOVE stick (--drun-assist). */
 export const ASSIST_PX = (STICK_PX + FIRE_PX) / 2
@@ -88,12 +89,38 @@ export function assistShown(fingers: boolean, hud: Pick<HudState, 'phase' | 'wea
   return fingers && !exiting && weapons[hud.weapon]?.assist === 'auto' && hud.phase !== 'failed' && hud.phase !== 'cleared'
 }
 
+/** Sprint stamina as the runner's store gives it (stamina 0..1, sprinting, sprintLocked, hasStamina); read as optional, so a store without them reads as full. */
+type StaminaFields = { stamina?: number; sprinting?: boolean; sprintLocked?: boolean; hasStamina?: boolean }
+
+/** What the SPRINT button's meter draws. */
+export interface StaminaView {
+  /** 0..1 of full. */
+  stamina: number
+  /** Sprint is speeding the body up now. */
+  sprinting: boolean
+  /** Emptied: the lockout runs, sprint does nothing until it ends. */
+  locked: boolean
+  /** The variant has stamina: without it sprint does nothing, so SPRINT is not shown (its place kept). */
+  shown: boolean
+}
+
+/** The meter's view of the HUD: full and free when the runner says nothing of stamina. */
+export function staminaOf(h: HudState): StaminaView {
+  const x = h as HudState & StaminaFields
+  const v = typeof x.stamina === 'number' && Number.isFinite(x.stamina) ? Math.max(0, Math.min(1, x.stamina)) : 1
+  return { stamina: v, sprinting: !!x.sprinting, locked: !!x.sprintLocked, shown: x.hasStamina !== false }
+}
+
+/** The idle stamina: full, not sprinting, no lockout; the base variant's say on whether there is any. */
+const IDLE_STAMINA: Required<StaminaFields> = { stamina: 1, sprinting: false, sprintLocked: false, hasStamina: !!(base as { spec: { player: { stamina?: unknown } } }).spec.player.stamina }
+
 /** The HUD before the runner says anything (the world loading): the safe zone, full health, the base variant's guns. */
 export const IDLE_HUD: HudState = {
+  ...IDLE_STAMINA,
   phase: 'safe', hp: 3, maxHp: 3, invulnerable: false, wave: 1, waveName: '', wavesTotal: 3, dronesLeft: 0,
   weapon: 0, weaponNames: BASE_WEAPONS.map((w) => w.name), weaponKinds: BASE_WEAPONS.map((w) => (w.gauge === 'ammo' ? 'ammo' : 'heat')),
   weaponCharges: BASE_WEAPONS.map((w) => w.gauge === 'charge'), weaponAssists: BASE_WEAPONS.map((w) => w.assist), heat: 0, overheated: false, ammo: 0, mag: 0, reloading: false,
-  charge: 0, switching: false, runTime: 0, kills: 0, score: 0,
+  charge: 0, switching: false, runTime: 0, stamina: 1, sprintLocked: false, sprinting: false, hasStamina: true, kills: 0, score: 0,
 }
 
 /** Every word the HUD prints (drafts for the owner's approval). */
@@ -114,10 +141,14 @@ export const COPY = {
   jump: 'JUMP',
   move: 'MOVE',
   look: 'LOOK',
+  /** The MOVE stick's label while the rail charges: it aims. */
+  stickAim: 'AIM',
+  sprint: 'SPRINT',
+  stamina: 'STAMINA',
   heat: 'HEAT',
   charge: 'CHARGE',
   /** The desktop hint line: key, then what it does. */
-  hintsFull: [['WASD', 'MOVE'], ['SPACE', 'JUMP'], ['CLICK', 'FIRE'], ['1 2 3 Q', 'GUNS'], ['R', 'RELOAD'], ['M', 'SOUND']] as const,
+  hintsFull: [['WASD', 'MOVE'], ['SHIFT', 'SPRINT'], ['SPACE', 'JUMP'], ['CLICK', 'FIRE'], ['1 2 3 Q', 'GUNS'], ['R', 'RELOAD'], ['M', 'SOUND']] as const,
   hintsWave: [['1 2 3 Q', 'GUNS'], ['R', 'RELOAD']] as const,
   /** Before the pointer is locked, the click aims (takes the mouse). */
   aim: 'AIM',

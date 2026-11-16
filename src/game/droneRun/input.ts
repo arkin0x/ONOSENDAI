@@ -10,9 +10,11 @@
  * | Input | What it gives |
  * |---|---|
  * | W A S D, arrows (held) | move: fwd and strafe (+1 right on screen), each -1, 0 or 1 (the simulation accelerates them, fluid WALK's feel) |
- * | the phone's stick | move: analog, inside the unit circle (added to the keys, then kept inside it) |
- * | mouse with the lock, a drag without it, a drag on the phone's right half | yaw and pitch, absolute, in lookState |
- * | the phone's LOOK stick (held off centre) | a turn rate, applied each frame by tickLook (lookStickRate: dead zone, a gentle curve, at most LOOK_MAX_YAW and LOOK_MAX_PITCH) |
+ * | the phone's MOVE stick (floating: its centre is where the thumb lands) | move: analog, inside the unit circle (added to the keys, then kept inside it) |
+ * | mouse with the lock, a drag without it, a second finger dragged on the phone's right half | yaw and pitch, absolute, in lookState |
+ * | the phone's LOOK stick (floating, held off where the thumb landed) | a turn rate, applied each frame by tickLook (lookStickRate: dead zone, a gentle curve, at most LOOK_MAX_YAW and LOOK_MAX_PITCH) |
+ * | the phone's MOVE stick while the rail charges (AIM) | a finer turn rate (AIM_SCALE of LOOK's); move is 0 meanwhile |
+ * | Shift, SPRINT (held) | sprint: held (the simulation spends stamina) |
  * | Space, JUMP | jump: an edge, true for the one step that reads it (in the air it is the double jump) |
  * | left button, FIRE (held) | fire: held (auto fires, the rail charges) |
  * | 1 2 3 | select: that gun, for the one step that reads it |
@@ -61,6 +63,7 @@ const KEY_DIRS: Record<string, Dir> = {
 /** What a key does in the game, or null for a key the game leaves alone. */
 export type KeyAction =
   | { kind: 'move'; dir: Dir }
+  | { kind: 'sprint' }
   | { kind: 'jump' }
   | { kind: 'select'; index: number }
   | { kind: 'cycle'; by: 1 | -1 }
@@ -72,6 +75,7 @@ export function keyAction(code: string): KeyAction | null {
   const dir = KEY_DIRS[code]
   if (dir) return { kind: 'move', dir }
   if (code === 'Space') return { kind: 'jump' }
+  if (code === 'ShiftLeft' || code === 'ShiftRight') return { kind: 'sprint' }
   if (code === 'Digit1' || code === 'Numpad1') return { kind: 'select', index: 0 }
   if (code === 'Digit2' || code === 'Numpad2') return { kind: 'select', index: 1 }
   if (code === 'Digit3' || code === 'Numpad3') return { kind: 'select', index: 2 }
@@ -83,6 +87,9 @@ export function keyAction(code: string): KeyAction | null {
 
 const held = new Map<string, Dir>()
 const firing = new Set<string>()
+const sprinting = new Set<string>()
+/** The rail charging on a phone: the MOVE stick aims (TouchTracker.setAim) and the steps read no movement. */
+let aiming = false
 let stick: Dir = { fwd: 0, strafe: 0 }
 /** The LOOK stick's turn rate, radians a second, in lookState's terms (yaw positive turns left, pitch positive looks up). */
 const lookRate = { yaw: 0, pitch: 0 }
@@ -93,8 +100,9 @@ let paused = false
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
 
-/** Everything held, combined: opposite keys cancel, the stick adds, the result stays inside the unit circle. */
+/** Everything held, combined: opposite keys cancel, the stick adds, the result stays inside the unit circle. Nothing while the stick aims. */
 export function moveNow(): Dir {
+  if (aiming) return { fwd: 0, strafe: 0 }
   let fwd = 0
   let strafe = 0
   for (const d of held.values()) { fwd += d.fwd; strafe += d.strafe }
@@ -117,8 +125,8 @@ export function readInput(): RunInput {
   }
   if (select !== null) weapons.current = select
   const out: RunInput = paused
-    ? { move: { fwd: 0, strafe: 0 }, yaw: lookState.yaw, pitch: lookState.pitch, jump: false, fire: false, select: null, reload: false }
-    : { move: moveNow(), yaw: lookState.yaw, pitch: lookState.pitch, jump: edges.jump, fire: firing.size > 0, select, reload: edges.reload }
+    ? { move: { fwd: 0, strafe: 0 }, yaw: lookState.yaw, pitch: lookState.pitch, jump: false, fire: false, select: null, reload: false, sprint: false }
+    : { move: moveNow(), yaw: lookState.yaw, pitch: lookState.pitch, jump: edges.jump, fire: firing.size > 0, select, reload: edges.reload, sprint: sprinting.size > 0 }
   edges = { jump: false, reload: false, select: null, cycle: 0 }
   return out
 }
@@ -163,8 +171,32 @@ export function holdMove(source: string, dir: Dir): void { held.set(source, dir)
 export function releaseMove(source: string): void { held.delete(source) }
 /** The phone's stick, analog, each axis -1..1. */
 export function setStick(fwd: number, strafe: number): void { stick = { fwd, strafe } }
-/** A fire source goes down or up (`mouse`, `pad:fire`). */
-export function setFire(source: string, down: boolean): void { if (down) firing.add(source); else firing.delete(source) }
+/** A fire source goes down or up (`mouse`, `pad:fire:<finger>`). */
+export function setFire(source: string, down: boolean): void {
+  const had = firing.has(source)
+  if (down) firing.add(source); else firing.delete(source)
+  if (had !== down) heard()
+}
+/** A sprint source goes down or up (`key:ShiftLeft`, `pad:sprint:<finger>`). */
+export function setSprint(source: string, down: boolean): void {
+  const had = sprinting.has(source)
+  if (down) sprinting.add(source); else sprinting.delete(source)
+  if (had !== down) heard()
+}
+/** Whether a finger holds the phone's FIRE (a `pad:fire:` source): with the rail in hand, that is the charge the MOVE stick aims through. */
+export function padFiring(): boolean {
+  for (const s of firing) if (s.startsWith('pad:fire:')) return true
+  return false
+}
+/** Whether anything holds sprint. */
+export function sprintHeld(): boolean { return sprinting.size > 0 }
+/** The rail charging on a phone (TouchTracker.setAim sets it): the steps read no movement while it is on. */
+export function setAiming(on: boolean): void { aiming = on }
+export function aimingNow(): boolean { return aiming }
+
+/** Who hears FIRE and SPRINT going down or up (the HUD: AIM, the SPRINT button lit). */
+export const held$ = { listeners: new Set<() => void>() }
+function heard(): void { for (const l of [...held$.listeners]) l() }
 export function pressJump(): void { if (!paused) edges.jump = true }
 export function pressReload(): void { if (!paused) edges.reload = true }
 export function pressSelect(index: number): void { if (!paused) { edges.select = clamp(index, 0, weapons.count - 1); edges.cycle = 0 } }
@@ -179,12 +211,16 @@ export function inputPaused(): boolean { return paused }
 
 /** Let go of everything held, and drop the edges not yet read. */
 export function releaseAll(): void {
+  const any = firing.size > 0 || sprinting.size > 0
   held.clear()
   firing.clear()
+  sprinting.clear()
+  aiming = false
   stick = { fwd: 0, strafe: 0 }
   lookRate.yaw = 0
   lookRate.pitch = 0
   edges = { jump: false, reload: false, select: null, cycle: 0 }
+  if (any) heard()
 }
 
 /** Back to a fresh start (a new session; tests). */
@@ -272,6 +308,7 @@ export function attachDesktop(host: DesktopHost, opts: DesktopOptions = {}): () 
     e.preventDefault()
     opts.onGesture?.()
     if (a.kind === 'move') { holdMove(`key:${e.code}`, a.dir); return }
+    if (a.kind === 'sprint') { setSprint(`key:${e.code}`, true); return }
     if (e.repeat) return
     if (a.kind === 'jump') pressJump()
     else if (a.kind === 'select') pressSelect(a.index)
@@ -282,6 +319,7 @@ export function attachDesktop(host: DesktopHost, opts: DesktopOptions = {}): () 
   const keyup = (e: KeyboardEvent): void => {
     if (e.key === 'Meta') { releaseAll(); return }
     releaseMove(`key:${e.code}`)
+    setSprint(`key:${e.code}`, false)
     // A focused button presses on Space's keyup: a jump never presses EXIT GAME.
     if (e.code === 'Space') e.preventDefault()
   }
@@ -401,8 +439,10 @@ export const LOOK_CURVE = 1.8
 /** The fastest the LOOK stick turns the view, radians a second: 180 degrees across, 100 up and down. */
 export const LOOK_MAX_YAW = Math.PI
 export const LOOK_MAX_PITCH = (100 * Math.PI) / 180
-/** A finger that lands this far from the LOOK stick's centre (a share of its reach) takes the stick; farther, it drags the look. */
-export const LOOK_GRAB = 1.25
+/** While the rail charges the MOVE stick aims at this share of the LOOK stick's rates (54 degrees a second across at the rim): fine enough to snipe. */
+export const AIM_SCALE = 0.3
+/** A floating stick's ring keeps this far inside the screen's edge, CSS px. */
+export const RING_MARGIN = 4
 
 /**
  * The stick's output for a thumb at (dx, dy) pixels from its centre, reach
@@ -422,39 +462,76 @@ export function stickVector(dx: number, dy: number, radius: number, dead = STICK
  * reach `radius`, radians a second in lookState's terms. Inside the dead zone
  * nothing; past it the push (0 to 1 at the rim) is raised to LOOK_CURVE and
  * split along the thumb's direction: right on screen turns the view right
- * (yaw down, as lookBy), up looks up.
+ * (yaw down, as lookBy), up looks up. `scale` shrinks the top rates (AIM_SCALE
+ * for the aim).
  */
-export function lookStickRate(dx: number, dy: number, radius: number): { yaw: number; pitch: number; mag: number } {
+export function lookStickRate(dx: number, dy: number, radius: number, scale = 1): { yaw: number; pitch: number; mag: number } {
   const r = Math.hypot(dx, dy)
   if (radius <= 0 || r <= LOOK_DEAD * radius) return { yaw: 0, pitch: 0, mag: 0 }
   const push = Math.min(1, (r / radius - LOOK_DEAD) / (1 - LOOK_DEAD))
   const mag = Math.pow(push, LOOK_CURVE)
-  return { yaw: (-dx / r) * mag * LOOK_MAX_YAW, pitch: (-dy / r) * mag * LOOK_MAX_PITCH, mag }
+  return { yaw: (-dx / r) * mag * LOOK_MAX_YAW * scale, pitch: (-dy / r) * mag * LOOK_MAX_PITCH * scale, mag }
 }
 
-/** Where a stick stands on screen: its centre and reach, in CSS pixels. */
+/** Where a stick stands on screen at rest: its centre and reach, in CSS pixels. A floating stick takes only its reach from it. */
 export interface StickPlace { cx: number; cy: number; radius: number }
 
 /** What a finger took when it landed. */
 export type TouchRole = 'stick' | 'lookstick' | 'look'
 
+/** A point on screen, CSS px. */
+export interface Pt { x: number; y: number }
+
 /**
- * The phone's touches by pointer id. A touch on the left half (below the top
- * bar) drives the MOVE stick, measured from the stick's own centre. On the
- * right half, one that lands on the LOOK stick (within LOOK_GRAB of its
- * reach) holds it, and the view turns at its rate (tickLook) until it lifts;
- * one that lands anywhere else drags the look. One finger each: a second
- * finger on a control already held is ignored there. FIRE, JUMP and the gun
- * button are buttons of their own and take their own fingers.
+ * Where a floating stick's ring is drawn for a thumb landing at (x, y): there,
+ * moved only as far as it must to keep the ring on screen (RING_MARGIN in)
+ * and on its own half. The stick still measures from the landing point, so
+ * the ring near an edge sits a little off the thumb, never the turn.
+ */
+export function ringAt(x: number, y: number, radius: number, side: 'left' | 'right', width: number, height: number): Pt {
+  const r = radius + RING_MARGIN
+  const half = width / 2
+  const lo = side === 'left' ? r : half + radius
+  const hi = side === 'left' ? half - radius : width - r
+  const fit = (v: number, a: number, b: number): number => (a <= b ? clamp(v, a, b) : (a + b) / 2)
+  return {
+    x: Number.isFinite(width) ? fit(x, lo, hi) : x,
+    y: Number.isFinite(height) ? fit(y, r, height - r) : y,
+  }
+}
+
+/** One floating stick's finger: its id, where it landed (the stick's centre), where it is, and where the ring is drawn. */
+interface Held { id: number; origin: Pt; at: Pt; ring: Pt }
+
+/**
+ * The phone's touches by pointer id. Both sticks float: where a thumb lands
+ * becomes the stick's centre (the ring is drawn there, kept on screen), so
+ * every touch starts at nothing and only moving away from the landing point
+ * moves or turns; the dead zone and the curve are measured from it. On lift
+ * the ring goes back to its resting place.
  *
- * A finger keeps what it took until it lifts, wherever it slides; lifting
- * (or cancelling) one finger never lets go of another's.
+ * - The left half (below the top bar) is the MOVE stick.
+ * - The right half is the LOOK stick: the view turns at its rate (tickLook)
+ *   until it lifts. A second finger on the right while LOOK is held drags the
+ *   look. Without a LOOK stick on screen (a desktop's touch screen) the right
+ *   half drags.
+ * - Aim (setAim, while the rail charges): the MOVE stick turns the view at
+ *   AIM_SCALE of LOOK's rate instead of moving, and the LOOK stick rests
+ *   (hidden by the HUD); a finger on either is re-centred where it is when aim
+ *   starts or ends, so neither jumps.
+ *
+ * One finger each: a second finger on a stick already held is ignored there.
+ * FIRE, JUMP, SPRINT and the gun button are buttons of their own and take
+ * their own fingers. A finger keeps what it took until it lifts, wherever it
+ * slides; lifting (or cancelling) one finger never lets go of another's.
  */
 export class TouchTracker {
-  private stickId: number | null = null
-  private lookStickId: number | null = null
+  private stick: Held | null = null
+  private lookStick: Held | null = null
   private lookId: number | null = null
   private last = { x: 0, y: 0 }
+  private aim = false
+  private size = { w: Infinity, h: Infinity }
   private readonly lookPlace: () => StickPlace | null
   private readonly radPerPx: number
   constructor(private place: () => StickPlace, opts: { look?: () => StickPlace | null; radPerPx?: number } = {}) {
@@ -462,19 +539,20 @@ export class TouchTracker {
     this.radPerPx = opts.radPerPx ?? TOUCH_RAD_PER_PX
   }
 
-  /** A finger lands at (x, y) on a view `width` wide: what it took, if anything. */
-  down(id: number, x: number, y: number, width: number): TouchRole | null {
-    if (id === this.stickId || id === this.lookStickId || id === this.lookId) return null
+  /** A finger lands at (x, y) on a view `width` by `height`: what it took, if anything. */
+  down(id: number, x: number, y: number, width: number, height = Infinity): TouchRole | null {
+    if (id === this.stick?.id || id === this.lookStick?.id || id === this.lookId) return null
+    this.size = { w: width, h: height }
     if (x < width / 2) {
-      if (this.stickId !== null) return null
-      this.stickId = id
+      if (this.stick) return null
+      this.stick = this.held(id, x, y, this.place().radius, 'left')
       this.moveStick(x, y)
       return 'stick'
     }
     const lp = this.lookPlace()
-    if (lp && Math.hypot(x - lp.cx, y - lp.cy) <= lp.radius * LOOK_GRAB) {
-      if (this.lookStickId !== null) return null
-      this.lookStickId = id
+    if (lp && this.aim) return null
+    if (lp && !this.lookStick) {
+      this.lookStick = this.held(id, x, y, lp.radius, 'right')
       this.moveLookStick(x, y)
       return 'lookstick'
     }
@@ -485,8 +563,8 @@ export class TouchTracker {
   }
 
   move(id: number, x: number, y: number): void {
-    if (id === this.stickId) this.moveStick(x, y)
-    else if (id === this.lookStickId) this.moveLookStick(x, y)
+    if (id === this.stick?.id) this.moveStick(x, y)
+    else if (id === this.lookStick?.id) this.moveLookStick(x, y)
     else if (id === this.lookId) {
       lookBy(x - this.last.x, y - this.last.y, this.radPerPx)
       this.last = { x, y }
@@ -494,48 +572,105 @@ export class TouchTracker {
   }
 
   up(id: number): void {
-    if (id === this.stickId) { this.stickId = null; setStick(0, 0); this.knob = { dx: 0, dy: 0 } }
-    if (id === this.lookStickId) { this.lookStickId = null; setLookRate(0, 0); this.lookKnob = { dx: 0, dy: 0 } }
+    if (id === this.stick?.id) {
+      this.stick = null
+      setStick(0, 0)
+      if (this.aim) setLookRate(0, 0)
+      this.knob = { dx: 0, dy: 0 }
+    }
+    if (id === this.lookStick?.id) {
+      this.lookStick = null
+      // Resting under the aim it turns nothing: the aim's rate is the MOVE stick's.
+      if (!this.aim) setLookRate(0, 0)
+      this.lookKnob = { dx: 0, dy: 0 }
+    }
     if (id === this.lookId) this.lookId = null
   }
 
   /** Every finger gone (the screen lost focus, a card came up). */
   clear(): void {
-    if (this.stickId !== null) setStick(0, 0)
-    if (this.lookStickId !== null) setLookRate(0, 0)
-    this.stickId = null
-    this.lookStickId = null
+    if (this.stick) setStick(0, 0)
+    if (this.lookStick || (this.aim && this.stick)) setLookRate(0, 0)
+    this.stick = null
+    this.lookStick = null
     this.lookId = null
     this.knob = { dx: 0, dy: 0 }
     this.lookKnob = { dx: 0, dy: 0 }
   }
+
+  /**
+   * Aim on or off (the rail charging with FIRE held, on a phone). On: the
+   * steps read no movement (input.ts setAiming), the MOVE stick turns the
+   * view finely, the LOOK stick rests. Either way a finger held on a stick is
+   * re-centred where it is, so the aim (or the run, or the turn) starts at
+   * nothing.
+   */
+  setAim(on: boolean): void {
+    if (on === this.aim) return
+    this.aim = on
+    setAiming(on)
+    setStick(0, 0)
+    setLookRate(0, 0)
+    if (this.stick) { this.recentre(this.stick, this.place().radius, 'left'); this.knob = { dx: 0, dy: 0 } }
+    const lp = this.lookPlace()
+    if (this.lookStick && lp) { this.recentre(this.lookStick, lp.radius, 'right'); this.lookKnob = { dx: 0, dy: 0 } }
+  }
+
+  /** Whether the MOVE stick aims now. */
+  get aiming(): boolean { return this.aim }
 
   /** Where the MOVE stick's knob is drawn, from its centre, clamped to its reach. */
   knob = { dx: 0, dy: 0 }
   /** Where the LOOK stick's knob is drawn. */
   lookKnob = { dx: 0, dy: 0 }
 
+  /** Where the MOVE stick's ring is drawn while a finger holds it; null: at its resting place. */
+  get ring(): Pt | null { return this.stick ? { ...this.stick.ring } : null }
+  /** Where the LOOK stick's ring is drawn while a finger holds it; null: at its resting place. */
+  get lookRing(): Pt | null { return this.lookStick ? { ...this.lookStick.ring } : null }
+
   get holding(): { stick: number | null; lookStick: number | null; look: number | null } {
-    return { stick: this.stickId, lookStick: this.lookStickId, look: this.lookId }
+    return { stick: this.stick?.id ?? null, lookStick: this.lookStick?.id ?? null, look: this.lookId }
   }
 
   /** Whether this finger holds one of the sticks (its knob moves with it). */
-  holdsStick(id: number): boolean { return id === this.stickId || id === this.lookStickId }
+  holdsStick(id: number): boolean { return id === this.stick?.id || id === this.lookStick?.id }
+
+  private held(id: number, x: number, y: number, radius: number, side: 'left' | 'right'): Held {
+    return { id, origin: { x, y }, at: { x, y }, ring: ringAt(x, y, radius, side, this.size.w, this.size.h) }
+  }
+
+  private recentre(h: Held, radius: number, side: 'left' | 'right'): void {
+    h.origin = { ...h.at }
+    h.ring = ringAt(h.at.x, h.at.y, radius, side, this.size.w, this.size.h)
+  }
 
   private moveStick(x: number, y: number): void {
-    const p = this.place()
-    const dx = x - p.cx
-    const dy = y - p.cy
-    const v = stickVector(dx, dy, p.radius)
-    setStick(v.fwd, v.strafe)
-    this.knob = knobAt(dx, dy, p.radius)
+    const h = this.stick
+    if (!h) return
+    h.at = { x, y }
+    const radius = this.place().radius
+    const dx = x - h.origin.x
+    const dy = y - h.origin.y
+    if (this.aim) {
+      const r = lookStickRate(dx, dy, radius, AIM_SCALE)
+      setLookRate(r.yaw, r.pitch)
+    } else {
+      const v = stickVector(dx, dy, radius)
+      setStick(v.fwd, v.strafe)
+    }
+    this.knob = knobAt(dx, dy, radius)
   }
 
   private moveLookStick(x: number, y: number): void {
+    const h = this.lookStick
     const p = this.lookPlace()
-    if (!p) return
-    const dx = x - p.cx
-    const dy = y - p.cy
+    if (!h || !p) return
+    h.at = { x, y }
+    // Resting under the aim: it remembers where the finger is, and turns nothing.
+    if (this.aim) return
+    const dx = x - h.origin.x
+    const dy = y - h.origin.y
     const r = lookStickRate(dx, dy, p.radius)
     setLookRate(r.yaw, r.pitch)
     this.lookKnob = knobAt(dx, dy, p.radius)

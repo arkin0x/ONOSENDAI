@@ -12208,12 +12208,13 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 /* ---------- DRONE RUN: HUD, controls (game/droneRun/hud/) ----------
  * White words with a dark shadow over the scene, every slot fixed so nothing
  * moves between phases. The view layer (.drun-layer) takes the presses meant
- * for the game (pointer lock, the phone's stick and look); the game bar stays
- * above it all. Phone controls: a stick per thumb (MOVE left, LOOK right),
- * FIRE and JUMP above LOOK, the gun above MOVE (beside it on a screen 380px
- * tall or less); the radar top left under the pips. Sizes come from the
- * variables on .drun-hud (the aim assist box is the mean of FIRE and the
- * stick). Classes start drun-. */
+ * for the game (pointer lock, the phone's sticks and look); the game bar stays
+ * above it all. Phone controls: a floating stick per thumb (MOVE left, LOOK
+ * right; each ring drawn where its thumb lands, moved by the HUD), FIRE and
+ * JUMP above LOOK, SPRINT just above MOVE toward the middle with the gun above
+ * it (the gun beside MOVE on a screen 440px tall or less); the radar top left
+ * under the pips. Sizes come from the variables on .drun-hud (the aim assist
+ * box is the mean of FIRE and the stick). Classes start drun-. */
 .gameview--drun > .gameview__bar,
 .gameview--drun > .gameview__note { z-index: 5; }
 .drun-hud {
@@ -12228,8 +12229,9 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   --drun-jump: 64px;
   --drun-assist: calc((var(--drun-stick) + var(--drun-fire)) / 2);
   --drun-radar: 96px;
-  /* The row FIRE, JUMP and the gun button sit on: just above the sticks. */
+  /* The row FIRE, JUMP and SPRINT sit on: just above the sticks; the gun button's, above SPRINT. */
   --drun-above-stick: calc(var(--drun-bottom) + 4px + var(--drun-stick) + 14px);
+  --drun-above-sprint: calc(var(--drun-above-stick) + var(--drun-jump) + 10px);
   position: absolute;
   inset: 0;
   z-index: 1;
@@ -12514,7 +12516,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .drun-card__go kbd { margin: 0 0 0 2px; }
 .drun-card__exit:disabled { opacity: 0.5; cursor: default; }
 
-/* The phone's controls: MOVE bottom left with the gun above it; LOOK bottom right with FIRE and JUMP above it. */
+/* The phone's controls: MOVE bottom left with SPRINT and the gun above it; LOOK bottom right with FIRE and JUMP above it. */
 .drun-touch { position: absolute; inset: 0; pointer-events: none; }
 .drun-hud.is-card .drun-touch { visibility: hidden; }
 .drun-stick {
@@ -12529,6 +12531,11 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 .drun-stick--move { left: 20px; }
 .drun-stick--look { right: 20px; }
+/* The rail charging: LOOK rests out of sight (its place kept), MOVE aims in the rail's blue with a crosshair in its knob. */
+.drun-stick.is-hidden { visibility: hidden; }
+.drun-stick.is-aim { border-color: rgba(0, 229, 255, 0.85); background: rgba(0, 40, 52, 0.4); }
+.drun-stick.is-aim .drun-stick__knob { border-color: rgba(0, 229, 255, 1); background: rgba(0, 229, 255, 0.28); }
+.drun-stick__aim { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #fff; filter: drop-shadow(0 0 2px #000); }
 .drun-stick__label {
   position: absolute;
   left: 0;
@@ -12593,10 +12600,34 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   font-size: 11px;
   letter-spacing: 0.1em;
 }
-/* The gun: over the MOVE stick; RELOAD above it. */
+/* SPRINT: JUMP's size and look, just above the MOVE stick toward the middle (its centre over the stick's rim). A ring
+ * inside its border is the stamina: it drains clockwise while sprinting and dims while emptied (the lockout). */
+.drun-btn--sprint {
+  left: calc(20px + var(--drun-stick) - var(--drun-jump) / 2);
+  bottom: var(--drun-above-stick);
+  width: var(--drun-jump);
+  height: var(--drun-jump);
+  border-radius: 50%;
+  border-color: rgba(255, 90, 130, 0.95);
+  background: rgba(255, 59, 107, 0.28);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 0;
+}
+.drun-btn--sprint:active, .drun-btn--sprint.is-held { background: rgba(255, 59, 107, 0.55); }
+.drun-btn__word { position: relative; }
+.drun-meter { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); pointer-events: none; }
+.drun-meter circle { fill: none; stroke-width: 7; }
+.drun-meter__track { stroke: rgba(255, 255, 255, 0.18); }
+.drun-meter__fill { stroke: #fff; stroke-linecap: butt; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9)); }
+.drun-btn--sprint.is-locked { opacity: 0.5; }
+.drun-btn--sprint[hidden] { display: block; visibility: hidden; }
+.drun-btn--sprint.is-locked .drun-meter__fill { stroke: rgba(255, 255, 255, 0.45); }
+/* The gun: over SPRINT; RELOAD above it. */
 .drun-btn--gun {
   left: 16px;
-  bottom: var(--drun-above-stick);
+  bottom: var(--drun-above-sprint);
   width: 150px;
   height: 56px;
   padding: 6px 8px;
@@ -12613,7 +12644,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .drun-btn--gun .drun-gauge__count { font-size: 12px; }
 .drun-btn--reload {
   left: 16px;
-  bottom: calc(var(--drun-above-stick) + 64px);
+  bottom: calc(var(--drun-above-sprint) + 64px);
   width: 110px;
   height: 36px;
   border-radius: 8px;
@@ -12628,12 +12659,13 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 /* A short landscape phone: the controls and the radar come down a size, RELOAD goes beside the gun. */
 @media (max-height: 520px) {
   .drun-hud { --drun-stick: 100px; --drun-fire: 72px; --drun-jump: 56px; --drun-radar: 72px; }
-  .drun-btn--reload { left: calc(16px + 150px + 8px); bottom: calc(var(--drun-above-stick) + 10px); }
+  .drun-btn--reload { left: calc(16px + 150px + 8px); bottom: calc(var(--drun-above-sprint) + 10px); }
   .drun-prompt { top: calc(var(--drun-top) + 36px); }
 }
-/* A very short landscape phone (812x375, 800x360, 640x320): the radar comes down to 56px and the gun goes beside
- * the MOVE stick, RELOAD above it, so nothing on the left reaches up into the radar. */
-@media (max-height: 380px) {
+/* A very short landscape phone (812x375, 800x360, 640x320, and up to 440 tall): the radar comes down to 56px and the gun
+ * goes beside the MOVE stick, RELOAD above it, SPRINT staying above the stick's rim, so nothing on the left reaches up into
+ * the radar. */
+@media (max-height: 440px) {
   .drun-hud { --drun-radar: 56px; --drun-beside-move: calc(20px + var(--drun-stick) + 10px); }
   .drun-btn--gun { left: var(--drun-beside-move); bottom: calc(var(--drun-bottom) + 4px); }
   .drun-btn--reload { left: var(--drun-beside-move); bottom: calc(var(--drun-bottom) + 4px + 56px + 8px); }

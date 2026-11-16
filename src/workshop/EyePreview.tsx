@@ -83,8 +83,8 @@ function PreviewScene({ shard }: { shard: ShardModel }): JSX.Element {
       <SampleFloor />
       {shard.vertices.length > 0 && (
         <group scale={[k, k, k]}>
-          {/* As WALK draws you from inside (AvatarShape firstPerson): as the world draws it, backs culled, opaque, still (DECK-0003 §3.3). */}
-          <ShardMesh shard={shard} world headlamp={false} cull still ignoreOpacity />
+          {/* As WALK draws you from inside (AvatarShape firstPerson): unlit, backs culled, opaque, still (DECK-0003 §3.3). Not lit: lit draws the backs too, darker. */}
+          <ShardMesh shard={shard} cull still ignoreOpacity />
         </group>
       )}
     </>

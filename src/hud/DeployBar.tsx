@@ -241,15 +241,26 @@ export function LookRow({ choices, look, refusal }: { choices: readonly (keyof t
 }
 
 /**
+ * What to do when a shard will not fit its bag even with entries moved out
+ * (store/useShards deployBagMeter, lib/bagFit.ts planUnderCap): HIDE &
+ * PUBLISH is off and this line says why, in plain words (owner, 2026-11-16).
+ * `others`: the bag already holds other things of yours, so another height
+ * (another bag) is the way out.
+ */
+export function bagTooBigLine(others: boolean): string {
+  return others ? 'This bag is too full for it. Hide it at another height.' : 'Too big for one bag. Hide part of it, or hide the rest at another height.'
+}
+
+/**
  * The bag's size with the shard in it, against what one bag may be
  * (lib/bagSize.ts): BY REFERENCE when the shard goes out as its own object,
  * and why; TOO LARGE, with the deploy's own words, when even that does not fit.
  */
-export function BagMeterRow({ meter }: { meter: BagMeter }): JSX.Element {
+export function BagMeterRow({ meter, others = false }: { meter: BagMeter; others?: boolean }): JSX.Element {
   const of = `${meter.bytes.toLocaleString('en-US')} of ${BAG_SAFE_BYTES.toLocaleString('en-US')} bytes`
   const form = meter.refusal ? 'TOO LARGE' : meter.fitted ? 'BY REFERENCE: THE BAG IS FULL' : meter.byReference ? 'BY REFERENCE' : 'INLINE'
   return (
-    <DeployRow kind="bagsize" label="BAG" hint={meter.refusal ?? (meter.fitted ? 'Too large to carry inline here, so it goes out as its own sealed object and the bag names it.' : undefined)}>
+    <DeployRow kind="bagsize" label="BAG" hint={meter.refusal ? <span data-testid="bag-too-big">{bagTooBigLine(others)}</span> : meter.fitted ? 'Too large to carry inline here, so it goes out as its own sealed object and the bag names it.' : undefined} hintTitle={meter.refusal ?? undefined}>
       <span className="deploybar__value" data-testid="bag-meter">{of} · {form}</span>
     </DeployRow>
   )
@@ -402,6 +413,8 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
     const place = bagRows[0] ? { at: positionOf(bagRows[0]), plane: bagRows[0].plane } : { at: deployPoint(s.cursor, buildStepOf(s), height), plane }
     return deployBagMeter(bagRows, planned, { height, settings: bag, owner: me, room: sealingId !== null, place, edit: editRow ?? undefined })
   }, [planned, bagRows, height, bag, me, sealingId, editRow, plane])
+  // Too big for its bag even with entries moved out: the deploy would refuse it, so the button is off and the BAG row says what to do.
+  const tooBig = !!meter?.refusal
   // A MOVE or EDIT keeps its own bag (review of #633): a room under it is offered, SEAL IN ROOM, never taken on its own.
   const offer = useMemo(
     () => (pending && moving && !sealMove ? autoRoomFor({ mine, pending, deployLeaveOut: leaveOut, deployDoorHeight: chosenRoom, deployHeight: height, deployRoomSnap: snap, deploySealMove: true }, me, cursor, plane) : null),
@@ -521,8 +534,8 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
         {!ask && (
           <button
             className="deploybar__deploy"
-            disabled={empty || working || here || !!lookRefusal}
-            title={lookRefusal ?? (placing ? 'Place it here, then fill it' : here ? 'The last one stands here. Move, or change how it goes out, to place another' : localEst)}
+            disabled={empty || working || here || !!lookRefusal || tooBig}
+            title={lookRefusal ?? (tooBig ? bagTooBigLine(bagRows.length > 0) : placing ? 'Place it here, then fill it' : here ? 'The last one stands here. Move, or change how it goes out, to place another' : localEst)}
             onClick={() => { if (placing) useShards.getState().placeChest(); else void useShards.getState().deploy() }}
             {...noCallout}
           >
@@ -580,7 +593,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
       </DeployRow>
 
       {/* How full the bag is with this shard in it, in the form it goes out in. */}
-      {meter && <BagMeterRow meter={meter} />}
+      {meter && <BagMeterRow meter={meter} others={bagRows.length > 0} />}
 
       {/* What a chest wears (D2, D3): a built-in or OTHER, from MINE or FEED. */}
       {pending.type === 'chest' && look && <LookRow choices={door ? DOOR_LOOKS : CHEST_LOOKS} look={look} refusal={lookRefusal} />}

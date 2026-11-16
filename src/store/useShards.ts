@@ -117,7 +117,7 @@ import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
 import { bagSizeRefusal, signedBytes } from '../lib/bagSize'
-import { bagBytes, growthRefusal, heldBy, planFit, referenceFor, sealFor, withReferences, type FitCandidate } from '../lib/bagFit'
+import { bagBytes, heldBy, planUnderCap, referenceFor, sealFor, withReferences, type FitCandidate } from '../lib/bagFit'
 import { ROOM_BAG_SETTINGS, inRoom, innermostRoomAt, newDoorSecret, roomDoorAt, roomEntries, roomKey, roomLookupId, roomOf, type OwnDoor } from '../lib/doors'
 import { commitDoorSecret, doorSecret, keepDoorSecret } from './doorSecrets'
 import { entriesIn, isListed, noteStored, onHiddenChange, reloadLocalView, saveRows, UNCLAIMED } from './hiddenStorage'
@@ -1418,16 +1418,17 @@ export function deployBagMeter(rows: readonly MyDeployment[], planned: NostrEven
   const standing = new Set(before.flatMap((e) => (isReference(e) ? [] : [e.id])))
   const seals = before.flatMap((e, i) => (isReference(e) ? [] : sealFor(e, o.owner, i.toString(16).padStart(32, '0'), sealHint(), standing) ?? []))
   const held = heldBy(seals)
+  const measureHeld = (es: readonly BagEntry[]): number => bagBytes(es, lookupId, o.height, settings, o.place, undefined, held)
+  // A placement always adds an entry: past the cap it is refused even when sealing shrank the bag (lib/bagFit.ts planUnderCap).
+  const measured = (es: readonly BagEntry[]) => ({ bytes: measureHeld(es), written: es })
   if (large) {
     const es = mergeEntries(before, [['a', `${OBJECT_KIND}:${o.owner}:${'0'.repeat(32)}`, hint, at]])
-    const fit = planFit(es, seals, (x) => growthRefusal(x, before, bagBytes(x, lookupId, o.height, settings, o.place, undefined, held)))
-    return { bytes: bagBytes(withReferences(es, fit.convert), lookupId, o.height, settings, o.place, undefined, held), byReference: true, fitted: false, refusal: fit.refusal }
+    const fit = planUnderCap(es, seals, measured, before, true)
+    return { bytes: measureHeld(withReferences(es, fit.convert)), byReference: true, fitted: false, refusal: fit.refusal }
   }
   const es = mergeEntries(before, [planned])
   const candidate = referenceFor(planned, o.owner, '0'.repeat(32), hint)
-  const measureHeld = (es: readonly BagEntry[]): number => bagBytes(es, lookupId, o.height, settings, o.place, undefined, held)
-  const refusedHeld = (es: readonly BagEntry[]): string | null => growthRefusal(es, before, measureHeld(es))
-  const plan = planFit(es, [...(candidate ? [candidate] : []), ...seals], refusedHeld)
+  const plan = planUnderCap(es, [...(candidate ? [candidate] : []), ...seals], measured, before, true)
   const written = withReferences(es, plan.convert)
   const byReference = !!candidate && plan.convert.has(candidate.key)
   return { bytes: measureHeld(written), byReference, fitted: byReference, refusal: plan.refusal }
@@ -2113,6 +2114,17 @@ function heldKeys(entries: readonly BagEntry[]): Set<string> {
   return new Set(entries.flatMap(entryKeys))
 }
 
+/**
+ * Whether a write of `written` puts in an entry `before` did not hold: a hide,
+ * a move in, an EDIT, a HIDE AGAIN. By entryKeys, so an item inline in one and
+ * sealed in the other is the same item. A DELETE, a REMOVE or a move out adds
+ * nothing. Past the cap, a write that adds is refused (lib/bagFit.ts planUnderCap).
+ */
+function addsTo(written: readonly BagEntry[], before: readonly BagEntry[]): boolean {
+  const held = heldKeys(before)
+  return written.some((e) => !entryKeys(e).some((k) => held.has(k)))
+}
+
 /** Whether a set of entry keys (heldKeys) holds this row: by its entry, or, for an item carried inline or sealed, by the item's id. */
 function rowHeld(held: ReadonlySet<string>, d: Pick<MyDeployment, 'inner' | 'ref' | 'sealedRef'>): boolean {
   return held.has(entryKey(entryOf(d))) || (!d.ref && held.has(d.inner.id))
@@ -2557,11 +2569,12 @@ export const useShards = create<ShardsState>((set, get) => {
     const seals = inners.flatMap((e) => (isReference(e) || objectKeys.has(e.id) ? [] : sealFor(e, owner, placementId(), sealHint(), standing, seal.has(e.id)) ?? []))
     const chosen = new Map([...objects, ...seals].filter((c) => forced.has(c.key) || seal.has(c.key)).map((c) => [c.key, c] as const))
     const held = heldBy(seals)
-    const refused = (es: readonly BagEntry[]): string | null => {
+    const measure = (es: readonly BagEntry[]) => {
       const written = bagWritten([...es], before, owner).entries
-      return growthRefusal(written, before, bagBytes(written, lookupId, height, settings, place, undefined, held))
+      return { bytes: bagBytes(written, lookupId, height, settings, place, undefined, held), written }
     }
-    const plan = planFit(withReferences(inners, chosen), [...objects, ...seals].filter((c) => !chosen.has(c.key)), refused)
+    const adds = addsTo(bagWritten(inners, before, owner).entries, before)
+    const plan = planUnderCap(withReferences(inners, chosen), [...objects, ...seals].filter((c) => !chosen.has(c.key)), measure, before, adds)
     const all = new Map([...chosen, ...plan.convert])
     return { refs: new Map([...all].filter(([, c]) => c.form === 'object')), refusal: plan.refusal }
   }
@@ -2605,15 +2618,17 @@ export const useShards = create<ShardsState>((set, get) => {
     const candidates = written.flatMap((e) => (isReference(e) ? [] : sealFor(e, owner, freshSealedD(), hint, standing, seal.has(e.id)) ?? []))
     const forced = new Map(candidates.filter((c) => seal.has(c.key)).map((c) => [c.key, c] as const))
     const held = heldBy(candidates)
-    const refused = (es: readonly BagEntry[]): string | null => growthRefusal(es, before, bagBytes(es, lookupId, height, settings, place, undefined, held))
-    const plan = planFit(withReferences(written, forced), candidates.filter((c) => !forced.has(c.key)), refused)
+    // Under the cap whenever moving entries out can do it; past it, a write that adds an entry is refused (lib/bagFit.ts planUnderCap).
+    const adds = addsTo(written, before)
+    const measure = (es: readonly BagEntry[]) => ({ bytes: bagBytes(es, lookupId, height, settings, place, undefined, held), written: es })
+    const plan = planUnderCap(withReferences(written, forced), candidates.filter((c) => !forced.has(c.key)), measure, before, adds)
     const chosen = plan.refusal ? forced : new Map([...forced, ...plan.convert])
     const entries = withReferences(written, chosen)
     const createdAt = nextBagAt(lookupId)
     const template = await bagTemplate(entries, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place, heldBy(chosen.values()))
-    // Larger than before, by what is sealed inside: the bag's size follows its plaintext.
+    // Larger than before, by what is sealed inside: the bag's size follows its plaintext. Past the cap, nothing may be added either.
     const tooBig = bagSizeRefusal(signedBytes(template))
-    if (tooBig && utf8Bytes(JSON.stringify(entries)) > utf8Bytes(JSON.stringify(before))) throw new Error(tooBig)
+    if (tooBig && (adds || utf8Bytes(JSON.stringify(entries)) > utf8Bytes(JSON.stringify(before)))) throw new Error(tooBig)
     // Each sealed entry is signed before the bag, so a signer that refuses one
     // stops the write with nothing signed that names it. Nothing is recorded
     // in the rows yet: that waits until the bag has gone out (settleSealed).

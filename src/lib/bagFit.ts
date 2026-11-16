@@ -161,3 +161,37 @@ export function planFit(entries: readonly BagEntry[], candidates: readonly FitCa
   }
   return { convert, refusal: why }
 }
+
+/**
+ * Which candidates go by reference so the bag fits, aiming under the cap
+ * (lib/bagSize.ts) first. planFit with growthRefusal alone stopped at the
+ * first plan that did not grow the bag, so a bag already past the cap (one
+ * written before the guard, as H8 was) took a new hide by sealing one entry
+ * and went out still past it, past what the canonical relay takes: the meter
+ * read "323,623 of 240,000 bytes · INLINE" and HIDE & PUBLISH stayed on
+ * (owner's castle, 2026-11-16). Now entries move out until the bag is under
+ * the cap whenever that can be done.
+ *
+ * When it cannot: a write that `adds` an entry the bag did not hold (a hide, a
+ * move in, an EDIT, a HIDE AGAIN) is refused, in the cap's words, even if it
+ * shrank the bag, since what it adds would be in no copy the canonical relay
+ * keeps. A write that adds nothing (a DELETE, a REMOVE, a move out) keeps the
+ * growth rule: it still goes whenever it shrinks the bag.
+ *
+ * `measure` gives the bag's signed size for a set of entries, and the entries
+ * the growth rule compares with `before` (signBag compares what it writes).
+ */
+export function planUnderCap(
+  entries: readonly BagEntry[],
+  candidates: readonly FitCandidate[],
+  measure: (entries: readonly BagEntry[]) => { bytes: number; written: readonly BagEntry[] },
+  before: readonly BagEntry[],
+  adds: boolean,
+): { convert: Map<string, FitCandidate>; refusal: string | null } {
+  const capped = planFit(entries, candidates, (es) => bagSizeRefusal(measure(es).bytes))
+  if (!capped.refusal || adds) return capped
+  return planFit(entries, candidates, (es) => {
+    const m = measure(es)
+    return growthRefusal(m.written, before, m.bytes)
+  })
+}

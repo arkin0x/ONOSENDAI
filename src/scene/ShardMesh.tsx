@@ -38,14 +38,14 @@ import { parseAddress, partMatrix, placedBounds, refKey, type Placed } from 'sno
 import { useResolved, type Resolved } from '../lib/parts'
 import { dropDemand, provisional, setDemand, useAllowance, type Allowance } from './meshBudget'
 import { followsVersion, onFollows, trustedAuthor } from '../lib/trust'
-import { ACCENT, WARN } from '../lib/palette'
+import { ACCENT, BUILD, WARN } from '../lib/palette'
 import { scaledDisc, useDotScale } from './dotScale'
 import { renderPose, type Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
 import { faceEdges } from 'sno-core/outline'
 import { BACK_SHADE_COLOR, SHARD_FACES_TONE_MAPPED } from './shardLight'
 import { SHARD_DOTS, SHARD_POINTS, createDiscMaterial, sizeDisc, withDiscColors } from './pointDisc'
-import { DOTS_ORDER, GHOST_OPACITY, basicFaceProps, benchOrders, lineProps, litFaceProps, shardOpacity, shardOrder } from './shardFaces'
+import { DOTS_ORDER, GHOST_OPACITY, NO_BLOOM_BLEND, TRANSLUCENT_ORDER, basicFaceProps, benchOrders, lineProps, litFaceProps, shardOpacity, shardOrder } from './shardFaces'
 
 import { HEADLAMP_FACES, HEADLAMP_LINES } from './headlamp'
 import { holdPlaced, placedBuffers, type PlacedBuffers } from './placedBuffers'
@@ -62,6 +62,15 @@ interface Props {
   scale?: number
   /** Dimmed, for a preview that is not yet real. */
   ghost?: boolean
+  /**
+   * Kept out of the world's bloom: faces blended as a see-through face is,
+   * lines and dots with the alpha under them kept (shardFaces.ts
+   * NO_BLOOM_BLEND), drawn after the opaque faces. BUILD's ghosts: the one
+   * being placed and a shard being moved (owner, 2026-11-16).
+   */
+  noBloom?: boolean
+  /** Thin crisp edges where its faces turn (GHOST_EDGES): the placing ghost's, to line it up by. */
+  edges?: boolean
   /**
    * Lit, as on the bench: faces shaded flat by the canvas's ShardLights
    * (shardLight.tsx, anchored at the world's full color), each one's
@@ -359,7 +368,16 @@ export function ShardMesh(props: Props): ReactNode {
   return <ShardBoundary shard={props.shard}><ShardMeshBody {...props} /></ShardBoundary>
 }
 
-export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip: regionClip, clipPlanes: givenPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, dim = 1, budget, still = false }: Props): JSX.Element | null {
+/**
+ * The placing ghost's edges in the world (owner, 2026-11-16: "can we reduce
+ * the glowiness in build mode? its hard to line up what we are placing"): the
+ * BUILD cursor's white, thin and see-through, drawn without bloom, at every
+ * edge where its faces meet at more than `angle` degrees, so flat runs of
+ * faces read as one wall and corners and rims stand out.
+ */
+export const GHOST_EDGES = { color: BUILD, opacity: 0.6, angle: 20 } as const
+
+export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom = false, edges = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip: regionClip, clipPlanes: givenPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, dim = 1, budget, still = false }: Props): JSX.Element | null {
   // Its own motion on the world clock (lib/anim.ts, scene/animMotion.ts): a
   // group above everything it draws, its placed objects included (a parent's
   // motion carries what it places). A moving object is cut at its region
@@ -383,7 +401,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   // Set as one key (R3F's pierced `userData-share`), never by replacing
   // userData: TV keeps its own state there (TvFinds lookOne).
   const own = shardOpacity(given, { ignoreOpacity }) * dim
-  const order = shardOrder(opacity, ghost)
+  const order = shardOrder(opacity, ghost, noBloom)
   const bench = benchOrders(opacity, ghost)
   // Point size and glow (DECK-0003 §1.15, §1.16; lib/pointLook.ts): POINTS
   // only, never an avatar, the object's own (never a parent's). At opacity
@@ -517,8 +535,11 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   const dotScale = useDotScale()
   const pointMaterial = useMemo(() => {
     const profile = scaledDisc(shard.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, dotScale)
-    return createDiscMaterial(profile, shard.mode === 'points' ? opacity : opacity * 0.55, headlamp && !lit)
-  }, [shard.mode, opacity, headlamp, lit, dotScale])
+    const m = createDiscMaterial(profile, shard.mode === 'points' ? opacity : opacity * 0.55, headlamp && !lit)
+    // A ghost's dots in the world never bloom: it is drawn as it will look, without the glow (shardFaces.ts GHOST_OPACITY).
+    if (noBloom) Object.assign(m, NO_BLOOM_BLEND)
+    return m
+  }, [shard.mode, opacity, headlamp, lit, dotScale, noBloom])
   useEffect(() => () => pointMaterial.dispose(), [pointMaterial])
   useEffect(() => { pointMaterial.clippingPlanes = clipPlanes ?? null }, [pointMaterial, clipPlanes])
 
@@ -540,14 +561,14 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   useEffect(() => (shared ? undefined : () => { outline?.dispose() }), [outline, shared])
 
   const line = useMemo(() => {
-    const m = new LineBasicMaterial({ vertexColors: true, toneMapped: false, ...lineProps(opacity, ghost) })
+    const m = new LineBasicMaterial({ vertexColors: true, toneMapped: false, ...lineProps(opacity, ghost, noBloom) })
     if (headlamp && !lit) Object.assign(m, HEADLAMP_LINES)
     const l = new Line(plain, m)
     l.frustumCulled = false
-    l.renderOrder = shardOrder(opacity, ghost)
+    l.renderOrder = shardOrder(opacity, ghost, noBloom)
     l.material.userData.share = own
     return l
-  }, [plain, opacity, ghost, own, headlamp, lit])
+  }, [plain, opacity, ghost, own, headlamp, lit, noBloom])
 
   // A rebuild replaces these; nothing else lets the GPU buffers go. The line
   // is a primitive, which R3F never disposes, so its material is ours too.
@@ -558,6 +579,15 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   useEffect(() => { (line.material as LineBasicMaterial).clippingPlanes = clipPlanes ?? null }, [line, clipPlanes])
   // Spread into each JSX material: nothing at all when there are no planes, so those materials are as they were.
   const cut = clipPlanes ? { clippingPlanes: clipPlanes } : {}
+
+  // The placing ghost's edges in the world: where its faces turn, a thin crisp
+  // line to line it up by, never a glow (GHOST_EDGES). Made from the drawn
+  // triangles, so it is cut and posed exactly as they are.
+  const ghostEdges = useMemo(
+    () => (edges && plan.faces && index.length > 0 ? new EdgesGeometry(indexed, GHOST_EDGES.angle) : null),
+    [edges, plan.faces, index.length, indexed],
+  )
+  useEffect(() => () => { ghostEdges?.dispose() }, [ghostEdges])
   // The same two functions on every world face and every world line: one program each (scene/headlamp.ts).
   const lampFaces = headlamp ? HEADLAMP_FACES : {}
   const lampLines = headlamp && !lit ? HEADLAMP_LINES : {}
@@ -656,7 +686,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   })
 
   const placed$ = (given.parts?.length ?? 0) > 0
-    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} dim={dim} allowance={allowance} near={near} rootTrusted={trusted} still={still} />
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} noBloom={noBloom} edges={edges} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} dim={dim} allowance={allowance} near={near} rootTrusted={trusted} still={still} />
     : null
   // What a world shard places is its trust's to budget, glow included.
   const placements = placed$ && budget ? <GlowTrust.Provider value={budget.trusted}>{placed$}</GlowTrust.Provider> : placed$
@@ -689,7 +719,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
               ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} {...litFaceProps(opacity, ghost)} userData-share={own} {...cut} />
               // `transparent forceSinglePass` repeat basicFaceProps so singlePass.test.ts's source scan sees this material.
               // lampFaces: opaque and see-through alike (the headlamp scales rgb only, so it composes with either blend).
-              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent forceSinglePass={!ghost} {...basicFaceProps(opacity, { ghost, world })} {...lampFaces} userData-share={own} {...cut} />}
+              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent forceSinglePass={!ghost} {...basicFaceProps(opacity, { ghost, world, noBloom })} {...lampFaces} userData-share={own} {...cut} />}
           </mesh>
           {lit && inside && (
             <mesh geometry={inside} frustumCulled={false} renderOrder={bench.inside} {...pick}>
@@ -700,6 +730,11 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
           )}
         </group>
       )}
+      {ghostEdges && (
+        <lineSegments name="ghost-edges" geometry={ghostEdges} frustumCulled={false} renderOrder={TRANSLUCENT_ORDER + 0.5}>
+          <lineBasicMaterial color={GHOST_EDGES.color} toneMapped={false} transparent opacity={GHOST_EDGES.opacity * dim} depthWrite={false} {...NO_BLOOM_BLEND} {...cut} />
+        </lineSegments>
+      )}
       {/* Faces as outlines. A shard with no faces has no edges to draw, so it
           keeps the old single line through its points, which is all there is. */}
       {/* Seen from inside (cull, WALK's first person) only the faces' fronts
@@ -708,7 +743,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
           what arkinox still saw with the backs culled (2026-10-13). */}
       {plan.lines && outline && (
         <lineSegments geometry={outline} frustumCulled={false} renderOrder={order}>
-          <lineBasicMaterial vertexColors toneMapped={false} {...lineProps(opacity, ghost)} {...lampLines} userData-share={own} {...cut} />
+          <lineBasicMaterial vertexColors toneMapped={false} {...lineProps(opacity, ghost, noBloom)} {...lampLines} userData-share={own} {...cut} />
         </lineSegments>
       )}
       {plan.lines && !outline && shard.vertices.length > 1 && <primitive object={line} />}
@@ -724,7 +759,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
         : !faintMaterial && <points name="shard-hit" visible={false} geometry={plain} material={pointMaterial} frustumCulled={false} />)}
       {faintMaterial && <points name="shard-faint" geometry={plain} material={faintMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} />}
       {plan.points === 'billboard' && look.pointSize !== undefined && (
-        <PointCores plain={pointsPlain} size={look.pointSize} opacity={opacity} glow={SHARD_POINTS.glow} headlamp={headlamp && !lit} clipPlanes={clipPlanes} walls={clip} />
+        <PointCores plain={pointsPlain} size={look.pointSize} opacity={opacity} glow={SHARD_POINTS.glow} headlamp={headlamp && !lit} clipPlanes={clipPlanes} walls={clip} noBloom={noBloom} />
       )}
       {plan.halos && look.glow && (
         <GlowHalos plain={pointsPlain} glow={look.glow} radius={look.glowRadius} strength={look.glowStrength} drawnWorld={world} core={plan.points === 'billboard' ? look.pointSize : 0} fade={haloFade({ ghostShare: ghost ? GHOST_OPACITY : 1, dim })} trusted={glowTrusted} clipPlanes={clipPlanes} walls={clip} birth={birth} dissolve={dissolve} />
@@ -894,12 +929,14 @@ function cutBox(shard: ShardModel, list: readonly Listed[], cut: readonly number
   return min[0] === Infinity ? null : { min, max }
 }
 
-function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, onPartClick, selected, cull, ignoreOpacity, dim, allowance, near, rootTrusted = false, still = false }: {
+function Placements({ shard, byRef, nested, lit, ghost, noBloom, edges, world, headlamp, pose, onPartClick, selected, cull, ignoreOpacity, dim, allowance, near, rootTrusted = false, still = false }: {
   shard: ShardModel
   byRef: Map<string, Resolved>
   nested?: Placed[]
   lit: boolean
   ghost: boolean
+  noBloom: boolean
+  edges: boolean
   world: boolean
   headlamp: boolean
   pose?: Pose
@@ -936,9 +973,9 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
     const model = r.model && r.model.unit + part.step >= 0 && r.model.unit + part.step <= MAX_UNIT ? r.model : null
     const matrix = new Matrix4().fromArray(partMatrix(part, shard.unit, model ? model.unit : shard.unit))
     // Its own share (without a ghost's), as every face and line keeps one, so the EDIT breath and the build dim's fade scale it rather than skip it.
-    let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={(ghost ? 0.45 : 0.8) * dim} userData-share={0.8 * dim} /></lineSegments>
+    let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={(ghost ? 0.45 : 0.8) * dim} userData-share={0.8 * dim} {...(noBloom ? NO_BLOOM_BLEND : {})} /></lineSegments>
     // The part's own model, so its own opacity, never the parent's (§1.10).
-    if (model) body = <ShardMesh shard={model} placed nested={r.children} lit={lit} ghost={ghost} world={world} headlamp={headlamp} cull={cull} dim={dim} still={still} ignoreOpacity={ignoreOpacity} />
+    if (model) body = <ShardMesh shard={model} placed nested={r.children} lit={lit} ghost={ghost} noBloom={noBloom} edges={edges} world={world} headlamp={headlamp} cull={cull} dim={dim} still={still} ignoreOpacity={ignoreOpacity} />
     // Selected: an amber box around what the placement draws, in its own frame so it turns with it.
     const box = selected?.includes(i) ? (model ? placedBounds(model, r.children) : null) ?? { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] } : null
     return (

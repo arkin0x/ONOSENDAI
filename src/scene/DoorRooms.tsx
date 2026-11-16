@@ -49,6 +49,7 @@ import { doorDepth, ownDoors, placedDoorHeight, sealingDoor, useShards, type MyD
 import { ClipWalls, type ClipFace } from './ClipWalls'
 import { drawnRegion, type DrawnRegion } from './DeployRegionBox'
 import { GRID_SPAN_CELLS, UNIT_BOX, WALL_RENDER_ORDER, gridMaterial, setGrid, tickWallClock } from './Rooms'
+import { NO_BLOOM_BLEND } from './shardFaces'
 import { useDrawReach } from './buildZoom'
 
 /** The red of a lock. */
@@ -93,7 +94,8 @@ const NO_FACE = new MeshBasicMaterial({ visible: false })
  */
 const gridPool: ShaderMaterial[] = []
 export const roomGridPool = {
-  take(): ShaderMaterial { return gridPool.pop() ?? gridMaterial() },
+  // Kept out of the bloom, as the green box's grid is (DeployRegionBox): a grid line over a face never washes it.
+  take(): ShaderMaterial { return gridPool.pop() ?? Object.assign(gridMaterial(), NO_BLOOM_BLEND) },
   /** Mark a taken material in use again: StrictMode's second mount follows a give. */
   hold(m: ShaderMaterial): void { const i = gridPool.indexOf(m); if (i >= 0) gridPool.splice(i, 1) },
   give(m: ShaderMaterial): void { if (!gridPool.includes(m)) gridPool.push(m) },

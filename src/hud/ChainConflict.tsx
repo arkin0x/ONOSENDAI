@@ -30,6 +30,7 @@ import { findDivergence, summarizeBranch, type BranchSummary } from '../lib/bran
 import { sectorTag, xyzToSectorId } from 'cyberspace-core'
 import { useCyberspace } from '../store/useCyberspace'
 import { useChainUi } from '../store/useChainUi'
+import { CopyValue } from './ui/CopyValue'
 
 export interface CompareColumn {
   heading: string
@@ -60,7 +61,7 @@ export function summaryCells(s: ChainSummary, now: number): ReactNode[] {
     <span title={formatStamp(s.startedAt)}>{formatAgo(s.startedAt, now)}</span>,
     String(s.actions),
     <span title={formatStamp(s.lastActive)}>{formatAgo(s.lastActive, now)}</span>,
-    <span title={positionHex(s.position, s.plane)}>{s.sector}{s.plane === 1 ? ' · ideaspace' : ''}<br />{shortHex(positionHex(s.position, s.plane), 6, 4)}</span>,
+    <span><CopyValue value={s.sector} />{s.plane === 1 ? ' · ideaspace' : ''}<br /><CopyValue value={positionHex(s.position, s.plane)} shown={shortHex(positionHex(s.position, s.plane), 6, 4)} /></span>,
   ]
 }
 
@@ -167,7 +168,7 @@ function branchCells(b: BranchSummary, now: number): ReactNode[] {
     String(b.count),
     <span title={formatStamp(b.firstAt)}>{formatAgo(b.firstAt, now)}</span>,
     <span title={formatStamp(b.lastAt)}>{formatAgo(b.lastAt, now)}</span>,
-    <span title={b.coordHex}>{sector}{b.plane === 1 ? ' · ideaspace' : ''}<br />{shortHex(b.coordHex, 6, 4)}</span>,
+    <span><CopyValue value={sector} />{b.plane === 1 ? ' · ideaspace' : ''}<br /><CopyValue value={b.coordHex} shown={shortHex(b.coordHex, 6, 4)} /></span>,
   ]
 }
 

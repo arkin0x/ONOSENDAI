@@ -23,7 +23,7 @@ describe('EventData', () => {
     const at = ['event ID', 'd tag', 'pubkey', 'created_at'].map((l) => html.indexOf(`<dt>${l}</dt>`))
     expect(at.every((i) => i >= 0)).toBe(true)
     expect([...at].sort((a, b) => a - b)).toEqual(at)
-    for (const v of [ev.id, 'my-shard', ev.pubkey, '1792400000']) expect(html).toMatch(new RegExp(`<button class="eventdata__value"[^>]*>${v}</button>`))
+    for (const v of [ev.id, 'my-shard', ev.pubkey, '1792400000']) expect(html).toMatch(new RegExp(`role="button"[^>]*class="copyv eventdata__value"[^>]*><span class="copyv__value">${v}\u2060<svg`))
   })
 
   it('says none for an event with no d tag', () => {

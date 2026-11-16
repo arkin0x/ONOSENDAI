@@ -41,6 +41,7 @@ import { ChestBlock, KeyLine, listedOnce, useChestOpen } from './ItemRows'
 import { useEscape } from '../hooks/useEscape'
 import { useBagReading } from '../hooks/useBagReadings'
 import { ModalClose } from './ui/ModalClose'
+import { CopyValue } from './ui/CopyValue'
 
 /** An item of this bag that this client can already see, from a scan or from its own deployments. */
 interface OpenedItem {
@@ -75,17 +76,10 @@ function searchLabel(exponent: number): string {
 }
 
 function Copyable({ label, value, title }: { label: string; value: string; title?: string }): JSX.Element {
-  const [copied, setCopied] = useState(false)
-  const copy = (): void => {
-    void navigator.clipboard?.writeText(value).then(() => {
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1200)
-    })
-  }
   return (
     <>
       <dt title={title}>{label}</dt>
-      <dd><button className="lootd__copy" title={`${value} (click to copy)`} onClick={copy}>{copied ? 'copied' : shortHex(value, 12, 8)}</button></dd>
+      <dd><CopyValue className="lootd__copy" value={value} shown={shortHex(value, 12, 8)} /></dd>
     </>
   )
 }
@@ -223,7 +217,7 @@ export function LootDetail(): JSX.Element | null {
             <div className="secret__person-text">
               <ProfileTap pubkey={item.author} className="secret__name">{name}{yours ? ' (you)' : ''}</ProfileTap>
               {profile?.nip05 && <span className="secret__nip05">{profile.nip05.replace(/^_@/, '')}</span>}
-              <span className="secret__npub" title={npub}>{shortHex(npub, 14, 8)}</span>
+              <CopyValue className="secret__npub" value={npub} shown={shortHex(npub, 14, 8)} />
             </div>
           </div>
         </div>
@@ -231,7 +225,7 @@ export function LootDetail(): JSX.Element | null {
         <dl className="secret__facts lootd__facts">
           <div><dt>Placed</dt><dd title={formatStamp(item.createdAt)}>{formatAgo(item.createdAt)}</dd></div>
           <div><dt>Region</dt><dd>{regionLabel(item.height)}{item.height !== null && <span className="lootd__dim"> (height {item.height})</span>}</dd></div>
-          {item.sector && <div><dt>Sector</dt><dd title="The hider's sector hint (spec §7.7): the bag is somewhere in this cube of 2^30 gibsons on a side">{item.sector}</dd></div>}
+          {item.sector && <div><dt>Sector</dt><dd><CopyValue value={item.sector} title={`The hider's sector hint (spec §7.7): the bag is somewhere in this cube of 2^30 gibsons on a side\n${item.sector}\nTap to copy`} /></dd></div>}
           <div><dt>Payload</dt><dd>{formatBytes(item.bytes)}</dd></div>
           <div><dt>Where</dt><dd>{where.label}</dd></div>
         </dl>

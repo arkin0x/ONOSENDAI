@@ -47,6 +47,7 @@ import { Explanation } from './Explanation'
 import { useChainStatus } from './ChainStatus'
 import { holdReason } from '../lib/chainHold'
 import { useChainUi } from '../store/useChainUi'
+import { CopyValue } from './ui/CopyValue'
 
 export function ChainPanel(): JSX.Element {
   const chain = useCyberspace((s) => s.chain)
@@ -210,7 +211,7 @@ export function ChainPanel(): JSX.Element {
                 {breaks && <TriangleAlert size={10} strokeWidth={2.5} aria-hidden className="chainrows__warn" />}
                 {label}
               </span>
-              <code className="chainrows__id" title={e.id}>{e.id.slice(0, 8)}…</code>
+              <code className="chainrows__id"><CopyValue value={e.id} shown={`${e.id.slice(0, 8)}…`} /></code>
               <span className={`tag tag--${tag}`} title={PUBLISH_TAG_TITLE[tag]}>{PUBLISH_TAG_LABEL[tag]}</span>
             </li>
           )

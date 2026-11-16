@@ -68,6 +68,7 @@ import { AudioCard } from './AudioCard'
 import { BlockButton, MuteItemButton } from './BlockButton'
 import { useMutes } from '../store/useMutes'
 import { ModalClose } from './ui/ModalClose'
+import { CopyValue } from './ui/CopyValue'
 
 const ICON = 12
 
@@ -314,7 +315,7 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
             <div className="secret__person-text">
               <ProfileTap pubkey={author} className="secret__name">{name}{mine ? ' (you)' : ''}</ProfileTap>
               {profile?.nip05 && <span className="secret__nip05">{profile.nip05.replace(/^_@/, '')}</span>}
-              <span className="secret__npub" title={npub}>{shortHex(npub, 14, 8)}</span>
+              <CopyValue className="secret__npub" value={npub} shown={shortHex(npub, 14, 8)} />
             </div>
           </div>
           {profile?.about && <p className="secret__about">{profile.about}</p>}

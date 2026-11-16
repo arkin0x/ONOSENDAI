@@ -44,6 +44,7 @@ import { useRoomKeys } from '../store/useKeyring'
 import { Explanation } from './Explanation'
 import { useEscape } from '../hooks/useEscape'
 import { ModalClose } from './ui/ModalClose'
+import { CopyValue } from './ui/CopyValue'
 
 const SORTS: Array<[SecretsSort, string]> = [['recent', 'MOST RECENT'], ['volume', 'LARGEST']]
 
@@ -294,7 +295,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                         {k.plane === 1 ? 'ideaspace' : 'dataspace'} · {k.source === 'cloud' ? 'bought' : k.source === 'hop' ? 'crossed' : k.source === 'scanmode' ? 'scanned' : 'opened'} · {formatAgo(k.at, now)}
                         {found > 0 && <span className="secrets__found"> · {found} found</span>}
                       </span>
-                      <span className="secrets__id">{k.lookupId.slice(0, 16)}…</span>
+                      <CopyValue className="secrets__id" value={k.lookupId} shown={`${k.lookupId.slice(0, 16)}…`} />
                     </button>
                     <button
                       className="secrets__scan"
@@ -373,7 +374,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                         {p.plane === 1 ? 'ideaspace' : 'dataspace'} · stood here {formatAgo(p.at, now)}
                         {p.first < p.at && ` · first ${formatAgo(p.first, now)}`}
                       </span>
-                      <span className="secrets__id">{p.keys[0]?.slice(0, 16)}…</span>
+                      {p.keys[0] && <CopyValue className="secrets__id" value={p.keys[0]} shown={`${p.keys[0].slice(0, 16)}…`} />}
                     </button>
                     <button
                       className="secrets__scan"
@@ -566,7 +567,7 @@ function RoomKeys(): JSX.Element | null {
         {rooms.map((r) => (
           <li key={r.lookupId} className="secrets__row">
             <span className="secrets__where">{r.kind === 'room' && r.name ? r.name : 'a room'}</span>
-            <span className="secrets__id">{r.lookupId.slice(0, 16)}…</span>
+            <CopyValue className="secrets__id" value={r.lookupId} shown={`${r.lookupId.slice(0, 16)}…`} />
           </li>
         ))}
       </ul>

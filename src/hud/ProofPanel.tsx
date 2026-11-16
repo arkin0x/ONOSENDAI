@@ -22,6 +22,7 @@ import { formatMs, formatOps } from '../lib/space'
 import { BROKEN_CHAIN_MESSAGE, FORKED_CHAIN_MESSAGE, MAX_COMPUTE_HEIGHT, RELAY_STOPPED_MESSAGE, brokenChainMessage, useCyberspace, type CloudState, type MovePlan, type MoveMode, type ProofState } from '../store/useCyberspace'
 import { useChainStop } from '../hooks/useChainStop'
 import { useChainUi } from '../store/useChainUi'
+import { CopyValue } from './ui/CopyValue'
 
 const MOVE_MODES: Array<[MoveMode, string, string]> = [
   ['single', 'SINGLE ACTION', 'One action per press'],
@@ -270,7 +271,7 @@ export function ProofPanel(): JSX.Element {
           {proof.proofHash && (
             <div className="hash">
               <span className="hash__label">proof</span>
-              <code>{proof.proofHash}</code>
+              <code><CopyValue value={proof.proofHash} /></code>
             </div>
           )}
 

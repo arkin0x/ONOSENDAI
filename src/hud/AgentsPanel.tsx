@@ -55,6 +55,7 @@ import { activateAgent } from '../store/followAgent'
 import { DmInboxSetup, useMyDmInbox } from './DmInboxSetup'
 import { Explanation } from './Explanation'
 import { ProfileBadge } from './ProfileBadge'
+import { copyText } from '../lib/copyText'
 
 /** How long a tapped button says COPIED before its label returns. */
 const COPIED_MS = 1200
@@ -89,10 +90,10 @@ export function AgentsPanel(): JSX.Element {
   const unread = useAgentUnread()
 
   const copy = (key: string, text: string): void => {
-    navigator.clipboard?.writeText(text).then(
-      () => { setCopied(key); window.setTimeout(() => setCopied((c) => (c === key ? null : c)), COPIED_MS) },
-      () => { /* no clipboard here: nothing to report */ },
-    )
+    // The clipboard, or the old copy command where it is refused (lib/copyText).
+    void copyText(text).then((ok) => {
+      if (ok) { setCopied(key); window.setTimeout(() => setCopied((c) => (c === key ? null : c)), COPIED_MS) }
+    })
   }
 
   const activate = (): void => {

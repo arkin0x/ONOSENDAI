@@ -356,6 +356,36 @@ body {
   color: var(--accent);
 }
 
+/* A value that copies on a tap (ui/CopyValue): the value as it reads, in the
+ * colour around it, a small copy icon after it, and COPIED over it for a
+ * moment. The value keeps its space while COPIED shows, so nothing moves. */
+.copyv {
+  position: relative;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+.copyv:hover,
+.copyv:focus-visible { color: var(--accent); outline: none; }
+.copyv__icon {
+  display: inline-block;
+  margin-left: 0.35em;
+  vertical-align: -0.05em;
+  opacity: 0.55;
+}
+.copyv:hover .copyv__icon,
+.copyv:focus-visible .copyv__icon { opacity: 1; }
+.copyv.is-flash .copyv__value { visibility: hidden; }
+.copyv__flash {
+  position: absolute;
+  top: 0;
+  left: 0;
+  white-space: nowrap;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
 /* An explanation in paragraphs. */
 .explain__well p {
   margin: 0;

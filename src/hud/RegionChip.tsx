@@ -9,6 +9,7 @@
 import { useState } from 'react'
 import { Copy, Scan } from 'lucide-react'
 import { useRegion } from '../store/useRegion'
+import { copyText } from '../lib/copyText'
 
 // The relay's speakeasy landing page, its create tool prefilled with the
 // region (arkinox, 2026-11-13; relay PR #34). The region is the bare hex,
@@ -26,10 +27,11 @@ export function RegionChip(): JSX.Element | null {
 
   const copy = (): void => {
     if (!prefix) return
-    navigator.clipboard?.writeText(prefix).then(
-      () => { setCopied(true); setTimeout(() => setCopied(false), 1200) },
-      () => { /* a copy that fails leaves the coordinate on screen to select */ },
-    )
+    // The clipboard, or the old copy command where it is refused (lib/copyText);
+    // a copy that fails leaves the coordinate on screen to select.
+    void copyText(prefix).then((ok) => {
+      if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1200) }
+    })
   }
 
   return (

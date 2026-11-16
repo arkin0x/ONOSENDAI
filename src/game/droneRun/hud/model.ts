@@ -120,7 +120,7 @@ export const IDLE_HUD: HudState = {
   phase: 'safe', hp: 3, maxHp: 3, invulnerable: false, wave: 1, waveName: '', wavesTotal: 3, dronesLeft: 0,
   weapon: 0, weaponNames: BASE_WEAPONS.map((w) => w.name), weaponKinds: BASE_WEAPONS.map((w) => (w.gauge === 'ammo' ? 'ammo' : 'heat')),
   weaponCharges: BASE_WEAPONS.map((w) => w.gauge === 'charge'), weaponAssists: BASE_WEAPONS.map((w) => w.assist), heat: 0, overheated: false, ammo: 0, mag: 0, reloading: false,
-  charge: 0, switching: false, runTime: 0, stamina: 1, sprintLocked: false, sprinting: false, hasStamina: true, kills: 0, score: 0,
+  charge: 0, switching: false, runTime: 0, kills: 0, score: 0,
 }
 
 /** Every word the HUD prints (drafts for the owner's approval). */

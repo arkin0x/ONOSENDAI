@@ -31,7 +31,7 @@ function kept(d: number, nz: number, reach: number, near: number, far: number, f
 }
 
 /** As the scene shades it now, for a third-person camera 26 cells from its target (the usual orbit). */
-const keptNow = (d: number, nz: number): number => kept(d, nz, 26, fogNear(false, 26), fogFar(false, 26))
+const keptNow = (d: number, nz: number): number => kept(d, nz, 26, fogNear('orbit', 26), fogFar('orbit', 26))
 
 /** The old shading, as it stood before 2026-11-15, for the comparison. */
 function keptBefore(d: number, nz: number, reach: number, far = 166): number {
@@ -68,8 +68,8 @@ describe('the darkening, cut to about a tenth', () => {
 
   it('loses about a tenth of what it lost nearer than where the fog begins, and much less out to the old fog\'s end', () => {
     // The usual orbit: 26 cells out, the fog from 79 to 251 (it was 37.4 to 166).
-    const near = fogNear(false, 26)
-    expect([near, fogFar(false, 26)]).toEqual([79, 251])
+    const near = fogNear('orbit', 26)
+    expect([near, fogFar('orbit', 26)]).toEqual([79, 251])
     const ratio = (nz: number, to: number): number => meanLoss((d) => keptNow(d, nz), 5, to) / meanLoss((d) => keptBefore(d, nz, 26), 5, to)
     // Facing the camera, a tenth or less; ground near edge on (nz 0.3) keeps a little more, for its shapes.
     expect(ratio(1, near)).toBeLessThan(0.1)
@@ -91,8 +91,8 @@ describe('the darkening, cut to about a tenth', () => {
 
   it('fades to black gently over a long way, not at a thin band at the edge', () => {
     for (const d of [2, 26, 60, 96, 400, 1280]) {
-      const near = fogNear(false, d)
-      const far = fogFar(false, d)
+      const near = fogNear('orbit', d)
+      const far = fogFar('orbit', d)
       expect(kept(far, 1, d, near, far)).toBe(0)
       // The fade is longer than the clear range before it is shorter than it: at least 2.3 times its start.
       expect(far / near).toBeGreaterThanOrEqual(2.3)
@@ -101,9 +101,9 @@ describe('the darkening, cut to about a tenth', () => {
       expect(mid).toBeGreaterThan(0.4)
       expect(mid).toBeLessThan(0.55)
     }
-    // TV's and WALK's own end.
-    expect(kept(96, 1, 8, fogNear(true, 0), fogFar(true, 0))).toBe(0)
-    expect(fogFar(true, 0) / fogNear(true, 0)).toBe(2)
+    // TV's own end.
+    expect(kept(96, 1, 8, fogNear('tv', 0), fogFar('tv', 0))).toBe(0)
+    expect(fogFar('tv', 0) / fogNear('tv', 0)).toBe(2)
   })
 
   it('fogs a shard\'s vertex dots with its faces, so far off they no longer show alone or pop at the cull line', () => {

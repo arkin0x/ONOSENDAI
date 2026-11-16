@@ -4,7 +4,8 @@
  * SHARD and PASTE; a tap asks the workshop for its file picker, which takes
  * PLY among the rest; while a file is read it says READING and takes no
  * second tap; and MENU's EXPLAIN says what IMPORT does and which way up a
- * PLY is read.
+ * PLY is read (a Blender PLY standing with the default export, since
+ * sno-core 0.1.33).
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -59,11 +60,15 @@ describe('IMPORT in the workshop MENU', () => {
     expect(workshopSrc).toContain('onImport={() => fileInput.current?.click()}')
   })
 
-  it('EXPLAIN says what IMPORT does and that a PLY is read Y up, with Blender\'s setting for it', () => {
+  it('EXPLAIN says what IMPORT does, that a Blender PLY comes in standing with the default export, and a quarter turn for one exported Up Y', () => {
     const start = menuSrc.indexOf('<Explanation>')
     const explain = menuSrc.slice(start, menuSrc.indexOf('</Explanation>', start)).replace(/\s+/g, ' ')
     expect(explain).toContain('IMPORT, at the top of this sheet, brings a 3D file ({IMPORT_FORMATS_LABEL}) into this shard')
-    expect(explain).toContain('export a PLY from Blender with Up set to Y and Forward to -Z')
+    expect(explain).toContain("A PLY from Blender comes in standing with Blender's default export settings")
+    expect(explain).toContain('if you exported it with Up set to Y, it comes in on its back and a quarter turn stands it up')
+    expect(explain).toContain('Any other PLY is read Y up')
+    // The old advice, export with Up Y, now lays a Blender PLY on its back.
+    expect(explain).not.toContain('Forward to -Z')
     expect(explain).not.toContain('—')
   })
 })

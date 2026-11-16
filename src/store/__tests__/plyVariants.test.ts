@@ -90,7 +90,8 @@ const lanternEls = (faceList = 'list uchar int vertex_indices'): El[] => [
  * height 2, an apex at 2.6, and a fin on its front (Blender's -Y) whose tip
  * is the one point that far forward, so which way it faces can be told.
  * `yUp` is the file Blender writes with Up set to Y and Forward to -Z,
- * (x, y, z) to (x, z, -y); otherwise the default, Z up.
+ * (x, y, z) to (x, z, -y). Otherwise it is the file Blender writes with its
+ * default settings, Forward Y and Up Z, which is Blender's own frame.
  */
 function obelisk(yUp: boolean): { points: number[][]; faces: number[][]; colors: number[][] } {
   const raw = [[-0.5, -0.5, 0], [0.5, -0.5, 0], [0.5, 0.5, 0], [-0.5, 0.5, 0], [-0.25, -0.25, 2], [0.25, -0.25, 2], [0.25, 0.25, 2], [-0.25, 0.25, 2], [0, 0, 2.6], [0, -0.9, 0.3]]
@@ -107,13 +108,13 @@ function obelisk(yUp: boolean): { points: number[][]; faces: number[][]; colors:
  * UVs as s t, then every other attribute, faces as `list uchar uint
  * vertex_indices`, and loose edges as their own element.
  */
-function blender4(yUp: boolean, format: Format = 'binary_little_endian'): Uint8Array {
+function blender4(yUp: boolean, format: Format = 'binary_little_endian', comments = ['Created in Blender version 4.2.3 LTS']): Uint8Array {
   const o = obelisk(yUp)
   return plyFile(format, [
     { name: 'vertex', props: [...XYZ, 'float nx', 'float ny', 'float nz', ...RGB, 'uchar alpha', 'float s', 'float t', 'float bevel_weight_vert'], rows: o.points.map((p, i) => [...p, 0, 0, 1, ...o.colors[i], i / 10, 1 - i / 10, 0]) },
     { name: 'face', props: ['list uchar uint vertex_indices'], rows: o.faces.map((f) => [f]) },
     { name: 'edge', props: ['int vertex1', 'int vertex2'], rows: [[0, 8]] },
-  ], ['Created in Blender version 4.2.3 LTS'])
+  ], comments)
 }
 
 const file = (name: string, bytes: Uint8Array): File => new File([bytes as Uint8Array<ArrayBuffer>], name)
@@ -244,24 +245,39 @@ describe('PLY variants through IMPORT', () => {
     }
   })
 
-  it('PLY has no up axis and is read Y up: Blender\'s export with Up Y and Forward -Z stands facing the viewer, its default Z up lies along Z', async () => {
-    const standing = await imported('obelisk-y.ply', blender4(true))
-    const [sx, sy, sz] = size(standing)
-    expect(sy).toBe(standing.extent / 2)
+  /** The obelisk stands: half of GRID SIZE tall in Y, the apex alone on top, Blender's front (the fin) toward the viewer. */
+  function expectStanding(s: Awaited<ReturnType<typeof imported>>): void {
+    const [sx, sy, sz] = size(s)
+    expect(sy).toBe(s.extent / 2)
     expect(sy).toBeGreaterThan(sx)
     expect(sy).toBeGreaterThan(sz)
-    // The apex is the highest point.
-    const ys = standing.vertices.map((v) => ticksOf(v)[1])
+    // The apex is the highest point, and the base is on the floor.
+    const ys = s.vertices.map((v) => ticksOf(v)[1])
     expect(ys.filter((y) => y === Math.max(...ys))).toHaveLength(1)
+    expect(ys.filter((y) => y === Math.min(...ys)).length).toBeGreaterThanOrEqual(4)
     // Blender's front comes to the viewer's side: wire +Z, which is the model's -Z (sno-core shards flipZ).
     // The fin's tip is the one point furthest that way; the two back corners of the base, the furthest the other.
-    const zs = standing.vertices.map((v) => ticksOf(v)[2])
+    const zs = s.vertices.map((v) => ticksOf(v)[2])
     expect(zs.filter((z) => z === Math.min(...zs))).toHaveLength(1)
     expect(zs.filter((z) => z === Math.max(...zs))).toHaveLength(2)
-    const lying = await imported('obelisk-z.ply', blender4(false))
+  }
+
+  it('a Blender PLY with the default export (Forward Y, Up Z) comes in standing, 4.x and the older exporter alike (arkinox, 2026-11-16)', async () => {
+    expectStanding(await imported('obelisk.ply', blender4(false)))
+    expectStanding(await imported('obelisk.ply', blender4(false, 'ascii')))
+    expectStanding(await imported('obelisk-3x.ply', blender4(false, 'binary_big_endian', ['Created by Blender 3.6.0 - www.blender.org'])))
+  })
+
+  it('a Blender PLY exported with Up Y comes in on its back, which a quarter turn stands up; the same file from anyone else stands, read Y up', async () => {
+    const lying = await imported('obelisk-y.ply', blender4(true))
     const [, ly, lz] = size(lying)
     expect(lz).toBe(lying.extent / 2)
     expect(ly).toBeLessThan(lz)
+    // No Blender comment: PLY has no up axis of its own, and is read Y up.
+    expectStanding(await imported('obelisk-y.ply', blender4(true, 'binary_little_endian', ['written by a scanner'])))
+    // And a Z up file without the comment lies along Z, as before.
+    const other = await imported('obelisk-z.ply', blender4(false, 'binary_little_endian', []))
+    expect(size(other)[2]).toBe(other.extent / 2)
   })
 
   it('reads the older Blender exporter\'s layout (2.8 to 3.5: UVs before colors)', async () => {
@@ -273,6 +289,8 @@ describe('PLY variants through IMPORT', () => {
     const s = await imported('legacy.ply', bytes)
     expect(s.faces).toHaveLength(15)
     expect(swatches(s)).toEqual(new Set([nearest([30, 30, 220]), nearest([220, 220, 220]), nearest([255, 40, 40])]))
+    // Its default export was Up Z too, and it stands.
+    expectStanding(s)
   })
 
   it('reads a MagicaVoxel point cloud (one point per voxel) and a voxel mesh of quads', async () => {

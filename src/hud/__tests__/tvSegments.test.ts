@@ -55,6 +55,12 @@ describe('a bag on the chiron', () => {
     expect(contentsWords({ nft: '1' })).toBe('1 NFT')
   })
 
+  it('says an NFT is inside when only that was published (spec 7.7 Claimable alone)', () => {
+    expect(segmentDoing({ ...bag, money: false, nft: true, counts: null })).toBe('SEALED A BAG · NFT INSIDE')
+    expect(segmentDoing({ ...bag, money: true, nft: true, counts: null })).toBe('SEALED A BAG · CASHU INSIDE · NFT INSIDE')
+    expect(segmentDoing({ ...bag, money: false, nft: true, counts: { message: '1', nft: '1' } })).toBe('SEALED A BAG · 1 MESSAGE · 1 NFT')
+  })
+
   it('still says money is inside when the money-alone row stands beside counted rows', () => {
     expect(segmentDoing({ ...bag, money: true, counts: { shard: '2' } })).toBe('SEALED A BAG · 2 SHARDS · CASHU INSIDE')
     expect(segmentDoing({ ...bag, money: true, counts: { shard: '2', cashu: '1' } })).toBe('SEALED A BAG · 2 SHARDS · 1 CASHU TOKEN')

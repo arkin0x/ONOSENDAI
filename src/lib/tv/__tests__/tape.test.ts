@@ -117,6 +117,8 @@ describe('itemOf', () => {
     const item = itemOf(ev(33330, 5, [['d', 'a'.repeat(64)], ['contents', 'message', '1'], ['contents', 'nft', '1']]))
     expect(item).toMatchObject({ kind: 'bag', money: false, nft: true, counts: { message: '1', nft: '1' } })
     expect(itemOf(ev(33330, 5, [['d', 'a'.repeat(64)], ['contents', 'cashu']]))).toMatchObject({ money: true, nft: false })
+    // The nft row with no count says an NFT is inside, as the cashu row says money (spec 7.7 Claimable alone).
+    expect(itemOf(ev(33330, 5, [['d', 'a'.repeat(64)], ['contents', 'nft']]))).toMatchObject({ money: false, nft: true, counts: null })
   })
   // Spec 7.7 "Reading contents": CASHU INSIDE! and NFT INSIDE! only from rows a reader keeps.
   it('shows no money or NFT on TV for a row whose count is not a count, and any size of count', () => {

@@ -61,7 +61,7 @@ describe('bagTemplate writes exactly the tags each combination asks for', () => 
       expect(ev.content).toBe(content)
       if (settings.heightTag) expect(ev.tags).toContainEqual(['H', String(HEIGHT)])
       if (settings.hint) for (const t of sector) expect(ev.tags).toContainEqual(t)
-      expect(bagSettingsOf(ev, HEIGHT)).toEqual({ ...settings, riddle: content, contents: false, money: false })
+      expect(bagSettingsOf(ev, HEIGHT, { cashu: 0, nft: 0 })).toEqual({ ...settings, riddle: content, contents: false, money: false })
     })
   }
 

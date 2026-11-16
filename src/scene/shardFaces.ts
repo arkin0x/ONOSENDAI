@@ -94,8 +94,9 @@ export const TAG_BLEND = {
  * background the texel stays alpha 0 with a colour, which the bloom reads as
  * a face and the canvas shows as that colour (worldBloom.tsx OpaqueTagged);
  * over a glowing line that line keeps its own glow. The placing ghost's lines
- * and dots, and the BUILD marks around it (the deploy region box, the build
- * cursor, the STEP cell), are drawn so (owner, 2026-11-16: "can we reduce the
+ * and dots, and the deploy region box's grid and ZOOM OUT walls, are drawn so;
+ * the box's outline, the build cursor and the STEP cell stay ordinary glowing
+ * lines, thin enough to read at a phone's pixel size (owner, 2026-11-16: "can we reduce the
  * glowiness in build mode? its hard to line up what we are placing").
  */
 export const NO_BLOOM_BLEND = {

@@ -43,7 +43,7 @@ import { BUILD } from '../../lib/palette'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useShards } from '../../store/useShards'
 import { useWorkshop } from '../../store/useWorkshop'
-import { GHOST_EDGES, ShardMesh } from '../ShardMesh'
+import { GHOST_EDGES, ShardMesh, clipSegments, ghostEdgeSegments } from '../ShardMesh'
 import { ShardGhost } from '../ShardGhost'
 import { roomGridPool } from '../DoorRooms'
 import { GHOST_OPACITY, NO_BLOOM_BLEND, SEE_THROUGH_BLEND, TAG_BLEND, TRANSLUCENT_ORDER } from '../shardFaces'
@@ -134,6 +134,23 @@ describe('the placing ghost: as it will land, see-through, crisp, never glowing'
     const dots = materialObjects(ofType(all, 'points'))
     expect(dots.length).toBeGreaterThanOrEqual(1)
     for (const d of dots) keepsAlpha(d)
+    await m.unmount()
+  })
+
+  it('its edges are the creases only, found once per model, and cut to its region box on each step', () => {
+    const seg = ghostEdgeSegments(corner('Courtyard'))
+    // Three right-angled faces meeting at a corner: every edge is a crease, six segments.
+    expect(seg.length).toBe(6 * 6)
+    // A box holding x <= 0.5 only: what crosses it is cut at 0.5, what lies past it goes.
+    const cut = clipSegments(seg, { min: [-1, -1, -1], max: [0.5, 2, 2] })
+    expect(cut.length).toBeGreaterThan(0)
+    for (let i = 0; i < cut.length; i += 3) expect(cut[i]).toBeLessThanOrEqual(0.5 + 1e-9)
+    expect(clipSegments(seg, { min: [5, 5, 5], max: [6, 6, 6] }).length).toBe(0)
+  })
+
+  it('its faces sit a hair back in depth under the edges, so the edges never stipple', async () => {
+    const m = await mount(createElement(ShardMesh, { shard: corner('Courtyard'), ghost: true, world: true, noBloom: true, edges: true }))
+    for (const f of ofType(m.all(), 'meshBasicMaterial')) expect(f.props).toMatchObject({ polygonOffset: true, polygonOffsetFactor: 1 })
     await m.unmount()
   })
 

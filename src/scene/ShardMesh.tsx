@@ -375,7 +375,53 @@ export function ShardMesh(props: Props): ReactNode {
  * edge where its faces meet at more than `angle` degrees, so flat runs of
  * faces read as one wall and corners and rims stand out.
  */
-export const GHOST_EDGES = { color: BUILD, opacity: 0.6, angle: 20 } as const
+export const GHOST_EDGES = { color: BUILD, opacity: 0.6, angle: 20, maxTriangles: 40_000 } as const
+
+/** Pushes the ghost's faces a hair back in depth, so its edges, drawn on them, never stipple. */
+const GHOST_FACE_OFFSET = { polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 } as const
+
+/** A shard's crease edges (GHOST_EDGES.angle), posed, as line segment pairs. */
+export function ghostEdgeSegments(shard: ShardModel, pose?: Pose): Float32Array {
+  const f = flatten(shard, pose)
+  const g = new BufferGeometry()
+  g.setAttribute('position', new Float32BufferAttribute(f.positions, 3))
+  g.setIndex(f.index)
+  const e = new EdgesGeometry(g, GHOST_EDGES.angle)
+  const out = (e.getAttribute('position').array as Float32Array).slice()
+  g.dispose()
+  e.dispose()
+  return out
+}
+
+/** Line segment pairs cut to a box (Liang-Barsky): the part of each inside it, or nothing. */
+export function clipSegments(seg: Float32Array, box: Box): Float32Array {
+  const out: number[] = []
+  for (let i = 0; i + 5 < seg.length; i += 6) {
+    let t0 = 0
+    let t1 = 1
+    let keep = true
+    for (let a = 0; a < 3 && keep; a++) {
+      const p = seg[i + a]
+      const d = seg[i + 3 + a] - p
+      if (d === 0) { if (p < box.min[a] || p > box.max[a]) keep = false; continue }
+      let lo = (box.min[a] - p) / d
+      let hi = (box.max[a] - p) / d
+      if (lo > hi) [lo, hi] = [hi, lo]
+      t0 = Math.max(t0, lo)
+      t1 = Math.min(t1, hi)
+      if (t0 > t1) keep = false
+    }
+    if (!keep) continue
+    for (const t of [t0, t1]) for (let a = 0; a < 3; a++) out.push(seg[i + a] + (seg[i + 3 + a] - seg[i + a]) * t)
+  }
+  return Float32Array.from(out)
+}
+
+function segmentsGeometry(seg: Float32Array): BufferGeometry {
+  const g = new BufferGeometry()
+  g.setAttribute('position', new Float32BufferAttribute(seg, 3))
+  return g
+}
 
 export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom = false, edges = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip: regionClip, clipPlanes: givenPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, dim = 1, budget, still = false }: Props): JSX.Element | null {
   // Its own motion on the world clock (lib/anim.ts, scene/animMotion.ts): a
@@ -581,12 +627,16 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
   const cut = clipPlanes ? { clippingPlanes: clipPlanes } : {}
 
   // The placing ghost's edges in the world: where its faces turn, a thin crisp
-  // line to line it up by, never a glow (GHOST_EDGES). Made from the drawn
-  // triangles, so it is cut and posed exactly as they are.
-  const ghostEdges = useMemo(
-    () => (edges && plan.faces && index.length > 0 ? new EdgesGeometry(indexed, GHOST_EDGES.angle) : null),
-    [edges, plan.faces, index.length, indexed],
+  // line to line it up by, never a glow (GHOST_EDGES). Found once per model
+  // and pose (the costly part: about 90 ms for 10k triangles), not on every
+  // cursor step, then cut at its region box on each step, which is a pass
+  // over the segments (ghostEdgeSegments). None past GHOST_EDGES.maxTriangles.
+  const edgeSource = useMemo(
+    () => (edges && plan.faces && shard.faces.length > 0 && shard.faces.length <= GHOST_EDGES.maxTriangles ? ghostEdgeSegments(shard, pose) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [edges, plan.faces, shard.vertices, shard.faces, pose],
   )
+  const ghostEdges = useMemo(() => (edgeSource ? segmentsGeometry(clip ? clipSegments(edgeSource, clip) : edgeSource) : null), [edgeSource, clip])
   useEffect(() => () => { ghostEdges?.dispose() }, [ghostEdges])
   // The same two functions on every world face and every world line: one program each (scene/headlamp.ts).
   const lampFaces = headlamp ? HEADLAMP_FACES : {}
@@ -719,7 +769,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
               ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} {...litFaceProps(opacity, ghost)} userData-share={own} {...cut} />
               // `transparent forceSinglePass` repeat basicFaceProps so singlePass.test.ts's source scan sees this material.
               // lampFaces: opaque and see-through alike (the headlamp scales rgb only, so it composes with either blend).
-              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent forceSinglePass={!ghost} {...basicFaceProps(opacity, { ghost, world, noBloom })} {...lampFaces} userData-share={own} {...cut} />}
+              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent forceSinglePass={!ghost} {...basicFaceProps(opacity, { ghost, world, noBloom })} {...lampFaces} {...(edges ? GHOST_FACE_OFFSET : {})} userData-share={own} {...cut} />}
           </mesh>
           {lit && inside && (
             <mesh geometry={inside} frustumCulled={false} renderOrder={bench.inside} {...pick}>

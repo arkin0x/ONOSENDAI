@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { BAG_SAFE_BYTES, signedBytes } from '../bagSize'
-import { bagBytes, growthRefusal, heldBy, planFit, planUnderCap, referenceFor, sealFor, sealedLength, withReferences, type FitCandidate } from '../bagFit'
+import { addsEntries, bagBytes, growthRefusal, heldBy, planFit, planUnderCap, referenceFor, sealFor, sealedLength, withReferences, type FitCandidate } from '../bagFit'
 import { encryptForRegion } from '../shardCrypto'
 import { CHEST_KIND, DEFAULT_BAG_SETTINGS, KEY_KIND, MESSAGE_KIND, OBJECT_KIND, SHARD_KIND, bagContents, bagTemplate, rumorOf, type BagEntry } from '../hidden'
 
@@ -174,6 +174,25 @@ describe('a bag already past the cap is brought under it (owner\u2019s castle, 2
     const es = before.slice(1)
     expect(planUnderCap(es, [], measure, before, false).refusal).toBeNull()
     expect(planUnderCap([...before, message(10)], [], measure, before, false).refusal).toMatch(/Too large for one bag/)
+  })
+
+  it('a write that adds nothing, given entries to move out, brings the bag under the cap too', () => {
+    const before = old()
+    const es = before.slice(1)
+    const plan = planUnderCap(es, sealsOf(es), measure, before, false)
+    expect(plan.refusal).toBeNull()
+    expect(measure(withReferences(es, plan.convert)).bytes).toBeLessThanOrEqual(BAG_SAFE_BYTES)
+  })
+
+  it('what counts as adding: a hide or a HIDE AGAIN adds; an EDIT, a chest rename, a DELETE or sealing an entry does not', () => {
+    const keys = (e: BagEntry): string[] => (Array.isArray(e) ? [e[1]] : [(e as { id: string }).id])
+    const a = message(10)
+    const b = rumorOf({ kind: MESSAGE_KIND, created_at: 1_800_000_001, content: 'b', tags: [C, ['-']] }, me) as BagEntry
+    const b2 = rumorOf({ kind: MESSAGE_KIND, created_at: 1_800_000_002, content: 'b, renamed', tags: [C, ['-']] }, me) as BagEntry
+    expect(addsEntries([a, b], [a], keys)).toBe(true)
+    expect(addsEntries([a, b2], [a, b], keys)).toBe(false)
+    expect(addsEntries([a], [a, b], keys)).toBe(false)
+    expect(addsEntries([a, b], [a, b], keys)).toBe(false)
   })
 
   it('under the cap, nothing changes: the same plan as before', () => {

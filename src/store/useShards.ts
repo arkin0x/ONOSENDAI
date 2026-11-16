@@ -117,7 +117,7 @@ import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
 import { bagSizeRefusal, signedBytes } from '../lib/bagSize'
-import { bagBytes, heldBy, planUnderCap, referenceFor, sealFor, withReferences, type FitCandidate } from '../lib/bagFit'
+import { addsEntries, bagBytes, heldBy, planUnderCap, referenceFor, sealFor, withReferences, type FitCandidate } from '../lib/bagFit'
 import { ROOM_BAG_SETTINGS, inRoom, innermostRoomAt, newDoorSecret, roomDoorAt, roomEntries, roomKey, roomLookupId, roomOf, type OwnDoor } from '../lib/doors'
 import { commitDoorSecret, doorSecret, keepDoorSecret } from './doorSecrets'
 import { entriesIn, isListed, noteStored, onHiddenChange, reloadLocalView, saveRows, UNCLAIMED } from './hiddenStorage'
@@ -1419,16 +1419,20 @@ export function deployBagMeter(rows: readonly MyDeployment[], planned: NostrEven
   const seals = before.flatMap((e, i) => (isReference(e) ? [] : sealFor(e, o.owner, i.toString(16).padStart(32, '0'), sealHint(), standing) ?? []))
   const held = heldBy(seals)
   const measureHeld = (es: readonly BagEntry[]): number => bagBytes(es, lookupId, o.height, settings, o.place, undefined, held)
-  // A placement always adds an entry: past the cap it is refused even when sealing shrank the bag (lib/bagFit.ts planUnderCap).
+  // A placement adds an entry: past the cap it is refused even when sealing shrank the bag. An EDIT puts the shard in its old
+  // row's place and adds nothing, as signBag counts it (lib/bagFit.ts addsEntries, planUnderCap).
+  const adds = !o.edit
+  // The bag an EDIT rewrites still holds the old row: the growth rule compares with it in, as signBag does.
+  const replaced = o.edit ? [...before, entryOf(o.edit)] : before
   const measured = (es: readonly BagEntry[]) => ({ bytes: measureHeld(es), written: es })
   if (large) {
     const es = mergeEntries(before, [['a', `${OBJECT_KIND}:${o.owner}:${'0'.repeat(32)}`, hint, at]])
-    const fit = planUnderCap(es, seals, measured, before, true)
+    const fit = planUnderCap(es, seals, measured, replaced, adds)
     return { bytes: measureHeld(withReferences(es, fit.convert)), byReference: true, fitted: false, refusal: fit.refusal }
   }
   const es = mergeEntries(before, [planned])
   const candidate = referenceFor(planned, o.owner, '0'.repeat(32), hint)
-  const plan = planUnderCap(es, [...(candidate ? [candidate] : []), ...seals], measured, before, true)
+  const plan = planUnderCap(es, [...(candidate ? [candidate] : []), ...seals], measured, replaced, adds)
   const written = withReferences(es, plan.convert)
   const byReference = !!candidate && plan.convert.has(candidate.key)
   return { bytes: measureHeld(written), byReference, fitted: byReference, refusal: plan.refusal }
@@ -2114,15 +2118,9 @@ function heldKeys(entries: readonly BagEntry[]): Set<string> {
   return new Set(entries.flatMap(entryKeys))
 }
 
-/**
- * Whether a write of `written` puts in an entry `before` did not hold: a hide,
- * a move in, an EDIT, a HIDE AGAIN. By entryKeys, so an item inline in one and
- * sealed in the other is the same item. A DELETE, a REMOVE or a move out adds
- * nothing. Past the cap, a write that adds is refused (lib/bagFit.ts planUnderCap).
- */
+/** Whether a write of `written` puts more items into the bag than it takes out (lib/bagFit.ts addsEntries), by entryKeys. */
 function addsTo(written: readonly BagEntry[], before: readonly BagEntry[]): boolean {
-  const held = heldKeys(before)
-  return written.some((e) => !entryKeys(e).some((k) => held.has(k)))
+  return addsEntries(written, before, entryKeys)
 }
 
 /** Whether a set of entry keys (heldKeys) holds this row: by its entry, or, for an item carried inline or sealed, by the item's id. */

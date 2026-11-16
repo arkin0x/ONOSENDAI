@@ -163,6 +163,23 @@ export function planFit(entries: readonly BagEntry[], candidates: readonly FitCa
 }
 
 /**
+ * Whether a write puts more items into a bag than it takes out: a hide, a move
+ * in, a HIDE AGAIN. An EDIT, a chest rename, REMOVE FROM CHEST or CHANGE LOCK
+ * puts one signed item in the place of another (a new id for the same thing),
+ * so it adds nothing, as a DELETE, a REMOVE or a move out adds nothing.
+ * `keysOf` names every key an entry answers to (an item inline in one and
+ * sealed in the other is the same item). Past the cap, a write that adds is
+ * refused (planUnderCap).
+ */
+export function addsEntries(written: readonly BagEntry[], before: readonly BagEntry[], keysOf: (e: BagEntry) => string[]): boolean {
+  const had = new Set(before.flatMap(keysOf))
+  const has = new Set(written.flatMap(keysOf))
+  const added = written.filter((e) => !keysOf(e).some((k) => had.has(k))).length
+  const removed = before.filter((e) => !keysOf(e).some((k) => has.has(k))).length
+  return added > removed
+}
+
+/**
  * Which candidates go by reference so the bag fits, aiming under the cap
  * (lib/bagSize.ts) first. planFit with growthRefusal alone stopped at the
  * first plan that did not grow the bag, so a bag already past the cap (one
@@ -172,11 +189,13 @@ export function planFit(entries: readonly BagEntry[], candidates: readonly FitCa
  * (owner's castle, 2026-11-16). Now entries move out until the bag is under
  * the cap whenever that can be done.
  *
- * When it cannot: a write that `adds` an entry the bag did not hold (a hide, a
- * move in, an EDIT, a HIDE AGAIN) is refused, in the cap's words, even if it
- * shrank the bag, since what it adds would be in no copy the canonical relay
- * keeps. A write that adds nothing (a DELETE, a REMOVE, a move out) keeps the
- * growth rule: it still goes whenever it shrinks the bag.
+ * When it cannot: a write that `adds` (addsEntries: a hide, a move in, a HIDE
+ * AGAIN) is refused, in the cap's words, even if it shrank the bag, since what
+ * it adds would be in no copy the canonical relay keeps. A write that adds
+ * nothing (a DELETE, a REMOVE, a move out, an EDIT in place) keeps the growth
+ * rule: it still goes whenever it shrinks the bag. Either kind first tries to
+ * get under the cap, so a write to a bag already past it may move other
+ * entries out (more than one signature with a remote signer).
  *
  * `measure` gives the bag's signed size for a set of entries, and the entries
  * the growth rule compares with `before` (signBag compares what it writes).

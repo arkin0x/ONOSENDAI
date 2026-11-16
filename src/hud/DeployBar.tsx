@@ -245,10 +245,12 @@ export function LookRow({ choices, look, refusal }: { choices: readonly (keyof t
  * (store/useShards deployBagMeter, lib/bagFit.ts planUnderCap): HIDE &
  * PUBLISH is off and this line says why, in plain words (owner, 2026-11-16).
  * `others`: the bag already holds other things of yours, so another height
- * (another bag) is the way out.
+ * (another bag) is the way out. `room`: it is going into a door's room, whose
+ * height the door sets, so the way out is the room chip's ×.
  */
-export function bagTooBigLine(others: boolean): string {
-  return others ? 'This bag is too full for it. Hide it at another height.' : 'Too big for one bag. Hide part of it, or hide the rest at another height.'
+export function bagTooBigLine(others: boolean, room = false): string {
+  if (room) return 'This room is too full for it. Leave it out of the room with the \u00d7.'
+  return others ? 'This bag is too full for it. Hide it at another height.' : 'Too big for one bag. Hide part of it, and hide the rest at another height.'
 }
 
 /**
@@ -256,11 +258,11 @@ export function bagTooBigLine(others: boolean): string {
  * (lib/bagSize.ts): BY REFERENCE when the shard goes out as its own object,
  * and why; TOO LARGE, with the deploy's own words, when even that does not fit.
  */
-export function BagMeterRow({ meter, others = false }: { meter: BagMeter; others?: boolean }): JSX.Element {
+export function BagMeterRow({ meter, others = false, room = false }: { meter: BagMeter; others?: boolean; room?: boolean }): JSX.Element {
   const of = `${meter.bytes.toLocaleString('en-US')} of ${BAG_SAFE_BYTES.toLocaleString('en-US')} bytes`
   const form = meter.refusal ? 'TOO LARGE' : meter.fitted ? 'BY REFERENCE: THE BAG IS FULL' : meter.byReference ? 'BY REFERENCE' : 'INLINE'
   return (
-    <DeployRow kind="bagsize" label="BAG" hint={meter.refusal ? <span data-testid="bag-too-big">{bagTooBigLine(others)}</span> : meter.fitted ? 'Too large to carry inline here, so it goes out as its own sealed object and the bag names it.' : undefined} hintTitle={meter.refusal ?? undefined}>
+    <DeployRow kind="bagsize" label="BAG" hint={meter.refusal ? <span data-testid="bag-too-big">{bagTooBigLine(others, room)}</span> : meter.fitted ? 'Too large to carry inline here, so it goes out as its own sealed object and the bag names it.' : undefined} hintTitle={meter.refusal ?? undefined}>
       <span className="deploybar__value" data-testid="bag-meter">{of} · {form}</span>
     </DeployRow>
   )
@@ -535,7 +537,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
           <button
             className="deploybar__deploy"
             disabled={empty || working || here || !!lookRefusal || tooBig}
-            title={lookRefusal ?? (tooBig ? bagTooBigLine(bagRows.length > 0) : placing ? 'Place it here, then fill it' : here ? 'The last one stands here. Move, or change how it goes out, to place another' : localEst)}
+            title={lookRefusal ?? (tooBig ? bagTooBigLine(bagRows.length > 0, sealingId !== null) : placing ? 'Place it here, then fill it' : here ? 'The last one stands here. Move, or change how it goes out, to place another' : localEst)}
             onClick={() => { if (placing) useShards.getState().placeChest(); else void useShards.getState().deploy() }}
             {...noCallout}
           >
@@ -593,7 +595,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
       </DeployRow>
 
       {/* How full the bag is with this shard in it, in the form it goes out in. */}
-      {meter && <BagMeterRow meter={meter} others={bagRows.length > 0} />}
+      {meter && <BagMeterRow meter={meter} others={bagRows.length > 0} room={sealingId !== null} />}
 
       {/* What a chest wears (D2, D3): a built-in or OTHER, from MINE or FEED. */}
       {pending.type === 'chest' && look && <LookRow choices={door ? DOOR_LOOKS : CHEST_LOOKS} look={look} refusal={lookRefusal} />}

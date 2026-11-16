@@ -178,7 +178,7 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
     <>
       <group ref={group}>
         {/* As the world draws what lands: its own colours and shading, see-through, crisp edges, no bloom (shardFaces.ts GHOST_OPACITY). */}
-        <ShardMesh shard={shard} scale={scale} ghost world noBloom edges clip={clip} pose={pose} />
+        <ShardMesh shard={shard} scale={scale} ghost headlamp world noBloom edges clip={clip} pose={pose} />
       </group>
       {sealed}
       {pending.type === 'chest' && pending.name && <WorldLabel text={`▣ ${pending.name}`} color="#ffd27d" follow={landingAt} align="center" px={13} opacity={0.5} />}

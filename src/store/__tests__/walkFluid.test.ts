@@ -484,10 +484,11 @@ describe('the queue stays honest', () => {
     let stillest = 0
     let last = rel(start)
     // Turn 90 degrees every 0.7 s: a new segment at every turn, and no proof
-    // ever lands. Slowed down near the hold, a 0.7 s leg is about a gibson,
-    // and a staircase of single steps is one line, one segment (the walk is
-    // only slowed there, which is right): the legs then grow to 2.8 s, so
-    // each turn is a corner again.
+    // ever lands. At 19 ahead (a sixth of the speed) a 0.7 s leg is about a
+    // gibson, and a staircase of single steps is one line, one segment (the
+    // walk is only slowed there, which is right; it reached 20 only because
+    // the stillness timer closed a segment at every slow crossing): the legs
+    // then grow to 2.8 s, so each turn is a corner again.
     let leg = 0
     let facing = 0
     face(0)
@@ -551,7 +552,7 @@ describe('a slow device (frames longer than WALK_SETTLE_MS)', () => {
     }
   })
 
-  it('with proofs landing 2 s late, the walker never goes back, and the walk ends on the chain', async () => {
+  it('with proofs landing 2 s late: at most 3 events ahead (11 before the fix), the walker never goes back, and the walk ends on the chain', async () => {
     world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]])
     walk(true)
     face(86)

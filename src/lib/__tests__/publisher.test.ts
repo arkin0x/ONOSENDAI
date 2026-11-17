@@ -58,7 +58,8 @@ if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
   ;(globalThis as { window?: unknown }).window = { setTimeout: (f: () => void, ms: number) => setTimeout(f, ms) }
 }
 
-import { startPublisher } from '../publisher'
+import { publisherHeldForTestGame, startPublisher } from '../publisher'
+import { DRONE_RUN_DEV_PUBKEY } from '../games/droneRun/game'
 import { mayMove, movementBlocked, resetVersionGateForTests, useVersionGate } from '../versionGate'
 import { CHAIN_RULES_EPOCH, versionFileOf } from '../chainRulesEpoch'
 import { useCyberspace, type PublishStatus } from '../../store/useCyberspace'
@@ -145,6 +146,22 @@ describe('the publisher and the release gate', () => {
     for (const id of ['a1', 'b2', 'c3', 'd4']) {
       expect(useCyberspace.getState().published[ev(id).id]).toBe('ok')
     }
+  })
+
+  it('never sends an entry into a placeholder game (a DEV test world), nor anything after it', async () => {
+    const events = setChain(['a1', 'b2', 'c3'])
+    // b2 enters the DRONE RUN DEV world, as a LOCAL test run signs it.
+    events[1].tags = [['A', 'enter-virtual'], ['p', DRONE_RUN_DEV_PUBKEY, '', 'game']]
+    useCyberspace.setState({ events: [...events] })
+    useCyberspace.setState({ live: true })
+    await idle()
+    append('d4')
+    await until(() => sent.length >= 1)
+    await idle()
+    expect(sent).toEqual([ev('a1').id])
+    expect(publisherHeldForTestGame()).toBe(true)
+    useCyberspace.setState({ live: false })
+    await idle()
   })
 
   it('sends no backlog when the look did not count: no relay answered that holds the chain (review of #236, item 9; option B)', async () => {

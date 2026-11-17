@@ -7,3 +7,7 @@ dist-ssr/
 .vscode/*
 !.vscode/extensions.json
 scripts/smoke-seed/seed.json
+
+# DRONE RUN level packages: imported on a device, never in this repository
+drone-run-level.zip
+*.drone-run-level.zip

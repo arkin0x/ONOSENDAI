@@ -1,0 +1,993 @@
+{
+  "format": "drone-run/1",
+  "id": "drone-run-base",
+  "name": "DRONE RUN",
+  "spec": {
+    "settings": {
+      "mode": [
+        "walk"
+      ],
+      "gravity": "on",
+      "view": "first-person",
+      "facing": "-z",
+      "motion": "fluid"
+    },
+    "player": {
+      "hp": 3,
+      "invulnMs": 1200,
+      "height": 2,
+      "radius": 0.35,
+      "eye": 1.75,
+      "stamina": {
+        "max": 100,
+        "drainPerS": 35,
+        "refillPerS": 25,
+        "refillDelayS": 0.6,
+        "lockoutS": 1.2,
+        "speedMul": 1.6
+      }
+    },
+    "zones": {
+      "start": {
+        "lo": [
+          108,
+          62,
+          184
+        ],
+        "hi": [
+          148,
+          80,
+          204
+        ]
+      },
+      "finish": {
+        "lo": [
+          114,
+          66,
+          66
+        ],
+        "hi": [
+          142,
+          78,
+          84
+        ]
+      }
+    },
+    "win": {
+      "kind": "reach-zone",
+      "zone": "finish"
+    },
+    "lose": {
+      "kind": "hp-zero"
+    },
+    "start": {
+      "kind": "leave-zone",
+      "zone": "start"
+    },
+    "weapons": [
+      {
+        "id": "pulse-rifle",
+        "name": "PULSE RIFLE",
+        "fire": "hitscan",
+        "mode": "auto",
+        "rate": 4,
+        "damage": 1,
+        "range": 40,
+        "falloff": {
+          "start": 25,
+          "end": 40,
+          "minFactor": 0.5
+        },
+        "spread": 0.4,
+        "pellets": 1,
+        "pierce": 0,
+        "readyS": 0.3,
+        "assist": "auto",
+        "assistHit": 0.85,
+        "assistMissBy": 1,
+        "heat": {
+          "perShot": 13,
+          "coolPerS": 18,
+          "overheatAt": 100,
+          "lockS": 1.6
+        }
+      },
+      {
+        "id": "arc-scatter",
+        "name": "ARC SCATTER",
+        "fire": "hitscan",
+        "mode": "semi",
+        "rate": 1.4,
+        "damage": 0.5,
+        "range": 18,
+        "falloff": {
+          "start": 8,
+          "end": 18,
+          "minFactor": 0.3
+        },
+        "spread": 6,
+        "pellets": 8,
+        "pierce": 0,
+        "readyS": 0.3,
+        "ammo": {
+          "mag": 6,
+          "reloadS": 1.6
+        }
+      },
+      {
+        "id": "charge-rail",
+        "name": "CHARGE RAIL",
+        "fire": "hitscan",
+        "mode": "charge",
+        "rate": 1.5,
+        "damage": 1,
+        "range": 120,
+        "spread": 0,
+        "pellets": 1,
+        "pierce": 2,
+        "readyS": 0.4,
+        "charge": {
+          "minS": 0.25,
+          "maxS": 1.0,
+          "damageMax": 4,
+          "rangeMax": 120
+        },
+        "heat": {
+          "perShot": 50,
+          "coolPerS": 20,
+          "overheatAt": 100,
+          "lockS": 1.8
+        }
+      }
+    ],
+    "enemies": [
+      {
+        "id": "scout",
+        "name": "SCOUT",
+        "hp": 2,
+        "radius": 0.5,
+        "speed": 10,
+        "accel": 22,
+        "turnRate": 4,
+        "behaviour": "dive",
+        "detect": 55,
+        "loseAfterS": 4,
+        "attack": {
+          "kind": "contact",
+          "damage": 1,
+          "cooldownS": 1.5
+        },
+        "altitude": {
+          "min": 4,
+          "max": 14
+        },
+        "dive": {
+          "commitRange": 14,
+          "speedFactor": 1.35,
+          "maxS": 1.6,
+          "pullUpS": 0.9,
+          "hoverAbove": 5,
+          "track": 90
+        }
+      },
+      {
+        "id": "sniper",
+        "name": "SNIPER",
+        "hp": 2,
+        "radius": 0.8,
+        "speed": 6,
+        "accel": 10,
+        "turnRate": 2,
+        "behaviour": "standoff",
+        "detect": 55,
+        "loseAfterS": 4,
+        "preferRange": 35,
+        "attack": {
+          "kind": "shot",
+          "damage": 1,
+          "cooldownS": 2.5,
+          "shot": {
+            "speed": 16,
+            "radius": 0.35,
+            "range": 70,
+            "windupS": 0.8
+          },
+          "lead": 1,
+          "leadMaxS": 3
+        },
+        "altitude": {
+          "min": 10,
+          "max": 22
+        }
+      },
+      {
+        "id": "heavy",
+        "name": "HEAVY",
+        "hp": 7,
+        "radius": 1.3,
+        "speed": 3.5,
+        "accel": 4,
+        "turnRate": 1,
+        "behaviour": "tank",
+        "detect": 55,
+        "loseAfterS": 4,
+        "preferRange": 20,
+        "attack": {
+          "kind": "shot",
+          "damage": 1,
+          "cooldownS": 3,
+          "burst": 3,
+          "burstGapS": 0.3,
+          "shot": {
+            "speed": 12,
+            "radius": 0.5,
+            "range": 50,
+            "windupS": 0.6
+          },
+          "lead": 0.7,
+          "leadMaxS": 3
+        },
+        "altitude": {
+          "min": 5,
+          "max": 12
+        }
+      },
+      {
+        "id": "swarmer",
+        "name": "SWARMER",
+        "hp": 1,
+        "radius": 0.3,
+        "speed": 7,
+        "accel": 18,
+        "turnRate": 5,
+        "behaviour": "swarm",
+        "detect": 55,
+        "loseAfterS": 4,
+        "attack": {
+          "kind": "contact",
+          "damage": 1,
+          "cooldownS": 1
+        },
+        "altitude": {
+          "min": 2,
+          "max": 10
+        },
+        "swarm": {
+          "separation": 2,
+          "neighbour": 10,
+          "cohesion": 0.6
+        }
+      }
+    ],
+    "waves": [
+      {
+        "id": "wave-1",
+        "name": "FIRST CONTACT",
+        "seed": 1101,
+        "maxAlive": 8,
+        "spawns": [
+          {
+            "at": "s1",
+            "enemy": "scout",
+            "count": 4,
+            "delayS": 1,
+            "every": 1
+          },
+          {
+            "at": "s3",
+            "enemy": "sniper",
+            "count": 1,
+            "delayS": 4
+          },
+          {
+            "at": "s2",
+            "enemy": "scout",
+            "count": 3,
+            "delayS": 7,
+            "every": 1.2
+          },
+          {
+            "at": "s5",
+            "enemy": "scout",
+            "count": 4,
+            "delayS": 0,
+            "every": 0.6,
+            "trigger": {
+              "kind": "player-z-below",
+              "value": 140
+            }
+          }
+        ]
+      },
+      {
+        "id": "wave-2",
+        "name": "SWARM",
+        "seed": 2202,
+        "maxAlive": 12,
+        "spawns": [
+          {
+            "at": "s1",
+            "enemy": "scout",
+            "count": 3,
+            "delayS": 1,
+            "every": 1.2
+          },
+          {
+            "at": "s4",
+            "enemy": "sniper",
+            "count": 1,
+            "delayS": 3
+          },
+          {
+            "at": "s6",
+            "enemy": "swarmer",
+            "count": 8,
+            "delayS": 0,
+            "every": 0.3,
+            "trigger": {
+              "kind": "player-z-below",
+              "value": 160
+            }
+          },
+          {
+            "at": "s7",
+            "enemy": "heavy",
+            "count": 1,
+            "delayS": 2,
+            "trigger": {
+              "kind": "player-z-below",
+              "value": 150
+            }
+          },
+          {
+            "at": "s8",
+            "enemy": "swarmer",
+            "count": 6,
+            "delayS": 0,
+            "every": 0.3,
+            "trigger": {
+              "kind": "player-z-below",
+              "value": 110
+            }
+          }
+        ]
+      },
+      {
+        "id": "wave-3",
+        "name": "EVERYTHING",
+        "seed": 3303,
+        "maxAlive": 20,
+        "spawns": [
+          {
+            "at": "s1",
+            "enemy": "scout",
+            "count": 4,
+            "delayS": 1,
+            "every": 1
+          },
+          {
+            "at": "s2",
+            "enemy": "scout",
+            "count": 3,
+            "delayS": 5,
+            "every": 1.5
+          },
+          {
+            "at": "s3",
+            "enemy": "sniper",
+            "count": 1,
+            "delayS": 3
+          },
+          {
+            "at": "s4",
+            "enemy": "sniper",
+            "count": 1,
+            "delayS": 6
+          },
+          {
+            "at": "s6",
+            "enemy": "swarmer",
+            "count": 10,
+            "delayS": 0,
+            "every": 0.25,
+            "trigger": {
+              "kind": "player-z-below",
+              "value": 170
+            }
+          },
+          {
+            "at": "s7",
+            "enemy": "heavy",
+            "count": 1,
+            "delayS": 0,
+            "trigger": {
+              "kind": "player-z-below",
+              "value": 160
+            }
+          },
+          {
+            "at": "s9",
+            "enemy": "sniper",
+            "count": 1,
+            "delayS": 0,
+            "trigger": {
+              "kind": "player-z-below",
+              "value": 130
+            }
+          },
+          {
+            "at": "s10",
+            "enemy": "heavy",
+            "count": 1,
+            "delayS": 0,
+            "trigger": {
+              "kind": "player-z-below",
+              "value": 110
+            }
+          },
+          {
+            "at": "s11",
+            "enemy": "swarmer",
+            "count": 8,
+            "delayS": 0,
+            "every": 0.25,
+            "trigger": {
+              "kind": "player-z-below",
+              "value": 100
+            }
+          },
+          {
+            "at": "s12",
+            "enemy": "scout",
+            "count": 4,
+            "delayS": 0,
+            "every": 0.8,
+            "trigger": {
+              "kind": "time",
+              "value": 20
+            }
+          }
+        ]
+      }
+    ],
+    "afterLast": "repeat-last",
+    "scoring": {
+      "perKill": {
+        "scout": 100,
+        "sniper": 250,
+        "heavy": 500,
+        "swarmer": 50
+      },
+      "timeBonus": {
+        "parS": 40,
+        "perSecond": 20
+      }
+    }
+  },
+  "world": {
+    "level": "drone-run-field-1"
+  },
+  "client": {
+    "fog": {
+      "near": 20,
+      "far": 55
+    },
+    "models": {
+      "pulse-rifle": "pulse-rifle",
+      "arc-scatter": "arc-scatter",
+      "charge-rail": "charge-rail",
+      "scout": "scout",
+      "sniper": "sniper",
+      "heavy": "heavy",
+      "swarmer": "swarmer"
+    },
+    "viewmodel": {
+      "offset": [
+        0.35,
+        -0.3,
+        -0.6
+      ]
+    },
+    "cameraBob": 0.04,
+    "sounds": {
+      "voices": {
+        "phone": 6,
+        "desktop": 10,
+        "reach": 2,
+        "near": 11,
+        "rolloff": 0.35,
+        "farFloor": 0.3,
+        "mix": 0.22,
+        "cueNear": 4,
+        "cueFar": 18,
+        "doppler": {
+          "c": 60,
+          "min": 0.85,
+          "max": 1.18
+        },
+        "occluded": {
+          "cutoff": 0.16,
+          "floor": 400,
+          "gain": 0.55
+        },
+        "checks": 3
+      },
+      "scout": {
+        "base": 290,
+        "oscs": [
+          {
+            "wave": "sawtooth",
+            "ratio": 1,
+            "mix": 0.55
+          },
+          {
+            "wave": "triangle",
+            "ratio": 2,
+            "detune": 6,
+            "mix": 0.3
+          },
+          {
+            "wave": "sine",
+            "ratio": 3,
+            "mix": 0.15
+          }
+        ],
+        "noise": {
+          "band": 2600,
+          "q": 1.5,
+          "mix": 0.2
+        },
+        "lfo": {
+          "rate": 46,
+          "amp": 0.35,
+          "pitch": 0,
+          "wave": "sine"
+        },
+        "filter": 2400,
+        "q": 1,
+        "gain": 0.065,
+        "spread": {
+          "cents": 25,
+          "rate": 0.1
+        },
+        "attack": {
+          "pitch": 700,
+          "gain": 1.5,
+          "bright": 2.2
+        }
+      },
+      "sniper": {
+        "base": 72,
+        "oscs": [
+          {
+            "wave": "sine",
+            "ratio": 1,
+            "mix": 0.45
+          },
+          {
+            "wave": "triangle",
+            "ratio": 2,
+            "detune": 3,
+            "mix": 0.25
+          },
+          {
+            "wave": "sine",
+            "ratio": 5,
+            "mix": 0.3
+          }
+        ],
+        "noise": {
+          "band": 360,
+          "q": 4,
+          "mix": 0.12
+        },
+        "lfo": {
+          "rate": 0.45,
+          "amp": 0.08,
+          "pitch": 4,
+          "wave": "sine"
+        },
+        "filter": 1000,
+        "q": 0.7,
+        "gain": 0.07,
+        "spread": {
+          "cents": 8,
+          "rate": 0.1
+        },
+        "attack": {
+          "pitch": 0,
+          "gain": 1.5,
+          "bright": 3.4
+        },
+        "whine": {
+          "from": 380,
+          "to": 1900,
+          "gain": 0.5
+        }
+      },
+      "heavy": {
+        "base": 46,
+        "oscs": [
+          {
+            "wave": "sawtooth",
+            "ratio": 1,
+            "mix": 0.45
+          },
+          {
+            "wave": "sawtooth",
+            "ratio": 1,
+            "detune": 34,
+            "mix": 0.3
+          },
+          {
+            "wave": "triangle",
+            "ratio": 8,
+            "detune": -27,
+            "mix": 0.25
+          }
+        ],
+        "noise": {
+          "band": 330,
+          "q": 1.5,
+          "mix": 0.3
+        },
+        "lfo": {
+          "rate": 9,
+          "amp": 0.45,
+          "pitch": 0,
+          "wave": "sine"
+        },
+        "filter": 900,
+        "q": 1.0,
+        "gain": 0.11,
+        "spread": {
+          "cents": 6,
+          "rate": 0.08
+        },
+        "attack": {
+          "pitch": 200,
+          "gain": 1.6,
+          "bright": 2.4
+        },
+        "whine": {
+          "from": 110,
+          "to": 330,
+          "gain": 0.35
+        }
+      },
+      "swarmer": {
+        "base": 540,
+        "oscs": [
+          {
+            "wave": "triangle",
+            "ratio": 1,
+            "mix": 0.4
+          },
+          {
+            "wave": "triangle",
+            "ratio": 1,
+            "detune": 18,
+            "mix": 0.35
+          },
+          {
+            "wave": "sawtooth",
+            "ratio": 1.5,
+            "detune": -10,
+            "mix": 0.25
+          }
+        ],
+        "noise": {
+          "band": 4200,
+          "q": 2,
+          "mix": 0.1
+        },
+        "lfo": {
+          "rate": 27,
+          "amp": 0.7,
+          "pitch": 30,
+          "wave": "sawtooth"
+        },
+        "filter": 3800,
+        "q": 0.8,
+        "gain": 0.032,
+        "spread": {
+          "cents": 60,
+          "rate": 0.3
+        },
+        "attack": {
+          "pitch": 150,
+          "gain": 1.6,
+          "bright": 1.8
+        }
+      },
+      "ui": {
+        "fire": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "sine",
+              "from": 520,
+              "to": 300,
+              "dur": 0.025,
+              "gain": 0.016
+            },
+            {
+              "kind": "noise",
+              "filter": "bandpass",
+              "from": 1800,
+              "to": 1800,
+              "q": 2,
+              "dur": 0.012,
+              "gain": 0.007
+            }
+          ],
+          "gap": 0.05
+        },
+        "jump": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "triangle",
+              "from": 600,
+              "to": 1100,
+              "dur": 0.045,
+              "gain": 0.014
+            }
+          ],
+          "gap": 0.05
+        },
+        "sprintOn": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "triangle",
+              "from": 700,
+              "dur": 0.03,
+              "gain": 0.011
+            },
+            {
+              "kind": "tone",
+              "wave": "triangle",
+              "from": 950,
+              "at": 0.035,
+              "dur": 0.03,
+              "gain": 0.011
+            }
+          ],
+          "gap": 0.06
+        },
+        "sprintOff": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "triangle",
+              "from": 950,
+              "dur": 0.03,
+              "gain": 0.01
+            },
+            {
+              "kind": "tone",
+              "wave": "triangle",
+              "from": 700,
+              "at": 0.035,
+              "dur": 0.03,
+              "gain": 0.01
+            }
+          ],
+          "gap": 0.06
+        },
+        "lockout": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "sawtooth",
+              "from": 260,
+              "to": 150,
+              "filter": "lowpass",
+              "cutoff": 900,
+              "q": 0.7,
+              "dur": 0.09,
+              "gain": 0.016
+            }
+          ],
+          "gap": 0.3
+        },
+        "switch": {
+          "layers": [
+            {
+              "kind": "noise",
+              "filter": "highpass",
+              "from": 3200,
+              "to": 2600,
+              "q": 0.8,
+              "dur": 0.009,
+              "gain": 0.018
+            },
+            {
+              "kind": "noise",
+              "filter": "highpass",
+              "from": 2400,
+              "to": 2000,
+              "q": 0.8,
+              "at": 0.03,
+              "dur": 0.01,
+              "gain": 0.016
+            }
+          ],
+          "gap": 0.05
+        },
+        "reload": {
+          "layers": [
+            {
+              "kind": "noise",
+              "filter": "bandpass",
+              "from": 900,
+              "to": 1600,
+              "q": 3,
+              "dur": 0.03,
+              "gain": 0.014
+            },
+            {
+              "kind": "tone",
+              "wave": "sine",
+              "from": 820,
+              "at": 0.04,
+              "dur": 0.022,
+              "gain": 0.01
+            }
+          ],
+          "gap": 0.1
+        },
+        "restart": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "sine",
+              "from": 520,
+              "to": 780,
+              "dur": 0.06,
+              "gain": 0.016
+            }
+          ],
+          "gap": 0.1
+        },
+        "nextWave": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "sine",
+              "from": 780,
+              "to": 1170,
+              "dur": 0.06,
+              "gain": 0.016
+            }
+          ],
+          "gap": 0.1
+        },
+        "exit": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "sine",
+              "from": 660,
+              "to": 440,
+              "dur": 0.07,
+              "gain": 0.016
+            }
+          ],
+          "gap": 0.1
+        },
+        "sound": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "sine",
+              "from": 880,
+              "dur": 0.04,
+              "gain": 0.013
+            },
+            {
+              "kind": "tone",
+              "wave": "sine",
+              "from": 1320,
+              "at": 0.05,
+              "dur": 0.04,
+              "gain": 0.013
+            }
+          ],
+          "gap": 0.1
+        }
+      },
+      "hit": {
+        "layers": [
+          {
+            "kind": "noise",
+            "filter": "highpass",
+            "from": 6000,
+            "to": 4500,
+            "q": 0.9,
+            "dur": 0.012,
+            "gain": 0.035
+          },
+          {
+            "kind": "tone",
+            "wave": "sine",
+            "from": 3150,
+            "attack": 0.001,
+            "dur": 0.05,
+            "gain": 0.012
+          },
+          {
+            "kind": "tone",
+            "wave": "sine",
+            "from": 8690,
+            "attack": 0.001,
+            "dur": 0.03,
+            "gain": 0.005
+          }
+        ],
+        "gap": 0.06,
+        "gunPitch": [
+          1,
+          0.85,
+          1.2
+        ]
+      },
+      "kill": {
+        "layers": [
+          {
+            "kind": "tone",
+            "wave": "sine",
+            "from": 180,
+            "to": 60,
+            "dur": 0.09,
+            "gain": 0.07
+          },
+          {
+            "kind": "noise",
+            "filter": "lowpass",
+            "from": 2500,
+            "to": 400,
+            "q": 0.7,
+            "dur": 0.07,
+            "gain": 0.045
+          },
+          {
+            "kind": "tone",
+            "wave": "sine",
+            "from": 2100,
+            "at": 0.01,
+            "attack": 0.001,
+            "dur": 0.12,
+            "gain": 0.02
+          },
+          {
+            "kind": "tone",
+            "wave": "sine",
+            "from": 5800,
+            "at": 0.01,
+            "attack": 0.001,
+            "dur": 0.07,
+            "gain": 0.008
+          }
+        ],
+        "gap": 0.08
+      },
+      "miss": {
+        "layers": [
+          {
+            "kind": "noise",
+            "filter": "bandpass",
+            "from": 900,
+            "to": 2400,
+            "q": 1.2,
+            "attack": 0.015,
+            "dur": 0.07,
+            "gain": 0.005
+          }
+        ],
+        "gap": 0.1
+      }
+    }
+  }
+}

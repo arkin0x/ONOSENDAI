@@ -31,7 +31,8 @@ const reg = vi.hoisted(() => ({ live: false }))
 vi.mock('../../lib/games/registry', async (orig) => {
   const real = await orig<typeof import('../../lib/games/registry')>()
   const { tutorialGameFor, TUTORIAL_PUBKEY } = await import('../../lib/games/tutorialGame')
-  return { ...real, implementedGames: () => (reg.live ? [tutorialGameFor(TUTORIAL_PUBKEY)] : real.implementedGames()) }
+  // DRONE RUN, also on by the switch, is left out: this file is about the dungeon (droneRun/__tests__/localMode.test.ts lists it).
+  return { ...real, implementedGames: () => (reg.live ? [tutorialGameFor(TUTORIAL_PUBKEY)] : real.implementedGames().filter((g) => !g.play)) }
 })
 
 vi.mock('../../lib/chains', async (importOriginal) => ({
@@ -104,6 +105,8 @@ beforeEach(async () => {
     cursor: fresh.position, pendingTarget: null, chainConflict: null, plan: null,
     exploreIndex: null, spectate: null, focus: null, transit: null, walking: false,
     proof: { ...S().proof, status: 'idle', message: null },
+    // LOCAL: the DEV dungeon's world is a fixture, which is entered only in LOCAL (useGame localOnlyRefusal).
+    live: false,
   })
 })
 

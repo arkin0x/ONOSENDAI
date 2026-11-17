@@ -37,9 +37,10 @@ import { noteChainHolders } from './chainHolders'
 import { chainLanded, onReleased } from './chainStore'
 import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend } from './release'
-import { newestEventOnRelays, noteStaleFormatStuck, retireStaleFormat, useCyberspace } from '../store/useCyberspace'
+import { newestEventOnRelays, noteStaleFormatStuck, retirePlaceholderRun, retireStaleFormat, useCyberspace } from '../store/useCyberspace'
 import { staleHopFormat } from './staleFormat'
 import { movementBlocked, useVersionGate } from './versionGate'
+import { entersPlaceholderGame } from './games/flag'
 
 /** First retry after a refusal or a dead socket; doubles up to the cap. */
 const RETRY_MS = 4000
@@ -55,6 +56,13 @@ let backoff = RETRY_MS
 let backlogChecked = false
 /** The last send failed, so the next one starts a fresh look at the relays. */
 let lastFailed = false
+/** The drain reached an entry into a placeholder game and stopped there (pump). */
+let heldForTestGame = false
+
+/** Whether the drain stopped at an entry into a placeholder game: that chain stays on this device. */
+export function publisherHeldForTestGame(): boolean {
+  return heldForTestGame
+}
 
 /**
  * Look at the relays once before sending a backlog: more than one event
@@ -125,6 +133,14 @@ async function pump(): Promise<void> {
   // is never sent, the player is told once, and this chain's queue waits
   // (nothing else does; other publishing goes out by its own paths).
   if (staleHopFormat(next)) { if (retireStaleFormat() === null) noteStaleFormatStuck(next); return }
+  // Never an entry into a placeholder game (a DEV test world, lib/games/flag.ts): it was
+  // signed in LOCAL for a test run and names a throwaway key that must never reach a relay.
+  // A finished run at the head is cut off the chain (retirePlaceholderRun, which useGame
+  // also does on EXIT), and the store update that makes asks for the next drain. Otherwise
+  // (a run still open, or moves signed after it) the drain waits here, and nothing from
+  // the entry on is sent.
+  heldForTestGame = false
+  if (entersPlaceholderGame(next)) { if (!retirePlaceholderRun()) heldForTestGame = true; return }
 
   // An action goes out only once it has landed on this device, because that
   // is where two tabs that signed from one head find out which of them won.

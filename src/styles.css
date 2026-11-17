@@ -11966,6 +11966,14 @@ html.tv-broadcast body { overflow: hidden; }
 /* GAMES (hud/GamesPanel.tsx): a game's name, its ENTER; under it, when the game says where it is entered from, those words. */
 .games__row { grid-template-columns: 1fr auto; }
 .games__where { grid-column: 1 / -1; font-size: 8px; letter-spacing: 0.08em; color: var(--dim); }
+/* DRONE RUN's field and IMPORT LEVEL under its row (hud/DroneRunFields.tsx): two halves, then one line kept for a note
+   and REMOVE, so nothing moves when either shows. */
+.games__field { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; }
+.games__field-row { margin: 0; }
+.games__field-pick { flex: 1 1 0; min-width: 0; height: 30px; text-overflow: ellipsis; }
+.games__field-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; }
+.games__field-note { min-width: 0; color: #fff; text-shadow: 0 1px 2px #000; font-size: 10px; line-height: 1.3; }
+.games__field-remove { flex: none; }
 
 /* The Straylight route's identity panel (hud/StraylightIdentity.tsx): the warning in the warn colour, the key in the backup's box. */
 .straylight-id { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
@@ -12197,3 +12205,509 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .keyinfo__about { margin: 0 0 12px; font-size: 12px; line-height: 1.5; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
 .keyinfo__chips { margin-bottom: 12px; }
 .keyinfo__nothread { margin: 0 0 4px; color: var(--fg); }
+
+/* ---------- DRONE RUN: HUD, controls (game/droneRun/hud/) ----------
+ * White words with a dark shadow over the scene, every slot fixed so nothing
+ * moves between phases. The view layer (.drun-layer) takes the presses meant
+ * for the game (pointer lock, the phone's sticks and look); the game bar stays
+ * above it all. Phone controls: a floating stick per thumb (MOVE left, LOOK
+ * right; each ring drawn where its thumb lands, moved by the HUD), FIRE and
+ * JUMP above LOOK, SPRINT above MOVE at the left edge (FIRE's mirror) with the
+ * gun above it (the gun beside MOVE on a screen 440px tall or less); the radar
+ * top left under the pips (past SPRINT's column on a screen 440px tall or less). Sizes come from the variables on .drun-hud (the aim assist
+ * box is the mean of FIRE and the stick). Classes start drun-. */
+.gameview--drun > .gameview__bar,
+.gameview--drun > .gameview__note { z-index: 5; }
+.drun-hud {
+  --drun-top: calc(max(12px, env(safe-area-inset-top)) + 46px);
+  --drun-bottom: max(20px, env(safe-area-inset-bottom));
+  /* Dark under every word, tight and then soft, so white text reads on pale ground and on light. */
+  --drun-shadow: 0 1px 1px #000, 0 0 2px #000, 0 0 5px rgba(0, 0, 0, 0.9), 0 0 10px rgba(0, 0, 0, 0.6);
+  --drun-red: #ff3b6b;
+  /* The phone controls' sizes (hud/model.ts STICK_PX, FIRE_PX, JUMP_PX mirror them) and the radar's. */
+  --drun-stick: 120px;
+  --drun-fire: 88px;
+  --drun-jump: 64px;
+  --drun-assist: calc((var(--drun-stick) + var(--drun-fire)) / 2);
+  --drun-radar: 96px;
+  /* The row FIRE, JUMP and SPRINT sit on: just above the sticks; the gun button's, above SPRINT. */
+  --drun-above-stick: calc(var(--drun-bottom) + 4px + var(--drun-stick) + 14px);
+  --drun-above-sprint: calc(var(--drun-above-stick) + var(--drun-jump) + 10px);
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  color: #fff;
+  font-family: var(--mono);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.drun-layer { position: absolute; inset: 0; touch-action: none; cursor: crosshair; }
+.drun-hudview { position: absolute; inset: 0; pointer-events: none; text-shadow: var(--drun-shadow); }
+
+/* The top row: HP pips left; wave, drones left, clock and sound right. */
+.drun-top {
+  position: absolute;
+  top: var(--drun-top);
+  left: 16px;
+  right: 16px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+.drun-pips { display: inline-flex; gap: 4px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9)); }
+.drun-pip.is-full { color: var(--drun-red); }
+.drun-pip.is-lost { color: rgba(255, 255, 255, 0.55); animation: drun-pip-lost 360ms ease-out; }
+.drun-pips.is-blinking .drun-pip.is-full { animation: drun-blink 240ms steps(2, jump-none) infinite; }
+@keyframes drun-pip-lost { from { transform: scale(1.7); color: var(--drun-red); } to { transform: scale(1); } }
+@keyframes drun-blink { from { opacity: 1; } to { opacity: 0.3; } }
+.drun-top__right { display: inline-flex; align-items: center; gap: 12px; }
+.drun-left { display: inline-flex; align-items: center; gap: 4px; min-width: 3.2em; }
+.drun-left svg { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9)); }
+.drun-clock { min-width: 6ch; text-align: right; }
+.drun-sound {
+  position: relative;
+  pointer-events: auto;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 6px;
+  background: rgba(6, 14, 22, 0.6);
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+}
+.drun-sound__key { position: absolute; right: -5px; bottom: -6px; font-size: 8px; padding: 0 2px; border-radius: 2px; background: rgba(6, 14, 22, 0.9); border: 1px solid rgba(255, 255, 255, 0.5); line-height: 10px; text-shadow: none; }
+
+/* The safe zone's line, its slot kept in every phase. */
+.drun-prompt {
+  position: absolute;
+  top: calc(var(--drun-top) + 52px);
+  left: 16px;
+  right: 16px;
+  height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+.drun-prompt__title { height: 14px; font-size: 11px; letter-spacing: 0.16em; white-space: pre; }
+.drun-prompt__line { height: 18px; font-size: 14px; }
+
+/* A narrow screen: the safe zone's line goes under the radar. */
+@media (max-width: 640px) {
+  .drun-prompt { top: calc(var(--drun-top) + 38px + var(--drun-radar) + 10px); }
+}
+
+/* The radar, top left under the pips: a canvas drawn each frame (hud/Radar.tsx). */
+.drun-radar {
+  position: absolute;
+  top: calc(var(--drun-top) + 38px);
+  left: 16px;
+  width: var(--drun-radar);
+  height: var(--drun-radar);
+  border-radius: 50%;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.7));
+}
+@media (min-width: 900px) and (min-height: 600px) {
+  .drun-hud { --drun-radar: 120px; }
+}
+
+/* The aim assist box (phone, PULSE RIFLE): orange rounded corner brackets round the reticle, a very faint fill. */
+.drun-assist {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--drun-assist);
+  height: var(--drun-assist);
+  transform: translate(-50%, -50%);
+  border-radius: 10px;
+  background: rgba(255, 150, 40, 0.025);
+  --drun-assist-line: rgba(255, 150, 40, 0.6);
+}
+.drun-assist.is-off { visibility: hidden; }
+.drun-assist.is-locked { background: rgba(255, 150, 40, 0.05); --drun-assist-line: rgba(255, 170, 70, 0.9); }
+.drun-assist__c {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 0 solid var(--drun-assist-line);
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7));
+}
+.drun-assist__c--tl { left: 0; top: 0; border-top-width: 2px; border-left-width: 2px; border-top-left-radius: 10px; }
+.drun-assist__c--tr { right: 0; top: 0; border-top-width: 2px; border-right-width: 2px; border-top-right-radius: 10px; }
+.drun-assist__c--bl { left: 0; bottom: 0; border-bottom-width: 2px; border-left-width: 2px; border-bottom-left-radius: 10px; }
+.drun-assist__c--br { right: 0; bottom: 0; border-bottom-width: 2px; border-right-width: 2px; border-bottom-right-radius: 10px; }
+
+/* The crosshair and the hit marker. */
+.drun-cross {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  filter: drop-shadow(0 0 1px #000) drop-shadow(0 0 2px rgba(0, 0, 0, 0.85));
+}
+.drun-cross__h, .drun-cross__v, .drun-cross__dot { position: absolute; display: block; }
+.drun-cross__h { left: 0; right: 0; top: 12px; height: 2px; background: linear-gradient(to right, #fff 0 9px, transparent 9px 17px, #fff 17px); }
+.drun-cross__v { top: 0; bottom: 0; left: 12px; width: 2px; background: linear-gradient(to bottom, #fff 0 9px, transparent 9px 17px, #fff 17px); }
+.drun-cross__dot { left: 12px; top: 12px; width: 2px; height: 2px; background: #fff; }
+.drun-hitmark {
+  position: absolute;
+  inset: -6px;
+  background:
+    linear-gradient(45deg, transparent calc(50% - 1px), #fff calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)),
+    linear-gradient(-45deg, transparent calc(50% - 1px), #fff calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px));
+  -webkit-mask: radial-gradient(circle, transparent 9px, #000 9.5px);
+  mask: radial-gradient(circle, transparent 9px, #000 9.5px);
+  animation: drun-hit 180ms ease-out forwards;
+}
+@keyframes drun-hit { from { opacity: 1; transform: scale(0.85); } to { opacity: 0; transform: scale(1.25); } }
+/* The kill shot: the same X, larger, gold and held a little longer. Absolutely placed: nothing moves. */
+.drun-hitmark.is-kill {
+  inset: -10px;
+  background:
+    linear-gradient(45deg, transparent calc(50% - 1.5px), #ffc23d calc(50% - 1.5px) calc(50% + 1.5px), transparent calc(50% + 1.5px)),
+    linear-gradient(-45deg, transparent calc(50% - 1.5px), #ffc23d calc(50% - 1.5px) calc(50% + 1.5px), transparent calc(50% + 1.5px));
+  -webkit-mask: radial-gradient(circle, transparent 11px, #000 11.5px);
+  mask: radial-gradient(circle, transparent 11px, #000 11.5px);
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.8));
+  animation: drun-kill 300ms ease-out forwards;
+}
+@keyframes drun-kill { 0% { opacity: 1; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.1); } 100% { opacity: 0; transform: scale(1.3); } }
+
+/* A hit taken: the screen's edges flash red. */
+.drun-flash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 38%, rgba(255, 30, 60, 0.55) 80%, rgba(255, 30, 60, 0.8) 100%);
+  box-shadow: inset 0 0 0 4px rgba(255, 40, 70, 0.85);
+  animation: drun-flash 450ms ease-out forwards;
+}
+@keyframes drun-flash { from { opacity: 1; } to { opacity: 0; } }
+
+/* The gun (desktop): slots 1 2 3, its name, its gauge; the key hints under it. */
+.drun-bottom {
+  position: absolute;
+  left: 50%;
+  bottom: var(--drun-bottom);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.drun-gun {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(6, 14, 22, 0.55);
+}
+.drun-slots { display: inline-flex; gap: 4px; }
+.drun-slot {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  opacity: 0.6;
+}
+.drun-slot.is-on { opacity: 1; border-color: var(--game); background: rgba(255, 122, 217, 0.18); }
+.drun-slot__key { position: absolute; right: 2px; bottom: 0; font-size: 8px; line-height: 10px; }
+.drun-gun__name { width: 13ch; font-size: 12px; letter-spacing: 0.08em; white-space: nowrap; }
+.drun-gauge {
+  display: grid;
+  grid-template-columns: 110px 9ch;
+  grid-template-rows: 14px 4px;
+  grid-template-areas: "main status" "sub sub";
+  column-gap: 8px;
+  align-items: center;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.drun-gauge__main { grid-area: main; display: flex; align-items: center; }
+.drun-gauge__sub { grid-area: sub; display: flex; align-items: center; width: 110px; }
+.drun-gauge__status { grid-area: status; white-space: nowrap; }
+.drun-gauge.is-hot .drun-gauge__status { color: var(--drun-red); }
+.drun-gauge__count { font-size: 14px; font-variant-numeric: tabular-nums; }
+.drun-bar {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+.drun-bar--thin { height: 3px; border-width: 0; background: rgba(255, 255, 255, 0.15); }
+.drun-bar__fill { position: absolute; left: 0; top: 0; bottom: 0; background: #fff; }
+.drun-gauge--charge .drun-gauge__main .drun-bar__fill { background: #00e5ff; }
+.drun-gauge.is-hot .drun-bar__fill { background: var(--drun-red); }
+.drun-hints {
+  box-sizing: border-box;
+  height: 22px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  /* A subtle dark pill behind the key hints: they sit low, over the brightest ground. */
+  border-radius: 11px;
+  background: rgba(6, 14, 22, 0.55);
+}
+/* The stamina (desktop, a variant with stamina): its own slot at the bottom left, a label over a bar; the bar dims in the
+ * lockout. Fixed in place, so nothing moves when it drains or locks. */
+.drun-stamina {
+  position: absolute;
+  left: 16px;
+  bottom: var(--drun-bottom);
+  width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.drun-stamina .drun-bar { height: 6px; }
+.drun-stamina.is-sprinting .drun-bar { border-color: #fff; }
+.drun-stamina.is-locked .drun-bar { border-color: rgba(255, 255, 255, 0.35); }
+.drun-stamina.is-locked .drun-bar__fill { background: rgba(255, 255, 255, 0.4); }
+.drun-hints kbd, .drun-card kbd {
+  margin-right: 5px;
+  padding: 0 4px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 3px;
+  font: inherit;
+  font-size: 10px;
+  background: rgba(6, 14, 22, 0.75);
+}
+
+/* The cards: RUN FAILED and WAVE n CLEAR, in the game's card style (GameView's CLEAR). */
+.drun-card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(300px, calc(100% - 32px));
+  box-sizing: border-box;
+  padding: 20px 20px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--game);
+  background: rgba(6, 14, 22, 0.94);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  pointer-events: auto;
+  text-shadow: none;
+}
+.drun-card__title { color: var(--game); letter-spacing: 0.14em; font-size: 13px; }
+.drun-card__title.is-failed { color: var(--drun-red); }
+.drun-card__time { font-size: 34px; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+.drun-card__stat { font-size: 12px; letter-spacing: 0.08em; }
+.drun-card__stat b { font-weight: 400; margin-left: 6px; font-variant-numeric: tabular-nums; }
+.drun-card__row { display: flex; gap: 8px; width: 100%; margin-top: 4px; }
+.drun-card__go, .drun-card__exit {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--game);
+  background: rgba(6, 14, 22, 0.9);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.drun-card__go { background: rgba(255, 122, 217, 0.2); }
+.drun-card__go kbd { margin: 0 0 0 2px; }
+.drun-card__exit:disabled { opacity: 0.5; cursor: default; }
+
+/* The phone's controls: MOVE bottom left with SPRINT and the gun above it; LOOK bottom right with FIRE and JUMP above it. */
+.drun-touch { position: absolute; inset: 0; pointer-events: none; }
+.drun-hud.is-card .drun-touch { visibility: hidden; }
+.drun-stick {
+  position: absolute;
+  bottom: calc(var(--drun-bottom) + 4px);
+  width: var(--drun-stick);
+  height: var(--drun-stick);
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 122, 217, 0.55);
+  background: rgba(6, 14, 22, 0.35);
+}
+.drun-stick--move { left: 20px; }
+.drun-stick--look { right: 20px; }
+/* The rail charging: LOOK rests out of sight (its place kept), MOVE aims in the rail's blue with a crosshair in its knob. */
+.drun-stick.is-hidden { visibility: hidden; }
+.drun-stick.is-aim { border-color: rgba(0, 229, 255, 0.85); background: rgba(0, 40, 52, 0.4); }
+.drun-stick.is-aim .drun-stick__knob { border-color: rgba(0, 229, 255, 1); background: rgba(0, 229, 255, 0.28); }
+.drun-stick__aim { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #fff; filter: drop-shadow(0 0 2px #000); }
+.drun-stick__label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 9%;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: #fff;
+  text-shadow: var(--drun-shadow);
+}
+.drun-stick__knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--drun-stick) * 0.43);
+  height: calc(var(--drun-stick) * 0.43);
+  box-sizing: border-box;
+  transform: translate(0, 0);
+  margin: calc(var(--drun-stick) * -0.215) 0 0 calc(var(--drun-stick) * -0.215);
+  border-radius: 50%;
+  border: 1px solid rgba(255, 122, 217, 0.95);
+  background: rgba(255, 122, 217, 0.3);
+}
+.drun-btn {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 122, 217, 0.6);
+  background: rgba(6, 14, 22, 0.7);
+  color: #fff;
+  font: inherit;
+  text-shadow: var(--drun-shadow);
+}
+.drun-btn:active { background: rgba(255, 122, 217, 0.3); }
+/* FIRE and JUMP: round, the same look; FIRE bigger, over the LOOK stick, JUMP to its left. */
+.drun-btn--fire, .drun-btn--jump {
+  bottom: var(--drun-above-stick);
+  border-radius: 50%;
+  border-color: rgba(255, 90, 130, 0.95);
+  background: rgba(255, 59, 107, 0.28);
+  font-weight: 700;
+  padding: 0;
+}
+.drun-btn--fire:active, .drun-btn--jump:active { background: rgba(255, 59, 107, 0.55); }
+.drun-btn--fire {
+  right: 16px;
+  width: var(--drun-fire);
+  height: var(--drun-fire);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+}
+.drun-btn--jump {
+  right: calc(16px + var(--drun-fire) + 10px);
+  width: var(--drun-jump);
+  height: var(--drun-jump);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+/* SPRINT: JUMP's size and look, above the MOVE stick at the left edge, FIRE's mirror (owner, 2026-11-17). A ring
+ * inside its border is the stamina: it drains clockwise while sprinting and dims while emptied (the lockout). Tapped on
+ * (latched), it is lit and glows; in the lockout only its ring and its background dim, never the white word. */
+.drun-btn--sprint {
+  left: 16px;
+  bottom: var(--drun-above-stick);
+  width: var(--drun-jump);
+  height: var(--drun-jump);
+  border-radius: 50%;
+  border-color: rgba(255, 90, 130, 0.95);
+  background: rgba(255, 59, 107, 0.28);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 0;
+}
+.drun-btn--sprint:active, .drun-btn--sprint.is-held { background: rgba(255, 59, 107, 0.55); }
+.drun-btn--sprint.is-latched { background: rgba(255, 59, 107, 0.8); border-color: #fff; box-shadow: 0 0 12px rgba(255, 90, 130, 0.95); }
+.drun-btn__word { position: relative; }
+.drun-meter { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); pointer-events: none; }
+.drun-meter circle { fill: none; stroke-width: 7; }
+.drun-meter__track { stroke: rgba(255, 255, 255, 0.18); }
+.drun-meter__fill { stroke: #fff; stroke-linecap: butt; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9)); }
+.drun-btn--sprint.is-locked { background: rgba(255, 59, 107, 0.12); border-color: rgba(255, 90, 130, 0.4); box-shadow: none; }
+.drun-btn--sprint[hidden] { display: block; visibility: hidden; }
+.drun-btn--sprint.is-locked .drun-meter__track { stroke: rgba(255, 255, 255, 0.08); }
+.drun-btn--sprint.is-locked .drun-meter__fill { stroke: rgba(255, 255, 255, 0.45); }
+/* The gun: over SPRINT; RELOAD above it. */
+.drun-btn--gun {
+  left: 16px;
+  bottom: var(--drun-above-sprint);
+  width: 150px;
+  height: 56px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 5px;
+}
+.drun-gunbtn__head { display: flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: 0.08em; }
+.drun-btn--gun .drun-gauge { grid-template-columns: 1fr 9ch; column-gap: 6px; font-size: 9px; }
+.drun-btn--gun .drun-gauge__sub { width: auto; }
+.drun-btn--gun .drun-gauge__count { font-size: 12px; }
+.drun-btn--reload {
+  left: 16px;
+  bottom: calc(var(--drun-above-sprint) + 64px);
+  width: 110px;
+  height: 36px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+.drun-btn--reload[hidden] { display: inline-flex; visibility: hidden; }
+/* A short landscape phone: the controls and the radar come down a size, RELOAD goes beside the gun. */
+@media (max-height: 520px) {
+  .drun-hud { --drun-stick: 100px; --drun-fire: 72px; --drun-jump: 56px; --drun-radar: 72px; }
+  .drun-btn--reload { left: calc(16px + 150px + 8px); bottom: calc(var(--drun-above-sprint) + 10px); }
+  .drun-prompt { top: calc(var(--drun-top) + 36px); }
+}
+/* A very short landscape phone (812x375, 800x360, 640x320, and up to 440 tall): the radar comes down to 56px, still
+ * under the hearts, and the gun goes beside the MOVE stick, RELOAD above it. */
+@media (max-height: 440px) {
+  .drun-hud { --drun-radar: 56px; --drun-beside-move: calc(20px + var(--drun-stick) + 10px); }
+  .drun-btn--gun { left: var(--drun-beside-move); bottom: calc(var(--drun-bottom) + 4px); }
+  .drun-btn--reload { left: var(--drun-beside-move); bottom: calc(var(--drun-bottom) + 4px + 56px + 8px); }
+}
+/* Only at 345 tall and under (640x320, 568x320) does SPRINT reach up to where the radar sits under the hearts: there the
+ * radar goes up beside the hearts, in the top row, a little smaller, so it ends above the safe zone's line. And the
+ * safe zone's words are centred between SPRINT's column and JUMP's, so the long line ends before JUMP at 568 wide. */
+@media (max-height: 345px) {
+  .drun-hud { --drun-radar: 52px; }
+  .drun-radar { top: var(--drun-top); left: calc(16px + var(--drun-jump) + 24px); }
+  .drun-prompt { left: calc(16px + var(--drun-jump) + 8px); right: calc(16px + var(--drun-fire) + 10px + var(--drun-jump) + 8px); }
+}
+/* ---------- end DRONE RUN ---------- */

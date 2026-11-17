@@ -118,6 +118,8 @@ beforeEach(async () => {
     cursor: fresh.position, pendingTarget: null, forkNotice: null, chainConflict: null, plan: null,
     exploreIndex: null, spectate: null, focus: null, transit: null, walking: false,
     proof: { ...S().proof, status: 'idle', message: null },
+    // LOCAL: the DEV dungeon's world is a fixture, which is entered only in LOCAL (useGame localOnlyRefusal).
+    live: false,
   })
 })
 

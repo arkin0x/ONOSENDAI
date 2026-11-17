@@ -12,15 +12,25 @@
  * and a tutorial run), and for a game entered only from somewhere else (discovered.ts
  * enterFromRefusal, the seam for the draft enter-from requirement), whose
  * words then show under its name.
+ *
+ * DRONE RUN, a test game on a DEV key (lib/games/droneRun/game.ts), is listed
+ * whenever it is on for this device (registry implementedGames: the device
+ * switch, never the production host), found or not, and its ENTER is greyed
+ * out while LIVE (useGame localOnlyRefusal). Under its name, which field it
+ * plays and IMPORT LEVEL (DroneRunFields), locked while the chain is inside it.
+ * The tutorial dungeon is listed as before.
  */
 
 import { useMemo, useState } from 'react'
+import { DroneRunFields } from './DroneRunFields'
 import { openBracket } from '../lib/events'
 import { discoveredGames, enterFromRefusal, notedGames, useFoundGames } from '../lib/games/discovered'
+import { implementedGames } from '../lib/games/registry'
 import type { GameDef } from '../lib/games/types'
 import { useCyberspace } from '../store/useCyberspace'
 import { useDemo } from '../store/useDemo'
-import { enterBlocked, useGame } from '../store/useGame'
+import { enterBlocked, enterBlockedFor, isDroneRun, useGame } from '../store/useGame'
+import { useDroneRunLevels } from '../store/useDroneRunLevels'
 import { useShards } from '../store/useShards'
 import { useTutorial } from '../store/useTutorial'
 import { useTv } from '../store/useTv'
@@ -28,6 +38,9 @@ import { useWalk } from '../store/useWalk'
 import { useWorkshop } from '../store/useWorkshop'
 import '../store/foundGames'
 import { Explanation } from './Explanation'
+
+/** Why DRONE RUN's ENTER is greyed out while a level is being imported. */
+export const IMPORTING_MESSAGE = 'Wait for the level to finish importing.'
 
 /** Why ENTER is greyed out during the tour (/demo), which a game would sit under. */
 export const TOUR_MESSAGE = 'Leave the tour first.'
@@ -47,6 +60,19 @@ export function whyNoEnter(): string | null {
   return enterBlocked()
 }
 
+/** Why `game` cannot be entered from here now, or null: the tour, a tutorial run, else useGame enterBlockedFor. */
+export function whyNoEnterFor(game: GameDef): string | null {
+  if (useDemo.getState().active) return TOUR_MESSAGE
+  if (useTutorial.getState().active) return TUTORIAL_MESSAGE
+  return enterBlockedFor(game)
+}
+
+/** The games listed: those found (lib/games/discovered.ts), and DRONE RUN whenever it is on here, in the registry's order. */
+export function panelGames(found: readonly GameDef[], on: readonly GameDef[] = implementedGames()): GameDef[] {
+  const listed = new Set(found.map((g) => g.pubkey))
+  return on.filter((g) => listed.has(g.pubkey) || isDroneRun(g))
+}
+
 export function GamesPanel(): JSX.Element {
   const pubkey = useCyberspace((s) => s.identity.pubkey)
   const events = useCyberspace((s) => s.events)
@@ -62,13 +88,16 @@ export function GamesPanel(): JSX.Element {
   useWorkshop((s) => s.open)
   useWalk((s) => s.queue.length + (s.open ? 1 : 0) + (s.running ? 1 : 0) + (s.falling ? 1 : 0))
   useCyberspace(() => whyNoEnter())
-  const blocked = whyNoEnter()
+  // A test game's ENTER follows LOCAL and LIVE (useGame localOnlyRefusal).
+  useCyberspace((s) => s.live)
+  // DRONE RUN's ENTER waits while a level is being imported: the field it plays is chosen at ENTER.
+  const importing = useDroneRunLevels((s) => s.busy !== null)
   const [entering, setEntering] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
 
   const chain = useMemo(() => useCyberspace.getState().actions(), [events])
   const games = useMemo(
-    () => discoveredGames({ noted: notedGames(pubkey), chain, finds: Object.values(finds) }),
+    () => panelGames(discoveredGames({ noted: notedGames(pubkey), chain, finds: Object.values(finds) })),
     // `version` is the noted list's: a new note draws it again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [pubkey, chain, finds, version],
@@ -90,16 +119,18 @@ export function GamesPanel(): JSX.Element {
         <li key={game.pubkey} className="avatars__row games__row">
           <span className="avatars__who" title={game.name}>{game.name}</span>
           <button className="avatars__go" disabled={session !== null || busy !== null || !atHead} onClick={() => { useGame.getState().resume() }}>BACK INTO THE GAME</button>
+          {isDroneRun(game) && <DroneRunFields locked />}
         </li>
       )
     }
     const place = enterFromRefusal(game)
-    const why = blocked ?? place
+    const why = whyNoEnterFor(game) ?? place ?? (isDroneRun(game) && importing ? IMPORTING_MESSAGE : null)
     return (
       <li key={game.pubkey} className="avatars__row games__row">
         <span className="avatars__who" title={game.name}>{game.name}</span>
         <button className="avatars__go" disabled={why !== null} title={why ?? undefined} onClick={() => enter(game)}>{entering === game.pubkey ? 'ENTERING' : 'ENTER'}</button>
         {place && <span className="games__where">{place}</span>}
+        {isDroneRun(game) && <DroneRunFields locked={session !== null || busy !== null} />}
       </li>
     )
   }

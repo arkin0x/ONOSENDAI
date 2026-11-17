@@ -21,9 +21,12 @@
  *
  * Keys: W A S D or the arrows (held, a press every 110 ms, as WALK's hold),
  * Space to jump (or up), E or Enter for TAKE and OPEN, Shift, Q or C down.
+ *
+ * DRONE RUN (GameDef play `drone-run`) is drawn by its own screen,
+ * game/droneRun/DroneRunScreen, loaded only when such a game opens.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { KeyRound } from 'lucide-react'
 import { BoxGeometry, EdgesGeometry, Vector3, type Group } from 'three'
@@ -254,10 +257,16 @@ function Clock({ progress }: { progress: Progress }): JSX.Element {
   return <span className="gameview__clock" aria-label="time">{formatClearTime(clockMs(progress, Date.now()))}</span>
 }
 
+/** DRONE RUN's screen, in a chunk of its own: nothing of it is in the main bundle. */
+const DroneRunScreen = lazy(() => import('./droneRun/DroneRunScreen').then((m) => ({ default: m.DroneRunScreen })))
+
 export function GameView(): JSX.Element | null {
   const entryId = useGame((s) => s.session?.entryId ?? null)
+  const droneRun = useGame((s) => s.session?.game.play?.kind === 'drone-run')
+  if (!entryId) return null
   // One component per session, so its look and its notes start fresh each time (review of #660).
-  return entryId ? <GameScreen key={entryId} /> : null
+  if (droneRun) return <Suspense fallback={null}><DroneRunScreen key={entryId} /></Suspense>
+  return <GameScreen key={entryId} />
 }
 
 function GameScreen(): JSX.Element | null {

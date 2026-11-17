@@ -74,8 +74,24 @@ export type GameWorldSource =
   /** Events signed ahead of time and bundled, never on any relay, asked as a relay is asked (lib/games/source.ts): for LOCAL tests of a placeholder world. */
   | { kind: 'fixture'; load: () => Promise<NostrEvent[]> }
 
+/**
+ * How a game is played on this device, when it is not the tutorial dungeon's
+ * way (a press moves one gibson, pads, a key and a door: lib/games/play.ts,
+ * gravity.ts, keyDoor.ts). Client code, not protocol: the protocol knows only
+ * the entry, the region and the world (DECK-0002).
+ *
+ * - `drone-run`: DRONE RUN (lib/games/droneRun/game.ts), a first-person run
+ *   played by its own simulation, read from the variant file named by
+ *   `variant` (lib/games/droneRun/variants/<variant>.json). Inside its bracket
+ *   none of the dungeon's step, pad, key, door or clock logic runs
+ *   (store/useGame.ts), and the game view draws game/droneRun/DroneRunScreen.
+ */
+export type GamePlay = { kind: 'drone-run'; variant: string }
+
 /** A game this client implements: its identity, its region, and its rules. */
 export interface GameDef {
+  /** How it is played here, when not the dungeon's way (GamePlay). Absent: the tutorial dungeon's rules. */
+  play?: GamePlay
   /** The game's pubkey, 64 lowercase hex: the `p` marked `game` on every entry. */
   pubkey: string
   /** Where its bags are found; the entry's relay hint. May be empty. */

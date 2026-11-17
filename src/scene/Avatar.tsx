@@ -68,6 +68,8 @@ import { Group, Material, Vector3, type Quaternion } from 'three'
 import { facingTurn, headingPair } from '../lib/facing'
 import { anchorCentre, GRID_RADIUS, placeCentre, renderDirection, type Position } from '../lib/space'
 import { REST_FLOOR } from '../store/walkWalls'
+import { upOf } from '../lib/walkDown'
+import { walkDown } from '../store/useWalk'
 import { easeRest, useRestDrop } from './useRestDrop'
 import { nearGate } from '../lib/walkGate'
 import { committedAnchor } from '../lib/renderFrame'
@@ -196,8 +198,10 @@ export function Avatar(): JSX.Element | null {
     if (!g || !d) return
     const up = renderDirection(useCyberspace.getState().axes(), 'y')
     if (walking) {
-      // Where fluid WALK stands you (store/walkFluid.ts groundFluid), the icosahedron lifted onto it.
-      g.position.copy(walkEye).addScaledVector(upVec.set(up[0], up[1], up[2]), lift)
+      // Where WALK stands you (store/walkFluid.ts groundFluid), the icosahedron lifted onto it along your gravity.
+      const wu = upOf(walkDown())
+      const r = renderDirection(useCyberspace.getState().axes(), wu.axis)
+      g.position.copy(walkEye).addScaledVector(upVec.set(r[0] * wu.dir, r[1] * wu.dir, r[2] * wu.dir), lift)
       wasWalking.current = true
       const p = proven.current
       if (p) {

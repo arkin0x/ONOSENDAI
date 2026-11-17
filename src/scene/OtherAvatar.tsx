@@ -81,6 +81,10 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
   const out = useRef<Vec3>([0, 0, 0])
   const last = useRef<Position>(position)
   const zoomWas = useRef(scaleExp)
+  /** The drop a move left with, and how far its glide had to go (render cells): apply blends the drop along it. */
+  const dropFrom = useRef<number | null>(null)
+  const glideLen = useRef(0)
+  const dropNow = useRef<number | null>(null)
   // Its key among what may block the build cursor, only while the Builder is
   // on; unique to this one drawing, since two lists may draw the same pubkey.
   const id = useId()
@@ -103,6 +107,9 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
     if (old.x === position.x && old.y === position.y && old.z === position.z) return
     const was = place(old)
     lerp.current.move([was[0] - center[0], was[1] - center[1], was[2] - center[2]], performance.now())
+    // The height it leaves with, blended onto the new one as the glide goes (apply).
+    dropFrom.current = dropNow.current
+    glideLen.current = Math.hypot(was[0] - center[0], was[1] - center[1], was[2] - center[2])
     // place and center are read at the moment of the move on purpose, as
     // Travel reads its frame: a zoom mid-glide must not restart it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,7 +123,6 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
   const zoom = useCyberspace((st) => st.scaleExp)
   const dropTo = useRestDrop(tv ? null : position, plane, zoom)
   const lift = useAvatarLift(pubkey, keepShape)
-  const dropNow = useRef<number | null>(null)
   const dropAt = useRef<number | null>(null)
   const apply = (): void => {
     const g = placed.current
@@ -125,10 +131,14 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
     const o = lerp.current.offset(now, out.current)
     g.position.set(center[0] + o[0], center[1] + o[1], center[2] + o[2])
     if (!tv) {
-      // A move under way keeps the height it left with; it settles once it lands.
-      const moving = Math.abs(o[0]) + Math.abs(o[1]) + Math.abs(o[2]) > 1e-3
+      // A move under way goes from the height it left with to the new one as
+      // it glides, so a walker on a slope keeps its feet on it; at rest it settles.
+      const left = Math.hypot(o[0], o[1], o[2])
       if (dropNow.current === null) dropNow.current = dropTo.current
-      else if (!moving) dropNow.current = easeRest(dropNow.current, dropTo.current, dropAt.current === null ? 0 : (now - dropAt.current) / 1000)
+      else if (left > 1e-3 && dropFrom.current !== null && glideLen.current > 1e-9) {
+        const t = Math.min(1, Math.max(0, 1 - left / glideLen.current))
+        dropNow.current = dropFrom.current + (dropTo.current - dropFrom.current) * t
+      } else dropNow.current = easeRest(dropNow.current, dropTo.current, dropAt.current === null ? 0 : (now - dropAt.current) / 1000)
       dropAt.current = now
       const up = renderDirection(useCyberspace.getState().axes(), 'y')
       const k = lift - dropNow.current

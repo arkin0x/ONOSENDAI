@@ -328,9 +328,11 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
  * never news: no unread, no chime, no unfold. Nothing comes back after a CLEAR.
  */
 export const chatHydrated: Promise<void> = readCached(CHAT_CACHE_KEY).then((data) => {
+  if (clearedAt !== null) return
   const kept = keptLines(data)
-  if (kept.length === 0 || clearedAt !== null) return
   const cur = useChat.getState().lines
-  const lines = mergeLines(kept, cur)
+  const lines = kept.length > 0 ? mergeLines(kept, cur) : cur
   if (lines !== cur) useChat.setState({ lines })
+  // The merged list, in place of any write made before the kept one was read.
+  saveLines(lines)
 }, () => undefined)

@@ -99,15 +99,9 @@ function loadCache(): Record<string, Profile | null> {
   return keptProfiles(takeLocal(STORAGE, PROFILES_CACHE_KEY))
 }
 
-let saveHandle: ReturnType<typeof setTimeout> | null = null
-let latest: Record<string, Profile | null> = {}
-function saveCacheSoon(cache: Record<string, Profile | null>): void {
-  latest = cache
-  if (saveHandle !== null) return
-  saveHandle = setTimeout(() => {
-    saveHandle = null
-    writeCachedSoon(PROFILES_CACHE_KEY, profilesToKeep(latest))
-  }, 1000)
+/** Keep the profiles shortly: the record as it stands when the write goes (lib/deviceCache.ts writeCachedSoon), flushed when the page is hidden. */
+function saveCacheSoon(): void {
+  writeCachedSoon(PROFILES_CACHE_KEY, () => profilesToKeep(useProfiles.getState().profiles))
 }
 
 /**
@@ -188,7 +182,7 @@ export const useProfiles = create<ProfilesState>((set, get) => {
     staged.clear()
     if (!next) return
     set({ profiles: next })
-    saveCacheSoon(next)
+    saveCacheSoon()
   }
 
   /** One kind 0 from a relay: staged if it is the newest copy seen, applied with the others shortly. */
@@ -264,7 +258,7 @@ export const useProfiles = create<ProfilesState>((set, get) => {
       if (!newerProfile(have, p)) return
       const next = { ...get().profiles, [ev.pubkey]: p }
       set({ profiles: next })
-      saveCacheSoon(next)
+      saveCacheSoon()
     },
   }
 })
@@ -286,10 +280,13 @@ export const profilesHydrated: Promise<void> = readCached(PROFILES_CACHE_KEY).th
     next ??= { ...cur }
     next[pk] = p
   }
-  if (!next) return
-  useProfiles.setState({ profiles: next })
-  // Kept is not fetched: a kept profile is still asked for again this visit, as before.
-  for (const pk of Object.keys(kept)) if (next[pk] === kept[pk]) withStamp.delete(pk)
+  if (next) {
+    useProfiles.setState({ profiles: next })
+    // Kept is not fetched: a kept profile is still asked for again this visit, as before.
+    for (const pk of Object.keys(kept)) if (next[pk] === kept[pk]) withStamp.delete(pk)
+  }
+  // The merged record, in place of any write made before the kept one was read.
+  saveCacheSoon()
 }, () => undefined)
 
 /** When each profile was fetched, so the TTL can refetch a stale one. */

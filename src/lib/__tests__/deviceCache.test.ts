@@ -11,6 +11,16 @@ import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+// Each test imports a store's whole tree afresh (vi.resetModules): slow under load, never a hang.
+vi.setConfig({ testTimeout: 30_000 })
+
+const net = vi.hoisted(() => ({ asked: [] as string[][] }))
+vi.mock('../relay', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../relay')>()),
+  relaySet: () => ['wss://cyberspace.test'],
+  askEach: vi.fn(async (_relays: string[], filter: { authors?: string[] }) => { net.asked.push(filter.authors ?? []); return [] }),
+}))
+
 const mem = new Map<string, string>()
 ;(globalThis as { localStorage?: unknown }).localStorage = {
   getItem: (k: string) => mem.get(k) ?? null,
@@ -39,14 +49,33 @@ describe('moving off localStorage', () => {
     expect(mem.has('old:key')).toBe(false)
   })
 
-  it('a record already kept stands; the old key still goes', async () => {
+  it('a record already kept stands; the old key goes once the merged list is written', async () => {
     const c = await import('../deviceCache')
     await c.writeCached('k', { newer: true })
     mem.set('old:key', JSON.stringify({ older: true }))
     c.takeLocal('old:key', 'k')
     await c.lastMove
     expect(await c.readCached('k')).toEqual({ newer: true })
+    expect(mem.has('old:key')).toBe(true)
+    await c.writeCached('k', { newer: true, older: true })
     expect(mem.has('old:key')).toBe(false)
+  })
+
+  it('a value that is not JSON is dropped, key and all', async () => {
+    mem.set('old:key', '{not json')
+    const c = await import('../deviceCache')
+    expect(c.takeLocal('old:key', 'k')).toBeUndefined()
+    await c.lastMove
+    expect(mem.has('old:key')).toBe(false)
+    expect(await c.readCached('k')).toBeUndefined()
+  })
+
+  it('queued writes go at once when the page is hidden or closed', async () => {
+    const c = await import('../deviceCache')
+    c.writeCachedSoon('k', () => ['built when written'])
+    c.flushCachedNow()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(await c.readCached('k')).toEqual(['built when written'])
   })
 
   it('without IndexedDB the old key is left where it is', async () => {
@@ -91,6 +120,33 @@ describe('the profiles', () => {
     expect(useProfiles.getState().profiles['ef'.repeat(32)]?.name).toBe('other')
   })
 
+  it('a profile that lands before the kept ones are read does not cut the kept record down', async () => {
+    const c = await import('../deviceCache')
+    const other = 'ef'.repeat(32)
+    await c.writeCached('profiles', { [PK]: profile(900, 'kept'), [other]: { ...profile(800, 'other'), pubkey: other } })
+    vi.resetModules()
+    const { useProfiles, profilesHydrated } = await import('../../store/useProfiles')
+    const third = '12'.repeat(32)
+    useProfiles.getState().remember({ kind: 0, pubkey: third, created_at: 1000, id: 'ee'.repeat(32), tags: [], content: JSON.stringify({ name: 'new' }), sig: '' } as never)
+    await profilesHydrated
+    const d = await import('../deviceCache')
+    d.flushCachedNow()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(Object.keys(await d.readCached('profiles') as object).sort()).toEqual([PK, other, third].sort())
+  })
+
+  it('a kept profile is still asked for again this visit', async () => {
+    const c = await import('../deviceCache')
+    await c.writeCached('profiles', { [PK]: profile(900, 'kept') })
+    vi.resetModules()
+    net.asked.length = 0
+    const { useProfiles, profilesHydrated } = await import('../../store/useProfiles')
+    await profilesHydrated
+    expect(useProfiles.getState().profiles[PK]?.name).toBe('kept')
+    useProfiles.getState().request(PK)
+    await vi.waitFor(() => { expect(net.asked.flat()).toContain(PK) })
+  })
+
   it('nothing is written to localStorage', async () => {
     vi.useFakeTimers()
     const { useProfiles } = await import('../../store/useProfiles')
@@ -98,6 +154,21 @@ describe('the profiles', () => {
     vi.advanceTimersByTime(5000)
     vi.useRealTimers()
     expect(mem.has('onosendai:profiles')).toBe(false)
+  })
+})
+
+describe('the loot list', () => {
+  it('kept rows are read in at start, newest copy of each bag winning', async () => {
+    const c = await import('../deviceCache')
+    const row = (key: string, createdAt: number, bagId = key) => ({ key, bagId, createdAt })
+    await c.writeCached('loot', [row('a', 10), row('b', 20)])
+    vi.resetModules()
+    const { useLootStore, lootHydrated } = await import('../../hooks/useLoot')
+    useLootStore.setState({ items: [row('a', 30, 'a2') as never] })
+    await lootHydrated
+    const items = useLootStore.getState().items as unknown as Array<{ key: string; createdAt: number }>
+    expect(items.map((i) => [i.key, i.createdAt])).toEqual([['a', 30], ['b', 20]])
+    expect(useLootStore.getState().status).toBe('ready')
   })
 })
 

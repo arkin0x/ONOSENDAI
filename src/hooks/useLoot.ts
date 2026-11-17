@@ -142,10 +142,15 @@ let backfilled = false
  * screen stay; the status turns ready if this is the first the list has.
  */
 export const lootHydrated: Promise<void> = readCached(LOOT_CACHE_KEY).then((data) => {
-  const kept = standing(keptItems(data))
   // A backfill already in says what is gone: the kept list would only bring it back.
-  if (kept.length === 0 || backfilled) return
-  useLootStore.setState((s) => ({ items: standing(mergeLoot(kept, s.items)), status: s.status === 'loading' ? 'ready' : s.status }))
+  if (backfilled) return
+  const kept = standing(keptItems(data))
+  useLootStore.setState((s) => {
+    const items = kept.length > 0 ? standing(mergeLoot(kept, s.items)) : s.items
+    return { items, status: items.length > 0 ? 'ready' : s.status }
+  })
+  // The merged list, in place of any write made before the kept one was read.
+  writeCache(useLootStore.getState().items)
 }, () => undefined)
 
 let close: (() => void) | null = null
@@ -236,7 +241,8 @@ function backfill(source: string): void {
         // Without the canonical relay's answer nothing is known to be gone: keep every row, add what came.
         const items = standing(mergeLoot(newest ? mergeLoot(s.items, found) : afterBackfill(s.items, found, LOOT_BACKFILL), here))
         writeCache(items)
-        backfilled = true
+        // Only the canonical relay's answer says what is gone; a refused read keeps every row, kept ones included.
+        if (!newest) backfilled = true
         return { items, status: trouble && items.length === 0 ? 'error' : 'ready', trouble }
       })
       scheduleRetry(trouble !== null)

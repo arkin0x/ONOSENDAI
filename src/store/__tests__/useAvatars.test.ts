@@ -1,3 +1,5 @@
+import 'fake-indexeddb/auto'
+import { IDBFactory } from 'fake-indexeddb'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The store keeps your own avatar in localStorage; the test runs where there is none.
@@ -21,7 +23,9 @@ import { publish, query } from '../../lib/relay'
 import { AVATAR_KIND, avatarShard, avatarSize, avatarTemplate } from '../../lib/avatar'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from '../useCyberspace'
-import { AVATAR_SIGN_PATIENCE_MS, useAvatars } from '../useAvatars'
+import { closeEventDb } from '../../lib/eventDb/connection'
+import { resetAvatarMigration } from '../../lib/avatarDb'
+import { AVATAR_SIGN_PATIENCE_MS, forgetDeviceReads, useAvatars } from '../useAvatars'
 
 const built = () => {
   const s = newShard('me')
@@ -33,7 +37,7 @@ const built = () => {
 }
 
 describe('useAvatars', () => {
-  beforeEach(() => { useAvatars.setState({ shards: {}, events: {}, asked: {}, phase: null, adoptError: null, mineEvent: null, minePublished: false }); useCyberspace.setState({ live: true }); localStorage.clear(); vi.mocked(query).mockClear(); vi.mocked(publish).mockClear() })
+  beforeEach(() => { closeEventDb(); (globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory(); resetAvatarMigration(); forgetDeviceReads(); useAvatars.setState({ shards: {}, events: {}, asked: {}, phase: null, adoptError: null, mineEvent: null, minePublished: false }); useCyberspace.setState({ live: true }); localStorage.clear(); vi.mocked(query).mockClear(); vi.mocked(publish).mockClear() })
 
   it('adopting a shard signs a kind 11333 event with no d tag and no work, publishes it and keeps a copy', async () => {
     const me = useCyberspace.getState().identity.pubkey
@@ -49,9 +53,11 @@ describe('useAvatars', () => {
     expect(useAvatars.getState().phase).toBeNull()
     expect(useAvatars.getState().shards[me]?.name).toBe('Arches')
     // Kept for the next load, before any relay answers.
-    useAvatars.setState({ shards: {} })
-    useAvatars.getState().loadMine()
-    expect(useAvatars.getState().shards[me]?.name).toBe('Arches')
+    useAvatars.setState({ shards: {}, events: {}, mineEvent: null })
+    await vi.waitFor(async () => {
+      await useAvatars.getState().loadMine()
+      expect(useAvatars.getState().shards[me]?.name).toBe('Arches')
+    })
   })
 
   it('adopting nothing puts the dodecahedron back', async () => {
@@ -181,17 +187,20 @@ describe('useAvatars', () => {
     }
   })
 
-  it('your own kept avatar is checked on load as everyone else\'s is', () => {
+  it('your own kept avatar is checked on load as everyone else\'s is', async () => {
     const me = useCyberspace.getState().identity.pubkey
     const t = avatarTemplate(built(), 30)
     const big = { ...t, content: t.content.replace(/}$/, `,"pad":"${'a'.repeat(131_072)}"}`), pubkey: me, id: 'ff'.repeat(32), sig: '' }
+    // Kept by an older version in localStorage: moved into the event database on load.
     localStorage.setItem('onosendai:avatar', JSON.stringify({ pubkey: me, payload: JSON.parse(t.content), event: big, published: false }))
-    useAvatars.getState().loadMine()
+    await useAvatars.getState().loadMine()
     expect(useAvatars.getState().shards[me]).toBeNull()
     expect(useAvatars.getState().mineEvent?.id).toBe(big.id)
     // Within the limit, drawn from the kept event.
+    closeEventDb(); (globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory(); resetAvatarMigration()
+    useAvatars.setState({ shards: {}, events: {}, mineEvent: null })
     localStorage.setItem('onosendai:avatar', JSON.stringify({ pubkey: me, payload: JSON.parse(t.content), event: { ...big, content: t.content }, published: false }))
-    useAvatars.getState().loadMine()
+    await useAvatars.getState().loadMine()
     expect(useAvatars.getState().shards[me]?.name).toBe('Arches')
   })
 

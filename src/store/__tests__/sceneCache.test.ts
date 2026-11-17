@@ -33,7 +33,11 @@ import { useCyberspace } from '../useCyberspace'
 import {
   PRESENCE_CACHE_MAX_AGE_S, loadPresenceCache, presenceDrawn, savePresenceCache, startPresence, stopPresence, usePresence, type Person,
 } from '../usePresence'
-import { AVATARS_CACHE_MAX_AGE_MS, AVATARS_KEPT_CHARS, keepAvatar, loadAvatarCache } from '../useAvatars'
+import 'fake-indexeddb/auto'
+import { IDBFactory } from 'fake-indexeddb'
+import { keepAvatarEvent, readKeptAvatar, resetAvatarMigration } from '../../lib/avatarDb'
+import { closeEventDb } from '../../lib/eventDb/connection'
+import { forgetDeviceReads, useAvatars } from '../useAvatars'
 
 const SECTOR = 1n << 30n
 const here = { x: 5n * SECTOR + 7n, y: 9n * SECTOR + 1n, z: 3n * SECTOR + 2n }
@@ -44,7 +48,7 @@ const someone = (pubkey: string, over: Partial<Person> = {}): Person => ({
 })
 
 /** XOR's avatar: a kind 11333, signed as the workshop would. */
-function xorAvatar(): { pubkey: string; event: NostrEvent } {
+function xorAvatar(createdAt = NOW): { pubkey: string; event: NostrEvent } {
   const sk = generateSecretKey()
   const pubkey = getPublicKey(sk)
   const s = newShard('xor')
@@ -52,7 +56,7 @@ function xorAvatar(): { pubkey: string; event: NostrEvent } {
   s.vertices = [{ p: [0, 0, 0], c: [0, 0.9, 1] }, { p: [1, 0, 0], c: [0, 0.9, 1] }, { p: [0, 1, 0], c: [0, 0.9, 1] }]
   s.faces = [[0, 1, 2]]
   s.mode = 'solid'
-  return { pubkey, event: finalizeEvent(avatarTemplate(s, NOW), sk) as NostrEvent }
+  return { pubkey, event: finalizeEvent(avatarTemplate(s, createdAt), sk) as NostrEvent }
 }
 
 beforeEach(() => {
@@ -116,47 +120,41 @@ describe('the spectated avatar is drawn once', () => {
 })
 
 describe('the avatar cache', () => {
-  it('round-trips an avatar, and a stale one is not drawn', () => {
-    const { pubkey, event } = xorAvatar()
-    keepAvatar(event, 1_000)
-    expect(loadAvatarCache(1_000)[pubkey]?.name).toBe('Stella Octangula')
-    expect(loadAvatarCache(1_000 + AVATARS_CACHE_MAX_AGE_MS + 1)[pubkey]).toBeUndefined()
+  /** XOR's avatar dated now: the event database refuses someone else's event far ahead of the clock. */
+  const xorNow = (): { pubkey: string; event: NostrEvent } => xorAvatar(Math.floor(Date.now() / 1000) - 60)
+
+  beforeEach(() => {
+    closeEventDb()
+    ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory()
+    resetAvatarMigration()
+    forgetDeviceReads()
+    useAvatars.setState({ shards: {}, events: {}, asked: {}, mineEvent: null, minePublished: false })
   })
 
-  it('a kept avatar over the size limit is not drawn', () => {
-    const { pubkey, event } = xorAvatar()
+  it('a reload draws a kept avatar from the device before the relay answers, and keeps nothing in localStorage', async () => {
+    const { pubkey, event } = xorNow()
+    await keepAvatarEvent(event, { mine: false, published: true })
+    useAvatars.getState().ensure(pubkey)
+    await vi.waitFor(() => { expect(useAvatars.getState().shards[pubkey]?.name).toBe('Stella Octangula') })
+    expect(localStorage.getItem('onosendai:avatars')).toBeNull()
+  })
+
+  it('a kept avatar over the size limit is kept, and not drawn', async () => {
+    const { pubkey, event } = xorNow()
     const big = { ...event, content: event.content.replace(/}$/, `,"pad":"${'a'.repeat(131_072)}"}`) }
-    keepAvatar(big, 1_000)
-    // Kept, and still not drawn.
-    expect(JSON.parse(localStorage.getItem('onosendai:avatars')!)[pubkey]).toBeDefined()
-    expect(loadAvatarCache(1_000)[pubkey]).toBeUndefined()
+    await keepAvatarEvent(big, { mine: false, published: true })
+    expect((await readKeptAvatar(pubkey))?.event.id).toBe(big.id)
+    useAvatars.getState().ensure(pubkey)
+    await vi.waitFor(() => { expect(useAvatars.getState().events[pubkey]?.id).toBe(big.id) })
+    expect(useAvatars.getState().shards[pubkey]).toBeNull()
   })
 
-  it('keeps the newest avatars within a size budget, so your own still fits', () => {
-    const { event } = xorAvatar()
-    const bulk = event.content.replace(/}$/, `,"pad":"${'a'.repeat(100_000)}"}`)
-    for (let i = 0; i < 30; i++) keepAvatar({ ...event, pubkey: i.toString(16).padStart(64, '0'), content: bulk }, 1_000 + i)
-    const kept = JSON.parse(localStorage.getItem('onosendai:avatars')!) as Record<string, unknown>
-    expect(localStorage.getItem('onosendai:avatars')!.length).toBeLessThanOrEqual(AVATARS_KEPT_CHARS + 1000)
-    expect(Object.keys(kept).length).toBeLessThan(30)
-    expect(kept[(29).toString(16).padStart(64, '0')]).toBeDefined()
-    expect(kept['0'.repeat(64)]).toBeUndefined()
-  })
-
-  it('forgets a shape its author dropped for the dodecahedron', () => {
-    const { pubkey, event } = xorAvatar()
-    keepAvatar(event, 1_000)
-    keepAvatar({ ...event, content: '', tags: [], created_at: event.created_at + 1 }, 2_000)
-    expect(loadAvatarCache(2_000)[pubkey]).toBeUndefined()
-  })
-
-  it('a reloaded store has the kept shape before the relay answers', async () => {
-    const { pubkey, event } = xorAvatar()
-    keepAvatar(event)
-    vi.resetModules()
-    const { useAvatars } = await import('../useAvatars')
-    expect(useAvatars.getState().shards[pubkey]?.name).toBe('Stella Octangula')
-    // Still asked of the relay, so a newer shape replaces it.
-    expect(useAvatars.getState().asked[pubkey]).toBeUndefined()
+  it('forgets a shape its author dropped for the dodecahedron', async () => {
+    const { pubkey, event } = xorNow()
+    await keepAvatarEvent(event, { mine: false, published: true })
+    await keepAvatarEvent({ ...event, id: 'f'.repeat(64), content: '', tags: [], created_at: event.created_at + 1 }, { mine: false, published: true })
+    useAvatars.getState().ensure(pubkey)
+    await vi.waitFor(() => { expect(pubkey in useAvatars.getState().shards).toBe(true) })
+    expect(useAvatars.getState().shards[pubkey]).toBeNull()
   })
 })

@@ -52,6 +52,8 @@ export interface IngestItem {
   nip01: Nip01Flag
   relay?: string
   pin?: boolean
+  /** A relay took it or answered with it, which relay unsaid (`acked`, as on the old records). Only ever rises. */
+  acked?: boolean
 }
 
 export interface IngestResult {
@@ -200,9 +202,10 @@ export async function ingest(db: IDBDatabase, items: IngestItem[], now = Date.no
       if (had && nip01Rank(item.nip01) <= nip01Rank(had.nip01)) {
         const seen = relay && !had.seen.includes(relay) ? [...had.seen, relay] : had.seen
         const pin = item.pin && had.pin !== 1 ? 1 : had.pin
-        if (seen !== had.seen || pin !== had.pin) {
+        const acked = item.acked && had.acked !== 1
+        if (seen !== had.seen || pin !== had.pin || acked) {
           if (pin !== had.pin) { countRow(totals, had, -1); countRow(totals, { pin, bytes: had.bytes }, 1) }
-          events.put({ ...had, seen, pin })
+          events.put({ ...had, seen, pin, ...(acked ? { acked: 1 as const } : {}) })
         }
         result.known.push(event.id)
         continue
@@ -221,6 +224,7 @@ export async function ingest(db: IDBDatabase, items: IngestItem[], now = Date.no
       const row: EventRow = { ...rowOf(event, { nip01: item.nip01, pin: pinned, relay }, now), ...(had ? carried(had) : {}) }
       if (had) row.pin = pinned ? 1 : 0
       if (had && relay && !row.seen.includes(relay)) row.seen = [...row.seen, relay]
+      if (item.acked) row.acked = 1
       if (isStruck) { row.deleted = 1; delete row.addr }
       if (row.addr !== undefined) {
         const current = await request(events.index('byAddr').get(row.addr)) as EventRow | undefined

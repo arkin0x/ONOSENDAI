@@ -3,8 +3,9 @@
  *
  * A pubkey is intelligible only with its kind:0: a name, a picture, maybe a
  * nip05. Components ask for one by pubkey; this batches the misses into
- * queries of CHUNK authors, caches what comes back, and keeps it in
- * localStorage so a reload paints names at once and then refreshes them.
+ * queries of CHUNK authors, caches what comes back, and keeps it on the
+ * device (IndexedDB, lib/deviceCache.ts; localStorage until 2026-11, moved
+ * once by takeLocal) so a reload paints names at once and then refreshes them.
  * Profiles live on the general relays (primal, damus, nos.lol), so it asks
  * those alongside every configured one: the cyberspace relay and any you
  * added. Each relay is asked on its own (relay.ts askEach) and each profile
@@ -26,6 +27,7 @@ import { create } from 'zustand'
 import { askEach, relaySet } from '../lib/relay'
 import { GENERAL_RELAYS } from '../lib/contacts'
 import type { NostrEvent } from '../lib/events'
+import { readCached, takeLocal, writeCachedSoon } from '../lib/deviceCache'
 
 export interface Profile {
   pubkey: string
@@ -61,7 +63,10 @@ interface ProfilesState {
   remember: (ev: NostrEvent) => void
 }
 
+/** Where older builds kept the profiles: moved to the device cache once (takeLocal). */
 const STORAGE = 'onosendai:profiles'
+/** The device cache's record for them. */
+export const PROFILES_CACHE_KEY = 'profiles'
 const HEX = /^[0-9a-f]{64}$/
 /** Refetch a cached profile after this, in case it changed. */
 const TTL_MS = 24 * 60 * 60 * 1000
@@ -72,28 +77,36 @@ const CHUNKS_AT_ONCE = 2
 const FLUSH_MS = 250
 /** Profiles arriving from relays are applied together, this often, rather than one render each. */
 const APPLY_MS = 50
-/** The most profiles kept in localStorage: the ones fetched most recently this session first. */
+/** The most profiles kept on the device: the ones fetched most recently this session first. */
 export const PROFILES_KEPT = 1000
 /** Profiles live on the general relays; the cyberspace relay is auth-gated and
  * slow, and rarely holds kind:0, so a short wait on the general set is enough. */
 const PROFILE_WAIT_MS = 4000
 
-function loadCache(): Record<string, Profile | null> {
-  try {
-    const raw = localStorage.getItem(STORAGE)
-    const data = raw ? JSON.parse(raw) : {}
-    return data && typeof data === 'object' ? data : {}
-  } catch { return {} }
+/** Only well-formed profiles from a kept record, by pubkey. */
+function keptProfiles(data: unknown): Record<string, Profile> {
+  const out: Record<string, Profile> = {}
+  if (!data || typeof data !== 'object') return out
+  for (const [pk, p] of Object.entries(data as Record<string, unknown>)) {
+    const x = p as Profile
+    if (HEX.test(pk) && x && typeof x === 'object' && x.pubkey === pk && typeof x.at === 'number') out[pk] = x
+  }
+  return out
 }
 
-let saveHandle: number | null = null
+/** What an older build left in localStorage, moved to the device cache (takeLocal): read now, so the first frame has the names. */
+function loadCache(): Record<string, Profile | null> {
+  return keptProfiles(takeLocal(STORAGE, PROFILES_CACHE_KEY))
+}
+
+let saveHandle: ReturnType<typeof setTimeout> | null = null
+let latest: Record<string, Profile | null> = {}
 function saveCacheSoon(cache: Record<string, Profile | null>): void {
+  latest = cache
   if (saveHandle !== null) return
-  saveHandle = window.setTimeout(() => {
+  saveHandle = setTimeout(() => {
     saveHandle = null
-    try {
-      localStorage.setItem(STORAGE, JSON.stringify(profilesToKeep(cache)))
-    } catch { /* quota or private mode */ }
+    writeCachedSoon(PROFILES_CACHE_KEY, profilesToKeep(latest))
   }, 1000)
 }
 
@@ -257,6 +270,27 @@ export const useProfiles = create<ProfilesState>((set, get) => {
 })
 
 if (import.meta.env.DEV && typeof window !== "undefined") { (window as unknown as { __profiles?: unknown }).__profiles = useProfiles }
+
+/**
+ * The profiles kept on the device, read into the record once at start, a
+ * moment after the first frame: newest wins per pubkey (newerProfile), so a
+ * profile a relay already gave this visit is never replaced by an older kept one.
+ */
+export const profilesHydrated: Promise<void> = readCached(PROFILES_CACHE_KEY).then((data) => {
+  const kept = keptProfiles(data)
+  const cur = useProfiles.getState().profiles
+  let next: Record<string, Profile | null> | null = null
+  for (const [pk, p] of Object.entries(kept)) {
+    if (cur[pk] !== undefined && cur[pk] !== null && !newerProfile(cur[pk], p)) continue
+    if (cur[pk] && cur[pk]!.id === p.id && cur[pk]!.at === p.at) continue
+    next ??= { ...cur }
+    next[pk] = p
+  }
+  if (!next) return
+  useProfiles.setState({ profiles: next })
+  // Kept is not fetched: a kept profile is still asked for again this visit, as before.
+  for (const pk of Object.keys(kept)) if (next[pk] === kept[pk]) withStamp.delete(pk)
+}, () => undefined)
 
 /** When each profile was fetched, so the TTL can refetch a stale one. */
 const withStamp = new Map<string, number>()

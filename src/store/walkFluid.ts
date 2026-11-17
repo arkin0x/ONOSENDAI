@@ -30,7 +30,7 @@ import { moveDirection } from '../lib/moves'
 import { walkFacing, walkFall, walkFallUp, walkGlide, walkRise } from '../lib/walkEye'
 import { WORLD_DOWN, heightOf, raised, upOf } from '../lib/walkDown'
 import { useCyberspace } from './useCyberspace'
-import { fluidCross, fallState, useWalk, walkDown } from './useWalk'
+import { fluidCross, fallState, setWalkerMoving, useWalk, walkDown } from './useWalk'
 import { fluidNudge, fluidOn, useFluidWalk } from './fluidSwitch'
 import { heldNow } from './walkHold'
 import { eventsAhead } from './walkAhead'
@@ -87,6 +87,18 @@ const st = {
   /** The gravity the asking was done under ('' with it off). */
   down: '',
 }
+
+/**
+ * A walker whose last frame is older than this, in ms, is not moving, whatever
+ * speed that frame left it: the frames have stopped (a hidden tab), and the
+ * open segment closes as it would at rest. A slow device's frames, about a
+ * second apart at worst, are well inside it.
+ */
+const MOVING_FRAME_MS = 2500
+
+// The open segment's stillness timer (store/useWalk.ts armSettle) waits while
+// the walker moves: a held walk is not still, however far apart its frames.
+setWalkerMoving(() => st.anchor !== null && st.last !== null && performance.now() - st.last <= MOVING_FRAME_MS && len(st.v) > 0 && fluidWalking())
 
 /** How the crossings went, for the headless recording and tests: plain counters. */
 export const fluidCounts = { moved: 0, held: 0, wait: 0 }

@@ -9,6 +9,9 @@
  * - crossing N gibsons makes N legal steps, in order, proved as a chain;
  * - the speed eases from 15 events ahead and stops at 20, and the LOSING SYNC
  *   warning fades in with it (arkinox, 2026-11-17);
+ * - on a slow device (frames further apart than WALK_SETTLE_MS) a straight
+ *   walk is still one segment, and with late proofs the walker never goes
+ *   back (walk-snapback investigation, 2026-11-17);
  * - leaving WALK glides the eye onto the anchor;
  * - with the switch off, WALK is the step WALK, untouched.
  */
@@ -480,10 +483,18 @@ describe('the queue stays honest', () => {
     let still = 0
     let stillest = 0
     let last = rel(start)
-    // Turn 90 degrees every 0.7 s: a new segment at every turn, and no proof ever lands.
-    for (let t = 0; t < 30000; t += 16) {
-      if (t % 1408 === 0) face(0)
-      if (t % 1408 === 704) face(90)
+    // Turn 90 degrees every 0.7 s: a new segment at every turn, and no proof
+    // ever lands. At 19 ahead (a sixth of the speed) a 0.7 s leg is about a
+    // gibson, and a staircase of single steps is one line, one segment (the
+    // walk is only slowed there, which is right; it reached 20 only because
+    // the stillness timer closed a segment at every slow crossing): the legs
+    // then grow to 2.8 s, so each turn is a corner again.
+    let leg = 0
+    let facing = 0
+    face(0)
+    for (let t = 0; t < 45000; t += 16) {
+      leg += 16
+      if (leg >= (t < 12000 ? 704 : 2816)) { leg = 0; facing = facing === 0 ? 90 : 0; face(facing) }
       frame(16)
       most = Math.max(most, eventsAhead())
       const c = rel(start)
@@ -504,6 +515,93 @@ describe('the queue stays honest', () => {
     frames(1000)
     expect(rel(start)).not.toEqual(heldAt)
     up('KeyW')
+  })
+})
+
+describe('a slow device (frames longer than WALK_SETTLE_MS)', () => {
+  /** A straight walk east under gravity in frames of `ms`, held for `holdMs`: the hops it makes and the most events it was ahead. */
+  async function eastIn(ms: number, holdMs: number): Promise<{ walked: number; hops: number; maxAhead: number }> {
+    world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]])
+    walk(true)
+    face(90)
+    down('KeyW')
+    let maxAhead = 0
+    for (let t = 0; t < holdMs; t += ms) { frame(ms); maxAhead = Math.max(maxAhead, eventsAhead()) }
+    up('KeyW')
+    for (let t = 0; t < 2000; t += ms) frame(ms)
+    const walked = Number(useCyberspace.getState().cursor.x - start.x)
+    await landAll()
+    return { walked, hops: posted.length, maxAhead }
+  }
+
+  it('a straight walk is one hop and one event ahead at 16, 590 and 610 ms a frame, and at a frame a second', async () => {
+    // Before the fix, a frame longer than WALK_SETTLE_MS let the stillness
+    // timer close the open segment between every two frames while W was
+    // held: 610 ms frames made a hop a frame (5 for 11 gibsons).
+    for (const ms of [16, 590, 610, 1000]) {
+      const r = await eastIn(ms, 3000)
+      expect(r.walked, `${ms} ms`).toBeGreaterThan(5)
+      expect(r.hops, `${ms} ms`).toBe(1)
+      expect(r.maxAhead, `${ms} ms`).toBe(1)
+      useWalk.getState().exit()
+      posted.length = 0
+      await useCyberspace.getState().respawn()
+      useCyberspace.getState().cancel()
+      start = { ...useCyberspace.getState().position }
+      resetFluid()
+    }
+  })
+
+  it('with proofs landing 2 s late: at most 3 events ahead (11 before the fix), the walker never goes back, and the walk ends on the chain', async () => {
+    world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]])
+    walk(true)
+    face(86)
+    let landed = 0
+    let lastLand = clock
+    let maxAhead = 0
+    const xs: number[] = []
+    // Where the walker is drawn along x: its gibson, plus the smooth position and the glide.
+    const drawn = (): number => Number(useCyberspace.getState().cursor.x - start.x) + fluidState().frac.x + fluidState().glide.x
+    const step = async (): Promise<void> => {
+      frame(650)
+      maxAhead = Math.max(maxAhead, eventsAhead())
+      xs.push(drawn())
+      if (posted.length > landed && clock - lastLand >= 2000) {
+        await useCyberspace.getState().applyProofMessage(done(posted[landed]))
+        landed++
+        lastLand = clock
+        await vi.waitFor(() => undefined)
+        xs.push(drawn())
+      }
+    }
+    for (let pass = 0; pass < 2; pass++) {
+      down('KeyW')
+      for (let t = 0; t < 4000; t += 650) await step()
+      up('KeyW')
+      for (let t = 0; t < 4000; t += 650) await step()
+    }
+    await landAll()
+    for (let i = 1; i < xs.length; i++) expect(xs[i]).toBeGreaterThanOrEqual(xs[i - 1] - 1e-9)
+    expect(xs[xs.length - 1]).toBeGreaterThan(8)
+    // At most the segment proving, the one waiting behind it, and the one being walked (it was 11 before the fix).
+    expect(maxAhead).toBeLessThanOrEqual(3)
+    expect(useCyberspace.getState().proof.status).not.toBe('infeasible')
+    expect(useCyberspace.getState().cursor).toEqual(useCyberspace.getState().position)
+  })
+
+  it('frames that stop mid-walk (a hidden tab): the open segment still closes and goes to be proved', () => {
+    world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]])
+    walk(true)
+    face(90)
+    down('KeyW')
+    frames(600)
+    expect(useWalk.getState().open).not.toBeNull()
+    expect(len(fluidState().v)).toBeGreaterThan(0)
+    // No frame from here: the keys go (useKeyboard.ts on blur), the speed stays as the last frame left it.
+    walkKeysReleased()
+    for (let t = 0; t < 4000; t += 250) { clock += 250; vi.advanceTimersByTime(250) }
+    expect(useWalk.getState().open).toBeNull()
+    expect(useWalk.getState().behind).toBe(1)
   })
 })
 

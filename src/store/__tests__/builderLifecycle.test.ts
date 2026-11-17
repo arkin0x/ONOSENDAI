@@ -227,8 +227,9 @@ describe('PLACE OBJECT with no models yet', () => {
     expect(B().active).toBe(false)
     expect(useStash.getState().models).toBe(false)
     expect(useWorkshop.getState().open).toBe(true)
-    // As EXIT: the view stays where the build cursor left it.
-    expect(S().focus?.drive).toBe(true)
+    // As EXIT: back to HOP at your head, under the workshop.
+    expect(S().focus).toBeNull()
+    expect(S().atHead()).toBe(true)
     useWorkshop.setState({ open: false })
   })
 })

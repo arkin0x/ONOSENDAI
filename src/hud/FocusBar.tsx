@@ -17,7 +17,7 @@ import { useEscape } from '../hooks/useEscape'
 import { useBuilder } from '../store/useBuilder'
 import { useScan } from '../store/useScan'
 
-/** What VIEWING says for a free view (VIEW, or what BUILD mode leaves behind). */
+/** What VIEWING says for a free view (VIEW, SCAN, a pin or a place gone to). */
 export const FREE_VIEW_LABEL = 'A COORD'
 
 /**
@@ -44,7 +44,8 @@ export function FocusBar(): JSX.Element | null {
   const spectating = useCyberspace((s) => s.spectate !== null)
   const viewOwned = useHyperspace((s) => s.viewOwned)
   // BUILD mode rides the free view and has its own bar (BuildBar), with its
-  // own EXIT and RETURN TO AVATAR; this one comes back when the mode ends.
+  // own EXIT and RETURN TO AVATAR. EXIT ends the view with the mode (HOP);
+  // this bar comes back only for a view the mode ended under or handed on.
   // Every VIEW has this bar, hyperspace's too; the ride's look has its own
   // (HyperspaceViewBar).
   const building = useBuilder((s) => s.active)
@@ -62,7 +63,7 @@ export function FocusBar(): JSX.Element | null {
         <span className="hyperbar__label">{scanning ? 'SCANNING' : 'VIEWING'}</span>
         <span className="hyperbar__meta">{focusLabel}</span>
       </span>
-      {/* A free view (VIEW, or what BUILD mode leaves behind when you exit)
+      {/* A free view (VIEW, SCAN, a pin or a place gone to)
           says where RETURN goes, since the pad drives it like your head. */}
       <button className="hyperbar__end" onClick={() => useCyberspace.getState().clearFocus()} title="Back to your avatar (Esc)">{focus?.drive ? 'RETURN TO AVATAR' : 'RETURN'}</button>
     </div>

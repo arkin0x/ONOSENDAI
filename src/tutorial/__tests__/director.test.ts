@@ -642,11 +642,12 @@ describe('the director', () => {
       expect(useBuilder.getState().active).toBe(false)
       expect(useCyberspace.getState().focus).toBe(null)
 
-      // BUILD left by hand before the bud: the view it left behind still goes.
+      // BUILD left by hand before the bud leaves no view behind any more:
+      // leaving BUILD is HOP (arkinox, 2026-11-17), and the bud finds nothing to end.
       useBuilder.getState().enter('build')
       useCyberspace.setState({ cursor: { ...aimed } })
       useBuilder.getState().exit()
-      expect(useCyberspace.getState().focus?.label).toBe(BUILD_FOCUS_LABEL)
+      expect(useCyberspace.getState().focus).toBe(null)
       useTutorial.getState().start({ at: 'bud' })
       expect(useCyberspace.getState().focus).toBe(null)
 

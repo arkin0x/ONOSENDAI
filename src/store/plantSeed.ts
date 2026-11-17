@@ -25,7 +25,7 @@ import type { Plane } from 'cyberspace-core'
 import type { Position } from '../lib/space'
 import { dnaMatches, dnaTemplate, draftPrice, dnaTextRefusal, readDnaText, seedTemplate, type SeedDraft } from '../lib/seeds/plant'
 import { checkDna, idbDnaCache } from '../lib/seeds/dnaStore'
-import { dnaResolver, refreshTrustedTip, trustedTip } from '../lib/seeds/seedSources'
+import { dnaResolver, nthTipThisVisit, refreshTrustedTip } from '../lib/seeds/seedSources'
 import { clockAtAnchor } from '../lib/seeds/seedClock'
 import { DNA_KIND, type SeedStand } from '../lib/seeds/seedItem'
 
@@ -143,8 +143,9 @@ export async function plantedTemplate(pending: { type: 'seed'; seed: SeedDraft }
   // The writer's clock block (§4.2): the tip this client trusts, NTH's newest verified anchor, asked
   // for now (a tab left idle may hold an old one). NTH publishes a block only once it is 6 deep, so
   // that anchor is the clock block itself (seedClock clockAtAnchor, §4.1), not 6 more below it.
+  // NTH's own answer this visit, never the tip kept from an earlier one (seedSources nthTipThisVisit).
   await refreshTrustedTip(null, Date.now(), true)
-  const tip = trustedTip()
+  const tip = nthTipThisVisit()
   if (tip === null) throw new Error('No block yet to plant at. Try again in a moment.')
   if (!o.current()) throw new MineCancelled()
   // Attributed before it is mined (lib/client.ts): the signer adds no client tag to a

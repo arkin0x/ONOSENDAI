@@ -306,13 +306,20 @@ export async function fetchAnchorHeaders(book: HeaderBook, heights: Iterable<num
 /** How many anchor queries fetchAnchorHeaders keeps open at once. */
 export const QUERIES_AT_ONCE = 4
 
-/** NTH's newest anchors, verified, into the book: its top is then the tip this client trusts. */
+/**
+ * NTH's newest anchors, verified, into the book. Returns the highest of them
+ * this call verified, or null when NTH gave none: the tip NTH says now, never
+ * one only kept from an earlier visit.
+ */
 export async function fetchNthTip(book: HeaderBook, query: (filter: { kinds: number[]; authors: string[]; limit: number }) => Promise<NostrEvent[]>, verify?: (ev: NostrEvent) => boolean): Promise<number | null> {
   let events: NostrEvent[] = []
   try { events = await query({ kinds: [321], authors: [NTH_PUBKEY], limit: 12 }) } catch { events = [] }
+  let top: number | null = null
   for (const ev of events) {
     const header = headerOfAnchor(ev, verify)
-    if (header) book.add(header)
+    if (!header) continue
+    book.add(header)
+    if (top === null || header.height > top) top = header.height
   }
-  return book.top()
+  return top
 }

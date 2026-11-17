@@ -19,6 +19,7 @@ vi.mock('../relay', () => ({
   queryEach: async (f: Record<string, unknown>) => [{ url: 'wss://relay.test', outcome: 'answered', events: await query(f) }],
   publishMany: vi.fn(),
   relaySet: () => ['wss://relay.test'],
+  troubleOf: () => null,
 }))
 vi.mock('../hyperspace/headerSync', () => ({ fetchManifest: () => fetchManifest(), blobUrl: (m: string, f: string) => `${m}/${f}` }))
 

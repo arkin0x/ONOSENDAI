@@ -21,6 +21,7 @@ import type { BloomStatus, BloomView } from '../seeds/bloomEngine'
 import { bloomStateLine } from '../seeds/bloomWords'
 import { fetchAnchorHeaders, HeaderBook } from '../seeds/headerBook'
 
+const trouble = vi.hoisted(() => ({ of: (_answers: unknown): string | null => null }))
 const query = vi.fn<(filter: Record<string, unknown>) => Promise<NostrEvent[]>>()
 const queryEach = vi.fn<(filter: Record<string, unknown>) => Promise<Array<{ url: string; outcome: string; events: NostrEvent[] }>>>()
 vi.mock('../relay', () => ({
@@ -28,6 +29,7 @@ vi.mock('../relay', () => ({
   queryEach: (f: Record<string, unknown>) => queryEach(f),
   publishMany: vi.fn(),
   relaySet: () => ['wss://relay.test'],
+  troubleOf: (answers: unknown) => trouble.of(answers),
 }))
 vi.mock('../hyperspace/headerSync', () => ({ fetchManifest: async () => null, blobUrl: (m: string, f: string) => `${m}/${f}` }))
 
@@ -80,6 +82,7 @@ beforeEach(() => {
   queryEach.mockReset()
   query.mockResolvedValue([])
   queryEach.mockImplementation(async (f) => [{ url: 'wss://relay.test', outcome: 'answered', events: await query(f) }])
+  trouble.of = () => null
 })
 
 describe('a refresh with a cache', () => {
@@ -130,11 +133,63 @@ describe('a refresh with a cache', () => {
   it('a seed settled this visit is kept, and the next visit reads no header for its clamp', async () => {
     const { s } = await loadEngine()
     s.noteSettled({ id: seed.id, height: P, E: P - 3, F: P + 12, clock: KEPT_TIP })
-    await new Promise((r) => setTimeout(r, 50))
+    await new Promise((r) => setTimeout(r, s.SAVE_DELAY_MS + 100))
     vi.resetModules()
     const again = await import('../seeds/seedSources')
     await again.headersReady()
     expect(again.settledBefore(seed.id)).toMatchObject({ height: P, clock: KEPT_TIP })
+  })
+})
+
+describe('a refresh with headers kept but no planted height', () => {
+  it('settles the seed from the kept headers alone: no fetch at all', async () => {
+    const { clampTimes, vectors } = await import('./seedsFixture')
+    const honest = vectors.clamp.cases[0]
+    const times = clampTimes()
+    for (let h = 970620; h <= 971200; h++) times.set(h, 1791544000 + (h - 970620) * 600)
+    const tip = 970524 + 3 * 144
+    await keep([...times].filter(([h]) => h <= tip).map(([h, t]) => ({ height: h, hash: synthetic(h), time: t })))
+    const old = mineSeedEvent({ dnaId: crystal.id, planted: honest.stated, at: { x: 77_000n, y: 1_200n, z: 33n }, plane: 0, createdAt: honest.created_at })
+    const item = seedItemOf(old)!
+    const { engine, views, seen, fetchHeaders } = await loadEngine()
+    engine.want([item])
+    await engine.refresh(item.id)
+    const v = views.get(item.id)!
+    expect(v.status).toBe('grown')
+    expect(v.planted).toBe(970524)
+    expect(v.growth?.generation).toBe(3)
+    expect(seen).not.toContain('no-clock')
+    expect(fetchHeaders).not.toHaveBeenCalled()
+    expect(queryEach).not.toHaveBeenCalled()
+  })
+})
+
+describe('a tab on an older build', () => {
+  it('holding the database open does not hold seeds back: they go on without what was kept', async () => {
+    const old = await new Promise<IDBDatabase>((resolve, reject) => {
+      const r = indexedDB.open('onosendai-seeds', 1)
+      r.onupgradeneeded = () => { r.result.createObjectStore('dna', { keyPath: 'id' }) }
+      r.onsuccess = () => resolve(r.result)
+      r.onerror = () => reject(r.error)
+    })
+    const { engine, views } = await loadEngine()
+    engine.want([seed])
+    await engine.refresh(seed.id)
+    expect(views.get(seed.id)!.status).toBe('no-clock')
+    old.close()
+  })
+})
+
+describe('the tip a planting states', () => {
+  it('is NTH\'s own answer this visit, never the tip kept from an earlier one', async () => {
+    await keep([{ height: KEPT_TIP, hash: synthetic(KEPT_TIP), time: 1_793_100_000 }])
+    const s = await import('../seeds/seedSources')
+    await s.headersReady()
+    expect(s.trustedTip()).toBe(KEPT_TIP)
+    expect(s.nthTipThisVisit()).toBeNull()
+    query.mockResolvedValue([anchor()])
+    await s.refreshTrustedTip(null, Date.now() + 10 * 60_000, true)
+    expect(s.nthTipThisVisit()).toBe(ANCHOR_HEIGHT)
   })
 })
 
@@ -203,6 +258,14 @@ describe('the store itself', () => {
 })
 
 describe('a read nobody answered', () => {
+  it('one fast relay answering without the canonical one is not "absent"', async () => {
+    const s = await import('../seeds/seedSources')
+    trouble.of = () => 'unreachable'
+    queryEach.mockResolvedValue([{ url: 'wss://fast.test', outcome: 'answered', events: [] }, { url: 'wss://relay.onosendai.tech', outcome: 'unreachable', events: [] }])
+    await s.fetchSeedHeaders([975300])
+    expect(s.headerBook.isAbsent(975300)).toBe(false)
+  })
+
   it('marks nothing absent, so the next pass asks again', async () => {
     const book = new HeaderBook()
     await fetchAnchorHeaders(book, [975300, 975301], async () => ({ events: [], answered: false }))

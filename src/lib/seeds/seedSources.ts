@@ -26,7 +26,7 @@ import { fetchAnchorHeaders, fetchNthTip, HeaderBook } from './headerBook'
 import { blobTimesInWorker } from './growClient'
 import { DNA_KIND, setBagDnaSink } from './seedItem'
 import { SEED_DNA_EVENTS } from './seedDnas'
-import { queryEach } from '../relay'
+import { queryEach, troubleOf } from '../relay'
 import { mergeAnswers } from '../relayOutcome'
 import type { AnchorRead, VerifiedHeader } from './headerBook'
 import { loadHeaders, loadPlanted, saveHeaders, savePlanted, type HeaderRow, type PlantedRow } from './seedsDb'
@@ -75,15 +75,35 @@ export function settledBefore(id: string): PlantedRow | undefined {
   return planted.get(id)
 }
 
+/** Settled heights noted since the last write, written together a moment later. */
+const unsavedPlanted = new Map<string, PlantedRow>()
+let plantedQueued = false
+
 /** Keep a seed's settled planted height. The lowest clock it was settled at is kept: E and F stand from then on (§4.2). */
 export function noteSettled(row: PlantedRow): void {
   const was = planted.get(row.id)
   if (was && was.clock <= row.clock && was.height === row.height && was.E === row.E && was.F === row.F) return
   planted.set(row.id, row)
-  void savePlanted([row])
+  unsavedPlanted.set(row.id, row)
+  if (plantedQueued) return
+  plantedQueued = true
+  setTimeout(() => {
+    plantedQueued = false
+    const batch = [...unsavedPlanted.values()]
+    unsavedPlanted.clear()
+    void savePlanted(batch)
+  }, SAVE_DELAY_MS)
 }
 
+/**
+ * The longest a pass waits for what was kept: past this it goes on without
+ * it (an IndexedDB open a browser never answers), and the kept state, if it
+ * comes, is read in all the same.
+ */
+export const READY_WAIT_MS = 1500
+
 let ready: Promise<void> | null = null
+let readyOrLate: Promise<void> | null = null
 
 /**
  * What was kept from the last visit, read into the book and the planted
@@ -99,9 +119,20 @@ export function headersReady(): Promise<void> {
     for (const r of settled) if (!planted.has(r.id)) planted.set(r.id, r)
     const top = headerBook.top()
     // Never lower: a tip this visit already has from NTH stands.
-    if (top !== null && (trusted === null || top > trusted)) trusted = top
+    if (top !== null && (trusted === null || top > trusted)) {
+      trusted = top
+      for (const l of keptListeners) l()
+    }
   })().catch(() => undefined)
-  return ready
+  readyOrLate ??= Promise.race([ready, new Promise<void>((resolve) => setTimeout(resolve, READY_WAIT_MS))])
+  return readyOrLate
+}
+
+const keptListeners = new Set<() => void>()
+/** Told when the kept state raised the trusted tip (late, past READY_WAIT_MS, included). */
+export function onKeptTip(listener: () => void): () => void {
+  keptListeners.add(listener)
+  return () => { keptListeners.delete(listener) }
 }
 
 /**
@@ -111,7 +142,10 @@ export function headersReady(): Promise<void> {
  */
 async function anchorRead(filter: Parameters<typeof query>[0]): Promise<AnchorRead> {
   const answers = await queryEach(filter)
-  return { events: mergeAnswers(answers), answered: answers.some((a) => a.outcome === 'answered') }
+  const ok = (a: { outcome: string }): boolean => a.outcome === 'answered'
+  // Every relay answered, or the canonical one did (where NTH publishes): a
+  // fast relay without NTH's anchors answering alone is not "absent".
+  return { events: mergeAnswers(answers), answered: answers.length > 0 && (answers.every(ok) || (answers.some(ok) && troubleOf(answers) === null)) }
 }
 
 const ZERO_HASH = '0'.repeat(64)
@@ -206,6 +240,13 @@ export const TIP_RETRY_MS = 10_000
 let tipJob: Promise<number | null> | null = null
 let tipAt = 0
 let trusted: number | null = null
+/** The highest tip NTH gave this visit, never a kept one. */
+let nthSeen: number | null = null
+
+/** The highest tip NTH itself gave this visit, or null: what a planting states (plantSeed), never a tip only kept from an earlier visit. */
+export function nthTipThisVisit(): number | null {
+  return nthSeen
+}
 
 /** The tip this client trusts for the seeds clock: NTH's newest verified anchor, or null before one is known. */
 export function trustedTip(): number | null {
@@ -224,7 +265,11 @@ export function refreshTrustedTip(hint: number | null = null, now = Date.now(), 
   if (tipJob || (!stale && !behind) || now - tipAt < 5_000) return tipJob ?? Promise.resolve(trusted)
   tipAt = now
   tipJob = fetchNthTip(headerBook, (filter) => query(filter) as Promise<NostrEvent[]>)
-    .then((top) => { if (top !== null && (trusted === null || top > trusted)) trusted = top; return trusted })
+    .then((top) => {
+      if (top !== null && (nthSeen === null || top > nthSeen)) nthSeen = top
+      if (top !== null && (trusted === null || top > trusted)) trusted = top
+      return trusted
+    })
     .finally(() => { tipJob = null })
   return tipJob
 }

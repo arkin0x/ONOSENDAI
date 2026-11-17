@@ -28,8 +28,8 @@ import type { HeaderBook } from './headerBook'
  *
  * sno-core clockHeight (the tip minus 6) is for a reader that sees the real
  * tip. ONOSENDAI's seeds never do: the trusted tip is NTH's newest verified
- * anchor (HeaderBook top, which counts only headers from NTH-signed anchors,
- * never the blobs), so the clock block's own header is always in the book,
+ * anchor (seedSources trustedTip: NTH's answer, or the highest header kept
+ * from an earlier visit, never lowered), so the clock block's own header is always in the book,
  * and every block up to the clock is one the book can hold. Before NTH has
  * answered, SEED's preview and its hide height fall back to the stop index's
  * tip (bloomReach.ts, SeedCompose), which any key's kind 321 can fill; that

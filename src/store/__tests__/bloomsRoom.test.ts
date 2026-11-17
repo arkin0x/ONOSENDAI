@@ -26,6 +26,7 @@ vi.mock('../../lib/seeds/seedSources', () => ({
   headersReady: async () => undefined,
   settledBefore: () => undefined,
   noteSettled: () => undefined,
+  onKeptTip: () => () => undefined,
   TIP_REFRESH_MS: 1e9,
   TIP_RETRY_MS: 1e9,
 }))

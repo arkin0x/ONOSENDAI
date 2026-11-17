@@ -38,11 +38,28 @@ export interface HeaderRow { height: number; hash: string; time: number }
 
 let dbOpen: Promise<IDBDatabase | null> | null = null
 
-/** The seeds database, or null where IndexedDB is missing or will not open (then nothing is kept). */
+/**
+ * The seeds database, or null where IndexedDB is missing or will not open
+ * (then nothing is kept, and seeds and DNAs come from the relays as before).
+ * A tab still on an older build holds version 1 open and never lets go, so an
+ * open it blocks fails at once rather than waiting (failWhenBlocked), and is
+ * tried again on a later call; this build's own connection closes when a
+ * newer build asks to upgrade.
+ */
 export function seedsDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null)
-  dbOpen ??= openDatabase(SEEDS_DB, SEEDS_DB_VERSION, [[DNA_STORE, 'id'], [HEADERS_STORE, 'height'], [PLANTED_STORE, 'id']]).catch(() => null)
-  return dbOpen
+  if (dbOpen) return dbOpen
+  const opening: Promise<IDBDatabase | null> = openDatabase(SEEDS_DB, SEEDS_DB_VERSION, [[DNA_STORE, 'id'], [HEADERS_STORE, 'height'], [PLANTED_STORE, 'id']], undefined, { failWhenBlocked: true })
+    .then((d) => {
+      d.onversionchange = () => { d.close(); if (dbOpen === opening) dbOpen = null }
+      return d
+    })
+    .catch(() => {
+      if (dbOpen === opening) dbOpen = null
+      return null
+    })
+  dbOpen = opening
+  return opening
 }
 
 const HEX64 = /^[0-9a-f]{64}$/
@@ -91,7 +108,7 @@ export interface PlantedRow { id: string; height: number; E: number | null; F: n
 function isPlanted(r: unknown): r is PlantedRow {
   const x = r as PlantedRow
   return !!x && typeof x.id === 'string' && HEX64.test(x.id) && Number.isSafeInteger(x.height) && Number.isSafeInteger(x.F) && Number.isSafeInteger(x.clock)
-    && (x.E === null || Number.isSafeInteger(x.E))
+    && (x.E === null || Number.isSafeInteger(x.E)) && x.height <= x.F && x.F <= x.clock && (x.E === null || x.E <= x.height)
 }
 
 /** Every settled planted height kept, after dropping those settled at the lowest clocks past PLANTED_KEPT. Best effort. */

@@ -29,6 +29,8 @@ vi.mock('../../lib/relay', async (orig) => {
     publish: vi.fn(async (e: { pubkey: string; kind: number }) => { log.published.push(e); return { ok: true, accepted: [] } }),
     publishMany: vi.fn(async (_r: unknown, e: { pubkey: string; kind: number }) => { log.published.push(e); return { ok: true, accepted: [] } }),
     query: vi.fn(async (f: unknown) => { log.queried.push(f); return [] }),
+    // Seeds read NTH's anchors relay by relay (seedSources anchorRead): no relay here either.
+    queryEach: vi.fn(async (f: unknown) => { log.queried.push(f); return [] }),
   }
 })
 

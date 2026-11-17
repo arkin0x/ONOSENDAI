@@ -32,6 +32,7 @@ vi.mock('../../lib/calibration', async (orig) => {
 
 import { useCyberspace } from '../useCyberspace'
 import { losingSync, segmentAffordable, SYNC_WARN_AT, WALK_SETTLE_MS, useWalk } from '../useWalk'
+import { eventsAhead } from '../walkAhead'
 import { useCalibration } from '../../lib/calibration'
 import { useToast } from '../useToast'
 
@@ -152,17 +153,20 @@ describe('WALK', () => {
     }
   })
 
-  it('counts only closed segments for LOSING SYNC: a long straight walk never warns, quick turns do', () => {
+  it('counts events ahead for LOSING SYNC: a long straight walk is one and never warns, quick turns do', () => {
     for (let i = 0; i < 6; i++) useWalk.getState().press('right')
     expect(useWalk.getState().behind).toBe(0)
-    expect(losingSync(useWalk.getState().behind)).toBe(false)
-    // Each turn closes a segment: nine behind is still quiet, the tenth warns (2026-11-14).
-    for (let i = 0; i < 9; i++) useWalk.getState().press(i % 2 === 0 ? 'up' : 'right')
-    expect(useWalk.getState().behind).toBe(9)
-    expect(losingSync(useWalk.getState().behind)).toBe(false)
+    expect(eventsAhead()).toBe(1)
+    expect(losingSync(eventsAhead())).toBe(false)
+    // Each turn closes a segment: with the open one, 14 ahead is still quiet, 15 shows it (2026-11-17).
+    for (let i = 0; i < 13; i++) useWalk.getState().press(i % 2 === 0 ? 'up' : 'right')
+    expect(useWalk.getState().behind).toBe(13)
+    expect(eventsAhead()).toBe(14)
+    expect(losingSync(eventsAhead())).toBe(false)
     useWalk.getState().press('right')
-    expect(useWalk.getState().behind).toBe(10)
-    expect(losingSync(useWalk.getState().behind)).toBe(true)
+    expect(useWalk.getState().behind).toBe(14)
+    expect(eventsAhead()).toBe(15)
+    expect(losingSync(eventsAhead())).toBe(true)
   })
 
   it('steps the zoom: one press is 2^scaleExp gibsons', async () => {
@@ -284,11 +288,11 @@ describe('WALK', () => {
     useCyberspace.getState().clearFocus()
   })
 
-  it('warns from three steps behind and stands down at two', () => {
-    expect(SYNC_WARN_AT).toBe(10)
+  it('shows LOSING SYNC from 15 events ahead and none at 14', () => {
+    expect(SYNC_WARN_AT).toBe(15)
     expect(losingSync(3)).toBe(false)
-    expect(losingSync(9)).toBe(false)
-    expect(losingSync(10)).toBe(true)
-    expect(losingSync(17)).toBe(true)
+    expect(losingSync(14)).toBe(false)
+    expect(losingSync(15)).toBe(true)
+    expect(losingSync(20)).toBe(true)
   })
 })

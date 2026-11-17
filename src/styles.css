@@ -7,6 +7,8 @@
   --accent: #00e5ff;
   --warn: #ffb020;
   --danger: #ff3b6b;
+  /* The LOSING SYNC warning's red (.syncwarn): the walk has reached its limit. */
+  --limit: #ff2323;
   --sidestep: #c07dff;
   /* Play inside a game (lib/palette.ts GAME): never a travel color. */
   --game: #ff7ad9;
@@ -5920,6 +5922,163 @@ select.avatars__input option:checked {
 .chip[aria-pressed='false'] {
   color: var(--dim);
   border-color: rgba(200, 245, 255, 0.18);
+}
+
+/* ---------- Chain chip: how far ahead ----------
+ *
+ * WALK's events ahead of your chain, on the CHAIN chip (hud/ChainAhead.tsx):
+ * twenty slanted ticks in the chip's bottom padding, one per event up to
+ * where the walk stops. Everything here is absolutely positioned inside the
+ * button or just outside it and takes no pointer events, so the chip keeps
+ * its size and the chips under it keep their place in every state. Nothing
+ * of it is on the page with nothing ahead.
+ *
+ * | Class on the chip | When |
+ * |---|---|
+ * | has-ahead | the marks are on the page: ahead, or fading out after catching up |
+ * | is-ahead | one event ahead or more: the bar shows |
+ * | is-slow | the walk is slowing (15 to 19): amber, the corner brackets |
+ * | is-limit | the walk is stopped (20): the warning's red, a slow breathe |
+ */
+.explorer__toggle.has-ahead {
+  position: relative;
+  transition: border-color 300ms ease;
+}
+.explorer__toggle.is-limit { border-color: var(--limit); }
+/* The words stay above the bar's glow. */
+.aheadtxt {
+  position: relative;
+  z-index: 1;
+}
+/* A move landing on the chain: the total glints white once. */
+.aheadtxt.is-glint { animation: ahead-glint 460ms ease; }
+@keyframes ahead-glint {
+  45% { color: #fff; text-shadow: 0 0 3px var(--bg), 0 0 6px #fff, 0 0 14px var(--accent); }
+}
+.aheadbar {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 3px;
+  height: 3px;
+  display: flex;
+  /* 2px between ticks on a chip as wide as CHAIN 1253/1253 and wider; in
+     proportion on a short chain's narrower chip, so the ticks stay ticks. */
+  gap: min(2px, 2%);
+  pointer-events: none;
+  opacity: 0;
+  /* Out: it waits most of a second first, so it does not blink while the
+     proofs keep pace with the steps (ChainAhead.tsx AHEAD_LINGER_MS). */
+  transition: opacity 400ms ease 900ms;
+  animation: ahead-in 220ms ease;
+}
+@keyframes ahead-in { from { opacity: 0; } }
+.explorer__toggle.is-ahead .aheadbar {
+  opacity: 1;
+  transition: opacity 220ms ease;
+}
+.aheadbar i {
+  flex: 1;
+  height: 3px;
+  transform: skewX(-38deg);
+  background: rgba(200, 245, 255, 0.11);
+  transition: background 180ms ease, box-shadow 180ms ease;
+}
+/* The last six are the slowing stretch: hollow and a little apart, so the
+   limit is in sight before you reach it. */
+.aheadbar i.is-z {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(255, 176, 32, 0.5);
+}
+.aheadbar i.is-z1 { margin-left: min(3px, 3%); }
+.aheadbar i.is-lit {
+  background: linear-gradient(#a6f7ff, #00e5ff);
+  box-shadow: 0 0 4px rgba(0, 229, 255, 0.85);
+}
+.aheadbar i.is-z.is-lit {
+  background: linear-gradient(#ffe1a3, #ffb020);
+  box-shadow: 0 0 4px rgba(255, 176, 32, 0.9);
+}
+/* The newest move is the bar's hot end. */
+.aheadbar i.is-head {
+  background: #fff;
+  box-shadow: 0 0 4px #fff, 0 0 9px var(--accent);
+}
+.aheadbar i.is-z.is-head { box-shadow: 0 0 4px #fff, 0 0 9px var(--warn); }
+.explorer__toggle.is-limit .aheadbar i.is-lit {
+  background: linear-gradient(#ff8a8a, var(--limit));
+  box-shadow: 0 0 5px rgba(255, 35, 35, 0.95);
+}
+/* At the limit the bar breathes, slowly: never a flash. ahead-in stays first
+   in the list so that leaving the limit does not play the fade-in again. */
+.explorer__toggle.is-limit .aheadbar { animation: ahead-in 220ms ease, ahead-breathe 1.6s ease-in-out infinite; }
+@keyframes ahead-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.62; }
+}
+/* A tick lighting: white and tall for a moment, then it settles. */
+.aheadbar i.is-ign { animation: ahead-ign 430ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+@keyframes ahead-ign {
+  0%, 40% {
+    background: #fff;
+    box-shadow: 0 0 6px #fff, 0 0 12px var(--accent);
+    transform: skewX(-38deg) scaleY(1.9);
+  }
+}
+/* A tick going, its move now on the chain: it flashes, folds away, and
+   leaves its slot empty. */
+.aheadbar i.is-going { animation: ahead-going 520ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+@keyframes ahead-going {
+  0% {
+    background: #fff;
+    box-shadow: 0 0 6px #fff;
+    opacity: 1;
+    transform: skewX(-38deg);
+  }
+  50% {
+    background: #fff;
+    box-shadow: 0 0 6px #fff;
+    opacity: 0.5;
+    transform: skewX(-38deg) scale(0.2, 0.4);
+  }
+}
+/* Corner brackets, just outside the chip: they appear as the walk starts to
+   slow and close onto the corners by the stop (--ahead-gap, set inline). */
+.aheadbrk {
+  --ahead-gap: 4px;
+  --ahead-line: var(--warn);
+  position: absolute;
+  inset: calc(-1px - var(--ahead-gap));
+  pointer-events: none;
+  opacity: 0;
+  background:
+    linear-gradient(var(--ahead-line), var(--ahead-line)) left top / 6px 1px no-repeat,
+    linear-gradient(var(--ahead-line), var(--ahead-line)) left top / 1px 6px no-repeat,
+    linear-gradient(var(--ahead-line), var(--ahead-line)) right top / 6px 1px no-repeat,
+    linear-gradient(var(--ahead-line), var(--ahead-line)) right top / 1px 6px no-repeat,
+    linear-gradient(var(--ahead-line), var(--ahead-line)) left bottom / 6px 1px no-repeat,
+    linear-gradient(var(--ahead-line), var(--ahead-line)) left bottom / 1px 6px no-repeat,
+    linear-gradient(var(--ahead-line), var(--ahead-line)) right bottom / 6px 1px no-repeat,
+    linear-gradient(var(--ahead-line), var(--ahead-line)) right bottom / 1px 6px no-repeat;
+  filter: drop-shadow(0 0 2px var(--ahead-line));
+  transition: inset 300ms cubic-bezier(0.2, 0.9, 0.3, 1), opacity 300ms ease;
+}
+.explorer__toggle.is-slow .aheadbrk { opacity: 1; }
+.explorer__toggle.is-limit .aheadbrk { --ahead-line: var(--limit); }
+/* On the amber face (actions dropped, chain replaced) the ticks are drawn in
+   the dark background colour, at the limit too: red on amber would not read. */
+.explorer__toggle.explorer__toggle--dropped .aheadbar i { background: rgba(5, 7, 13, 0.2); box-shadow: none; }
+.explorer__toggle.explorer__toggle--dropped .aheadbar i.is-z { background: transparent; box-shadow: inset 0 0 0 1px rgba(5, 7, 13, 0.6); }
+.explorer__toggle.explorer__toggle--dropped .aheadbar i.is-lit { background: var(--bg); box-shadow: none; }
+/* Reduced motion: no breathing, no glint, no tick or bracket movement. The
+   colours, the hollow slots and the brackets still say everything. */
+@media (prefers-reduced-motion: reduce) {
+  .aheadbar,
+  .explorer__toggle.is-limit .aheadbar,
+  .aheadbar i.is-ign,
+  .aheadbar i.is-going,
+  .aheadtxt.is-glint { animation: none; }
+  .aheadbrk { transition: opacity 300ms ease; }
 }
 
 /* What is left when the pad is dismissed: small enough to ignore, present

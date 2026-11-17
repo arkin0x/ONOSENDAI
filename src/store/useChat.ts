@@ -29,6 +29,7 @@ import { useNotifications } from './useNotifications'
 import { useMutes } from './useMutes'
 import { hidesThing } from '../lib/muteList'
 import { placeOf } from '../lib/chests'
+import { readCached, takeLocal, writeCachedSoon } from '../lib/deviceCache'
 
 export interface ChatLine {
   /** The inner event's id: the line's identity, what stops a repeat. */
@@ -56,24 +57,29 @@ export function linesInPlane(lines: readonly ChatLine[], plane: 0 | 1): ChatLine
   return lines.filter((l) => l.plane === undefined || l.plane === plane)
 }
 
+/** Where older builds kept the lines: moved to the device cache once (lib/deviceCache.ts takeLocal). */
 const STORAGE_KEY = 'onosendai:chat'
+/** The device cache's record for the lines. */
+export const CHAT_CACHE_KEY = 'chat'
 const MUTE_KEY = 'onosendai:chat:muted'
 /** Lines kept on this device, oldest dropped first. */
 export const CHAT_MAX = 500
 
-function loadLines(): ChatLine[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    const list = JSON.parse(raw) as unknown
-    return Array.isArray(list) ? (list as ChatLine[]).filter((l) => l && typeof l.id === 'string' && typeof l.text === 'string') : []
-  } catch {
-    return []
-  }
+function keptLines(list: unknown): ChatLine[] {
+  return Array.isArray(list) ? (list as ChatLine[]).filter((l) => l && typeof l.id === 'string' && typeof l.text === 'string' && typeof l.at === 'number') : []
 }
 
+/** What an older build left in localStorage, moved to the device cache once: read now, so the first frame has the lines. */
+function loadLines(): ChatLine[] {
+  return keptLines(takeLocal(STORAGE_KEY, CHAT_CACHE_KEY))
+}
+
+/** Set by CLEAR: the kept lines read in a moment later must not bring back what was cleared. */
+let clearedAt: number | null = null
+
+/** Kept on the device in IndexedDB, never localStorage (arkinox, 2026-11-17). */
 function saveLines(lines: ChatLine[]): void {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(lines.slice(-CHAT_MAX))) } catch { /* private mode */ }
+  writeCachedSoon(CHAT_CACHE_KEY, lines.slice(-CHAT_MAX))
 }
 
 function loadMuted(): boolean {
@@ -306,6 +312,7 @@ export const useChat = create<ChatState>((set, get) => ({
   },
 
   clear: () => {
+    clearedAt = Date.now()
     saveLines([])
     set({ lines: [], unread: 0, mentionsUnread: 0, revealId: null })
   },
@@ -314,3 +321,19 @@ export const useChat = create<ChatState>((set, get) => ({
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __chat: typeof useChat }).__chat = useChat
 }
+
+/**
+ * The lines kept on the device, merged in once at start (by id, in time
+ * order, CHAT_MAX at most), a moment after the first frame. They are history,
+ * never news: no unread, no chime, no unfold. Nothing comes back after a CLEAR.
+ */
+export const chatHydrated: Promise<void> = readCached(CHAT_CACHE_KEY).then((data) => {
+  if (clearedAt !== null) return
+  const kept = keptLines(data)
+  const cur = useChat.getState().lines
+  const lines = kept.length > 0 ? mergeLines(kept, cur) : cur
+  if (lines !== cur) useChat.setState({ lines })
+  // The merged list, in place of any write made before the kept one was read
+  // (nothing kept, or a read that failed: nothing to put back, so no write).
+  if (data !== undefined) saveLines(lines)
+}, () => undefined)

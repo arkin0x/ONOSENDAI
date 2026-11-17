@@ -29,7 +29,8 @@
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import { BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, Group, IcosahedronGeometry, Line, LineBasicMaterial, PerspectiveCamera, Vector3, Matrix4 } from 'three'
+import { BufferGeometry, DoubleSide, Float32BufferAttribute, Group, Line, LineBasicMaterial, PerspectiveCamera, Vector3, Matrix4 } from 'three'
+import { markerEdges } from '../scene/avatarMarker'
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { glowTexture } from '../lib/glow'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from 'sno-core/shards'
@@ -90,7 +91,8 @@ const UP = toRender
  */
 function ScaleAvatar(): JSX.Element {
   const unit = useWorkshop((s) => s.current()?.unit ?? 0)
-  const geometry = useMemo(() => new EdgesGeometry(new IcosahedronGeometry(0.5, 1)), [])
+  // Standing on the grid, its lowest point its origin, as in the world (scene/avatarMarker.ts).
+  const geometry = useMemo(() => markerEdges(true), [])
   useEffect(() => () => geometry.dispose(), [geometry])
   const k = Math.pow(2, -unit)
   return (

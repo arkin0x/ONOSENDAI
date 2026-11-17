@@ -8,8 +8,8 @@
  * with the plane and cell size (the cursor's coordinate left it on
  * 2026-11-02), and the buttons. That
  * building does not move your avatar (design note §4.2) is said in EXPLAIN,
- * kept to short lines under a cap that fits a phone. EXIT leaves the view where it is (R6), like
- * the workshop's close; Escape does the same, as a chip on the Escape stack
+ * kept to short lines under a cap that fits a phone. EXIT goes back to HOP at your
+ * avatar (arkinox, 2026-11-17), like the workshop's close; Escape does the same, as a chip on the Escape stack
  * that the mode itself registers (store/useBuilder.ts), after anything opened
  * inside the mode (a deploy's bar closes first).
  * RETURN TO AVATAR brings the build cursor back to you without leaving. It
@@ -102,7 +102,7 @@ export function BuildBar(): JSX.Element | null {
         {showHome && (
           <button className="buildbar__act buildbar__home" onClick={() => useBuilder.getState().toAvatar()} onFocus={() => { homeFocused.current = true }} onBlur={() => { homeFocused.current = false }} aria-label="Return to avatar" title="Return to avatar: bring the build cursor and the view back to your avatar, still building (X)"><House className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />RETURN TO AVATAR</button>
         )}
-        <button ref={exitRef} className="hyperbar__end buildbar__exit" onClick={() => useBuilder.getState().exit()} title="Leave build mode. The view stays where it is (Esc, or B)">EXIT</button>
+        <button ref={exitRef} className="hyperbar__end buildbar__exit" onClick={() => useBuilder.getState().exit()} title="Leave build mode, back to HOP at your avatar (Esc, or B)">EXIT</button>
       </div>
 
       {moving && (
@@ -145,7 +145,7 @@ export function BuildBar(): JSX.Element | null {
           <li>After a placement, AGAIN lines it up with the same settings.</li>
           <li>While placing, STEP (, and . on a keyboard) moves and snaps it in smaller steps inside the cube, shown by the small white box, without moving the camera.</li>
           <li>Building never moves your avatar and signs no move.{onAvatar ? '' : ` Your avatar is ${formatDistance(axisDistance(cursor, position))} away.`}</li>
-          <li>EXIT, Esc or B leaves build mode; the view stays where it is.</li>
+          <li>EXIT, Esc or B leaves build mode, back to HOP at your avatar.</li>
         </ul>
       </Explanation>
     </div>

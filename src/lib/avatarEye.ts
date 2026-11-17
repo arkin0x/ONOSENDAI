@@ -167,11 +167,14 @@ export function eyeLabel(shard: ShardModel): string {
 }
 
 /**
- * The default avatar's eye, in cells above its centre: the automatic rule on
- * the icosahedron's own box, which runs from half a cell below to half a cell
- * above, so 0.5 less an eighth of 1: 0.375.
+ * The default avatar's eye, in cells above its origin: the automatic rule on
+ * the icosahedron's own box. Its origin is its lowest point, where it touches
+ * the ground (scene/avatarMarker.ts MARKER_LIFT; arkinox, 2026-11-17), so the
+ * box runs from 0 to a cell up, and the eye is 1 less an eighth of 1: 0.875.
+ * On the shape it is where it always was, 0.375 above the icosahedron's
+ * centre.
  */
-export const MARKER_EYE = AVATAR_MARKER_HALF - (2 * AVATAR_MARKER_HALF) / 8
+export const MARKER_EYE = 2 * AVATAR_MARKER_HALF - (2 * AVATAR_MARKER_HALF) / 8
 
 /**
  * The WALK eye in the avatar's own drawn frame, in render cells at zoom

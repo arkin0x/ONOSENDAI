@@ -13,7 +13,14 @@ import type { NostrEvent } from '../events'
 
 const query = vi.fn<(filter: Record<string, unknown>) => Promise<NostrEvent[]>>()
 const fetchManifest = vi.fn()
-vi.mock('../relay', () => ({ query: (f: Record<string, unknown>) => query(f), publishMany: vi.fn(), relaySet: () => ['wss://relay.test'] }))
+vi.mock('../relay', () => ({
+  query: (f: Record<string, unknown>) => query(f),
+  // Anchors by height are read relay by relay (seedSources anchorRead): one relay here, answering what query gives.
+  queryEach: async (f: Record<string, unknown>) => [{ url: 'wss://relay.test', outcome: 'answered', events: await query(f) }],
+  publishMany: vi.fn(),
+  relaySet: () => ['wss://relay.test'],
+  troubleOf: () => null,
+}))
 vi.mock('../hyperspace/headerSync', () => ({ fetchManifest: () => fetchManifest(), blobUrl: (m: string, f: string) => `${m}/${f}` }))
 
 const fresh = (): NostrEvent => JSON.parse(JSON.stringify(anchor975256)) as NostrEvent

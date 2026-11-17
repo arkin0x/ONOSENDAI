@@ -41,6 +41,7 @@ import { onCanonicalSignIn, onResume, queryChecked, subscribe, type ReadTrouble 
 import { useRelays } from '../store/useRelays'
 import { useShards } from '../store/useShards'
 import { useCyberspace } from '../store/useCyberspace'
+import { readCached, takeLocal, writeCachedSoon } from '../lib/deviceCache'
 import type { Position } from '../lib/space'
 
 /** Bags taken down from this device, which no relay's answer can bring back. */
@@ -93,6 +94,8 @@ interface LootState extends Loot {
 const CACHE_KEY = 'onosendai:loot'
 /** How many rows are kept for the next visit. The panel shows a handful. */
 const CACHE_MAX = 120
+/** The device cache's record for the list. */
+export const LOOT_CACHE_KEY = 'loot'
 
 /**
  * The last list, kept for the next visit.
@@ -103,19 +106,18 @@ const CACHE_MAX = 120
  * they do not spoil: a bag that has been rewritten comes back in the same
  * backfill and replaces itself.
  */
-function readCache(): LootItem[] {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY)
-    if (!raw) return []
-    const list = JSON.parse(raw) as unknown
-    return Array.isArray(list) ? (list as LootItem[]).filter((i) => i && typeof i.key === 'string') : []
-  } catch {
-    return []
-  }
+function keptItems(list: unknown): LootItem[] {
+  return Array.isArray(list) ? (list as LootItem[]).filter((i) => i && typeof i.key === 'string' && typeof i.createdAt === 'number') : []
 }
 
+/** What an older build left in localStorage, moved to the device cache once (lib/deviceCache.ts takeLocal). */
+function readCache(): LootItem[] {
+  return keptItems(takeLocal(CACHE_KEY, LOOT_CACHE_KEY))
+}
+
+/** Kept on the device in IndexedDB (lib/deviceCache.ts), never localStorage (arkinox, 2026-11-17). */
 function writeCache(items: LootItem[]): void {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify(items.slice(0, CACHE_MAX))) } catch { /* private mode */ }
+  writeCachedSoon(LOOT_CACHE_KEY, items.slice(0, CACHE_MAX))
 }
 
 // Filtered on the way in: a bag taken down here must not come back from
@@ -130,6 +132,27 @@ export const useLootStore = create<LootState>(() => ({
   source: '',
   sector: null,
 }))
+
+/** Set once a backfill has answered this visit. */
+let backfilled = false
+
+/**
+ * The list kept on the device, merged in once at start (mergeLoot: the newest
+ * copy of each bag wins), a moment after the first frame. Rows already on
+ * screen stay; the status turns ready if this is the first the list has.
+ */
+export const lootHydrated: Promise<void> = readCached(LOOT_CACHE_KEY).then((data) => {
+  // A backfill already in says what is gone: the kept list would only bring it back.
+  if (backfilled) return
+  const kept = standing(keptItems(data))
+  useLootStore.setState((s) => {
+    const items = kept.length > 0 ? standing(mergeLoot(kept, s.items)) : s.items
+    return { items, status: items.length > 0 ? 'ready' : s.status }
+  })
+  // The merged list, in place of any write made before the kept one was read
+  // (nothing kept, or a read that failed: nothing to put back, so no write).
+  if (data !== undefined) writeCache(useLootStore.getState().items)
+}, () => undefined)
 
 let close: (() => void) | null = null
 
@@ -219,6 +242,8 @@ function backfill(source: string): void {
         // Without the canonical relay's answer nothing is known to be gone: keep every row, add what came.
         const items = standing(mergeLoot(newest ? mergeLoot(s.items, found) : afterBackfill(s.items, found, LOOT_BACKFILL), here))
         writeCache(items)
+        // Only the canonical relay's answer says what is gone; a refused read keeps every row, kept ones included.
+        if (!newest) backfilled = true
         return { items, status: trouble && items.length === 0 ? 'error' : 'ready', trouble }
       })
       scheduleRetry(trouble !== null)

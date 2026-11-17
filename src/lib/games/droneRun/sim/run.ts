@@ -130,6 +130,9 @@ export function overlaps(a: Box3, b: Box3): boolean {
 }
 
 /** Throws on a variant the run cannot play with this level. */
+/** Ids no enemy may take: client.sounds holds each drone's voice under its id, and these keys there mean something else (types.ts ClientSounds). */
+export const RESERVED_ENEMY_IDS: ReadonlySet<string> = new Set(['voices', 'ui', 'hit', 'kill', 'miss'])
+
 export function checkVariant(v: DroneRunVariant, level: RunLevel): void {
   const s = v.spec
   if (v.format !== 'drone-run/1') throw new Error(`Unknown variant format: ${String(v.format)}`)
@@ -145,6 +148,8 @@ export function checkVariant(v: DroneRunVariant, level: RunLevel): void {
     if (w.assistMissBy !== undefined && !(w.assistMissBy >= 0)) throw new Error(`Weapon ${w.id}: assistMissBy must be 0 or more.`)
   }
   for (const e of s.enemies) {
+    // client.sounds keeps each drone's voice under its id, beside these keys of its own.
+    if (RESERVED_ENEMY_IDS.has(e.id)) throw new Error(`Enemy id "${e.id}" is reserved (client.sounds uses it); pick another.`)
     const a = e.attack
     if (a.lead !== undefined && !(a.lead >= 0 && a.lead <= 1)) throw new Error(`Enemy ${e.id}: attack.lead must be from 0 to 1.`)
     if (a.leadMaxS !== undefined && !(a.leadMaxS > 0)) throw new Error(`Enemy ${e.id}: attack.leadMaxS must be above 0.`)

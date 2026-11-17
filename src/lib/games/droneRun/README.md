@@ -25,7 +25,7 @@ Every field below is tagged:
 | `id`, `name` | The variant's id and shown name | (b) |
 | `spec` | The rules (below) | (b) |
 | `world.level` | The level the world was built from; the world itself is shards in the region's bags, read like any game world | (a) |
-| `client` | Model refs, colours, fog distances for drawing, viewmodel offsets, camera bob, sounds (`sounds`: each drone id's looping voice, its pitch, waveforms, chop, filter, level, attack rise and windup whine; `sounds.voices`: how many are heard at once on a phone and a desktop, how far they carry, Doppler and wall muffling) | (c) |
+| `client` | Model refs, colours, fog distances for drawing, viewmodel offsets, camera bob, sounds (`sounds`: each drone id's looping voice, its pitch, waveforms, chop, filter, level, attack rise and windup whine; `sounds.voices`: how many are heard at once on a phone and a desktop, how far they carry, Doppler and wall muffling; `sounds.ui.<control>`: each control's short press sound (fire, jump, sprintOn, sprintOff, lockout, switch, reload, restart, nextWave, exit, sound), as layers of swept tones and filtered noise with a repeat gap; `sounds.hit`, `sounds.kill`, `sounds.miss`: the hitmarker (with each gun's pitch), the kill shot and an aimed pull sent wide, in the same form). So no enemy may have the id `voices`, `ui`, `hit`, `kill` or `miss`: `createRun` rejects it | (c) |
 
 ### spec
 

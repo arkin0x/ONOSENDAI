@@ -31,6 +31,7 @@ import { useProfile } from '../hooks/useProfile'
 import { Stacked, leaveModals, useModalStack } from './modalStack'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
+import { newestAvatar } from '../lib/avatar'
 import { useAvatarShard, useAvatars } from '../store/useAvatars'
 import { copyAvatarToWorkshop, usePersonCard } from '../store/usePersonCard'
 import { spectate } from '../lib/spectator'
@@ -63,13 +64,9 @@ function PersonCardLive({ pubkey, onClose }: { pubkey: string; onClose: () => vo
   const shard = useAvatarShard(pubkey)
   const me = useCyberspace((s) => s.identity.pubkey)
   // Yours: the newer of what this device signed and what the relay answered
-  // (an avatar adopted on another device is only the latter).
-  const event = useAvatars((s) => {
-    const fetched = s.events[pubkey] ?? null
-    if (pubkey !== me) return fetched
-    const kept = s.mineEvent
-    return !kept ? fetched : !fetched || kept.created_at >= fetched.created_at ? kept : fetched
-  })
+  // (an avatar adopted on another device is only the latter), newest wins
+  // as NIP-01 has it (avatarReplaces).
+  const event = useAvatars((s) => newestAvatar([s.events[pubkey], pubkey === me ? s.mineEvent : null]))
   return <PersonCard pubkey={pubkey} shard={shard} event={event} onClose={onClose} />
 }
 

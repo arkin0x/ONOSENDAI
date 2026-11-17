@@ -37,6 +37,7 @@ vi.mock('../../lib/relay', () => ({
   queryAny: vi.fn(async () => []),
   queryChecked: vi.fn(async () => ({ events: [], trouble: null })),
   relaySet: () => ['wss://relay.test'],
+  troubleOf: () => null,
 }))
 
 import { workOk } from 'sno-core/seeds'

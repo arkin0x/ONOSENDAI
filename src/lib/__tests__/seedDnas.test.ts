@@ -139,7 +139,8 @@ describe('the owner\'s published DNAs (2026-11-12)', () => {
     expect(dnaResolver.verdict(id)).toBeUndefined()
     const v = await dnaResolver.resolve(id)
     expect(v.state).toBe('ok')
-  })
+  // A cold import of seedSources' whole tree: over 5 s on a loaded machine (fails the same on origin/v2), never a hang.
+  }, 30_000)
 })
 
 describe('every DNA SEED lists grows', () => {

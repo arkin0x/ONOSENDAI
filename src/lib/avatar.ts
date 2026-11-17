@@ -24,6 +24,32 @@ export const AVATAR_KIND = 11333
 
 export interface AvatarTemplate { kind: number; created_at: number; tags: string[][]; content: string }
 
+/** What newest-wins needs of an avatar event: its time and its id. */
+export interface Versioned { created_at: number; id: string }
+
+/**
+ * Whether avatar event `a` replaces `b`, the rule for a replaceable kind
+ * (NIP-01): the later `created_at` wins, and of two with the same
+ * `created_at` the lower id, first in lexical order. The same event never
+ * replaces itself, and anything replaces nothing. Every copy an avatar comes
+ * from (the relays, the device, a signature just made) goes through this, so
+ * an older copy answering first never draws over a newer one (arkinox,
+ * 2026-11-17: "every time I start onosendai it shows my previous avatar for
+ * about 30 seconds").
+ */
+export function avatarReplaces(a: Versioned, b: Versioned | null | undefined): boolean {
+  if (!b) return true
+  if (a.created_at !== b.created_at) return a.created_at > b.created_at
+  return a.id < b.id
+}
+
+/** The newest of these avatar events by avatarReplaces, or null for none. */
+export function newestAvatar<E extends Versioned>(events: readonly (E | null | undefined)[]): E | null {
+  let best: E | null = null
+  for (const e of events) if (e && avatarReplaces(e, best)) best = e
+  return best
+}
+
 /** The event to sign: this shard as the avatar, or none for the dodecahedron. */
 export function avatarTemplate(shard: ShardModel | null, createdAt: number): AvatarTemplate {
   return {

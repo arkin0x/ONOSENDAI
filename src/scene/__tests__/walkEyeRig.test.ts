@@ -1,7 +1,7 @@
 /**
  * walkEyeRig.test.ts - the rig's eye: turned with the body's heading about up
  * only, never tipped by a look up or down, kept when the look is straight
- * down, and the icosahedron's 0.375 for no avatar.
+ * down, and the icosahedron's 0.875 over its origin for no avatar.
  */
 import { describe, expect, it, vi } from 'vitest'
 
@@ -32,9 +32,9 @@ const frame = (shard: ShardModel | null, forward: { x: number; y: number; z: num
 })
 
 describe('WalkEyeRig', () => {
-  it('gives the icosahedron its 0.375', () => {
+  it('gives the icosahedron its 0.875 over its origin, its lowest point (0.375 over its centre)', () => {
     const v = new WalkEyeRig().offset(frame(null, { x: 0, y: 0, z: -1 }), new Vector3())
-    expect(v.toArray()).toEqual([0, 0.375, 0])
+    expect(v.toArray()).toEqual([0, 0.875, 0])
   })
 
   it('turns the eye with the heading, about up only', () => {

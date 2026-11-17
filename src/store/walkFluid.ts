@@ -9,7 +9,7 @@
  * | Part | What happens |
  * |---|---|
  * | input | what is held (store/walkHold.ts heldNow), or a tap's short nudge, is the way to go: forward and the sides along the way you face, laid flat across gravity; with gravity off, JUMP and DOWN push up and down |
- * | speed | it picks up toward FLUID_MAX_SPEED, and slows to a stop when let go; the cap eases as the walk falls behind its proofs (syncSpeedFactor), and holds at the edge of the gibson one under the LOSING SYNC warning |
+ * | speed | it picks up toward FLUID_MAX_SPEED, and slows to a stop when let go; the cap eases from 15 events ahead of the chain (store/walkAhead.ts eventsAhead, lib/fluidWalk.ts syncSpeedFactor) and stops at 20, holding at the edge of the gibson until the chain catches up |
  * | the anchor | when the smooth position passes half a step from its gibson's middle, the walk takes one legal step there (store/useWalk.ts fluidCross): a straight step, or a diagonal near a corner; the step goes to the chain as a press's would, so the chain only ever sees whole gibsons |
  * | walls | a step a wall holds keeps the smooth position in its gibson, FLUID_WALL_REACH from the middle at most (and FLUID_FACE_GAP short of a nearer face), and stops its speed that way only: the rest goes on, which is sliding along the wall |
  * | floors, stairs, gravity | the step does what a press does (stair step-up and step-down, the fall off a ledge, the bounce pads); the anchor's change of height is eased into the eye, and the ground (below) stands the drawn walker on the surface itself; jumps, double jumps and falls are the walk's own arcs (store/useWalk.ts), unchanged |
@@ -33,6 +33,7 @@ import { useCyberspace } from './useCyberspace'
 import { fluidCross, fallState, useWalk, walkDown } from './useWalk'
 import { fluidNudge, fluidOn, useFluidWalk } from './fluidSwitch'
 import { heldNow } from './walkHold'
+import { eventsAhead } from './walkAhead'
 import { walkInputOpen } from './walkInput'
 import { REST_FLOOR, faceDistance, groundUnder, restDrop, wallItemsAt, type WallItem } from './walkWalls'
 import { STEP_DOWN_MAX, STEP_UP_MAX } from './walkStep'
@@ -497,23 +498,14 @@ function underAnchor(at: Position, items: readonly WallItem[], g: AxisDirection,
 /** The axes across each gravity axis, and so the ones a diagonal may use: kept, so a frame allocates no list. */
 const LEVEL: Record<AxisName, readonly AxisName[]> = { x: ['y', 'z'], y: ['x', 'z'], z: ['x', 'y'] }
 
-/**
- * What the walk will have queued once everything in hand closes: the
- * segments not yet proven, the open one, and a fall's mid-air hops and its
- * landing. The speed eases and holds by this (syncSpeedFactor), so neither a
- * settle nor a landing can carry the queue to the LOSING SYNC warning.
- */
-export function fluidPending(): number {
-  const w = useWalk.getState()
-  const f = fallState()
-  return w.behind + (w.open ? 1 : 0) + (f ? f.waypoints.length + 1 : 0)
-}
-
 /** One step of the walk's motion, `dt` seconds: the speed, the smooth position, what holds it, and the crossings due. */
 function substep(dt: number, now: number, wish: Vec, gravity: boolean, g: AxisDirection, level: readonly AxisName[], length: bigint): void {
   const falling = fallState() !== null
-  const factor = syncSpeedFactor(fluidPending())
-  const max = FLUID_MAX_SPEED * Math.max(factor, 0.25)
+  // Events ahead of the chain (store/walkAhead.ts): the speed eases from
+  // FLUID_EASE_FROM and stops at FLUID_HOLD_AT, so neither a settle nor a
+  // landing can carry the queue past it.
+  const factor = syncSpeedFactor(eventsAhead())
+  const max = FLUID_MAX_SPEED * factor
   if (falling) accelerate(st.v, wish, max, FLUID_AIR_ACCEL, FLUID_AIR_DECEL, dt)
   else accelerate(st.v, wish, max, FLUID_ACCEL, FLUID_DECEL, dt)
   if (gravity) st.v[g.axis] = 0
@@ -567,7 +559,7 @@ function substep(dt: number, now: number, wish: Vec, gravity: boolean, g: AxisDi
     const due = dueCrossing(st.frac, st.v, level)
     if (!due) break
     const { main, side } = due
-    // Two under the LOSING SYNC warning: no new gibson until the chain catches up.
+    // Stopped (FLUID_HOLD_AT events ahead): no new gibson until the chain catches up.
     if (factor === 0) { holdEdges(); break }
     const known = st.held.get(key(main.axis, main.dir))
     if (known && now - known.at < recheck) { holdAt(main, known.limit, known.at, known.edge); continue }

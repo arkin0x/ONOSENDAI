@@ -77,12 +77,23 @@ function layerOf(g: unknown): ClickLayer | null {
   return out
 }
 
+/** The least gap between two of one sound, seconds: a variant cannot switch the one-voice rule off. */
+export const MIN_GAP_S = 0.02
+/** The most a sound's layers may add up to (their gains summed): a variant's sound never comes near full scale. */
+export const MAX_SUM_GAIN = 0.25
+
+/** The layers as given, or all scaled down together so their gains add up to MAX_SUM_GAIN. */
+function capped(layers: ClickLayer[]): ClickLayer[] {
+  const sum = layers.reduce((n, l) => n + l.gain, 0)
+  return sum > MAX_SUM_GAIN ? layers.map((l) => ({ ...l, gain: (l.gain * MAX_SUM_GAIN) / sum })) : layers
+}
+
 /** One sound: `g`'s layers if it gives any good ones, else `d`'s; its gap and gun pitches checked. */
 function clickOf(g: unknown, d: ClickDef): ClickDef {
   if (!isObj(g)) return d
   const layers = Array.isArray(g.layers) ? g.layers.slice(0, 8).map(layerOf).filter((l): l is ClickLayer => l !== null) : []
   const pitch = Array.isArray(g.gunPitch) ? g.gunPitch.slice(0, 8).map((x) => fin(x, 1, 0.25, 4)) : d.gunPitch
-  return { layers: layers.length ? layers : d.layers, gap: fin(g.gap, d.gap ?? 0.03, 0, 1), ...(pitch ? { gunPitch: pitch } : {}) }
+  return { layers: capped(layers.length ? layers : d.layers), gap: fin(g.gap, d.gap ?? 0.03, MIN_GAP_S, 1), ...(pitch ? { gunPitch: pitch } : {}) }
 }
 
 function clicksFrom(sounds: unknown, d: Clicks): Clicks {
@@ -157,8 +168,8 @@ function layerAt(ac: BaseAudioContext, to: AudioNode, t: number, l: ClickLayer, 
 
 /**
  * One click at `t` on `ac`'s clock into `out` (the game's bus): what
- * playClick plays now, and what a recording renders offline at its moment.
- * `weapon` picks a gun's pitch. Returns false when dropped (sooner than its
+ * playClick plays now. It takes any context and any time, so a test can
+ * schedule one on a stand-in. `weapon` picks a gun's pitch. Returns false when dropped (sooner than its
  * gap after the last). Played again, the last one is cut with a 4 ms fade.
  */
 export function clickAt(ac: BaseAudioContext, out: AudioNode, t: number, name: Click, def: ClickDef, weapon = 0): boolean {
@@ -191,17 +202,19 @@ function clicksNow(): Clicks {
 }
 
 /**
- * Play a click now. Silent (returns false) when the game's sound is off or
- * MUTE ALL is on, where there is no Web Audio, or when it is a repeat
- * inside its gap.
+ * Play a click now, or `delayS` from now. Silent (returns false) when the
+ * game's sound is off or MUTE ALL is on, where there is no Web Audio, when
+ * it is a repeat inside its gap, or while the context is not running
+ * (suspended before the first tap, interrupted by a call): it is asked to
+ * resume and this click is dropped, never queued to play late with others.
  */
-export function playClick(name: Click, weapon = 0): boolean {
+export function playClick(name: Click, weapon = 0, delayS = 0): boolean {
   if (droneRunSilent()) return false
   try {
     const ac = audioContext()
     if (!ac) return false
-    if (ac.state === 'suspended') void ac.resume().catch(() => { /* held back until a tap */ })
-    return clickAt(ac, gameBus(ac), ac.currentTime, name, clickDef(clicksNow(), name), weapon)
+    if (ac.state !== 'running') { void ac.resume().catch(() => { /* held back until a tap */ }); return false }
+    return clickAt(ac, gameBus(ac), ac.currentTime + Math.max(0, delayS), name, clickDef(clicksNow(), name), weapon)
   } catch {
     return false
   }

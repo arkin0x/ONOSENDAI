@@ -12695,12 +12695,19 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   .drun-btn--reload { left: calc(16px + 150px + 8px); bottom: calc(var(--drun-above-sprint) + 10px); }
   .drun-prompt { top: calc(var(--drun-top) + 36px); }
 }
-/* A very short landscape phone (812x375, 800x360, 640x320, and up to 440 tall): the radar comes down to 56px and moves in
- * past SPRINT's column (at 320 tall SPRINT reaches up beside it), and the gun goes beside the MOVE stick, RELOAD above it. */
+/* A very short landscape phone (812x375, 800x360, 640x320, and up to 440 tall): the radar comes down to 56px, still
+ * under the hearts, and the gun goes beside the MOVE stick, RELOAD above it. */
 @media (max-height: 440px) {
   .drun-hud { --drun-radar: 56px; --drun-beside-move: calc(20px + var(--drun-stick) + 10px); }
-  .drun-radar { left: calc(16px + var(--drun-jump) + 12px); }
   .drun-btn--gun { left: var(--drun-beside-move); bottom: calc(var(--drun-bottom) + 4px); }
   .drun-btn--reload { left: var(--drun-beside-move); bottom: calc(var(--drun-bottom) + 4px + 56px + 8px); }
+}
+/* Only at 345 tall and under (640x320, 568x320) does SPRINT reach up to where the radar sits under the hearts: there the
+ * radar goes up beside the hearts, in the top row, a little smaller, so it ends above the safe zone's line. And the
+ * safe zone's words are centred between SPRINT's column and JUMP's, so the long line ends before JUMP at 568 wide. */
+@media (max-height: 345px) {
+  .drun-hud { --drun-radar: 52px; }
+  .drun-radar { top: var(--drun-top); left: calc(16px + var(--drun-jump) + 24px); }
+  .drun-prompt { left: calc(16px + var(--drun-jump) + 8px); right: calc(16px + var(--drun-fire) + 10px + var(--drun-jump) + 8px); }
 }
 /* ---------- end DRONE RUN ---------- */

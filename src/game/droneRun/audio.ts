@@ -144,7 +144,7 @@ useSoundMutes.subscribe(followMutes)
 
 /**
  * One sound, scheduled at `t` on `ac`'s clock into `out`: what playSound
- * plays now, and what a recording renders offline at the moment it played.
+ * plays now. It takes any context and any time, so a test can schedule one on a stand-in.
  */
 export function synthAt(ac: BaseAudioContext, out: AudioNode, t: number, sound: DroneSound, weapon = 0, strength = 1): void {
   switch (sound) {
@@ -190,7 +190,8 @@ export function playSound(sound: DroneSound, weapon = 0, strength = 1): boolean 
   try {
     const ac = audioContext()
     if (!ac) return false
-    if (ac.state === 'suspended') void ac.resume().catch(() => { /* held back until a tap */ })
+    // Not running (suspended before the first tap, interrupted by a call): asked to resume, and this sound dropped, never queued to play late with others.
+    if (ac.state !== 'running') { void ac.resume().catch(() => { /* held back until a tap */ }); return false }
     const key = sound === 'shot' ? `shot${weapon}` : sound
     const prev = lastAt.get(key)
     if (prev !== undefined && ac.currentTime - prev < REPEAT_GAP_S && ac.currentTime >= prev) return false

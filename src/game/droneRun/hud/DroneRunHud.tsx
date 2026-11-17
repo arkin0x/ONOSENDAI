@@ -21,7 +21,7 @@
  * - plays the sounds from the run's events (audio.ts) and the clicks in the
  *   player's head (clicks.ts: the hitmarker, the kill, an aimed pull sent
  *   wide), and flashes the screen's edges on a hit taken and the hit marker
- *   on a hit landed (larger and gold on the kill);
+ *   on a hit landed (a second, larger, gold one on the kill);
  * - plays each control's press sound (clicks.ts): the presses input.ts
  *   tells (controls$), the cards' buttons and the sound switch;
  * - while a card is up (RUN FAILED, WAVE n CLEAR) lets the mouse go, stops
@@ -43,7 +43,7 @@ import { playClick, type Click } from '../clicks'
 import { attachDesktop, controls$, held$, noteWeapons, type ControlPress, padFiring, pointer, releaseAll, releasePointer, setAiming, setInputPaused, sprintHeld, sprintLatched, tickLook, TouchTracker, type Pt, type StickPlace } from '../input'
 import { HudView, type Pulses } from './HudView'
 import { TouchPad } from './TouchPad'
-import { IDLE_HUD, STICK_PX, weaponsOfHud, type HudState, type HudWeapon } from './model'
+import { IDLE_HUD, STICK_PX, staminaOf, weaponsOfHud, type HudState, type HudWeapon } from './model'
 import { nextWaveRun, onDroneRunEvent, restartRun, setRunPaused, useDroneRunHud } from '../runner'
 
 export interface DroneRunHudProps {
@@ -115,6 +115,21 @@ function usePointerLocked(): boolean {
   )
 }
 
+/** How long after the sound switch goes on its two notes start, seconds: the game's bus is still fading in before that. */
+export const SOUND_ON_DELAY_S = 0.06
+
+/**
+ * Whether a press does anything here, so it gets its sound: RELOAD only
+ * with a magazine gun in hand that is neither full nor already reloading
+ * (R with the PULSE RIFLE is nothing), and SPRINT only in a variant with
+ * stamina. Every other press does.
+ */
+export function pressDoes(c: ControlPress, hud: HudState, weapons: readonly HudWeapon[]): boolean {
+  if (c === 'reload') return weapons[hud.weapon]?.gauge === 'ammo' && hud.ammo < hud.mag && !hud.reloading
+  if (c === 'sprintOn' || c === 'sprintOff' || c === 'lockout') return staminaOf(hud).shown
+  return true
+}
+
 /**
  * What an event does on screen and in the speakers: the sound it plays, the
  * click in the player's head (clicks.ts: the hitmarker, the kill, an aimed
@@ -165,8 +180,8 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
   const leave = (): void => { playClick('ui:exit'); exitGame() }
   const again = (): void => { playClick('ui:restart'); restart() }
   const onward = (): void => { playClick('ui:nextWave'); nextWave() }
-  /** The sound switch: going on, its two notes (going off, it is silent already). */
-  const toggleSound = (): void => { toggleDroneRunSound(); playClick('ui:sound') }
+  /** The sound switch: going on, its two notes, a moment after the bus opens so its fade-in does not swallow them (going off, it is silent already). */
+  const toggleSound = (): void => { toggleDroneRunSound(); playClick('ui:sound', 0, SOUND_ON_DELAY_S) }
   const toggleRef = useRef(toggleSound)
   toggleRef.current = toggleSound
 
@@ -244,9 +259,12 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
     return () => window.removeEventListener('keydown', key)
   }, [card, hud.phase, restart, nextWave])
 
-  // Each control's press sound (input.ts controls$: FIRE, JUMP, a gun, RELOAD, sprint on and off, the lockout).
+  // Each control's press sound (input.ts controls$: FIRE, JUMP, a gun, RELOAD, sprint on and off, the lockout),
+  // unless the press does nothing here (pressDoes).
+  const now = useRef({ hud, weapons })
+  now.current = { hud, weapons }
   useEffect(() => {
-    const press = (c: ControlPress): void => { playClick(`ui:${c}`) }
+    const press = (c: ControlPress): void => { if (pressDoes(c, now.current.hud, now.current.weapons)) playClick(`ui:${c}`) }
     controls$.listeners.add(press)
     return () => { controls$.listeners.delete(press) }
   }, [])
@@ -261,7 +279,7 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
       if (r.click) playClick(r.click, gun)
       if (r.pulse === 'hurt') setPulses((p) => ({ ...p, hurt: p.hurt + 1 }))
       else if (r.pulse === 'hit') setPulses((p) => ({ ...p, hit: p.hit + 1 }))
-      else if (r.pulse === 'kill') setPulses((p) => ({ ...p, hit: p.hit + 1, kill: p.hit + 1 }))
+      else if (r.pulse === 'kill') setPulses((p) => ({ ...p, kill: p.kill + 1 }))
     })
   }, [subscribe])
 

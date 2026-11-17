@@ -42,19 +42,21 @@ vi.mock('../../audio', async (importOriginal) => ({
   warmSound: () => {},
 }))
 const clicked: Array<[string, number]> = []
+const clickDelays = new Map<string, number>()
 vi.mock('../../clicks', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../clicks')>()),
-  playClick: (c: string, w = 0) => { clicked.push([c, w]); return true },
+  playClick: (c: string, w = 0, delay = 0) => { clicked.push([c, w]); clickDelays.set(c, delay); return true },
 }))
 
 import { createElement, useState } from 'react'
 import { mount, textOf, type Host } from '../../../../test/elementRoot'
 import { HudView, type HudViewProps } from '../HudView'
-import { aimShown, drawStick, DroneRunHud, reactTo } from '../DroneRunHud'
+import { aimShown, drawStick, DroneRunHud, pressDoes, reactTo, SOUND_ON_DELAY_S } from '../DroneRunHud'
+import { useSoundMutes } from '../../../../store/useSoundMutes'
 import { TouchPad } from '../TouchPad'
 import { ASSIST_PX, BASE_WEAPONS, COPY, FIRE_PX, IDLE_HUD, JUMP_PX, STICK_PX, assistShown, staminaOf, weaponsOfHud, type HudState } from '../model'
 import { AssistBox } from '../AssistBox'
-import { AIM_SCALE, aimingNow, controls$, lookRateNow, lookState, lookStickRate, noteSprintLocked, noteWeapons, pressCycle, pressJump, pressReload, pressSelect, readInput, resetInput, setFire, setInputPaused, setSprint, tickLook } from '../../input'
+import { AIM_SCALE, aimingNow, controls$, lookRateNow, lookState, lookStickRate, noteSprintLocked, pressCycle, pressJump, pressReload, pressSprintPad, readInput, releaseAll, releaseSprintPad, resetInput, setFire, setInputPaused, setSprint, tickLook } from '../../input'
 import { useDroneRunSound } from '../../audio'
 import { readFileSync } from 'node:fs'
 import type { RunEvent } from '../../../../lib/games/droneRun/sim/events'
@@ -87,7 +89,7 @@ function slots(all: Host[]): string[] {
   return all.flatMap((h) => cls(h).split(' ').filter((c) => SLOTS.includes(c) || c.startsWith('drun-btn--') || c.startsWith('drun-stick--'))).sort()
 }
 
-beforeEach(() => { resetInput(0, 0); played.length = 0; clicked.length = 0; assistCalls.length = 0 })
+beforeEach(() => { resetInput(0, 0); played.length = 0; clicked.length = 0; clickDelays.clear(); assistCalls.length = 0 })
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('the HUD keeps its slots in every phase', () => {
@@ -317,16 +319,26 @@ describe('the hitmarker and the press sounds', () => {
     await tick()
     expect(marks(m.all()).map(cls)).toEqual(['drun-hitmark'])
     expect(clicked.at(-1)).toEqual(['hit', 2])
+    // Pellets across two drones in one step: hit A, A destroyed, hit B. The kill has a mark of its own, gold, beside the white one.
     send!(ev({ type: 'shot', weapon: 1 }))
     send!(ev({ type: 'hit', drone: 1, damage: 1 }))
     send!(ev({ type: 'drone-destroyed', drone: 1, enemy: 'scout' }))
-    await tick()
-    expect(marks(m.all()).map(cls)).toEqual(['drun-hitmark is-kill'])
-    expect(clicked.slice(-2)).toEqual([['hit', 1], ['kill', 1]])
-    // The next plain hit goes back to the plain look.
     send!(ev({ type: 'hit', drone: 2, damage: 1 }))
     await tick()
-    expect(marks(m.all()).map(cls)).toEqual(['drun-hitmark'])
+    expect(marks(m.all()).map(cls)).toEqual(['drun-hitmark', 'drun-hitmark is-kill'])
+    expect(clicked.slice(-3)).toEqual([['hit', 1], ['kill', 1], ['hit', 1]])
+    // A plain hit right after the kill restarts the white mark only: the gold one is the same element, left to finish.
+    const gold = marks(m.all()).find((h) => cls(h).includes('is-kill'))
+    const white = marks(m.all()).find((h) => !cls(h).includes('is-kill'))
+    send!(ev({ type: 'hit', drone: 2, damage: 1 }))
+    await tick()
+    expect(marks(m.all()).map(cls)).toEqual(['drun-hitmark', 'drun-hitmark is-kill'])
+    expect(marks(m.all()).find((h) => cls(h).includes('is-kill'))).toBe(gold)
+    expect(marks(m.all()).find((h) => !cls(h).includes('is-kill'))).not.toBe(white)
+    // The next kill restarts the gold one.
+    send!(ev({ type: 'drone-destroyed', drone: 2, enemy: 'scout' }))
+    await tick()
+    expect(marks(m.all()).find((h) => cls(h).includes('is-kill'))).not.toBe(gold)
     // None of these are the guns' own sounds: the hitmarker never goes through playSound.
     expect(played.every(([s]) => s === 'shot')).toBe(true)
     await m.unmount()
@@ -384,6 +396,9 @@ describe('the hitmarker and the press sounds', () => {
     click(cleared.all(), 'drun-card__go')
     await cleared.unmount()
     expect(clicked.map(([c]) => c)).toEqual(['ui:restart', 'ui:exit', 'ui:sound', 'ui:nextWave'])
+    // The sound switch's notes wait for the bus to open.
+    expect(clickDelays.get('ui:sound')).toBe(SOUND_ON_DELAY_S)
+    expect(clickDelays.get('ui:restart')).toBe(0)
     expect(restart).toHaveBeenCalledTimes(1)
     expect(nextWave).toHaveBeenCalledTimes(1)
     expect(exit).toHaveBeenCalledTimes(1)
@@ -392,23 +407,56 @@ describe('the hitmarker and the press sounds', () => {
     g.removeEventListener = had.remove
   })
 
-  it('the desktop keys press the same controls (Space, 1 to 3, Q, R, Shift)', () => {
-    const heard: string[] = []
-    const l = (c: string): void => { heard.push(c) }
-    controls$.listeners.add(l)
-    noteWeapons(3, 0)
-    pressJump()
-    pressSelect(0)
-    pressSelect(2)
-    pressCycle(1)
+  it('a press that does nothing here has no sound: R with a heat gun, a full magazine or a reload under way; SPRINT with no stamina', async () => {
+    const scatter = { ...IDLE_HUD, phase: 'wave' as const, weapon: 1, ammo: 2, mag: 6 }
+    expect(pressDoes('reload', scatter, BASE_WEAPONS)).toBe(true)
+    expect(pressDoes('reload', { ...scatter, ammo: 6 }, BASE_WEAPONS)).toBe(false)
+    expect(pressDoes('reload', { ...scatter, reloading: true }, BASE_WEAPONS)).toBe(false)
+    expect(pressDoes('reload', { ...scatter, weapon: 0 }, BASE_WEAPONS)).toBe(false)
+    const none = { ...scatter, hasStamina: false } as HudState
+    for (const c of ['sprintOn', 'sprintOff', 'lockout'] as const) {
+      expect(pressDoes(c, scatter, BASE_WEAPONS)).toBe(true)
+      expect(pressDoes(c, none, BASE_WEAPONS)).toBe(false)
+    }
+    for (const c of ['fire', 'jump', 'switch'] as const) expect(pressDoes(c, none, BASE_WEAPONS)).toBe(true)
+    // Through the HUD: the PULSE RIFLE in hand, R and Shift in a variant with no stamina.
+    const m = await mount(createElement(DroneRunHud, { hud: { ...IDLE_HUD, phase: 'wave', weapon: 0, hasStamina: false } as HudState, restart: vi.fn(), nextWave: vi.fn(), subscribe: () => () => {}, exit: vi.fn(), touch: false }))
     pressReload()
-    setSprint('key:ShiftLeft', true)
-    setSprint('key:ShiftLeft', false)
-    setFire('mouse', true)
-    setFire('mouse', false)
-    controls$.listeners.delete(l)
-    // Choosing the gun already in hand is no switch.
-    expect(heard).toEqual(['jump', 'switch', 'switch', 'reload', 'sprintOn', 'sprintOff', 'fire'])
+    pressSprintPad('pad:sprint:1', 1000)
+    releaseSprintPad('pad:sprint:1', 1600)
+    pressJump()
+    expect(clicked.map(([c]) => c)).toEqual(['ui:jump'])
+    await m.unmount()
+  })
+
+  it('the screen closing with SPRINT latched says nothing', async () => {
+    const m = await mount(createElement(DroneRunHud, { hud: { ...IDLE_HUD, phase: 'wave' }, restart: vi.fn(), nextWave: vi.fn(), subscribe: () => () => {}, exit: vi.fn(), touch: true }))
+    pressSprintPad('pad:sprint:1', 1000)
+    releaseSprintPad('pad:sprint:1', 1050)
+    expect(clicked.map(([c]) => c)).toEqual(['ui:sprintOn'])
+    await m.unmount()
+    releaseAll()
+    expect(clicked.map(([c]) => c)).toEqual(['ui:sprintOn'])
+  })
+
+  it('the sound switched off with M, then MUTE ALL: the HUD still draws (the same hooks every render)', async () => {
+    const m = await mount(createElement(DroneRunHud, { hud: { ...IDLE_HUD, phase: 'wave' }, restart: vi.fn(), nextWave: vi.fn(), subscribe: () => () => {}, exit: vi.fn(), touch: false }))
+    const speaker = (): Host | undefined => m.all().find((h) => cls(h) === 'drun-sound')
+    expect(speaker()?.props['aria-label']).toBe('Sound on')
+    useDroneRunSound.setState({ muted: true })
+    await tick()
+    expect(speaker()?.props['aria-label']).toBe('Sound off')
+    useSoundMutes.setState({ master: true })
+    await tick()
+    expect(speaker()?.props['aria-label']).toBe('Sound off')
+    useDroneRunSound.setState({ muted: false })
+    await tick()
+    expect(speaker()?.props['aria-label']).toBe('Sound off')
+    useSoundMutes.setState({ master: false })
+    await tick()
+    expect(speaker()?.props['aria-label']).toBe('Sound on')
+    expect(m.all().some((h) => cls(h) === 'drun-cross')).toBe(true)
+    await m.unmount()
   })
 
   it('a card up, no control sounds at all', () => {
@@ -918,7 +966,7 @@ describe('the desktop\'s stamina gauge', () => {
   })
 })
 
-describe('the controls at the five phone sizes: no two boxes overlap', () => {
+describe('the controls at the phone sizes: no two boxes overlap', () => {
   const css = readFileSync(new URL('../../../../styles.css', import.meta.url), 'utf8')
   const section = css.slice(css.indexOf('/* ---------- DRONE RUN: HUD'), css.indexOf('/* ---------- end DRONE RUN'))
   const block = (q: string): string => {
@@ -928,14 +976,19 @@ describe('the controls at the five phone sizes: no two boxes overlap', () => {
   }
   const px = (body: string, name: string): number => Number(new RegExp(`${name}: (\\d+)px`).exec(body)?.[1] ?? NaN)
   const tall = section.slice(0, section.indexOf('.drun-layer {'))
-  const short = block('max-height: 520px'), shorter = block('max-height: 440px')
+  const short = block('max-height: 520px'), shorter = block('max-height: 440px'), shortest = block('max-height: 345px')
 
   it('the rules the boxes below are computed from are the CSS\'s own', () => {
     expect(section).toContain('--drun-above-stick: calc(var(--drun-bottom) + 4px + var(--drun-stick) + 14px);')
     expect(section).toContain('--drun-above-sprint: calc(var(--drun-above-stick) + var(--drun-jump) + 10px);')
     expect(section).toMatch(/\.drun-btn--sprint \{\n  left: 16px;\n  bottom: var\(--drun-above-stick\);\n  width: var\(--drun-jump\);\n  height: var\(--drun-jump\);/)
     expect(section).toMatch(/\.drun-radar \{\n  position: absolute;\n  top: calc\(var\(--drun-top\) \+ 38px\);\n  left: 16px;/)
-    expect(shorter).toContain('.drun-radar { left: calc(16px + var(--drun-jump) + 12px); }')
+    expect(shorter).not.toContain('.drun-radar')
+    expect(shortest).toContain('.drun-radar { top: var(--drun-top); left: calc(16px + var(--drun-jump) + 24px); }')
+    expect(shortest).toContain('.drun-prompt { left: calc(16px + var(--drun-jump) + 8px); right: calc(16px + var(--drun-fire) + 10px + var(--drun-jump) + 8px); }')
+    expect(section).toMatch(/\.drun-prompt__title \{ height: 14px; font-size: 11px; letter-spacing: 0\.16em;/)
+    expect(section).toMatch(/\.drun-prompt__line \{ height: 18px; font-size: 14px; \}/)
+    expect(section).toMatch(/\.drun-prompt \{[^}]*gap: 6px;/)
     expect(section).toMatch(/\.drun-btn--gun \{\n  left: 16px;\n  bottom: var\(--drun-above-sprint\);\n  width: 150px;\n  height: 56px;/)
     expect(section).toMatch(/\.drun-btn--reload \{\n  left: 16px;\n  bottom: calc\(var\(--drun-above-sprint\) \+ 64px\);\n  width: 110px;\n  height: 36px;/)
     expect(short).toContain('.drun-btn--reload { left: calc(16px + 150px + 8px); bottom: calc(var(--drun-above-sprint) + 10px); }')
@@ -948,8 +1001,8 @@ describe('the controls at the five phone sizes: no two boxes overlap', () => {
   type Box = { name: string; x0: number; y0: number; x1: number; y1: number }
   /** Every box on a phone at w x h, screen px, from the CSS's sizes and rules (no safe-area insets). */
   function boxes(w: number, h: number): Box[] {
-    const isShort = h <= 520, isShorter = h <= 440
-    const from = (name: string): number => px(isShorter && !Number.isNaN(px(shorter, name)) ? shorter : isShort && !Number.isNaN(px(short, name)) ? short : tall, name)
+    const isShort = h <= 520, isShorter = h <= 440, isShortest = h <= 345
+    const from = (name: string): number => px(isShortest && !Number.isNaN(px(shortest, name)) ? shortest : isShorter && !Number.isNaN(px(shorter, name)) ? shorter : isShort && !Number.isNaN(px(short, name)) ? short : tall, name)
     const stick = from('--drun-stick'), fire = from('--drun-fire'), jump = from('--drun-jump')
     const radar = w >= 900 && h >= 600 ? 120 : from('--drun-radar')
     const bottom = 20, top = 12 + 46
@@ -958,13 +1011,22 @@ describe('the controls at the five phone sizes: no two boxes overlap', () => {
     const b = (name: string, x0: number, y0: number, bw: number, bh: number): Box => ({ name, x0, y0, x1: x0 + bw, y1: y0 + bh })
     const up = (name: string, left: number, fromBottom: number, bw: number, bh: number): Box => b(name, left, h - fromBottom - bh, bw, bh)
     const assist = (stick + fire) / 2
-    // The safe zone's line: centred words (its longest line, 37 characters of 14px mono), under the radar on a narrow screen, higher on a short one.
+    // The safe zone's words, centred, under the radar on a narrow screen, higher on a short one: a 14px title (the
+    // longest, "WAVE 1  FIRST CONTACT", 21 letters of 11px mono with 0.16 em between), 6 between, then an 18px line
+    // (its longest, 38 letters of 14px mono).
     const promptTop = isShort ? top + 36 : w <= 640 ? top + 38 + radar + 10 : top + 52
-    const promptW = Math.min(37 * 14 * 0.6, w - 32)
+    const promptW = Math.min(38 * 14 * 0.6, w - 32)
+    const titleW = Math.min(21 * 11 * (0.6 + 0.16), w - 32)
+    // Centred on the screen; at 345 tall and under, between SPRINT's column and JUMP's.
+    const promptMid = isShortest ? (16 + jump + 8 + (w - (16 + fire + 10 + jump + 8))) / 2 : w / 2
+    // The three hearts in the top row (20px each, 4 between), and what is on its right (about 190px of words and the speaker).
     const out = [
-      b('top row', 16, top, w - 32, 30),
-      b('radar', isShorter ? 16 + jump + 12 : 16, top + 38, radar, radar),
-      b('safe zone line', (w - promptW) / 2, promptTop, promptW, 44),
+      b('hearts', 16, top + 5, 3 * 20 + 2 * 4, 20),
+      b('top right', w - 16 - 190, top, 190, 30),
+      // The radar: under the hearts; at 345 tall and under, up beside them in the top row.
+      isShortest ? b('radar', 16 + jump + 24, top, radar, radar) : b('radar', 16, top + 38, radar, radar),
+      b('safe zone title', promptMid - titleW / 2, promptTop, titleW, 14),
+      b('safe zone line', promptMid - promptW / 2, promptTop + 14 + 6, promptW, 18),
       b('crosshair', w / 2 - 13, h / 2 - 13, 26, 26),
       b('assist box', w / 2 - assist / 2, h / 2 - assist / 2, assist, assist),
       up('MOVE', 20, bottom + 4, stick, stick),
@@ -985,9 +1047,9 @@ describe('the controls at the five phone sizes: no two boxes overlap', () => {
   const overlap = (a: Box, c: Box): boolean => a.x0 < c.x1 && c.x0 < a.x1 && a.y0 < c.y1 && c.y0 < a.y1
   // The assist box is drawn round the crosshair on purpose; the faint box under the safe zone's centred words on a very
   // short screen is the layout before this change (the words are the safe zone's, before a wave).
-  const allowed = new Set(['crosshair|assist box', 'safe zone line|assist box'])
+  const allowed = new Set(['crosshair|assist box', 'safe zone line|assist box', 'safe zone title|assist box'])
 
-  for (const [w, h] of [[375, 812], [412, 915], [812, 375], [800, 360], [640, 320]]) {
+  for (const [w, h] of [[375, 812], [412, 915], [812, 375], [800, 360], [640, 320], [568, 320]]) {
     it(`${w}x${h}`, () => {
       const all = boxes(w, h)
       for (const a of all) {
@@ -1029,15 +1091,16 @@ describe('a short landscape phone: nothing on the left reaches the radar', () =>
   }
   const px = (body: string, name: string): number => Number(new RegExp(`${name}: (\\d+)px`).exec(body)?.[1] ?? NaN)
 
-  it('at 812x375, 800x360 and 640x320 the radar ends above the gun button and RELOAD (the sizes the CSS gives)', () => {
-    const short = block(520), shorter = block(440)
-    const stick = px(short, '--drun-stick'), radar = px(shorter, '--drun-radar')
-    expect(radar).toBe(56)
+  it('at 812x375, 800x360, 640x320 and 568x320 the radar ends above the gun button and RELOAD (the sizes the CSS gives)', () => {
+    const short = block(520), shorter = block(440), shortest = block(345)
+    const stick = px(short, '--drun-stick')
+    expect(px(shorter, '--drun-radar')).toBe(56)
     expect(shorter).toContain('.drun-btn--gun { left: var(--drun-beside-move); bottom: calc(var(--drun-bottom) + 4px); }')
     expect(shorter).toContain('--drun-beside-move: calc(20px + var(--drun-stick) + 10px);')
-    // The layout's own numbers: the HUD's top line 12 + 46, the radar 38 under it; the gun button 56 tall, RELOAD 36 above it with 8 between.
-    const radarBottom = 12 + 46 + 38 + radar
-    for (const [w, h] of [[812, 375], [800, 360], [640, 320]]) {
+    for (const [w, h] of [[812, 375], [800, 360], [640, 320], [568, 320]]) {
+      const radar = h <= 345 ? px(shortest, '--drun-radar') : px(shorter, '--drun-radar')
+      // The layout's own numbers: the HUD's top line 12 + 46; the radar 38 under it, or in the top row at 345 tall and under.
+      const radarBottom = 12 + 46 + (h <= 345 ? 0 : 38) + radar
       const bottom = 20 + 4
       const gunTop = h - bottom - 56
       const reloadTop = h - (bottom + 56 + 8) - 36
@@ -1046,6 +1109,46 @@ describe('a short landscape phone: nothing on the left reaches the radar', () =>
       // Beside the MOVE stick, inside the screen's left half, and below the aim assist box in the middle.
       expect(20 + stick + 10 + 150).toBeLessThan(w / 2)
       expect(gunTop).toBeGreaterThan(h / 2 + (stick + px(short, '--drun-fire')) / 4)
+    }
+  })
+
+  it('the radar stays under the hearts wherever SPRINT leaves it room (375x812, 412x915, 812x375, 800x360), and moves beside the hearts only at 345 tall and under (640x320, 568x320), clear of SPRINT, the hearts and the safe zone\'s centred line', () => {
+    const base = css.slice(css.indexOf('/* ---------- DRONE RUN: HUD'))
+    const short = block(520), shorter = block(440), shortest = block(345)
+    // The move is in the 345 block alone.
+    expect(shorter).not.toContain('.drun-radar')
+    expect(short).not.toContain('.drun-radar')
+    expect(shortest).toContain('.drun-radar { top: var(--drun-top); left: calc(16px + var(--drun-jump) + 24px); }')
+    const top = 12 + 46
+    for (const [w, h] of [[375, 812], [412, 915], [812, 375], [800, 360], [640, 320], [568, 320]]) {
+      const low = h <= 520
+      const stick = low ? px(short, '--drun-stick') : px(base, '--drun-stick')
+      const jump = low ? px(short, '--drun-jump') : px(base, '--drun-jump')
+      const radar = h <= 345 ? px(shortest, '--drun-radar') : h <= 440 ? px(shorter, '--drun-radar') : low ? px(short, '--drun-radar') : px(base, '--drun-radar')
+      // SPRINT: at the left edge (16px), JUMP's size, on the row just above the sticks.
+      const sprint = { left: 16, right: 16 + jump, top: h - (20 + 4 + stick + 14) - jump }
+      const moved = h <= 345
+      const r = moved ? { left: 16 + jump + 24, top } : { left: 16, top: top + 38 }
+      const box = { ...r, right: r.left + radar, bottom: r.top + radar }
+      if (!moved) {
+        // Under the hearts, in SPRINT's column, and ending above it.
+        expect(box.left).toBe(16)
+        expect(box.bottom).toBeLessThanOrEqual(sprint.top)
+      } else {
+        // Past SPRINT's column and past the three hearts (20px each, 4 between, from 16px).
+        expect(box.left).toBeGreaterThan(sprint.right)
+        expect(box.left).toBeGreaterThanOrEqual(16 + 3 * 20 + 2 * 4 + 8)
+        // The safe zone's lines (styles: top + 36, a 14px title, 6 between, an 18px line), centred between SPRINT's and JUMP's columns: the radar ends
+        // above the long line ("Leave the safe zone to start the wave.") and to the left of the short title above it
+        // (21 letters at 11px mono, 0.6 em each, with 0.16 em between).
+        const lineTop = top + 36 + 14 + 6
+        const mid = (16 + jump + 8 + (w - (16 + px(short, '--drun-fire') + 10 + jump + 8))) / 2
+        const titleLeft = mid - (21 * (11 * 0.6 + 11 * 0.16)) / 2
+        expect(box.bottom).toBeLessThan(lineTop)
+        expect(box.right).toBeLessThan(titleLeft)
+      }
+      // And it never needs the move where it is not made: under the hearts it would run into SPRINT only at 345 and under.
+      if (low) expect(top + 38 + 56 > sprint.top).toBe(moved)
     }
   })
 })

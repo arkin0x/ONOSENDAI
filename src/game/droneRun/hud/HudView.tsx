@@ -28,9 +28,9 @@ import { Radar } from './Radar'
 export interface Pulses {
   /** Counts up on each hit taken: the red flash restarts. */
   hurt: number
-  /** Counts up on each shot that lands, and on each kill: the hit marker restarts. */
+  /** Counts up on each shot that lands: the white hit marker restarts. */
   hit: number
-  /** The `hit` count at the last kill: while they are equal, the marker takes its kill look. */
+  /** Counts up on each kill: the gold kill marker restarts, in a span of its own, so a hit after it (the same step's next pellet, or the next pull) never cuts it short or whitens it. */
   kill: number
 }
 
@@ -108,7 +108,8 @@ export function HudView(p: HudViewProps): JSX.Element {
         <span className="drun-cross__h" />
         <span className="drun-cross__v" />
         <span className="drun-cross__dot" />
-        {pulses.hit > 0 && <span key={`hit${pulses.hit}`} className={`drun-hitmark${pulses.kill === pulses.hit ? ' is-kill' : ''}`} />}
+        {pulses.hit > 0 && <span key={`hit${pulses.hit}`} className="drun-hitmark" />}
+        {pulses.kill > 0 && <span key={`kill${pulses.kill}`} className="drun-hitmark is-kill" />}
       </div>
 
       <div className="drun-top">

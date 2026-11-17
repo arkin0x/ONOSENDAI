@@ -18,6 +18,7 @@ import { useState } from 'react'
 import { useGame } from '../../store/useGame'
 import { Canvas3D } from './Canvas3D'
 import { DroneRunHudMount } from './hud/DroneRunHud'
+import { playClick } from './clicks'
 
 export function DroneRunScreen(): JSX.Element | null {
   const session = useGame((s) => s.session)
@@ -28,6 +29,8 @@ export function DroneRunScreen(): JSX.Element | null {
   const { game, world, entry, level, worldError } = session
 
   const leave = async (): Promise<void> => {
+    // The same press sound as EXIT GAME on a card (clicks.ts).
+    playClick('ui:exit')
     const refused = await useGame.getState().exit()
     setExitFailed(refused !== null)
   }

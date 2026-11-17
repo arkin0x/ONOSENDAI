@@ -11,7 +11,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  attachDesktop, keyAction, lookBy, noteSprintLocked, pressSprintPad, releaseSprintPad, sprintHeld, sprintLatched, SPRINT_TAP_MS, lookRateNow, lookState, lookStickRate, noteWeapons, padFiring, pointer, readInput, releaseAll, resetInput, ringAt, setFire, setInputPaused, setLookRate, setSprint, stickVector, tickLook,
+  attachDesktop, controls$, keyAction, pressJump, setSprintLatch, lookBy, noteSprintLocked, pressSprintPad, releaseSprintPad, sprintHeld, sprintLatched, SPRINT_TAP_MS, lookRateNow, lookState, lookStickRate, noteWeapons, padFiring, pointer, readInput, releaseAll, resetInput, ringAt, setFire, setInputPaused, setLookRate, setSprint, stickVector, tickLook,
   TouchTracker, MOUSE_RAD_PER_PX, DRAG_RAD_PER_PX, STICK_DEAD, TOUCH_RAD_PER_PX, PITCH_LIMIT, LOOK_DEAD, LOOK_CURVE, LOOK_MAX_YAW, LOOK_MAX_PITCH, AIM_SCALE, RING_MARGIN, aimingNow,
 } from '../../input'
 
@@ -721,5 +721,110 @@ describe('aim: the MOVE stick aims while the rail charges', () => {
     releaseAll()
     expect(padFiring()).toBe(false)
     expect(aimingNow()).toBe(false)
+  })
+})
+
+describe('the press sounds\' presses (controls$)', () => {
+  const W = 375, H = 812
+  const MOVE = { cx: 80, cy: H - 84, radius: 60 }
+  const LOOK = { cx: W - 80, cy: H - 84, radius: 60 }
+  const listen = (): { heard: string[]; off: () => void } => {
+    const heard: string[] = []
+    const l = (c: string): void => { heard.push(c) }
+    controls$.listeners.add(l)
+    return { heard, off: () => { controls$.listeners.delete(l) } }
+  }
+
+  it('the desktop keys and the mouse press the same controls: Space, 1 to 3, Q, the wheel, R, Shift, a click', () => {
+    const h = host()
+    const c = listen()
+    noteWeapons(3, 0)
+    key(h, 'keydown', 'Space'); key(h, 'keyup', 'Space')
+    key(h, 'keydown', 'Digit1')
+    key(h, 'keydown', 'Digit3')
+    key(h, 'keydown', 'KeyQ')
+    key(h, 'keydown', 'KeyR')
+    key(h, 'keydown', 'ShiftLeft'); key(h, 'keyup', 'ShiftLeft')
+    // The first click takes the pointer and does not fire (no sound); the next fires.
+    h.el.fire('pointerdown', mouse())
+    h.win.fire('pointerup', mouse())
+    expect(c.heard).not.toContain('fire')
+    h.el.fire('pointerdown', mouse())
+    h.win.fire('pointerup', mouse())
+    // Choosing the gun already in hand is no switch.
+    expect(c.heard).toEqual(['jump', 'switch', 'switch', 'reload', 'sprintOn', 'sprintOff', 'fire'])
+    c.off(); h.detach()
+  })
+
+  it('a held key repeats without repeating its sound: one JUMP, one SPRINT on, one switch, one RELOAD', () => {
+    const h = host()
+    const c = listen()
+    noteWeapons(3, 0)
+    for (const code of ['Space', 'ShiftLeft', 'KeyQ', 'KeyR']) {
+      key(h, 'keydown', code)
+      for (let i = 0; i < 30; i++) key(h, 'keydown', code, { repeat: true })
+    }
+    expect(c.heard).toEqual(['jump', 'sprintOn', 'switch', 'reload'])
+    // Both Shifts down, one lifted: still sprinting, no sound; the other lifted: SPRINT off, once.
+    key(h, 'keydown', 'ShiftRight')
+    key(h, 'keyup', 'ShiftLeft')
+    expect(c.heard.length).toBe(4)
+    key(h, 'keyup', 'ShiftRight')
+    key(h, 'keyup', 'KeyW')
+    expect(c.heard.slice(4)).toEqual(['sprintOff'])
+    c.off(); h.detach()
+  })
+
+  it('a trackpad swipe (a flood of small wheel events) is one switch sound, and the next swipe one more', () => {
+    const clock = { t: 10_000 }
+    const h = host('grant', clock)
+    const c = listen()
+    noteWeapons(3, 0)
+    for (let i = 0; i < 40; i++) { clock.t += 16; h.el.fire('wheel', { deltaY: 8, deltaMode: 0 }) }
+    expect(c.heard).toEqual(['switch'])
+    clock.t += 500
+    for (let i = 0; i < 40; i++) { clock.t += 16; h.el.fire('wheel', { deltaY: 8, deltaMode: 0 }) }
+    expect(c.heard).toEqual(['switch', 'switch'])
+    c.off(); h.detach()
+  })
+
+  it('sprint ending by anything but a press of SPRINT is silent: the MOVE stick let go, the page losing focus, the keys detached, a card', () => {
+    const latch = (): void => { pressSprintPad('pad:sprint:1', 1000); releaseSprintPad('pad:sprint:1', 1050) }
+    const c = listen()
+    // The MOVE stick let go with SPRINT latched.
+    latch()
+    expect(sprintLatched()).toBe(true)
+    const t = new TouchTracker(() => MOVE, { look: () => LOOK })
+    t.down(7, MOVE.cx, MOVE.cy, W, H)
+    t.move(7, MOVE.cx, MOVE.cy - 50)
+    t.up(7)
+    expect(sprintHeld()).toBe(false)
+    // The window losing focus, the page hidden (the HUD calls releaseAll), and every finger cleared.
+    latch(); releaseAll()
+    latch(); t.down(8, MOVE.cx, MOVE.cy, W, H); t.clear()
+    // The latch taken off directly, and Shift let go of by the keys being detached (the screen closing) or the window's blur.
+    latch(); setSprintLatch(false)
+    const h = host()
+    key(h, 'keydown', 'ShiftLeft')
+    h.win.fire('blur', {})
+    key(h, 'keydown', 'ShiftLeft')
+    h.detach()
+    expect(sprintHeld()).toBe(false)
+    // A card up.
+    latch(); setInputPaused(true); setInputPaused(false)
+    // A cancelled touch on SPRINT (no lift) ends the hold without a word.
+    pressSprintPad('pad:sprint:2', 5000); releaseSprintPad('pad:sprint:2', 5600, false)
+    expect(c.heard.filter((x) => x === 'sprintOff')).toEqual([])
+    expect(c.heard.every((x) => x === 'sprintOn')).toBe(true)
+    c.off()
+  })
+
+  it('JUMP while a card is up is nothing', () => {
+    const c = listen()
+    setInputPaused(true)
+    pressJump()
+    setInputPaused(false)
+    expect(c.heard).toEqual([])
+    c.off()
   })
 })

@@ -223,9 +223,10 @@ export function setSprintLatch(on: boolean): void {
 export function pressSprintPad(source: string, now: number): void {
   if (paused) return
   sprintPresses.set(source, { at: now, wasLatched: latched })
-  // The finger first, then the latch off, so sprint never flickers off and on (one press sound, not three).
-  setSprint(source, true)
-  setSprintLatch(false)
+  sprintPress(() => {
+    setSprint(source, true)
+    setSprintLatch(false)
+  })
 }
 
 /**
@@ -236,21 +237,18 @@ export function pressSprintPad(source: string, now: number): void {
 export function releaseSprintPad(source: string, now: number, tap = true): void {
   const p = sprintPresses.get(source)
   sprintPresses.delete(source)
-  // A tap latches before the finger lets go, so sprint stays on without a flicker.
-  if (tap && p && !p.wasLatched && !paused && now - p.at < SPRINT_TAP_MS) setSprintLatch(true)
-  setSprint(source, false)
+  const lift = (): void => {
+    if (tap && p && !p.wasLatched && !paused && now - p.at < SPRINT_TAP_MS) setSprintLatch(true)
+    setSprint(source, false)
+  }
+  // A finger lifting is a press of SPRINT (it says SPRINT off when sprint ends by it); a cancelled touch is not.
+  if (tap) sprintPress(lift); else lift()
 }
 
 /** Stamina ran dry (the lockout runs): the latch comes off, so sprint is tapped on again when it is back (the runner tells it each step). */
 export function noteSprintLocked(locked: boolean): void {
-  if (locked && !wasLocked && !paused) {
-    // The lockout's own sound, not SPRINT off as well.
-    quietSprint = true
-    setSprintLatch(false)
-    quietSprint = false
-    sprintWas = sprintHeld()
-    pressed('lockout')
-  } else if (locked) setSprintLatch(false)
+  if (locked) setSprintLatch(false)
+  if (locked && !wasLocked && !paused) pressed('lockout')
   wasLocked = locked
 }
 /** The rail charging on a phone (TouchTracker.setAim sets it): the steps read no movement while it is on. */
@@ -260,27 +258,35 @@ export function aimingNow(): boolean { return aiming }
 /**
  * A control pressed, for its press sound (clicks.ts; the HUD plays it):
  * FIRE going down (any finger or the mouse, the first of them), JUMP, a gun
- * chosen or cycled, RELOAD, sprint coming on or off (any source, the latch
- * too), and the stamina lockout. Never while paused, never a stick.
+ * chosen or cycled, RELOAD, sprint coming on or off by a press of SPRINT
+ * itself (the phone's button, Shift), and the stamina lockout. Never while
+ * paused, never a stick, never sprint ending by anything but its press.
  */
 export type ControlPress = 'fire' | 'jump' | 'switch' | 'reload' | 'sprintOn' | 'sprintOff' | 'lockout'
 export const controls$ = { listeners: new Set<(c: ControlPress) => void>() }
 function pressed(c: ControlPress): void { for (const l of [...controls$.listeners]) l(c) }
-let sprintWas = false
-let quietSprint = false
 let wasLocked = false
+
+/**
+ * A press on SPRINT itself (the phone's button, Shift): `change` does it,
+ * and if sprint came on or went off by it, that is told. Only these
+ * presses say SPRINT on or off; sprint ending any other way (the MOVE
+ * stick let go, the page losing focus, a card, the screen closing) is
+ * silent. In the lockout, sprint ending says nothing (the lockout said
+ * it), and SPRINT pressed again answers with the lockout's sound: not yet.
+ */
+function sprintPress(change: () => void): void {
+  const was = sprintHeld()
+  change()
+  const now = sprintHeld()
+  if (now === was || paused) return
+  if (now) pressed(wasLocked ? 'lockout' : 'sprintOn')
+  else if (!wasLocked) pressed('sprintOff')
+}
 
 /** Who hears FIRE and SPRINT going down or up (the HUD: AIM, the SPRINT button lit). */
 export const held$ = { listeners: new Set<() => void>() }
-function heard(): void {
-  const now = sprintHeld()
-  if (now !== sprintWas) {
-    sprintWas = now
-    // In the lockout, sprint ending says nothing (the lockout said it), and SPRINT pressed again answers with the lockout's sound: not yet.
-    if (!paused && !quietSprint && !(wasLocked && !now)) pressed(now ? (wasLocked ? 'lockout' : 'sprintOn') : 'sprintOff')
-  }
-  for (const l of [...held$.listeners]) l()
-}
+function heard(): void { for (const l of [...held$.listeners]) l() }
 export function pressJump(): void { if (!paused) { edges.jump = true; pressed('jump') } }
 export function pressReload(): void { if (!paused) { edges.reload = true; pressed('reload') } }
 export function pressSelect(index: number): void {
@@ -319,7 +325,6 @@ export function releaseAll(): void {
 export function resetInput(yaw = 0, pitch = 0): void {
   releaseAll()
   paused = false
-  sprintWas = false
   wasLocked = false
   weapons = { count: 3, current: 0 }
   setLook(yaw, pitch)
@@ -402,7 +407,7 @@ export function attachDesktop(host: DesktopHost, opts: DesktopOptions = {}): () 
     e.preventDefault()
     opts.onGesture?.()
     if (a.kind === 'move') { holdMove(`key:${e.code}`, a.dir); return }
-    if (a.kind === 'sprint') { setSprint(`key:${e.code}`, true); return }
+    if (a.kind === 'sprint') { sprintPress(() => setSprint(`key:${e.code}`, true)); return }
     if (e.repeat) return
     if (a.kind === 'jump') pressJump()
     else if (a.kind === 'select') pressSelect(a.index)
@@ -413,7 +418,7 @@ export function attachDesktop(host: DesktopHost, opts: DesktopOptions = {}): () 
   const keyup = (e: KeyboardEvent): void => {
     if (e.key === 'Meta') { releaseAll(); return }
     releaseMove(`key:${e.code}`)
-    setSprint(`key:${e.code}`, false)
+    sprintPress(() => setSprint(`key:${e.code}`, false))
     // A focused button presses on Space's keyup: a jump never presses EXIT GAME.
     if (e.code === 'Space') e.preventDefault()
   }

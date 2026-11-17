@@ -130,16 +130,16 @@ describe('the mode button', () => {
     }
   })
 
-  it('from BUILD goes to SCAN at the build cursor, then home to HOP, where EXIT leaves the view', () => {
+  it('from BUILD goes to SCAN at the build cursor, then home to HOP, as EXIT goes to HOP', () => {
     const home = { ...S().position }
     B().enter('build')
     S().moveCursor({ axis: 'x', dir: 1 })
     S().moveCursor({ axis: 'x', dir: 1 })
     expect(B().leftAvatar).toBe(true)
-    // EXIT (and B, and Esc) leave the view where it is (R6).
+    // EXIT (and B, and Esc) go back to HOP (arkinox, 2026-11-17).
     B().exit()
-    expect(S().focus?.drive).toBe(true)
-    S().clearFocus()
+    expect(S().focus).toBeNull()
+    expect(currentPadMode()).toBe('hop')
 
     B().enter('build')
     S().moveCursor({ axis: 'x', dir: 1 })

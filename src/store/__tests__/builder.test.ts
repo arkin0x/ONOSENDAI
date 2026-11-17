@@ -4,7 +4,7 @@
  * arkinox, 2026-10-07 (R5, R6): deploying uses the Builder instead of the
  * avatar's position; DEPLOY centers the Builder on the avatar; the controls
  * and the zoom move the build cursor; the Position panel jumps it; exiting
- * is like the workshop's and leaves the view where it is. And building
+ * is like the workshop's and, since 2026-11-17, goes back to HOP. And building
  * never moves you: nothing in BUILD mode proposes, computes or signs a move.
  */
 
@@ -210,16 +210,18 @@ describe('the build cursor', () => {
 })
 
 describe('leaving BUILD mode', () => {
-  it('EXIT leaves the view exactly where it is, as a free view with its RETURN', () => {
+  it('EXIT off your avatar goes back to HOP at your head, at the zoom you had before BUILD (arkinox, 2026-11-17)', () => {
+    S().adjustScale(2)
     B().enter('build')
     S().adjustScale(3)
     for (let i = 0; i < 5; i++) S().moveCursor({ axis: 'x', dir: 1 })
-    const view = { cursor: { ...S().cursor }, anchor: { ...S().anchor }, scaleExp: S().scaleExp, plane: S().anchorPlane }
     B().exit()
     expect(B().active).toBe(false)
-    expect(S().focus?.drive).toBe(true)
-    expect({ cursor: S().cursor, anchor: S().anchor, scaleExp: S().scaleExp, plane: S().anchorPlane }).toEqual(view)
-    expect(S().atHead()).toBe(false)
+    expect(S().focus).toBeNull()
+    expect(S().cursor).toEqual(S().position)
+    expect(S().anchor).toEqual(S().position)
+    expect(S().scaleExp).toBe(2)
+    expect(S().atHead()).toBe(true)
   })
 
   it('EXIT on your avatar ends the view at the zoom you are at, since the picture is the same', () => {

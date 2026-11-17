@@ -11181,10 +11181,12 @@ a.feed__act { text-decoration: none; }
 
 /* ---------- LOSING SYNC ----------
  *
- * WALK three or more steps ahead of its proofs (hud/SyncWarning.tsx). Dead
+ * WALK 15 or more events ahead of its proofs (hud/SyncWarning.tsx). Dead
  * centre, over the scene and under nothing a finger needs: it takes no
- * pointer events at all. In at a quarter second, out in a tenth, so catching
- * up clears it at once. */
+ * pointer events at all, and as position: fixed it takes no space. Its
+ * opacity is set inline, fading in with fluid WALK's slowdown (0 at 14 events
+ * ahead, 1 at 20); each change eases over a quarter second, and going out
+ * entirely takes 120 ms, so catching up clears it at once. */
 .syncwarn {
   /* After v1's derezz warning (ONOSENDAI v1 109540f, DerezzWarning.tsx):
      a 16:9 black panel in a thick hazard frame of 45 degree red and black
@@ -11209,7 +11211,6 @@ a.feed__act { text-decoration: none; }
   transition: opacity 120ms ease-out;
 }
 .syncwarn.is-on {
-  opacity: 1;
   transition: opacity 250ms ease-in;
   /* One stripe period along x is the band pair over sin 45: the loop is seamless. */
   animation: syncwarn-crawl 4s linear infinite;

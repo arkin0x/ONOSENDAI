@@ -1100,8 +1100,8 @@ export interface CyberspaceState {
   /**
    * Stop looking; the scene returns to your avatar. With `keepScale` the zoom
    * stays where it is instead of going back to the one the look began at:
-   * the Builder ends a view that already sits on your avatar this way, so
-   * leaving build mode changes nothing on screen (useBuilder `exit`).
+   * leaving build mode on your avatar ends its view this way, so nothing
+   * changes on screen (useBuilder `exit`).
    */
   clearFocus: (keepScale?: boolean) => void
   /** Hyperspace transit: non-null from boarding until arrival (DECK-0001 v3). */

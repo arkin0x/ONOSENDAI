@@ -51,33 +51,95 @@ export type HeaderFetch = (heights: number[]) => Promise<void>
 /**
  * The heights a pass of the clamp will read for a seed whose `created_at`
  * lies near height `near`, at `clock`: the median time past window at the
- * clock, the windows of the gallop down from it as far as `near`, and the
+ * clock, the windows of the gallop down from it as far as `near`, the windows
+ * of the bisection that follows (bisectionPath, for E and for F), and the
  * blocks around `near` where E and F lie. A prediction only: whatever else a
- * pass needs it asks for.
+ * pass needs it asks for. With `near` within a few dozen blocks of the truth,
+ * it is every header the pass reads, so a seed settles in one or two fetches
+ * rather than walking down a window at a time (sno-core's fallback walk when
+ * a bisection header is missing).
  */
 export function predictedHeights(near: number, clock: number): number[] {
   const out = new Set<number>()
   const window = (top: number): void => { for (let h = top - 10; h <= top; h++) if (h >= 0) out.add(h) }
   window(clock)
   for (let step = 1; clock - step >= Math.max(10, near - 300); step *= 2) window(clock - step)
-  for (let h = near - 30; h <= Math.min(clock, near + 30); h++) if (h >= 0) out.add(h)
+  for (const target of [near - CLAMP_BLOCKS, near + CLAMP_BLOCKS]) for (const x of bisectionPath(target, clock)) window(x)
+  for (let h = near - NEAR_SPAN; h <= Math.min(clock, near + NEAR_SPAN); h++) if (h >= 0) out.add(h)
   return [...out].sort((a, b) => a - b)
 }
 
+/** The clamp's margin (§4.2, two hours) in blocks of ten minutes. */
+const CLAMP_BLOCKS = 12
+/** How far either side of `near` every header is asked for: where the bisection ends, and the error of `near` it absorbs. */
+const NEAR_SPAN = 40
+
 /**
- * About the height whose header time is `t`, from the clock's own header and
- * ten minutes a block. Where E and F will be found (§4.2) depends on the
- * seed's `created_at`, never on the `planted` its planter wrote, so a seed
- * that states an absurd height makes this client fetch nothing for it.
+ * The heights whose median time past sno-core highestAtOrBelow reads, gallop
+ * then bisection, when the answer is height `target`: MTP(x), the median of
+ * x-10..x, is about the time of x-5, so it is below the answer's time while x
+ * is at most target + 5. Mirrors sno-core's search; a guess of where it goes,
+ * never a judgment.
+ */
+export function bisectionPath(target: number, clock: number): number[] {
+  const MTP_FLOOR = 10
+  const below = (x: number): boolean => x <= target + 5
+  const out: number[] = []
+  if (below(clock)) return out
+  let hi = clock
+  let step = 1
+  let lo = Math.max(MTP_FLOOR, clock - step)
+  for (;;) {
+    if (lo >= hi) return out
+    out.push(lo)
+    if (below(lo)) break
+    hi = lo
+    step *= 2
+    lo = Math.max(MTP_FLOOR, clock - step)
+  }
+  while (hi - lo > 1) {
+    const mid = lo + Math.floor((hi - lo) / 2)
+    out.push(mid)
+    if (below(mid)) lo = mid
+    else hi = mid
+  }
+  return out
+}
+
+/**
+ * About the height whose header time is `t`. Where E and F will be found
+ * (§4.2) depends on the seed's `created_at`, never on the `planted` its
+ * planter wrote, so a seed that states an absurd height makes this client
+ * fetch nothing for it. Read between the nearest headers held on either side
+ * of `t`, probing the gallop's heights down from the clock (clock - 1, - 2,
+ * - 4, ...), so blocks running faster or slower than ten minutes do not throw
+ * it off; ten minutes a block from the lowest header above `t` when nothing
+ * below it is held yet.
  */
 export function heightNear(t: number, clock: number, book: Pick<HeaderBook, 'time'>): number {
   const top = book.time(clock)
   if (top === undefined) return clock
-  return Math.max(0, Math.min(clock, clock - Math.round((top - t) / 600)))
+  const clamp = (h: number): number => Math.max(0, Math.min(clock, Math.round(h)))
+  if (top <= t) return clock
+  let hi = clock
+  let hiT = top
+  for (let step = 1; clock - step >= 0; step *= 2) {
+    const h = clock - step
+    const ht = book.time(h)
+    if (ht === undefined) continue
+    if (ht > t) { hi = h; hiT = ht; continue }
+    if (hiT === ht) break
+    return clamp(h + ((t - ht) * (hi - h)) / (hiT - ht))
+  }
+  return clamp(hi - (hiT - t) / 600)
 }
 
-/** The most fetches one call of `settlePlanted` makes before it leaves the seed pending for now. */
+/** The most fetches one call of `settlePlanted` makes, after its predicted batches, before it leaves the seed pending for now. */
 export const SETTLE_ROUNDS = 12
+/** Predicted batches at most, each from a better idea of where `created_at` lies. */
+const PREDICT_PASSES = 3
+/** How far below a missing header a round asks: a query holds a hundred heights. */
+const ROUND_BELOW = 90
 
 /**
  * The effective planted height of a seed at `clock`, fetching the headers it
@@ -137,16 +199,24 @@ async function settleAt(stated: number, createdAt: number, clock: number, book: 
   const time = (h: number): number | undefined => book.time(h)
   let result: PlantedState = effectivePlantedHeight(stated, createdAt, clock, time)
   if (result.state !== 'pending' || result.missingHeader === undefined) return result
-  // The clock's own window first: it says how far back `created_at` lies.
-  await fetch(predictedHeights(clock, clock))
-  await fetch(predictedHeights(heightNear(createdAt, clock, book), clock))
+  // Predicted in batches: the first from the clock's own header (ten minutes
+  // a block), each next one from the headers the last brought, until where
+  // `created_at` lies stops moving. Each is mostly heights already held.
+  let near: number | null = null
+  for (let i = 0; i < PREDICT_PASSES; i++) {
+    const n = heightNear(createdAt, clock, book)
+    if (near !== null && Math.abs(n - near) <= NEAR_SPAN / 4) break
+    near = n
+    await fetch(predictedHeights(n, clock))
+  }
   for (let round = 0; round < SETTLE_ROUNDS; round++) {
     result = effectivePlantedHeight(stated, createdAt, clock, time)
     if (result.state !== 'pending' || result.missingHeader === undefined) return result
     const missing = result.missingHeader
     if (book.isAbsent(missing)) return { ...result, waiting: true }
+    // sno-core walks down from a missing header one block at a time, so the window reaches well below it.
     const window: number[] = []
-    for (let h = missing - 20; h <= Math.min(clock, missing + 2); h++) if (h >= 0) window.push(h)
+    for (let h = missing - ROUND_BELOW; h <= Math.min(clock, missing + 2); h++) if (h >= 0) window.push(h)
     await fetch(window)
     if (!book.has(missing)) return { ...result, waiting: true }
   }

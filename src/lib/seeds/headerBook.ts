@@ -141,6 +141,7 @@ export class HeaderBook {
   private blobs: BlobHeaders[] = []
   private absent = new Map<number, number>()
   private listeners = new Set<() => void>()
+  private sinks = new Set<(header: VerifiedHeader) => void>()
   /** Rises whenever a header is added. */
   version = 0
 
@@ -184,12 +185,41 @@ export class HeaderBook {
     for (const h of heights) if (!this.has(h)) this.absent.set(h, until)
   }
 
+  /**
+   * A verified header, fresh from NTH. One for a height already held with
+   * another header replaces it (a newer anchor for that height), and the
+   * sinks are told either way it changed (seedSources keeps it in IndexedDB).
+   */
   add(header: VerifiedHeader): void {
     if (this.times.get(header.height) === header.time && this.hashes.get(header.height) === header.hash) return
     this.times.set(header.height, header.time)
     this.hashes.set(header.height, header.hash)
     this.absent.delete(header.height)
+    for (const s of this.sinks) s(header)
     this.bump()
+  }
+
+  /**
+   * Headers kept from an earlier visit (seedsDb loadHeaders), verified when
+   * they were first added. A height this page already has from NTH keeps the
+   * page's own: the fresher one wins. The sinks are not told; they wrote these.
+   */
+  addCached(headers: readonly VerifiedHeader[]): void {
+    let added = 0
+    for (const h of headers) {
+      if (this.times.has(h.height)) continue
+      this.times.set(h.height, h.time)
+      this.hashes.set(h.height, h.hash)
+      this.absent.delete(h.height)
+      added++
+    }
+    if (added > 0) this.bump()
+  }
+
+  /** Told of every header `add` takes in (not cached ones, not blobs, not test times). */
+  onHeader(sink: (header: VerifiedHeader) => void): () => void {
+    this.sinks.add(sink)
+    return () => { this.sinks.delete(sink) }
   }
 
   /** Times from injected headers (tests), `times[i]` at `startHeight + i`. */
@@ -223,37 +253,58 @@ export class HeaderBook {
 /** How many `#B` values one anchor query carries. */
 export const B_PER_QUERY = 100
 
-/** A read of anchors, the relays' (lib/relay.ts query) or a test's. */
-export type AnchorQuery = (filter: { kinds: number[]; authors: string[]; '#B': string[]; limit: number }) => Promise<NostrEvent[]>
+/**
+ * A read of anchors, the relays' (seedSources anchorRead) or a test's: the
+ * events, or the events and whether any relay answered (sent EOSE) at all.
+ */
+export type AnchorQuery = (filter: { kinds: number[]; authors: string[]; '#B': string[]; limit: number }) => Promise<NostrEvent[] | AnchorRead>
+
+/** What a read of anchors brought, and whether any relay answered it (a plain list counts as answered). */
+export interface AnchorRead { events: NostrEvent[]; answered: boolean }
 
 /**
  * Fetch the headers of `heights` from NTH's anchors into `book`: by authors
  * and `#B`, a hundred heights a query, keeping only headers that verify. A
  * height that came back without one is marked absent. Heights the book
  * holds, or knows to be absent, are not asked for.
+ *
+ * A query that throws, or that no relay answered (seedSources anchorRead:
+ * none sent EOSE in time, a relay still connecting or signing in, a refusal),
+ * says nothing about whether a header exists, so its heights are not marked
+ * absent: the next pass asks again, rather than reading as waiting for blocks
+ * for ABSENT_MS after a slow start. What it did bring is kept.
  */
 export async function fetchAnchorHeaders(book: HeaderBook, heights: Iterable<number>, query: AnchorQuery, verify?: (ev: NostrEvent) => boolean): Promise<void> {
   const want = [...new Set(heights)].filter((h) => h >= 0 && !book.has(h) && !book.isAbsent(h)).sort((a, b) => a - b)
-  const ask = async (chunk: number[]): Promise<void> => {
-    let events: NostrEvent[] = []
+  /** False when no relay answered. */
+  const ask = async (chunk: number[]): Promise<boolean> => {
+    let read: AnchorRead
     try {
-      events = await query({ kinds: [321], authors: [NTH_PUBKEY], '#B': chunk.map(String), limit: chunk.length * 3 })
-    } catch { events = [] }
-    for (const ev of events) {
+      const got = await query({ kinds: [321], authors: [NTH_PUBKEY], '#B': chunk.map(String), limit: chunk.length * 3 })
+      read = Array.isArray(got) ? { events: got, answered: true } : got
+    } catch { return false }
+    for (const ev of read.events) {
       const header = headerOfAnchor(ev, verify)
       if (header && chunk.includes(header.height)) book.add(header)
     }
+    return read.answered
   }
-  for (let i = 0; i < want.length; i += B_PER_QUERY) {
-    const chunk = want.slice(i, i + B_PER_QUERY)
-    await ask(chunk)
+  const one = async (chunk: number[]): Promise<void> => {
+    if (!(await ask(chunk))) return
     // Asked once more, on their own, before they count as absent: several
     // anchors to a height (§2.5) can fill a query's limit before every height is in.
     const missing = chunk.filter((h) => !book.has(h))
-    if (missing.length > 0 && missing.length < chunk.length) await ask(missing)
+    if (missing.length > 0 && missing.length < chunk.length && !(await ask(missing))) return
     book.markAbsent(chunk)
   }
+  const chunks: number[][] = []
+  for (let i = 0; i < want.length; i += B_PER_QUERY) chunks.push(want.slice(i, i + B_PER_QUERY))
+  // A few queries at once: each is a round trip, and a batch is rarely more than a few hundred heights.
+  for (let i = 0; i < chunks.length; i += QUERIES_AT_ONCE) await Promise.all(chunks.slice(i, i + QUERIES_AT_ONCE).map(one))
 }
+
+/** How many anchor queries fetchAnchorHeaders keeps open at once. */
+export const QUERIES_AT_ONCE = 4
 
 /** NTH's newest anchors, verified, into the book: its top is then the tip this client trusts. */
 export async function fetchNthTip(book: HeaderBook, query: (filter: { kinds: number[]; authors: string[]; limit: number }) => Promise<NostrEvent[]>, verify?: (ev: NostrEvent) => boolean): Promise<number | null> {

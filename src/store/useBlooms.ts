@@ -12,7 +12,7 @@
 
 import { create } from 'zustand'
 import { BloomEngine, type BloomView } from '../lib/seeds/bloomEngine'
-import { dnaResolver, fetchSeedHeaders, headerBook, refreshTrustedTip, trustedTip, TIP_REFRESH_MS } from '../lib/seeds/seedSources'
+import { dnaResolver, fetchSeedHeaders, headerBook, headersReady, noteSettled, refreshTrustedTip, settledBefore, trustedTip, TIP_REFRESH_MS, TIP_RETRY_MS } from '../lib/seeds/seedSources'
 import { deviceBudget, looksLikePhone } from '../lib/seeds/bloomBudget'
 import { MISSING_RETRY_MS } from '../lib/seeds/dnaStore'
 import { forgetInWorker, growInWorker } from '../lib/seeds/growClient'
@@ -63,12 +63,23 @@ function getEngine(): BloomEngine {
     forget: forgetInWorker,
     budget: deviceBudget(looksLikePhone()),
     onView: queueView,
+    // What the last visit kept: seeds grow at once from it, and the network moves them on.
+    ready: headersReady,
+    settledBefore,
+    noteSettled,
   })
   engine = made
   // A new trusted tip: every bloom grows by a block, and pending seeds may settle.
-  let tip = trustedTip()
+  let tip: number | null = null
+  let retry: ReturnType<typeof setTimeout> | null = null
   const ask = (): void => {
-    void refreshTrustedTip(useHyperspace.getState().tipHeight).then((t) => {
+    void headersReady().then(() => {
+      // The kept tip is where every pass starts; only a newer one regrows.
+      if (tip === null) tip = trustedTip()
+      return refreshTrustedTip(useHyperspace.getState().tipHeight)
+    }).then((t) => {
+      // No tip at all yet (a first visit, the first ask found nothing): asked again soon, not in two minutes.
+      if (t === null && retry === null && typeof setTimeout === 'function') retry = setTimeout(() => { retry = null; ask() }, TIP_RETRY_MS)
       if (t === tip) return
       tip = t
       made.refreshAll()

@@ -23,7 +23,11 @@ vi.mock('../../lib/seeds/seedSources', () => ({
   headerBook: {},
   refreshTrustedTip: async () => null,
   trustedTip: () => null,
+  headersReady: async () => undefined,
+  settledBefore: () => undefined,
+  noteSettled: () => undefined,
   TIP_REFRESH_MS: 1e9,
+  TIP_RETRY_MS: 1e9,
 }))
 vi.mock('../../lib/seeds/growClient', () => ({ growInWorker: async () => ({}), forgetInWorker: () => undefined }))
 

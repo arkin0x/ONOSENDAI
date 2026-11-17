@@ -248,6 +248,11 @@ async function layout(name, options, pad = 0) {
   if (!pad) {
     const hit = await landing(page)
     check(hit.folded && hit.glint === 'ahead-glint', `${name}: a real move landed, its tick folded and the total glinted (${JSON.stringify(hit)})`)
+    // The step may have been more than one move: stand until all of it has landed.
+    for (let i = 0; i < 600; i++) {
+      if (await page.evaluate(() => { const w = window.__walk.getState(); return w.behind === 0 && w.open === null && w.running === null && !w.falling })) break
+      await page.waitForTimeout(100)
+    }
     await page.waitForTimeout(2200)
     const after = await read(page)
     check(!after.drawn && after.chip.split(' ')[3] === base.chip.split(' ')[3] && after.chip.split(' ').slice(0, 2).join(' ') === base.chip.split(' ').slice(0, 2).join(' '), `${name}: and afterwards the bar is gone and the chip is where it was, as tall as it was (${after.chip})`)

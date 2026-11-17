@@ -273,3 +273,44 @@ describe('a bag Cyberspace TV kept', () => {
   })
 })
 
+
+describe('on load, the nearest first and handed over as they open', () => {
+  const row = (key: string, seenAt: number, origin?: { x: string; y: string; z: string }, plane: 0 | 1 = 0) =>
+    ({ rowKey: key, owner: ME, outer: {} as NostrEvent, keyHex: '', refs: {}, itemIds: [], seenAt, ...(origin ? { origin: { at: origin, plane } } : {}) })
+
+  it('orders rows in your plane by distance from where you stand, then the rest most recently seen first', async () => {
+    const { nearFirst } = await import('../useFound')
+    const here = { x: 1000n, y: 1000n, z: 1000n }
+    const rows = [
+      row('far', 5, { x: '9000', y: '1000', z: '1000' }),
+      row('none-old', 1),
+      row('near', 2, { x: '1001', y: '1000', z: '999' }),
+      row('other-plane', 9, { x: '1000', y: '1000', z: '1000' }, 1),
+      row('none-new', 7),
+    ]
+    expect(nearFirst(rows, here, 0).map((r) => r.rowKey)).toEqual(['near', 'far', 'other-plane', 'none-new', 'none-old'])
+    // Not known where you stand: most recently seen first.
+    expect(nearFirst(rows, null, 0).map((r) => r.rowKey)).toEqual(['other-plane', 'none-new', 'far', 'near', 'none-old'])
+  })
+
+  it('a long list reaches the world in pieces: the first after a few rows, not after the last', async () => {
+    const a = await boot()
+    const { FIRST_ROWS } = await import('../useFound')
+    const n = FIRST_ROWS + 2
+    for (let i = 0; i < n; i++) {
+      const p = { x: 90_000n + BigInt(i) * 4_000_000n, y: 4_000n, z: 71n }
+      const k = regionKeyAt(p, 6, 20)
+      const m = finalizeEvent(messageInnerTemplate(`bag ${i}`, p, 0, 5), hider)
+      const outer = finalizeEvent(await bagTemplate([m], k.key, k.lookupId, 6, 100), hider)
+      await a.cache.unbagRemembered(outer, k.key, undefined, undefined, 6)
+    }
+    await a.found.flushFound()
+    discovered = {}
+    added.length = 0
+    const b = await boot()
+    expect(b.found.loadedRows()).toHaveLength(n)
+    expect(added.length).toBe(2)
+    expect(added[0]).toHaveLength(FIRST_ROWS)
+    expect(texts()).toHaveLength(n)
+  })
+})

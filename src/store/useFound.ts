@@ -30,6 +30,7 @@ import { useCyberspace } from './useCyberspace'
 import { useInventory } from './useInventory'
 import { useShards } from './useShards'
 import { useStarred } from './useStarred'
+import type { Position } from '../lib/space'
 
 /** A bag seen again is not rewritten for this long: a scan runs every time you cross a cube. */
 const RESEEN_SECONDS = 6 * 60 * 60
@@ -53,6 +54,34 @@ function database(): Promise<IDBDatabase | null> {
     })
   }
   return db
+}
+
+/** Rows opened before the first are handed to the shard store: the few nearest you draw at once. */
+export const FIRST_ROWS = 8
+/** After the first, opened rows are handed over this many at a time, so a long list fills in as it opens. */
+export const NEXT_ROWS = 32
+
+/**
+ * The rows in the order they are opened on load: those found in your plane
+ * nearest where you stand first (their origin, by the sum of the axis
+ * distances), then the rest most recently seen first. Pure.
+ */
+export function nearFirst(stored: readonly FoundBag[], at: Position | null, plane: number | null): FoundBag[] {
+  const abs = (v: bigint): bigint => (v < 0n ? -v : v)
+  const dist = (r: FoundBag): bigint | null => {
+    if (!at || !r.origin || r.origin.plane !== plane) return null
+    try {
+      return abs(BigInt(r.origin.at.x) - at.x) + abs(BigInt(r.origin.at.y) - at.y) + abs(BigInt(r.origin.at.z) - at.z)
+    } catch { return null }
+  }
+  const keyed = stored.map((r) => ({ r, d: dist(r) }))
+  keyed.sort((a, b) => {
+    if (a.d !== null && b.d !== null) return a.d < b.d ? -1 : a.d > b.d ? 1 : b.r.seenAt - a.r.seenAt
+    if (a.d !== null) return -1
+    if (b.d !== null) return 1
+    return b.r.seenAt - a.r.seenAt
+  })
+  return keyed.map((k) => k.r)
 }
 
 /** The loaded owner's rows and what each opened to, for the budget's questions. */
@@ -212,10 +241,24 @@ export const useFound = create<FoundState>((set, get) => ({
       return
     }
     if (get().owner !== owner) return
-    const found: Hidden[] = []
-    const watchedFinds: Hidden[] = []
+    let found: Hidden[] = []
+    let watchedFinds: Hidden[] = []
     const bad: string[] = []
-    for (const row of stored) {
+    // Through the same door as a scan's finds: deletions you made are
+    // honored, and nothing opens but a chest this identity opened by hand
+    // before, opened again as it was (store/useOpenedChests). Kept by TV:
+    // back as TV's finds are, no chest in them opening.
+    const hand = (): void => {
+      if (found.length > 0) useShards.getState().addDiscovered(found)
+      if (watchedFinds.length > 0) useShards.getState().addDiscovered(watchedFinds, { watched: true })
+      found = []
+      watchedFinds = []
+    }
+    // Nearest first, handed over as they open: what is around you is on
+    // screen after a few rows, not after the last of hundreds.
+    const here = useCyberspace.getState()
+    let done = 0
+    for (const row of nearFirst(stored, here.position, here.headPlane)) {
       const items = await openRow(row)
       if (get().owner !== owner) return
       if (!items) { bad.push(row.rowKey); continue }
@@ -226,16 +269,13 @@ export const useFound = create<FoundState>((set, get) => ({
       opened.set(row.rowKey, items)
       if (row.watched) watchedFinds.push(...items)
       else found.push(...items)
+      done++
+      if (done === FIRST_ROWS || (done > FIRST_ROWS && (done - FIRST_ROWS) % NEXT_ROWS === 0)) hand()
     }
     if (bad.length > 0) void serial((db) => deleteFound(db, bad))
     set({ storage: 'indexeddb' })
     rememberWaiting(owner)
-    // Through the same door as a scan's finds: deletions you made are
-    // honored, and nothing opens but a chest this identity opened by hand
-    // before, opened again as it was (store/useOpenedChests).
-    if (found.length > 0) useShards.getState().addDiscovered(found)
-    // Kept by TV: back as TV's finds are, no chest in them opening.
-    if (watchedFinds.length > 0) useShards.getState().addDiscovered(watchedFinds, { watched: true })
+    hand()
     void pruneDeletions(owner, [...rows.values()])
   },
 }))

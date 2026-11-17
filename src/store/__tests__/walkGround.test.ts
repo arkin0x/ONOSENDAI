@@ -55,7 +55,9 @@ import { useCyberspace } from '../useCyberspace'
 import { tickFall, useWalk } from '../useWalk'
 import { useShards, type WorldItem } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
-import { clearWalls, eyeReach, wallItemsAt, wallsBuilt } from '../walkWalls'
+import { REST_FLOOR, clearWalls, eyeReach, restDrop, wallItemsAt, wallsBuilt } from '../walkWalls'
+import { markerEdges } from '../../scene/avatarMarker'
+import { MARKER_EYE } from '../../lib/avatarEye'
 import { groundFluid, resetFluid, tickFluid } from '../walkFluid'
 import { useFluidWalk } from '../fluidSwitch'
 import { walkFacing, walkFall, walkFallUp, walkGlide, walkRise } from '../../lib/walkEye'
@@ -172,7 +174,7 @@ function eyeShare(p: V3): number {
 function camera(p: V3): V3 {
   const share = eyeShare(p)
   const above = EYE[1] * share
-  const lower = walkGlide.exact && walkRise.offset < 0 ? Math.max(walkRise.offset, -Math.max(0, above - ROOM)) : 0
+  const lower = walkRise.offset < 0 ? Math.max(walkRise.offset, -Math.max(0, above - ROOM)) : 0
   return [p[0] + EYE[0] * share, p[1] + above + lower, p[2] + EYE[2] * share]
 }
 
@@ -489,27 +491,90 @@ describe('the walker stands on the geometry, not on the gibson', () => {
   }
 })
 
-describe('the step WALK (the switch off) is untouched', () => {
-  it('draws the walker on its gibson, and groundFluid writes nothing', async () => {
+describe('every avatar stands with its origin on the surface (restDrop, markerEdges)', () => {
+  /** Where an avatar's origin is drawn, in gibsons from `start`, standing at `at`: its gibson's centre, lowered by restDrop. */
+  async function restsAt(at: Position): Promise<number> {
+    const plane = useCyberspace.getState().plane
+    let r = restDrop(at, plane)
+    if (r.pending) { await wallsBuilt(); r = restDrop(at, plane) }
+    expect(r.pending).toBe(false)
+    return Number(at.y - start.y) - r.drop
+  }
+  const up = (n: number): Position => ({ ...start, y: start.y + BigInt(n) })
+
+  it('a feet-origin avatar just above a half-height platform has its feet on the top, not a gibson over it', async () => {
+    world(start, boxes('Half platform', [[[-4, -3, -4], [4, -0.5, 4]]]), [0, 0, 0])
+    expect(await restsAt(start)).toBeCloseTo(-0.5, 9)
+  })
+
+  it('a whole gibson over a whole-unit platform top, the feet are on it', async () => {
+    world(start, boxes('Whole platform', [[[-4, -3, -4], [4, -1, 4]]]), [0, 0, 0])
+    expect(await restsAt(start)).toBeCloseTo(-1, 9)
+    // In the top's own plane: on it already.
+    expect(await restsAt(up(-1))).toBeCloseTo(-1, 9)
+  })
+
+  it('never floats or sinks at a fractional surface height', async () => {
+    // Tick-exact heights (a vertex is a whole number of 1/120 units), on both sides of the gibson's floor.
+    for (const top of [-2, -30, -59, -61, -92, -119].map((t) => t / 120)) {
+      clearWalls()
+      world(start, boxes(`Platform ${top}`, [[[-4, -3, -4], [4, top, 4]]]), [0, 0, 0])
+      expect(await restsAt(start)).toBeCloseTo(top, 9)
+    }
+  })
+
+  it('with nothing within a gibson under it, it stands on its own gibson\'s floor', async () => {
+    world(start, boxes('Low platform', [[[-4, -3, -4], [4, -1.5, 4]]]), [0, 0, 0])
+    expect(await restsAt(start)).toBe(-REST_FLOOR)
+    expect(await restsAt(up(5))).toBe(5 - REST_FLOOR)
+  })
+
+  it('a face that stops no walker holds no avatar up, as it holds no walker', async () => {
+    const open = withConstrain(boxes('Unconstrained', [[[-4, -3, -4], [4, -0.5, 4]]]), 'off')
+    world(start, open, [0, 0, 0])
+    expect(await restsAt(start)).toBe(-REST_FLOOR)
+  })
+
+  it('the default icosahedron\'s lowest point is its origin, so it stands where any avatar stands', () => {
+    const g = markerEdges()
+    g.computeBoundingBox()
+    expect(g.boundingBox!.min.y).toBeCloseTo(0, 12)
+    expect(g.boundingBox!.max.y).toBeCloseTo(1, 12)
+    // Still one cell across, its vertex straight below its centre.
+    expect(g.boundingBox!.max.x - g.boundingBox!.min.x).toBeLessThanOrEqual(1 + 1e-12)
+    g.dispose()
+  })
+
+  it('the default avatar\'s eye is where it was on its shape: 0.375 over its centre', () => {
+    expect(MARKER_EYE - REST_FLOOR).toBe(0.375)
+  })
+})
+
+describe('the step WALK (the switch off)', () => {
+  it('steps whole gibsons as it always did, the walker drawn with its origin on the surface, and the eye asked as it always was', async () => {
     useFluidWalk.setState({ on: false })
     world(start, ledge(), [0, 0, 0])
     await walk(false)
-    const seen: V3[] = []
+    const cells: V3[] = []
     for (const code of ['KeyW', 'KeyW', 'KeyW', 'KeyW', 'KeyS', 'KeyS']) {
       down(code)
       frame(16)
       up(code)
       for (let k = 0; k < 30; k++) {
         frame(16)
-        expect(walkGlide.active).toBe(false)
         expect(walkGlide.exact).toBe(false)
-        expect([walkGlide.x, walkGlide.y, walkGlide.z]).toEqual([0, 0, 0])
       }
-      seen.push(drawn())
+      const cs = useCyberspace.getState()
+      const cell: V3 = [Number(cs.cursor.x - start.x), Number(cs.cursor.y - start.y), Number(cs.cursor.z - start.z)]
+      cells.push(cell)
+      // The rig eases onto this point: the gibson, lowered onto the surface under its centre.
+      const p = drawn()
+      expect(p[0]).toBe(cell[0])
+      expect(p[1]).toBeCloseTo(ledgeHeight(cell[0]), 9)
     }
     // Whole gibsons only: up onto the ledge and back down, on the gibsons the step WALK always stood on.
-    for (const p of seen) for (const v of p) expect(Number.isInteger(v)).toBe(true)
-    expect(seen.some((p) => p[1] === 1)).toBe(true)
+    for (const c of cells) for (const v of c) expect(Number.isInteger(v)).toBe(true)
+    expect(cells.some((c) => c[1] === 1)).toBe(true)
     // With the switch off, the eye's question is the one it always was.
     const cs = useCyberspace.getState()
     const items = wallItemsAt(cs.plane, cs.cursor)

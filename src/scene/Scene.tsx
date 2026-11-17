@@ -587,6 +587,8 @@ function LensShift(): null {
  * direction to turn about.
  */
 const WALK_EYE = 0.001
+/** The camera's trail below a stair's rise this frame (walkRise), render cells: added to the camera and its target alike. */
+const riseVec = new Vector3()
 /** Scratch for the eye's line of sight, so the frame loop allocates nothing. */
 const walkDir = new Vector3()
 /**
@@ -1239,14 +1241,15 @@ function Rig(): JSX.Element {
       c.object.position.copy(smooth.current).add(eyeShift.current).addScaledVector(along.normalize(), d)
       // Fluid WALK up a stair: the feet are on the step, the camera trails
       // them up (lib/walkEye.ts walkRise), never nearer their height than
-      // the near plane's room.
-      if (s.walking && walkGlide.exact && walkRise.offset < 0) {
+      // the near plane's room. The camera and what it looks at move
+      // together (the target, below), so the way you look is unchanged.
+      riseVec.set(0, 0, 0)
+      if (walkRise.offset < 0) {
         const r = renderUp(s.view, walkRise.up.axis, walkRise.up.dir)
         const above = eyeShift.current.x * r[0] + eyeShift.current.y * r[1] + eyeShift.current.z * r[2]
         const lower = Math.max(walkRise.offset / 2 ** s.scaleExp, -Math.max(0, above - EYE_ROOM))
-        c.object.position.x += r[0] * lower
-        c.object.position.y += r[1] * lower
-        c.object.position.z += r[2] * lower
+        riseVec.set(r[0] * lower, r[1] * lower, r[2] * lower)
+        c.object.position.add(riseVec)
       }
       c.minDistance = Math.min(ORBIT_MIN_DISTANCE, d * 0.5)
       locked.current = true
@@ -1255,6 +1258,7 @@ function Rig(): JSX.Element {
     walkEye.copy(smooth.current)
 
     c.target.copy(smooth.current).add(eyeShift.current)
+    if (eye.current) c.target.add(riseVec)
     // The tour's camera for this step, once, as a pinch would leave it: at
     // its distance, from its side when it has one (cyberspace x, y, z put
     // into the view's render axes, as Earth is placed), else along the line

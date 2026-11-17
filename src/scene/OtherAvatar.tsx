@@ -32,7 +32,10 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Quaternion, type Group } from 'three'
 import { AvatarLerp, type Vec3 } from '../lib/avatarLerp'
-import type { Position } from '../lib/space'
+import { renderDirection, type Position } from '../lib/space'
+import { useCyberspace } from '../store/useCyberspace'
+import { REST_FLOOR } from '../store/walkWalls'
+import { easeRest, useRestDrop } from './useRestDrop'
 import { drawnAvatars } from '../lib/targets'
 import { yawOnly } from '../lib/avatarEye'
 import { useAvatarFace } from '../store/avatarFace'
@@ -103,11 +106,29 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
     // Travel reads its frame: a zoom mid-glide must not restart it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moveKey])
+  // Their origin stands on the surface under their gibson, else on its
+  // floor, as yours does (useRestDrop; arkinox, 2026-11-17). Not on
+  // Cyberspace TV (`scaleExp` given), whose frame and zoom are its own.
+  const plane = useCyberspace((st) => st.plane)
+  const dropTo = useRestDrop(scaleExp === undefined ? position : null, plane)
+  const dropNow = useRef(REST_FLOOR)
+  const dropAt = useRef<number | null>(null)
   const apply = (): void => {
     const g = placed.current
     if (!g) return
-    const o = lerp.current.offset(performance.now(), out.current)
+    const now = performance.now()
+    const o = lerp.current.offset(now, out.current)
     g.position.set(center[0] + o[0], center[1] + o[1], center[2] + o[2])
+    dropNow.current = easeRest(dropNow.current, dropTo.current, dropAt.current === null ? 0 : (now - dropAt.current) / 1000)
+    dropAt.current = now
+    if (dropNow.current !== 0) {
+      const st = useCyberspace.getState()
+      const up = renderDirection(st.axes(), 'y')
+      const k = dropNow.current / 2 ** (scaleExp ?? st.scaleExp)
+      g.position.x -= up[0] * k
+      g.position.y -= up[1] * k
+      g.position.z -= up[2] * k
+    }
     if (size && drawn.current) drawn.current.scale.setScalar(Math.max(1e-4, size()))
   }
   // On every commit as well as every frame, so the group is never left at
@@ -131,7 +152,7 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
         <AvatarShape pubkey={pubkey} color={color} keepShape={keepShape} dim={dim} />
       </group>
       {tappable && <TapTarget measure={drawn} occluder={occluder} onTap={() => usePersonCard.getState().open(pubkey)} />}
-      <WorldLabel text={label} color={color} at={[0, 0.9, 0]} align="center" px={labelPx} opacity={labelOpacity} />
+      <WorldLabel text={label} color={color} at={[0, 0.9 + REST_FLOOR, 0]} align="center" px={labelPx} opacity={labelOpacity} />
     </group>
   )
 }

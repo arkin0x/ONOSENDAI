@@ -3,6 +3,26 @@
  * apart as plain data so a test can put it through three's own render list.
  */
 
+import { EdgesGeometry, IcosahedronGeometry } from 'three'
+import { AVATAR_MARKER_HALF } from '../lib/avatar'
+
+/**
+ * The default avatar's shape: a wireframe icosahedron one cell across, with
+ * a vertex straight above and below its centre, lifted so its lowest vertex
+ * is its origin. An avatar's origin is the point that touches the ground
+ * (arkinox, 2026-11-17), so the default stands on what is under it as every
+ * worn shape does (store/walkWalls.ts restDrop), instead of half sunk into
+ * it.
+ */
+export function markerEdges(): EdgesGeometry {
+  const ico = new IcosahedronGeometry(AVATAR_MARKER_HALF, 1)
+  ico.computeBoundingBox()
+  ico.translate(0, -ico.boundingBox!.min.y, 0)
+  const edges = new EdgesGeometry(ico)
+  ico.dispose()
+  return edges
+}
+
 /**
  * The marker's line material: depth tested, or drawn over everything (your
  * own avatar, Avatar.tsx), or the faint outline.

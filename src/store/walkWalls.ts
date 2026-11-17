@@ -1129,6 +1129,31 @@ export function groundUnder(from: Position, lead: readonly [number, number, numb
 }
 
 /**
+ * Where an avatar is drawn (arkinox, 2026-11-17: "an avatar shard's ORIGIN
+ * is the point that touches the ground geometry"): how far, in gibsons, to
+ * draw its origin below the centre of its gibson `at`. On the first face that
+ * stops a walker (§1.12) within a gibson under that centre, a whole gibson
+ * under it included; with none, on the floor of its own gibson, half a
+ * gibson down (REST_FLOOR). So every avatar, the default icosahedron
+ * included (its lowest point is its origin), stands on what is under it.
+ * `pending` when a shard in reach is still being built: ask again once it
+ * is. Below is along `down`. Display only: the avatar's coordinate, its
+ * chain and every step are unchanged, and a walker is still measured from
+ * its gibson's centre.
+ */
+export function restDrop(at: Position, plane: number, down: AxisDirection = WORLD_DOWN): { drop: number; pending: boolean } {
+  const out = { pending: false }
+  const s = groundUnder(at, [0, 0, 0], wallItemsAt(plane, at), down, 0, REST_REACH, out)
+  return { drop: s === null || s < -REST_REACH ? REST_FLOOR : Math.min(1, Math.max(0, -s)), pending: out.pending }
+}
+
+/** The floor of a gibson, in gibsons under its centre: where an avatar with nothing under it stands. */
+export const REST_FLOOR = 0.5
+
+/** How far under a gibson's centre restDrop looks, in gibsons: a whole gibson, and a hair for the float. */
+const REST_REACH = 1 + 1e-6
+
+/**
  * Whether every way from `o0` (the gibson's centre, lifted, in a shard's
  * render frame) to `o0 + lead` crosses a face of `tris` (eyeReach `stand`),
  * each the way groundUnder reaches the ground: up along `upM` to a climb,

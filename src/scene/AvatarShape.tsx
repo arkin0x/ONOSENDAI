@@ -15,13 +15,12 @@
  * anybody is.
  */
 
-import { EdgesGeometry, IcosahedronGeometry } from 'three'
 import { avatarDraw, avatarDrawKept, spectatorScale } from '../lib/avatar'
 import { useAvatarShard } from '../store/useAvatars'
 import { useCyberspace } from '../store/useCyberspace'
 import { useTryEye } from '../store/tryEye'
 import { ShardMesh } from './ShardMesh'
-import { markerMaterialProps } from './avatarMarker'
+import { markerEdges, markerMaterialProps } from './avatarMarker'
 
 /**
  * The marker's edges, one for every avatar for as long as the page is open.
@@ -31,7 +30,7 @@ import { markerMaterialProps } from './avatarMarker'
  * so a long watch added one for every avatar at every cut (arkinox,
  * 2026-10-20: "the perf on /tv on my laptop is not satisfactory").
  */
-const MARKER_EDGES = new EdgesGeometry(new IcosahedronGeometry(0.5, 1))
+const MARKER_EDGES = markerEdges()
 
 interface Props {
   pubkey: string

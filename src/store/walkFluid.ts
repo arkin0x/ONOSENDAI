@@ -34,7 +34,7 @@ import { fluidCross, fallState, useWalk, walkDown } from './useWalk'
 import { fluidNudge, fluidOn, useFluidWalk } from './fluidSwitch'
 import { heldNow } from './walkHold'
 import { walkInputOpen } from './walkInput'
-import { faceDistance, groundUnder, wallItemsAt, type WallItem } from './walkWalls'
+import { REST_FLOOR, faceDistance, groundUnder, restDrop, wallItemsAt, type WallItem } from './walkWalls'
 import { STEP_DOWN_MAX, STEP_UP_MAX } from './walkStep'
 
 /** How long the eye takes to glide onto a new anchor, in seconds (the time constant): about a third of a second to settle. */
@@ -126,6 +126,7 @@ export function fluidState(): Readonly<typeof st> {
 /** Forget everything: the next frame starts at the anchor's middle, at rest. */
 export function resetFluid(): void {
   resetFoot()
+  walkRise.offset = 0
   st.v = zero()
   st.frac = zero()
   st.glide = zero()
@@ -290,7 +291,6 @@ function resetFoot(): void {
   foot.itemsAt = -Infinity
   foot.underKey = ''
   foot.colKey = ''
-  walkRise.offset = 0
 }
 
 /** The drawn feet's height along up, gibsons from the anchor's middle, or null while fluid WALK is not running: for tests and the DEV handle. */
@@ -324,14 +324,25 @@ export function groundFluid(now: number = performance.now()): void {
   foot.last = now
   const cs = useCyberspace.getState()
   if (!walkGlide.exact || !fluidWalking()) {
-    // Just left: the eye glides off the feet's height too, as off the smooth position.
-    if (foot.h !== null && foot.extra !== 0 && cs.scaleExp === foot.scaleExp) {
-      const k = (foot.extra * foot.upDir) / 2 ** foot.scaleExp
+    // The step WALK (the switch off): the walker drawn with its origin on
+    // the surface under its gibson's centre, else on its gibson's floor, as
+    // every avatar out of WALK is (restDrop); the rig eases onto it as it
+    // eases onto a step.
+    const stepDrop = cs.walking ? stepWalkDrop(cs.cursor, cs.plane, now) : 0
+    // Just left fluid WALK: the eye glides off the feet's height too, as off the smooth position.
+    if (foot.h !== null && cs.scaleExp === foot.scaleExp && foot.extra + stepDrop !== 0) {
+      const k = ((foot.extra + stepDrop) * foot.upDir) / 2 ** foot.scaleExp
       st.glide[foot.upAxis] += k
       walkGlide[foot.upAxis] += k
       walkGlide.active = true
     }
     resetFoot()
+    if (stepDrop !== 0) {
+      walkGlide.y -= stepDrop / 2 ** cs.scaleExp
+      walkGlide.active = true
+    }
+    // A stair's trail fades as it would have, so leaving WALK just after a riser never pops the camera.
+    walkRise.offset = walkRise.offset > -1e-4 ? 0 : walkRise.offset * Math.exp(-dt / GLIDE_TAU_S)
     return
   }
   const gravity = useWalk.getState().gravity
@@ -373,13 +384,15 @@ export function groundFluid(now: number = performance.now()): void {
     // A shard in reach still being built: the feet stay where they are until it is.
     if (!foot.pending.pending) {
       const standing = under !== null && under > -STAND_REACH
-      let target = base
+      // Not standing on anything: on the floor of the gibson it is drawn in.
+      let target = base - REST_FLOOR * stepG
       if (standing) {
         // Past a rim with nothing near under the drawn point: still on the rim the anchor stands on.
         const s = col === null || col < under - stepG ? under : col
-        // Gravity off, pushing up off the floor: up to the anchor's own height by half a step up.
+        // Gravity off, pushing up off the floor: up to the next gibson's floor by half a step up, where it leaves this one.
         const r = gravity ? 0 : Math.max(0, st.frac[ui] * up.dir * stepG)
-        target = r > 0 ? s + (0.5 * stepG - s) * Math.min(1, (2 * r) / stepG) : s
+        const off = r - REST_FLOOR * stepG
+        target = r > 0 ? s + (off - s) * Math.min(1, (2 * r) / stepG) : s
       }
       if (h < target) h = standing ? target : h + (target - h) * (1 - decayK)
       else if (h > target) h = Math.max(target, Math.min(h - FOOT_DROP_SPEED * stepG * dt, target + (h - target) * decayK))
@@ -390,12 +403,14 @@ export function groundFluid(now: number = performance.now()): void {
     // A jump leaves from the feet, and the arc takes them over: how far
     // under the arc's point they were when it began fades (GLIDE_TAU_S), so
     // they land where the arc lands, on its whole gibson's standing height.
-    if (!foot.falling) foot.lift = h - base
+    // In the air the origin rides the arc on the floor of the gibson it is drawn in.
+    const air = base - REST_FLOOR * stepG
+    if (!foot.falling) foot.lift = h - air
     else foot.lift *= decayK
     foot.falling = true
-    h = base + foot.lift
+    h = air + foot.lift
     // The ground under the arc, searched from the arc's own point (never
-    // from the gibson the fall left, which can be far above or below it).
+    // from the gibson the fall left, which can be far above or below it), in open air: the drawn origin, half a gibson under it, may be inside a slope.
     const from = Math.max(h, base)
     lead[AXIS_INDEX[ui]] = from * up.dir
     const col = groundUnder(cs.cursor, lead, items, g, rise, drop)
@@ -416,6 +431,16 @@ export function groundFluid(now: number = performance.now()): void {
     walkGlide[ui] += (foot.extra * up.dir) / stepG
     walkGlide.active = true
   }
+}
+
+/** The step WALK's drop under the cursor (restDrop), in gibsons: kept for this gibson, asked again every FOOT_ITEMS_MS (walls arriving) and while a wall is on its way. */
+let stepKept = { key: '', at: -Infinity, drop: REST_FLOOR }
+function stepWalkDrop(at: Position, plane: number, now: number): number {
+  const k = `${plane}|${at.x},${at.y},${at.z}`
+  if (k === stepKept.key && now - stepKept.at <= FOOT_ITEMS_MS) return stepKept.drop
+  const r = restDrop(at, plane)
+  stepKept = { key: r.pending ? '' : k, at: now, drop: r.drop }
+  return r.drop
 }
 
 /** The ground under the drawn point (groundUnder), kept while the anchor, the walls and the drawn point (to GROUND_QUANT gibsons) stay put. */

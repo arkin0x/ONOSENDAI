@@ -66,7 +66,9 @@ import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Group, Material, type Quaternion } from 'three'
 import { facingTurn, headingPair } from '../lib/facing'
-import { anchorCentre, GRID_RADIUS, placeCentre, type Position } from '../lib/space'
+import { anchorCentre, GRID_RADIUS, placeCentre, renderDirection, type Position } from '../lib/space'
+import { REST_FLOOR } from '../store/walkWalls'
+import { easeRest, useRestDrop } from './useRestDrop'
 import { nearGate } from '../lib/walkGate'
 import { committedAnchor } from '../lib/renderFrame'
 import { travelOffset } from '../lib/travel'
@@ -171,6 +173,17 @@ export function Avatar(): JSX.Element | null {
   // named only while drawn, so it registers once its group is there.
   const { occluder, dim } = useAvatarOccluder(shown ? 'you' : undefined, drawn)
 
+  // Out of WALK, your avatar's origin stands on the surface under its
+  // gibson's centre, within a gibson of it, else on its gibson's floor
+  // (store/walkWalls.ts restDrop; arkinox, 2026-11-17: an avatar's origin is
+  // the point that touches the ground). Display only, eased so a hop or a
+  // wall arriving never pops it. In WALK, fluid WALK stands it
+  // (store/walkFluid.ts groundFluid).
+  const restAt = shownPosition ?? anchor
+  const restPlane = shownPlane ?? anchorPlane
+  const dropTo = useRestDrop(walking ? null : restAt, restPlane)
+  const dropNow = useRef(REST_FLOOR)
+
   useFrame(({ camera }, dt) => {
     const g = group.current
     const d = drawn.current
@@ -188,7 +201,10 @@ export function Avatar(): JSX.Element | null {
         const gate = shown ? nearGate(Math.hypot(shown.at[0] - camera.position.x, shown.at[1] - camera.position.y, shown.at[2] - camera.position.z)) : 0
         p.visible = shown !== null && gate > 0
         if (shown && gate > 0) {
-          p.position.set(shown.at[0], shown.at[1], shown.at[2])
+          // On its gibson's floor: the icosahedron's origin is its lowest point (scene/avatarMarker.ts).
+          const up = renderDirection(s.axes(), 'y')
+          const k = REST_FLOOR / 2 ** s.scaleExp
+          p.position.set(shown.at[0] - up[0] * k, shown.at[1] - up[1] * k, shown.at[2] - up[2] * k)
           p.traverse((o) => {
             const m = (o as { material?: Material }).material
             if (m) { m.transparent = true; m.opacity = GHOST_OPACITY * shown.fade * gate }
@@ -198,6 +214,15 @@ export function Avatar(): JSX.Element | null {
     } else {
       ghost.current.reset()
       g.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
+      dropNow.current = easeRest(dropNow.current, dropTo.current, dt)
+      if (dropNow.current !== 0) {
+        // Down cyberspace -Y, in this view's render frame, at this zoom.
+        const up = renderDirection(useCyberspace.getState().axes(), 'y')
+        const k = dropNow.current / 2 ** scaleExp
+        g.position.x -= up[0] * k
+        g.position.y -= up[1] * k
+        g.position.z -= up[2] * k
+      }
     }
     // In WALK you face where you look, live as you turn (arkinox,
     // 2026-10-13), not the way your last move went. The model's nose (+Z)

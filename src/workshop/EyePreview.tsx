@@ -30,7 +30,8 @@
 import { Canvas, useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronUp, Eye } from 'lucide-react'
-import { EdgesGeometry, IcosahedronGeometry, type PerspectiveCamera } from 'three'
+import { type PerspectiveCamera } from 'three'
+import { markerEdges } from '../scene/avatarMarker'
 import type { ShardModel } from 'sno-core/shards'
 import { avatarDraw, avatarScale } from '../lib/avatar'
 import { walkEyeLocal } from '../lib/avatarEye'
@@ -92,7 +93,7 @@ function EyeCamera({ eye }: { eye: [number, number, number] }): null {
   return null
 }
 
-const MARKER = new EdgesGeometry(new IcosahedronGeometry(0.5, 1))
+const MARKER = markerEdges()
 
 /** The sample floor: a grid of gibsons in the walker's plane, a doorway ahead, a default avatar beside it. */
 function SampleFloor(): JSX.Element {

@@ -133,7 +133,7 @@ import { FLUID_EASE_FROM, FLUID_LINE_SLACK, onLine } from '../lib/fluidWalk'
  */
 export const SYNC_WARN_AT = FLUID_EASE_FROM + 1
 
-/** Still this long, in ms, and the open segment closes and goes to be proved. */
+/** Still this long, in ms, and the open segment closes and goes to be proved (armSettle: a fluid walker still moving is not still). */
 export const WALK_SETTLE_MS = 600
 
 /**
@@ -204,6 +204,33 @@ let settleTimer: ReturnType<typeof setTimeout> | null = null
 function clearSettle(): void {
   if (settleTimer !== null) clearTimeout(settleTimer)
   settleTimer = null
+}
+
+/**
+ * Whether fluid WALK's walker is still moving (store/walkFluid.ts sets it;
+ * nothing moves without it, as in the step WALK).
+ */
+let walkerMoving: () => boolean = () => false
+export function setWalkerMoving(moving: () => boolean): void {
+  walkerMoving = moving
+}
+
+/**
+ * The open segment closes after WALK_SETTLE_MS of stillness. A step arms the
+ * timer; when it runs out while fluid WALK's walker is still moving, it is
+ * armed again instead (walk-snapback investigation, 2026-11-17): on a device
+ * whose frames come further apart than WALK_SETTLE_MS (a loaded machine, a
+ * slow phone) it ran out between every two frames of a held walk, so a long
+ * straight walk was a hop a frame instead of one, and with slow proofs those
+ * piled up toward the LOSING SYNC warning and the stop at FLUID_HOLD_AT.
+ */
+function armSettle(): void {
+  clearSettle()
+  settleTimer = setTimeout(() => {
+    settleTimer = null
+    if (walkerMoving()) armSettle()
+    else useWalk.getState().settle()
+  }, WALK_SETTLE_MS)
 }
 
 /** The pad modes WALK can be entered from and goes back to (store/padMode.ts). */
@@ -402,8 +429,7 @@ export const useWalk = create<WalkState>((set, get) => ({
     }
     // The view and the avatar go now; the proof catches up.
     useCyberspace.setState({ cursor: { ...next } })
-    clearSettle()
-    settleTimer = setTimeout(() => { settleTimer = null; get().settle() }, WALK_SETTLE_MS)
+    armSettle()
     // Off a floor under gravity: this segment ends here, and the fall begins.
     if (gravity) fallIfAirborne()
     // Onto a bounce pad: a step up onto a fixed height, or any arrival onto a springboard, launches (E).
@@ -495,8 +521,7 @@ export function fluidCross(main: AxisDirection, side: AxisDirection | null, edge
     if (open) pump()
   }
   useCyberspace.setState({ cursor: { ...next } })
-  clearSettle()
-  settleTimer = setTimeout(() => { settleTimer = null; useWalk.getState().settle() }, WALK_SETTLE_MS)
+  armSettle()
   if (gravity) fallIfAirborne()
   if (gravity && !fall) padLaunch(next, heightOf(next, g) > heightOf(from, g), items)
   return { kind: 'moved', from, to: next }

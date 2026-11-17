@@ -276,7 +276,8 @@ function heard(): void {
   const now = sprintHeld()
   if (now !== sprintWas) {
     sprintWas = now
-    if (!paused && !quietSprint) pressed(now ? 'sprintOn' : 'sprintOff')
+    // In the lockout, sprint ending says nothing (the lockout said it), and SPRINT pressed again answers with the lockout's sound: not yet.
+    if (!paused && !quietSprint && !(wasLocked && !now)) pressed(now ? (wasLocked ? 'lockout' : 'sprintOn') : 'sprintOff')
   }
   for (const l of [...held$.listeners]) l()
 }

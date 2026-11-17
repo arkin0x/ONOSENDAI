@@ -360,7 +360,10 @@ describe('the hitmarker and the press sounds', () => {
     ;(btnOf('sprint').props.onPointerDown as (e: unknown) => void)(e(3, 2000))
     ;(btnOf('sprint').props.onPointerUp as (e: unknown) => void)(e(3, 2100))
     noteSprintLocked(true)
-    expect(clicked.map(([c]) => c)).toEqual(['ui:fire', 'ui:sprintOn', 'ui:lockout'])
+    // SPRINT pressed again in the lockout answers with the lockout's sound (not yet), and letting go says nothing.
+    ;(btnOf('sprint').props.onPointerDown as (e: unknown) => void)(e(4, 3000))
+    ;(btnOf('sprint').props.onPointerUp as (e: unknown) => void)(e(4, 3500))
+    expect(clicked.map(([c]) => c)).toEqual(['ui:fire', 'ui:sprintOn', 'ui:lockout', 'ui:lockout'])
     await m.unmount()
   })
 

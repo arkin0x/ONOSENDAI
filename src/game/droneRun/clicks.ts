@@ -17,7 +17,7 @@
  * | ui:jump | a rising triangle blip, 600 to 1100 Hz, 45 ms |
  * | ui:sprintOn | two quick rising triangle notes |
  * | ui:sprintOff | the same two notes falling |
- * | ui:lockout | a dull falling buzz (a filtered saw, 260 to 150 Hz), 90 ms |
+ * | ui:lockout | a dull falling buzz (a filtered saw, 260 to 150 Hz), 90 ms: stamina ran dry, and SPRINT pressed again before it is back |
  * | ui:switch | a mechanical clack-clack: two filtered noise clicks 30 ms apart |
  * | ui:reload | a slide (band-passed noise) and a latch tick |
  * | ui:restart, ui:nextWave, ui:exit | soft sine glides: up a fifth, up a higher fifth, down |
@@ -116,6 +116,9 @@ function layerAt(ac: BaseAudioContext, to: AudioNode, t: number, l: ClickLayer, 
   const t0 = t + (l.at ?? 0)
   const end = t0 + l.dur
   const env = ac.createGain()
+  // Silent until its start, not at a gain's default of 1: a source can start a sample before the envelope's first
+  // event takes hold, and one sample of noise at full level through a high- or low-pass is a loud click.
+  env.gain.value = 0
   env.gain.setValueAtTime(0.0001, t0)
   env.gain.exponentialRampToValueAtTime(Math.max(0.0002, l.gain), t0 + Math.min(l.attack ?? 0.002, l.dur * 0.5))
   env.gain.exponentialRampToValueAtTime(0.0001, end)

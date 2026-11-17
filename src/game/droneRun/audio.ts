@@ -82,6 +82,8 @@ export function noiseBuffer(ac: BaseAudioContext): AudioBuffer {
 /** A gain envelope: up to `peak` in `attack`, down to silence by `end` (seconds from t0), into `to`. */
 function env(ac: BaseAudioContext, to: AudioNode, t0: number, peak: number, attack: number, end: number): GainNode {
   const g = ac.createGain()
+  // Silent until t0, not at a gain's default of 1 (a source a sample early through a filter is a loud click).
+  g.gain.value = 0
   g.gain.setValueAtTime(0.0001, t0)
   g.gain.exponentialRampToValueAtTime(peak, t0 + attack)
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + end)

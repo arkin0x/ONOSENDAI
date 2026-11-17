@@ -672,6 +672,7 @@ function later(fn: (idle?: IdleDeadline) => void): void {
 /** Forget every shard's walls: for tests, and an identity switch has no need of them either. */
 export function clearWalls(): void {
   entries.clear()
+  restEntries.clear()
   bounceBuilt = false
   waited = false
   landed()
@@ -932,8 +933,19 @@ function regionMeets(w: WallItem, lo: Position, hi: Position): boolean {
  * slab holds the walker, holds the eye at the walker, and `out.pending` says
  * the first, so the answer is not kept. Nothing moves, nothing is published:
  * this is where the camera looks from.
+ *
+ * With `stand` (fluid WALK, the walker drawn standing on the surface between
+ * gibsons, store/walkFluid.ts groundFluid; a number is the most the ground
+ * climbs, in gibsons, true is 2), the walker's point as drawn is reached the
+ * way the ground was found (groundUnder): up from the gibson's centre to its
+ * height, if it is higher, or a whole gibson or two, then level, then down
+ * onto it. A
+ * straight line from the centre down to feet past a rim, or up to feet on a
+ * slope ahead, would cut through the surface they stand on and hold the eye
+ * at the feet, which is the camera in the floor. Without it, the line is
+ * straight, as it always was.
  */
-export function eyeReach(from: Position, lead: readonly [number, number, number], eye: readonly [number, number, number], margin: number, items: readonly WallItem[], up: AxisDirection = UP_Y, out?: { pending: boolean }): number {
+export function eyeReach(from: Position, lead: readonly [number, number, number], eye: readonly [number, number, number], margin: number, items: readonly WallItem[], up: AxisDirection = UP_Y, out?: { pending: boolean }, stand: boolean | number = false): number {
   if (out) out.pending = false
   const len = Math.hypot(eye[0], eye[1], eye[2])
   if (!(len > 0)) return 1
@@ -1002,7 +1014,7 @@ export function eyeReach(from: Position, lead: readonly [number, number, number]
     if (enclosed(e.mesh, o, e.clip)) return 0
     // The walker's point as drawn must be on the gibson's own side of every face.
     const leadLen = Math.hypot(leadM[0], leadM[1], leadM[2])
-    if (leadLen * g > tol && segmentHit(tris, o0, leadM, tol / (leadLen * g)) !== null) return 0
+    if (leadLen * g > tol && (stand !== false && stand !== 0 ? standPathHit(tris, o0, leadM, upM, tol / g, (stand === true ? 2 : stand) / g, 1 / g) : segmentHit(tris, o0, leadM, tol / (leadLen * g)) !== null)) return 0
     near.push({ tris, walker, o, g })
     const hit = segmentHit(tris, o, d, tol / span)
     if (hit !== null) reach = Math.min(reach, hit.s * span - margin / Math.max(hit.square, EYE_SQUARE_MIN))
@@ -1021,6 +1033,177 @@ export function eyeReach(from: Position, lead: readonly [number, number, number]
     reach = n === EYE_BACK_STEPS - 1 ? 0 : Math.max(0, reach - margin / 2)
   }
   return reach / len
+}
+
+/**
+ * Fluid WALK's ground (store/walkFluid.ts groundFluid): how high the surface
+ * under the drawn walker is, in gibsons along `up` (against `down`) from the
+ * walker's gibson `from`, or null when no face that stops a walker (§1.12)
+ * is under it within `drop` gibsons, or a shard in reach is still being
+ * built (`out.pending`). The walker is drawn `lead` gibsons from `from`,
+ * by cyberspace axis; its height along `up` is where the search starts.
+ *
+ * The surface is found the way a walker would reach it, never through a
+ * face: from the walker's height over `from`, up by the smallest whole
+ * lift, 0 to `rise` (the stair step-up's), whose rise is clear and from
+ * whose height the level way over to the drawn point is clear; then
+ * straight down from there. So a riser under the drawn point is stood on
+ * (up, over, down onto its top), a floor below a lintel is found under the
+ * lintel and never on top of it, and a walker drawn past a ledge's rim
+ * finds the floor below the rim. Each line starts a hair above its own
+ * height (EYE_LIFT, at least sixteen of a shard's tolerance), so the face
+ * the walker stands on is under it, as the eye's line has it (eyeReach).
+ *
+ * A question about where to draw only: nothing moves and nothing is
+ * published. The walker itself stays a point at the centre of its gibson,
+ * and every step is still measured from there (stepLimit). `lookup` finds
+ * each shard's walls: WALK's own (entryFor), or restEntryFor outside it.
+ */
+export function groundUnder(from: Position, lead: readonly [number, number, number], items: readonly WallItem[], down: AxisDirection, rise: number, drop: number, out?: { pending: boolean }, lookup: (w: WallItem) => Entry = entryFor): number | null {
+  if (out) out.pending = false
+  const up = upOf(down)
+  const ui = AXIS_INDEX[up.axis]
+  const h0 = lead[ui] * up.dir
+  const flat: [number, number, number] = [lead[0], lead[1], lead[2]]
+  flat[ui] = 0
+  const level = Math.hypot(flat[0], flat[1], flat[2])
+  // The box the search can reach, cyberspace gibsons from `from`.
+  const lo = [0, 0, 0], hi = [0, 0, 0]
+  for (let q = 0; q < 3; q++) {
+    lo[q] = Math.min(0, flat[q]) - 1
+    hi[q] = Math.max(0, flat[q]) + 1
+  }
+  lo[ui] = Math.min(lo[ui], up.dir > 0 ? h0 - drop - 1 : -(h0 + rise) - 1)
+  hi[ui] = Math.max(hi[ui], up.dir > 0 ? h0 + rise + 1 : -(h0 - drop) + 1)
+  const blo = { x: from.x + BigInt(Math.floor(lo[0])), y: from.y + BigInt(Math.floor(lo[1])), z: from.z + BigInt(Math.floor(lo[2])) }
+  const bhi = { x: from.x + BigInt(Math.ceil(hi[0])), y: from.y + BigInt(Math.ceil(hi[1])), z: from.z + BigInt(Math.ceil(hi[2])) }
+  const near: Array<{ e: Entry; g: number; off: [number, number, number] }> = []
+  let tol = 0
+  for (const w of items) {
+    // A closed door's slab that holds the walker lets it go (WallItem `inside`).
+    if (w.inside || !regionMeets(w, blo, bhi)) continue
+    const e = lookup(w)
+    if (e.first) { if (out) out.pending = true; return null }
+    if (!e.reach) continue
+    const g = 2 ** w.shard.unit
+    const off: [number, number, number] = [Number(from.x - w.at.x), Number(from.y - w.at.y), Number(from.z - w.at.z)]
+    const r = e.reach
+    const wlo = [Number(r.lo.x), Number(r.lo.y), Number(r.lo.z)], whi = [Number(r.hi.x), Number(r.hi.y), Number(r.hi.z)]
+    let apart = false
+    for (let q = 0; q < 3; q++) if (off[q] + hi[q] < wlo[q] - 1 || off[q] + lo[q] > whi[q] + 1) apart = true
+    if (apart) continue
+    near.push({ e, g, off })
+    tol = Math.max(tol, tolerance(e, g, 0n))
+  }
+  if (near.length === 0) return null
+  const hair = Math.max(EYE_LIFT, 16 * tol)
+  // A point `h` gibsons up from `from`, `along` of the way out to the drawn point, in a shard's render frame (Z flips, as stepLimit has it).
+  const at = (c: { g: number; off: [number, number, number] }, h: number, along: number): [number, number, number] => {
+    const p = [c.off[0] + flat[0] * along, c.off[1] + flat[1] * along, c.off[2] + flat[2] * along]
+    p[ui] += up.dir * h
+    return [p[0] / c.g, p[1] / c.g, -p[2] / c.g]
+  }
+  const si = renderSign(up)
+  const levelM = (c: { g: number }): [number, number, number] => [flat[0] / c.g, flat[1] / c.g, -flat[2] / c.g]
+  for (let lift = 0; lift <= rise; lift++) {
+    const h = h0 + lift + hair
+    // The rise, straight up over `from`: a face over it holds this lift and every higher one.
+    if (lift > 0 && near.some((c) => firstHit(c.e.mesh, at(c, h0 + hair, 0), ui, si, lift / c.g, 0, c.e.clip) !== null)) return null
+    // The level way over to the drawn point, at that height.
+    if (level > 0 && near.some((c) => {
+      const o = at(c, h, 0)
+      const d = levelM(c)
+      const pad = hair / c.g
+      const boxLo = [0, 1, 2].map((q) => Math.min(o[q], o[q] + d[q]) - pad)
+      const boxHi = [0, 1, 2].map((q) => Math.max(o[q], o[q] + d[q]) + pad)
+      const tris = trianglesNear(c.e.mesh, boxLo, boxHi, c.e.clip)
+      return tris.length > 0 && segmentHit(tris, o, d, 0) !== null
+    })) continue
+    // Then straight down onto the first face.
+    let best: number | null = null
+    for (const c of near) {
+      const t = firstHit(c.e.mesh, at(c, h, 1), ui, -si as 1 | -1, (lift + hair + drop) / c.g, 0, c.e.clip)
+      if (t !== null && (best === null || t * c.g < best)) best = t * c.g
+    }
+    return best === null ? null : h - best
+  }
+  return null
+}
+
+/**
+ * Where an avatar is drawn (arkinox, 2026-11-17: "an avatar shard's ORIGIN
+ * is the point that touches the ground geometry"): how far, in gibsons, to
+ * draw its origin below the centre of its gibson `at`. On the first face that
+ * stops a walker (§1.12) within a gibson under that centre, a whole gibson
+ * under it included; with none, on the floor of its own gibson, half a
+ * gibson down (REST_FLOOR). So every avatar, the default icosahedron
+ * included (its lowest point is its origin), stands on what is under it.
+ * Below is along `down`. Display only: the avatar's coordinate, its
+ * chain and every step are unchanged, and a walker is still measured from
+ * its gibson's centre.
+ */
+export function restDrop(at: Position, plane: number, down: AxisDirection = WORLD_DOWN): { drop: number; pending: boolean } {
+  const out = { pending: false }
+  const s = groundUnder(at, [0, 0, 0], wallItemsAt(plane, at), down, 0, REST_REACH, out, restEntryFor)
+  return { drop: s === null || s < -REST_REACH ? REST_FLOOR : Math.min(1, Math.max(0, -s)), pending: out.pending }
+}
+
+/**
+ * The walls restDrop stands avatars on, outside WALK's own builds: a shard's
+ * walls WALK has already built whole, else its own faces alone, built here
+ * and kept apart (restEntries). Nothing a placed object carries is fetched
+ * and no WALK pool is charged, so standing other people's avatars never
+ * spends what holds the walker (review of #800). A part not yet built by
+ * WALK holds no avatar up until it is.
+ */
+function restEntryFor(w: WallItem): Entry {
+  const held = entries.get(w.key)
+  if (held && !held.first && held.shard === w.shard && held.where === whereOf(w)) return held
+  const kept = restEntries.get(w.key)
+  if (kept && kept.shard === w.shard && kept.where === whereOf(w)) return kept
+  if (restEntries.size >= REST_ENTRIES_MAX) restEntries.clear()
+  const e = build(w, [], false, false)
+  restEntries.set(w.key, e)
+  return e
+}
+
+/** restEntryFor's own builds, by shard key. */
+const restEntries = new Map<string, Entry>()
+
+/** The most restEntryFor keeps before it starts again: a bound on memory, never on correctness. */
+const REST_ENTRIES_MAX = 512
+
+/** The floor of a gibson, in gibsons under its centre: where an avatar with nothing under it stands. */
+export const REST_FLOOR = 0.5
+
+/** How far under a gibson's centre restDrop looks, in gibsons: a whole gibson, and a hair for the float. */
+const REST_REACH = 1 + 1e-6
+
+/**
+ * Whether every way from `o0` (the gibson's centre, lifted, in a shard's
+ * render frame) to `o0 + lead` crosses a face of `tris` (eyeReach `stand`),
+ * each the way groundUnder reaches the ground: up along `upM` to a climb,
+ * level to over the point, then down onto it. The climbs tried are the
+ * point's own height when that is higher, then each whole gibson
+ * (`gibsonM` model units) up to `riseM`, as the ground's lifts are. A hit within `tolM` model
+ * units of a leg's start does not count, as eyeReach's straight line has it.
+ */
+function standPathHit(tris: Float64Array, o0: readonly [number, number, number], lead: readonly [number, number, number], upM: readonly number[], tolM: number, riseM: number, gibsonM: number): boolean {
+  const h = lead[0] * upM[0] + lead[1] * upM[1] + lead[2] * upM[2]
+  const flat: [number, number, number] = [lead[0] - upM[0] * h, lead[1] - upM[1] * h, lead[2] - upM[2] * h]
+  const climbs = [Math.max(0, h)]
+  for (let k = 1; k * gibsonM <= riseM * (1 + 1e-12); k++) if (k * gibsonM > climbs[0]) climbs.push(k * gibsonM)
+  const p: [number, number, number] = [0, 0, 0]
+  const hit = (d: readonly number[]): boolean => {
+    const len = Math.hypot(d[0], d[1], d[2])
+    const crossed = len > tolM && segmentHit(tris, p, d as [number, number, number], tolM / len) !== null
+    p[0] += d[0]; p[1] += d[1]; p[2] += d[2]
+    return crossed
+  }
+  return climbs.every((c) => {
+    p[0] = o0[0]; p[1] = o0[1]; p[2] = o0[2]
+    return hit([upM[0] * c, upM[1] * c, upM[2] * c]) || hit(flat) || hit([upM[0] * (h - c), upM[1] * (h - c), upM[2] * (h - c)])
+  })
 }
 
 /** How many times floorPad has been asked: for the test that a world with no bounce asks it nothing. */

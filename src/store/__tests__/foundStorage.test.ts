@@ -16,6 +16,8 @@ import { bagTemplate, messageInnerTemplate, type Hidden } from '../../lib/hidden
 const ME = 'ee'.repeat(32)
 const OTHER = 'dd'.repeat(32)
 let identity = ME
+/** Runs once, right after the next addDiscovered: a test's way to act exactly between two hand-overs. */
+let onAdd: (() => void) | null = null
 /** Where the player stands, for the nearest-first load (undefined: not known). */
 let standing: { x: bigint; y: bigint; z: bigint } | undefined
 let discovered: Record<string, Hidden> = {}
@@ -39,7 +41,7 @@ vi.mock('../useShards', () => ({
   useShards: {
     getState: () => ({
       discovered,
-      addDiscovered: (items: Hidden[], how?: { watched?: boolean }) => { added.push(items); addedHow.push(how); for (const h of items) discovered[h.eventId] = h },
+      addDiscovered: (items: Hidden[], how?: { watched?: boolean }) => { added.push(items); addedHow.push(how); for (const h of items) discovered[h.eventId] = h; const hook = onAdd; onAdd = null; hook?.() },
     }),
     setState: (s: { discovered: Record<string, Hidden> }) => { discovered = s.discovered },
   },
@@ -82,6 +84,7 @@ const texts = (): string[] => Object.values(discovered).map((h) => h.text ?? '')
 beforeEach(() => {
   ;(globalThis as { indexedDB?: unknown }).indexedDB = new IDBFactory()
   identity = ME
+  onAdd = null
   standing = undefined
   discovered = {}
   added.length = 0
@@ -337,19 +340,19 @@ describe('on load, the nearest first and handed over as they open', () => {
     expect(added[0].map((h) => h.text).sort()).toEqual([4, 5, 6, 7, 8, 9, 10, 11].map((i) => `bag ${i}`).sort())
   })
 
-  it('switching identity mid-load leaves none of the last identity\'s finds', async () => {
+  it('switching identity mid-load leaves none of the last identity\'s finds, and the old load hands over nothing more', async () => {
     await keepBags(12)
     vi.resetModules()
     identityListeners = []
     const found = await import('../useFound')
-    // The switch lands as soon as the first piece is handed over.
-    const first = added.length
-    const loading = found.useFound.getState().load(ME)
-    await vi.waitFor(() => { expect(added.length).toBeGreaterThan(first) })
-    identity = OTHER
-    for (const l of identityListeners) l({ identity: { pubkey: OTHER } }, { identity: { pubkey: ME } })
-    await loading
+    // The switch lands right after the first piece is handed over, before the next row opens.
+    onAdd = () => {
+      identity = OTHER
+      for (const l of identityListeners) l({ identity: { pubkey: OTHER } }, { identity: { pubkey: ME } })
+    }
+    await found.useFound.getState().load(ME)
     await found.useFound.getState().load(OTHER)
+    expect(added.length).toBe(1)
     expect(texts()).toEqual([])
   })
 })

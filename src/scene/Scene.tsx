@@ -41,13 +41,14 @@ import { GRID_RADIUS, cellDelta, claimScreenAxes, itemCentre, levelScreenAxes, o
 import { upOf } from '../lib/walkDown'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
-import { setWalkFacing, walkBody, walkEye, walkFacing, walkFall, walkFallUp, walkGlide } from '../lib/walkEye'
-import { WalkEyeRig } from './walkEyeRig'
+import { setWalkFacing, walkBody, walkEye, walkFacing, walkFall, walkFallUp, walkGlide, walkRise } from '../lib/walkEye'
+import { EYE_ROOM, WalkEyeRig } from './walkEyeRig'
 import { useAvatars } from '../store/useAvatars'
 import { tryEyeFor } from '../store/tryEye'
 import { clearWalkLook, lookRadPerPx, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
 import { tickFall, useWalk, walkDown } from '../store/useWalk'
 import { groundFluid, tickFluid } from '../store/walkFluid'
+import { STEP_UP_MAX } from '../store/walkStep'
 import { orbitOffset } from '../workshop/benchAxes'
 import { WalkProbe } from './WalkProbe'
 import { commitAnchor, commitScale, committedAnchor } from '../lib/renderFrame'
@@ -1229,13 +1230,24 @@ function Rig(): JSX.Element {
         forward: eyeFwd.copy(along).negate(),
         up: upOf(walkDown()),
         walls: s.walking,
-        stand: s.walking && walkGlide.exact,
+        stand: s.walking && walkGlide.exact ? Number(STEP_UP_MAX) * 2 ** s.scaleExp : undefined,
         now: performance.now(),
       }, eyeVec)
       eyeShift.current.copy(eyeVec).multiplyScalar(eyeMix.current)
       // The body's turn for Avatar.tsx, from the same heading: your heading, never the look up or down.
       walkBody.copy(eyeRig.body)
       c.object.position.copy(smooth.current).add(eyeShift.current).addScaledVector(along.normalize(), d)
+      // Fluid WALK up a stair: the feet are on the step, the camera trails
+      // them up (lib/walkEye.ts walkRise), never nearer their height than
+      // the near plane's room.
+      if (s.walking && walkGlide.exact && walkRise.offset < 0) {
+        const r = renderUp(s.view, walkRise.up.axis, walkRise.up.dir)
+        const above = eyeShift.current.x * r[0] + eyeShift.current.y * r[1] + eyeShift.current.z * r[2]
+        const lower = Math.max(walkRise.offset / 2 ** s.scaleExp, -Math.max(0, above - EYE_ROOM))
+        c.object.position.x += r[0] * lower
+        c.object.position.y += r[1] * lower
+        c.object.position.z += r[2] * lower
+      }
       c.minDistance = Math.min(ORBIT_MIN_DISTANCE, d * 0.5)
       locked.current = true
       if (t >= 1 && !s.walking) { eye.current = null; c.minDistance = ORBIT_MIN_DISTANCE; eyeMix.current = 0; eyeShift.current.set(0, 0, 0) }

@@ -27,7 +27,7 @@ import {
   FLUID_WALL_REACH, accelerate, dueCrossing, len, syncSpeedFactor, wishOf, zero, type Vec,
 } from '../lib/fluidWalk'
 import { moveDirection } from '../lib/moves'
-import { walkFacing, walkFall, walkFallUp, walkGlide } from '../lib/walkEye'
+import { walkFacing, walkFall, walkFallUp, walkGlide, walkRise } from '../lib/walkEye'
 import { WORLD_DOWN, heightOf, raised, upOf } from '../lib/walkDown'
 import { useCyberspace } from './useCyberspace'
 import { fluidCross, fallState, useWalk, walkDown } from './useWalk'
@@ -272,6 +272,9 @@ const foot = {
   /** The surface under the anchor's own middle, kept for this gibson and these walls. */
   under: null as number | null,
   underKey: '',
+  /** The surface under the drawn point, kept for this gibson, these walls and this point (groundAt). */
+  col: null as number | null,
+  colKey: '',
   pending: { pending: false },
 }
 
@@ -286,6 +289,8 @@ function resetFoot(): void {
   foot.itemsKey = ''
   foot.itemsAt = -Infinity
   foot.underKey = ''
+  foot.colKey = ''
+  walkRise.offset = 0
 }
 
 /** The drawn feet's height along up, gibsons from the anchor's middle, or null while fluid WALK is not running: for tests and the DEV handle. */
@@ -304,9 +309,10 @@ export function footHeight(): number | null {
  *
  * | Case | The drawn height |
  * |---|---|
- * | standing (a face less than a gibson under the anchor's middle) | the surface under the drawn point (store/walkWalls.ts groundUnder), followed exactly up a slope and down one; a riser it passes over is stood on at once, a drop is eased down at FOOT_DROP_SPEED at least |
+ * | standing (a face less than a gibson under the anchor's middle) | the surface under the drawn point (store/walkWalls.ts groundUnder), followed exactly up a slope and down one; a riser it passes over is stood on at once, and the camera follows it up over GLIDE_TAU_S (lib/walkEye.ts walkRise); a drop is eased down at FOOT_DROP_SPEED at least |
  * | gravity off, rising off the floor | from the surface to the anchor's own height by the time the walker is half a step up, where it leaves the gibson, so the hand-over is seamless |
- * | in the air (a jump, a fall) | the fall's own arc, from where the feet were when it began |
+ * | in the air (a jump, a fall) | the fall's own arc, from where the feet were when it began, easing onto the arc's point (GLIDE_TAU_S) |
+ * | a shard in reach still being built | where the feet were, until it is |
  * | not standing (gravity off, floating) | the anchor plus the glide, as before |
  * | always | never under the surface under the drawn point |
  *
@@ -347,6 +353,7 @@ export function groundFluid(now: number = performance.now()): void {
     foot.h = base
     foot.falling = falling
     foot.lift = 0
+    walkRise.offset = 0
   }
   foot.anchor = { ...cs.cursor }
   foot.scaleExp = cs.scaleExp
@@ -355,36 +362,52 @@ export function groundFluid(now: number = performance.now()): void {
   const lead: [number, number, number] = [walkGlide.x * stepG, walkGlide.y * stepG, walkGlide.z * stepG]
   const rise = Number(STEP_UP_MAX) * stepG
   const drop = Number(STEP_DOWN_MAX + 1n) * stepG
-  let h = foot.h
+  const was = foot.h
+  let h = was
+  const decayK = Math.exp(-dt / GLIDE_TAU_S)
   if (!falling) {
     lead[AXIS_INDEX[ui]] = 0
+    foot.pending.pending = false
     const under = underAnchor(cs.cursor, items, g, rise, drop, downKey)
-    const standing = under !== null && under > -STAND_REACH
-    const col = groundUnder(cs.cursor, lead, items, g, rise, drop)
-    let target = base
-    if (standing) {
-      // Past a rim with nothing near under the drawn point: still on the rim the anchor stands on.
-      const s = col === null || col < under - stepG ? under : col
-      // Gravity off, pushing up off the floor: up to the anchor's own height by half a step up.
-      const r = gravity ? 0 : Math.max(0, st.frac[ui] * up.dir * stepG)
-      target = r > 0 ? s + (0.5 * stepG - s) * Math.min(1, (2 * r) / stepG) : s
+    const col = groundAt(cs.cursor, lead, items, g, rise, drop, downKey)
+    // A shard in reach still being built: the feet stay where they are until it is.
+    if (!foot.pending.pending) {
+      const standing = under !== null && under > -STAND_REACH
+      let target = base
+      if (standing) {
+        // Past a rim with nothing near under the drawn point: still on the rim the anchor stands on.
+        const s = col === null || col < under - stepG ? under : col
+        // Gravity off, pushing up off the floor: up to the anchor's own height by half a step up.
+        const r = gravity ? 0 : Math.max(0, st.frac[ui] * up.dir * stepG)
+        target = r > 0 ? s + (0.5 * stepG - s) * Math.min(1, (2 * r) / stepG) : s
+      }
+      if (h < target) h = standing ? target : h + (target - h) * (1 - decayK)
+      else if (h > target) h = Math.max(target, Math.min(h - FOOT_DROP_SPEED * stepG * dt, target + (h - target) * decayK))
+      if (col !== null && h < col) h = col
     }
-    if (h < target) h = standing ? target : h + (target - h) * (1 - Math.exp(-dt / GLIDE_TAU_S))
-    else if (h > target) h = Math.max(target, Math.min(h - FOOT_DROP_SPEED * stepG * dt, target + (h - target) * Math.exp(-dt / GLIDE_TAU_S)))
-    if (col !== null && h < col) h = col
     foot.falling = false
   } else {
-    // A jump leaves from the feet, and the arc carries them; a landing hands them back to the ground.
+    // A jump leaves from the feet, and the arc takes them over: how far
+    // under the arc's point they were when it began fades (GLIDE_TAU_S), so
+    // they land where the arc lands, on its whole gibson's standing height.
     if (!foot.falling) foot.lift = h - base
+    else foot.lift *= decayK
     foot.falling = true
     h = base + foot.lift
-    // The ground under the arc, found from the anchor's own height, which
-    // the fall left from in open air: never below it, though the arc's
-    // point and the gibson it is on are whole gibsons apart.
-    lead[AXIS_INDEX[ui]] = 0
-    const col = groundUnder(cs.cursor, lead, items, g, rise, drop + Math.max(0, -h))
+    // The ground under the arc, searched from the arc's own point (never
+    // from the gibson the fall left, which can be far above or below it).
+    const from = Math.max(h, base)
+    lead[AXIS_INDEX[ui]] = from * up.dir
+    const col = groundUnder(cs.cursor, lead, items, g, rise, drop)
     if (col !== null && h < col) h = col
   }
+  // A riser stood on at once (faster than any slope is walked): the feet
+  // are on it, and the camera follows them up over GLIDE_TAU_S (walkRise).
+  const jump = h - was - FOOT_DROP_SPEED * stepG * dt
+  walkRise.offset = walkRise.offset * decayK - (!falling && jump > 0 ? jump : 0)
+  if (walkRise.offset > -1e-4 * stepG) walkRise.offset = 0
+  walkRise.up.axis = ui
+  walkRise.up.dir = up.dir
   foot.h = h
   foot.extra = h - base
   foot.upAxis = ui
@@ -394,6 +417,21 @@ export function groundFluid(now: number = performance.now()): void {
     walkGlide.active = true
   }
 }
+
+/** The ground under the drawn point (groundUnder), kept while the anchor, the walls and the drawn point (to GROUND_QUANT gibsons) stay put. */
+function groundAt(at: Position, lead: readonly [number, number, number], items: readonly WallItem[], g: AxisDirection, rise: number, drop: number, downKey: string): number | null {
+  const q = (v: number): number => Math.round(v / GROUND_QUANT)
+  const k = `${foot.itemsKey}|${at.x},${at.y},${at.z}|${downKey}|${rise}|${q(lead[0])},${q(lead[1])},${q(lead[2])}`
+  if (k === foot.colKey) return foot.col
+  const out = { pending: false }
+  foot.col = groundUnder(at, lead, items, g, rise, drop, out)
+  if (out.pending) foot.pending.pending = true
+  foot.colKey = out.pending ? '' : k
+  return foot.col
+}
+
+/** How finely groundAt's key tells one drawn point from another, in gibsons: far under a pixel. */
+const GROUND_QUANT = 1 / 4096
 
 const AXIS_INDEX: Record<AxisName, 0 | 1 | 2> = { x: 0, y: 1, z: 2 }
 
@@ -405,6 +443,7 @@ function itemsNear(plane: number, at: Position, now: number): WallItem[] {
     foot.itemsKey = k
     foot.itemsAt = now
     foot.underKey = ''
+    foot.colKey = ''
   }
   return foot.items
 }

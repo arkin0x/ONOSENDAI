@@ -56,8 +56,8 @@ export interface EyeFrame {
   up: AxisDirection
   /** Whether to ask the walls: in WALK. Gliding out, the last answer stands. */
   walls: boolean
-  /** Fluid WALK: the walker is drawn standing on the surface, between gibsons (store/walkFluid.ts groundFluid), and reached the way it stands there (eyeReach `stand`). */
-  stand?: boolean
+  /** Fluid WALK: the walker is drawn standing on the surface, between gibsons (store/walkFluid.ts groundFluid), and reached the way it stands there (eyeReach `stand`): the most the ground climbs, in gibsons. */
+  stand?: number
   now: number
 }
 
@@ -106,9 +106,9 @@ export class WalkEyeRig {
     const off = csDirection(f.axes, [eye.x, eye.y, eye.z]).map((v) => v * g) as [number, number, number]
     const step = EYE_ROOM * g * KEY_STEP
     const q = (v: number): number => Math.round(v / step)
-    const key = `${cell}|${f.scaleExp}|${f.up.axis}${f.up.dir}|${f.stand ? 's' : ''}|${lead.map(q).join(',')}|${off.map(q).join(',')}`
+    const key = `${cell}|${f.scaleExp}|${f.up.axis}${f.up.dir}|${f.stand ?? ''}|${lead.map(q).join(',')}|${off.map(q).join(',')}`
     if (key === this.askKey) return this.share
-    const share = eyeReach(c, lead, off, EYE_ROOM * g, this.items, f.up, this.pending, f.stand === true)
+    const share = eyeReach(c, lead, off, EYE_ROOM * g, this.items, f.up, this.pending, f.stand ?? false)
     // A shard still being built is asked about again next frame; until then the eye stays at the walker.
     this.askKey = this.pending.pending ? '' : key
     return share

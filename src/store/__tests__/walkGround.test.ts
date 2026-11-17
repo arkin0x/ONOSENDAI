@@ -58,7 +58,7 @@ import { useWorkshop } from '../useWorkshop'
 import { clearWalls, eyeReach, wallItemsAt, wallsBuilt } from '../walkWalls'
 import { groundFluid, resetFluid, tickFluid } from '../walkFluid'
 import { useFluidWalk } from '../fluidSwitch'
-import { walkFacing, walkFall, walkFallUp, walkGlide } from '../../lib/walkEye'
+import { walkFacing, walkFall, walkFallUp, walkGlide, walkRise } from '../../lib/walkEye'
 import { useCalibration } from '../../lib/calibration'
 import { withConstrain } from '../../lib/walkConstrain'
 import { canonicalQuaternion, type Position, type ViewAxes } from '../../lib/space'
@@ -158,12 +158,22 @@ function drawn(): V3 {
 /** An avatar's eye, straight up from its origin in gibsons: the Ship's 1.33. */
 const EYE: V3 = [0, 1.33, 0]
 
-/** Where the camera is, in gibsons from `start`: the eye over the drawn walker, pulled in as the rig pulls it (scene/walkEyeRig.ts). */
-function camera(p: V3): V3 {
+/** The near plane's room the rig keeps (scene/walkEyeRig.ts EYE_ROOM), in gibsons at 2^0. */
+const ROOM = 0.15
+
+/** How much of the eye the rig takes this frame (eyeReach, as scene/walkEyeRig.ts asks it). */
+function eyeShare(p: V3): number {
   const cs = useCyberspace.getState()
   const lead: V3 = [p[0] - Number(cs.cursor.x - start.x), p[1] - Number(cs.cursor.y - start.y), p[2] - Number(cs.cursor.z - start.z)]
-  const share = eyeReach(cs.cursor, lead, EYE, 0.15, wallItemsAt(cs.plane, cs.cursor), { axis: 'y', dir: 1 }, undefined, walkGlide.exact)
-  return [p[0] + EYE[0] * share, p[1] + EYE[1] * share, p[2] + EYE[2] * share]
+  return eyeReach(cs.cursor, lead, EYE, ROOM, wallItemsAt(cs.plane, cs.cursor), { axis: 'y', dir: 1 }, undefined, walkGlide.exact ? 2 : false)
+}
+
+/** Where the camera is, in gibsons from `start`: the eye over the drawn walker, pulled in as the rig pulls it, lowered by a stair's rise as the rig lowers it (Scene.tsx, walkRise). */
+function camera(p: V3): V3 {
+  const share = eyeShare(p)
+  const above = EYE[1] * share
+  const lower = walkGlide.exact && walkRise.offset < 0 ? Math.max(walkRise.offset, -Math.max(0, above - ROOM)) : 0
+  return [p[0] + EYE[0] * share, p[1] + above + lower, p[2] + EYE[2] * share]
 }
 
 const key = (code: string) => ({ code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, preventDefault: () => {} })
@@ -200,6 +210,7 @@ async function landAll(): Promise<void> {
 
 beforeEach(async () => {
   posted.length = 0
+  landedSoFar = 0
   vi.spyOn(performance, 'now').mockImplementation(() => clock)
   walkKeysReleased()
   useWalk.getState().exit()
@@ -237,6 +248,12 @@ async function walk(gravity: boolean): Promise<void> {
   frame(16)
 }
 
+let landedSoFar = 0
+/** The chain keeps up, as a relay would: every proof asked for lands, so the walk never holds at the LOSING SYNC edge. */
+async function keepUp(): Promise<void> {
+  while (posted.length > landedSoFar) await useCyberspace.getState().applyProofMessage(done(posted[landedSoFar++]))
+}
+
 /** A frame-time pattern: steady at `ms`, or with a long frame every so often. */
 function* times(ms: number, spikes: boolean): Generator<number> {
   for (let n = 0; ; n++) yield spikes && n % 23 === 7 ? 120 + (n % 5) * 30 : ms
@@ -247,23 +264,28 @@ function* times(ms: number, spikes: boolean): Generator<number> {
  * let go and settle; on every frame, the feet and the eye must be on or over
  * `surface` at their own x. The lowest margin seen, for the message.
  */
-function walkOver(surface: (x: number) => number, keyCode: string, until: (x: number) => boolean, ms: number, spikes: boolean): { worstFeet: number; worstEye: number; frames: number } {
+async function walkOver(surface: (x: number) => number, keyCode: string, until: (x: number) => boolean, ms: number, spikes: boolean): Promise<{ worstFeet: number; worstEye: number; frames: number; camStep: number }> {
   let worstFeet = Infinity
   let worstEye = Infinity
+  let camStep = 0
+  let lastCam: number | null = null
   let n = 0
   const check = (): void => {
     const p = drawn()
     const c = camera(p)
     worstFeet = Math.min(worstFeet, p[1] - surface(p[0]))
+    // The eye well over the surface, not pulled in to the feet.
     worstEye = Math.min(worstEye, c[1] - surface(c[0]))
+    if (lastCam !== null) camStep = Math.max(camStep, Math.abs(c[1] - lastCam))
+    lastCam = c[1]
     n++
   }
   down(keyCode)
   const t = times(ms, spikes)
-  for (let k = 0; k < 4000 && !until(drawn()[0]); k++) { frame(t.next().value as number); check() }
+  for (let k = 0; k < 4000 && !until(drawn()[0]); k++) { frame(t.next().value as number); check(); await keepUp() }
   up(keyCode)
-  for (let k = 0; k < 60; k++) { frame(t.next().value as number); check() }
-  return { worstFeet, worstEye, frames: n }
+  for (let k = 0; k < 60; k++) { frame(t.next().value as number); check(); await keepUp() }
+  return { worstFeet, worstEye, frames: n, camStep }
 }
 
 const PACES: Array<[string, number, boolean]> = [['60 fps', 16, false], ['30 fps', 33, false], ['60 fps with spikes', 16, true]]
@@ -277,27 +299,63 @@ describe('the feet and the eye never go below the surface', () => {
         const at = rampSurface()
         const surface = (x: number): number => at(x - 24)
         await walk(gravity)
-        const upHill = walkOver(surface, 'KeyW', (x) => x > 44, ms, spikes)
+        const upHill = await walkOver(surface, 'KeyW', (x) => x > 44, ms, spikes)
         expect(drawn()[0]).toBeGreaterThan(44)
-        const downHill = walkOver(surface, 'KeyS', (x) => x < 6, ms, spikes)
+        const downHill = await walkOver(surface, 'KeyS', (x) => x < 6, ms, spikes)
         expect(drawn()[0]).toBeLessThan(6)
         expect(upHill.worstFeet).toBeGreaterThanOrEqual(-1e-6)
         expect(downHill.worstFeet).toBeGreaterThanOrEqual(-1e-6)
-        expect(upHill.worstEye).toBeGreaterThanOrEqual(-1e-6)
-        expect(downHill.worstEye).toBeGreaterThanOrEqual(-1e-6)
+        expect(upHill.worstEye).toBeGreaterThan(EYE[1] / 2)
+        expect(downHill.worstEye).toBeGreaterThan(EYE[1] / 2)
       })
 
       it(`onto and off a half-gibson ledge, gravity ${gravity ? 'on' : 'off'}, ${name}`, async () => {
         world(start, ledge(), [0, 0, 0])
         await walk(gravity)
-        const onto = walkOver(ledgeHeight, 'KeyW', (x) => x > 6, ms, spikes)
+        const onto = await walkOver(ledgeHeight, 'KeyW', (x) => x > 6, ms, spikes)
         expect(drawn()[0]).toBeGreaterThan(6)
-        const off = walkOver(ledgeHeight, 'KeyS', (x) => x < -3, ms, spikes)
+        const off = await walkOver(ledgeHeight, 'KeyS', (x) => x < -3, ms, spikes)
         expect(drawn()[0]).toBeLessThan(-3)
         expect(onto.worstFeet).toBeGreaterThanOrEqual(-1e-6)
         expect(off.worstFeet).toBeGreaterThanOrEqual(-1e-6)
-        expect(onto.worstEye).toBeGreaterThanOrEqual(-1e-6)
-        expect(off.worstEye).toBeGreaterThanOrEqual(-1e-6)
+        expect(onto.worstEye).toBeGreaterThan(EYE[1] / 2)
+        expect(off.worstEye).toBeGreaterThan(EYE[1] / 2)
+      })
+    }
+  }
+})
+
+/**
+ * Stairs authored for this test: risers of `rise` gibsons every `run`, the
+ * first at x 2.3, the floor 0.4 under the start gibson.
+ */
+function stairs(rise: number, run: number, n: number): { shard: ShardModel; height: (x: number) => number } {
+  const list: Array<[V3, V3]> = [[[-40, -6, -40], [2.3, LOW, 40]]]
+  for (let k = 0; k < n; k++) list.push([[2.3 + k * run, -6, -40], [k === n - 1 ? 40 : 2.3 + (k + 1) * run, LOW + (k + 1) * rise, 40]])
+  const height = (x: number): number => (x < 2.3 ? LOW : LOW + Math.min(n, Math.floor((x - 2.3) / run) + 1) * rise)
+  return { shard: boxes(`Stairs ${rise}`, list), height }
+}
+
+describe('stairs: the feet stand on each step and the camera climbs smoothly', () => {
+  for (const [rise, run] of [[1, 1.5], [2, 3], [0.6, 0.7]] as const) {
+    for (const gravity of [true, false]) {
+      it(`risers of ${rise} every ${run}, gravity ${gravity ? 'on' : 'off'}: never below a step, and the camera never jumps`, async () => {
+        const { shard, height } = stairs(rise, run, 5)
+        world(start, shard, [0, 0, 0])
+        await walk(gravity)
+        const upStairs = await walkOver(height, 'KeyW', (x) => x > 2.3 + 5 * run + 2, 16, false)
+        expect(drawn()[0]).toBeGreaterThan(2.3 + 5 * run + 2)
+        expect(drawn()[1]).toBeCloseTo(LOW + 5 * rise, 9)
+        const downStairs = await walkOver(height, 'KeyS', (x) => x < -2, 16, false)
+        expect(drawn()[1]).toBeCloseTo(LOW, 9)
+        for (const r of [upStairs, downStairs]) {
+          expect(r.worstFeet).toBeGreaterThanOrEqual(-1e-6)
+          expect(r.worstEye).toBeGreaterThan(0)
+          // At 60 fps a step's rise reaches the camera over several frames, never at once. The
+          // camera never trails below the feet's height (plus the near plane's room), so of a
+          // riser taller than the eye, the part over it is climbed at once.
+          expect(r.camStep).toBeLessThan(Math.max(0.45, rise - (EYE[1] - ROOM) + 0.15))
+        }
       })
     }
   }
@@ -338,6 +396,50 @@ describe('jumps leave from the feet and land on the surface', () => {
     const p = drawn()
     expect(walkFall.active).toBe(false)
     expect(p[1]).toBeCloseTo(surface(p[0]), 9)
+  })
+})
+
+describe('a jump onto a block, and leaving WALK', () => {
+  it('a jump from a floor 0.9 under the gibson onto a block 2.6 up never draws the feet inside it, and the eye stays out', async () => {
+    const shard = boxes('Floor and block', [[[-40, -3, -40], [40, -0.9, 40]], [[2.6, -3, -40], [40, 2.6, 40]]])
+    world(start, shard, [0, 0, 0])
+    const height = (x: number): number => (x < 2.6 ? -0.9 : 2.6)
+    await walk(true)
+    let worstFeet = Infinity
+    let worstEye = Infinity
+    down('KeyW')
+    for (let k = 0; k < 400 && drawn()[0] < 8; k++) {
+      if (k === 6) { down('Space'); up('Space') }
+      frame(16)
+      const p = drawn()
+      const c = camera(p)
+      worstFeet = Math.min(worstFeet, p[1] - height(p[0]))
+      worstEye = Math.min(worstEye, c[1] - height(c[0]))
+    }
+    up('KeyW')
+    for (let k = 0; k < 120; k++) frame(16)
+    expect(drawn()[0]).toBeGreaterThan(2.6)
+    expect(worstFeet).toBeGreaterThanOrEqual(-1e-6)
+    expect(worstEye).toBeGreaterThan(0)
+    expect(drawn()[1]).toBeCloseTo(2.6, 9)
+  })
+
+  it('leaving WALK on a half-height surface, the eye glides off the surface, never jumping to the gibson', async () => {
+    world(start, ledge(), [0, 0, 0])
+    await walk(true)
+    for (let k = 0; k < 20; k++) frame(16)
+    expect(drawn()[1]).toBeCloseTo(LOW, 9)
+    let last = drawn()[1]
+    useWalk.getState().exit()
+    let biggest = 0
+    for (let k = 0; k < 60; k++) {
+      frame(16)
+      const y = drawn()[1]
+      biggest = Math.max(biggest, Math.abs(y - last))
+      last = y
+    }
+    expect(biggest).toBeLessThan(0.2)
+    expect(last).toBeCloseTo(0, 3) // onto the gibson, where the step WALK and the orbit draw it
   })
 })
 

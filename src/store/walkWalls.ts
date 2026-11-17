@@ -934,15 +934,17 @@ function regionMeets(w: WallItem, lo: Position, hi: Position): boolean {
  * this is where the camera looks from.
  *
  * With `stand` (fluid WALK, the walker drawn standing on the surface between
- * gibsons, store/walkFluid.ts groundFluid), the walker's point as drawn is
- * reached the way the ground was found (groundUnder): up from the gibson's
- * centre to its height, if it is higher, then level, then down onto it. A
+ * gibsons, store/walkFluid.ts groundFluid; a number is the most the ground
+ * climbs, in gibsons, true is 2), the walker's point as drawn is reached the
+ * way the ground was found (groundUnder): up from the gibson's centre to its
+ * height, if it is higher, or a whole gibson or two, then level, then down
+ * onto it. A
  * straight line from the centre down to feet past a rim, or up to feet on a
  * slope ahead, would cut through the surface they stand on and hold the eye
  * at the feet, which is the camera in the floor. Without it, the line is
  * straight, as it always was.
  */
-export function eyeReach(from: Position, lead: readonly [number, number, number], eye: readonly [number, number, number], margin: number, items: readonly WallItem[], up: AxisDirection = UP_Y, out?: { pending: boolean }, stand = false): number {
+export function eyeReach(from: Position, lead: readonly [number, number, number], eye: readonly [number, number, number], margin: number, items: readonly WallItem[], up: AxisDirection = UP_Y, out?: { pending: boolean }, stand: boolean | number = false): number {
   if (out) out.pending = false
   const len = Math.hypot(eye[0], eye[1], eye[2])
   if (!(len > 0)) return 1
@@ -1011,7 +1013,7 @@ export function eyeReach(from: Position, lead: readonly [number, number, number]
     if (enclosed(e.mesh, o, e.clip)) return 0
     // The walker's point as drawn must be on the gibson's own side of every face.
     const leadLen = Math.hypot(leadM[0], leadM[1], leadM[2])
-    if (leadLen * g > tol && (stand ? standPathHit(tris, o0, leadM, upM, tol / g) : segmentHit(tris, o0, leadM, tol / (leadLen * g)) !== null)) return 0
+    if (leadLen * g > tol && (stand !== false && stand !== 0 ? standPathHit(tris, o0, leadM, upM, tol / g, (stand === true ? 2 : stand) / g, 1 / g) : segmentHit(tris, o0, leadM, tol / (leadLen * g)) !== null)) return 0
     near.push({ tris, walker, o, g })
     const hit = segmentHit(tris, o, d, tol / span)
     if (hit !== null) reach = Math.min(reach, hit.s * span - margin / Math.max(hit.square, EYE_SQUARE_MIN))
@@ -1127,27 +1129,30 @@ export function groundUnder(from: Position, lead: readonly [number, number, numb
 }
 
 /**
- * Whether the way from `o0` (the gibson's centre, lifted, in a shard's render
- * frame) to `o0 + lead` crosses a face of `tris` (eyeReach `stand`): up along
- * `upM` to the drawn point's height when that is higher, level to over it,
- * then down onto it. A hit within `tolM` model units of a leg's start does
- * not count, as eyeReach's straight line has it.
+ * Whether every way from `o0` (the gibson's centre, lifted, in a shard's
+ * render frame) to `o0 + lead` crosses a face of `tris` (eyeReach `stand`),
+ * each the way groundUnder reaches the ground: up along `upM` to a climb,
+ * level to over the point, then down onto it. The climbs tried are the
+ * point's own height when that is higher, then each whole gibson
+ * (`gibsonM` model units) up to `riseM`, as the ground's lifts are. A hit within `tolM` model
+ * units of a leg's start does not count, as eyeReach's straight line has it.
  */
-function standPathHit(tris: Float64Array, o0: readonly [number, number, number], lead: readonly [number, number, number], upM: readonly number[], tolM: number): boolean {
+function standPathHit(tris: Float64Array, o0: readonly [number, number, number], lead: readonly [number, number, number], upM: readonly number[], tolM: number, riseM: number, gibsonM: number): boolean {
   const h = lead[0] * upM[0] + lead[1] * upM[1] + lead[2] * upM[2]
-  const rise = Math.max(0, h)
-  const legs: Array<[number, number, number]> = [
-    [upM[0] * rise, upM[1] * rise, upM[2] * rise],
-    [lead[0] - upM[0] * h, lead[1] - upM[1] * h, lead[2] - upM[2] * h],
-    [upM[0] * (h - rise), upM[1] * (h - rise), upM[2] * (h - rise)],
-  ]
-  const p: [number, number, number] = [o0[0], o0[1], o0[2]]
-  for (const d of legs) {
+  const flat: [number, number, number] = [lead[0] - upM[0] * h, lead[1] - upM[1] * h, lead[2] - upM[2] * h]
+  const climbs = [Math.max(0, h)]
+  for (let k = 1; k * gibsonM <= riseM * (1 + 1e-12); k++) if (k * gibsonM > climbs[0]) climbs.push(k * gibsonM)
+  const p: [number, number, number] = [0, 0, 0]
+  const hit = (d: readonly number[]): boolean => {
     const len = Math.hypot(d[0], d[1], d[2])
-    if (len > tolM && segmentHit(tris, p, d, tolM / len) !== null) return true
+    const crossed = len > tolM && segmentHit(tris, p, d as [number, number, number], tolM / len) !== null
     p[0] += d[0]; p[1] += d[1]; p[2] += d[2]
+    return crossed
   }
-  return false
+  return climbs.every((c) => {
+    p[0] = o0[0]; p[1] = o0[1]; p[2] = o0[2]
+    return hit([upM[0] * c, upM[1] * c, upM[2] * c]) || hit(flat) || hit([upM[0] * (h - c), upM[1] * (h - c), upM[2] * (h - c)])
+  })
 }
 
 /** How many times floorPad has been asked: for the test that a world with no bounce asks it nothing. */

@@ -149,8 +149,9 @@ export const lootHydrated: Promise<void> = readCached(LOOT_CACHE_KEY).then((data
     const items = kept.length > 0 ? standing(mergeLoot(kept, s.items)) : s.items
     return { items, status: items.length > 0 ? 'ready' : s.status }
   })
-  // The merged list, in place of any write made before the kept one was read.
-  writeCache(useLootStore.getState().items)
+  // The merged list, in place of any write made before the kept one was read
+  // (nothing kept, or a read that failed: nothing to put back, so no write).
+  if (data !== undefined) writeCache(useLootStore.getState().items)
 }, () => undefined)
 
 let close: (() => void) | null = null

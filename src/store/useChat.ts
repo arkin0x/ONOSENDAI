@@ -333,6 +333,7 @@ export const chatHydrated: Promise<void> = readCached(CHAT_CACHE_KEY).then((data
   const cur = useChat.getState().lines
   const lines = kept.length > 0 ? mergeLines(kept, cur) : cur
   if (lines !== cur) useChat.setState({ lines })
-  // The merged list, in place of any write made before the kept one was read.
-  saveLines(lines)
+  // The merged list, in place of any write made before the kept one was read
+  // (nothing kept, or a read that failed: nothing to put back, so no write).
+  if (data !== undefined) saveLines(lines)
 }, () => undefined)

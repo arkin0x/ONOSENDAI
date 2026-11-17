@@ -285,8 +285,9 @@ export const profilesHydrated: Promise<void> = readCached(PROFILES_CACHE_KEY).th
     // Kept is not fetched: a kept profile is still asked for again this visit, as before.
     for (const pk of Object.keys(kept)) if (next[pk] === kept[pk]) withStamp.delete(pk)
   }
-  // The merged record, in place of any write made before the kept one was read.
-  saveCacheSoon()
+  // The merged record, in place of any write made before the kept one was read
+  // (nothing kept, or a read that failed: nothing to put back, so no write).
+  if (data !== undefined) saveCacheSoon()
 }, () => undefined)
 
 /** When each profile was fetched, so the TTL can refetch a stale one. */

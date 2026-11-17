@@ -42,6 +42,11 @@
  * game's, and the place each one has inside the game is shown apart from
  * the coord, which stays where the identity entered. An action this client
  * does not recognize is a short quiet tick, labelled SKIPPED (§8.9).
+ *
+ * In WALK the chip also shows how far ahead of your chain the walk is: a
+ * bar of ticks in its bottom padding, on whichever face the chip has
+ * (ChainAhead.tsx; arkinox, 2026-11-17). Only on your own chain at its
+ * head, and the chip is the same size with it and without.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -64,6 +69,7 @@ import { useEscape } from '../hooks/useEscape'
 import { useChainUi } from '../store/useChainUi'
 import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
 import { everyWhileVisible } from '../lib/whileVisible'
+import { AheadMarks, AheadWords, useChainAhead } from './ChainAhead'
 
 // Spectating opens the chain explorer: the chain is the thing you came to
 // look at. What you had it set to is put back when the spectation ends, and
@@ -121,6 +127,8 @@ function ChainExplorerChip(): JSX.Element {
   const index = marked === null ? last : Math.min(marked, last)
   const action = actions[index]
   const atHead = marked === null
+  // How far ahead of this chain the walk is: yours, at its head, only.
+  const ahead = useChainAhead(spectate === null && atHead && !building, actions.length)
   const secretKeys = useSecrets((s) => s.keys)
   const key = useMemo(
     () => (action ? keyStateForAction(action, actions[index - 1] ?? null, secretKeys, findLcaHeight) : { state: 'none' as const, height: null }),
@@ -195,40 +203,44 @@ function ChainExplorerChip(): JSX.Element {
         // superseded by a newer spawn (arkinox, 2026-10-01). It stays on the
         // chip until read, like any drop.
         <button
-          className="chip explorer__toggle explorer__toggle--dropped"
+          className={`chip explorer__toggle explorer__toggle--dropped${ahead.cls}`}
           {...noCallout}
           onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
-          aria-label="Your chain was replaced by a new spawn from another device. Tap to read why."
+          aria-label={`Your chain was replaced by a new spawn from another device. Tap to read why.${ahead.label}`}
         >
-          CHAIN REPLACED BY A NEW SPAWN
+          <AheadWords ahead={ahead}>CHAIN REPLACED BY A NEW SPAWN</AheadWords>
+          <AheadMarks ahead={ahead} />
         </button>
       ) : fork && fork.dropped > 0 ? (
         <button
-          className="chip explorer__toggle explorer__toggle--dropped"
+          className={`chip explorer__toggle explorer__toggle--dropped${ahead.cls}`}
           {...noCallout}
           onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
-          aria-label={`${fork.dropped} actions from this device were dropped. Tap to read why.`}
+          aria-label={`${fork.dropped} actions from this device were dropped. Tap to read why.${ahead.label}`}
         >
-          {fork.dropped} ACTION{fork.dropped === 1 ? '' : 'S'} DROPPED
+          <AheadWords ahead={ahead}>{fork.dropped} ACTION{fork.dropped === 1 ? '' : 'S'} DROPPED</AheadWords>
+          <AheadMarks ahead={ahead} />
         </button>
       ) : fork && fork.adopted > 0 && fresh ? (
         <button
-          className="chip explorer__toggle explorer__toggle--adopted"
+          className={`chip explorer__toggle explorer__toggle--adopted${ahead.cls}`}
           {...noCallout}
           onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
-          aria-label={`${fork.adopted} actions arrived from another device. Tap to read why.`}
+          aria-label={`${fork.adopted} actions arrived from another device. Tap to read why.${ahead.label}`}
         >
-          {fork.adopted} FROM ANOTHER DEVICE
+          <AheadWords ahead={ahead}>{fork.adopted} FROM ANOTHER DEVICE</AheadWords>
+          <AheadMarks ahead={ahead} />
         </button>
       ) : (
         <button
-          className="chip explorer__toggle"
+          className={`chip explorer__toggle${ahead.cls}`}
           {...noCallout}
           onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v) }}
-          aria-label={open ? 'Hide chain explorer' : 'Show chain explorer'}
+          aria-label={`${open ? 'Hide chain explorer' : 'Show chain explorer'}${ahead.label ? `.${ahead.label}` : ''}`}
           aria-pressed={open}
         >
-          CHAIN {index + 1}/{actions.length}{atHead || building ? '' : ' HISTORY'}
+          <AheadWords ahead={ahead}>CHAIN {index + 1}/{actions.length}{atHead || building ? '' : ' HISTORY'}</AheadWords>
+          <AheadMarks ahead={ahead} />
         </button>
       )}
 

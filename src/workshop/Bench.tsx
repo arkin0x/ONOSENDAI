@@ -92,7 +92,7 @@ const UP = toRender
 function ScaleAvatar(): JSX.Element {
   const unit = useWorkshop((s) => s.current()?.unit ?? 0)
   // Standing on the grid, its lowest point its origin, as in the world (scene/avatarMarker.ts).
-  const geometry = useMemo(() => markerEdges(), [])
+  const geometry = useMemo(() => markerEdges(true), [])
   useEffect(() => () => geometry.dispose(), [geometry])
   const k = Math.pow(2, -unit)
   return (

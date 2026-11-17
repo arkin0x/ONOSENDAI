@@ -328,17 +328,21 @@ export function groundFluid(now: number = performance.now()): void {
     // the surface under its gibson's centre, else on its gibson's floor, as
     // every avatar out of WALK is (restDrop); the rig eases onto it as it
     // eases onto a step.
-    const stepDrop = cs.walking ? stepWalkDrop(cs.cursor, cs.plane, now) : 0
-    // Just left fluid WALK: the eye glides off the feet's height too, as off the smooth position.
-    if (foot.h !== null && cs.scaleExp === foot.scaleExp && foot.extra + stepDrop !== 0) {
-      const k = ((foot.extra + stepDrop) * foot.upDir) / 2 ** foot.scaleExp
-      st.glide[foot.upAxis] += k
-      walkGlide[foot.upAxis] += k
+    const sg = cs.walking && useWalk.getState().gravity ? walkDown() : WORLD_DOWN
+    const su = upOf(sg)
+    const stepDrop = cs.walking ? stepWalkDrop(cs.cursor, cs.plane, cs.scaleExp, sg, now) : 0
+    // Just left fluid WALK: the eye glides off the feet's height (and onto the step WALK's), as off the smooth position.
+    if (foot.h !== null && cs.scaleExp === foot.scaleExp) {
+      const stepG = 2 ** cs.scaleExp
+      st.glide[foot.upAxis] += (foot.extra * foot.upDir) / stepG
+      walkGlide[foot.upAxis] += (foot.extra * foot.upDir) / stepG
+      st.glide[su.axis] += (stepDrop * su.dir) / stepG
+      walkGlide[su.axis] += (stepDrop * su.dir) / stepG
       walkGlide.active = true
     }
     resetFoot()
     if (stepDrop !== 0) {
-      walkGlide.y -= stepDrop / 2 ** cs.scaleExp
+      walkGlide[su.axis] -= (stepDrop * su.dir) / 2 ** cs.scaleExp
       walkGlide.active = true
     }
     // A stair's trail fades as it would have, so leaving WALK just after a riser never pops the camera.
@@ -356,11 +360,15 @@ export function groundFluid(now: number = performance.now()): void {
   // The height the rig would draw without the feet, gibsons along up from the anchor's middle.
   const fallH = falling && walkFallUp.axis === ui ? walkFall.offset * walkFallUp.dir * up.dir : 0
   const base = fallH + walkGlide[ui] * up.dir * stepG
+  // A first frame (fluid WALK just began, or the anchor jumped too far to
+  // follow): the feet go straight onto the ground, as they stood out of it.
+  let fresh = false
   if (foot.h !== null && foot.anchor && foot.scaleExp === cs.scaleExp && foot.down === downKey) {
     // The anchor moved: the feet stay where they are in the world.
     foot.h -= Number(heightOf(cs.cursor, g) - heightOf(foot.anchor, g))
-    if (!(Math.abs(foot.h - base) < GLIDE_MAX * stepG)) foot.h = base
+    if (!(Math.abs(foot.h - base) < GLIDE_MAX * stepG)) { foot.h = base; fresh = true }
   } else {
+    fresh = true
     foot.h = base
     foot.falling = falling
     foot.lift = 0
@@ -394,7 +402,8 @@ export function groundFluid(now: number = performance.now()): void {
         const off = r - REST_FLOOR * stepG
         target = r > 0 ? s + (off - s) * Math.min(1, (2 * r) / stepG) : s
       }
-      if (h < target) h = standing ? target : h + (target - h) * (1 - decayK)
+      if (fresh) h = target
+      else if (h < target) h = standing ? target : h + (target - h) * (1 - decayK)
       else if (h > target) h = Math.max(target, Math.min(h - FOOT_DROP_SPEED * stepG * dt, target + (h - target) * decayK))
       if (col !== null && h < col) h = col
     }
@@ -405,7 +414,8 @@ export function groundFluid(now: number = performance.now()): void {
     // they land where the arc lands, on its whole gibson's standing height.
     // In the air the origin rides the arc on the floor of the gibson it is drawn in.
     const air = base - REST_FLOOR * stepG
-    if (!foot.falling) foot.lift = h - air
+    if (fresh) foot.lift = 0
+    else if (!foot.falling) foot.lift = h - air
     else foot.lift *= decayK
     foot.falling = true
     h = air + foot.lift
@@ -419,7 +429,7 @@ export function groundFluid(now: number = performance.now()): void {
   // A riser stood on at once (faster than any slope is walked): the feet
   // are on it, and the camera follows them up over GLIDE_TAU_S (walkRise).
   const jump = h - was - FOOT_DROP_SPEED * stepG * dt
-  walkRise.offset = walkRise.offset * decayK - (!falling && jump > 0 ? jump : 0)
+  walkRise.offset = walkRise.offset * decayK - (!falling && !fresh && jump > 0 ? jump : 0)
   if (walkRise.offset > -1e-4 * stepG) walkRise.offset = 0
   walkRise.up.axis = ui
   walkRise.up.dir = up.dir
@@ -433,13 +443,15 @@ export function groundFluid(now: number = performance.now()): void {
   }
 }
 
-/** The step WALK's drop under the cursor (restDrop), in gibsons: kept for this gibson, asked again every FOOT_ITEMS_MS (walls arriving) and while a wall is on its way. */
+/** The step WALK's drop under the cursor (restDrop, along its gravity), in gibsons: kept for this gibson, asked again every FOOT_ITEMS_MS (walls arriving). */
 let stepKept = { key: '', at: -Infinity, drop: REST_FLOOR }
-function stepWalkDrop(at: Position, plane: number, now: number): number {
-  const k = `${plane}|${at.x},${at.y},${at.z}`
+function stepWalkDrop(at: Position, plane: number, scaleExp: number, g: AxisDirection, now: number): number {
+  // Zoomed out past a gibson: the cell's floor, as everywhere (scene/useRestDrop.ts).
+  if (scaleExp !== 0) return REST_FLOOR * 2 ** scaleExp
+  const k = `${plane}|${at.x},${at.y},${at.z}|${g.axis}${g.dir}`
   if (k === stepKept.key && now - stepKept.at <= FOOT_ITEMS_MS) return stepKept.drop
-  const r = restDrop(at, plane)
-  stepKept = { key: r.pending ? '' : k, at: now, drop: r.drop }
+  const r = restDrop(at, plane, g)
+  stepKept = { key: k, at: now, drop: r.drop }
   return r.drop
 }
 

@@ -93,7 +93,7 @@ function EyeCamera({ eye }: { eye: [number, number, number] }): null {
   return null
 }
 
-const MARKER = markerEdges()
+const MARKER = markerEdges(true)
 
 /** The sample floor: a grid of gibsons in the walker's plane, a doorway ahead, a default avatar beside it. */
 function SampleFloor(): JSX.Element {

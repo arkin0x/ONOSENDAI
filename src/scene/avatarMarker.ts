@@ -8,20 +8,25 @@ import { AVATAR_MARKER_HALF } from '../lib/avatar'
 
 /**
  * The default avatar's shape: a wireframe icosahedron one cell across, with
- * a vertex straight above and below its centre, lifted so its lowest vertex
- * is its origin. An avatar's origin is the point that touches the ground
- * (arkinox, 2026-11-17), so the default stands on what is under it as every
- * worn shape does (store/walkWalls.ts restDrop), instead of half sunk into
- * it.
+ * a vertex straight above and below its centre. An avatar's origin is the
+ * point that touches the ground (arkinox, 2026-11-17), and the icosahedron's
+ * is its lowest vertex: it is drawn MARKER_LIFT up from where an avatar
+ * stands, outside the turn that faces it the way it moved, so it still
+ * turns about its centre and never swings off its gibson (review of #800).
+ * `lifted` builds the lift into the shape, for the workshop's still views,
+ * which never turn it.
  */
-export function markerEdges(): EdgesGeometry {
+export function markerEdges(lifted = false): EdgesGeometry {
   const ico = new IcosahedronGeometry(AVATAR_MARKER_HALF, 1)
   ico.computeBoundingBox()
-  ico.translate(0, -ico.boundingBox!.min.y, 0)
+  if (lifted) ico.translate(0, -ico.boundingBox!.min.y, 0)
   const edges = new EdgesGeometry(ico)
   ico.dispose()
   return edges
 }
+
+/** How far the icosahedron is drawn above where it stands, in its own cells (times its spectator shrink): its lowest vertex onto the ground. */
+export const MARKER_LIFT = AVATAR_MARKER_HALF
 
 /**
  * The marker's line material: depth tested, or drawn over everything (your

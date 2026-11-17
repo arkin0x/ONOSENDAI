@@ -64,7 +64,7 @@
 
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Group, Material, type Quaternion } from 'three'
+import { Group, Material, Vector3, type Quaternion } from 'three'
 import { facingTurn, headingPair } from '../lib/facing'
 import { anchorCentre, GRID_RADIUS, placeCentre, renderDirection, type Position } from '../lib/space'
 import { REST_FLOOR } from '../store/walkWalls'
@@ -81,6 +81,7 @@ import { usePersonCard } from '../store/usePersonCard'
 import { useAvatarFace } from '../store/avatarFace'
 import { useLayers } from '../store/useLayers'
 import { AvatarShape } from './AvatarShape'
+import { useAvatarLift } from './avatarLift'
 import { useAvatarOccluder } from './BuildOccluders'
 import { TapTarget } from './TapTarget'
 import { useDrawReach } from './buildZoom'
@@ -89,6 +90,9 @@ import { useDrawReach } from './buildZoom'
 const REACH = GRID_RADIUS * 8
 /** The proven-head outline's opacity at full strength, as AvatarShape's outline draws it. */
 const GHOST_OPACITY = 0.3
+
+/** Scratch for the lift's direction, so a frame allocates nothing. */
+const upVec = new Vector3()
 
 export function Avatar(): JSX.Element | null {
   const group = useRef<Group>(null)
@@ -181,15 +185,20 @@ export function Avatar(): JSX.Element | null {
   // (store/walkFluid.ts groundFluid).
   const restAt = shownPosition ?? anchor
   const restPlane = shownPlane ?? anchorPlane
-  const dropTo = useRestDrop(walking ? null : restAt, restPlane)
+  const dropTo = useRestDrop(walking ? null : restAt, restPlane, scaleExp)
   const dropNow = useRef(REST_FLOOR)
+  const wasWalking = useRef(false)
+  const lift = useAvatarLift(pubkey)
 
   useFrame(({ camera }, dt) => {
     const g = group.current
     const d = drawn.current
     if (!g || !d) return
+    const up = renderDirection(useCyberspace.getState().axes(), 'y')
     if (walking) {
-      g.position.copy(walkEye)
+      // Where fluid WALK stands you (store/walkFluid.ts groundFluid), the icosahedron lifted onto it.
+      g.position.copy(walkEye).addScaledVector(upVec.set(up[0], up[1], up[2]), lift)
+      wasWalking.current = true
       const p = proven.current
       if (p) {
         const s = useCyberspace.getState()
@@ -201,10 +210,7 @@ export function Avatar(): JSX.Element | null {
         const gate = shown ? nearGate(Math.hypot(shown.at[0] - camera.position.x, shown.at[1] - camera.position.y, shown.at[2] - camera.position.z)) : 0
         p.visible = shown !== null && gate > 0
         if (shown && gate > 0) {
-          // On its gibson's floor: the icosahedron's origin is its lowest point (scene/avatarMarker.ts).
-          const up = renderDirection(s.axes(), 'y')
-          const k = REST_FLOOR / 2 ** s.scaleExp
-          p.position.set(shown.at[0] - up[0] * k, shown.at[1] - up[1] * k, shown.at[2] - up[2] * k)
+          p.position.set(shown.at[0], shown.at[1], shown.at[2])
           p.traverse((o) => {
             const m = (o as { material?: Material }).material
             if (m) { m.transparent = true; m.opacity = GHOST_OPACITY * shown.fade * gate }
@@ -214,15 +220,16 @@ export function Avatar(): JSX.Element | null {
     } else {
       ghost.current.reset()
       g.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
-      dropNow.current = easeRest(dropNow.current, dropTo.current, dt)
-      if (dropNow.current !== 0) {
-        // Down cyberspace -Y, in this view's render frame, at this zoom.
-        const up = renderDirection(useCyberspace.getState().axes(), 'y')
-        const k = dropNow.current / 2 ** scaleExp
-        g.position.x -= up[0] * k
-        g.position.y -= up[1] * k
-        g.position.z -= up[2] * k
-      }
+      // Out of WALK, already standing where WALK stood you: no settle.
+      if (wasWalking.current) { wasWalking.current = false; dropNow.current = dropTo.current }
+      // A hop under way keeps the height it left with; it settles once it lands.
+      const travelling = Math.abs(travelOffset.x) + Math.abs(travelOffset.y) + Math.abs(travelOffset.z) > 1e-3
+      if (!travelling) dropNow.current = easeRest(dropNow.current, dropTo.current, dt)
+      // Down cyberspace -Y onto the ground, in this view's render frame; the icosahedron lifted onto it.
+      const k = lift - dropNow.current
+      g.position.x += up[0] * k
+      g.position.y += up[1] * k
+      g.position.z += up[2] * k
     }
     // In WALK you face where you look, live as you turn (arkinox,
     // 2026-10-13), not the way your last move went. The model's nose (+Z)

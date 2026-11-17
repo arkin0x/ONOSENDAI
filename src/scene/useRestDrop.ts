@@ -3,41 +3,40 @@
  * fluid WALK (arkinox, 2026-11-17: "an avatar shard's ORIGIN is the point
  * that touches the ground geometry"): on the surface under its gibson's
  * centre, within a gibson of it, else on its gibson's floor
- * (store/walkWalls.ts restDrop). The default icosahedron's lowest point is
- * its origin (scene/avatarMarker.ts), so it obeys the same rule.
+ * (store/walkWalls.ts restDrop). Zoomed out past a gibson to a cell, on the
+ * cell's floor: half a cell under its centre, as fluid WALK has it.
  *
- * The hook keeps the drop, in gibsons, asked again when the avatar moves,
- * when the shards in the world change, and once a shard still being built
- * is built. easeRest moves a drawn drop toward it, so a hop or a wall
- * arriving never pops an avatar. Display only: nobody's coordinate, chain
- * or step changes.
+ * The drop is asked as the avatar renders at a new place (so the first frame
+ * there already has it), and again whenever the shards in the world change.
+ * easeRest moves a drawn drop toward it, so a wall arriving never pops an
+ * avatar. Display only: nobody's coordinate, chain or step changes.
  */
 
 import { useEffect, useRef, type MutableRefObject } from 'react'
 import type { Position } from '../lib/space'
 import { useShards } from '../store/useShards'
-import { REST_FLOOR, restDrop, wallsBuilt } from '../store/walkWalls'
+import { REST_FLOOR, restDrop } from '../store/walkWalls'
 
 /** How long a drawn avatar takes to settle onto a new surface, in seconds (the time constant). */
 export const REST_TAU_S = 0.12
 
-/** The drop for an avatar at `at` in `plane`, in gibsons under its gibson's centre; REST_FLOOR until asked, and when `at` is null. */
-export function useRestDrop(at: Position | null, plane: number | null): MutableRefObject<number> {
+/**
+ * The drop for an avatar at `at` in `plane` at zoom 2^`scaleExp`, in render
+ * cells under its cell's centre: at 2^0 (a cell is a gibson) the surface's,
+ * coarser the cell's floor. REST_FLOOR when `at` is null.
+ */
+export function useRestDrop(at: Position | null, plane: number | null, scaleExp: number): MutableRefObject<number> {
   const drop = useRef(REST_FLOOR)
-  const key = at && plane !== null ? `${plane}|${at.x},${at.y},${at.z}` : ''
+  const asked = useRef<string | null>(null)
+  const key = at && plane !== null ? `${plane}|${scaleExp}|${at.x},${at.y},${at.z}` : ''
+  const ask = (): void => { drop.current = at && plane !== null && scaleExp === 0 ? restDrop(at, plane).drop : REST_FLOOR }
+  if (asked.current !== key) { asked.current = key; ask() }
   useEffect(() => {
-    if (!at || plane === null) { drop.current = REST_FLOOR; return }
-    let live = true
-    const ask = (): void => {
-      if (!live) return
-      const r = restDrop(at, plane)
-      drop.current = r.drop
-      if (r.pending) void wallsBuilt().then(ask)
-    }
-    ask()
-    // Shards arriving or leaving: asked again.
-    const off = useShards.subscribe((st, prev) => { if (st.worldItems !== prev.worldItems || st.drawnItems !== prev.drawnItems) ask() })
-    return () => { live = false; off() }
+    if (!key) return
+    // The shards in the world changed (found, placed, deleted, a new list to show): asked again.
+    return useShards.subscribe((st, prev) => {
+      if (st.discovered !== prev.discovered || st.mine !== prev.mine || st.curated !== prev.curated || st.deleted !== prev.deleted || st.deletedBags !== prev.deletedBags || st.worldItems !== prev.worldItems) ask()
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
   return drop

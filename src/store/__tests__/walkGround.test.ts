@@ -56,7 +56,7 @@ import { tickFall, useWalk } from '../useWalk'
 import { useShards, type WorldItem } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 import { REST_FLOOR, clearWalls, eyeReach, restDrop, wallItemsAt, wallsBuilt } from '../walkWalls'
-import { markerEdges } from '../../scene/avatarMarker'
+import { MARKER_LIFT, markerEdges } from '../../scene/avatarMarker'
 import { MARKER_EYE } from '../../lib/avatarEye'
 import { groundFluid, resetFluid, tickFluid } from '../walkFluid'
 import { useFluidWalk } from '../fluidSwitch'
@@ -535,18 +535,24 @@ describe('every avatar stands with its origin on the surface (restDrop, markerEd
     expect(await restsAt(start)).toBe(-REST_FLOOR)
   })
 
-  it('the default icosahedron\'s lowest point is its origin, so it stands where any avatar stands', () => {
+  it('the default icosahedron is lifted onto the ground by half its height, and still turns about its centre', () => {
+    // Drawn centred, inside the turn that faces it the way it moved, so a turn never swings it off its gibson.
     const g = markerEdges()
     g.computeBoundingBox()
-    expect(g.boundingBox!.min.y).toBeCloseTo(0, 12)
-    expect(g.boundingBox!.max.y).toBeCloseTo(1, 12)
-    // Still one cell across, its vertex straight below its centre.
-    expect(g.boundingBox!.max.x - g.boundingBox!.min.x).toBeLessThanOrEqual(1 + 1e-12)
+    expect(g.boundingBox!.min.y).toBeCloseTo(-0.5, 12)
+    expect(g.boundingBox!.max.y).toBeCloseTo(0.5, 12)
+    // Lifted outside that turn by MARKER_LIFT: its lowest vertex on where the avatar stands.
+    expect(g.boundingBox!.min.y + MARKER_LIFT).toBeCloseTo(0, 12)
     g.dispose()
+    // The workshop's still views build the lift in.
+    const still = markerEdges(true)
+    still.computeBoundingBox()
+    expect(still.boundingBox!.min.y).toBeCloseTo(0, 12)
+    still.dispose()
   })
 
   it('the default avatar\'s eye is where it was on its shape: 0.375 over its centre', () => {
-    expect(MARKER_EYE - REST_FLOOR).toBe(0.375)
+    expect(MARKER_EYE - MARKER_LIFT).toBe(0.375)
   })
 })
 

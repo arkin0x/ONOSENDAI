@@ -672,6 +672,7 @@ function later(fn: (idle?: IdleDeadline) => void): void {
 /** Forget every shard's walls: for tests, and an identity switch has no need of them either. */
 export function clearWalls(): void {
   entries.clear()
+  restEntries.clear()
   bounceBuilt = false
   waited = false
   landed()
@@ -1055,9 +1056,10 @@ export function eyeReach(from: Position, lead: readonly [number, number, number]
  *
  * A question about where to draw only: nothing moves and nothing is
  * published. The walker itself stays a point at the centre of its gibson,
- * and every step is still measured from there (stepLimit).
+ * and every step is still measured from there (stepLimit). `lookup` finds
+ * each shard's walls: WALK's own (entryFor), or restEntryFor outside it.
  */
-export function groundUnder(from: Position, lead: readonly [number, number, number], items: readonly WallItem[], down: AxisDirection, rise: number, drop: number, out?: { pending: boolean }): number | null {
+export function groundUnder(from: Position, lead: readonly [number, number, number], items: readonly WallItem[], down: AxisDirection, rise: number, drop: number, out?: { pending: boolean }, lookup: (w: WallItem) => Entry = entryFor): number | null {
   if (out) out.pending = false
   const up = upOf(down)
   const ui = AXIS_INDEX[up.axis]
@@ -1080,7 +1082,7 @@ export function groundUnder(from: Position, lead: readonly [number, number, numb
   for (const w of items) {
     // A closed door's slab that holds the walker lets it go (WallItem `inside`).
     if (w.inside || !regionMeets(w, blo, bhi)) continue
-    const e = entryFor(w)
+    const e = lookup(w)
     if (e.first) { if (out) out.pending = true; return null }
     if (!e.reach) continue
     const g = 2 ** w.shard.unit
@@ -1136,16 +1138,40 @@ export function groundUnder(from: Position, lead: readonly [number, number, numb
  * under it included; with none, on the floor of its own gibson, half a
  * gibson down (REST_FLOOR). So every avatar, the default icosahedron
  * included (its lowest point is its origin), stands on what is under it.
- * `pending` when a shard in reach is still being built: ask again once it
- * is. Below is along `down`. Display only: the avatar's coordinate, its
+ * Below is along `down`. Display only: the avatar's coordinate, its
  * chain and every step are unchanged, and a walker is still measured from
  * its gibson's centre.
  */
 export function restDrop(at: Position, plane: number, down: AxisDirection = WORLD_DOWN): { drop: number; pending: boolean } {
   const out = { pending: false }
-  const s = groundUnder(at, [0, 0, 0], wallItemsAt(plane, at), down, 0, REST_REACH, out)
+  const s = groundUnder(at, [0, 0, 0], wallItemsAt(plane, at), down, 0, REST_REACH, out, restEntryFor)
   return { drop: s === null || s < -REST_REACH ? REST_FLOOR : Math.min(1, Math.max(0, -s)), pending: out.pending }
 }
+
+/**
+ * The walls restDrop stands avatars on, outside WALK's own builds: a shard's
+ * walls WALK has already built whole, else its own faces alone, built here
+ * and kept apart (restEntries). Nothing a placed object carries is fetched
+ * and no WALK pool is charged, so standing other people's avatars never
+ * spends what holds the walker (review of #800). A part not yet built by
+ * WALK holds no avatar up until it is.
+ */
+function restEntryFor(w: WallItem): Entry {
+  const held = entries.get(w.key)
+  if (held && !held.first && held.shard === w.shard && held.where === whereOf(w)) return held
+  const kept = restEntries.get(w.key)
+  if (kept && kept.shard === w.shard && kept.where === whereOf(w)) return kept
+  if (restEntries.size >= REST_ENTRIES_MAX) restEntries.clear()
+  const e = build(w, [], false, false)
+  restEntries.set(w.key, e)
+  return e
+}
+
+/** restEntryFor's own builds, by shard key. */
+const restEntries = new Map<string, Entry>()
+
+/** The most restEntryFor keeps before it starts again: a bound on memory, never on correctness. */
+const REST_ENTRIES_MAX = 512
 
 /** The floor of a gibson, in gibsons under its centre: where an avatar with nothing under it stands. */
 export const REST_FLOOR = 0.5

@@ -834,10 +834,10 @@ registerTutorialEffect('plant-tutorial-seed', () => {
  *   - BUILD: on since PLANT THE SEED; leaving it stands that copy down
  *     (useBuilder exit), which closes the bar;
  *   - the build view: BUILD's driven view on the cursor, which PLANT THE SEED
- *     put in the dirt beside the avatar, not on it, so leaving BUILD keeps it
- *     (useBuilder settleView) and the bar beneath reads RETURN TO AVATAR. It
- *     ends here as that button ends it (useCyberspace clearFocus), keeping
- *     the zoom, so the view and the cursor are back on the avatar.
+ *     put in the dirt beside the avatar, not on it. Leaving BUILD now ends it
+ *     too, back to HOP at the zoom you are at (useBuilder `exit`, arkinox
+ *     2026-11-17); the check below stays as a backstop for a view of BUILD's
+ *     still standing.
  * A hide still running as the bud comes up is waited for first (BUILD will
  * not leave under a deploy that is working), then the same. Something of the
  * player's own lined up (not the copy) is never dropped: BUILD stays for it,

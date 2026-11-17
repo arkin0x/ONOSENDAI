@@ -11,7 +11,8 @@
  * starts where VIEW was looking (useBuilder `enter` keeps a driven view's
  * cursor), and SCAN where BUILD's cursor was (buildToScan). B, the Stash
  * panel's BUILD, a DEPLOY, EXIT and Esc go in and out of BUILD as they
- * always have; N goes in and out of SCAN (store/useScan.ts).
+ * always have, and out of BUILD is HOP (arkinox, 2026-11-17; useBuilder
+ * `exit`); N goes in and out of SCAN (store/useScan.ts).
  *
  * WALK is not in the ring: it is a toggle in RECALL's slot (arkinox,
  * 2026-11-12). With the cursor on your avatar and nothing under way, in HOP,
@@ -26,12 +27,10 @@
  */
 
 import { samePosition, useCyberspace, VIEW_FOCUS_LABEL } from './useCyberspace'
-import { useBuilder } from './useBuilder'
+import { dropViewReturns, useBuilder } from './useBuilder'
 import { copyLinedUp, useShards } from './useShards'
 import { useWalk } from './useWalk'
-import { useSecrets } from './useSecrets'
 import { regionAtOriginalSize, useRegion } from './useRegion'
-import { resetDoorReturn } from '../lib/doorReturn'
 import { landFly } from '../lib/viewFly'
 import { buildPlane, placedCursor } from '../lib/buildCursor'
 import { SCAN_FOCUS_LABEL, scanBuying, useScan } from './useScan'
@@ -68,18 +67,13 @@ export function buildHeld(shards = useShards.getState()): boolean {
 
 /**
  * Out of BUILD and back to HOP: the mode ends, and the view it rode ends too,
- * at the zoom you are at, so the cursor and the camera are home at your head.
- * EXIT on the bar leaves the view where it is (R6); the ring goes all the way
- * round. Spectating, there is no HOP to go to: the scene goes back to
- * watching them, as EXIT does. Nothing while a deploy is lined up.
+ * so the cursor and the camera are home at your head.
+ * Every way out of BUILD does this now (arkinox, 2026-11-17; useBuilder
+ * `exit`). Spectating, there is no HOP to go to: the scene goes back to
+ * watching them. Nothing while a deploy is lined up.
  */
 export function buildToHop(): void {
-  const b = useBuilder.getState()
-  if (!b.active) return
-  b.exit()
-  if (useBuilder.getState().active) return
-  const cs = useCyberspace.getState()
-  if (cs.spectate === null && cs.focus?.drive) cs.clearFocus(true)
+  useBuilder.getState().exit()
 }
 
 /**
@@ -94,7 +88,7 @@ export function buildToScan(): void {
   const before = useCyberspace.getState()
   const at = { ...placedCursor(before) }
   const plane = buildPlane(before)
-  b.exit()
+  b.exit({ handoff: true })
   if (useBuilder.getState().active) return
   useCyberspace.getState().focusOn(at, plane, SCAN_FOCUS_LABEL, undefined, true, false, { view: true })
   useScan.getState().enter()
@@ -115,9 +109,7 @@ export function scanToHop(): void {
  * the Secrets list it came from stays shut (#675).
  */
 function leaveViewForMode(): void {
-  useShards.getState().setNearbyReturn(null)
-  resetDoorReturn()
-  useSecrets.getState().focus(null)
+  dropViewReturns()
 }
 
 /** VIEW to BUILD: BUILD starts where the view is looking (useBuilder `enter` keeps a driven view's cursor). */

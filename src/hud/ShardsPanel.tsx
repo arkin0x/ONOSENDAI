@@ -81,7 +81,7 @@ export function ShardsPanel(): JSX.Element {
             aria-pressed={building}
             disabled={building && deploying}
             onClick={() => useBuilder.getState().toggle()}
-            title={building && deploying ? 'Hide or cancel the deploy first; leaving build mode would cancel it' : building ? 'Leave build mode; the view stays where it is (B)' : 'Place objects and messages anywhere, without moving your avatar (B)'}
+            title={building && deploying ? 'Hide or cancel the deploy first; leaving build mode would cancel it' : building ? 'Leave build mode, back to HOP at your avatar (B)' : 'Place objects and messages anywhere, without moving your avatar (B)'}
           >{building ? 'EXIT BUILD' : <><Wrench className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> BUILD</>}</button>
         </div>
       </div>

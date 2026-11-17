@@ -2,34 +2,41 @@
  * SyncWarning.tsx: WALK has run too far ahead of its proofs.
  *
  * WALK shows every step the moment it is pressed and proves them behind you
- * (store/useWalk.ts). A few moves behind is a walk keeping up; from
- * SYNC_WARN_AT (10, arkinox 2026-11-14; it was 3) the view is promising more
- * than the chain has, and this says so in the middle of the screen (arkinox,
- * 2026-10-13): red, WARNING: LOSING SYNC, and how far behind the proof chain
- * is. It fades in, and fades out faster than it came in once the walk is
- * back under it, so catching up reads as relief rather than another flash.
+ * (store/useWalk.ts). A few events ahead is a walk keeping up; past
+ * FLUID_EASE_FROM (14) fluid WALK slows down, and this fades in with the
+ * slowdown in the middle of the screen (arkinox, 2026-11-17: "fade in the
+ * sync warning relative to the slowdown amount with 14=0% and 20=100%
+ * opacity"): red, WARNING: LOSING SYNC, and how far behind the proof chain
+ * is. Its opacity is lib/fluidWalk.ts syncWarnOpacity of the events ahead
+ * (store/walkAhead.ts): 0 at 14 or fewer, 0.5 at 17, 1 from 20, where the
+ * walk stops. It eases between counts (styles.css), and the same rule holds
+ * with fluid WALK off. It was all or nothing at 10 closed segments
+ * (2026-11-14).
  *
  * Dressed as v1's derezz warning: a black panel in a red and black hazard
  * frame, the words in red Krypton (styles.css, .syncwarn).
  *
- * pointer-events: none from the stylesheet, and nothing in it is a control:
- * it sits over the scene and the pad and never takes a touch from either.
- * The count it shows is the last one worth warning about, so the words do
- * not tick down to "2 BEHIND" while it is fading away.
+ * position: fixed and pointer-events: none from the stylesheet, and nothing
+ * in it is a control: it sits over the scene and the pad, takes no space in
+ * any layout at any opacity, and never takes a touch from either. Hidden,
+ * it keeps the last count it showed, so the words do not change while it
+ * fades out.
  */
 
 import { useRef } from 'react'
-import { losingSync, useWalk } from '../store/useWalk'
+import { syncWarnOpacity } from '../lib/fluidWalk'
 import { useCyberspace } from '../store/useCyberspace'
+import { useEventsAhead } from '../store/walkAhead'
 
 export function SyncWarning(): JSX.Element {
   const walking = useCyberspace((s) => s.walking)
-  const behind = useWalk((s) => s.behind)
-  const on = walking && losingSync(behind)
-  const shown = useRef(behind)
-  if (on) shown.current = behind
+  const ahead = useEventsAhead()
+  const opacity = walking ? syncWarnOpacity(ahead) : 0
+  const on = opacity > 0
+  const shown = useRef(ahead)
+  if (on) shown.current = ahead
   return (
-    <div className={`syncwarn${on ? ' is-on' : ''}`} role="status" aria-live="polite" aria-hidden={!on}>
+    <div className={`syncwarn${on ? ' is-on' : ''}`} style={{ opacity }} role="status" aria-live="polite" aria-hidden={!on}>
       <div className="syncwarn__panel">
         <div className="syncwarn__title">WARNING: LOSING SYNC</div>
         <div className="syncwarn__sub">PROOF CHAIN {shown.current} BEHIND</div>

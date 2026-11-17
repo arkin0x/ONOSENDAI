@@ -7,7 +7,8 @@
  * will center the builder at the avatar's position but the position should be
  * easily changeable." and "you can exit build mode like you exit the
  * workshop; exiting leaves the view where it is (does not snap back to
- * avatar)."
+ * avatar)." The view half of R6 is superseded (arkinox, 2026-11-17): exiting
+ * goes back to HOP, below.
  *
  * What the mode is made of:
  *
@@ -28,12 +29,23 @@
  *   you are looking if a view is up and on your avatar if not, and the deploy
  *   lands at the build cursor (useShards `deploy`). A deploy started while
  *   building leaves the cursor where you put it.
- * - Exiting leaves the view where it is: the free view stays, with its RETURN
- *   (FocusBar) to take you home. The one exception is a build cursor already
- *   on your avatar in your plane, where the view and your head are the same
- *   picture: exiting then simply ends the view, at the zoom you are at, so
- *   the movement controls come back without a RETURN that would change
- *   nothing on screen.
+ * - Leaving goes back to HOP (arkinox, 2026-11-17: "I don't like how exiting
+ *   build mode goes into a nonstandard VIEW mode. It should just go back to
+ *   HOP."). This replaces R6's "exiting leaves the view where it is": the
+ *   free view BUILD rode used to stay up, labeled BUILD but not the
+ *   standard VIEW, with the cursor off your head, COMMIT hidden and a
+ *   RETURN TO AVATAR to get out of it. Now every way out (EXIT, Esc, B, the
+ *   mode ring, a DEPLOY's end, the workshop's CANCEL, PLACE OBJECT's
+ *   workshop) ends that view, so the cursor and the camera are home at your
+ *   head and the movement controls are back. The zoom is the one you had
+ *   before BUILD (or the view it started from) began, as the old EXIT then
+ *   RETURN TO AVATAR left it, so a zoom the view chose (a /C/ region's, a
+ *   pin's, an item's) is not carried into HOP; a build cursor already on
+ *   your avatar keeps the zoom you are at, since the picture is the same.
+ *   Nothing the view came from (a Nearby list, a door's card, the Secrets
+ *   list) reopens, as when the ring leaves VIEW for BUILD (#675). A caller
+ *   that puts a view of its own up at once (SCAN, MOVE, ADD) hands over
+ *   instead (`exit` with `handoff`), and its view replaces BUILD's.
  * - Escape leaves the mode, like the workshop's close. The mode is a chip on
  *   the Escape stack (hooks/useEscape.ts), registered here when it turns on
  *   rather than by a component, because the mode outlives its bar: the bar
@@ -114,6 +126,8 @@ import { buildPlane, buildStepOf, placedCursor } from '../lib/buildCursor'
 import { landFly } from '../lib/viewFly'
 import { positionHex } from '../lib/events'
 import { useRegion } from './useRegion'
+import { useSecrets } from './useSecrets'
+import { resetDoorReturn } from '../lib/doorReturn'
 
 /** How a session of BUILD mode began: the BUILD control (or B), or a DEPLOY. */
 export type BuildEntry = 'build' | 'deploy'
@@ -168,12 +182,16 @@ export interface BuilderState {
    */
   enter: (via?: BuildEntry) => void
   /**
-   * Leave BUILD mode. The view stays where it is (R6). Refused while a deploy
-   * is lined up: leaving would cancel it, which is CANCEL's (or Escape's) to
+   * Leave BUILD mode, back to HOP: the build view ends, so the cursor and
+   * the camera are home at your head, at the zoom you had before it began
+   * (or, on your avatar, the zoom you are at) (arkinox, 2026-11-17). Spectating, there is no HOP: the scene goes back to watching
+   * them. With `handoff` the build view is left for the caller, which puts a
+   * view of its own up at once (SCAN, MOVE, ADD). Refused while a deploy is
+   * lined up: leaving would cancel it, which is CANCEL's (or Escape's) to
    * do, so the B key, EXIT BUILD and EXIT all agree. A copy lined up after a
    * placement (useShards `copyLinedUp`) is stood down instead.
    */
-  exit: () => void
+  exit: (opts?: { handoff?: boolean }) => void
   /** On, or off. The B key and the BUILD control. */
   toggle: () => void
   /** Bring the build cursor, and the view with it, back to your avatar. Still building. */
@@ -207,20 +225,37 @@ export function onAvatar(s: ReturnType<typeof useCyberspace.getState>): boolean 
 }
 
 /**
- * What the free view becomes once the mode is off. A free view that sits on
- * your avatar shows what your head shows: end it, keeping the zoom. One kept
- * through a spectation cannot stand without the mode, so it ends and the
- * scene goes back to watching them, at the action last aimed at (`scrub`).
+ * A view left for a mode, not for a RETURN: the Nearby list, a door's card
+ * or the Secrets list it came from stays shut (#675). The ring's VIEW to
+ * BUILD does this (padMode leaveViewForMode), and so does leaving BUILD for
+ * HOP, whichever way BUILD was entered.
  */
-function settleView(scrub: number | null): void {
+export function dropViewReturns(): void {
+  useShards.getState().setNearbyReturn(null)
+  resetDoorReturn()
+  useSecrets.getState().focus(null)
+}
+
+/**
+ * What the free view becomes once the mode is off. One kept through a
+ * spectation cannot stand without the mode, so it ends and the scene goes
+ * back to watching them, at the action last aimed at (`scrub`). A free view
+ * on your avatar shows what your head shows: it ends, keeping the zoom.
+ * Left the usual way (`home`), any other ends too, back at the zoom you had
+ * before it began: HOP at your head. Otherwise (a hand-off, or the mode
+ * ended under it) it stays for whatever comes next.
+ */
+function settleView(scrub: number | null, home = false): void {
   const cs = useCyberspace.getState()
   if (!cs.focus?.drive) return
+  if (home) dropViewReturns()
   if (cs.spectate) {
     cs.clearFocus(true)
     if (scrub !== null) useCyberspace.getState().explore(scrub)
     return
   }
   if (onAvatar(cs)) cs.clearFocus(true)
+  else if (home) cs.clearFocus()
 }
 
 export const useBuilder = create<BuilderState>((set, get) => ({
@@ -295,7 +330,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     set({ active: true, via, scrub: null, leftAvatar: !onAvatar(useCyberspace.getState()) })
   },
 
-  exit: () => {
+  exit: (opts) => {
     if (!get().active) return
     // A copy lined up after a placement is not a deploy to wait on: leaving
     // stands it down, so B, Esc and EXIT end the mode right after a
@@ -306,7 +341,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     // Off first, so the view change below is not read as the view ending
     // under a live build mode.
     set({ active: false, via: null, leftAvatar: false, scrub: null })
-    settleView(scrub)
+    settleView(scrub, opts?.handoff !== true)
   },
 
   toggle: () => { if (get().active) get().exit(); else get().enter('build') },
@@ -514,7 +549,7 @@ export function movePlaced(eventId: string): void {
   }
   if (shards.pending) return
   const b = useBuilder.getState()
-  if (b.active) b.exit()
+  if (b.active) b.exit({ handoff: true })
   const at = positionOf(d)
   const step = placedStep(at, d.height)
   const zoom = Math.max(d.shard?.unit ?? 0, step)
@@ -569,7 +604,7 @@ export function addToRoom(eventId: string): void {
   }
   if (shards.pending) return
   const b = useBuilder.getState()
-  if (b.active) b.exit()
+  if (b.active) b.exit({ handoff: true })
   const at = positionOf(d)
   useCyberspace.getState().focusItem(at, d.plane, d.chest?.name || 'door', placedStep(at, height))
   useBuilder.getState().enter('build')

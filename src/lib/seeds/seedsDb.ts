@@ -37,6 +37,10 @@ export const PLANTED_KEPT = 5_000
 export interface HeaderRow { height: number; hash: string; time: number }
 
 let dbOpen: Promise<IDBDatabase | null> | null = null
+/** When an open last failed: none is tried again for REOPEN_AFTER_MS, so an old tab holding the database does not pile up requests. */
+let failedAt = 0
+/** How long after a failed open the next is tried. */
+export const REOPEN_AFTER_MS = 30_000
 
 /**
  * The seeds database, or null where IndexedDB is missing or will not open
@@ -49,12 +53,14 @@ let dbOpen: Promise<IDBDatabase | null> | null = null
 export function seedsDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null)
   if (dbOpen) return dbOpen
+  if (failedAt > 0 && Date.now() - failedAt < REOPEN_AFTER_MS) return Promise.resolve(null)
   const opening: Promise<IDBDatabase | null> = openDatabase(SEEDS_DB, SEEDS_DB_VERSION, [[DNA_STORE, 'id'], [HEADERS_STORE, 'height'], [PLANTED_STORE, 'id']], undefined, { failWhenBlocked: true })
     .then((d) => {
       d.onversionchange = () => { d.close(); if (dbOpen === opening) dbOpen = null }
       return d
     })
     .catch(() => {
+      failedAt = Date.now()
       if (dbOpen === opening) dbOpen = null
       return null
     })
@@ -141,4 +147,5 @@ export async function savePlanted(rows: PlantedRow[]): Promise<void> {
 /** Tests: forget the open connection, so the next call opens afresh. */
 export function resetSeedsDbForTest(): void {
   dbOpen = null
+  failedAt = 0
 }

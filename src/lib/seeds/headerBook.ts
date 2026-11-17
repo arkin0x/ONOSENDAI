@@ -132,6 +132,8 @@ export function blobChainTimes(bytes: Uint8Array, count: number, prevHashDisplay
 
 /** How long a height asked for and not found stays absent before it is asked for again. */
 export const ABSENT_MS = 5 * 60_000
+/** How long a height no relay answered for waits before it is asked again: not "absent", only not asked on every pass. */
+export const UNANSWERED_MS = 30_000
 
 /** Header times and hashes by height, as far as this page has them. */
 export class HeaderBook {
@@ -180,8 +182,9 @@ export class HeaderBook {
     return until !== undefined && until > this.now()
   }
 
-  markAbsent(heights: Iterable<number>): void {
-    const until = this.now() + ABSENT_MS
+  /** Asked for and not found: absent for `ms` (ABSENT_MS, or UNANSWERED_MS when no relay answered). */
+  markAbsent(heights: Iterable<number>, ms = ABSENT_MS): void {
+    const until = this.now() + ms
     for (const h of heights) if (!this.has(h)) this.absent.set(h, until)
   }
 
@@ -270,9 +273,10 @@ export interface AnchorRead { events: NostrEvent[]; answered: boolean }
  *
  * A query that throws, or that no relay answered (seedSources anchorRead:
  * none sent EOSE in time, a relay still connecting or signing in, a refusal),
- * says nothing about whether a header exists, so its heights are not marked
- * absent: the next pass asks again, rather than reading as waiting for blocks
- * for ABSENT_MS after a slow start. What it did bring is kept.
+ * says nothing about whether a header exists, so its heights are held back
+ * only UNANSWERED_MS, not ABSENT_MS: a pass after that asks again, rather
+ * than reading as waiting for blocks for five minutes after a slow start, and
+ * no pass asks on every tick while a relay is down. What it did bring is kept.
  */
 export async function fetchAnchorHeaders(book: HeaderBook, heights: Iterable<number>, query: AnchorQuery, verify?: (ev: NostrEvent) => boolean): Promise<void> {
   const want = [...new Set(heights)].filter((h) => h >= 0 && !book.has(h) && !book.isAbsent(h)).sort((a, b) => a - b)
@@ -290,11 +294,11 @@ export async function fetchAnchorHeaders(book: HeaderBook, heights: Iterable<num
     return read.answered
   }
   const one = async (chunk: number[]): Promise<void> => {
-    if (!(await ask(chunk))) return
+    if (!(await ask(chunk))) { book.markAbsent(chunk, UNANSWERED_MS); return }
     // Asked once more, on their own, before they count as absent: several
     // anchors to a height (§2.5) can fill a query's limit before every height is in.
     const missing = chunk.filter((h) => !book.has(h))
-    if (missing.length > 0 && missing.length < chunk.length && !(await ask(missing))) return
+    if (missing.length > 0 && missing.length < chunk.length && !(await ask(missing))) { book.markAbsent(missing, UNANSWERED_MS); return }
     book.markAbsent(chunk)
   }
   const chunks: number[][] = []

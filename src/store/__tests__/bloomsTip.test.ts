@@ -8,6 +8,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+// Each test imports useBlooms' tree afresh (vi.resetModules): slow under load, never a hang.
+vi.setConfig({ testTimeout: 30_000 })
+
 const engine = vi.hoisted(() => ({ refreshed: 0 }))
 const src = vi.hoisted(() => ({ trusted: null as number | null, asked: 0, answer: null as number | null, kept: null as number | null }))
 vi.mock('../../lib/seeds/bloomEngine', () => ({

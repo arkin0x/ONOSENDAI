@@ -258,19 +258,30 @@ describe('the store itself', () => {
 })
 
 describe('a read nobody answered', () => {
-  it('one fast relay answering without the canonical one is not "absent"', async () => {
+  it('one fast relay answering without the canonical one is not "absent": asked again in seconds', async () => {
     const s = await import('../seeds/seedSources')
+    const { UNANSWERED_MS } = await import('../seeds/headerBook')
     trouble.of = () => 'unreachable'
     queryEach.mockResolvedValue([{ url: 'wss://fast.test', outcome: 'answered', events: [] }, { url: 'wss://relay.onosendai.tech', outcome: 'unreachable', events: [] }])
+    const t0 = Date.now()
     await s.fetchSeedHeaders([975300])
+    const now = vi.spyOn(Date, 'now').mockReturnValue(t0 + UNANSWERED_MS + 1_000)
     expect(s.headerBook.isAbsent(975300)).toBe(false)
+    now.mockRestore()
   })
 
-  it('marks nothing absent, so the next pass asks again', async () => {
-    const book = new HeaderBook()
+  it('holds its heights back only briefly; an answered miss is absent for minutes', async () => {
+    const { ABSENT_MS, UNANSWERED_MS } = await import('../seeds/headerBook')
+    let t = 1_000_000
+    const book = new HeaderBook(() => t)
     await fetchAnchorHeaders(book, [975300, 975301], async () => ({ events: [], answered: false }))
+    expect(book.isAbsent(975300)).toBe(true)
+    t += UNANSWERED_MS + 1
     expect(book.isAbsent(975300)).toBe(false)
     await fetchAnchorHeaders(book, [975300, 975301], async () => ({ events: [], answered: true }))
+    t += UNANSWERED_MS + 1
     expect(book.isAbsent(975300)).toBe(true)
+    t += ABSENT_MS
+    expect(book.isAbsent(975300)).toBe(false)
   })
 })

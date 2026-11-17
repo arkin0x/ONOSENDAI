@@ -8,7 +8,7 @@
  * | top left | HP pips (hearts, filled or empty); the one just lost pulses; they blink while you cannot be hit |
  * | under the pips | the radar (Radar.tsx): drones as dots, the end zone in gold, forward up |
  * | top right | WAVE n / total, drones left (a drone icon), the clock, the sound switch (M) |
- * | centre | the crosshair; a small X on it when a shot hits; on a phone with an assist gun (the PULSE RIFLE) in hand, the aim assist's box round it (AssistBox.tsx, model.ts assistShown) |
+ * | centre | the crosshair; a small white X on it for 180 ms when a shot hits, a larger gold one for 300 ms on the kill (none for a shot sent wide); on a phone with an assist gun (the PULSE RIFLE) in hand, the aim assist's box round it (AssistBox.tsx, model.ts assistShown) |
  * | edges | a red flash when you are hit |
  * | under the top bar | the safe zone's line: the wave's name, then "Leave the safe zone to start the wave." (kept empty, not removed, in other phases) |
  * | bottom left (desktop) | the stamina: STAMINA over a bar that drains while sprinting (Shift) and dims in the lockout; only for a variant with stamina (the phone's is the ring round SPRINT) |
@@ -28,8 +28,10 @@ import { Radar } from './Radar'
 export interface Pulses {
   /** Counts up on each hit taken: the red flash restarts. */
   hurt: number
-  /** Counts up on each shot that lands: the hit marker restarts. */
+  /** Counts up on each shot that lands, and on each kill: the hit marker restarts. */
   hit: number
+  /** The `hit` count at the last kill: while they are equal, the marker takes its kill look. */
+  kill: number
 }
 
 export interface HudViewProps {
@@ -106,7 +108,7 @@ export function HudView(p: HudViewProps): JSX.Element {
         <span className="drun-cross__h" />
         <span className="drun-cross__v" />
         <span className="drun-cross__dot" />
-        {pulses.hit > 0 && <span key={`hit${pulses.hit}`} className="drun-hitmark" />}
+        {pulses.hit > 0 && <span key={`hit${pulses.hit}`} className={`drun-hitmark${pulses.kill === pulses.hit ? ' is-kill' : ''}`} />}
       </div>
 
       <div className="drun-top">

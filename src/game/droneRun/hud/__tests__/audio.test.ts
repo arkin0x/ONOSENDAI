@@ -52,7 +52,7 @@ vi.mock('../../../../lib/soundMuteDb', () => ({
 import { droneRunSilent, playSound, resetSoundsForTests, toggleDroneRunSound, useDroneRunSound, type DroneSound } from '../../audio'
 import { useSoundMutes } from '../../../../store/useSoundMutes'
 
-const ALL: DroneSound[] = ['shot', 'hit', 'pop', 'hurt', 'overheat', 'reload', 'wave', 'clear', 'fail']
+const ALL: DroneSound[] = ['shot', 'hurt', 'overheat', 'reload', 'wave', 'clear', 'fail']
 
 beforeEach(() => {
   resetSoundsForTests()
@@ -80,7 +80,7 @@ describe('DRONE RUN sounds', () => {
     expect(made.osc + made.noise + made.gain).toBe(0)
     toggleDroneRunSound()
     expect(localStorage.getItem('onosendai:drone-run:muted')).toBe('0')
-    expect(playSound('hit')).toBe(true)
+    expect(playSound('hurt')).toBe(true)
   })
 
   it('MUTE ALL silences them too', () => {
@@ -89,11 +89,10 @@ describe('DRONE RUN sounds', () => {
     expect(made.osc + made.noise + made.gain).toBe(0)
   })
 
-  it('eight pellets of one pull are one shot and one tick', () => {
+  it('eight pellets of one pull are one shot', () => {
     let played = 0
     for (let i = 0; i < 8; i++) if (playSound('shot', 1)) played++
-    for (let i = 0; i < 8; i++) if (playSound('hit')) played++
-    expect(played).toBe(2)
+    expect(played).toBe(1)
     now += 0.2
     expect(playSound('shot', 1)).toBe(true)
     // Another gun's shot is its own sound.

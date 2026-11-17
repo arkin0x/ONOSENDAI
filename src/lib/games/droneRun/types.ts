@@ -301,7 +301,42 @@ export interface DroneRunClient {
 
 export interface ClientSounds {
   voices?: Partial<VoiceSettings>
-  [droneId: string]: Partial<VoiceDef> | Partial<VoiceSettings> | undefined
+  /** The controls' press sounds, by control (game/droneRun/clicks.ts CONTROLS). */
+  ui?: Record<string, ClickDef>
+  /** A bullet landing on a drone (the hitmarker), the kill shot, and an aimed pull the assist sent wide. */
+  hit?: ClickDef
+  kill?: ClickDef
+  miss?: ClickDef
+  [droneId: string]: Partial<VoiceDef> | Partial<VoiceSettings> | Record<string, ClickDef> | ClickDef | undefined
+}
+
+/* ---------- class (c): short sounds in the player's head (the controls, hits) ---------- */
+
+/**
+ * One layer of a short sound: a tone (an oscillator swept `from` to `to`
+ * Hz, through a filter at `cutoff` when given) or noise (through a filter
+ * swept `from` to `to` Hz). It starts `at` seconds in, rises over `attack`
+ * and dies away by `dur`, peaking at `gain`.
+ */
+export interface ClickLayer {
+  kind: 'tone' | 'noise'
+  wave?: SoundWave
+  filter?: 'lowpass' | 'highpass' | 'bandpass'
+  from: number
+  to?: number
+  cutoff?: number
+  q?: number
+  at?: number
+  attack?: number
+  dur: number
+  gain: number
+}
+
+/** A short sound: its layers; the least gap between two (a repeat sooner is dropped, seconds); for a hit, each gun's pitch as a multiple. */
+export interface ClickDef {
+  layers: ClickLayer[]
+  gap?: number
+  gunPitch?: number[]
 }
 
 /* ---------- class (c): the drones' voices ---------- */

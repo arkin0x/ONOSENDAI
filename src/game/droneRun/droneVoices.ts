@@ -144,11 +144,14 @@ function settingsOf(g: unknown, d: VoiceSettings): VoiceSettings {
   }
 }
 
+/** The keys of client.sounds that are not a drone's voice (the controls' and the hits' sounds: clicks.ts). */
+const NOT_DRONES: ReadonlySet<string> = new Set(['voices', 'ui', 'hit', 'kill', 'miss'])
+
 function soundsFrom(given: unknown, d: DroneRunSounds): DroneRunSounds {
   const g = isObj(given) ? given : {}
   const kinds: Record<string, VoiceDef> = { ...d.kinds }
   for (const [id, v] of Object.entries(g)) {
-    if (id === 'voices' || !isObj(v)) continue
+    if (NOT_DRONES.has(id) || !isObj(v)) continue
     kinds[id] = voiceOf(v, d.kinds[id] ?? d.kinds.scout ?? FALLBACK_VOICE)
   }
   return { voices: settingsOf(g.voices, d.voices), kinds }

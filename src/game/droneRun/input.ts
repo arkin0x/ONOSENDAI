@@ -29,6 +29,10 @@
  * lets go of everything. On the phone each control owns its own finger
  * (pointer id), so moving, looking, firing and jumping all work at once.
  *
+ * Each press of a control (FIRE going down, JUMP, a gun, RELOAD, sprint on
+ * or off, the lockout) is told to controls$, for its press sound
+ * (clicks.ts); a stick never is.
+ *
  * Ledger class (c), client: how a player makes a RunInput is this client's
  * own. The RunInput itself (what a step takes) is the simulation's, class
  * (b), shared with any client that replays a run.
@@ -179,7 +183,9 @@ export function setStick(fwd: number, strafe: number): void { stick = { fwd, str
 /** A fire source goes down or up (`mouse`, `pad:fire:<finger>`). */
 export function setFire(source: string, down: boolean): void {
   const had = firing.has(source)
+  const before = firing.size
   if (down) firing.add(source); else firing.delete(source)
+  if (down && before === 0 && firing.size === 1 && !paused) pressed('fire')
   if (had !== down) heard()
 }
 /** A sprint source goes down or up (`key:ShiftLeft`, `pad:sprint:<finger>`). */
@@ -217,8 +223,9 @@ export function setSprintLatch(on: boolean): void {
 export function pressSprintPad(source: string, now: number): void {
   if (paused) return
   sprintPresses.set(source, { at: now, wasLatched: latched })
-  setSprintLatch(false)
+  // The finger first, then the latch off, so sprint never flickers off and on (one press sound, not three).
   setSprint(source, true)
+  setSprintLatch(false)
 }
 
 /**
@@ -229,23 +236,60 @@ export function pressSprintPad(source: string, now: number): void {
 export function releaseSprintPad(source: string, now: number, tap = true): void {
   const p = sprintPresses.get(source)
   sprintPresses.delete(source)
-  setSprint(source, false)
+  // A tap latches before the finger lets go, so sprint stays on without a flicker.
   if (tap && p && !p.wasLatched && !paused && now - p.at < SPRINT_TAP_MS) setSprintLatch(true)
+  setSprint(source, false)
 }
 
 /** Stamina ran dry (the lockout runs): the latch comes off, so sprint is tapped on again when it is back (the runner tells it each step). */
-export function noteSprintLocked(locked: boolean): void { if (locked) setSprintLatch(false) }
+export function noteSprintLocked(locked: boolean): void {
+  if (locked && !wasLocked && !paused) {
+    // The lockout's own sound, not SPRINT off as well.
+    quietSprint = true
+    setSprintLatch(false)
+    quietSprint = false
+    sprintWas = sprintHeld()
+    pressed('lockout')
+  } else if (locked) setSprintLatch(false)
+  wasLocked = locked
+}
 /** The rail charging on a phone (TouchTracker.setAim sets it): the steps read no movement while it is on. */
 export function setAiming(on: boolean): void { aiming = on }
 export function aimingNow(): boolean { return aiming }
 
+/**
+ * A control pressed, for its press sound (clicks.ts; the HUD plays it):
+ * FIRE going down (any finger or the mouse, the first of them), JUMP, a gun
+ * chosen or cycled, RELOAD, sprint coming on or off (any source, the latch
+ * too), and the stamina lockout. Never while paused, never a stick.
+ */
+export type ControlPress = 'fire' | 'jump' | 'switch' | 'reload' | 'sprintOn' | 'sprintOff' | 'lockout'
+export const controls$ = { listeners: new Set<(c: ControlPress) => void>() }
+function pressed(c: ControlPress): void { for (const l of [...controls$.listeners]) l(c) }
+let sprintWas = false
+let quietSprint = false
+let wasLocked = false
+
 /** Who hears FIRE and SPRINT going down or up (the HUD: AIM, the SPRINT button lit). */
 export const held$ = { listeners: new Set<() => void>() }
-function heard(): void { for (const l of [...held$.listeners]) l() }
-export function pressJump(): void { if (!paused) edges.jump = true }
-export function pressReload(): void { if (!paused) edges.reload = true }
-export function pressSelect(index: number): void { if (!paused) { edges.select = clamp(index, 0, weapons.count - 1); edges.cycle = 0 } }
-export function pressCycle(by: 1 | -1): void { if (!paused) edges.cycle += by }
+function heard(): void {
+  const now = sprintHeld()
+  if (now !== sprintWas) {
+    sprintWas = now
+    if (!paused && !quietSprint) pressed(now ? 'sprintOn' : 'sprintOff')
+  }
+  for (const l of [...held$.listeners]) l()
+}
+export function pressJump(): void { if (!paused) { edges.jump = true; pressed('jump') } }
+export function pressReload(): void { if (!paused) { edges.reload = true; pressed('reload') } }
+export function pressSelect(index: number): void {
+  if (paused) return
+  const to = clamp(index, 0, weapons.count - 1)
+  if (to !== weapons.current) pressed('switch')
+  edges.select = to
+  edges.cycle = 0
+}
+export function pressCycle(by: 1 | -1): void { if (!paused) { edges.cycle += by; if (weapons.count > 1) pressed('switch') } }
 
 /** Cards up or down: paused, the steps read no movement, no fire and no edges. */
 export function setInputPaused(on: boolean): void {
@@ -274,6 +318,8 @@ export function releaseAll(): void {
 export function resetInput(yaw = 0, pitch = 0): void {
   releaseAll()
   paused = false
+  sprintWas = false
+  wasLocked = false
   weapons = { count: 3, current: 0 }
   setLook(yaw, pitch)
 }

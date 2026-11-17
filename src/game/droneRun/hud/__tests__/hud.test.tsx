@@ -41,6 +41,11 @@ vi.mock('../../audio', async (importOriginal) => ({
   playSound: (s: string, w = 0) => { played.push([s, w]); return true },
   warmSound: () => {},
 }))
+const clicked: Array<[string, number]> = []
+vi.mock('../../clicks', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../clicks')>()),
+  playClick: (c: string, w = 0) => { clicked.push([c, w]); return true },
+}))
 
 import { createElement, useState } from 'react'
 import { mount, textOf, type Host } from '../../../../test/elementRoot'
@@ -49,7 +54,8 @@ import { aimShown, drawStick, DroneRunHud, reactTo } from '../DroneRunHud'
 import { TouchPad } from '../TouchPad'
 import { ASSIST_PX, BASE_WEAPONS, COPY, FIRE_PX, IDLE_HUD, JUMP_PX, STICK_PX, assistShown, staminaOf, weaponsOfHud, type HudState } from '../model'
 import { AssistBox } from '../AssistBox'
-import { AIM_SCALE, aimingNow, lookRateNow, lookState, lookStickRate, noteSprintLocked, readInput, resetInput, tickLook } from '../../input'
+import { AIM_SCALE, aimingNow, controls$, lookRateNow, lookState, lookStickRate, noteSprintLocked, noteWeapons, pressCycle, pressJump, pressReload, pressSelect, readInput, resetInput, setFire, setInputPaused, setSprint, tickLook } from '../../input'
+import { useDroneRunSound } from '../../audio'
 import { readFileSync } from 'node:fs'
 import type { RunEvent } from '../../../../lib/games/droneRun/sim/events'
 
@@ -65,7 +71,7 @@ function props(over: Partial<HudState> = {}, more: Partial<HudViewProps> = {}): 
     locked: true,
     muted: false,
     exiting: false,
-    pulses: { hurt: 0, hit: 0 },
+    pulses: { hurt: 0, hit: 0, kill: 0 },
     onRestart: vi.fn(),
     onNextWave: vi.fn(),
     onExit: vi.fn(),
@@ -81,7 +87,7 @@ function slots(all: Host[]): string[] {
   return all.flatMap((h) => cls(h).split(' ').filter((c) => SLOTS.includes(c) || c.startsWith('drun-btn--') || c.startsWith('drun-stick--'))).sort()
 }
 
-beforeEach(() => { resetInput(0, 0); played.length = 0; assistCalls.length = 0 })
+beforeEach(() => { resetInput(0, 0); played.length = 0; clicked.length = 0; assistCalls.length = 0 })
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('the HUD keeps its slots in every phase', () => {
@@ -266,9 +272,13 @@ describe('the run\'s events', () => {
   it('each plays its sound; hits taken and landed restart their pulses', async () => {
     const ev = (e: Partial<RunEvent> & { type: RunEvent['type'] }): RunEvent => e as RunEvent
     expect(reactTo(ev({ type: 'shot', weapon: 2 }))).toMatchObject({ sound: 'shot', weapon: 2 })
-    expect(reactTo(ev({ type: 'hit' }))).toMatchObject({ sound: 'hit', pulse: 'hit' })
+    expect(reactTo(ev({ type: 'shot', weapon: 2 })).click).toBeUndefined()
+    expect(reactTo(ev({ type: 'hit' }))).toMatchObject({ sound: null, click: 'hit', pulse: 'hit' })
     expect(reactTo(ev({ type: 'player-hit' }))).toMatchObject({ sound: 'hurt', pulse: 'hurt' })
-    expect(reactTo(ev({ type: 'drone-destroyed' })).sound).toBe('pop')
+    expect(reactTo(ev({ type: 'drone-destroyed' }))).toMatchObject({ sound: null, click: 'kill', pulse: 'kill' })
+    // An aimed pull the assist sent wide: the shot, a faint whiff, no hitmarker and no marker.
+    expect(reactTo(ev({ type: 'shot', weapon: 0, wide: true }))).toMatchObject({ sound: 'shot', click: 'miss' })
+    expect(reactTo(ev({ type: 'shot', weapon: 0, wide: true })).pulse).toBeUndefined()
     expect(reactTo(ev({ type: 'overheated' })).sound).toBe('overheat')
     expect(reactTo(ev({ type: 'reloaded' })).sound).toBe('reload')
     expect(reactTo(ev({ type: 'wave-started' })).sound).toBe('wave')
@@ -286,6 +296,127 @@ describe('the run\'s events', () => {
     expect(m.all().some((h) => cls(h) === 'drun-flash')).toBe(true)
     await m.unmount()
     expect(send).toBeNull()
+  })
+})
+
+describe('the hitmarker and the press sounds', () => {
+  const ev = (e: Partial<RunEvent> & { type: RunEvent['type'] }): RunEvent => e as RunEvent
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5))
+  const marks = (all: Host[]): Host[] => all.filter((h) => cls(h).startsWith('drun-hitmark'))
+
+  it('a hit shows the marker and ticks for the gun that fired; a kill shows the kill look and its own sound; a shot sent wide shows none and only whiffs', async () => {
+    let send: ((e: RunEvent) => void) | null = null
+    const m = await mount(createElement(DroneRunHud, { hud: { ...IDLE_HUD, phase: 'wave' }, restart: vi.fn(), nextWave: vi.fn(), subscribe: (cb) => { send = cb; return () => { send = null } }, exit: vi.fn(), touch: false }))
+    expect(marks(m.all())).toEqual([])
+    send!(ev({ type: 'shot', weapon: 0, wide: true }))
+    await tick()
+    expect(marks(m.all())).toEqual([])
+    expect(clicked).toEqual([['miss', 0]])
+    send!(ev({ type: 'shot', weapon: 2 }))
+    send!(ev({ type: 'hit', drone: 1, damage: 1 }))
+    await tick()
+    expect(marks(m.all()).map(cls)).toEqual(['drun-hitmark'])
+    expect(clicked.at(-1)).toEqual(['hit', 2])
+    send!(ev({ type: 'shot', weapon: 1 }))
+    send!(ev({ type: 'hit', drone: 1, damage: 1 }))
+    send!(ev({ type: 'drone-destroyed', drone: 1, enemy: 'scout' }))
+    await tick()
+    expect(marks(m.all()).map(cls)).toEqual(['drun-hitmark is-kill'])
+    expect(clicked.slice(-2)).toEqual([['hit', 1], ['kill', 1]])
+    // The next plain hit goes back to the plain look.
+    send!(ev({ type: 'hit', drone: 2, damage: 1 }))
+    await tick()
+    expect(marks(m.all()).map(cls)).toEqual(['drun-hitmark'])
+    // None of these are the guns' own sounds: the hitmarker never goes through playSound.
+    expect(played.every(([s]) => s === 'shot')).toBe(true)
+    await m.unmount()
+  })
+
+  it('each control on the phone has its press sound: FIRE, JUMP, SPRINT on and off, the gun, RELOAD; the lockout too', async () => {
+    const m = await mount(createElement(DroneRunHud, { hud: { ...IDLE_HUD, phase: 'wave', weapon: 1, ammo: 2, mag: 6 }, restart: vi.fn(), nextWave: vi.fn(), subscribe: () => () => {}, exit: vi.fn(), touch: true }))
+    const btnOf = (mod: string): Host => m.all().find((h) => cls(h).includes(`drun-btn--${mod}`))!
+    const press = (h: Host, name: string, extra: Record<string, unknown> = {}): void => { (h.props[name] as (e: unknown) => void)({ pointerId: 7, pointerType: 'touch', timeStamp: 1000, preventDefault() {}, stopPropagation() {}, currentTarget: { setPointerCapture() {} }, ...extra }) }
+    press(btnOf('fire'), 'onPointerDown')
+    press(btnOf('fire'), 'onPointerUp')
+    press(btnOf('jump'), 'onPointerDown')
+    press(btnOf('sprint'), 'onPointerDown')
+    press(btnOf('sprint'), 'onPointerUp', { timeStamp: 1600 })
+    press(btnOf('gun'), 'onPointerDown')
+    press(btnOf('reload'), 'onPointerDown')
+    noteSprintLocked(false)
+    noteSprintLocked(true)
+    noteSprintLocked(true)
+    expect(clicked.map(([c]) => c)).toEqual(['ui:fire', 'ui:jump', 'ui:sprintOn', 'ui:sprintOff', 'ui:switch', 'ui:reload', 'ui:lockout'])
+    await m.unmount()
+  })
+
+  it('a second finger on FIRE is no second press; a latched SPRINT run dry is the lockout alone, not SPRINT off too', async () => {
+    const m = await mount(createElement(DroneRunHud, { hud: { ...IDLE_HUD, phase: 'wave' }, restart: vi.fn(), nextWave: vi.fn(), subscribe: () => () => {}, exit: vi.fn(), touch: true }))
+    const btnOf = (mod: string): Host => m.all().find((h) => cls(h).includes(`drun-btn--${mod}`))!
+    const e = (id: number, t = 1000) => ({ pointerId: id, pointerType: 'touch', timeStamp: t, preventDefault() {}, stopPropagation() {}, currentTarget: { setPointerCapture() {} } })
+    ;(btnOf('fire').props.onPointerDown as (e: unknown) => void)(e(1))
+    ;(btnOf('fire').props.onPointerDown as (e: unknown) => void)(e(2))
+    // A tap latches sprint on.
+    ;(btnOf('sprint').props.onPointerDown as (e: unknown) => void)(e(3, 2000))
+    ;(btnOf('sprint').props.onPointerUp as (e: unknown) => void)(e(3, 2100))
+    noteSprintLocked(true)
+    expect(clicked.map(([c]) => c)).toEqual(['ui:fire', 'ui:sprintOn', 'ui:lockout'])
+    await m.unmount()
+  })
+
+  it('RESTART, NEXT WAVE, EXIT GAME and the sound switch each have their own press sound', async () => {
+    // A card takes Enter and R on the window: a window that listens.
+    const g = globalThis as unknown as Record<string, unknown>
+    const had = { add: g.addEventListener, remove: g.removeEventListener }
+    g.addEventListener = () => {}
+    g.removeEventListener = () => {}
+    const restart = vi.fn(), nextWave = vi.fn(), exit = vi.fn()
+    const failed = await mount(createElement(DroneRunHud, { hud: { ...IDLE_HUD, phase: 'failed' }, restart, nextWave, subscribe: () => () => {}, exit, touch: true }))
+    const click = (all: Host[], c: string): void => { (all.find((h) => cls(h) === c)!.props.onClick as (e?: unknown) => void)() }
+    click(failed.all(), 'drun-card__go')
+    click(failed.all(), 'drun-card__exit')
+    click(failed.all(), 'drun-sound')
+    await failed.unmount()
+    const cleared = await mount(createElement(DroneRunHud, { hud: { ...IDLE_HUD, phase: 'cleared' }, restart, nextWave, subscribe: () => () => {}, exit, touch: true }))
+    click(cleared.all(), 'drun-card__go')
+    await cleared.unmount()
+    expect(clicked.map(([c]) => c)).toEqual(['ui:restart', 'ui:exit', 'ui:sound', 'ui:nextWave'])
+    expect(restart).toHaveBeenCalledTimes(1)
+    expect(nextWave).toHaveBeenCalledTimes(1)
+    expect(exit).toHaveBeenCalledTimes(1)
+    useDroneRunSound.setState({ muted: false })
+    g.addEventListener = had.add
+    g.removeEventListener = had.remove
+  })
+
+  it('the desktop keys press the same controls (Space, 1 to 3, Q, R, Shift)', () => {
+    const heard: string[] = []
+    const l = (c: string): void => { heard.push(c) }
+    controls$.listeners.add(l)
+    noteWeapons(3, 0)
+    pressJump()
+    pressSelect(0)
+    pressSelect(2)
+    pressCycle(1)
+    pressReload()
+    setSprint('key:ShiftLeft', true)
+    setSprint('key:ShiftLeft', false)
+    setFire('mouse', true)
+    setFire('mouse', false)
+    controls$.listeners.delete(l)
+    // Choosing the gun already in hand is no switch.
+    expect(heard).toEqual(['jump', 'switch', 'switch', 'reload', 'sprintOn', 'sprintOff', 'fire'])
+  })
+
+  it('a card up, no control sounds at all', () => {
+    const heard: string[] = []
+    const l = (c: string): void => { heard.push(c) }
+    controls$.listeners.add(l)
+    setInputPaused(true)
+    pressJump(); pressReload(); pressCycle(1); setFire('mouse', true); setSprint('key:ShiftLeft', true); noteSprintLocked(true)
+    setInputPaused(false)
+    controls$.listeners.delete(l)
+    expect(heard).toEqual([])
   })
 })
 

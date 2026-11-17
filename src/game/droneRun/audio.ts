@@ -14,14 +14,15 @@
  * | shot 0 (PULSE RIFLE) | a square blip falling 900 to 260 Hz, 80 ms |
  * | shot 1 (ARC SCATTER) | a band of noise round 1.4 kHz over a low thump, 160 ms |
  * | shot 2 (CHARGE RAIL) | a saw falling 1.8 kHz to 140 Hz with a bright tick, 240 ms; louder with more charge |
- * | hit | a 2.2 kHz tick, 35 ms |
- * | pop | noise swept down through a low-pass over a falling sine, 200 ms |
  * | hurt | a low sine thud 130 to 45 Hz with dull noise, 220 ms |
  * | overheat | high noise, fading, 280 ms |
  * | reload | two clicks 90 ms apart |
  * | wave | two rising square notes, 260 ms |
  * | clear | four rising sine notes (C5 E5 G5 C6), 700 ms |
  * | fail | a triangle falling 330 to 140 Hz, 290 ms |
+ *
+ * A bullet landing on a drone (the hitmarker), the kill shot and every
+ * control's press are clicks.ts.
  *
  * Every sound goes out through one gain (gameBus), which the mutes close.
  * The drones' own voices, placed where each drone flies, are droneVoices.ts
@@ -34,7 +35,7 @@ import { create } from 'zustand'
 import { audioContext, wantSound } from '../../lib/audioContext'
 import { useSoundMutes } from '../../store/useSoundMutes'
 
-export type DroneSound = 'shot' | 'hit' | 'pop' | 'hurt' | 'overheat' | 'reload' | 'wave' | 'clear' | 'fail'
+export type DroneSound = 'shot' | 'hurt' | 'overheat' | 'reload' | 'wave' | 'clear' | 'fail'
 
 const MUTE_KEY = 'onosendai:drone-run:muted'
 
@@ -156,11 +157,6 @@ export function synthAt(ac: BaseAudioContext, out: AudioNode, t: number, sound: 
       } else {
         tone(ac, out, t, 'square', 900, 260, 0.08, 0.035)
       }
-      return
-    case 'hit': tone(ac, out, t, 'sine', 2200, 2200, 0.035, 0.04); return
-    case 'pop':
-      hiss(ac, out, t, 'lowpass', 3000, 260, 0.2, 0.08)
-      tone(ac, out, t, 'sine', 320, 70, 0.18, 0.06)
       return
     case 'hurt':
       tone(ac, out, t, 'sine', 130, 45, 0.22, 0.12)

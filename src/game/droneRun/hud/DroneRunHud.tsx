@@ -18,8 +18,12 @@
  * lets go of FIRE) switch it back.
  *
  * It also:
- * - plays the sounds from the run's events (audio.ts), and flashes the
- *   screen's edges on a hit taken and the hit marker on a hit landed;
+ * - plays the sounds from the run's events (audio.ts) and the clicks in the
+ *   player's head (clicks.ts: the hitmarker, the kill, an aimed pull sent
+ *   wide), and flashes the screen's edges on a hit taken and the hit marker
+ *   on a hit landed (larger and gold on the kill);
+ * - plays each control's press sound (clicks.ts): the presses input.ts
+ *   tells (controls$), the cards' buttons and the sound switch;
  * - while a card is up (RUN FAILED, WAVE n CLEAR) lets the mouse go, stops
  *   the game reading the controls, pauses the run (so the aim assist asks
  *   nothing) and takes Enter and R for the card's first button (RESTART,
@@ -35,7 +39,8 @@ import type { RunEvent } from '../../../lib/games/droneRun/sim/events'
 import { useGame } from '../../../store/useGame'
 import { useSoundMutes } from '../../../store/useSoundMutes'
 import { playSound, toggleDroneRunSound, useDroneRunSound, warmSound } from '../audio'
-import { attachDesktop, held$, noteWeapons, padFiring, pointer, releaseAll, releasePointer, setAiming, setInputPaused, sprintHeld, sprintLatched, tickLook, TouchTracker, type Pt, type StickPlace } from '../input'
+import { playClick, type Click } from '../clicks'
+import { attachDesktop, controls$, held$, noteWeapons, type ControlPress, padFiring, pointer, releaseAll, releasePointer, setAiming, setInputPaused, sprintHeld, sprintLatched, tickLook, TouchTracker, type Pt, type StickPlace } from '../input'
 import { HudView, type Pulses } from './HudView'
 import { TouchPad } from './TouchPad'
 import { IDLE_HUD, STICK_PX, weaponsOfHud, type HudState, type HudWeapon } from './model'
@@ -110,12 +115,17 @@ function usePointerLocked(): boolean {
   )
 }
 
-/** What an event does on screen and in the speakers: the sound it plays, and which pulse it restarts. */
-export function reactTo(e: RunEvent): { sound: Parameters<typeof playSound>[0] | null; weapon?: number; pulse?: keyof Pulses } {
+/**
+ * What an event does on screen and in the speakers: the sound it plays, the
+ * click in the player's head (clicks.ts: the hitmarker, the kill, an aimed
+ * pull sent wide), and which pulse it restarts (the hit marker, its kill
+ * look, the red flash).
+ */
+export function reactTo(e: RunEvent): { sound: Parameters<typeof playSound>[0] | null; click?: Click; weapon?: number; pulse?: 'hurt' | 'hit' | 'kill' } {
   switch (e.type) {
-    case 'shot': return { sound: 'shot', weapon: e.weapon }
-    case 'hit': return { sound: 'hit', pulse: 'hit' }
-    case 'drone-destroyed': return { sound: 'pop' }
+    case 'shot': return e.wide ? { sound: 'shot', weapon: e.weapon, click: 'miss' } : { sound: 'shot', weapon: e.weapon }
+    case 'hit': return { sound: null, click: 'hit', pulse: 'hit' }
+    case 'drone-destroyed': return { sound: null, click: 'kill', pulse: 'kill' }
     case 'player-hit': return { sound: 'hurt', pulse: 'hurt' }
     case 'overheated': return { sound: 'overheat' }
     case 'reloaded': return { sound: 'reload' }
@@ -132,9 +142,12 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
   const listed = useMemo(() => weaponsOfHud(hud), [hud.weaponNames, hud.weaponKinds, hud.weaponCharges, hud.weaponAssists])
   const weapons = given ?? listed
   const locked = usePointerLocked()
-  const muted = useDroneRunSound((s) => s.muted) || useSoundMutes((s) => s.master)
+  // Both hooks every render (a short-circuit would skip the second once the first is on, and React needs the same hooks each time).
+  const gameMuted = useDroneRunSound((s) => s.muted)
+  const allMuted = useSoundMutes((s) => s.master)
+  const muted = gameMuted || allMuted
   const exiting = useGame((s) => s.busy === 'exiting')
-  const [pulses, setPulses] = useState<Pulses>({ hurt: 0, hit: 0 })
+  const [pulses, setPulses] = useState<Pulses>({ hurt: 0, hit: 0, kill: 0 })
   const layer = useRef<HTMLDivElement>(null)
   const move = { base: useRef<HTMLDivElement>(null), knob: useRef<HTMLSpanElement>(null) }
   const look = { base: useRef<HTMLDivElement>(null), knob: useRef<HTMLSpanElement>(null) }
@@ -147,7 +160,15 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
   const aiming = aimShown(touch, card, padFire, hud, weapons)
   /** How far each ring is moved from its resting place now, px (so its resting place can be read back from where it is drawn). */
   const shifted = useRef({ move: { x: 0, y: 0 }, look: { x: 0, y: 0 } })
-  const leave = exit ?? ((): void => { void useGame.getState().exit() })
+  const exitGame = exit ?? ((): void => { void useGame.getState().exit() })
+  // The cards' buttons and the sound switch, each with its press sound (clicks.ts).
+  const leave = (): void => { playClick('ui:exit'); exitGame() }
+  const again = (): void => { playClick('ui:restart'); restart() }
+  const onward = (): void => { playClick('ui:nextWave'); nextWave() }
+  /** The sound switch: going on, its two notes (going off, it is silent already). */
+  const toggleSound = (): void => { toggleDroneRunSound(); playClick('ui:sound') }
+  const toggleRef = useRef(toggleSound)
+  toggleRef.current = toggleSound
 
   // The sticks' resting places and reach, read from where they are drawn (before that, from the layout's default places).
   const tracker = useMemo(() => new TouchTracker(
@@ -165,7 +186,7 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
     const el = layer.current
     // A renderer with no DOM (tests) hands no element to listen on.
     if (!el || typeof el.addEventListener !== 'function' || typeof document === 'undefined') return
-    return attachDesktop({ el, win: window, doc: document as DesktopDoc }, { onMute: toggleDroneRunSound, onGesture: warmSound })
+    return attachDesktop({ el, win: window, doc: document as DesktopDoc }, { onMute: () => toggleRef.current(), onGesture: warmSound })
   }, [])
 
   // A card up: the mouse goes free, the controls rest, every finger lets go.
@@ -217,18 +238,32 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
       if (e.code === 'Enter' && (e.target as HTMLElement | null)?.closest?.('button')) return
       if (e.code !== 'Enter' && e.code !== 'NumpadEnter' && e.code !== 'KeyR') return
       e.preventDefault()
-      if (hud.phase === 'failed') restart(); else nextWave()
+      if (hud.phase === 'failed') again(); else onward()
     }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
   }, [card, hud.phase, restart, nextWave])
 
-  // Sounds and pulses from the run's events.
-  useEffect(() => subscribe((e) => {
-    const r = reactTo(e)
-    if (r.sound) playSound(r.sound, r.weapon ?? 0)
-    if (r.pulse) { const k = r.pulse; setPulses((p) => ({ ...p, [k]: p[k] + 1 })) }
-  }), [subscribe])
+  // Each control's press sound (input.ts controls$: FIRE, JUMP, a gun, RELOAD, sprint on and off, the lockout).
+  useEffect(() => {
+    const press = (c: ControlPress): void => { playClick(`ui:${c}`) }
+    controls$.listeners.add(press)
+    return () => { controls$.listeners.delete(press) }
+  }, [])
+
+  // Sounds and pulses from the run's events. A hit's tick takes the gun of the shot before it (a step lists the shot first).
+  useEffect(() => {
+    let gun = 0
+    return subscribe((e) => {
+      const r = reactTo(e)
+      if (e.type === 'shot') gun = e.weapon
+      if (r.sound) playSound(r.sound, r.weapon ?? 0)
+      if (r.click) playClick(r.click, gun)
+      if (r.pulse === 'hurt') setPulses((p) => ({ ...p, hurt: p.hurt + 1 }))
+      else if (r.pulse === 'hit') setPulses((p) => ({ ...p, hit: p.hit + 1 }))
+      else if (r.pulse === 'kill') setPulses((p) => ({ ...p, hit: p.hit + 1, kill: p.hit + 1 }))
+    })
+  }, [subscribe])
 
   const onTouchDown = (e: React.PointerEvent<HTMLDivElement>): void => {
     if (e.pointerType !== 'touch' || card) return
@@ -270,10 +305,10 @@ export function DroneRunHud({ hud, weapons: given, restart, nextWave, subscribe,
         muted={muted}
         exiting={exiting}
         pulses={pulses}
-        onRestart={restart}
-        onNextWave={nextWave}
+        onRestart={again}
+        onNextWave={onward}
         onExit={leave}
-        onToggleSound={toggleDroneRunSound}
+        onToggleSound={toggleSound}
       />
       {touch && <TouchPad hud={hud} weapons={weapons} move={move} look={look} aiming={aiming} sprintHeld={sprinting} sprintLatched={sprintOn} />}
     </div>

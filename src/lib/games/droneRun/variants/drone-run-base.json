@@ -699,6 +699,294 @@
           "gain": 1.6,
           "bright": 1.8
         }
+      },
+      "ui": {
+        "fire": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "sine",
+              "from": 520,
+              "to": 300,
+              "dur": 0.025,
+              "gain": 0.016
+            },
+            {
+              "kind": "noise",
+              "filter": "bandpass",
+              "from": 1800,
+              "to": 1800,
+              "q": 2,
+              "dur": 0.012,
+              "gain": 0.007
+            }
+          ],
+          "gap": 0.05
+        },
+        "jump": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "triangle",
+              "from": 600,
+              "to": 1100,
+              "dur": 0.045,
+              "gain": 0.014
+            }
+          ],
+          "gap": 0.05
+        },
+        "sprintOn": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "triangle",
+              "from": 700,
+              "dur": 0.03,
+              "gain": 0.011
+            },
+            {
+              "kind": "tone",
+              "wave": "triangle",
+              "from": 950,
+              "at": 0.035,
+              "dur": 0.03,
+              "gain": 0.011
+            }
+          ],
+          "gap": 0.06
+        },
+        "sprintOff": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "triangle",
+              "from": 950,
+              "dur": 0.03,
+              "gain": 0.01
+            },
+            {
+              "kind": "tone",
+              "wave": "triangle",
+              "from": 700,
+              "at": 0.035,
+              "dur": 0.03,
+              "gain": 0.01
+            }
+          ],
+          "gap": 0.06
+        },
+        "lockout": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "sawtooth",
+              "from": 260,
+              "to": 150,
+              "filter": "lowpass",
+              "cutoff": 900,
+              "q": 0.7,
+              "dur": 0.09,
+              "gain": 0.016
+            }
+          ],
+          "gap": 0.3
+        },
+        "switch": {
+          "layers": [
+            {
+              "kind": "noise",
+              "filter": "highpass",
+              "from": 3200,
+              "to": 2600,
+              "q": 0.8,
+              "dur": 0.009,
+              "gain": 0.018
+            },
+            {
+              "kind": "noise",
+              "filter": "highpass",
+              "from": 2400,
+              "to": 2000,
+              "q": 0.8,
+              "at": 0.03,
+              "dur": 0.01,
+              "gain": 0.016
+            }
+          ],
+          "gap": 0.05
+        },
+        "reload": {
+          "layers": [
+            {
+              "kind": "noise",
+              "filter": "bandpass",
+              "from": 900,
+              "to": 1600,
+              "q": 3,
+              "dur": 0.03,
+              "gain": 0.014
+            },
+            {
+              "kind": "tone",
+              "wave": "sine",
+              "from": 820,
+              "at": 0.04,
+              "dur": 0.022,
+              "gain": 0.01
+            }
+          ],
+          "gap": 0.1
+        },
+        "restart": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "sine",
+              "from": 520,
+              "to": 780,
+              "dur": 0.06,
+              "gain": 0.016
+            }
+          ],
+          "gap": 0.1
+        },
+        "nextWave": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "sine",
+              "from": 780,
+              "to": 1170,
+              "dur": 0.06,
+              "gain": 0.016
+            }
+          ],
+          "gap": 0.1
+        },
+        "exit": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "sine",
+              "from": 660,
+              "to": 440,
+              "dur": 0.07,
+              "gain": 0.016
+            }
+          ],
+          "gap": 0.1
+        },
+        "sound": {
+          "layers": [
+            {
+              "kind": "tone",
+              "wave": "sine",
+              "from": 880,
+              "dur": 0.04,
+              "gain": 0.013
+            },
+            {
+              "kind": "tone",
+              "wave": "sine",
+              "from": 1320,
+              "at": 0.05,
+              "dur": 0.04,
+              "gain": 0.013
+            }
+          ],
+          "gap": 0.1
+        }
+      },
+      "hit": {
+        "layers": [
+          {
+            "kind": "noise",
+            "filter": "highpass",
+            "from": 6000,
+            "to": 4500,
+            "q": 0.9,
+            "dur": 0.012,
+            "gain": 0.035
+          },
+          {
+            "kind": "tone",
+            "wave": "sine",
+            "from": 3150,
+            "attack": 0.001,
+            "dur": 0.05,
+            "gain": 0.012
+          },
+          {
+            "kind": "tone",
+            "wave": "sine",
+            "from": 8690,
+            "attack": 0.001,
+            "dur": 0.03,
+            "gain": 0.005
+          }
+        ],
+        "gap": 0.06,
+        "gunPitch": [
+          1,
+          0.85,
+          1.2
+        ]
+      },
+      "kill": {
+        "layers": [
+          {
+            "kind": "tone",
+            "wave": "sine",
+            "from": 180,
+            "to": 60,
+            "dur": 0.09,
+            "gain": 0.07
+          },
+          {
+            "kind": "noise",
+            "filter": "lowpass",
+            "from": 2500,
+            "to": 400,
+            "q": 0.7,
+            "dur": 0.07,
+            "gain": 0.045
+          },
+          {
+            "kind": "tone",
+            "wave": "sine",
+            "from": 2100,
+            "at": 0.01,
+            "attack": 0.001,
+            "dur": 0.12,
+            "gain": 0.02
+          },
+          {
+            "kind": "tone",
+            "wave": "sine",
+            "from": 5800,
+            "at": 0.01,
+            "attack": 0.001,
+            "dur": 0.07,
+            "gain": 0.008
+          }
+        ],
+        "gap": 0.08
+      },
+      "miss": {
+        "layers": [
+          {
+            "kind": "noise",
+            "filter": "bandpass",
+            "from": 900,
+            "to": 2400,
+            "q": 1.2,
+            "attack": 0.015,
+            "dur": 0.07,
+            "gain": 0.005
+          }
+        ],
+        "gap": 0.1
       }
     }
   }

@@ -12371,6 +12371,18 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   animation: drun-hit 180ms ease-out forwards;
 }
 @keyframes drun-hit { from { opacity: 1; transform: scale(0.85); } to { opacity: 0; transform: scale(1.25); } }
+/* The kill shot: the same X, larger, gold and held a little longer. Absolutely placed: nothing moves. */
+.drun-hitmark.is-kill {
+  inset: -10px;
+  background:
+    linear-gradient(45deg, transparent calc(50% - 1.5px), #ffc23d calc(50% - 1.5px) calc(50% + 1.5px), transparent calc(50% + 1.5px)),
+    linear-gradient(-45deg, transparent calc(50% - 1.5px), #ffc23d calc(50% - 1.5px) calc(50% + 1.5px), transparent calc(50% + 1.5px));
+  -webkit-mask: radial-gradient(circle, transparent 11px, #000 11.5px);
+  mask: radial-gradient(circle, transparent 11px, #000 11.5px);
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.8));
+  animation: drun-kill 300ms ease-out forwards;
+}
+@keyframes drun-kill { 0% { opacity: 1; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.1); } 100% { opacity: 0; transform: scale(1.3); } }
 
 /* A hit taken: the screen's edges flash red. */
 .drun-flash {

@@ -35,8 +35,7 @@ import {
 } from '../usePresence'
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
-import { keepAvatarEvent, readKeptAvatar, resetAvatarMigration } from '../../lib/avatarDb'
-import { closeEventDb } from '../../lib/eventDb/connection'
+import { closeAvatarDb, keepAvatarEvent, readKeptAvatar, resetAvatarMigration } from '../../lib/avatarDb'
 import { forgetDeviceReads, useAvatars } from '../useAvatars'
 
 const SECTOR = 1n << 30n
@@ -124,7 +123,7 @@ describe('the avatar cache', () => {
   const xorNow = (): { pubkey: string; event: NostrEvent } => xorAvatar(Math.floor(Date.now() / 1000) - 60)
 
   beforeEach(() => {
-    closeEventDb()
+    closeAvatarDb()
     ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory()
     resetAvatarMigration()
     forgetDeviceReads()

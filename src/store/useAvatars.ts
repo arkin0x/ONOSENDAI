@@ -9,8 +9,8 @@
  * dodecahedron to everyone. There is no work to check: a nonce tag on an
  * avatar published while avatars were paid for in work is ignored.
  *
- * Every avatar event seen is kept on the device in the event database
- * (lib/avatarDb, IndexedDB; never localStorage, arkinox 2026-11-17), so a
+ * Every avatar event seen is kept on the device (lib/avatarDb, its own
+ * IndexedDB database; never localStorage, arkinox 2026-11-17), so a
  * reload draws you and the people around you in your own shapes from the
  * device in milliseconds, not as dodecahedra until the relays answer
  * (arkinox, 2026-10-12: "when I refresh the page XOR disappears until it
@@ -89,28 +89,42 @@ const readFromDevice = new Set<string>()
 /** Where a copy came from: the device (with whether a relay has it) or a relay's answer. */
 type Source = { from: 'device'; published: boolean } | { from: 'relay' }
 
+/** By pubkey: the newest avatar the relays answered with on this page. A device copy newer than that is one no relay has. */
+const relaySaid = new Map<string, NostrEvent>()
+
 /**
  * Draw `event` as `pubkey`'s avatar if it is the newest held (avatarReplaces);
  * true when it is. A relay's copy is kept on the device. Yours also becomes
- * `mineEvent`; a relay answering with an older one than yours says the relays
- * do not hold yours, so BROADCAST is offered (sending it again is harmless).
+ * `mineEvent`, published when a relay has it: an avatar newer than every
+ * relay answer is not, whatever was kept with it, so BROADCAST is offered
+ * (sending it again is harmless), whichever of the two answers landed first.
  */
 function take(pubkey: string, event: NostrEvent, source: Source): boolean {
   const s = useAvatars.getState()
   const mine = pubkey === useCyberspace.getState().identity.pubkey
+  if (source.from === 'relay') {
+    const said = relaySaid.get(pubkey)
+    if (!said || avatarReplaces(event, said)) relaySaid.set(pubkey, event)
+    // Kept, or only marked seen when the device has a newer one (avatarDb).
+    void keepAvatarEvent(event, { mine, published: true })
+  }
   const held = newestAvatar([s.events[pubkey], mine ? s.mineEvent : null])
   if (held && avatarReplaces(held, event)) {
     if (mine && source.from === 'relay' && s.mineEvent && avatarReplaces(s.mineEvent, event) && s.minePublished) useAvatars.setState({ minePublished: false })
     return false
   }
-  useAvatars.setState({ shards: { ...s.shards, [pubkey]: avatarShard(event) }, events: { ...s.events, [pubkey]: event } })
+  // The same event again draws nothing new: its shape is already built.
+  if (s.events[pubkey]?.id !== event.id) {
+    useAvatars.setState({ shards: { ...s.shards, [pubkey]: avatarShard(event) }, events: { ...s.events, [pubkey]: event } })
+  }
   if (mine) {
+    const said = relaySaid.get(pubkey)
+    const unsent = !!said && avatarReplaces(event, said)
     // The same event again from the device: what this session already
     // learned of it (a relay's answer) outranks the flag kept with it.
-    const published = source.from === 'relay' || (s.mineEvent?.id === event.id ? s.minePublished : source.published)
-    useAvatars.setState({ mineEvent: event, minePublished: published })
+    const published = source.from === 'relay' || (s.mineEvent?.id === event.id ? s.minePublished : source.published && !unsent)
+    if (s.mineEvent?.id !== event.id || s.minePublished !== published) useAvatars.setState({ mineEvent: event, minePublished: published })
   }
-  if (source.from === 'relay') void keepAvatarEvent(event, { mine, published: true })
   return true
 }
 
@@ -263,7 +277,7 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
 let unwatchMine: (() => void) | null = null
 
 /**
- * Move what localStorage held into the event database (once), take your own
+ * Move what localStorage held into IndexedDB (once), take your own
  * kept avatar in now, and again on every identity switch (a new key, a
  * login, signing out), so each identity is drawn as its own and BROADCAST
  * never offers another identity's avatar. Started once, by App.
@@ -279,8 +293,8 @@ export function watchMyAvatar(): () => void {
   return () => { unwatchMine?.(); unwatchMine = null }
 }
 
-/** For tests: forget which pubkeys were looked up on the device, as a reload does. */
-export function forgetDeviceReads(): void { readFromDevice.clear() }
+/** For tests: forget which pubkeys were looked up on the device and what the relays said, as a reload does. */
+export function forgetDeviceReads(): void { readFromDevice.clear(); relaySaid.clear() }
 
 /** The shard a pubkey is drawn as, or null for the dodecahedron; asks the relay as needed. */
 export function useAvatarShard(pubkey: string): ShardModel | null {

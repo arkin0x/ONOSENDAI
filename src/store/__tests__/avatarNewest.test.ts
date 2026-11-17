@@ -36,8 +36,7 @@ vi.mock('../../lib/relay', () => ({
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { publish, query } from '../../lib/relay'
 import { avatarReplaces, avatarTemplate, newestAvatar } from '../../lib/avatar'
-import { keepAvatarEvent, readKeptAvatar, resetAvatarMigration } from '../../lib/avatarDb'
-import { closeEventDb } from '../../lib/eventDb/connection'
+import { closeAvatarDb, keepAvatarEvent, readKeptAvatar, resetAvatarMigration } from '../../lib/avatarDb'
 import type { NostrEvent } from '../../lib/events'
 import { useCyberspace } from '../useCyberspace'
 import { forgetDeviceReads, useAvatars, watchMyAvatar } from '../useAvatars'
@@ -85,7 +84,7 @@ const reload = (): void => {
 }
 
 beforeEach(() => {
-  closeEventDb()
+  closeAvatarDb()
   ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory()
   localStorage.clear()
   vi.mocked(query).mockReset()
@@ -271,6 +270,53 @@ describe('your own avatar', () => {
     expect(localStorage.getItem('onosendai:avatars')).toBeNull()
   })
 
+  it('one kept as published but newer than the relays\' answer offers BROADCAST, though the relays answered first', async () => {
+    await keepAvatarEvent(avatarEvent(me(), 'Unsent', T + 200, '2'), { mine: true, published: true })
+    let release: (v: NostrEvent[]) => void = () => {}
+    vi.mocked(query).mockImplementationOnce(() => new Promise((r) => { release = r as never }))
+    useAvatars.getState().ensure(me())
+    release([avatarEvent(me(), 'Previous', T + 100, '1')])
+    await vi.waitFor(() => { expect(useAvatars.getState().shards[me()]?.name).toBe('Unsent') })
+    expect(useAvatars.getState().minePublished).toBe(false)
+  })
+
+  it('a LOCAL adopt whose signer answers after an identity switch is kept for the identity that signed it, and not offered to the new one', async () => {
+    const identity = useCyberspace.getState().identity
+    const original = useCyberspace.getState().signEvent
+    let release: () => void = () => {}
+    // A remote signer: it signs as A, and its answer lands after the switch.
+    useCyberspace.setState({
+      live: false,
+      signEvent: (t, p) => original(t, p).then((ev) => new Promise((resolve) => { release = () => resolve(ev) })),
+    })
+    try {
+      const signedAs = identity.pubkey
+      const pending = useAvatars.getState().adopt(shardNamed('Signed as A'))
+      await vi.waitFor(() => { expect(useAvatars.getState().phase).toBe('signing') })
+      useCyberspace.setState({ identity: { pubkey: '7c'.repeat(32), npub: '' } })
+      await new Promise((r) => setTimeout(r, 10))
+      release()
+      expect(await pending).toBe(false)
+      expect(useAvatars.getState().phase).toBeNull()
+      expect(useAvatars.getState().mineEvent).toBeNull()
+      expect(useAvatars.getState().adoptError).toBeNull()
+      await vi.waitFor(async () => { expect((await readKeptAvatar(signedAs))?.published).toBe(false) })
+    } finally {
+      useCyberspace.setState({ identity, signEvent: original, live: true })
+    }
+  })
+
+  it('moves the per-identity keys an earlier build kept, and keeps an unpublished slot it cannot move', async () => {
+    const other = '7d'.repeat(32)
+    localStorage.setItem(`onosendai:avatar:${other}`, JSON.stringify({ pubkey: other, event: avatarEvent(other, 'Per identity', T + 100, '4'), published: true }))
+    localStorage.setItem('onosendai:avatar', JSON.stringify({ pubkey: me(), payload: { v: 1 }, published: false }))
+    await useAvatars.getState().loadMine()
+    expect((await readKeptAvatar(other))?.event.tags[0]).toEqual(['name', 'Per identity'])
+    expect(localStorage.getItem(`onosendai:avatar:${other}`)).toBeNull()
+    // Only a payload, and never published: it may exist nowhere else, so it stays.
+    expect(localStorage.getItem('onosendai:avatar')).not.toBeNull()
+  })
+
   it('a kept avatar over the size limit is the dodecahedron', async () => {
     const t = avatarTemplate(shardNamed('Big'), T + 100)
     const big = { ...t, content: t.content.replace(/}$/, `,"pad":"${'a'.repeat(131_072)}"}`), pubkey: me(), id: 'f'.repeat(64), sig: '' }
@@ -291,6 +337,19 @@ describe('everyone else\'s avatar', () => {
     expect(useAvatars.getState().shards[pk]?.name).toBe('Newest')
     await answer(pk, [avatarEvent(pk, 'Newer still', T + 300, '3')])
     expect(useAvatars.getState().shards[pk]?.name).toBe('Newer still')
+  })
+
+  it('keeps one row per pubkey, and trims everyone else\'s past the limit, never your own', async () => {
+    const { AVATARS_KEPT } = await import('../../lib/avatarDb')
+    const me = useCyberspace.getState().identity.pubkey
+    await keepAvatarEvent(avatarEvent(me, 'Mine', T, '9'), { mine: true, published: true }, 1)
+    for (let i = 0; i <= AVATARS_KEPT; i++) {
+      const pubkey = (i + 1).toString(16).padStart(64, '0')
+      await keepAvatarEvent(avatarEvent(pubkey, `P${i}`, T, 'a'), { mine: false, published: true }, 1_000 + i)
+    }
+    expect(await readKeptAvatar((1).toString(16).padStart(64, '0'), 2_000)).toBeNull()
+    expect((await readKeptAvatar((AVATARS_KEPT + 1).toString(16).padStart(64, '0'), 2_000))?.event.tags[0]).toEqual(['name', `P${AVATARS_KEPT}`])
+    expect((await readKeptAvatar(me, 2_000))?.event.tags[0]).toEqual(['name', 'Mine'])
   })
 
   it('a reload draws the kept newest from the device, and an older relay answer does not replace it', async () => {

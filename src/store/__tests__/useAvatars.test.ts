@@ -23,8 +23,7 @@ import { publish, query } from '../../lib/relay'
 import { AVATAR_KIND, avatarShard, avatarSize, avatarTemplate } from '../../lib/avatar'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from '../useCyberspace'
-import { closeEventDb } from '../../lib/eventDb/connection'
-import { resetAvatarMigration } from '../../lib/avatarDb'
+import { closeAvatarDb, resetAvatarMigration } from '../../lib/avatarDb'
 import { AVATAR_SIGN_PATIENCE_MS, forgetDeviceReads, useAvatars } from '../useAvatars'
 
 const built = () => {
@@ -37,7 +36,7 @@ const built = () => {
 }
 
 describe('useAvatars', () => {
-  beforeEach(() => { closeEventDb(); (globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory(); resetAvatarMigration(); forgetDeviceReads(); useAvatars.setState({ shards: {}, events: {}, asked: {}, phase: null, adoptError: null, mineEvent: null, minePublished: false }); useCyberspace.setState({ live: true }); localStorage.clear(); vi.mocked(query).mockClear(); vi.mocked(publish).mockClear() })
+  beforeEach(() => { closeAvatarDb(); (globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory(); resetAvatarMigration(); forgetDeviceReads(); useAvatars.setState({ shards: {}, events: {}, asked: {}, phase: null, adoptError: null, mineEvent: null, minePublished: false }); useCyberspace.setState({ live: true }); localStorage.clear(); vi.mocked(query).mockClear(); vi.mocked(publish).mockClear() })
 
   it('adopting a shard signs a kind 11333 event with no d tag and no work, publishes it and keeps a copy', async () => {
     const me = useCyberspace.getState().identity.pubkey
@@ -197,7 +196,7 @@ describe('useAvatars', () => {
     expect(useAvatars.getState().shards[me]).toBeNull()
     expect(useAvatars.getState().mineEvent?.id).toBe(big.id)
     // Within the limit, drawn from the kept event.
-    closeEventDb(); (globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory(); resetAvatarMigration()
+    closeAvatarDb(); (globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory(); resetAvatarMigration()
     useAvatars.setState({ shards: {}, events: {}, mineEvent: null })
     localStorage.setItem('onosendai:avatar', JSON.stringify({ pubkey: me, payload: JSON.parse(t.content), event: { ...big, content: t.content }, published: false }))
     await useAvatars.getState().loadMine()

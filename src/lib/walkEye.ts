@@ -49,6 +49,17 @@ export const walkFall = { active: false, offset: 0 }
 export const walkGlide = { active: false, exact: false, x: 0, y: 0, z: 0 }
 
 /**
+ * Fluid WALK's rise onto a riser (store/walkFluid.ts groundFluid): the
+ * drawn feet are stood on a stair's top the frame they pass over its edge,
+ * and the camera trails them by `offset` gibsons (zero or negative) along
+ * `up`, which fades over GLIDE_TAU_S. The rig (Scene.tsx) lowers the camera
+ * by it, never nearer the feet's height than the near plane's room, so a
+ * stair is climbed smoothly and never looked at from inside. The avatar is
+ * drawn on the step itself.
+ */
+export const walkRise: { offset: number; up: { axis: AxisName; dir: 1 | -1 } } = { offset: 0, up: { axis: 'y', dir: 1 } }
+
+/**
  * Which way a fall's up is (walkFall): cyberspace `axis` in direction `dir`,
  * against the fall's gravity (lib/walkDown.ts), +Y unless the view is
  * turned. Written when a fall begins or the view turns its gravity.

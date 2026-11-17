@@ -64,9 +64,13 @@
 
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Group, Material, type Quaternion } from 'three'
+import { Group, Material, Vector3, type Quaternion } from 'three'
 import { facingTurn, headingPair } from '../lib/facing'
-import { anchorCentre, GRID_RADIUS, placeCentre, type Position } from '../lib/space'
+import { anchorCentre, GRID_RADIUS, placeCentre, renderDirection, type Position } from '../lib/space'
+import { REST_FLOOR } from '../store/walkWalls'
+import { upOf } from '../lib/walkDown'
+import { walkDown } from '../store/useWalk'
+import { easeRest, useRestDrop } from './useRestDrop'
 import { nearGate } from '../lib/walkGate'
 import { committedAnchor } from '../lib/renderFrame'
 import { travelOffset } from '../lib/travel'
@@ -79,6 +83,7 @@ import { usePersonCard } from '../store/usePersonCard'
 import { useAvatarFace } from '../store/avatarFace'
 import { useLayers } from '../store/useLayers'
 import { AvatarShape } from './AvatarShape'
+import { useAvatarLift } from './avatarLift'
 import { useAvatarOccluder } from './BuildOccluders'
 import { TapTarget } from './TapTarget'
 import { useDrawReach } from './buildZoom'
@@ -87,6 +92,9 @@ import { useDrawReach } from './buildZoom'
 const REACH = GRID_RADIUS * 8
 /** The proven-head outline's opacity at full strength, as AvatarShape's outline draws it. */
 const GHOST_OPACITY = 0.3
+
+/** Scratch for the lift's direction, so a frame allocates nothing. */
+const upVec = new Vector3()
 
 export function Avatar(): JSX.Element | null {
   const group = useRef<Group>(null)
@@ -171,12 +179,30 @@ export function Avatar(): JSX.Element | null {
   // named only while drawn, so it registers once its group is there.
   const { occluder, dim } = useAvatarOccluder(shown ? 'you' : undefined, drawn)
 
+  // Out of WALK, your avatar's origin stands on the surface under its
+  // gibson's centre, within a gibson of it, else on its gibson's floor
+  // (store/walkWalls.ts restDrop; arkinox, 2026-11-17: an avatar's origin is
+  // the point that touches the ground). Display only, eased so a hop or a
+  // wall arriving never pops it. In WALK, fluid WALK stands it
+  // (store/walkFluid.ts groundFluid).
+  const restAt = shownPosition ?? anchor
+  const restPlane = shownPlane ?? anchorPlane
+  const dropTo = useRestDrop(walking ? null : restAt, restPlane, scaleExp)
+  const dropNow = useRef(REST_FLOOR)
+  const wasWalking = useRef(false)
+  const lift = useAvatarLift(pubkey)
+
   useFrame(({ camera }, dt) => {
     const g = group.current
     const d = drawn.current
     if (!g || !d) return
+    const up = renderDirection(useCyberspace.getState().axes(), 'y')
     if (walking) {
-      g.position.copy(walkEye)
+      // Where WALK stands you (store/walkFluid.ts groundFluid), the icosahedron lifted onto it along your gravity.
+      const wu = upOf(walkDown())
+      const r = renderDirection(useCyberspace.getState().axes(), wu.axis)
+      g.position.copy(walkEye).addScaledVector(upVec.set(r[0] * wu.dir, r[1] * wu.dir, r[2] * wu.dir), lift)
+      wasWalking.current = true
       const p = proven.current
       if (p) {
         const s = useCyberspace.getState()
@@ -198,6 +224,16 @@ export function Avatar(): JSX.Element | null {
     } else {
       ghost.current.reset()
       g.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
+      // Out of WALK, already standing where WALK stood you: no settle.
+      if (wasWalking.current) { wasWalking.current = false; dropNow.current = dropTo.current }
+      // A hop under way keeps the height it left with; it settles once it lands.
+      const travelling = Math.abs(travelOffset.x) + Math.abs(travelOffset.y) + Math.abs(travelOffset.z) > 1e-3
+      if (!travelling) dropNow.current = easeRest(dropNow.current, dropTo.current, dt)
+      // Down cyberspace -Y onto the ground, in this view's render frame; the icosahedron lifted onto it.
+      const k = lift - dropNow.current
+      g.position.x += up[0] * k
+      g.position.y += up[1] * k
+      g.position.z += up[2] * k
     }
     // In WALK you face where you look, live as you turn (arkinox,
     // 2026-10-13), not the way your last move went. The model's nose (+Z)

@@ -7,7 +7,8 @@
  * - a wall at an angle is slid along, and the anchor never enters it;
  * - a ramp is walked up standing on it, a step at a time;
  * - crossing N gibsons makes N legal steps, in order, proved as a chain;
- * - the speed eases near the LOSING SYNC warning and holds one under it;
+ * - the speed eases from 15 events ahead and stops at 20, and the LOSING SYNC
+ *   warning fades in with it (arkinox, 2026-11-17);
  * - leaving WALK glides the eye onto the anchor;
  * - with the switch off, WALK is the step WALK, untouched.
  */
@@ -56,7 +57,8 @@ import { DOUBLE_JUMP_HEIGHT, JUMP_HEIGHT } from '../walkGravity'
 import { walkFacing, walkFall, walkGlide } from '../../lib/walkEye'
 import { useCalibration } from '../../lib/calibration'
 import { withConstrain, type Constrain } from '../../lib/walkConstrain'
-import { FLUID_ACCEL, FLUID_HOLD_AT, FLUID_MAX_SPEED, FLUID_WALL_REACH, len, onLine, syncSpeedFactor } from '../../lib/fluidWalk'
+import { FLUID_ACCEL, FLUID_EASE_FROM, FLUID_HOLD_AT, FLUID_MAX_SPEED, FLUID_WALL_REACH, len, onLine, syncSpeedFactor, syncWarnOpacity } from '../../lib/fluidWalk'
+import { eventsAhead } from '../walkAhead'
 import { canonicalQuaternion, type Position, type ViewAxes } from '../../lib/space'
 import { walkKeyDown, walkKeyUp, walkKeysReleased } from '../../hooks/useKeyboard'
 import { rampFixture } from '../fixtures/rampFixture'
@@ -405,17 +407,73 @@ describe('anchoring the chain', () => {
 })
 
 describe('the queue stays honest', () => {
-  it('eases the speed as proofs fall behind', () => {
-    expect(syncSpeedFactor(0)).toBe(1)
-    expect(syncSpeedFactor(5)).toBe(1)
-    expect(syncSpeedFactor(6)).toBeCloseTo(0.75, 9)
-    expect(syncSpeedFactor(7)).toBeCloseTo(0.5, 9)
-    expect(syncSpeedFactor(8)).toBeCloseTo(0.25, 9)
-    expect(FLUID_HOLD_AT).toBe(SYNC_WARN_AT - 1)
-    expect(syncSpeedFactor(FLUID_HOLD_AT)).toBe(0)
+  it('full speed to 14 events ahead, slower from 15 to 19, stopped from 20 (arkinox, 2026-11-17)', () => {
+    expect(FLUID_EASE_FROM).toBe(14)
+    expect(FLUID_HOLD_AT).toBe(20)
+    for (let n = 0; n <= 14; n++) expect(syncSpeedFactor(n)).toBe(1)
+    let last = 1
+    for (let n = 15; n <= 19; n++) {
+      const f = syncSpeedFactor(n)
+      expect(f).toBeGreaterThan(0)
+      expect(f).toBeLessThan(last)
+      // A straight line from 14 (full) to 20 (stopped).
+      expect(f).toBeCloseTo((20 - n) / 6, 9)
+      last = f
+    }
+    expect(syncSpeedFactor(17)).toBeCloseTo(0.5, 9)
+    expect(syncSpeedFactor(20)).toBe(0)
+    expect(syncSpeedFactor(31)).toBe(0)
   })
 
-  it('a zigzag faster than the proofs holds at the gibson edge and never reaches the LOSING SYNC warning; it walks on once they land', async () => {
+  it('the LOSING SYNC warning fades in with the slowdown: 0 at 14, 0.5 at 17, 1 at 20', () => {
+    expect(syncWarnOpacity(0)).toBe(0)
+    expect(syncWarnOpacity(14)).toBe(0)
+    expect(syncWarnOpacity(15)).toBeCloseTo(1 / 6, 9)
+    expect(syncWarnOpacity(17)).toBeCloseTo(0.5, 9)
+    expect(syncWarnOpacity(19)).toBeCloseTo(5 / 6, 9)
+    expect(syncWarnOpacity(20)).toBe(1)
+    expect(syncWarnOpacity(40)).toBe(1)
+    expect(SYNC_WARN_AT).toBe(15)
+  })
+
+  it('a held walk: no slowdown at 14 ahead, partial at 15 to 19, stopped at 20, and walks on as the count falls', () => {
+    walk()
+    down('KeyW')
+    // Hold the events ahead at `n` while walking (the open segment is one of
+    // them): set after the timers, so a settle never shows the walk a short queue.
+    const at = (n: number, ms: number): void => {
+      for (let t = 0; t < ms; t += 16) {
+        clock += 16
+        vi.advanceTimersByTime(16)
+        useWalk.setState({ behind: n - (useWalk.getState().open ? 1 : 0) })
+        expect(eventsAhead()).toBe(n)
+        tickFluid(clock)
+        tickFall(clock)
+      }
+    }
+    const speed = (): number => len(fluidState().v)
+    at(14, 1000)
+    expect(speed()).toBeCloseTo(FLUID_MAX_SPEED, 6)
+    for (let n = 15; n <= 19; n++) {
+      at(n, 600)
+      expect(speed()).toBeCloseTo(FLUID_MAX_SPEED * (20 - n) / 6, 6)
+    }
+    at(20, 600)
+    expect(speed()).toBe(0)
+    const stopped = rel(start)
+    at(20, 1000)
+    expect(rel(start)).toEqual(stopped)
+    // The count falls: it picks up again, a little, then all the way.
+    at(18, 600)
+    expect(speed()).toBeCloseTo(FLUID_MAX_SPEED / 3, 6)
+    expect(rel(start)).not.toEqual(stopped)
+    at(14, 600)
+    expect(speed()).toBeCloseTo(FLUID_MAX_SPEED, 6)
+    up('KeyW')
+    useWalk.setState({ behind: 0 })
+  })
+
+  it('a zigzag faster than the proofs stops at the gibson edge 20 events ahead, never past; it walks on once they land', async () => {
     walk()
     down('KeyW')
     let most = 0
@@ -423,11 +481,11 @@ describe('the queue stays honest', () => {
     let stillest = 0
     let last = rel(start)
     // Turn 90 degrees every 0.7 s: a new segment at every turn, and no proof ever lands.
-    for (let t = 0; t < 16000; t += 16) {
+    for (let t = 0; t < 30000; t += 16) {
       if (t % 1408 === 0) face(0)
       if (t % 1408 === 704) face(90)
       frame(16)
-      most = Math.max(most, useWalk.getState().behind)
+      most = Math.max(most, eventsAhead())
       const c = rel(start)
       if (c[0] === last[0] && c[2] === last[2]) still += 16
       else still = 0
@@ -436,8 +494,7 @@ describe('the queue stays honest', () => {
       expect(Math.abs(fluidState().frac.x)).toBeLessThanOrEqual(0.75)
       expect(Math.abs(fluidState().frac.z)).toBeLessThanOrEqual(0.75)
     }
-    expect(most).toBeGreaterThanOrEqual(FLUID_HOLD_AT - 2)
-    expect(most).toBeLessThan(SYNC_WARN_AT)
+    expect(most).toBe(FLUID_HOLD_AT)
     // Held a good while with the key down.
     expect(stillest).toBeGreaterThan(2000)
     const heldAt = rel(start)

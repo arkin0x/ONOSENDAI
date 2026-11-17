@@ -9,11 +9,12 @@
  * | Part | What happens |
  * |---|---|
  * | input | what is held (store/walkHold.ts heldNow), or a tap's short nudge, is the way to go: forward and the sides along the way you face, laid flat across gravity; with gravity off, JUMP and DOWN push up and down |
- * | speed | it picks up toward FLUID_MAX_SPEED, and slows to a stop when let go; the cap eases as the walk falls behind its proofs (syncSpeedFactor), and holds at the edge of the gibson one under the LOSING SYNC warning |
+ * | speed | it picks up toward FLUID_MAX_SPEED, and slows to a stop when let go; the cap eases from 15 events ahead of the chain (store/walkAhead.ts eventsAhead, lib/fluidWalk.ts syncSpeedFactor) and stops at 20, holding at the edge of the gibson until the chain catches up |
  * | the anchor | when the smooth position passes half a step from its gibson's middle, the walk takes one legal step there (store/useWalk.ts fluidCross): a straight step, or a diagonal near a corner; the step goes to the chain as a press's would, so the chain only ever sees whole gibsons |
  * | walls | a step a wall holds keeps the smooth position in its gibson, FLUID_WALL_REACH from the middle at most (and FLUID_FACE_GAP short of a nearer face), and stops its speed that way only: the rest goes on, which is sliding along the wall |
- * | floors, stairs, gravity | the step does what a press does (stair step-up and step-down, the fall off a ledge, the bounce pads); a stair's rise is eased into the eye, not jumped; jumps, double jumps and falls are the walk's own arcs (store/useWalk.ts), unchanged |
+ * | floors, stairs, gravity | the step does what a press does (stair step-up and step-down, the fall off a ledge, the bounce pads); the anchor's change of height is eased into the eye, and the ground (below) stands the drawn walker on the surface itself; jumps, double jumps and falls are the walk's own arcs (store/useWalk.ts), unchanged |
  * | the eye | the camera and your avatar are drawn at the anchor plus `frac` (lib/walkEye.ts walkGlide), every frame, never snapped to the grid while in WALK |
+ * | the ground | after the fall's frame (groundFluid), the drawn walker's height is the surface under it, wherever it is between gibsons (store/walkWalls.ts groundUnder), never the gibson's: it stands on the geometry, and its feet are never drawn below it |
  * | leaving WALK, a STOP, a step that did not land | the anchor moves without the smooth position: the eye glides from where it was to the new anchor (GLIDE_TAU_S) and the speed is dropped |
  *
  * Module state, as the fall's is: it is read every frame and nothing should
@@ -26,14 +27,16 @@ import {
   FLUID_WALL_REACH, accelerate, dueCrossing, len, syncSpeedFactor, wishOf, zero, type Vec,
 } from '../lib/fluidWalk'
 import { moveDirection } from '../lib/moves'
-import { walkFacing, walkFall, walkGlide } from '../lib/walkEye'
-import { WORLD_DOWN, raised } from '../lib/walkDown'
+import { walkFacing, walkFall, walkFallUp, walkGlide, walkRise } from '../lib/walkEye'
+import { WORLD_DOWN, heightOf, raised, upOf } from '../lib/walkDown'
 import { useCyberspace } from './useCyberspace'
 import { fluidCross, fallState, useWalk, walkDown } from './useWalk'
 import { fluidNudge, fluidOn, useFluidWalk } from './fluidSwitch'
 import { heldNow } from './walkHold'
+import { eventsAhead } from './walkAhead'
 import { walkInputOpen } from './walkInput'
-import { faceDistance, wallItemsAt } from './walkWalls'
+import { REST_FLOOR, faceDistance, groundUnder, restDrop, wallItemsAt, type WallItem } from './walkWalls'
+import { STEP_DOWN_MAX, STEP_UP_MAX } from './walkStep'
 
 /** How long the eye takes to glide onto a new anchor, in seconds (the time constant): about a third of a second to settle. */
 export const GLIDE_TAU_S = 0.09
@@ -123,6 +126,8 @@ export function fluidState(): Readonly<typeof st> {
 
 /** Forget everything: the next frame starts at the anchor's middle, at rest. */
 export function resetFluid(): void {
+  resetFoot()
+  walkRise.offset = 0
   st.v = zero()
   st.frac = zero()
   st.glide = zero()
@@ -229,26 +234,278 @@ export function tickFluid(now: number = performance.now()): boolean {
   return true
 }
 
-/** The axes across each gravity axis, and so the ones a diagonal may use: kept, so a frame allocates no list. */
-const LEVEL: Record<AxisName, readonly AxisName[]> = { x: ['y', 'z'], y: ['x', 'z'], z: ['x', 'y'] }
+/**
+ * How fast the drawn feet may come down onto a lower surface, in steps a
+ * second: faster than walking down the steepest slope the stair step-up
+ * climbs (STEP_UP_MAX a step at FLUID_MAX_SPEED, about 18), so a slope is
+ * followed exactly and only a ledge's drop is eased, over a few frames.
+ */
+export const FOOT_DROP_SPEED = 20
+
+/** How long the walls under the walker are kept before they are listed again, in ms (as scene/walkEyeRig.ts keeps the eye's). */
+const FOOT_ITEMS_MS = 300
+
+/** A face under the walker's own gibson nearer than this, in gibsons, is one it stands on (store/walkStep.ts standing: less than a gibson below). */
+const STAND_REACH = 1 + 1e-9
 
 /**
- * What the walk will have queued once everything in hand closes: the
- * segments not yet proven, the open one, and a fall's mid-air hops and its
- * landing. The speed eases and holds by this (syncSpeedFactor), so neither a
- * settle nor a landing can carry the queue to the LOSING SYNC warning.
+ * The drawn walker's feet (groundFluid). `h` is their height along up, in
+ * gibsons from the anchor's middle, kept where it is in the world when the
+ * anchor moves; null while fluid WALK is not running.
  */
-export function fluidPending(): number {
-  const w = useWalk.getState()
-  const f = fallState()
-  return w.behind + (w.open ? 1 : 0) + (f ? f.waypoints.length + 1 : 0)
+const foot = {
+  h: null as number | null,
+  anchor: null as Position | null,
+  scaleExp: 0,
+  down: '',
+  last: null as number | null,
+  /** A fall was being drawn at the last frame. */
+  falling: false,
+  /** How far under the fall's own point the feet were when it began: kept through the arc, so a jump leaves from the feet. */
+  lift: 0,
+  /** What the feet added to the drawn height at the last frame, gibsons along `upAxis` and `upDir`. */
+  extra: 0,
+  upAxis: 'y' as AxisName,
+  upDir: 1 as 1 | -1,
+  /** The walls near the walker, listed every FOOT_ITEMS_MS or on a new gibson. */
+  items: [] as WallItem[],
+  itemsKey: '',
+  itemsAt: -Infinity,
+  /** The surface under the anchor's own middle, kept for this gibson and these walls. */
+  under: null as number | null,
+  underKey: '',
+  /** The surface under the drawn point, kept for this gibson, these walls and this point (groundAt). */
+  col: null as number | null,
+  colKey: '',
+  pending: { pending: false },
 }
+
+function resetFoot(): void {
+  foot.h = null
+  foot.anchor = null
+  foot.last = null
+  foot.falling = false
+  foot.lift = 0
+  foot.extra = 0
+  foot.items = []
+  foot.itemsKey = ''
+  foot.itemsAt = -Infinity
+  foot.underKey = ''
+  foot.colKey = ''
+}
+
+/** The drawn feet's height along up, gibsons from the anchor's middle, or null while fluid WALK is not running: for tests and the DEV handle. */
+export function footHeight(): number | null {
+  return foot.h
+}
+
+/**
+ * The ground's frame, after the fall's (scene/Scene.tsx Rig: tickFluid,
+ * tickFall, then this): the drawn walker stands on the surface under it
+ * (arkinox, 2026-11-17: "my avatar doesn't seem to stand on the geometry, it
+ * stands on the nearest gibson"; "sometimes for a frame i'll dip under the
+ * floor"). Display only: the anchor, the chain and every step are whole
+ * gibsons as before, and walls and floors are still measured from the
+ * walker's point at the middle of its gibson (DECK-0003 §1.12, §1.17).
+ *
+ * | Case | The drawn height |
+ * |---|---|
+ * | standing (a face less than a gibson under the anchor's middle) | the surface under the drawn point (store/walkWalls.ts groundUnder), followed exactly up a slope and down one; a riser it passes over is stood on at once, and the camera follows it up over GLIDE_TAU_S (lib/walkEye.ts walkRise); a drop is eased down at FOOT_DROP_SPEED at least |
+ * | gravity off, rising off the floor | from the surface to the anchor's own height by the time the walker is half a step up, where it leaves the gibson, so the hand-over is seamless |
+ * | in the air (a jump, a fall) | the fall's own arc, from where the feet were when it began, easing onto the arc's point (GLIDE_TAU_S) |
+ * | a shard in reach still being built | where the feet were, until it is |
+ * | not standing (gravity off, floating) | the anchor plus the glide, as before |
+ * | always | never under the surface under the drawn point |
+ *
+ * It adds to walkGlide along up only, so the rig draws it with no change.
+ * Leaving fluid WALK, what it added glides off with the rest (GLIDE_TAU_S).
+ */
+export function groundFluid(now: number = performance.now()): void {
+  const dt = foot.last === null ? 0 : Math.min(MAX_DT, Math.max(0, (now - foot.last) / 1000))
+  foot.last = now
+  const cs = useCyberspace.getState()
+  if (!walkGlide.exact || !fluidWalking()) {
+    // The step WALK (the switch off): the walker drawn with its origin on
+    // the surface under its gibson's centre, else on its gibson's floor, as
+    // every avatar out of WALK is (restDrop); the rig eases onto it as it
+    // eases onto a step.
+    const sg = cs.walking && useWalk.getState().gravity ? walkDown() : WORLD_DOWN
+    const su = upOf(sg)
+    const stepDrop = cs.walking ? stepWalkDrop(cs.cursor, cs.plane, cs.scaleExp, sg, now) : 0
+    // Just left fluid WALK: the eye glides off the feet's height (and onto the step WALK's), as off the smooth position.
+    if (foot.h !== null && cs.scaleExp === foot.scaleExp) {
+      const stepG = 2 ** cs.scaleExp
+      st.glide[foot.upAxis] += (foot.extra * foot.upDir) / stepG
+      walkGlide[foot.upAxis] += (foot.extra * foot.upDir) / stepG
+      st.glide[su.axis] += (stepDrop * su.dir) / stepG
+      walkGlide[su.axis] += (stepDrop * su.dir) / stepG
+      walkGlide.active = true
+    }
+    resetFoot()
+    if (stepDrop !== 0) {
+      walkGlide[su.axis] -= (stepDrop * su.dir) / 2 ** cs.scaleExp
+      walkGlide.active = true
+    }
+    // A stair's trail fades as it would have, so leaving WALK just after a riser never pops the camera.
+    walkRise.offset = walkRise.offset > -1e-4 ? 0 : walkRise.offset * Math.exp(-dt / GLIDE_TAU_S)
+    return
+  }
+  const gravity = useWalk.getState().gravity
+  const g = gravity ? walkDown() : WORLD_DOWN
+  const up = upOf(g)
+  const ui = up.axis
+  const stepG = 2 ** cs.scaleExp
+  const downKey = `${g.axis}${g.dir}`
+  const fall = fallState()
+  const falling = fall !== null && walkFall.active
+  // The height the rig would draw without the feet, gibsons along up from the anchor's middle.
+  const fallH = falling && walkFallUp.axis === ui ? walkFall.offset * walkFallUp.dir * up.dir : 0
+  const base = fallH + walkGlide[ui] * up.dir * stepG
+  // A first frame (fluid WALK just began, or the anchor jumped too far to
+  // follow): the feet go straight onto the ground, as they stood out of it.
+  let fresh = false
+  if (foot.h !== null && foot.anchor && foot.scaleExp === cs.scaleExp && foot.down === downKey) {
+    // The anchor moved: the feet stay where they are in the world.
+    foot.h -= Number(heightOf(cs.cursor, g) - heightOf(foot.anchor, g))
+    if (!(Math.abs(foot.h - base) < GLIDE_MAX * stepG)) { foot.h = base; fresh = true }
+  } else {
+    fresh = true
+    foot.h = base
+    foot.falling = falling
+    foot.lift = 0
+    walkRise.offset = 0
+  }
+  foot.anchor = { ...cs.cursor }
+  foot.scaleExp = cs.scaleExp
+  foot.down = downKey
+  const items = fall ? fall.items : itemsNear(cs.plane, cs.cursor, now)
+  const lead: [number, number, number] = [walkGlide.x * stepG, walkGlide.y * stepG, walkGlide.z * stepG]
+  const rise = Number(STEP_UP_MAX) * stepG
+  const drop = Number(STEP_DOWN_MAX + 1n) * stepG
+  const was = foot.h
+  let h = was
+  const decayK = Math.exp(-dt / GLIDE_TAU_S)
+  if (!falling) {
+    lead[AXIS_INDEX[ui]] = 0
+    foot.pending.pending = false
+    const under = underAnchor(cs.cursor, items, g, rise, drop, downKey)
+    const col = groundAt(cs.cursor, lead, items, g, rise, drop, downKey)
+    // A shard in reach still being built: the feet stay where they are until it is.
+    if (!foot.pending.pending) {
+      const standing = under !== null && under > -STAND_REACH
+      // Not standing on anything: on the floor of the gibson it is drawn in.
+      let target = base - REST_FLOOR * stepG
+      if (standing) {
+        // Past a rim with nothing near under the drawn point: still on the rim the anchor stands on.
+        const s = col === null || col < under - stepG ? under : col
+        // Gravity off, pushing up off the floor: up to the next gibson's floor by half a step up, where it leaves this one.
+        const r = gravity ? 0 : Math.max(0, st.frac[ui] * up.dir * stepG)
+        const off = r - REST_FLOOR * stepG
+        target = r > 0 ? s + (off - s) * Math.min(1, (2 * r) / stepG) : s
+      }
+      if (fresh) h = target
+      else if (h < target) h = standing ? target : h + (target - h) * (1 - decayK)
+      else if (h > target) h = Math.max(target, Math.min(h - FOOT_DROP_SPEED * stepG * dt, target + (h - target) * decayK))
+      if (col !== null && h < col) h = col
+    }
+    foot.falling = false
+  } else {
+    // A jump leaves from the feet, and the arc takes them over: how far
+    // under the arc's point they were when it began fades (GLIDE_TAU_S), so
+    // they land where the arc lands, on its whole gibson's standing height.
+    // In the air the origin rides the arc on the floor of the gibson it is drawn in.
+    const air = base - REST_FLOOR * stepG
+    if (fresh) foot.lift = 0
+    else if (!foot.falling) foot.lift = h - air
+    else foot.lift *= decayK
+    foot.falling = true
+    h = air + foot.lift
+    // The ground under the arc, searched from the arc's own point (never
+    // from the gibson the fall left, which can be far above or below it), in open air: the drawn origin, half a gibson under it, may be inside a slope.
+    const from = Math.max(h, base)
+    lead[AXIS_INDEX[ui]] = from * up.dir
+    const col = groundUnder(cs.cursor, lead, items, g, rise, drop)
+    if (col !== null && h < col) h = col
+  }
+  // A riser stood on at once (faster than any slope is walked): the feet
+  // are on it, and the camera follows them up over GLIDE_TAU_S (walkRise).
+  const jump = h - was - FOOT_DROP_SPEED * stepG * dt
+  walkRise.offset = walkRise.offset * decayK - (!falling && !fresh && jump > 0 ? jump : 0)
+  if (walkRise.offset > -1e-4 * stepG) walkRise.offset = 0
+  walkRise.up.axis = ui
+  walkRise.up.dir = up.dir
+  foot.h = h
+  foot.extra = h - base
+  foot.upAxis = ui
+  foot.upDir = up.dir
+  if (foot.extra !== 0) {
+    walkGlide[ui] += (foot.extra * up.dir) / stepG
+    walkGlide.active = true
+  }
+}
+
+/** The step WALK's drop under the cursor (restDrop, along its gravity), in gibsons: kept for this gibson, asked again every FOOT_ITEMS_MS (walls arriving). */
+let stepKept = { key: '', at: -Infinity, drop: REST_FLOOR }
+function stepWalkDrop(at: Position, plane: number, scaleExp: number, g: AxisDirection, now: number): number {
+  // Zoomed out past a gibson: the cell's floor, as everywhere (scene/useRestDrop.ts).
+  if (scaleExp !== 0) return REST_FLOOR * 2 ** scaleExp
+  const k = `${plane}|${at.x},${at.y},${at.z}|${g.axis}${g.dir}`
+  if (k === stepKept.key && now - stepKept.at <= FOOT_ITEMS_MS) return stepKept.drop
+  const r = restDrop(at, plane, g)
+  stepKept = { key: k, at: now, drop: r.drop }
+  return r.drop
+}
+
+/** The ground under the drawn point (groundUnder), kept while the anchor, the walls and the drawn point (to GROUND_QUANT gibsons) stay put. */
+function groundAt(at: Position, lead: readonly [number, number, number], items: readonly WallItem[], g: AxisDirection, rise: number, drop: number, downKey: string): number | null {
+  const q = (v: number): number => Math.round(v / GROUND_QUANT)
+  const k = `${foot.itemsKey}|${at.x},${at.y},${at.z}|${downKey}|${rise}|${q(lead[0])},${q(lead[1])},${q(lead[2])}`
+  if (k === foot.colKey) return foot.col
+  const out = { pending: false }
+  foot.col = groundUnder(at, lead, items, g, rise, drop, out)
+  if (out.pending) foot.pending.pending = true
+  foot.colKey = out.pending ? '' : k
+  return foot.col
+}
+
+/** How finely groundAt's key tells one drawn point from another, in gibsons: far under a pixel. */
+const GROUND_QUANT = 1 / 4096
+
+const AXIS_INDEX: Record<AxisName, 0 | 1 | 2> = { x: 0, y: 1, z: 2 }
+
+/** The walls near the walker at `at`, listed again every FOOT_ITEMS_MS or on a new gibson. */
+function itemsNear(plane: number, at: Position, now: number): WallItem[] {
+  const k = `${plane}|${at.x},${at.y},${at.z}`
+  if (k !== foot.itemsKey || now - foot.itemsAt > FOOT_ITEMS_MS) {
+    foot.items = wallItemsAt(plane, at)
+    foot.itemsKey = k
+    foot.itemsAt = now
+    foot.underKey = ''
+    foot.colKey = ''
+  }
+  return foot.items
+}
+
+/** The surface under the anchor's own middle (groundUnder), kept until the anchor, its gravity or its walls change; never kept while a wall is on its way. */
+function underAnchor(at: Position, items: readonly WallItem[], g: AxisDirection, rise: number, drop: number, downKey: string): number | null {
+  const k = `${foot.itemsKey}|${at.x},${at.y},${at.z}|${downKey}|${rise}`
+  if (k === foot.underKey) return foot.under
+  foot.under = groundUnder(at, [0, 0, 0], items, g, rise, drop, foot.pending)
+  foot.underKey = foot.pending.pending ? '' : k
+  return foot.under
+}
+
+/** The axes across each gravity axis, and so the ones a diagonal may use: kept, so a frame allocates no list. */
+const LEVEL: Record<AxisName, readonly AxisName[]> = { x: ['y', 'z'], y: ['x', 'z'], z: ['x', 'y'] }
 
 /** One step of the walk's motion, `dt` seconds: the speed, the smooth position, what holds it, and the crossings due. */
 function substep(dt: number, now: number, wish: Vec, gravity: boolean, g: AxisDirection, level: readonly AxisName[], length: bigint): void {
   const falling = fallState() !== null
-  const factor = syncSpeedFactor(fluidPending())
-  const max = FLUID_MAX_SPEED * Math.max(factor, 0.25)
+  // Events ahead of the chain (store/walkAhead.ts): the speed eases from
+  // FLUID_EASE_FROM and stops at FLUID_HOLD_AT, so neither a settle nor a
+  // landing can carry the queue past it.
+  const factor = syncSpeedFactor(eventsAhead())
+  const max = FLUID_MAX_SPEED * factor
   if (falling) accelerate(st.v, wish, max, FLUID_AIR_ACCEL, FLUID_AIR_DECEL, dt)
   else accelerate(st.v, wish, max, FLUID_ACCEL, FLUID_DECEL, dt)
   if (gravity) st.v[g.axis] = 0
@@ -302,7 +559,7 @@ function substep(dt: number, now: number, wish: Vec, gravity: boolean, g: AxisDi
     const due = dueCrossing(st.frac, st.v, level)
     if (!due) break
     const { main, side } = due
-    // Two under the LOSING SYNC warning: no new gibson until the chain catches up.
+    // Stopped (FLUID_HOLD_AT events ahead): no new gibson until the chain catches up.
     if (factor === 0) { holdEdges(); break }
     const known = st.held.get(key(main.axis, main.dir))
     if (known && now - known.at < recheck) { holdAt(main, known.limit, known.at, known.edge); continue }

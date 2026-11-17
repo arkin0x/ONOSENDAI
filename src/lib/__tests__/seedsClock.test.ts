@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { CLOCK_DEPTH, clockHeight } from 'sno-core/seeds'
 import anchor975256 from './vectors/nth-anchor-975256.json'
 import { blobChainTimes, fetchAnchorHeaders, headerOfAnchor, HeaderBook, NTH_PUBKEY, B_PER_QUERY } from '../seeds/headerBook'
-import { clockAtAnchor, predictedHeights, settlePlanted } from '../seeds/seedClock'
+import { bisectionPath, clockAtAnchor, predictedHeights, settlePlanted } from '../seeds/seedClock'
 import { reverse32, sha256d, writeRecord, wireHeader, HEADER_RECORD_SIZE } from '../hyperspace/headers'
 import { bytesToHex, type NostrEvent } from '../events'
 import { clampTimes, vectors } from './seedsFixture'
@@ -120,9 +120,9 @@ describe('fetching headers by authors and #B', () => {
     })
     const heights = Array.from({ length: 150 }, (_, i) => 975200 + i)
     await fetchAnchorHeaders(book, heights, query)
-    // Two chunks, and the heights of the first that did not come back asked once more on their own.
+    // Two chunks (asked together), and the heights of the first that did not come back asked once more on their own.
     expect(query).toHaveBeenCalledTimes(Math.ceil(150 / B_PER_QUERY) + 1)
-    expect(query.mock.calls[1][0]['#B']).toHaveLength(B_PER_QUERY - 1)
+    expect(query.mock.calls.map((c) => c[0]['#B'].length)).toContain(B_PER_QUERY - 1)
     expect(book.has(975256)).toBe(true)
     expect(book.isAbsent(975255)).toBe(true)
     // Asked again: nothing it holds or knows to be absent goes out.
@@ -230,7 +230,30 @@ describe('the planted height, clamped with injected headers (§4.2)', () => {
   it('the prediction covers the median window at the clock and the blocks around the planted height', () => {
     const p = predictedHeights(975300, 975800)
     for (let h = 975790; h <= 975800; h++) expect(p).toContain(h)
-    for (let h = 975270; h <= 975330; h++) expect(p).toContain(h)
-    expect(p.length).toBeLessThan(300)
+    for (let h = 975260; h <= 975340; h++) expect(p).toContain(h)
+    // The bisection's windows too, and still a handful of queries.
+    for (const x of bisectionPath(975288, 975800)) for (let h = x - 10; h <= x; h++) expect(p).toContain(h)
+    expect(p.length).toBeLessThan(450)
+  })
+
+  describe('an older seed, blocks faster than ten minutes', () => {
+    // Nine minutes a block on average, unevenly: where created_at lies drifts from the ten-minute guess.
+    const fast = new Map<number, number>()
+    for (let h = 970000; h <= 974000; h++) fast.set(h, 1_790_000_000 + (h - 970000) * 540 + ((h * 7919) % 400) - 200)
+    const clock = 974000
+    for (const back of [150, 450, 1000, 2000]) {
+      it(`${back} blocks back: settled in at most three fetches, as with every header`, async () => {
+        const createdAt = fast.get(clock - back)! + 100
+        const full = new HeaderBook()
+        full.addTimes(970000, [...fast.values()])
+        const whole = await settlePlanted(clock - back, createdAt, clock, full, async () => {})
+        expect(whole.state).toBe('settled')
+        const book = new HeaderBook()
+        let fetches = 0
+        const got = await settlePlanted(clock - back, createdAt, clock, book, async (heights) => { fetches++; fetcher(book, fast)(heights) })
+        expect(got).toEqual(whole)
+        expect(fetches).toBeLessThanOrEqual(3)
+      })
+    }
   })
 })

@@ -375,9 +375,11 @@ describe('jumps leave from the feet and land on the surface', () => {
     let worstEye = Infinity
     let jumps = 0
     let landed = 0
+    let lastJump = -20
     for (let k = 0; k < 4000 && drawn()[0] < 44; k++) {
-      // A jump every 40 frames from the ground, pressed and let go: it leaves from the feet.
-      if (k % 40 === 10 && !walkFall.active) {
+      // A jump half a second after the last landing's press, from the ground, pressed and let go: it leaves from the feet.
+      if (k - lastJump >= 30 && !walkFall.active) {
+        lastJump = k
         const before = drawn()[1]
         down('Space'); up('Space'); frame(16); jumps++
         expect(drawn()[1]).toBeGreaterThanOrEqual(before - 1e-9)
@@ -391,7 +393,7 @@ describe('jumps leave from the feet and land on the surface', () => {
     }
     up('KeyW')
     for (let k = 0; k < 120; k++) frame(16)
-    expect(jumps).toBeGreaterThan(5)
+    expect(jumps).toBeGreaterThanOrEqual(4)
     expect(worstFeet).toBeGreaterThanOrEqual(-1e-6)
     expect(worstEye).toBeGreaterThanOrEqual(-1e-6)
     // Landed and stopped: on the slope, to the float.

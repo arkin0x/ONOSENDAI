@@ -25,7 +25,8 @@
  *
  * A new move's tick lights white and tall, then settles. A move landing on
  * your chain folds the end tick away while the CHAIN total glints white.
- * Moves dropped together (a wall, STOP) fade together.
+ * Moves dropped together (a wall, STOP) go out together, with no fold: they
+ * did not land.
  *
  * Nothing here is drawn on a chain that is not yours to walk right now:
  * spectating, history, or out of WALK. The marks are absolutely positioned
@@ -89,29 +90,31 @@ export interface AheadTrack {
   rose: boolean
   /** Ticks above `n` up to this one went by landing on the chain, one at a time: each folds away. 0 for none. */
   goneTop: number
-  /** A move landed (the total grew) and the count has not come down for it yet. */
-  owed: boolean
-  /** How many moves have landed while ahead: each new one glints the total. */
+  /** How many moves have landed in this stretch of being ahead: each new one glints the total. 0 from the first move after catching up. */
   landed: number
 }
 
-export const AHEAD_TRACK_START: AheadTrack = { n: 0, total: 0, rose: false, goneTop: 0, owed: false, landed: 0 }
+export const AHEAD_TRACK_START: AheadTrack = { n: 0, total: 0, rose: false, goneTop: 0, landed: 0 }
 
 /**
  * The track after the count and the chain's length are now `n` and `total`.
- * A tick folds away only for a move that landed: the count came down by one
- * as the total grew. A count that falls any other way (a step undone, a wall,
- * STOP) fades its ticks.
+ *
+ * A move landing grows the chain and brings the count down in one store
+ * change (store/useWalk.ts pump runs inside the change that lands it), so
+ * the two are seen together: that, and only that, folds a tick away. A
+ * count that falls any other way (a step undone, a wall, STOP) just goes
+ * out. The total glints for every landing while ahead, and the first move
+ * after catching up starts the count of them again, so a move made never
+ * glints.
  */
 export function aheadStep(was: AheadTrack, n: number, total: number): AheadTrack {
   if (was.n === n && was.total === total) return was
   const grew = total > was.total && was.n > 0
-  const landing = grew || was.owed
-  const landed = was.landed + (grew ? 1 : 0)
-  if (n > was.n) return { n, total, rose: true, goneTop: 0, owed: false, landed }
-  if (n === was.n) return { ...was, total, owed: landing, landed }
-  const folds = n === was.n - 1 && landing
-  return { n, total, rose: false, goneTop: folds ? Math.max(was.goneTop, was.n) : 0, owed: false, landed }
+  const landed = was.n === 0 ? 0 : was.landed + (grew ? 1 : 0)
+  if (n > was.n) return { n, total, rose: true, goneTop: 0, landed }
+  if (n === was.n) return { ...was, total, landed }
+  const folds = n === was.n - 1 && grew
+  return { n, total, rose: false, goneTop: folds ? Math.max(was.goneTop, was.n) : 0, landed }
 }
 
 /** Tick `i` (1 to AHEAD_TICKS) of the bar: its classes. */
@@ -158,8 +161,10 @@ export function useChainAhead(own: boolean, total: number): ChainAhead {
   // Derived from the last render's count, the sanctioned way: set during
   // render, so the classes that play a change stay put through renders
   // that are not about the count.
+  // A chain that is not yours to walk (a spectated one, history) is not
+  // followed: its length is no landing of yours.
   const [track, setTrack] = useState<AheadTrack>(() => ({ ...AHEAD_TRACK_START, n: bar.n, total }))
-  const now = aheadStep(track, bar.n, total)
+  const now = own ? aheadStep(track, bar.n, total) : aheadStep(track, 0, track.total)
   if (now !== track) setTrack(now)
 
   // On the page while ahead, and for the fade after catching up.

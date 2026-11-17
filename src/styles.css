@@ -5965,6 +5965,8 @@ select.avatars__input option:checked {
   /* 2px between ticks on a chip as wide as CHAIN 1253/1253 and wider; in
      proportion on a short chain's narrower chip, so the ticks stay ticks. */
   gap: min(2px, 2%);
+  /* Its own width decides how the hollow slots are drawn (below). */
+  container: aheadbar / inline-size;
   pointer-events: none;
   opacity: 0;
   /* Out: it waits most of a second first, so it does not blink while the
@@ -5991,6 +5993,12 @@ select.avatars__input option:checked {
   box-shadow: inset 0 0 0 1px rgba(255, 176, 32, 0.5);
 }
 .aheadbar i.is-z1 { margin-left: min(3px, 3%); }
+/* A short chain's chip is narrow, and its ticks too thin for an outline to
+   leave a hollow: there the slot is its top and bottom lines only, so it
+   still reads as empty at any width. */
+@container aheadbar (max-width: 96px) {
+  .aheadbar i.is-z { box-shadow: inset 0 1px 0 rgba(255, 176, 32, 0.5), inset 0 -1px 0 rgba(255, 176, 32, 0.5); }
+}
 .aheadbar i.is-lit {
   background: linear-gradient(#a6f7ff, #00e5ff);
   box-shadow: 0 0 4px rgba(0, 229, 255, 0.85);
@@ -6068,7 +6076,7 @@ select.avatars__input option:checked {
 /* On the amber face (actions dropped, chain replaced) the ticks are drawn in
    the dark background colour, at the limit too: red on amber would not read. */
 .explorer__toggle.explorer__toggle--dropped .aheadbar i { background: rgba(5, 7, 13, 0.2); box-shadow: none; }
-.explorer__toggle.explorer__toggle--dropped .aheadbar i.is-z { background: transparent; box-shadow: inset 0 0 0 1px rgba(5, 7, 13, 0.6); }
+.explorer__toggle.explorer__toggle--dropped .aheadbar i.is-z { background: transparent; box-shadow: inset 0 1px 0 rgba(5, 7, 13, 0.6), inset 0 -1px 0 rgba(5, 7, 13, 0.6); }
 .explorer__toggle.explorer__toggle--dropped .aheadbar i.is-lit { background: var(--bg); box-shadow: none; }
 /* Reduced motion: no breathing, no glint, no tick or bracket movement. The
    colours, the hollow slots and the brackets still say everything. */

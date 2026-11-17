@@ -18,10 +18,12 @@
  *
  * Usage: PLAYWRIGHT_BROWSERS_PATH=<browsers> \
  *   node scripts/chain-ahead-probe.mjs http://localhost:5199/ <out dir>
- * Env: DPR=<n> for the phone screenshots' pixel ratio (2). WALK=1 instead
- * records a real walk to <out>/walk.webm: KEYS held in turn (w,a,w,d) for
- * HOLD ms each with GAP ms between, STEPS turns at most, and LAG=<ms> to
- * slow the proofs as a slower device does, so the walk gets ahead.
+ * Env: DPR=<n> for the phone screenshots' pixel ratio (2), PAD=<n> for the
+ * long chain's length (12345). WALK=1 instead records a real walk to
+ * <out>/walk.webm: KEYS held in turn (w,a,w,d) for HOLD ms each with GAP ms
+ * between, STEPS turns at most, LAG=<ms> to slow the proofs as a slower
+ * device does, so the walk gets ahead, CHAIN=<n> to walk a chain that long
+ * first, and DPR=<n> for the video's pixel ratio (1).
  * Exits 1 when a check fails.
  */
 import { chromium } from 'playwright'
@@ -45,10 +47,11 @@ const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP * ~NOT
  * A page of the app in LOCAL with the network refused, standing in WALK on
  * a short chain of its own (a spawn and a step). `pad` shows the chip as a
  * chain of that many actions would, for the bar at a long chain's width.
- * `lag` holds every message to a proof worker back that many ms, as a
- * slower device's proofs are, so a walk can get ahead of them.
+ * `lag` lets the page hold every message to a proof worker back by
+ * window.__proofLag ms (0 until set), as a slower device's proofs are, so a
+ * walk can get ahead of them.
  */
-async function open(options, pad = 0, lag = 0) {
+async function open(options, pad = 0, lag = false) {
   const ctx = await browser.newContext(options)
   await ctx.route((u) => !/^https?:\/\/(localhost|127\.0\.0\.1)/.test(u.toString()), (r) => r.abort())
   const sent = []
@@ -71,10 +74,16 @@ async function open(options, pad = 0, lag = 0) {
       localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns }))
     } catch {}
   }, [getPublicKey(sk), nip19.nsecEncode(sk)])
-  if (lag) await page.addInitScript((ms) => {
+  const born = Date.now()
+  if (lag) await page.addInitScript(() => {
+    window.__proofLag = 0
     const post = Worker.prototype.postMessage
-    Worker.prototype.postMessage = function (...args) { setTimeout(() => post.apply(this, args), ms) }
-  }, lag)
+    Worker.prototype.postMessage = function (...args) {
+      const ms = window.__proofLag
+      if (ms) setTimeout(() => post.apply(this, args), ms)
+      else post.apply(this, args)
+    }
+  })
   page.on('pageerror', (e) => { if (!/Failed to fetch/.test(e.message)) console.log(`PAGEERROR: ${e.message}`) })
   await page.goto(url, { waitUntil: 'load' })
   await page.waitForTimeout(6000)
@@ -84,15 +93,21 @@ async function open(options, pad = 0, lag = 0) {
   await page.waitForTimeout(1500)
   if (!(await page.evaluate(() => window.__store.getState().walking))) { console.log('ABORT: not in WALK'); await browser.close(); process.exit(2) }
   // The chip needs a chain: one step makes the spawn and a hop. Then stand until they have landed.
-  // Held, not tapped: a press shorter than one of the software renderer's frames is never seen.
-  await page.keyboard.down('w')
-  await page.waitForTimeout(500)
-  await page.keyboard.up('w')
   const standing = () => page.evaluate(() => {
     const w = window.__walk.getState(), s = window.__store.getState()
     return { ready: s.events.length >= 2 && w.behind === 0 && w.open === null && w.running === null && !w.falling, events: s.events.length, behind: w.behind, open: w.open !== null, running: w.running !== null, falling: w.falling, walking: s.walking, message: s.proof.message }
   })
   let at = await standing()
+  // Held, not tapped (a press shorter than one of the software renderer's
+  // frames is never seen), and again until the walk has taken it: a page
+  // still settling in can miss the first.
+  for (let tries = 0; tries < 30 && at.events === 0 && at.behind === 0 && !at.open && !at.running; tries++) {
+    await page.keyboard.down('w')
+    await page.waitForTimeout(500)
+    await page.keyboard.up('w')
+    await page.waitForTimeout(1500)
+    at = await standing()
+  }
   for (let i = 0; i < 720 && !at.ready; i++) { await page.waitForTimeout(250); at = await standing() }
   if (!at.ready) { console.log(`ABORT: the first step never landed: ${JSON.stringify(at)}`); await browser.close(); process.exit(2) }
   if (pad) await page.evaluate((n) => {
@@ -101,7 +116,7 @@ async function open(options, pad = 0, lag = 0) {
     window.__store.setState({ focusChain: () => chain, events: [...s.events] })
   }, pad)
   await page.waitForTimeout(500)
-  return { ctx, page, sent }
+  return { ctx, page, sent, born }
 }
 
 /**
@@ -142,7 +157,8 @@ const read = (page) => page.evaluate(() => {
     barOpacity: bar ? Number(getComputedStyle(bar).opacity) : 0,
     barAnimation: bar ? getComputedStyle(bar).animationName : '',
     barBox: bar ? box(bar) : '',
-    tickWidth: ticks.length ? ticks[0].offsetWidth : 0,
+    tickWidth: ticks.length ? Math.round(parseFloat(getComputedStyle(ticks[0]).width) * 100) / 100 : 0,
+    slot: ticks.length ? getComputedStyle(ticks[ticks.length - 1]).boxShadow : '',
     ticks: ticks.length,
     lit: ticks.filter((t) => t.classList.contains('is-lit')).length,
     hollow: ticks.filter((t) => t.classList.contains('is-z') && !t.classList.contains('is-lit')).length,
@@ -155,8 +171,35 @@ const read = (page) => page.evaluate(() => {
   }
 })
 
+/**
+ * One real step, and its landing as the chip shows it: whether the end tick
+ * folded, and the animation on the words (the glint) when the total grew.
+ * The classes stay until the next move, so a poll cannot miss them.
+ */
+async function landing(page) {
+  await page.evaluate(() => window.__walk.setState({ behind: 0 }))
+  await page.waitForTimeout(2200)
+  const before = await page.evaluate(() => window.__store.getState().events.length)
+  for (let tries = 0; tries < 10; tries++) {
+    await page.keyboard.down('w')
+    await page.waitForTimeout(500)
+    await page.keyboard.up('w')
+    await page.waitForTimeout(300)
+    if (await page.evaluate((n) => { const w = window.__walk.getState(); return w.open !== null || w.behind > 0 || w.running !== null || window.__store.getState().events.length > n }, before)) break
+  }
+  for (let i = 0; i < 1200; i++) {
+    const s = await page.evaluate(() => {
+      const words = document.querySelector('.aheadtxt.is-glint')
+      return { total: window.__store.getState().events.length, glint: words ? getComputedStyle(words).animationName : '', folded: !!document.querySelector('.aheadbar i.is-going'), lit: document.querySelectorAll('.aheadbar i.is-lit').length }
+    })
+    if (s.total > before && s.glint) return s
+    await page.waitForTimeout(50)
+  }
+  return { total: before, glint: '', folded: false, lit: -1 }
+}
+
 async function layout(name, options, pad = 0) {
-  const { ctx, page } = await open(options, pad)
+  const { ctx, page, sent } = await open(options, pad)
   await ahead(page, 0, 3000)
   const base = await read(page)
   check(!base.drawn && /^chip explorer__toggle$/.test(base.cls.trim()), `${name}: nothing ahead, the chip is as it always was (${base.words}; ${base.cls.trim()}; ${base.chip})`)
@@ -182,7 +225,7 @@ async function layout(name, options, pad = 0) {
     check(/ahead-breathe/.test(s.barAnimation) === (n >= 20), `${name} at ${n}: ${n >= 20 ? 'breathing' : 'not breathing'}`)
     check((s.warn > 0) === (n >= 15) && (s.warn === 1) === (n >= 20), `${name} at ${n}: LOSING SYNC at ${Math.round(s.warn * 100)}%`)
     check(s.label.includes(`${n} move${n === 1 ? '' : 's'} ahead of your chain. The walk stops at 20.`), `${name} at ${n}: the label carries the count (${s.label})`)
-    check(s.tickWidth >= 1, `${name} at ${n}: ticks ${s.tickWidth}px wide in a ${s.barBox.split(' ')[2]}px bar`)
+    check(s.tickWidth >= 1.4, `${name} at ${n}: ticks ${s.tickWidth}px wide in a ${s.barBox.split(' ')[2]}px bar`)
     await clip(`${name}-${String(n).padStart(2, '0')}.png`)
     if (name !== 'desktop' && [5, 17, 20].includes(n)) await page.screenshot({ path: `${out}/${name}-full-${n}.png` })
   }
@@ -197,12 +240,21 @@ async function layout(name, options, pad = 0) {
   const later = await read(page)
   check(!later.drawn && later.cls.trim() === base.cls.trim() && later.label === base.label, `${name}: 2.1 s after catching up the bar is gone and the chip is as before`)
   check(later.chip === base.chip && later.stack.every((b, i) => b === base.stack[i]), `${name}: and nothing moved`)
+  // A real move landing: its tick folds away and the total glints, in the same moment.
+  if (!pad) {
+    const hit = await landing(page)
+    check(hit.folded && hit.glint === 'ahead-glint', `${name}: a real move landed, its tick folded and the total glinted (${JSON.stringify(hit)})`)
+    await page.waitForTimeout(2200)
+    const after = await read(page)
+    check(!after.drawn && after.chip.split(' ')[3] === base.chip.split(' ')[3] && after.chip.split(' ').slice(0, 2).join(' ') === base.chip.split(' ').slice(0, 2).join(' '), `${name}: and afterwards the bar is gone and the chip is where it was, as tall as it was (${after.chip})`)
+  }
   // Out of WALK nothing shows, however far ahead the store says.
   await page.evaluate(() => window.__walk.getState().exit())
   await page.evaluate(() => window.__walk.setState({ behind: 12 }))
   await page.waitForTimeout(2200)
   const off = await read(page)
   check(!off.drawn, `${name}: out of WALK there is no bar`)
+  check(sent.length === 0, `${name}: nothing was sent to a relay (${sent.length})`)
   await ctx.close()
 }
 
@@ -217,20 +269,25 @@ async function reduced() {
     check(s.lit === n && s.barOpacity === 1 && (s.brkOpacity === 1) === (n >= 15) && (s.border === 'rgb(255, 35, 35)') === (n >= 20), `reduced motion at ${n}: the state still shows (${s.lit} lit, brackets ${s.brkOpacity}, border ${s.border})`)
     check(s.chip === base.chip, `reduced motion at ${n}: the chip's box is unchanged`)
   }
-  // A move landing: no glint animation either.
-  const glint = await page.evaluate(() => { const t = document.querySelector('.aheadtxt'); return t ? getComputedStyle(t).animationName : 'missing' })
-  check(glint === 'none', `reduced motion: the words do not animate (${glint})`)
+  // A real move landing: the total still changes, with no glint animation.
+  const hit = await landing(page)
+  check(hit.glint === 'none', `reduced motion: a real move landed and the words did not animate (${JSON.stringify(hit)})`)
   await ctx.close()
 }
 
 /**
  * A real walk, recorded: turns made faster than the proofs land, to the stop
- * at 20 when the proofs are slow enough, then standing while they land.
- * Each turn closes a segment, and every segment is one event to prove.
+ * at 20 when the proofs are slow enough (LAG), then standing while they
+ * land. Each turn closes a segment, and every segment is one event to prove.
+ * With CHAIN it first walks, proofs at full speed, until the chain is that
+ * long, so the chip is as wide as a played-in chain's; the part worth
+ * keeping is printed as seconds into the video.
  */
 async function walk() {
   const size = { width: 375, height: 812 }
-  const { ctx, page, sent } = await open({ viewport: size, isMobile: true, hasTouch: true, recordVideo: { dir: out, size } }, 0, Number(process.env.LAG ?? 0))
+  const scale = Number(process.env.DPR ?? 1)
+  const lag = Number(process.env.LAG ?? 0)
+  const { ctx, page, sent, born } = await open({ viewport: size, deviceScaleFactor: scale, isMobile: true, hasTouch: true, recordVideo: { dir: out, size: { width: size.width * scale, height: size.height * scale } } }, 0, lag > 0)
   const keys = (process.env.KEYS ?? 'w,a,w,d').split(',')
   const steps = Number(process.env.STEPS ?? 160)
   const hold = Number(process.env.HOLD ?? 220)
@@ -253,20 +310,41 @@ async function walk() {
       warn: Number(getComputedStyle(document.querySelector('.syncwarn')).opacity),
     }
   })
-  const start = await state()
-  let top = 0
-  let moved = false
-  const log = []
-  for (let i = 0; i < steps; i++) {
+  const turn = async (i) => {
     const key = keys[i % keys.length]
     await page.keyboard.down(key)
     await page.waitForTimeout(hold)
     await page.keyboard.up(key)
     await page.waitForTimeout(gap)
-    const s = await state()
+    return state()
+  }
+  /** Stand until every move has landed and the bar has gone; `each` sees every poll. */
+  const stand = async (each = () => {}) => {
+    for (let i = 0; i < 1800; i++) {
+      const s = await state()
+      await each(s)
+      if (s.lit === 0 && s.behind === 0 && !s.open && !s.falling) break
+      await page.waitForTimeout(100)
+    }
+    await page.waitForTimeout(2600)
+  }
+  const place = (box) => { const [x, y, , h] = box.split(' '); return `${x} ${y} ${h}` }
+  // A played-in chain first, at the proofs' own speed.
+  const chain = Number(process.env.CHAIN ?? 0)
+  for (let i = 0; i < 900 && (await state()).total < chain; i++) await turn(i)
+  if (chain) await stand()
+  const from = (Date.now() - born) / 1000
+  if (lag) await page.evaluate((ms) => { window.__proofLag = ms }, lag)
+  const start = await state()
+  let top = 0
+  let moved = false
+  const log = []
+  for (let i = 0; i < steps; i++) {
+    const s = await turn(i)
     top = Math.max(top, s.lit)
     log.push(s.lit)
-    if (s.box.split(' ').slice(2).join(' ') !== start.box.split(' ').slice(2).join(' ')) moved = true
+    // Its left, top and height: the width follows the total's digits, as it always has.
+    if (place(s.box) !== place(start.box)) moved = true
     if (s.lit >= 3 && s.lit <= 9) await shot('1-filling')
     if (s.lit >= 15 && s.lit <= 19) await shot('2-amber')
     if (s.limit) { await page.waitForTimeout(1200); await shot('3-red-20'); await page.waitForTimeout(1500); break }
@@ -274,20 +352,18 @@ async function walk() {
   // Standing still: the proofs land, the ticks fold away and the total glints.
   let landings = 0
   let wasTotal = (await state()).total
-  for (let i = 0; i < 1200; i++) {
-    const s = await state()
+  await stand(async (s) => {
     if (s.total > wasTotal) { landings += s.total - wasTotal; wasTotal = s.total }
-    if (s.going > 0 && s.glint && s.lit > 0) await shot('4-landing')
-    if (s.lit === 0 && s.behind === 0 && !s.open && !s.falling) break
-    await page.waitForTimeout(100)
-  }
-  await page.waitForTimeout(2600)
+    if (s.going > 0 && s.glint && s.lit > 0 && s.lit < 15) await shot('4-landing')
+  })
+  const to = (Date.now() - born) / 1000
   const end = await state()
   await shot('5-caught-up')
   console.log(`walk: top ${top} ahead, ${start.total} to ${end.total} actions, ${landings} landed while standing, sent to the stand-in relay: ${JSON.stringify(sent)}`)
+  console.log(`walk video: the walk is from ${Math.max(0, from - 1).toFixed(1)} s to ${to.toFixed(1)} s`)
   console.log(`walk counts per turn: ${log.join(' ')}`)
   check(top >= 1, `walk: the bar filled (top ${top})`)
-  check(!moved && end.box === start.box, `walk: the chip kept its size throughout (${start.box} to ${end.box})`)
+  check(!moved && place(end.box) === place(start.box), `walk: the chip kept its place and height throughout (${start.box} to ${end.box})`)
   check(end.lit === 0 && !(await page.evaluate(() => !!document.querySelector('.aheadbar'))), 'walk: caught up, the bar is gone')
   check(sent.length === 0, `walk: nothing was sent to a relay (${sent.length})`)
   const video = page.video()
@@ -299,8 +375,8 @@ if (process.env.WALK) await walk()
 else {
   await layout('phone', { viewport: { width: 375, height: 812 }, deviceScaleFactor: dpr, isMobile: true, hasTouch: true })
   await layout('desktop', { viewport: { width: 1280, height: 720 } })
-  // The chip as wide as the design drew it: CHAIN 1253/1253.
-  await layout('phone-long', { viewport: { width: 375, height: 812 }, deviceScaleFactor: dpr, isMobile: true, hasTouch: true }, 1253)
+  // A long chain's chip, as wide as the design drew it.
+  await layout('phone-long', { viewport: { width: 375, height: 812 }, deviceScaleFactor: dpr, isMobile: true, hasTouch: true }, Number(process.env.PAD ?? 12345))
   await reduced()
 }
 await browser.close()

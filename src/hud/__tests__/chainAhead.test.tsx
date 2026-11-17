@@ -134,10 +134,19 @@ describe('what a change plays', () => {
     expect(aheadStep(b, 5, 102)).toMatchObject({ rose: true, goneTop: 0 })
   })
 
-  it('the total growing just before the count comes down is still a landing', () => {
+  it('a move landing as another is made glints the total and folds nothing: the count did not come down', () => {
     const a = aheadStep(at(6, 100), 6, 101)
-    expect(a).toMatchObject({ n: 6, owed: true, landed: 1, goneTop: 0 })
-    expect(aheadStep(a, 5, 101)).toMatchObject({ n: 5, goneTop: 6, owed: false, landed: 1 })
+    expect(a).toMatchObject({ n: 6, landed: 1, goneTop: 0 })
+    // And a count that then falls with no landing of its own (STOP) fades.
+    expect(aheadStep(a, 5, 101)).toMatchObject({ n: 5, goneTop: 0, landed: 1 })
+  })
+
+  it('starts each time ahead with no glint owed: the first move after catching up is not a landing', () => {
+    const caught = aheadStep(at(1, 100), 0, 101)
+    expect(caught).toMatchObject({ n: 0, goneTop: 1, landed: 1 })
+    expect(aheadStep(caught, 1, 101)).toMatchObject({ n: 1, rose: true, goneTop: 0, landed: 0 })
+    // Still ahead, the count of landings carries on, so each one glints anew.
+    expect(aheadStep(at(3, 100, { landed: 4 }), 4, 100).landed).toBe(4)
   })
 
   it('a count that falls without a landing fades: a step undone, a wall, STOP', () => {
@@ -173,6 +182,20 @@ const chainOf = (n: number): void => {
   // A new (empty) events array is what tells the chip its chain changed.
   useCyberspace.setState({ focusChain: () => chain as unknown as ReturnType<typeof realChain>, events: [] })
 }
+/**
+ * A move landing, as the walk's own listener does it (store/useWalk.ts
+ * pump): the count comes down inside the store change that grew the chain,
+ * so the chip sees both at once. Listening from before any chip is mounted,
+ * as the walk does.
+ */
+let landing: number | null = null
+useCyberspace.subscribe(() => {
+  if (landing === null) return
+  const behind = landing
+  landing = null
+  useWalk.setState({ behind })
+})
+const land = (total: number, behind: number): void => { landing = behind; chainOf(total) }
 const walkAt = (behind: number, walking = true): void => {
   useCyberspace.setState({ walking })
   useWalk.setState({ behind, open: null, queue: [], running: null })
@@ -183,6 +206,17 @@ afterEach(() => {
   useCyberspace.setState({ walking: false, focusChain: realChain, events: [], spectate: null, exploreIndex: null, forkNotice: null })
   useChainUi.setState({ explorerOpen: false })
 })
+
+const marked = (all: Host[]): boolean => all.some((h) => /ahead/.test(String(h.props.className ?? '')))
+/** Wait for the marks to leave the page; how long it took, in ms. No upper bound on a slow machine but the test's own. */
+async function gone(m: { all: () => Host[] }): Promise<number> {
+  const from = Date.now()
+  while (marked(m.all())) {
+    if (Date.now() - from > 8000) throw new Error('the bar never left the page')
+    await new Promise((r) => setTimeout(r, 20))
+  }
+  return Date.now() - from
+}
 
 const chipOf = (all: Host[]): Host => all.find((h) => h.type === 'button' && String(h.props.className).includes('explorer__toggle'))!
 const kids = (h: Host, cls: string): Host[] => h.children.filter((c): c is Host => typeof c !== 'string' && String(c.props.className ?? '').split(' ').includes(cls))
@@ -209,13 +243,13 @@ describe('the CHAIN chip in WALK', () => {
     const chip = chipOf(m.all())
     expect(chip.props.className).toBe('chip explorer__toggle')
     expect(chip.props['aria-label']).toBe('Show chain explorer')
-    expect(m.all().some((h) => /ahead/.test(String(h.props.className ?? '')))).toBe(false)
+    expect(marked(m.all())).toBe(false)
     expect(markup(m.all()[0])).toBe(PLAIN)
     // And again once it has shown and gone.
     walkAt(4); await settled()
     expect(markup(m.all()[0])).not.toBe(PLAIN)
     walkAt(0)
-    await new Promise((r) => setTimeout(r, AHEAD_LINGER_MS + 200))
+    await gone(m)
     expect(markup(m.all()[0])).toBe(PLAIN)
     await m.unmount()
   })
@@ -292,15 +326,36 @@ describe('the CHAIN chip in WALK', () => {
     const words = (): Host => kids(chipOf(m.all()), 'aheadtxt')[0]
     expect(String(words().props.className)).toBe('aheadtxt')
     const first = words()
-    chainOf(4); walkAt(1); await settled()
+    land(4, 1); await settled()
     expect(String(words().props.className)).toBe('aheadtxt is-glint')
     expect(m.says('CHAIN 4/4')).toBe(true)
     const second = words()
     expect(second).not.toBe(first)
     const bar = kids(chipOf(m.all()), 'aheadbar')[0].children as Host[]
     expect(has(String(bar[1].props.className), 'is-going')).toBe(true)
-    chainOf(5); walkAt(0); await settled()
+    land(5, 0); await settled()
     expect(words()).not.toBe(second)
+    expect(String(words().props.className)).toBe('aheadtxt is-glint')
+    await m.unmount()
+  })
+
+  it('does not glint for a move made: not on the first step, and not on the first step after catching up', async () => {
+    chainOf(3)
+    walkAt(0)
+    const m = await mount(<ChainExplorer />)
+    const words = (): string => String(kids(chipOf(m.all()), 'aheadtxt')[0].props.className)
+    walkAt(1); await settled()
+    expect(words()).toBe('aheadtxt')
+    // It lands, and the walk has caught up: the total glinted for that.
+    land(4, 0); await settled()
+    expect(words()).toBe('aheadtxt is-glint')
+    // A step while the bar is still fading out, and one after it has gone: neither is a landing.
+    walkAt(1); await settled()
+    expect(words()).toBe('aheadtxt')
+    land(5, 0)
+    await gone(m)
+    walkAt(1); await settled()
+    expect(words()).toBe('aheadtxt')
     await m.unmount()
   })
 
@@ -312,21 +367,29 @@ describe('the CHAIN chip in WALK', () => {
     const m = await mount(<ChainExplorer />)
     walkAt(0); await settled()
     // Caught up: the bar is still on the page, empty, on its way out.
-    let chip = chipOf(m.all())
+    const chip = chipOf(m.all())
     expect(String(chip.props.className)).toBe('chip explorer__toggle has-ahead')
     expect(kids(chip, 'aheadbar').length).toBe(1)
     expect(litOf(chip)).toBe(0)
     expect(chip.props['aria-label']).toBe('Show chain explorer')
-    // A step inside the wait keeps it: no blink while proofs keep pace.
-    await new Promise((r) => setTimeout(r, AHEAD_LINGER_MS - 500))
-    walkAt(1); await settled()
+    // It leaves no sooner than its time (a slow machine only makes it later).
+    expect(await gone(m)).toBeGreaterThanOrEqual(AHEAD_LINGER_MS - 200)
+    expect(chipOf(m.all()).props.className).toBe('chip explorer__toggle')
+    await m.unmount()
+  })
+
+  it('a step inside the wait starts the wait again: no blink while proofs keep pace', async () => {
+    chainOf(3)
+    walkAt(2)
+    const m = await mount(<ChainExplorer />)
     walkAt(0); await settled()
+    // Most of the way through the wait, one more step is made and proved.
     await new Promise((r) => setTimeout(r, 700))
-    expect(kids(chipOf(m.all()), 'aheadbar').length).toBe(1)
-    await new Promise((r) => setTimeout(r, AHEAD_LINGER_MS - 600))
-    chip = chipOf(m.all())
-    expect(chip.props.className).toBe('chip explorer__toggle')
-    expect(m.all().some((h) => /ahead/.test(String(h.props.className ?? '')))).toBe(false)
+    walkAt(1); await settled()
+    expect(litOf(chipOf(m.all()))).toBe(1)
+    walkAt(0); await settled()
+    // The full wait runs from this catch-up, not what was left of the first.
+    expect(await gone(m)).toBeGreaterThanOrEqual(AHEAD_LINGER_MS - 200)
     await m.unmount()
   })
 
@@ -334,7 +397,7 @@ describe('the CHAIN chip in WALK', () => {
     chainOf(3)
     walkAt(12, false)
     const m = await mount(<ChainExplorer />)
-    const none = (): boolean => !m.all().some((h) => /ahead/.test(String(h.props.className ?? '')))
+    const none = (): boolean => !marked(m.all())
     expect(none()).toBe(true)
     walkAt(12); await settled()
     expect(none()).toBe(false)
@@ -351,7 +414,7 @@ describe('the CHAIN chip in WALK', () => {
     useChainUi.setState({ explorerOpen: false })
     const theirs = await mount(<ChainExplorer />)
     walkAt(12); await settled()
-    expect(theirs.all().some((h) => /ahead/.test(String(h.props.className ?? '')))).toBe(false)
+    expect(marked(theirs.all())).toBe(false)
     expect(String(chipOf(theirs.all()).props['aria-label'])).not.toContain('ahead')
     await theirs.unmount()
   })
@@ -438,13 +501,16 @@ describe('the bar in the stylesheet', () => {
   })
 
   it('under reduced motion runs none of its animations and keeps its colours', () => {
-    const reduced = section.slice(section.lastIndexOf('@media (prefers-reduced-motion: reduce)'))
-    const animated = [...section.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{[^{}]*\banimation:[^{}]*\}/g)].map((m) => m[1].trim()).filter((s) => !s.includes('\n') && !s.startsWith('@'))
+    const bare = section.replace(/\/\*[\s\S]*?\*\//g, '')
+    const media = bare.slice(bare.lastIndexOf('@media (prefers-reduced-motion: reduce)'))
+    // Every rule in the section that sets an animation, by its selector.
+    const animated = [...bare.slice(0, bare.lastIndexOf('@media')).matchAll(/([^{}]+)\{[^{}]*\banimation:[^{}]*\}/g)].map((m) => m[1].trim())
     expect(animated.sort()).toEqual(['.aheadbar', '.aheadbar i.is-going', '.aheadbar i.is-ign', '.aheadtxt.is-glint', '.explorer__toggle.is-limit .aheadbar'].sort())
-    for (const sel of animated) expect([sel, reduced.includes(sel)]).toEqual([sel, true])
-    expect(reduced).toContain('animation: none;')
-    // Only the brackets' movement is taken away; nothing there hides a state.
-    expect(reduced.replace(/\s+/g, ' ')).toContain('.aheadbrk { transition: opacity 300ms ease; }')
-    expect(reduced).not.toMatch(/display|visibility|opacity: 0/)
+    // The reduced-motion rule that turns animation off names each of them, selector for selector.
+    const off = [...media.matchAll(/([^{}]+)\{\s*animation: none;\s*\}/g)].flatMap((m) => m[1].split(',').map((sel) => sel.trim()))
+    expect(off.sort()).toEqual([...animated].sort())
+    // Only the brackets' movement is taken away besides; nothing there hides a state.
+    expect(media.replace(/\s+/g, ' ')).toContain('.aheadbrk { transition: opacity 300ms ease; }')
+    expect(media).not.toMatch(/display|visibility|opacity: 0/)
   })
 })

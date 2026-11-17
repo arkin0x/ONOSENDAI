@@ -41,13 +41,14 @@ import { GRID_RADIUS, cellDelta, claimScreenAxes, itemCentre, levelScreenAxes, o
 import { upOf } from '../lib/walkDown'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
-import { setWalkFacing, walkBody, walkEye, walkFacing, walkFall, walkFallUp, walkGlide } from '../lib/walkEye'
-import { WalkEyeRig } from './walkEyeRig'
+import { setWalkFacing, walkBody, walkEye, walkFacing, walkFall, walkFallUp, walkGlide, walkRise } from '../lib/walkEye'
+import { EYE_ROOM, WalkEyeRig } from './walkEyeRig'
 import { useAvatars } from '../store/useAvatars'
 import { tryEyeFor } from '../store/tryEye'
 import { clearWalkLook, lookRadPerPx, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
 import { tickFall, useWalk, walkDown } from '../store/useWalk'
-import { tickFluid } from '../store/walkFluid'
+import { groundFluid, tickFluid } from '../store/walkFluid'
+import { STEP_UP_MAX } from '../store/walkStep'
 import { orbitOffset } from '../workshop/benchAxes'
 import { WalkProbe } from './WalkProbe'
 import { commitAnchor, commitScale, committedAnchor } from '../lib/renderFrame'
@@ -586,6 +587,8 @@ function LensShift(): null {
  * direction to turn about.
  */
 const WALK_EYE = 0.001
+/** The camera's trail below a stair's rise this frame (walkRise), render cells: added to the camera and its target alike. */
+const riseVec = new Vector3()
 /** Scratch for the eye's line of sight, so the frame loop allocates nothing. */
 const walkDir = new Vector3()
 /**
@@ -970,8 +973,11 @@ function Rig(): JSX.Element {
     // Fluid WALK (store/walkFluid.ts) takes its frame first: a crossing moves
     // the anchor (the cursor) and can start a fall. Then GRAVITY's fall
     // (store/useWalk.ts): it can land, which moves the cursor read below.
+    // Last, the walker drawn on the surface under it, wherever the fall and
+    // the smooth position left it (groundFluid).
     tickFluid()
     tickFall()
+    groundFluid()
     // So does the camera's offset from its orbit (ViewFly.ts): VIEW's fly
     // glides the view along the line of sight while the cursor waits, the
     // pan takes its frame, and a fly at rest long enough lands the cursor,
@@ -1226,12 +1232,25 @@ function Rig(): JSX.Element {
         forward: eyeFwd.copy(along).negate(),
         up: upOf(walkDown()),
         walls: s.walking,
+        stand: s.walking && walkGlide.exact ? Number(STEP_UP_MAX) * 2 ** s.scaleExp : undefined,
         now: performance.now(),
       }, eyeVec)
       eyeShift.current.copy(eyeVec).multiplyScalar(eyeMix.current)
       // The body's turn for Avatar.tsx, from the same heading: your heading, never the look up or down.
       walkBody.copy(eyeRig.body)
       c.object.position.copy(smooth.current).add(eyeShift.current).addScaledVector(along.normalize(), d)
+      // Fluid WALK up a stair: the feet are on the step, the camera trails
+      // them up (lib/walkEye.ts walkRise), never nearer their height than
+      // the near plane's room. The camera and what it looks at move
+      // together (the target, below), so the way you look is unchanged.
+      riseVec.set(0, 0, 0)
+      if (walkRise.offset < 0) {
+        const r = renderUp(s.view, walkRise.up.axis, walkRise.up.dir)
+        const above = eyeShift.current.x * r[0] + eyeShift.current.y * r[1] + eyeShift.current.z * r[2]
+        const lower = Math.max(walkRise.offset / 2 ** s.scaleExp, -Math.max(0, above - EYE_ROOM))
+        riseVec.set(r[0] * lower, r[1] * lower, r[2] * lower)
+        c.object.position.add(riseVec)
+      }
       c.minDistance = Math.min(ORBIT_MIN_DISTANCE, d * 0.5)
       locked.current = true
       if (t >= 1 && !s.walking) { eye.current = null; c.minDistance = ORBIT_MIN_DISTANCE; eyeMix.current = 0; eyeShift.current.set(0, 0, 0) }
@@ -1239,6 +1258,7 @@ function Rig(): JSX.Element {
     walkEye.copy(smooth.current)
 
     c.target.copy(smooth.current).add(eyeShift.current)
+    if (eye.current) c.target.add(riseVec)
     // The tour's camera for this step, once, as a pinch would leave it: at
     // its distance, from its side when it has one (cyberspace x, y, z put
     // into the view's render axes, as Earth is placed), else along the line

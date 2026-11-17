@@ -58,20 +58,32 @@ function database(): Promise<IDBDatabase | null> {
 
 /** Rows opened before the first are handed to the shard store: the few nearest you draw at once. */
 export const FIRST_ROWS = 8
-/** After the first, opened rows are handed over this many at a time, so a long list fills in as it opens. */
-export const NEXT_ROWS = 32
+/**
+ * Whether the row just opened (the `done`th) ends a batch: after FIRST_ROWS,
+ * then each batch twice the one before (8, 16, 32, ...), so a long list fills
+ * in as it opens while the shard store is updated only about log2(rows) times.
+ */
+export function endsBatch(done: number): boolean {
+  if (done < FIRST_ROWS) return false
+  const k = done / FIRST_ROWS + 1
+  return Number.isInteger(k) && (k & (k - 1)) === 0
+}
 
 /**
  * The rows in the order they are opened on load: those found in your plane
- * nearest where you stand first (their origin, by the sum of the axis
- * distances), then the rest most recently seen first. Pure.
+ * nearest where you stand first, then the rest most recently seen first.
+ * Near is measured to the bag's region (the box from its origin, the
+ * region's base corner, 2^height on a side), by the sum of how far you are
+ * outside it on each axis: 0 standing inside it. Without a height, to the
+ * corner. Pure.
  */
 export function nearFirst(stored: readonly FoundBag[], at: Position | null, plane: number | null): FoundBag[] {
-  const abs = (v: bigint): bigint => (v < 0n ? -v : v)
   const dist = (r: FoundBag): bigint | null => {
     if (!at || !r.origin || r.origin.plane !== plane) return null
     try {
-      return abs(BigInt(r.origin.at.x) - at.x) + abs(BigInt(r.origin.at.y) - at.y) + abs(BigInt(r.origin.at.z) - at.z)
+      const side = Number.isSafeInteger(r.height) && r.height! >= 0 && r.height! <= 96 ? 1n << BigInt(r.height!) : 1n
+      const outside = (lo: bigint, v: bigint): bigint => (v < lo ? lo - v : v > lo + side - 1n ? v - (lo + side - 1n) : 0n)
+      return outside(BigInt(r.origin.at.x), at.x) + outside(BigInt(r.origin.at.y), at.y) + outside(BigInt(r.origin.at.z), at.z)
     } catch { return null }
   }
   const keyed = stored.map((r) => ({ r, d: dist(r) }))
@@ -247,7 +259,8 @@ export const useFound = create<FoundState>((set, get) => ({
     // Through the same door as a scan's finds: deletions you made are
     // honored, and nothing opens but a chest this identity opened by hand
     // before, opened again as it was (store/useOpenedChests). Kept by TV:
-    // back as TV's finds are, no chest in them opening.
+    // back as TV's finds are, no chest in them opening. The early batches
+    // go before rememberWaiting below, which only writes rows TV held back.
     const hand = (): void => {
       if (found.length > 0) useShards.getState().addDiscovered(found)
       if (watchedFinds.length > 0) useShards.getState().addDiscovered(watchedFinds, { watched: true })
@@ -270,7 +283,7 @@ export const useFound = create<FoundState>((set, get) => ({
       if (row.watched) watchedFinds.push(...items)
       else found.push(...items)
       done++
-      if (done === FIRST_ROWS || (done > FIRST_ROWS && (done - FIRST_ROWS) % NEXT_ROWS === 0)) hand()
+      if (endsBatch(done)) hand()
     }
     if (bad.length > 0) void serial((db) => deleteFound(db, bad))
     set({ storage: 'indexeddb' })

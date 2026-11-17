@@ -16,6 +16,8 @@ import { bagTemplate, messageInnerTemplate, type Hidden } from '../../lib/hidden
 const ME = 'ee'.repeat(32)
 const OTHER = 'dd'.repeat(32)
 let identity = ME
+/** Where the player stands, for the nearest-first load (undefined: not known). */
+let standing: { x: bigint; y: bigint; z: bigint } | undefined
 let discovered: Record<string, Hidden> = {}
 const added: Hidden[][] = []
 /** How each addDiscovered was asked: watched (by Cyberspace TV) or played. */
@@ -29,7 +31,7 @@ type IdentityListener = (s: { identity: { pubkey: string } }, prev: { identity: 
 let identityListeners: IdentityListener[] = []
 vi.mock('../useCyberspace', () => ({
   useCyberspace: {
-    getState: () => ({ identity: { pubkey: identity, npub: '' } }),
+    getState: () => ({ identity: { pubkey: identity, npub: '' }, position: standing, headPlane: 0 }),
     subscribe: (fn: IdentityListener) => { identityListeners.push(fn); return () => undefined },
   },
 }))
@@ -80,6 +82,7 @@ const texts = (): string[] => Object.values(discovered).map((h) => h.text ?? '')
 beforeEach(() => {
   ;(globalThis as { indexedDB?: unknown }).indexedDB = new IDBFactory()
   identity = ME
+  standing = undefined
   discovered = {}
   added.length = 0
   addedHow.length = 0
@@ -275,42 +278,78 @@ describe('a bag Cyberspace TV kept', () => {
 
 
 describe('on load, the nearest first and handed over as they open', () => {
-  const row = (key: string, seenAt: number, origin?: { x: string; y: string; z: string }, plane: 0 | 1 = 0) =>
-    ({ rowKey: key, owner: ME, outer: {} as NostrEvent, keyHex: '', refs: {}, itemIds: [], seenAt, ...(origin ? { origin: { at: origin, plane } } : {}) })
+  const row = (key: string, seenAt: number, origin?: { x: string; y: string; z: string }, plane: 0 | 1 = 0, height?: number) =>
+    ({ rowKey: key, owner: ME, outer: {} as NostrEvent, keyHex: '', refs: {}, itemIds: [], seenAt, ...(origin ? { origin: { at: origin, plane } } : {}), ...(height !== undefined ? { height } : {}) })
 
-  it('orders rows in your plane by distance from where you stand, then the rest most recently seen first', async () => {
+  it('orders rows in your plane by distance from where you stand to their region, then the rest most recently seen first', async () => {
     const { nearFirst } = await import('../useFound')
     const here = { x: 1000n, y: 1000n, z: 1000n }
     const rows = [
       row('far', 5, { x: '9000', y: '1000', z: '1000' }),
       row('none-old', 1),
       row('near', 2, { x: '1001', y: '1000', z: '999' }),
+      // A big region whose corner is far but which you stand inside: distance 0.
+      row('around-you', 3, { x: '0', y: '0', z: '0' }, 0, 12),
       row('other-plane', 9, { x: '1000', y: '1000', z: '1000' }, 1),
       row('none-new', 7),
     ]
-    expect(nearFirst(rows, here, 0).map((r) => r.rowKey)).toEqual(['near', 'far', 'other-plane', 'none-new', 'none-old'])
+    expect(nearFirst(rows, here, 0).map((r) => r.rowKey)).toEqual(['around-you', 'near', 'far', 'other-plane', 'none-new', 'none-old'])
     // Not known where you stand: most recently seen first.
-    expect(nearFirst(rows, null, 0).map((r) => r.rowKey)).toEqual(['other-plane', 'none-new', 'far', 'near', 'none-old'])
+    expect(nearFirst(rows, null, 0).map((r) => r.rowKey)).toEqual(['other-plane', 'none-new', 'far', 'around-you', 'near', 'none-old'])
   })
 
-  it('a long list reaches the world in pieces: the first after a few rows, not after the last', async () => {
+  it('batches end after 8 rows, then each twice the last', async () => {
+    const { endsBatch } = await import('../useFound')
+    const ends = Array.from({ length: 130 }, (_, i) => i + 1).filter(endsBatch)
+    expect(ends).toEqual([8, 24, 56, 120])
+  })
+
+  /** Kept bags in n regions along x, each `step` apart, as earlier scans left them; returns the bag texts by region. */
+  async function keepBags(n: number, step = 4_000_000n): Promise<void> {
     const a = await boot()
-    const { FIRST_ROWS } = await import('../useFound')
-    const n = FIRST_ROWS + 2
     for (let i = 0; i < n; i++) {
-      const p = { x: 90_000n + BigInt(i) * 4_000_000n, y: 4_000n, z: 71n }
+      const p = { x: 90_000n + BigInt(i) * step, y: 4_000n, z: 71n }
       const k = regionKeyAt(p, 6, 20)
       const m = finalizeEvent(messageInnerTemplate(`bag ${i}`, p, 0, 5), hider)
       const outer = finalizeEvent(await bagTemplate([m], k.key, k.lookupId, 6, 100), hider)
-      await a.cache.unbagRemembered(outer, k.key, undefined, undefined, 6)
+      await a.cache.unbagRemembered(outer, k.key, undefined, { at: { x: (p.x >> 6n) << 6n, y: (p.y >> 6n) << 6n, z: (p.z >> 6n) << 6n }, plane: 0 }, 6)
     }
     await a.found.flushFound()
     discovered = {}
     added.length = 0
+  }
+
+  it('a long list reaches the world in pieces: 8, then 16, then the rest', async () => {
+    const { FIRST_ROWS } = await import('../useFound')
+    const n = FIRST_ROWS + 2 * FIRST_ROWS + 1
+    await keepBags(n)
     const b = await boot()
     expect(b.found.loadedRows()).toHaveLength(n)
-    expect(added.length).toBe(2)
-    expect(added[0]).toHaveLength(FIRST_ROWS)
+    expect(added.map((x) => x.length)).toEqual([8, 16, 1])
     expect(texts()).toHaveLength(n)
+  })
+
+  it('the bags nearest where you stand are in the first piece', async () => {
+    await keepBags(12)
+    // Standing at the last bag's place: bags 11 down to 4 are the nearest eight.
+    standing = { x: 90_000n + 11n * 4_000_000n, y: 4_000n, z: 71n }
+    await boot()
+    expect(added[0].map((h) => h.text).sort()).toEqual([4, 5, 6, 7, 8, 9, 10, 11].map((i) => `bag ${i}`).sort())
+  })
+
+  it('switching identity mid-load leaves none of the last identity\'s finds', async () => {
+    await keepBags(12)
+    vi.resetModules()
+    identityListeners = []
+    const found = await import('../useFound')
+    // The switch lands as soon as the first piece is handed over.
+    const first = added.length
+    const loading = found.useFound.getState().load(ME)
+    await vi.waitFor(() => { expect(added.length).toBeGreaterThan(first) })
+    identity = OTHER
+    for (const l of identityListeners) l({ identity: { pubkey: OTHER } }, { identity: { pubkey: ME } })
+    await loading
+    await found.useFound.getState().load(OTHER)
+    expect(texts()).toEqual([])
   })
 })

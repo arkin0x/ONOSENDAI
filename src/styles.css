@@ -6007,9 +6007,12 @@ select.avatars__input option:checked {
   background: linear-gradient(#ffe1a3, #ffb020);
   box-shadow: 0 0 4px rgba(255, 176, 32, 0.9);
 }
-/* The newest move is the bar's hot end. */
+/* The newest move is the bar's hot end. White as an image, like the lit
+   ticks' gradients, so a tick that becomes the head when the one after it
+   lands changes at once: a plain colour would fade in from nothing under
+   the gradient it replaces, and the head would blink dark at every landing. */
 .aheadbar i.is-head {
-  background: #fff;
+  background: linear-gradient(#fff, #fff);
   box-shadow: 0 0 4px #fff, 0 0 9px var(--accent);
 }
 .aheadbar i.is-z.is-head { box-shadow: 0 0 4px #fff, 0 0 9px var(--warn); }

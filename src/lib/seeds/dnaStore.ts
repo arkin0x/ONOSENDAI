@@ -17,7 +17,8 @@
 import { capsFromTags, capsPrice, eventId, tryParseDna, type Caps } from 'sno-core/seeds'
 import type { NostrEvent } from '../events'
 import { verifyOnce } from '../verifiedSigs'
-import { openDatabase, request } from '../idb'
+import { request } from '../idb'
+import { DNA_STORE, seedsDb } from './seedsDb'
 import { DNA_KIND } from './seedItem'
 
 /** What this client knows of a DNA. */
@@ -73,14 +74,8 @@ export const MISSING_RETRY_MAX_MS = 2 * 60_000
 /** How long ids wait to be asked for together. */
 export const BATCH_MS = 60
 
-const DB_NAME = 'onosendai-seeds'
-const DNA_STORE = 'dna'
-let dbOpen: Promise<IDBDatabase | null> | null = null
-function db(): Promise<IDBDatabase | null> {
-  if (typeof indexedDB === 'undefined') return Promise.resolve(null)
-  dbOpen ??= openDatabase(DB_NAME, 1, [[DNA_STORE, 'id']]).catch(() => null)
-  return dbOpen
-}
+/** The seeds database (seedsDb.ts), shared with the header store. */
+const db = seedsDb
 
 /** IndexedDB, for the DNAs relays gave. Best effort: a failed read is a miss, a failed write is nothing. */
 export const idbDnaCache: Pick<DnaSources, 'load' | 'save'> & { all: () => Promise<NostrEvent[]> } = {

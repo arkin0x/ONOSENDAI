@@ -36,7 +36,7 @@ import type { ShardModel } from 'sno-core/shards'
 import type { SeedItem } from './seedItem'
 import type { DnaResolver, DnaVerdict } from './dnaStore'
 import type { HeaderBook } from './headerBook'
-import { clockAtAnchor, settlePlanted, type HeaderFetch } from './seedClock'
+import { clockAtAnchor, settlePlanted, type HeaderFetch, type PlantedState } from './seedClock'
 import { SLICE_STEPS, tooHeavy } from './bloomBudget'
 import { bloomShard } from './bloomShard'
 import type { GrowRequest, PlantingWire, SeedsResponse } from './growJob'
@@ -85,6 +85,17 @@ export interface BloomDeps {
   forget?: (ids: string[]) => void
   /** This device's step budget (bloomBudget deviceBudget). */
   budget: number
+  /**
+   * Resolves once what an earlier visit kept is read (seedSources
+   * headersReady): the tip, the headers and the settled planted heights. A
+   * pass waits for it before it reads the tip, so a refresh never flashes
+   * "waiting for blocks" while IndexedDB is being read.
+   */
+  ready?: () => Promise<void>
+  /** A seed's planted height settled before, at this clock or an earlier one (seedSources settledBefore). */
+  settledBefore?: (id: string) => { height: number; E: number | null; F: number; clock: number } | undefined
+  /** Keep a seed's settled planted height (seedSources noteSettled). */
+  noteSettled?: (row: { id: string; height: number; E: number | null; F: number; clock: number }) => void
   /** Told whenever a seed's view changes. */
   onView: (id: string, view: BloomView) => void
 }
@@ -219,13 +230,14 @@ export class BloomEngine {
       this.set(id, { seedId: id, status: 'underpaid', dna })
       return
     }
+    if (this.deps.ready) await this.deps.ready()
     const tip = this.deps.tip()
     if (tip === null) {
       this.set(id, { seedId: id, status: 'no-clock', dna })
       return
     }
     const clock = clockAtAnchor(tip)
-    const planted = await settlePlanted(seed.planted, seed.createdAt, clock, this.deps.book, this.deps.fetchHeaders)
+    const planted = await this.plantedAt(seed, clock)
     if (planted.state === 'cannot-grow') {
       this.set(id, { seedId: id, status: 'cannot-grow', dna, clock })
       return
@@ -257,6 +269,21 @@ export class BloomEngine {
     this.drawnFor.set(id, drawKey)
     const shard = bloomShard(answer.buffers, verdict.name, seed.scale, `bloom:${seed.id}:${clock}:${answer.growth.generation}:${planting.planted ?? 'axiom'}`)
     this.set(id, { ...base, growth: answer.growth, shard })
+  }
+
+  /**
+   * A seed's effective planted height at `clock`. Settled at a clock, E and F
+   * are those of every later clock (§4.2; seedClock settlePlanted judges a
+   * seed below a gap on the same ground), so one settled before, here or on
+   * an earlier visit, stands without a header read. A pass at a lower clock
+   * than that (the tip is never lowered, so only a test) settles afresh.
+   */
+  private async plantedAt(seed: SeedItem, clock: number): Promise<PlantedState> {
+    const before = this.deps.settledBefore?.(seed.id)
+    if (before && before.clock <= clock) return { state: 'settled', height: before.height, E: before.E, F: before.F }
+    const planted = await settlePlanted(seed.planted, seed.createdAt, clock, this.deps.book, this.deps.fetchHeaders)
+    if (planted.state === 'settled') this.deps.noteSettled?.({ id: seed.id, height: planted.height, E: planted.E, F: planted.F, clock })
+    return planted
   }
 
   /**

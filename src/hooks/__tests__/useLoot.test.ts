@@ -1,3 +1,4 @@
+import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 if (typeof localStorage === 'undefined') {
@@ -33,7 +34,15 @@ vi.mock('../../lib/loot', async () => {
   return { ...actual, summarizeBag: (ev: { id: string }) => ({ key: ev.id, bagId: ev.id, at: 1, bytes: 10 } as never) }
 })
 
-import { ensureLoot, refreshLoot, useLootStore } from '../useLoot'
+import { ensureLoot, LOOT_CACHE_KEY, refreshLoot, useLootStore } from '../useLoot'
+import { readCached, WRITE_DELAY_MS } from '../../lib/deviceCache'
+
+/** The list kept on the device, once the queued write has gone (IndexedDB, never localStorage). */
+async function keptList(): Promise<unknown[]> {
+  await new Promise((r) => setTimeout(r, WRITE_DELAY_MS + 50))
+  const v = await readCached(LOOT_CACHE_KEY)
+  return Array.isArray(v) ? v : []
+}
 
 beforeEach(() => { trouble = null })
 
@@ -89,8 +98,8 @@ describe('the list survives a reload', () => {
     ensureLoot(['wss://one'])
     await vi.waitFor(() => { expect(useLootStore.getState().status).toBe('ready') })
 
-    const kept = JSON.parse(localStorage.getItem('onosendai:loot') ?? '[]')
-    expect(kept).toHaveLength(2)
+    expect(await keptList()).toHaveLength(2)
+    expect(localStorage.getItem('onosendai:loot')).toBeNull()
   })
 
   it('a list already on screen is not a loading state', () => {
@@ -126,14 +135,13 @@ describe('a read the canonical relay did not answer is not "nothing"', () => {
 
   it('keeps the rows on screen, and their cache, when the relay refuses', async () => {
     const rows = [{ key: 'a', bagId: 'a' }, { key: 'b', bagId: 'b' }] as never[]
-    localStorage.setItem('onosendai:loot', JSON.stringify(rows))
     useLootStore.setState({ items: rows, status: 'ready', source: '', trouble: null })
     trouble = 'auth'
     ensureLoot(['wss://refused-with-rows'])
     await vi.waitFor(() => { expect(useLootStore.getState().trouble).toBe('auth') })
     expect(useLootStore.getState().items).toHaveLength(2)
     expect(useLootStore.getState().status).toBe('ready')
-    expect(JSON.parse(localStorage.getItem('onosendai:loot') ?? '[]')).toHaveLength(2)
+    expect(await keptList()).toHaveLength(2)
   })
 
   it('an unreachable relay is said too, not read as nothing', async () => {

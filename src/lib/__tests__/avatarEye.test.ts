@@ -1,7 +1,7 @@
 /**
  * avatarEye.test.ts - where WALK's camera sits on an avatar: the `eye` field
  * read (and every malformed value read as absent), the automatic eye in exact
- * integers, the icosahedron's 0.375, the eye drawn at the avatar's scale and
+ * integers, the icosahedron's 0.875 (0.375 over its centre), the eye drawn at the avatar's scale and
  * within its size limit, and the body turned about up only.
  */
 import { describe, expect, it } from 'vitest'
@@ -75,13 +75,15 @@ describe('the automatic eye', () => {
 })
 
 describe('walkEyeLocal', () => {
-  it('gives the icosahedron its eye 0.375 cells above its centre', () => {
-    expect(MARKER_EYE).toBe(0.375)
-    expect(walkEyeLocal(null, 0, 1)).toEqual([0, 0.375, 0])
+  it('gives the icosahedron its eye 0.375 cells above its centre: 0.875 above its origin, its lowest point', () => {
+    // The shape's origin is its lowest vertex (scene/avatarMarker.ts markerEdges), half a cell under its centre.
+    expect(MARKER_EYE).toBe(0.875)
+    expect(MARKER_EYE - 0.5).toBe(0.375)
+    expect(walkEyeLocal(null, 0, 1)).toEqual([0, 0.875, 0])
     // Shrunk at the top of the ladder with the marker.
-    expect(walkEyeLocal(null, 82, 0.25)).toEqual([0, 0.375 * 0.25, 0])
+    expect(walkEyeLocal(null, 82, 0.25)).toEqual([0, 0.875 * 0.25, 0])
     // An avatar with no vertices of its own is drawn as the icosahedron.
-    expect(walkEyeLocal({ ...newShard('Empty') }, 0, 1)).toEqual([0, 0.375, 0])
+    expect(walkEyeLocal({ ...newShard('Empty') }, 0, 1)).toEqual([0, 0.875, 0])
   })
 
   it('draws the Ship’s eye at its scale: 1.325 gibsons up at 2^0', () => {
@@ -93,7 +95,7 @@ describe('walkEyeLocal', () => {
 
   it('uses the icosahedron’s eye once a custom avatar is drawn as it, zoomed far out', () => {
     // The Ship reaches 1.4 gibsons: at 2^2 that is 0.35 cells, under the marker's half cell.
-    expect(walkEyeLocal(ship(), 2, 1)).toEqual([0, 0.375, 0])
+    expect(walkEyeLocal(ship(), 2, 1)).toEqual([0, 0.875, 0])
     // At 2^1 it is still its mesh, at half size.
     expect(walkEyeLocal(ship(), 1, 1)[1]).toBeCloseTo(1.325 / 2, 12)
   })

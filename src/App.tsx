@@ -106,7 +106,7 @@ import { useSecrets, watchFocus } from './store/useSecrets'
 import { useInventory } from './store/useInventory'
 import { useShardFolders } from './store/useShardFolders'
 import { useFound } from './store/useFound'
-import { useAvatars } from './store/useAvatars'
+import { watchMyAvatar } from './store/useAvatars'
 import { setSyncPriority } from './lib/hyperspace/anchors'
 
 /** How long after the panels open the anchor sync goes full tilt. */
@@ -136,7 +136,7 @@ export default function App(): JSX.Element {
   useProofListener()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startVersionGate(); startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); startHidesSync(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); void useSecrets.getState().load(); void useInventory.getState().load(); void useShardFolders.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn(); watchDoorReturn() }, [])
+  useEffect(() => { startVersionGate(); startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); startHidesSync(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); watchMyAvatar(); void useSecrets.getState().load(); void useInventory.getState().load(); void useShardFolders.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn(); watchDoorReturn() }, [])
   // onosendai.tech/C/<hex>: a place or a region to open on, and Back and
   // Forward over the ones the View box opens (store/useCoordRoute.ts).
   useEffect(() => {

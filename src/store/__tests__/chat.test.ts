@@ -1,3 +1,4 @@
+import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 if (typeof localStorage === 'undefined') {
@@ -12,11 +13,18 @@ if (typeof localStorage === 'undefined') {
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { bagTemplate, chatInnerTemplate, CHAT_BAG_KIND } from '../../lib/hidden'
-import { mergeLines, sendKey, useChat, type ChatLine } from '../useChat'
+import { CHAT_CACHE_KEY, mergeLines, sendKey, useChat, type ChatLine } from '../useChat'
+import { readCached, WRITE_DELAY_MS } from '../../lib/deviceCache'
 import { useSecrets } from '../useSecrets'
 import { useCyberspace } from '../useCyberspace'
 
 const bytesToHex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
+
+/** The lines kept on the device, once the queued write has gone (IndexedDB, never localStorage). */
+async function kept(): Promise<unknown> {
+  await new Promise((r) => setTimeout(r, WRITE_DELAY_MS + 50))
+  return readCached(CHAT_CACHE_KEY)
+}
 
 const line = (id: string, at: number, over: Partial<ChatLine> = {}): ChatLine => ({ id, from: 'f'.repeat(64), text: id, at, region: 'r', height: 12, mine: false, ...over })
 
@@ -64,7 +72,8 @@ describe('receiving', () => {
     expect(s.lines).toHaveLength(1)
     expect(s.lines[0]).toMatchObject({ id: inner.id, from: getPublicKey(sk), text: 'anyone around?', region, height: 12, mine: false })
     expect(s.open).toBe(true)
-    expect(JSON.parse(localStorage.getItem('onosendai:chat') ?? '[]')).toHaveLength(1)
+    expect(await kept()).toHaveLength(1)
+    expect(localStorage.getItem('onosendai:chat')).toBeNull()
   })
 
   it('opens an envelope from a neighboring cube with that cube\'s key', async () => {
@@ -135,11 +144,11 @@ describe('receiving', () => {
     }
   })
 
-  it('clear forgets everything on this device', () => {
+  it('clear forgets everything on this device', async () => {
     useChat.setState({ lines: [line('a', 1)], unread: 3 })
     useChat.getState().clear()
     expect(useChat.getState().lines).toHaveLength(0)
     expect(useChat.getState().unread).toBe(0)
-    expect(localStorage.getItem('onosendai:chat')).toBe('[]')
+    expect(await kept()).toEqual([])
   })
 })

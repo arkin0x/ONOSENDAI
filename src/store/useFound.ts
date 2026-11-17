@@ -30,6 +30,7 @@ import { useCyberspace } from './useCyberspace'
 import { useInventory } from './useInventory'
 import { useShards } from './useShards'
 import { useStarred } from './useStarred'
+import type { Position } from '../lib/space'
 
 /** A bag seen again is not rewritten for this long: a scan runs every time you cross a cube. */
 const RESEEN_SECONDS = 6 * 60 * 60
@@ -53,6 +54,46 @@ function database(): Promise<IDBDatabase | null> {
     })
   }
   return db
+}
+
+/** Rows opened before the first are handed to the shard store: the few nearest you draw at once. */
+export const FIRST_ROWS = 8
+/**
+ * Whether the row just opened (the `done`th) ends a batch: after FIRST_ROWS,
+ * then each batch twice the one before (8, 16, 32, ...), so a long list fills
+ * in as it opens while the shard store is updated only about log2(rows) times.
+ */
+export function endsBatch(done: number): boolean {
+  if (done < FIRST_ROWS) return false
+  const k = done / FIRST_ROWS + 1
+  return Number.isInteger(k) && (k & (k - 1)) === 0
+}
+
+/**
+ * The rows in the order they are opened on load: those found in your plane
+ * nearest where you stand first, then the rest most recently seen first.
+ * Near is measured to the bag's region (the box from its origin, the
+ * region's base corner, 2^height on a side), by the sum of how far you are
+ * outside it on each axis: 0 standing inside it. Without a height, to the
+ * corner. Pure.
+ */
+export function nearFirst(stored: readonly FoundBag[], at: Position | null, plane: number | null): FoundBag[] {
+  const dist = (r: FoundBag): bigint | null => {
+    if (!at || !r.origin || r.origin.plane !== plane) return null
+    try {
+      const side = Number.isSafeInteger(r.height) && r.height! >= 0 && r.height! <= 96 ? 1n << BigInt(r.height!) : 1n
+      const outside = (lo: bigint, v: bigint): bigint => (v < lo ? lo - v : v > lo + side - 1n ? v - (lo + side - 1n) : 0n)
+      return outside(BigInt(r.origin.at.x), at.x) + outside(BigInt(r.origin.at.y), at.y) + outside(BigInt(r.origin.at.z), at.z)
+    } catch { return null }
+  }
+  const keyed = stored.map((r) => ({ r, d: dist(r) }))
+  keyed.sort((a, b) => {
+    if (a.d !== null && b.d !== null) return a.d < b.d ? -1 : a.d > b.d ? 1 : b.r.seenAt - a.r.seenAt
+    if (a.d !== null) return -1
+    if (b.d !== null) return 1
+    return b.r.seenAt - a.r.seenAt
+  })
+  return keyed.map((k) => k.r)
 }
 
 /** The loaded owner's rows and what each opened to, for the budget's questions. */
@@ -212,10 +253,25 @@ export const useFound = create<FoundState>((set, get) => ({
       return
     }
     if (get().owner !== owner) return
-    const found: Hidden[] = []
-    const watchedFinds: Hidden[] = []
+    let found: Hidden[] = []
+    let watchedFinds: Hidden[] = []
     const bad: string[] = []
-    for (const row of stored) {
+    // Through the same door as a scan's finds: deletions you made are
+    // honored, and nothing opens but a chest this identity opened by hand
+    // before, opened again as it was (store/useOpenedChests). Kept by TV:
+    // back as TV's finds are, no chest in them opening. The early batches
+    // go before rememberWaiting below, which only writes rows TV held back.
+    const hand = (): void => {
+      if (found.length > 0) useShards.getState().addDiscovered(found)
+      if (watchedFinds.length > 0) useShards.getState().addDiscovered(watchedFinds, { watched: true })
+      found = []
+      watchedFinds = []
+    }
+    // Nearest first, handed over as they open: what is around you is on
+    // screen after a few rows, not after the last of hundreds.
+    const here = useCyberspace.getState()
+    let done = 0
+    for (const row of nearFirst(stored, here.position, here.headPlane)) {
       const items = await openRow(row)
       if (get().owner !== owner) return
       if (!items) { bad.push(row.rowKey); continue }
@@ -226,16 +282,13 @@ export const useFound = create<FoundState>((set, get) => ({
       opened.set(row.rowKey, items)
       if (row.watched) watchedFinds.push(...items)
       else found.push(...items)
+      done++
+      if (endsBatch(done)) hand()
     }
     if (bad.length > 0) void serial((db) => deleteFound(db, bad))
     set({ storage: 'indexeddb' })
     rememberWaiting(owner)
-    // Through the same door as a scan's finds: deletions you made are
-    // honored, and nothing opens but a chest this identity opened by hand
-    // before, opened again as it was (store/useOpenedChests).
-    if (found.length > 0) useShards.getState().addDiscovered(found)
-    // Kept by TV: back as TV's finds are, no chest in them opening.
-    if (watchedFinds.length > 0) useShards.getState().addDiscovered(watchedFinds, { watched: true })
+    hand()
     void pruneDeletions(owner, [...rows.values()])
   },
 }))

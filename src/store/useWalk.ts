@@ -99,8 +99,10 @@
  *
  * `behind` is the walk's lag: the closed segments not yet proven, the one
  * computing included, and never the open one, which is still being walked.
- * It is what the LOSING SYNC warning counts, so the warning comes up only for
- * turns made faster than they can be proved. Leaving WALK or STOP drops the
+ * With the open segment and a fall's hops it makes the events ahead
+ * (store/walkAhead.ts), which the LOSING SYNC warning and fluid WALK's
+ * slowdown count, so they come up only for turns made faster than they can
+ * be proved. Leaving WALK or STOP drops the
  * open segment with the queue.
  */
 
@@ -120,14 +122,16 @@ import { launchHeight } from '../lib/walkBounce'
 import { walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
 import { heldNow, holdReleaseAll } from './walkHold'
 import { noteWallContact } from './wallHint'
-import { FLUID_LINE_SLACK, onLine } from '../lib/fluidWalk'
+import { FLUID_EASE_FROM, FLUID_LINE_SLACK, onLine } from '../lib/fluidWalk'
 
 /**
- * What the LOSING SYNC warning waits for: this many moves not yet proven.
- * 10 (arkinox, 2026-11-14: "only appear when the 10th event hits the
- * queue"); it was 3, which warned during ordinary quick walking.
+ * The first count of events ahead (store/walkAhead.ts) at which the LOSING
+ * SYNC warning shows at all: one past FLUID_EASE_FROM, where fluid WALK
+ * starts to slow, and it fades in with the slowdown to fully shown at
+ * FLUID_HOLD_AT (lib/fluidWalk.ts syncWarnOpacity; arkinox, 2026-11-17). It
+ * was 10 closed segments (2026-11-14), and 3 before that.
  */
-export const SYNC_WARN_AT = 10
+export const SYNC_WARN_AT = FLUID_EASE_FROM + 1
 
 /** Still this long, in ms, and the open segment closes and goes to be proved. */
 export const WALK_SETTLE_MS = 600
@@ -1268,9 +1272,9 @@ useCyberspace.subscribe((s, prev) => {
   pump()
 })
 
-/** Whether the walk is far enough behind for the LOSING SYNC warning. */
-export function losingSync(behind: number): boolean {
-  return behind >= SYNC_WARN_AT
+/** Whether `ahead` events ahead (store/walkAhead.ts) shows the LOSING SYNC warning at all. */
+export function losingSync(ahead: number): boolean {
+  return ahead >= SYNC_WARN_AT
 }
 
 // DEV window handle, the house pattern (__store): how far behind the walk

@@ -33,7 +33,7 @@ const built = () => {
 }
 
 describe('useAvatars', () => {
-  beforeEach(() => { useAvatars.setState({ shards: {}, asked: {}, phase: null, adoptError: null, mineEvent: null, minePublished: false }); useCyberspace.setState({ live: true }); localStorage.clear(); vi.mocked(query).mockClear(); vi.mocked(publish).mockClear() })
+  beforeEach(() => { useAvatars.setState({ shards: {}, events: {}, asked: {}, phase: null, adoptError: null, mineEvent: null, minePublished: false }); useCyberspace.setState({ live: true }); localStorage.clear(); vi.mocked(query).mockClear(); vi.mocked(publish).mockClear() })
 
   it('adopting a shard signs a kind 11333 event with no d tag and no work, publishes it and keeps a copy', async () => {
     const me = useCyberspace.getState().identity.pubkey

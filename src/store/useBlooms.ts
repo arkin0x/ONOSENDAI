@@ -12,7 +12,7 @@
 
 import { create } from 'zustand'
 import { BloomEngine, type BloomView } from '../lib/seeds/bloomEngine'
-import { dnaResolver, fetchSeedHeaders, headerBook, refreshTrustedTip, trustedTip, TIP_REFRESH_MS } from '../lib/seeds/seedSources'
+import { dnaResolver, fetchSeedHeaders, headerBook, headersReady, noteSettled, onKeptTip, refreshTrustedTip, settledBefore, trustedTip, TIP_REFRESH_MS, TIP_RETRY_MS } from '../lib/seeds/seedSources'
 import { deviceBudget, looksLikePhone } from '../lib/seeds/bloomBudget'
 import { MISSING_RETRY_MS } from '../lib/seeds/dnaStore'
 import { forgetInWorker, growInWorker } from '../lib/seeds/growClient'
@@ -63,18 +63,36 @@ function getEngine(): BloomEngine {
     forget: forgetInWorker,
     budget: deviceBudget(looksLikePhone()),
     onView: queueView,
+    // What the last visit kept: seeds grow at once from it, and the network moves them on.
+    ready: headersReady,
+    settledBefore,
+    noteSettled,
   })
   engine = made
   // A new trusted tip: every bloom grows by a block, and pending seeds may settle.
-  let tip = trustedTip()
+  // The tip the passes started from: the kept one, read once (passes wait for it themselves).
+  let tip: number | null | undefined
+  const started = headersReady().then(() => { tip = trustedTip() })
+  let retry: ReturnType<typeof setTimeout> | null = null
+  const moved = (t: number | null): void => {
+    if (tip === undefined || t === tip) return
+    tip = t
+    made.refreshAll()
+  }
   const ask = (): void => {
-    void refreshTrustedTip(useHyperspace.getState().tipHeight).then((t) => {
-      if (t === tip) return
-      tip = t
-      made.refreshAll()
+    // Asked alongside the kept state, never after it: a slow IndexedDB holds back no relay.
+    void Promise.all([refreshTrustedTip(useHyperspace.getState().tipHeight), started]).then(() => {
+      const t = trustedTip()
+      // No tip at all yet (a first visit, the first ask found nothing): asked again soon, not in two minutes.
+      if (t === null && retry === null && typeof setTimeout === 'function') retry = setTimeout(() => { retry = null; ask() }, TIP_RETRY_MS)
+      moved(t)
     })
   }
   ask()
+  // The kept state arriving late (past the passes' wait) still moves them to it.
+  onKeptTip(() => { void started.then(() => moved(trustedTip())) })
+  // A seed left waiting because no relay answered is looked at again soon, not only at the next block.
+  if (typeof setInterval === 'function') setInterval(() => made.refreshAll((v) => v?.status === 'waiting' || v?.status === 'no-clock'), TIP_RETRY_MS)
   // The hyperspace line hearing of a block is the cue to ask NTH; a timer covers a line that hears nothing.
   useHyperspace.subscribe((s, before) => { if (s.tipHeight !== before.tipHeight) ask() })
   if (typeof setInterval === 'function') setInterval(ask, TIP_REFRESH_MS)

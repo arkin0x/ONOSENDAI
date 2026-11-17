@@ -242,6 +242,24 @@ describe('your own avatar', () => {
     }
   })
 
+  it('an avatar just published stays published across a switch away and back, though the relays last answered an older one', async () => {
+    const identity = useCyberspace.getState().identity
+    await answer(identity.pubkey, [avatarEvent(identity.pubkey, 'Previous', T + 100, '1')])
+    expect(await useAvatars.getState().adopt(shardNamed('Published'))).toBe(true)
+    const signed = useAvatars.getState().mineEvent!
+    await vi.waitFor(async () => { expect((await readKeptAvatar(identity.pubkey))?.event.id).toBe(signed.id) })
+    const stop = watchMyAvatar()
+    try {
+      useCyberspace.setState({ identity: { pubkey: '7e'.repeat(32), npub: '' } })
+      useCyberspace.setState({ identity })
+      await vi.waitFor(() => { expect(useAvatars.getState().mineEvent?.id).toBe(signed.id) })
+      expect(useAvatars.getState().minePublished).toBe(true)
+    } finally {
+      stop()
+      useCyberspace.setState({ identity })
+    }
+  })
+
   it('a switch to an identity with nothing kept takes the copy already drawn from a relay as its own, published', async () => {
     const other = '7b'.repeat(32)
     const identity = useCyberspace.getState().identity

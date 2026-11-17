@@ -219,6 +219,8 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
     }
     set({ phase: 'publishing' })
     const result = await publish(event)
+    // A relay has it now: the newest the relays are known to hold.
+    if (result.ok) relaySaid.set(event.pubkey, event)
     // Switched identity while the relays answered: kept for the identity that
     // signed it, and not drawn as the one on screen now.
     if (useCyberspace.getState().identity.pubkey !== me) {
@@ -251,6 +253,7 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
       set({ phase: null, adoptError: 'No relay took the avatar. Try again when one is reachable.' })
       return false
     }
+    relaySaid.set(event.pubkey, event)
     void keepAvatarEvent(event, { mine: true, published: true })
     if (useCyberspace.getState().identity.pubkey !== event.pubkey) {
       set({ phase: null })

@@ -22,8 +22,9 @@
  * long chain's length (12345). WALK=1 instead records a real walk to
  * <out>/walk.webm: KEYS held in turn (w,a,w,d) for HOLD ms each with GAP ms
  * between, STEPS turns at most, LAG=<ms> to slow the proofs as a slower
- * device does, so the walk gets ahead, CHAIN=<n> to walk a chain that long
- * first, and DPR=<n> for the video's pixel ratio (1).
+ * device does, so the walk gets ahead (LAND=<ms> for the lag once it has
+ * stopped), CHAIN=<n> to walk a chain that long first, and DPR=<n> for the
+ * video's pixel ratio (1).
  * Exits 1 when a check fails.
  */
 import { chromium } from 'playwright'
@@ -78,10 +79,13 @@ async function open(options, pad = 0, lag = false) {
   if (lag) await page.addInitScript(() => {
     window.__proofLag = 0
     const post = Worker.prototype.postMessage
+    // In the order they were sent, whatever the lag is changed to meanwhile.
+    let last = 0
     Worker.prototype.postMessage = function (...args) {
-      const ms = window.__proofLag
-      if (ms) setTimeout(() => post.apply(this, args), ms)
-      else post.apply(this, args)
+      const due = Math.max(Date.now() + window.__proofLag, last + 1)
+      if (due <= Date.now()) { post.apply(this, args); return }
+      last = due
+      setTimeout(() => post.apply(this, args), due - Date.now())
     }
   })
   page.on('pageerror', (e) => { if (!/Failed to fetch/.test(e.message)) console.log(`PAGEERROR: ${e.message}`) })
@@ -350,6 +354,7 @@ async function walk() {
     if (s.limit) { await page.waitForTimeout(1200); await shot('3-red-20'); await page.waitForTimeout(1500); break }
   }
   // Standing still: the proofs land, the ticks fold away and the total glints.
+  if (lag && process.env.LAND !== undefined) await page.evaluate((ms) => { window.__proofLag = ms }, Number(process.env.LAND))
   let landings = 0
   let wasTotal = (await state()).total
   await stand(async (s) => {

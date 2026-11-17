@@ -47,7 +47,7 @@ import { useAvatars } from '../store/useAvatars'
 import { tryEyeFor } from '../store/tryEye'
 import { clearWalkLook, lookRadPerPx, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
 import { tickFall, useWalk, walkDown } from '../store/useWalk'
-import { tickFluid } from '../store/walkFluid'
+import { groundFluid, tickFluid } from '../store/walkFluid'
 import { orbitOffset } from '../workshop/benchAxes'
 import { WalkProbe } from './WalkProbe'
 import { commitAnchor, commitScale, committedAnchor } from '../lib/renderFrame'
@@ -970,8 +970,11 @@ function Rig(): JSX.Element {
     // Fluid WALK (store/walkFluid.ts) takes its frame first: a crossing moves
     // the anchor (the cursor) and can start a fall. Then GRAVITY's fall
     // (store/useWalk.ts): it can land, which moves the cursor read below.
+    // Last, the walker drawn on the surface under it, wherever the fall and
+    // the smooth position left it (groundFluid).
     tickFluid()
     tickFall()
+    groundFluid()
     // So does the camera's offset from its orbit (ViewFly.ts): VIEW's fly
     // glides the view along the line of sight while the cursor waits, the
     // pan takes its frame, and a fly at rest long enough lands the cursor,
@@ -1226,6 +1229,7 @@ function Rig(): JSX.Element {
         forward: eyeFwd.copy(along).negate(),
         up: upOf(walkDown()),
         walls: s.walking,
+        stand: s.walking && walkGlide.exact,
         now: performance.now(),
       }, eyeVec)
       eyeShift.current.copy(eyeVec).multiplyScalar(eyeMix.current)

@@ -10,7 +10,7 @@
  * | bottom right | the LOOK stick, the same size and floating on the right half: held off where it landed it turns the view, faster the farther out (input.ts lookStickRate) |
  * | right half, a second finger | drag to look (input.ts TOUCH_RAD_PER_PX) |
  * | above the LOOK stick | FIRE, big and round; held fires (and charges the rail). JUMP beside it, round and smaller (again in the air: the double jump) |
- * | just above the MOVE stick, toward the middle | SPRINT, JUMP's size and look; held sprints. A ring round it is the stamina: it drains while sprinting and dims while emptied (the lockout) |
+ * | above the MOVE stick, at the left edge (FIRE's mirror) | SPRINT, JUMP's size and look; held sprints. A ring round it is the stamina: it drains while sprinting and dims while emptied (the lockout) |
  * | above SPRINT (beside the MOVE stick on a short landscape screen) | the gun button: the gun in hand's icon, name and gauge; a tap goes to the next gun |
  * | above the gun button (beside it on a short screen) | RELOAD, only for the gun with a magazine (its place is kept for the others) |
  *

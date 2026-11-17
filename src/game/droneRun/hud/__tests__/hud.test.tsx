@@ -799,7 +799,9 @@ describe('the controls at the five phone sizes: no two boxes overlap', () => {
   it('the rules the boxes below are computed from are the CSS\'s own', () => {
     expect(section).toContain('--drun-above-stick: calc(var(--drun-bottom) + 4px + var(--drun-stick) + 14px);')
     expect(section).toContain('--drun-above-sprint: calc(var(--drun-above-stick) + var(--drun-jump) + 10px);')
-    expect(section).toMatch(/\.drun-btn--sprint \{\n  left: calc\(20px \+ var\(--drun-stick\) - var\(--drun-jump\) \/ 2\);\n  bottom: var\(--drun-above-stick\);\n  width: var\(--drun-jump\);\n  height: var\(--drun-jump\);/)
+    expect(section).toMatch(/\.drun-btn--sprint \{\n  left: 16px;\n  bottom: var\(--drun-above-stick\);\n  width: var\(--drun-jump\);\n  height: var\(--drun-jump\);/)
+    expect(section).toMatch(/\.drun-radar \{\n  position: absolute;\n  top: calc\(var\(--drun-top\) \+ 38px\);\n  left: 16px;/)
+    expect(shorter).toContain('.drun-radar { left: calc(16px + var(--drun-jump) + 12px); }')
     expect(section).toMatch(/\.drun-btn--gun \{\n  left: 16px;\n  bottom: var\(--drun-above-sprint\);\n  width: 150px;\n  height: 56px;/)
     expect(section).toMatch(/\.drun-btn--reload \{\n  left: 16px;\n  bottom: calc\(var\(--drun-above-sprint\) \+ 64px\);\n  width: 110px;\n  height: 36px;/)
     expect(short).toContain('.drun-btn--reload { left: calc(16px + 150px + 8px); bottom: calc(var(--drun-above-sprint) + 10px); }')
@@ -827,7 +829,7 @@ describe('the controls at the five phone sizes: no two boxes overlap', () => {
     const promptW = Math.min(37 * 14 * 0.6, w - 32)
     const out = [
       b('top row', 16, top, w - 32, 30),
-      b('radar', 16, top + 38, radar, radar),
+      b('radar', isShorter ? 16 + jump + 12 : 16, top + 38, radar, radar),
       b('safe zone line', (w - promptW) / 2, promptTop, promptW, 44),
       b('crosshair', w / 2 - 13, h / 2 - 13, 26, 26),
       b('assist box', w / 2 - assist / 2, h / 2 - assist / 2, assist, assist),
@@ -835,7 +837,7 @@ describe('the controls at the five phone sizes: no two boxes overlap', () => {
       up('LOOK', w - 20 - stick, bottom + 4, stick, stick),
       up('FIRE', w - 16 - fire, aboveStick, fire, fire),
       up('JUMP', w - 16 - fire - 10 - jump, aboveStick, jump, jump),
-      up('SPRINT', 20 + stick - jump / 2, aboveStick, jump, jump),
+      up('SPRINT', 16, aboveStick, jump, jump),
     ]
     if (isShorter) {
       out.push(up('gun', 20 + stick + 10, bottom + 4, 150, 56), up('RELOAD', 20 + stick + 10, bottom + 4 + 56 + 8, 110, 36))
@@ -868,11 +870,16 @@ describe('the controls at the five phone sizes: no two boxes overlap', () => {
         }
       }
       expect(hits).toEqual([])
-      // SPRINT sits above the MOVE stick, the gun never over SPRINT.
-      const sprint = all.find((x) => x.name === 'SPRINT')!, move = all.find((x) => x.name === 'MOVE')!
+      // SPRINT sits above the MOVE stick at the left edge, FIRE's mirror: its left margin is FIRE's right one, on FIRE's
+      // row, and the gun button's left edge where it is in that column (a tall screen).
+      const find = (n: string): Box => all.find((x) => x.name === n)!
+      const sprint = find('SPRINT'), move = find('MOVE'), fire = find('FIRE'), gun = find('gun')
       expect(sprint.y1).toBeLessThanOrEqual(move.y0)
-      expect(sprint.x0).toBeGreaterThan(move.x0)
-      expect(sprint.x0).toBeLessThan(move.x1)
+      expect(sprint.x0).toBe(w - fire.x1)
+      expect(sprint.y1).toBe(fire.y1)
+      expect(sprint.x0).toBeLessThanOrEqual(move.x0)
+      expect(sprint.x1).toBeGreaterThan(move.x0)
+      if (h > 520) expect(gun.x0).toBe(sprint.x0)
     })
   }
 })

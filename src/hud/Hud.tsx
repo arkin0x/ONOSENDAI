@@ -381,7 +381,7 @@ export function ViewAtPanel(): JSX.Element {
             type="button"
             onClick={roll}
             disabled={finding}
-            title="Random coordinate: look at a completely random place"
+            title="Look at a completely random place"
             aria-label="Random coordinate"
           >
             <Dices aria-hidden="true" />

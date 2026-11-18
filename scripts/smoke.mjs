@@ -64,7 +64,7 @@ async function runDevice(device) {
 
   const overlaps = async () => {
     return page.evaluate(() => {
-      const ctl = [...document.querySelectorAll('.touchpad, .touchops, .compass-3d--tappable')].map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0)
+      const ctl = [...document.querySelectorAll('.touchpad, .touchops, .compass-3d--tappable:not(.compass-3d--hidden)')].map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0)
       const hud = [...document.querySelectorAll('.hyperbar, .chip, .syncwarn__panel, .goalgroup, .hamburger-menu, .toast__build, .chatdock, .deploybar, .routeov')]
         .filter((e) => !e.closest('.touchpad, .touchops, .compass-3d') && !e.closest('.modal'))
       const hits = []

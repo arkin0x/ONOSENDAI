@@ -673,6 +673,7 @@ function later(fn: (idle?: IdleDeadline) => void): void {
 export function clearWalls(): void {
   entries.clear()
   restEntries.clear()
+  restBytes = 0
   bounceBuilt = false
   waited = false
   landed()
@@ -1144,7 +1145,10 @@ export function groundUnder(from: Position, lead: readonly [number, number, numb
  */
 export function restDrop(at: Position, plane: number, down: AxisDirection = WORLD_DOWN): { drop: number; pending: boolean } {
   const out = { pending: false }
-  const s = groundUnder(at, [0, 0, 0], wallItemsAt(plane, at), down, 0, REST_REACH, out, restEntryFor)
+  // The keys of every shard in this plane, closed doors included (wallItemsAt leaves out a door that lets this avatar go): read once, and only if a build is needed.
+  let keys: Set<string> | null = null
+  const inWorld = (): Set<string> => (keys ??= new Set(wallItems(plane).map((x) => x.key)))
+  const s = groundUnder(at, [0, 0, 0], wallItemsAt(plane, at), down, 0, REST_REACH, out, (w) => restEntryFor(w, inWorld))
   return { drop: s === null || s < -REST_REACH ? REST_FLOOR : Math.min(1, Math.max(0, -s)), pending: out.pending }
 }
 
@@ -1156,22 +1160,68 @@ export function restDrop(at: Position, plane: number, down: AxisDirection = WORL
  * spends what holds the walker (review of #800). A part not yet built by
  * WALK holds no avatar up until it is.
  */
-function restEntryFor(w: WallItem): Entry {
+function restEntryFor(w: WallItem, inWorld: () => ReadonlySet<string>): Entry {
   const held = entries.get(w.key)
   if (held && !held.first && held.shard === w.shard && held.where === whereOf(w)) return held
   const kept = restEntries.get(w.key)
-  if (kept && kept.shard === w.shard && kept.where === whereOf(w)) return kept
-  if (restEntries.size >= REST_ENTRIES_MAX) restEntries.clear()
+  if (kept && kept.e.shard === w.shard && kept.e.where === whereOf(w)) {
+    // The most recently asked goes last, so it is the last to go.
+    restEntries.delete(w.key)
+    restEntries.set(w.key, kept)
+    return kept.e
+  }
+  if (kept) { restEntries.delete(w.key); restBytes -= kept.bytes }
+  // A build is about to be made, which costs far more than this: the walls of
+  // shards no longer in the world (moved, deleted, hidden again) go first.
+  // Only this plane's: `inWorld` is the shards of the plane asked about.
+  if (restEntries.size > 0) {
+    const here = inWorld()
+    for (const [k, v] of restEntries) if (v.e.item.plane === w.plane && !here.has(k)) { restEntries.delete(k); restBytes -= v.bytes }
+  }
   const e = build(w, [], false, false)
-  restEntries.set(w.key, e)
+  const bytes = wallBytes(e.mesh)
+  restEntries.set(w.key, { e, bytes })
+  restBytes += bytes
+  // Least recently asked first out, past either bound; never the one just built.
+  for (const [k, v] of restEntries) {
+    if (restEntries.size <= restBounds.count && restBytes <= restBounds.bytes) break
+    if (k === w.key) continue
+    restEntries.delete(k)
+    restBytes -= v.bytes
+  }
   return e
 }
 
-/** restEntryFor's own builds, by shard key. */
-const restEntries = new Map<string, Entry>()
+/**
+ * restEntryFor's own builds, by shard key, least recently asked first, with
+ * what each holds in bytes. A shard moved or hidden again is a new key, so
+ * the walls of where it was stood here until 512 had gathered (2026-11-18:
+ * a session of BUILD moves among large imported pieces grew it with every move,
+ * each entry its triangles and the old placement's whole model). Now the
+ * walls of a shard no longer in the world go before the next build, and what
+ * stays is bounded by count and by bytes, the least recently asked let go first.
+ */
+const restEntries = new Map<string, { e: Entry; bytes: number }>()
+let restBytes = 0
 
-/** The most restEntryFor keeps before it starts again: a bound on memory, never on correctness. */
-const REST_ENTRIES_MAX = 512
+/**
+ * The most restEntryFor keeps, and the most bytes of triangles and placements:
+ * a backstop on memory, never on correctness (one let go is built again when
+ * asked). Shards that left the world go first anyway, so these bind only on a
+ * world holding more than this near avatars at once, where a smaller bound
+ * would build the same walls again at every ask (review).
+ */
+export const restBounds = { count: 512, bytes: 256 * 1024 * 1024 }
+
+/** About what one build holds of its own: its triangles and each placement's matrix and bounds (a model's walls are shared). */
+function wallBytes(mesh: WallMesh): number {
+  return mesh.tris.byteLength + mesh.placements.length * 256 + 256
+}
+
+/** What restEntryFor keeps now, least recently asked first: for tests, and the memory soak. */
+export function restWallsKept(): { count: number; bytes: number; keys: string[] } {
+  return { count: restEntries.size, bytes: restBytes, keys: [...restEntries.keys()] }
+}
 
 /** The floor of a gibson, in gibsons under its centre: where an avatar with nothing under it stands. */
 export const REST_FLOOR = 0.5

@@ -593,6 +593,10 @@ body {
   z-index: 10;
 }
 
+/* Out of the way, kept mounted (scene/Compass3D): its size stays, so its drawing buffer is not made again either. */
+.compass-3d.compass-3d--hidden,
+.compass-3d.compass-3d--hidden * { visibility: hidden; pointer-events: none; }
+
 .compass-labels {
   position: absolute;
   top: 0;

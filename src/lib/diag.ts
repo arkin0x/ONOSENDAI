@@ -24,7 +24,7 @@ import { useThumbs } from '../store/useThumbs'
 import { useTv } from '../store/useTv'
 import { useWorkshop } from '../store/useWorkshop'
 import { DIAG_FOUND_KEY, DIAG_LAST_KEY, diagForget } from './diagGate'
-import { DIAG_COLUMNS, GlLedger, Ring, frameVerb, framePercentiles, heapReading, invokerLabel, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
+import { DIAG_COLUMNS, GlLedger, Ring, frameVerb, framePercentiles, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
 
 /** Seconds between samples, and how long each ring reaches back. */
 const SAMPLE_MS = 5_000
@@ -438,9 +438,10 @@ export function startDiag(): void {
     const ctxs = liveContexts()
     let lsBytes = 0
     let lsKeys = 0
+    const lsSizes: Array<[string, number]> = []
     try {
       lsKeys = localStorage.length
-      for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i)!; lsBytes += key.length + (localStorage.getItem(key)?.length ?? 0) }
+      for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i)!; const n = key.length + (localStorage.getItem(key)?.length ?? 0); lsBytes += n; lsSizes.push([key, n]) }
     } catch { /* refused */ }
     // The largest drawing context: a throwaway probe may be WebGL 1, with no MAX_SAMPLES to ask.
     const first = ctxs.filter((gl) => !gl.isContextLost()).sort((a, b) => b.drawingBufferWidth * b.drawingBufferHeight - a.drawingBufferWidth * a.drawingBufferHeight)[0]
@@ -474,7 +475,7 @@ export function startDiag(): void {
       workers: { made: workers.made, ended: workers.ended },
       renderers: alive(renderers).map((r) => ({ w: r.domElement?.width, h: r.domElement?.height, pr: r.getPixelRatio?.(), geoms: r.info?.memory.geometries, textures: r.info?.memory.textures, programs: r.info?.programs?.length ?? 0 })),
       largest: ledger.largest(ctxs, isLost),
-      storage: { ...storage, localStorageKeys: lsKeys, localStorageChars: lsBytes },
+      storage: { ...storage, localStorageKeys: lsKeys, localStorageChars: lsBytes, localStorageTop: largestKeys(lsSizes) },
       peak,
       columns: DIAG_COLUMNS,
       uiStates,

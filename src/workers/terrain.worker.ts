@@ -30,6 +30,9 @@ export interface RunRequest {
   plane: Plane
 }
 
+/** Posted once, when the module has loaded: a worker that errors without having said it never loaded (lib/workers.ts). */
+export interface TerrainReady { ready: true }
+
 export interface RunResponse {
   id: number
   values: Uint8Array
@@ -66,3 +69,6 @@ self.onmessage = (event: MessageEvent<RunRequest>) => {
   }
   self.postMessage(response, [values.buffer])
 }
+
+const ready: TerrainReady = { ready: true }
+self.postMessage(ready)

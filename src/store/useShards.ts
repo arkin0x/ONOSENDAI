@@ -1930,10 +1930,10 @@ function normalizedRow(d: MyDeployment): MyDeployment {
 
 function loadMine(owner: string): MyDeployment[] {
   const out: MyDeployment[] = []
-  for (const { row, json } of entriesIn(owner)) {
+  for (const { row, sig } of entriesIn(owner)) {
     if (!isListed(row) || unreadable(row)) continue
     const d = normalizedRow(row)
-    noteStored(d, json)
+    noteStored(d, sig)
     out.push(d)
   }
   return out

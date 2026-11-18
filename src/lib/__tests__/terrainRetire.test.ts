@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const fake = vi.hoisted(() => {
   Object.defineProperty(globalThis, 'navigator', { value: { hardwareConcurrency: 3 }, configurable: true })
   type Listener = (event: { data?: unknown; message?: string }) => void
-  const state = { made: [] as FakeWorker[] }
+  const state = { made: [] as FakeWorker[], broken: false }
   class FakeWorker {
     message: Listener[] = []
     error: Listener[] = []
@@ -17,7 +17,13 @@ const fake = vi.hoisted(() => {
     ended = false
     constructor() { state.made.push(this) }
     addEventListener(type: string, listener: Listener): void { (type === 'message' ? this.message : this.error).push(listener) }
-    postMessage(run: { id: number; count: number }): void { this.running = run }
+    saidReady = false
+    broken = state.broken
+    postMessage(run: { id: number; count: number }): void {
+      // A worker that loaded says so before it reads its first run (terrain.worker.ts TerrainReady); a broken file never does.
+      if (!this.saidReady && !this.broken) { this.saidReady = true; for (const l of [...this.message]) l({ data: { ready: true } }) }
+      this.running = run
+    }
     terminate(): void { this.ended = true }
     fail(): void {
       this.running = null
@@ -33,7 +39,7 @@ const fake = vi.hoisted(() => {
   return { state }
 })
 
-const { TERRAIN_IDLE_MS, postRun, setRunDropHandler, setRunResultHandler, terrainWorkersAlive } = await import('../workers')
+const { LOAD_FAILURES_BEFORE_REST, LOAD_REST_MS, TERRAIN_IDLE_MS, postRun, setRunDropHandler, setRunResultHandler, terrainWorkersAlive } = await import('../workers')
 const { useVersionGate } = await import('../versionGate')
 
 const run = (id: number) => ({ id, originX: 0n, originY: 0n, originZ: 0n, axis: 'x' as const, step: 1n, count: 2, plane: 0 as const })
@@ -119,7 +125,9 @@ describe('the terrain pool', () => {
   it('a pool whose workers never loaded gives every run back and starts over at the next run, never wedged', () => {
     const dropped: number[] = []
     setRunDropHandler((ids) => { dropped.push(...ids) })
+    fake.state.broken = true
     postRun(run(40)); postRun(run(41)); postRun(run(42))
+    fake.state.broken = false
     const failing = busy()
     expect(failing).toHaveLength(2)
     failing[0].fail()
@@ -141,5 +149,38 @@ describe('the terrain pool', () => {
     expect(dropped).toContain(44)
     expect(terrainWorkersAlive()).toBe(2)
     setRunDropHandler(null)
+  })
+
+  it('a run that throws in a pool that loaded costs only that run, even the first', () => {
+    const dropped: number[] = []
+    setRunDropHandler((ids) => { dropped.push(...ids) })
+    postRun(run(50)); postRun(run(51))
+    const [a, b] = busy()
+    a.fail()
+    expect(dropped).toEqual([50])
+    expect(terrainWorkersAlive()).toBe(2)
+    b.answer()
+    expect(answered).toEqual([51])
+    setRunDropHandler(null)
+    vi.advanceTimersByTime(TERRAIN_IDLE_MS)
+  })
+
+  it('after pools fail to load three times in a row, the next waits a minute, its runs given back meanwhile', () => {
+    const dropped: number[] = []
+    setRunDropHandler((ids) => { dropped.push(...ids) })
+    fake.state.broken = true
+    for (let i = 0; i < LOAD_FAILURES_BEFORE_REST; i++) { postRun(run(60 + i)); busy()[0].fail() }
+    const made = fake.state.made.length
+    postRun(run(70))
+    expect(fake.state.made.length).toBe(made)
+    expect(dropped).toContain(70)
+    fake.state.broken = false
+    vi.advanceTimersByTime(LOAD_REST_MS)
+    postRun(run(71))
+    expect(terrainWorkersAlive()).toBe(2)
+    busy()[0].answer()
+    expect(answered).toEqual([71])
+    setRunDropHandler(null)
+    vi.advanceTimersByTime(TERRAIN_IDLE_MS)
   })
 })

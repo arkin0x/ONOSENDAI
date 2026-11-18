@@ -389,3 +389,93 @@ describe("View's box takes a /C/ region (arkinox, 2026-11-12)", () => {
     expect(useCoordRoute.getState().region).toBeNull()
   })
 })
+
+describe("View's dice: a completely random coordinate (arkinox, 2026-11-18)", () => {
+  const loc = { pathname: '/', search: '', hash: '' }
+  const history = { pushState: vi.fn(), replaceState: vi.fn() }
+  const BYTES = Array.from({ length: 32 }, (_, i) => (i * 37 + 11) & 0xff)
+  const HEX = BYTES.map((b) => b.toString(16).padStart(2, '0')).join('')
+  beforeEach(() => {
+    cs().clearFocus()
+    useCoordRoute.setState({ region: null, label: null })
+    useCyberspace.setState({ plane: 0, anchorPlane: 0 })
+    useViewDraft.getState().setText('')
+    localStorage.removeItem(RECENT_VIEWS_KEY)
+    vi.mocked(geocode).mockClear()
+    ;(globalThis as { window?: unknown }).window = { location: loc, history }
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    cs().clearFocus()
+    useCyberspace.setState({ plane: 0, anchorPlane: 0 })
+    useViewDraft.getState().setText('')
+    localStorage.removeItem(RECENT_VIEWS_KEY)
+    delete (globalThis as { window?: unknown }).window
+  })
+
+  const dice = () => findAll(tree(ViewAtPanel), (p) => p['aria-label'] === 'Random coordinate')[0]
+
+  it('sits in the VIEW row, after VIEW, as a button you can reach by keyboard, with a tooltip', () => {
+    const form = findAll(tree(ViewAtPanel), (p) => typeof p.onSubmit === 'function')[0]
+    const buttons = findAll(form.props.children as ReactNode, (p) => p.className !== undefined && String(p.className).includes('avatars__go'))
+    expect(buttons.map((b) => b.props['aria-label'] ?? b.props.children)).toEqual(['VIEW', 'Random coordinate'])
+    const d = dice()
+    expect(d.type).toBe('button')
+    expect(d.props.type).toBe('button')
+    expect(d.props.tabIndex).toBeUndefined()
+    expect(String(d.props.title)).toMatch(/^Random coordinate/)
+    const html = renderToString(createElement(ViewAtPanel))
+    expect(html).toContain('aria-label="Random coordinate"')
+    expect(html).toContain('lucide-dices')
+  })
+
+  it('rolls 32 bytes from crypto.getRandomValues, fills the box with their hex and views that point as VIEW does', async () => {
+    const spy = vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(<T extends ArrayBufferView | null>(a: T): T => {
+      ;(a as unknown as Uint8Array).set(BYTES)
+      return a
+    })
+    ;(dice().props.onClick as () => void)()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect((spy.mock.calls[0][0] as unknown as Uint8Array).length).toBe(32)
+    expect(useViewDraft.getState().text).toBe(HEX)
+    expect(HEX).toMatch(/^[0-9a-f]{64}$/)
+    const rolled = { focus: cs().focus, cursor: cs().cursor, anchorPlane: cs().anchorPlane, recent: localStorage.getItem(RECENT_VIEWS_KEY) }
+    expect(geocode).not.toHaveBeenCalled()
+    expect(history.pushState).not.toHaveBeenCalled()
+
+    // The same coordinate typed into the box and VIEW pressed ends in the same place.
+    cs().clearFocus()
+    localStorage.removeItem(RECENT_VIEWS_KEY)
+    useViewDraft.getState().setText(HEX)
+    const form = findAll(tree(ViewAtPanel), (p) => typeof p.onSubmit === 'function')[0]
+    ;(form.props.onSubmit as (e: { preventDefault: () => void }) => void)({ preventDefault: () => {} })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(rolled).toEqual({ focus: cs().focus, cursor: cs().cursor, anchorPlane: cs().anchorPlane, recent: localStorage.getItem(RECENT_VIEWS_KEY) })
+    expect(rolled.focus?.position).toEqual(placeOf(HEX).position)
+    expect(rolled.anchorPlane).toBe(placeOf(HEX).plane)
+  })
+
+  it('an ideaspace roll (low bit 1) goes to ideaspace from dataspace', async () => {
+    const odd = [...BYTES.slice(0, 31), 0x01]
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(<T extends ArrayBufferView | null>(a: T): T => {
+      ;(a as unknown as Uint8Array).set(odd)
+      return a
+    })
+    ;(dice().props.onClick as () => void)()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(cs().anchorPlane).toBe(1)
+  })
+})
+
+/** The point and plane a 64-hex coordinate names. */
+function placeOf(hex: string): { position: { x: bigint; y: bigint; z: bigint }; plane: number } {
+  const n = BigInt('0x' + hex)
+  let x = 0n, y = 0n, z = 0n
+  for (let i = 0n; i < 85n; i++) {
+    z |= ((n >> (1n + i * 3n)) & 1n) << i
+    y |= ((n >> (2n + i * 3n)) & 1n) << i
+    x |= ((n >> (3n + i * 3n)) & 1n) << i
+  }
+  return { position: { x, y, z }, plane: Number(n & 1n) }
+}

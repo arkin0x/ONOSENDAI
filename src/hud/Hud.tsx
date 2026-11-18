@@ -57,6 +57,8 @@ import { appVersion } from '../lib/tv/upgradeAnnounce'
 import { STRAYLIGHT_INVITE } from '../tutorial/straylight'
 import { CopyValue } from './ui/CopyValue'
 import { copyText } from '../lib/copyText'
+import { randomCoordHex } from '../lib/randomCoord'
+import { Dices } from 'lucide-react'
 
 /** The menu footer's version: VERSION 2.1, or the build stamp for a build with no simple version. */
 const SHOWN_VERSION = ((v) => (v ? `VERSION ${v}` : __ONOSENDAI_VERSION__))(appVersion())
@@ -301,9 +303,9 @@ export function ViewAtPanel(): JSX.Element {
   // longitude. Anything else is taken as a place by name and looked up once
   // (geocode.ts); what comes back is a latitude and longitude, remembered as
   // such under the place's own name, so the recent entry never needs the
-  // lookup again.
-  const view = async (): Promise<void> => {
-    const typed = viewText.trim()
+  // lookup again. The dice hands its roll straight in, as if it were typed.
+  const view = async (text: string = viewText): Promise<void> => {
+    const typed = text.trim()
     const target = parseViewAt(typed, lookedPlane)
     if (target) { setViewBad(false); look(typed, target); return }
     // A /C/ link, or its hex: a region opens as the link does, the address
@@ -333,6 +335,17 @@ export function ViewAtPanel(): JSX.Element {
       setFinding(false)
     }
   }
+  // The dice (arkinox, 2026-11-18): a completely random coordinate, written
+  // into the box so it can be seen and changed, then viewed exactly as if it
+  // had been typed and VIEW pressed. Every 256-bit number is a place
+  // (lib/randomCoord), so a roll never comes back refused.
+  const roll = (): void => {
+    const hex = randomCoordHex()
+    setViewText(hex)
+    setViewBad(false)
+    setViewNote(null)
+    void view(hex)
+  }
 
   return (
     <section className="panel">
@@ -349,7 +362,7 @@ export function ViewAtPanel(): JSX.Element {
       <div className="viewat">
         <span className="legend__label">View a coordinate</span>
         <form
-          className="avatars__find"
+          className="avatars__find viewat__find"
           onSubmit={(e) => { e.preventDefault(); void view() }}
         >
           <input
@@ -363,6 +376,16 @@ export function ViewAtPanel(): JSX.Element {
             aria-invalid={viewBad}
           />
           <button className="avatars__go" type="submit" disabled={!viewText.trim() || finding} title="Look at this place without moving">{finding ? 'FINDING' : 'VIEW'}</button>
+          <button
+            className="avatars__go viewat__dice"
+            type="button"
+            onClick={roll}
+            disabled={finding}
+            title="Random coordinate: look at a completely random place"
+            aria-label="Random coordinate"
+          >
+            <Dices aria-hidden="true" />
+          </button>
         </form>
         {viewNote && <p className="notice">{viewNote}</p>}
         {recent.length > 0 && (

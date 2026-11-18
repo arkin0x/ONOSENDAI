@@ -272,7 +272,7 @@ export function LoginModal({ onClose, over = false }: { onClose: () => void; ove
 
             <div className="login__or"><span>OR</span></div>
             {lockedKey && (
-              <div className="login__primary">
+              <div className="login__options login__locked">
                 <p className="login__note login__note--warn">Switching removes your encrypted key from this device.</p>
                 <button
                   className="secret__act login__act"

@@ -6625,6 +6625,10 @@ select.avatars__input option:checked {
 
 /* ---------- Key lock (hud/KeyLock.tsx) and new password (hud/ui/NewPassword.tsx) ---------- */
 /* Over everything, the tutorial and the workshop included: nothing signs until it is answered. */
+/* Copy the encrypted key before switching away from it: apart from the options under it. */
+.login__locked { margin-bottom: 11px; }
+.login__locked .login__note { margin: 0; }
+
 /* The login opened from the key lock: at the lock's height. */
 .modal.modal--over { z-index: 1100; }
 

@@ -1,7 +1,7 @@
 /**
  * sealedLooks.test.ts: a chest's look carried as a SEALED LOOK (DECK-0004
- * §3.6, "A look sealed as its own event", spec PR #115), and opening a chest
- * without its model ever going blank (arkinox, 2026-11-18).
+ * §3.6, "A look sealed as its own event", spec PR #115). Opening a chest without
+ * its model going blank is chestOpenNoBlank.test.ts and chestOpenMount.test.tsx.
  *
  * Written: a look up to 16,384 bytes stays in its tag; a larger one becomes its
  * own kind 33331 hidden object sealed with the bag's key, and the tag a wrapper
@@ -13,21 +13,15 @@
  * with the model once it opens, and with the default when it is missing or does
  * not open (another bag's key): exactly whoever can read the chest can draw it.
  * Built-in and inline looks read as before. The cache stays bounded.
- *
- * Opened: a chest with one model keeps that very model drawn on every frame;
- * a two-part look always has one of the two drawn.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { toPayload, type ShardModel } from 'sno-core/shards'
 import { BAG_SAFE_BYTES, signedBytes } from '../bagSize'
 import { OBJECT_PREVIEW, chestInnerTemplate, chestItemOf, type ChestItem } from '../hidden'
-import { builtInLook, builtInLookTags, drawnLook, forgetSealedLooks, lookOf, lookTagsOf, sealedLookAddress, sealedLooksKept, sealedLooksVersion, setSealedLookFetch, swapsOnOpen, MAX_LOOK_BYTES, type Look } from '../looks'
+import { builtInLook, builtInLookTags, drawnLook, forgetSealedLooks, lookOf, lookTagsOf, sealedLookAddress, sealedLooksKept, sealedLooksVersion, setSealedLookFetch, MAX_LOOK_BYTES } from '../looks'
 import { LOOK_NOT_FETCHED, sealLookTags, sealedLookAddresses, sealedLookLimit, sealedLookPayload, type SealLooksIo } from '../sealedLooks'
 import { bytesToHex, type EventTemplate, type NostrEvent } from '../events'
-import { lidPartsShown, restShowsFrom } from '../../scene/ChestCeremony'
-import { restVisible } from '../../scene/ChestLooks'
-import { ceremonyLength } from '../ceremony'
 import { forgeKey, openWithSecret, sealEntries } from '../chests'
 
 const sk = generateSecretKey()
@@ -330,58 +324,5 @@ describe('reading a sealed look', () => {
     expect(kept.count).toBeLessThan(4)
     // The newest stands; an evicted one is fetched again when asked.
     expect(lookOf({ type: 'chest', event: chests[3].event, bagKeyHex: bytesToHex(key) })!.name).toBe('custom')
-  })
-})
-
-describe('opening a chest never leaves its model blank', () => {
-  const custom = (open: boolean): Look => {
-    const closed = sized('Crate', 2)
-    return { name: 'custom', kind: 'chest', closed, open: open ? sized('Crate open', 2) : null }
-  }
-
-  it('a chest with one model plays no swap, and draws that very model on every frame through opening', () => {
-    const look = custom(false)
-    expect(swapsOnOpen(look)).toBe(false)
-    const before = drawnLook(look, false)
-    const after = drawnLook(look, true)
-    // The same model object: the resting mesh is never handed another, so nothing is rebuilt or fetched.
-    expect(after).toBe(before)
-    // With no swap the resting mesh is never hidden, whatever the clock.
-    const at = 1000
-    for (let t = 0; t <= ceremonyLength('chest', false) + 100; t += 4) expect(restVisible(false, null, at + t)).toBe(true)
-    // Its walls are the same model before and after (store/walkWalls wallItems draws drawnLook).
-    expect(drawnLook(look, true)).toBe(look.closed)
-  })
-
-  it('a two-part look (TREASURE) always has the closed chest or the open one drawn, on every frame of the lid opening', () => {
-    const look = builtInLook('treasure')
-    expect(swapsOnOpen(look)).toBe(true)
-    const at = 5000
-    const from = restShowsFrom(look, { at, calm: false })
-    expect(from).not.toBeNull()
-    for (let t = 0; t <= ceremonyLength('chest', false) + 100; t += 1) {
-      const lid = lidPartsShown(t)
-      const rest = restVisible(true, from, at + t)
-      expect(lid || rest).toBe(true)
-    }
-    // Its walls switch at once, and there is a model on either side of OPEN.
-    expect(drawnLook(look, false)).not.toBeNull()
-    expect(drawnLook(look, true)).not.toBeNull()
-  })
-
-  it('on the calm path the crossfade draws both until it ends, and the resting open look shows as it goes', () => {
-    const look = custom(true)
-    expect(swapsOnOpen(look)).toBe(true)
-    // No lid: the resting mesh waits for the end, while CalmSwap draws from and to.
-    expect(restShowsFrom(look, { at: 0, calm: true })).toBeNull()
-    expect(restShowsFrom(builtInLook('treasure'), { at: 0, calm: true })).toBeNull()
-    // Once the ceremony is gone, the resting mesh is visible at once.
-    expect(restVisible(false, null, 0)).toBe(true)
-  })
-
-  it('a door with no open look still fades away as it opens, and simply stands again as it closes', () => {
-    const door: Look = { name: 'custom', kind: 'door', closed: sized('Slab', 2), open: null }
-    expect(swapsOnOpen(door)).toBe(true)
-    expect(swapsOnOpen(door, true)).toBe(false)
   })
 })

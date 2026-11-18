@@ -117,6 +117,51 @@ export function setRunDropHandler(handler: ((ids: number[]) => void) | null): vo
   runDropHandler = handler
 }
 
+/**
+ * Told each run's answer, after its worker is free again. One handler for
+ * the pool rather than a listener on each worker, so the pool can let its
+ * workers go and start new ones without anyone listening to a dead worker.
+ */
+let runResultHandler: ((answer: RunResponse) => void) | null = null
+
+export function setRunResultHandler(handler: ((answer: RunResponse) => void) | null): void {
+  runResultHandler = handler
+}
+
+/**
+ * A pool with nothing to do for this long lets its workers go, and the next
+ * run starts them again. One per core but one, each its own V8 heap with
+ * cyberspace-core loaded, they sat idle for the life of the page: 7 of the
+ * 12 workers alive in arkinox's ?diag=1 report (2026-11-18), on a view that
+ * asks for terrain only when it moves.
+ */
+export const TERRAIN_IDLE_MS = 60_000
+let retireTimer: ReturnType<typeof setTimeout> | null = null
+
+function poolIdle(): boolean {
+  return runQueue.length === 0 && terrainIdle.every(Boolean)
+}
+
+function armRetire(): void {
+  if (retireTimer !== null || terrainWorkers.length === 0 || !poolIdle()) return
+  retireTimer = setTimeout(retireTerrain, TERRAIN_IDLE_MS)
+}
+
+function retireTerrain(): void {
+  retireTimer = null
+  if (!poolIdle()) return
+  tlog(`[workers] pool idle ${TERRAIN_IDLE_MS / 1000} s: letting ${terrainWorkers.length} workers go`)
+  for (const w of terrainWorkers) w.terminate()
+  terrainWorkers.length = 0
+  terrainIdle.length = 0
+  terrainRunning.length = 0
+}
+
+/** Terrain workers alive now (tests, and the diag). */
+export function terrainWorkersAlive(): number {
+  return terrainWorkers.length
+}
+
 export function setProofHandler(handler: ((msg: ProofResponse) => void) | null): void {
   proofHandler = handler
 }
@@ -170,21 +215,27 @@ export function getTerrainWorkers(): Worker[] {
       const slot = i
       // Free the slot before the consumer's own listener runs, so the next
       // job is already in flight while the result is being folded into cache.
-      worker.addEventListener('message', () => {
+      worker.addEventListener('message', (event: MessageEvent<RunResponse>) => {
+        // A worker let go may still have an answer on its way: nobody's now.
+        if (terrainWorkers[slot] !== worker) return
         terrainIdle[slot] = true
         terrainRunning[slot] = null
         pumpRunQueue()
+        runResultHandler?.(event.data)
+        armRetire()
       })
       // A worker that throws never posts back, so without this its slot stays
       // busy forever and the queue drains one worker short each time until the
       // pool wedges completely and no result ever arrives again.
       worker.addEventListener('error', (event) => {
+        if (terrainWorkers[slot] !== worker) return
         tlog(`[workers] w${slot} FAILED:`, event.message)
         const lost = terrainRunning[slot]
         terrainIdle[slot] = true
         terrainRunning[slot] = null
         pumpRunQueue()
         if (lost !== null) runDropHandler?.([lost])
+        armRetire()
       })
       terrainWorkers.push(worker)
       terrainIdle.push(true)
@@ -225,6 +276,7 @@ export function postProof(request: ProofRequest): void {
 
 /** Queue a run. Order is preserved: the first queued is the first started. */
 export function postRun(request: RunRequest): void {
+  if (retireTimer !== null) { clearTimeout(retireTimer); retireTimer = null }
   getTerrainWorkers()
   runQueue.push(request)
   pumpRunQueue()

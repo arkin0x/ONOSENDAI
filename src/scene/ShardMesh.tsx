@@ -319,16 +319,16 @@ function outlineGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute, fac
 
 /** One object's buffers, for all its placements (placedBuffers.ts): no decode writes to them, so no second copy of any array. */
 function buildPlaced(model: ShardModel): PlacedBuffers<ShardModel> {
-  const shard = expandFaceColors(model)
-  const { positions, colors, index, faces, drawn } = shardGeometry(shard)
+  const { positions, colors, index, faces, drawn } = shardGeometry(expandFaceColors(model))
   const posAttr = new BufferAttribute(positions, 3)
   const colAttr = new BufferAttribute(colors, 3)
   const plain = plainGeometry(posAttr, colAttr)
   const indexed = indexedGeometry(posAttr, colAttr, index, positions)
   const outline = outlineGeometry(posAttr, colAttr, faces)
   let inside: BufferGeometry | null = null
+  // The model as given, which its placements hold anyway: the expansion goes once the buffers are made.
   return {
-    shard, positions, colors, index, faces, drawn, plain, indexed, outline,
+    shard: model, positions, colors, index, faces, drawn, plain, indexed, outline,
     inside: () => (inside ??= insideGeometry(posAttr, colAttr, index, positions)),
     geometries: () => [plain, indexed, ...(outline ? [outline] : []), ...(inside ? [inside] : [])],
   }
@@ -512,12 +512,15 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
   const renderer = useThree((s) => s.gl)
   const shared = useMemo(() => (sharing ? placedBuffers(given, renderer, () => buildPlaced(given)) : null), [sharing, given, renderer])
   useEffect(() => (shared ? holdPlaced(given, renderer, shared as PlacedBuffers<unknown>) : undefined), [shared, given, renderer])
-  const shard = useMemo(() => shared?.shard ?? expandFaceColors(given), [given, shared])
-  // Keyed on the points and faces rather than the whole model, so a parent
-  // that hands over a fresh copy of the same shard does not rebuild it
-  // (unless it has face colours: the expansion above makes new arrays).
+  // Keyed on the points, faces and face colours rather than the whole model,
+  // so a parent that hands over a fresh copy of the same shard does not
+  // rebuild it. The face colour expansion is made here and let go once the
+  // geometry is built: kept, it was a second model of JS objects per shard, a
+  // vertex for every corner of every face (about 130 bytes each), held for as
+  // long as the shard was drawn. At arkinox's spot that is the bulk of the
+  // heap left after a GC (?diag=1, 2026-11-18).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const built = useMemo(() => shared ?? shardGeometry(shard, clip, pose), [shared, shard.vertices, shard.faces, clip, pose])
+  const built = useMemo(() => shared ?? shardGeometry(expandFaceColors(given), clip, pose), [shared, given.vertices, given.faces, given.facecolors, clip, pose])
   const { colors, faces, drawn } = built
   const positions = useSame(built.positions)
   const index = useSame(built.index)
@@ -527,7 +530,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
   // Made again with the geometries that share them (sharedBufferDeps), and not
   // for a paint: new colors on the same corners go into the buffer that is
   // there, once, below.
-  const buffers = sharedBufferDeps(positions, colors.length, index, shard.mode, lit)
+  const buffers = sharedBufferDeps(positions, colors.length, index, given.mode, lit)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const posAttr = useMemo(() => (shared ? null : new Float32BufferAttribute(positions.slice(), 3)), [...buffers, shared])
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -580,12 +583,12 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
   // At the canvas's own dot scale (scene/dotScale.ts): 1, the world's, except on the workshop's LOOK.
   const dotScale = useDotScale()
   const pointMaterial = useMemo(() => {
-    const profile = scaledDisc(shard.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, dotScale)
-    const m = createDiscMaterial(profile, shard.mode === 'points' ? opacity : opacity * 0.55, headlamp && !lit)
+    const profile = scaledDisc(given.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, dotScale)
+    const m = createDiscMaterial(profile, given.mode === 'points' ? opacity : opacity * 0.55, headlamp && !lit)
     // A ghost's dots in the world never bloom: it is drawn as it will look, without the glow (shardFaces.ts GHOST_OPACITY).
     if (noBloom) Object.assign(m, NO_BLOOM_BLEND)
     return m
-  }, [shard.mode, opacity, headlamp, lit, dotScale, noBloom])
+  }, [given.mode, opacity, headlamp, lit, dotScale, noBloom])
   useEffect(() => () => pointMaterial.dispose(), [pointMaterial])
   useEffect(() => { pointMaterial.clippingPlanes = clipPlanes ?? null }, [pointMaterial, clipPlanes])
 
@@ -598,11 +601,11 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
    */
   const outline = useMemo(() => {
     if (shared) return shared.outline
-    if (shard.mode !== 'lines') return null
+    if (given.mode !== 'lines') return null
     return outlineGeometry(posAttr!, colAttr!, faces)
     // Keyed on the triangle list, the steady twin of `faces`: a paint that leaves it alone keeps the outline.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posAttr, colAttr, index, shard.mode, shared])
+  }, [posAttr, colAttr, index, given.mode, shared])
 
   useEffect(() => (shared ? undefined : () => { outline?.dispose() }), [outline, shared])
 
@@ -632,9 +635,9 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
   // cursor step, then cut at its region box on each step, which is a pass
   // over the segments (ghostEdgeSegments). None past GHOST_EDGES.maxTriangles.
   const edgeSource = useMemo(
-    () => (edges && plan.faces && shard.faces.length > 0 && shard.faces.length <= GHOST_EDGES.maxTriangles ? ghostEdgeSegments(shard, pose) : null),
+    () => (edges && plan.faces && given.faces.length > 0 && given.faces.length <= GHOST_EDGES.maxTriangles ? ghostEdgeSegments(expandFaceColors(given), pose) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [edges, plan.faces, shard.vertices, shard.faces, pose],
+    [edges, plan.faces, given.vertices, given.faces, given.facecolors, pose],
   )
   const ghostEdges = useMemo(() => (edgeSource ? segmentsGeometry(clip ? clipSegments(edgeSource, clip) : edgeSource) : null), [edgeSource, clip])
   useEffect(() => () => { ghostEdges?.dispose() }, [ghostEdges])
@@ -645,7 +648,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
   // The scrambled start: each vertex thrown somewhere in the model's extent.
   const noise = useMemo(() => {
     if (birth === undefined) return null
-    const seed = seedOf(shard.id)
+    const seed = seedOf(given.id)
     let extent = 1
     for (let i = 0; i < positions.length; i++) extent = Math.max(extent, Math.abs(positions[i]))
     const pos = new Float32Array(positions.length)
@@ -661,13 +664,13 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
       col[v * 3 + 2] = STATIC[2] * b
     }
     return { pos, col, extent, seed }
-  }, [birth, positions, colors, shard.id])
+  }, [birth, positions, colors, given.id])
 
   // Going away: each vertex's own scatter and lift, and its static brightness.
   // Made once, not per vertex per frame: the decode runs every frame for DOOR_DISSOLVE_MS.
   const away = useMemo(() => {
     if (dissolve === undefined) return null
-    const seed = seedOf(shard.id) ^ 0x5bd1e995
+    const seed = seedOf(given.id) ^ 0x5bd1e995
     let extent = 1
     for (let i = 0; i < positions.length; i++) extent = Math.max(extent, Math.abs(positions[i]))
     const n = positions.length / 3
@@ -685,7 +688,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
       shade[v] = 0.35 + 0.65 * hash01(v * 5, seed)
     }
     return { seed, extent, scatter, lift, shade }
-  }, [dissolve, positions, shard.id])
+  }, [dissolve, positions, given.id])
 
   const done = useRef(false)
   const frame = useRef(0)
@@ -741,7 +744,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
   // What a world shard places is its trust's to budget, glow included.
   const placements = placed$ && budget ? <GlowTrust.Provider value={budget.trusted}>{placed$}</GlowTrust.Provider> : placed$
   // An object may be nothing but the arrangement of others (§1.9 rule 13).
-  if (shard.vertices.length === 0) return placements ? <group scale={scale}>{motion(placements)}</group> : null
+  if (given.vertices.length === 0) return placements ? <group scale={scale}>{motion(placements)}</group> : null
   // The nearest hit is on whichever side faces the tap; it answers and stops it there.
   const pick = { userData: { faceOf: drawn }, ...(onFaceClick ? { onClick: (e: ThreeEvent<MouseEvent>) => { const f = faceOfHit(e); if (f !== null) onFaceClick(e, f) } } : {}) }
 
@@ -796,15 +799,15 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
           <lineBasicMaterial vertexColors toneMapped={false} {...lineProps(opacity, ghost, noBloom)} {...lampLines} userData-share={own} {...cut} />
         </lineSegments>
       )}
-      {plan.lines && !outline && shard.vertices.length > 1 && <primitive object={line} />}
+      {plan.lines && !outline && given.vertices.length > 1 && <primitive object={line} />}
       {/* The client's own points, as always, unless a POINT SIZE says otherwise (always absent under SOLID and LINES). */}
-      {plan.points === 'disc' && (shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (
+      {plan.points === 'disc' && (given.mode === 'points' || given.mode === 'solid' || given.mode === 'lines') && (
         <points geometry={plain} material={pointMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} />
       )}
       {/* At a POINT SIZE: billboards, since a GPU caps a GL point's size. 0 draws no points. Sized in model
           units, carried by the model's own scale, so the canvas's dot scale (scene/dotScale.ts, LOOK) never applies. */}
       {/* Nothing of its own drawn (opacity 0, or POINTS at point size 0): an invisible copy still answers taps and picks, and is never drawn, so it hides and occludes nothing. */}
-      {!cull && (look.hidden || plan.points === 'none') && (shard.mode === 'solid' && index.length > 0 && look.hidden
+      {!cull && (look.hidden || plan.points === 'none') && (given.mode === 'solid' && index.length > 0 && look.hidden
         ? <mesh name="shard-hit" visible={false} geometry={indexed} material={HIT_MATERIAL} frustumCulled={false} {...pick} />
         : !faintMaterial && <points name="shard-hit" visible={false} geometry={plain} material={pointMaterial} frustumCulled={false} />)}
       {faintMaterial && <points name="shard-faint" geometry={plain} material={faintMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} />}

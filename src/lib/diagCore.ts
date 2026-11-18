@@ -261,6 +261,16 @@ function refusal(s: string): '#url' | '#' | null {
  * since the strip below takes the colon. Keys and long hex go after the strip,
  * so nothing rejoins past them, and the cut to length is last.
  */
+/**
+ * The biggest localStorage keys, as [name, characters], largest first: names
+ * through safeLabel, so a pubkey in a key reads `#`, and never a value. What
+ * fills the origin's few megabytes is then known from a report (arkinox's of
+ * 2026-11-18 said 47 keys and 5.1 million characters, and nothing more).
+ */
+export function largestKeys(entries: ReadonlyArray<readonly [string, number]>, n = 10): Array<[string, number]> {
+  return [...entries].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, c]) => [safeLabel(k, 64), c])
+}
+
 export function safeLabel(s: unknown, max = 48): string {
   if (typeof s !== 'string') return ''
   const refused = refusal(s)

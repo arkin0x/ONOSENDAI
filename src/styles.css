@@ -488,6 +488,12 @@ body {
   border-bottom: none;
 }
 
+/* Above the newest rows of a long chain: how many older ones the explorer holds (hud/ChainPanel.tsx CHAIN_ROWS_SHOWN). */
+.chainrows__older {
+  padding: 3px 2px;
+  border-bottom: 1px solid rgba(0, 229, 255, 0.1);
+}
+
 .chainrows__n {
   font-size: 9px;
   color: var(--dim);

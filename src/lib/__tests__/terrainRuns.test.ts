@@ -16,7 +16,7 @@ const fake = vi.hoisted(() => ({
 }))
 
 vi.mock('../workers', () => ({
-  getTerrainWorkers: () => [{ addEventListener: (_: string, listener: (event: { data: unknown }) => void) => { fake.listeners.push(listener) } }],
+  setRunResultHandler: (handler: (answer: unknown) => void) => { fake.listeners.push((event) => handler(event.data)) },
   postRun: (request: { id: number; count: number }) => { fake.posted.push(request) },
   setRunDropHandler: () => {},
 }))

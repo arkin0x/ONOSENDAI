@@ -49,6 +49,20 @@ import { holdReason } from '../lib/chainHold'
 import { useChainUi } from '../store/useChainUi'
 import { CopyValue } from './ui/CopyValue'
 
+/**
+ * The rows drawn: the newest this many. Every row is about eighteen DOM nodes,
+ * and a long chain drew all of them: arkinox's ~1,300 actions were ~20,000
+ * nodes in the open menu, redrawn on every publish result (?diag=1,
+ * 2026-11-19). The chain explorer (the ACTIONS tag, or the line above the
+ * rows) walks the rest.
+ */
+export const CHAIN_ROWS_SHOWN = 100
+
+/** The index of the first row drawn, of a chain this long: the newest CHAIN_ROWS_SHOWN. */
+export function firstShownRow(length: number, shown: number = CHAIN_ROWS_SHOWN): number {
+  return Math.max(0, length - shown)
+}
+
 export function ChainPanel(): JSX.Element {
   const chain = useCyberspace((s) => s.chain)
   const spentMsats = useCyberspace((s) => s.spentMsats)
@@ -96,6 +110,7 @@ export function ChainPanel(): JSX.Element {
     if (el) el.scrollTop = el.scrollHeight
   }, [events.length])
 
+  const from = firstShownRow(events.length)
   const statuses = events.map((e) => published[e.id])
   const sent = statuses.filter((st) => st === 'ok').length
   // HELD first: whatever LIVE says, a held chain is going nowhere until the
@@ -195,7 +210,20 @@ export function ChainPanel(): JSX.Element {
       {/* Every action, oldest first, and where it is. State only: there is no
           control on a row. */}
       <ol className="chainrows" ref={list}>
-        {events.map((e, i) => {
+        {from > 0 && (
+          <li className="chainrows__older">
+            <button
+              className="tag tag--tap"
+              disabled={building}
+              onClick={() => { if (!useBuilder.getState().active) walkChain(from - 1) }}
+              title={building ? 'Not while building' : 'Open the chain explorer at the newest of these'}
+            >
+              {from.toLocaleString()} OLDER ACTION{from === 1 ? '' : 'S'}
+            </button>
+          </li>
+        )}
+        {events.slice(from).map((e, k) => {
+          const i = from + k
           const tag = publishTag(published[e.id])
           const a = byId.get(e.id)
           // A row that breaks a rule reads BROKEN whatever its role, with the

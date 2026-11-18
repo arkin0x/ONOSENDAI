@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { diagWanted, DIAG_FOUND_KEY, DIAG_KEY, DIAG_LAST_KEY } from '../diagGate'
-import { DIAG_COLUMNS, GlLedger, Ring, bytesPerPixel, framePercentiles, frameVerb, heapReading, invokerLabel, safeDescription, safeLabel, toRow, uploadedBytes } from '../diagCore'
+import { DIAG_COLUMNS, GlLedger, Ring, bytesPerPixel, framePercentiles, frameVerb, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes } from '../diagCore'
 
 const SRC = path.resolve(__dirname, '../..')
 
@@ -167,7 +167,7 @@ describe('nothing private leaves', () => {
 
   it('the capture reads storage only for its size, and message data only for its length', () => {
     const text = fs.readFileSync(path.join(SRC, 'lib/diag.ts'), 'utf8')
-    expect(text.match(/localStorage\.getItem\([^)]*\)[^;\n]*/g)).toEqual(['localStorage.getItem(key)?.length ?? 0) }'])
+    expect(text.match(/localStorage\.getItem\([^)]*\)[^;\n]*/g)).toEqual(['localStorage.getItem(key)?.length ?? 0)'])
     expect(text).not.toMatch(/indexedDB\.|location\.search/)
     // This tab's storage holds only the capture's own keys.
     expect([...text.matchAll(/sessionStorage\.(?:get|set|remove)Item\(([A-Z_]+)/g)].every((m) => ['DIAG_LAST_KEY', 'DIAG_FOUND_KEY'].includes(m[1]))).toBe(true)
@@ -176,6 +176,20 @@ describe('nothing private leaves', () => {
     expect(text).toMatch(/new URL\(location\.href\)/)
     expect(text.match(/e\.data\b[^;\n]*/g)!.every((l) => /\.length/.test(l))).toBe(true)
     expect(text).not.toMatch(/JSON\.parse/)
+  })
+})
+
+describe('the biggest localStorage keys', () => {
+  const NSEC = 'nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5'
+  const HEX = 'cfe6b74cab677b52d850ac659d54266a3a4d7bb48270234d2fec836881d0a5f7'
+  it('lists the largest first, at most ten, by name and size only, a pubkey in a name masked', () => {
+    const entries: Array<[string, number]> = Array.from({ length: 14 }, (_, i) => [`onosendai:k${i}`, i * 10])
+    entries.push([`onosendai:chain:${HEX}`, 3_000_000], [`onosendai:${NSEC}`, 5])
+    const top = largestKeys(entries)
+    expect(top).toHaveLength(10)
+    expect(top[0]).toEqual(['onosendai:chain:#', 3_000_000])
+    expect(top.map((r) => r[1])).toEqual([3_000_000, 130, 120, 110, 100, 90, 80, 70, 60, 50])
+    expect(JSON.stringify(largestKeys(entries, 20))).not.toMatch(/nsec1|[0-9a-f]{16}/i)
   })
 })
 

@@ -115,7 +115,7 @@ import { HOP_AXIS_BUDGET_MS, projectCantorMs, recommendedHopHeight, useCalibrati
 import { moveDirection, type MoveName } from '../lib/moves'
 import { clampAxis, stepFor, type AxisDirection, type AxisName, type Position } from '../lib/space'
 import { WORLD_DOWN, atHeight, heightOf, raised, sameDir, upOf, viewDown } from '../lib/walkDown'
-import { MAX_COMPUTE_HEIGHT, dropWalkLanes, samePosition, setWalkLaneHooks, useCyberspace } from './useCyberspace'
+import { MAX_COMPUTE_HEIGHT, checkWalkLanes, dropWalkLanes, samePosition, setWalkLaneHooks, useCyberspace } from './useCyberspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { standing, walkStep, type WalkStep } from './walkStep'
 import { planWalkMove, walkHeading, type Stepper, type WalkHeading } from '../lib/walkSlide'
@@ -1245,6 +1245,9 @@ function pump(): void {
 }
 
 function pumpOnce(): void {
+  if (!useCyberspace.getState().walking) return
+  // Lanes something else ended (an X, a HOSAKA flow) are dropped here, and the walk hears of it.
+  checkWalkLanes()
   const walk = useWalk.getState()
   const cs = useCyberspace.getState()
   if (!cs.walking) return
@@ -1306,6 +1309,10 @@ setWalkLaneHooks({
   },
   failed: (message) => {
     if (useCyberspace.getState().walking) useWalk.getState().stop(message)
+  },
+  // A respawn or a switch ended them: the walk goes back to the head without a word.
+  dropped: () => {
+    if (useCyberspace.getState().walking && useWalk.getState().handed > 0) useWalk.getState().stop()
   },
 })
 

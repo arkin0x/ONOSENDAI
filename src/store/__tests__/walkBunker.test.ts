@@ -62,13 +62,17 @@ vi.mock('../../lib/relay', async (orig) => {
   }
 })
 /** The relays' head confirmation: a round trip of `ms`, answering that nothing is newer. */
-const relay = vi.hoisted(() => ({ ms: 0, asked: 0 }))
+const relay = vi.hoisted(() => ({ ms: 0, asked: 0, out: 0, mostOut: 0 }))
 vi.mock('../../lib/chains', async (orig) => ({
   ...(await orig() as object),
   fetchChainEvents: vi.fn(async () => []),
-  confirmChainEvents: vi.fn(async () => {
-    relay.asked++
-    if (relay.ms > 0) await new Promise((r) => setTimeout(r, relay.ms))
+  confirmChainEvents: vi.fn(async (_pk: string, _spawn: string | undefined, _have: unknown[], opts: { reconnect?: boolean } = {}) => {
+    // A move's head confirmation (confirmHead) says whether it reconnects; the publisher's own look does not, and is not counted.
+    const move = 'reconnect' in opts
+    if (move) { relay.asked++; relay.out++; relay.mostOut = Math.max(relay.mostOut, relay.out) }
+    try {
+      if (relay.ms > 0) await new Promise((r) => setTimeout(r, relay.ms))
+    } finally { if (move) relay.out-- }
     return []
   }),
 }))
@@ -269,6 +273,8 @@ beforeEach(async () => {
   Object.assign(bunker, { ms: 0, jitter: 0, seed: 1, out: 0, mostOut: 0, asked: 0, declineAt: 0, alterAt: 0, altered: '', answered: [] })
   relay.ms = 0
   relay.asked = 0
+  relay.out = 0
+  relay.mostOut = 0
   vi.spyOn(performance, 'now').mockImplementation(() => clock)
   walkKeysReleased()
   useWalk.getState().exit()
@@ -323,12 +329,47 @@ describe('fluid WALK with a bunker (arkinox, 2026-11-18: "I can\'t explore for m
         expect(r.at15, `${signMs} ms ${name}`).toBeNull()
         if (name !== 'straight') expect(bunker.mostOut, `${signMs} ms ${name}`).toBeGreaterThan(1)
         expect(bunker.mostOut).toBeLessThanOrEqual(WALK_SIGNS_OUT)
+        // One head confirmation at a time: a reconnect never cuts another's short.
+        expect(relay.mostOut).toBe(1)
         chainHolds()
         reset()
       }
     }
     if (process.env.WALK_BUNKER_TABLE) (await import('node:fs')).writeFileSync(process.env.WALK_BUNKER_TABLE, table.join('\n') + '\n')
   }, 120_000)
+
+  it('a slow relay (400 ms a head confirmation) with an 800 ms bunker still stays under the slowdown', async () => {
+    const r = await walkWith(800, 0.3, (ms) => face(Math.floor(ms / 400) % 2 ? 45 : -45), 20_000, 400)
+    if (process.env.WALK_BUNKER_TABLE) (await import('node:fs')).appendFileSync(process.env.WALK_BUNKER_TABLE, `| 800 ms, relay 400 ms | zigzag | ${r.most} | ${r.at15 ?? '-'} | ${r.at20 ?? '-'} | ${bunker.mostOut} |\n`)
+    expect(r.at15).toBeNull()
+    expect(r.most).toBeLessThan(FLUID_EASE_FROM)
+    chainHolds()
+  }, 60_000)
+
+  it('an X (cancel) while steps are on their way stops the walk cleanly: nothing stuck, and it walks on after', async () => {
+    bunker.ms = 800
+    relay.ms = 150
+    useCalibration.setState({ cantorMsByHeight: PHONE })
+    floorUnder(S().position)
+    useWalk.getState().setGravity(true)
+    useWalk.getState().enter()
+    useCyberspace.setState({ screenAxes: AXES })
+    await frame()
+    await wallsBuilt()
+    walkKeyDown(key('KeyW'))
+    for (let t = 0; t < 3000; t += 16) { face(Math.floor(t / 400) % 2 ? 45 : -45); await frame() }
+    expect(useWalk.getState().handed).toBeGreaterThan(0)
+    S().cancel()
+    for (let t = 0; t < 3000; t += 16) await frame()
+    walkKeyUp('KeyW')
+    expect(useWalk.getState()).toMatchObject({ queue: [], handed: 0, running: null })
+    expect(S().proof.status).not.toBe('computing')
+    chainHolds()
+    reset()
+    const r = await walkWith(800, 0.3, (ms) => face(Math.floor(ms / 400) % 2 ? 45 : -45), 3000)
+    expect(r.landed).toBeGreaterThan(0)
+    chainHolds()
+  }, 60_000)
 
   it('replies that come back out of order go on the chain, and to the relays, in chain order', async () => {
     // 800 ms give or take 90%: a later request often answers first.

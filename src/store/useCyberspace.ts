@@ -3822,7 +3822,8 @@ let walkHopId: number | null = null
  * | Stage | How many at once | Waits for |
  * |---|---|---|
  * | proof | one (one worker) | the step before it to be proved: its event, and so its id, is known then, before it is signed (an id is the hash of the unsigned event, NIP-01) |
- * | head confirmation and signature | up to WALK_SIGNS_OUT | its own proof only; each signature still has its own fresh look at the relays first (confirmHead, arkinox 2026-10-08) |
+ * | head confirmation | one at a time, in chain order | its own proof; each signature still has its own fresh look at the relays first (confirmHead, arkinox 2026-10-08), and one look at a time keeps a slow relay's reconnect from knocking down the others |
+ * | signature | up to WALK_SIGNS_OUT | its head confirmation, asked the moment it answers |
  * | onto the chain, then the relays | one, in chain order | its signature, and the step before it on the chain |
  *
  * So a step is proved from where the one before it will land and names that
@@ -3830,8 +3831,9 @@ let walkHopId: number | null = null
  * overlaps. A signature that comes back before an earlier one waits for it.
  * A signed event whose id is not the one its successor was proved from (a
  * signer that changed it) is never kept, and the walk stops. Any step that
- * does not land stops the walk: what was signed before it, in order, stays on
- * the chain, and nothing after it is kept or sent. The chain rules, the
+ * does not land stops the walk: the steps before it that are already signed
+ * land, in order (they are real moves); steps still waiting on the signer are
+ * dropped with it, and nothing after it is kept or sent. The chain rules, the
  * events and what is published are unchanged.
  *
  * Only plain hops within this machine's ceiling go down lanes; a route
@@ -3853,6 +3855,8 @@ interface WalkLane {
   prevCreatedAt: number
   /** The event exactly as it is signed, once proved, and what it leaves the chain at: its id, its C and its created_at (a still lane's are the lane before it's). */
   template: EventTemplate | null
+  /** The key it is signed by: the one signing when it was proved. */
+  by: string
   id: string | null
   coordHex: string | null
   createdAt: number
@@ -3878,6 +3882,8 @@ const lanes = {
   plane: 0 as Plane,
   proving: false,
   signsOut: 0,
+  /** The head confirmation in hand, if any: the next lane's waits for it (one look at the relays at a time). */
+  confirming: Promise.resolve() as Promise<void>,
   /** The head the front lane moves from: your head when the first lane was handed, then each landed lane's event. */
   baseHead: '',
   /** The last landed step's proof, for the panel once the lanes are empty. */
@@ -3885,7 +3891,7 @@ const lanes = {
 }
 
 /** How the walk hears of its lanes (store/useWalk.ts): one landed, in order, or the walk has to stop with these words. */
-export interface WalkLaneHooks { landed: () => void; failed: (message: string) => void }
+export interface WalkLaneHooks { landed: () => void; failed: (message: string) => void; dropped: () => void }
 let laneHooks: WalkLaneHooks | null = null
 export function setWalkLaneHooks(hooks: WalkLaneHooks | null): void {
   laneHooks = hooks
@@ -3897,6 +3903,7 @@ function dropLanes(): void {
   lanes.epoch++
   lanes.proving = false
   lanes.signsOut = 0
+  lanes.confirming = Promise.resolve()
 }
 
 /**
@@ -3904,6 +3911,13 @@ function dropLanes(): void {
  * go, a proof of theirs still computing is stopped, and any answer still on
  * its way for them is ignored. Nothing they signed and landed is touched.
  */
+/** Installed by the store: the lanes look whether something else ended them (lanesAlive), and if so the walk hears of it. */
+let walkLanesCheck: () => void = () => {}
+/** Ask the lanes whether they are still the walk's (store/useWalk.ts pump, on every store change while walking). */
+export function checkWalkLanes(): void {
+  walkLanesCheck()
+}
+
 export function dropWalkLanes(): void {
   if (lanes.list.length > 0) {
     if (lanes.proving) cancelProof()
@@ -3912,6 +3926,10 @@ export function dropWalkLanes(): void {
   dropLanes()
 }
 
+/** Said when the lanes are ended by something other than the walk (an X, a HOSAKA flow, a retired old-format hop). */
+export const WALK_LANES_ENDED_MESSAGE = 'WALK stopped: the steps on their way were cancelled. Walk on from where you are.'
+/** Said when a step would be signed differently from how the steps after it were proved (another signer, the tutorial's broadcast hold turned on). */
+export const WALK_STEP_CHANGED_MESSAGE = 'WALK stopped: a step changed while it waited for your signer, so it was not signed. Walk on from where you are.'
 /** Said when a signer returns a different event than the one asked for: the steps after it were proved from the one asked for. */
 export const WALK_SIGNED_OTHER_MESSAGE = 'WALK stopped: your signer returned a different event than the step asked for, so it was not kept.'
 
@@ -5509,8 +5527,18 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    */
   const lanesAlive = (): boolean => {
     if (lanes.list.length === 0) return true
-    if (requestId === lanes.ownId && chainEpoch === lanes.chainEpoch && get().identity.pubkey === lanes.pubkey && get().walking) return true
+    const sameChain = chainEpoch === lanes.chainEpoch && get().identity.pubkey === lanes.pubkey
+    if (requestId === lanes.ownId && sameChain && get().walking) return true
+    // Ended by something else (an X, a HOSAKA flow, a retired old-format
+    // hop, a respawn or a switch): the lanes go, a proof of theirs is
+    // stopped, a 'computing' only they held is cleared, and the walk hears
+    // of it, so it never waits on lanes that are gone.
+    if (lanes.proving) cancelProof()
     dropLanes()
+    const s = get()
+    if (s.proof.status === 'computing' && s.plan === null && s.cloud.status === 'idle') set({ pendingTarget: null, proof: IDLE_PROOF })
+    const message = sameChain && s.walking ? WALK_LANES_ENDED_MESSAGE : null
+    queueMicrotask(() => { if (message) laneHooks?.failed(message); else laneHooks?.dropped() })
     return false
   }
 
@@ -5595,7 +5623,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         foldDeferred()
         const refusal = laneRefusal() ?? (get().prevEventId !== lane.prevId ? headMovedWords(get().events, 'Re-aim from where you are now.') : null)
         if (refusal) { if (fail) failLanes(refusal, false); return }
+        const epoch = lanes.epoch
         landLane(lane)
+        // The landing's own store change can stop the walk (its subscribers run inside set).
+        if (epoch !== lanes.epoch) return
       }
       lanes.list.shift()
       if (lanes.list.length === 0 && get().proof.status === 'computing') set({ pendingTarget: null, proof: lanes.lastDone ? doneProof(lanes.lastDone) : IDLE_PROOF })
@@ -5621,13 +5652,28 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // The head is confirmed immediately before every signature (arkinox,
       // 2026-10-08), this lane's own look, while the lanes before it wait on
       // theirs: a move another device made from your head stops the walk.
-      const unconfirmed = await confirmHead(() => {})
+      // One look at a time, in chain order: a look that has to reconnect
+      // drops every relay socket, which would cut the others' looks short.
+      const before = lanes.confirming
+      let done = (): void => {}
+      lanes.confirming = new Promise<void>((r) => { done = r })
+      let unconfirmed: Awaited<ReturnType<typeof confirmHead>>
+      try {
+        await before
+        if (!live()) return
+        unconfirmed = await confirmHead(() => {})
+      } finally {
+        done()
+      }
       if (!live()) return
-      if (unconfirmed === STALE_CONFIRMATION) { dropLanes(); return }
+      if (unconfirmed === STALE_CONFIRMATION) { if (lanesAlive()) failLanes(HEAD_UNCONFIRMED_MESSAGE, false); return }
       if (unconfirmed) { failLanes(unconfirmed); return }
       foldDeferred()
       const refusal = laneRefusal() ?? (get().prevEventId !== lanes.list[0]?.prevId ? headMovedWords(get().events, 'Re-aim from where you are now.') : null)
       if (refusal) { failLanes(refusal, false); return }
+      // Signed as it was proved, by the key it was proved for: else its id,
+      // which the steps after it name, would not be this event's.
+      if (currentSigner.pubkey !== lane.by || withNoBroadcast(lane.template!, currentSigner.pubkey) !== lane.template) { failLanes(WALK_STEP_CHANGED_MESSAGE); return }
       let event: NostrEvent
       try {
         event = await get().signEvent(lane.template!)
@@ -5670,7 +5716,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // proof (headCheckedHere): the saved chain's signatures, another tab's move.
     const here = await headCheckedHere()
     if (epoch !== lanes.epoch || !lanesAlive()) return
-    if (here === STALE_CONFIRMATION) { dropLanes(); return }
+    if (here === STALE_CONFIRMATION) { lanes.proving = false; if (lanesAlive()) failLanes(HEAD_UNCONFIRMED_MESSAGE, false); return }
     if (here) { lanes.proving = false; failLanes(here); return }
     const s = get()
     // Another tab's move just taken in, or anything else that moved your
@@ -5754,6 +5800,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // alone), so its id now is its id once signed, under the key that signs.
     const by = currentSigner.pubkey
     const signed = attributed(withNoBroadcast(template, by))
+    lane.by = by
     lane.template = signed
     lane.id = getEventHash({ ...signed, pubkey: by })
     lane.coordHex = positionHex(lane.to, lanes.plane)
@@ -5772,6 +5819,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * cannot go down a lane (a route, a first move, a game, a chain choice),
    * so once the lanes are empty it goes the old way (walkTo).
    */
+  walkLanesCheck = () => { lanesAlive() }
+
   const walkLane = (to: Position): 'taken' | 'full' | 'serial' => {
     lanesAlive()
     const s = get()
@@ -5800,7 +5849,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     lanes.list.push({
       from: { ...from }, to: { ...to }, still, state: 'waiting', proofId: null, prevId: null, prevCoordHex: null, prevCreatedAt: 0,
-      template: null, id: null, coordHex: null, createdAt: 0, msg: null, event: null, signing: null,
+      template: null, by: '', id: null, coordHex: null, createdAt: 0, msg: null, event: null, signing: null,
     })
     // Never inside the hand-off itself: a still lane could land at once, and
     // the walk counts this one as handed only once this returns.

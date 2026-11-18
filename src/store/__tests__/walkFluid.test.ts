@@ -3,6 +3,9 @@
  * lib/fluidWalk.ts, store/useWalk.ts fluidCross):
  *
  * - a hold accelerates to FLUID_MAX_SPEED and a let go slows to rest; a tap nudges;
+ * - straight and diagonal, keys or pad, walk at the same FLUID_MAX_SPEED, and
+ *   with phone proof times a walk that turns, zigzags or jumps never reaches
+ *   the slowdown (arkinox, 2026-11-18: "my walk speed seems slow");
  * - the jump still rises 5 and the double jump 3;
  * - a wall at an angle is slid along, and the anchor never enters it;
  * - a ramp is walked up standing on it, a step at a time;
@@ -65,6 +68,7 @@ import { eventsAhead } from '../walkAhead'
 import { canonicalQuaternion, type Position, type ViewAxes } from '../../lib/space'
 import { walkKeyDown, walkKeyUp, walkKeysReleased } from '../../hooks/useKeyboard'
 import { rampFixture } from '../fixtures/rampFixture'
+import { holdEnd, holdStart } from '../walkHold'
 
 /** Right +X, up +Y, toward the camera +Z: 'away' walks -Z. */
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } }
@@ -224,11 +228,11 @@ describe('acceleration', () => {
     expect(len(fluidState().v)).toBeCloseTo(FLUID_MAX_SPEED, 6)
     frames(500)
     expect(len(fluidState().v)).toBeLessThanOrEqual(FLUID_MAX_SPEED + 1e-9)
-    // About 9 steps a second, -Z, straight.
+    // About FLUID_MAX_SPEED steps a second (12.5), -Z, straight.
     const at = rel(start)
     expect(at[0]).toBe(0)
-    expect(at[2]).toBeLessThan(-8)
-    expect(at[2]).toBeGreaterThan(-12)
+    expect(at[2]).toBeLessThan(-FLUID_MAX_SPEED * 0.9)
+    expect(at[2]).toBeGreaterThan(-FLUID_MAX_SPEED * 1.3)
     up('KeyW')
     const before = rel(start)[2] + fluidState().frac.z
     frames(250)
@@ -246,6 +250,112 @@ describe('acceleration', () => {
     expect(len(fluidState().v)).toBe(0)
     expect(rel(start)).toEqual([0, 0, -1])
     expect(fluidState().frac.z).toBeGreaterThan(-0.1)
+  })
+})
+
+describe('speed (arkinox, 2026-11-18: "my walk speed seems slow ... maybe faster when i go diagonal")', () => {
+  /** Gibsons a second walked on flat ground under gravity, over 2 s at full speed, holding what `hold` holds, in frames of `ms`. */
+  async function topSpeed(hold: () => void, release: () => void, deg: number, ms = 16): Promise<number> {
+    world(start, [boxes('Floor', 'all', [[[-120, -1, -120], [120, 0, 120]]]), [0, -1, 0]])
+    walk(true)
+    await wallsBuilt()
+    face(deg)
+    const at = (): V3 => { const r = rel(start); const f = fluidState().frac; return [r[0] + f.x, r[1] + f.y, r[2] + f.z] }
+    hold()
+    frames(600, ms)
+    const a = at()
+    const t0 = clock
+    frames(2000, ms)
+    const b = at()
+    release()
+    return Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / ((clock - t0) / 1000)
+  }
+
+  it('straight and diagonal walk at the same speed, FLUID_MAX_SPEED, from the keys or the pad, at 60 and 30 frames a second', async () => {
+    const keys = (...codes: string[]) => [() => codes.forEach(down), () => codes.forEach(up)] as const
+    const pad = (fwd: -1 | 0 | 1, strafe: -1 | 0 | 1) => [
+      () => { holdStart('pad:forward', { fwd, strafe: 0, vert: 0 }); if (strafe) holdStart('pad:right', { fwd: 0, strafe, vert: 0 }) },
+      () => { holdEnd('pad:forward'); holdEnd('pad:right') },
+    ] as const
+    const cases: Array<[string, readonly [() => void, () => void], number, number]> = [
+      ['W', keys('KeyW'), 0, 16],
+      ['W+D', keys('KeyW', 'KeyD'), 0, 16],
+      ['W facing 45 degrees', keys('KeyW'), 45, 16],
+      ['W+A facing 30 degrees', keys('KeyW', 'KeyA'), 30, 16],
+      ['pad forward', pad(1, 0), 0, 16],
+      ['pad forward and right', pad(1, 1), 0, 16],
+      ['W at 30 fps', keys('KeyW'), 0, 33],
+      ['W+D at 30 fps', keys('KeyW', 'KeyD'), 0, 33],
+    ]
+    for (const [name, [hold, release], deg, ms] of cases) {
+      const v = await topSpeed(hold, release, deg, ms)
+      expect(v, name).toBeGreaterThan(FLUID_MAX_SPEED * 0.99)
+      expect(v, name).toBeLessThan(FLUID_MAX_SPEED * 1.01)
+      walkKeysReleased()
+      useWalk.getState().exit()
+      await useCyberspace.getState().respawn()
+      useCyberspace.getState().cancel()
+      start = { ...useCyberspace.getState().position }
+      resetFluid()
+    }
+    // 12.5 gibsons a second: 37.5% faster than the 9.09 it was.
+    expect(FLUID_MAX_SPEED).toBe(12.5)
+  })
+
+  /**
+   * Walk 8 s holding W on a wide floor while `drive` steers, a phone proving
+   * each move in `proofMs` one after another: the most events it got ahead.
+   */
+  async function aheadWithProofs(proofMs: number, drive: (ms: number) => void): Promise<number> {
+    world(start, [boxes('Floor', 'all', [[[-200, -1, -200], [200, 0, 200]]]), [0, -1, 0]])
+    walk(true)
+    await wallsBuilt()
+    face(0)
+    down('KeyW')
+    const askedAt: number[] = []
+    let landed = 0
+    let lastLand = clock
+    let most = 0
+    const t0 = clock
+    while (clock - t0 < 8000) {
+      drive(clock - t0)
+      frame(16)
+      // The walk asks for a proof a microtask or two after the move.
+      await Promise.resolve(); await Promise.resolve()
+      while (askedAt.length < posted.length) askedAt.push(clock)
+      if (landed < posted.length && clock >= Math.max(askedAt[landed], lastLand) + proofMs) {
+        await useCyberspace.getState().applyProofMessage(done(posted[landed]))
+        landed++
+        lastLand = clock
+        await vi.waitFor(() => undefined)
+      }
+      most = Math.max(most, eventsAhead())
+    }
+    up('KeyW')
+    return most
+  }
+
+  it('with phone proof times (300 ms a move), a walk that turns, zigzags or keeps jumping stays well under the slowdown', async () => {
+    let jumps = -1
+    const walks: Array<[string, (ms: number) => void]> = [
+      ['turning 120 degrees a second', (ms) => face((ms / 1000) * 120)],
+      ['zigzag, 45 degrees each way every 0.4 s', (ms) => face(Math.floor(ms / 400) % 2 ? 45 : -45)],
+      ['a running jump every 1.2 s', (ms) => { const k = Math.floor(ms / 1200); if (k !== jumps) { jumps = k; down('Space'); up('Space') } }],
+    ]
+    for (const [name, drive] of walks) {
+      const most = await aheadWithProofs(300, drive)
+      // Measured at most 4, as at the old 9.09 a second (700 ms proofs, a slow phone: 13 to 15, against 11 to 12); the slowdown starts past FLUID_EASE_FROM (14).
+      expect(most, name).toBeLessThanOrEqual(6)
+      expect(most, name).toBeLessThan(FLUID_EASE_FROM)
+      walkKeysReleased()
+      useWalk.getState().exit()
+      posted.length = 0
+      await useCyberspace.getState().respawn()
+      useCyberspace.getState().cancel()
+      start = { ...useCyberspace.getState().position }
+      resetFluid()
+      face(0)
+    }
   })
 })
 
@@ -553,7 +663,8 @@ describe('a slow device (frames longer than WALK_SETTLE_MS)', () => {
   })
 
   it('with proofs landing 2 s late: at most 3 events ahead (11 before the fix), the walker never goes back, and the walk ends on the chain', async () => {
-    world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]])
+    // Wide enough for both walks at FLUID_MAX_SPEED: off its edge the walker falls.
+    world(start, [boxes('Floor', 'all', [[[-80, -1, -80], [80, 0, 80]]]), [0, -1, 0]])
     walk(true)
     face(86)
     let landed = 0

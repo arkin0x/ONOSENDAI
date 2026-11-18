@@ -14,11 +14,11 @@
  *
  * | Number | Value | Why |
  * |---|---|---|
- * | FLUID_MAX_SPEED | 9 steps/s | today's held key: one step every WALK_HOLD_MS (110 ms). Held distances and running jumps stay what they were |
- * | FLUID_ACCEL | 45 steps/s^2 | full speed in 0.2 s: quick, but you feel it pick up |
- * | FLUID_DECEL | 60 steps/s^2 | stops from full speed in 0.15 s, coasting about 0.7 of a step |
- * | FLUID_AIR_ACCEL / FLUID_AIR_DECEL | 30 / 8 steps/s^2 | steering in the air is softer, and a running jump keeps its speed |
- * | FLUID_NUDGE_MS | 140 ms | a tap pushes this long: about three quarters of a step, into the next gibson from the middle of one |
+ * | FLUID_MAX_SPEED | 12.5 steps/s | the one number for how fast WALK goes (arkinox, 2026-11-18: "my walk speed seems slow ... maybe we should increase it"); it was 9.09, the step WALK's held key (one step every WALK_HOLD_MS, 110 ms) |
+ * | FLUID_ACCEL | FLUID_MAX_SPEED / 0.2 s (62.5 steps/s^2) | full speed in 0.2 s: quick, but you feel it pick up |
+ * | FLUID_DECEL | FLUID_MAX_SPEED / 0.15 s (83 steps/s^2) | stops from full speed in 0.15 s, coasting under a step (0.94) |
+ * | FLUID_AIR_ACCEL / FLUID_AIR_DECEL | 30 / 8 steps/s^2 | steering in the air is softer, and a running jump keeps its speed (so it goes as much further as the walk is faster) |
+ * | FLUID_NUDGE_MS | 140 ms | a tap pushes this long: about one step, into the next gibson, stopping near its middle |
  *
  * A step is 2^zoom gibsons, the length a press walked: at the usual 2^0 it
  * is one gibson.
@@ -26,14 +26,27 @@
 
 import type { AxisDirection, AxisName, Position } from './space'
 
-/** The walking speed, in steps per second: one step every 110 ms, as a held key walked (store/walkHold.ts WALK_HOLD_MS). */
-export const FLUID_MAX_SPEED = 1000 / 110
+/**
+ * The walking speed, in steps per second, straight or diagonal alike (the
+ * way to go is never longer than 1: wishOf). The one number to change for a
+ * faster or slower walk: the pick-up, the stop and the drawn feet's drop
+ * (store/walkFluid.ts FOOT_DROP_SPEED) follow it, so the walk feels the same,
+ * only faster.
+ *
+ * 12.5 since 2026-11-18 (arkinox: "my walk speed seems slow ... maybe we
+ * should increase it"), 37.5% faster than the 9.09 it was (1000 / 110, the
+ * step WALK's held key, one step every store/walkHold.ts WALK_HOLD_MS).
+ * Measured with phone proof times (300 ms a proof), a walk that turns or
+ * zigzags stays well under FLUID_EASE_FROM events ahead, so the slowdown
+ * never comes into a normal walk (store/__tests__/walkSpeed.test.ts).
+ */
+export const FLUID_MAX_SPEED = 12.5
 
 /** How fast the walk picks up, in steps per second per second: full speed in 0.2 s. */
-export const FLUID_ACCEL = 45
+export const FLUID_ACCEL = FLUID_MAX_SPEED / 0.2
 
-/** How fast it slows with nothing held, in steps per second per second: from full speed to a stop in about 0.15 s. */
-export const FLUID_DECEL = 60
+/** How fast it slows with nothing held, in steps per second per second: from full speed to a stop in 0.15 s. */
+export const FLUID_DECEL = FLUID_MAX_SPEED / 0.15
 
 /** Steering in the air: softer than on the ground. */
 export const FLUID_AIR_ACCEL = 30

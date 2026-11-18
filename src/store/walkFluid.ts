@@ -248,11 +248,12 @@ export function tickFluid(now: number = performance.now()): boolean {
 
 /**
  * How fast the drawn feet may come down onto a lower surface, in steps a
- * second: faster than walking down the steepest slope the stair step-up
- * climbs (STEP_UP_MAX a step at FLUID_MAX_SPEED, about 18), so a slope is
- * followed exactly and only a ledge's drop is eased, over a few frames.
+ * second: a tenth faster than walking down the steepest slope the stair
+ * step-up climbs (STEP_UP_MAX a step at FLUID_MAX_SPEED: 25 at 12.5 steps a
+ * second, so 27.5), so a slope is followed exactly and only a ledge's drop is
+ * eased, over a few frames. It was 20 at the old 9.09 steps a second.
  */
-export const FOOT_DROP_SPEED = 20
+export const FOOT_DROP_SPEED = Number(STEP_UP_MAX) * FLUID_MAX_SPEED * 1.1
 
 /** How long the walls under the walker are kept before they are listed again, in ms (as scene/walkEyeRig.ts keeps the eye's). */
 const FOOT_ITEMS_MS = 300

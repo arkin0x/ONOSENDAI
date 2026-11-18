@@ -47,7 +47,7 @@ const sk = generateSecretKey()
 await page.addInitScript(([pk, ns]) => {
   try {
     localStorage.setItem('onosendai:live', '0')
-    localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns }))
+    { localStorage.setItem('onosendai:nsec', ns); localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns })) }
   } catch { /* the app falls back */ }
 }, [getPublicKey(sk), nip19.nsecEncode(sk)])
 const errors = []

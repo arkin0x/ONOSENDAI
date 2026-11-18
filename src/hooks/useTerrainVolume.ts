@@ -22,7 +22,7 @@ import {
   onTerrainData, readKey, requestRun,
 } from '../lib/terrainCache'
 import { clearRunQueue } from '../lib/workers'
-import { UNKNOWN } from '../workers/terrain.worker'
+import { UNKNOWN } from '../lib/terrainUnknown'
 import { settleWait } from './useViewWindow'
 import { flyDir } from '../lib/viewFly'
 import type { Position } from '../lib/space'

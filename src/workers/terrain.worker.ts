@@ -14,6 +14,7 @@
 
 import { terrainK, type Plane } from 'cyberspace-core'
 import type { AxisName } from '../lib/space'
+import { UNKNOWN } from '../lib/terrainUnknown'
 
 export interface RunRequest {
   id: number
@@ -36,9 +37,6 @@ export interface RunResponse {
 }
 
 const AXIS_MAX = (1n << 85n) - 1n
-
-/** Outside the universe. A renderer cannot tell this from "not yet known". */
-export const UNKNOWN = 255
 
 self.onmessage = (event: MessageEvent<RunRequest>) => {
   const { id, originX, originY, originZ, axis, step, count, plane } = event.data

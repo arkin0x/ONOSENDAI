@@ -9,7 +9,11 @@
  *   - the lid: the closed chest cut at the lid (lib/looks.ts splitAt), the
  *     lid turning up and back on its hinge, ease-out over LID_MS;
  *   - the swap: the open look in its place once the lid is up, under the
- *     glints, so the hollow and the gold appear as the lid arrives;
+ *     glints, so the hollow and the gold appear as the lid arrives. The open
+ *     look is the chest's own resting mesh (ChestLooks RestLook), mounted and
+ *     hidden from the moment OPEN begins, so it is built and its parts fetched
+ *     before it shows; it shows from LID_MS (restShowsFrom), the frame the lid
+ *     stops being drawn, so there is never a frame with neither;
  *   - the glints: a few dozen points of light at the gold inside, each
  *     twinkling on its own clock, drawn with the shared glow sprite
  *     (lib/glow.ts). Points are seen by the scene's bloom and faces are not
@@ -19,8 +23,10 @@
  *     their motion worked in the vertex shader, as BurstLines works its.
  *
  * The calm path (reduced motion): the closed look fades into the open one,
- * nothing turns, glints or rises. A look with no lid or no open look
- * crossfades too: the hinge is only ever applied to the built-in TREASURE.
+ * nothing turns, glints or rises. A look with no lid crossfades too: the
+ * hinge is only ever applied to the built-in TREASURE. A chest with no open
+ * look plays none of this (lib/looks.ts swapsOnOpen): its one model stays
+ * drawn as it is.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -65,6 +71,21 @@ export function meshFrame(frame: LookFrame | undefined, part: string): LookFrame
   return frame?.budget ? { ...frame, budget: { ...frame.budget, key: `${frame.budget.key}:${part}` } } : frame ?? {}
 }
 
+/**
+ * When the chest's resting mesh (the open look, ChestLooks RestLook) shows
+ * during an opening: at LID_MS on the lid's path, the moment LidOpening stops
+ * drawing the closed chest and its lid; never on a crossfade, which draws the
+ * open look itself until it ends. performance.now() time, or null.
+ */
+export function restShowsFrom(look: Pick<Look, 'lid' | 'open'>, ceremony: { at: number; calm: boolean }): number | null {
+  return !ceremony.calm && look.lid && look.open ? ceremony.at + LID_MS : null
+}
+
+/** Whether the closed chest and its turning lid are drawn, this long into an opening: until the resting open look shows (restShowsFrom). */
+export function lidPartsShown(elapsed: number): boolean {
+  return !swappedAt(elapsed)
+}
+
 /** A chest opening, drawn in its look's frame. */
 export function ChestCeremony({ look, at, calm, frame }: Props): JSX.Element {
   const open = look.open ?? look.closed
@@ -78,22 +99,27 @@ export function ChestCeremony({ look, at, calm, frame }: Props): JSX.Element {
   )
 }
 
-/** The closed chest with its lid turning, then the open look in its place. */
-function LidOpening({ look, at, frame }: { look: Look; at: number; frame?: LookFrame }): JSX.Element {
+/** The closed chest with its lid turning, until the open look (the chest's resting mesh) takes its place at LID_MS. */
+function LidOpening({ look, at, frame }: { look: Look; at: number; frame?: LookFrame }): JSX.Element | null {
   const lid = look.lid!
   const turn = useRef<Group>(null)
   const [done, setDone] = useState(() => swappedAt(performance.now() - at))
+  const parts = useRef<Group>(null)
   useEffect(() => {
     if (done) return
     const t = window.setTimeout(() => setDone(true), Math.max(0, at + LID_MS - performance.now()))
     return () => window.clearTimeout(t)
   }, [done, at])
   useFrame(() => {
-    if (turn.current) turn.current.rotation.x = lidTurn(performance.now() - at, lid.hinge.angle)
+    const t = performance.now() - at
+    if (turn.current) turn.current.rotation.x = lidTurn(t, lid.hinge.angle)
+    // Hidden on the very frame the resting open look shows, ahead of the timer's re-render.
+    if (parts.current) parts.current.visible = lidPartsShown(t)
   })
-  if (done) return <ShardMesh shard={look.open!} world {...frame} />
+  // The open look is the resting mesh, shown from the same moment (restShowsFrom): drawn over for a frame at most, never missing one.
+  if (done) return null
   return (
-    <>
+    <group ref={parts}>
       <ShardMesh shard={lid.body} world clip={frame?.clip} />
       {/* The lid turns about its hinge line: moved so the hinge is the origin, turned, and moved back. */}
       <group position={[0, lid.hinge.y, lid.hinge.z]}>
@@ -103,7 +129,7 @@ function LidOpening({ look, at, frame }: { look: Look; at: number; frame?: LookF
           </group>
         </group>
       </group>
-    </>
+    </group>
   )
 }
 

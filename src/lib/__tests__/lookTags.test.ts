@@ -58,7 +58,7 @@ describe('which look tags count (shape first, spec #82)', () => {
     const payload = payloadOf(big)
     expect(payload.length).toBeGreaterThan(MAX_LOOK_BYTES)
     expect(lookTagsOf([['look', payload]]).closed).toBeNull()
-    expect(() => lookTags(big, null)).toThrow(/too large to wear/)
+    expect(() => lookTags(big, null)).toThrow(/over the size limit/)
     expect(lookRefusal(MAX_LOOK_BYTES)).toBeNull()
     expect(lookRefusal(MAX_LOOK_BYTES + 1)).toMatch(/16,384/)
   })

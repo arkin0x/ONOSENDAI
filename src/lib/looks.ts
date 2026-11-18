@@ -26,9 +26,15 @@
  * a look's bytes in every bag were what filled it). Another client fetches the
  * object. Here an exact match on one of the eight addresses is the bundled file,
  * with no fetch and no relay asked (expandDefault), and from there on a real
- * model: its walls, its lid and its drawing are as they were. Custom looks stay
- * inline, and an inline look of any shape is still read. A chest written before
- * looks has none, and wears TREASURE, or DOOR when it is a door.
+ * model: its walls, its lid and its drawing are as they were. A custom look of
+ * up to MAX_LOOK_BYTES stays inline, and an inline look of any shape is still
+ * read. A larger one is a SEALED LOOK (DECK-0004 §3.6, "A look sealed as its own
+ * event"): its own kind 33331 hidden object, sealed with the key of the bag that
+ * holds the chest exactly as a large shard is (lib/hidden.ts objectTemplateOf),
+ * and the tag carries a small wrapper placing it. lookOf opens it with that
+ * bag's key once it is fetched (sealedLookState), and draws the chest without
+ * that look until then. A chest written before looks has none, and wears
+ * TREASURE, or DOOR when it is a door.
  *
  * A door is a chest that carries a `door` tag (DECK-0004 §3.7). Every chest
  * without one is a chest.
@@ -41,6 +47,10 @@
  */
 
 import { MAX_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
+import { parseAddress } from 'sno-core/parts'
+import { hexToBytes, type NostrEvent } from './events'
+import { ALGO, decryptForRegion } from './shardCrypto'
+import { verifyOnce } from './verifiedSigs'
 import { keepOwnTable } from './carried'
 import { turnDirection, turnShard, type Turns } from './turn'
 import { chosenConstrainOf, withConstrain, type Constrain } from './walkConstrain'
@@ -238,19 +248,20 @@ function treasureLid(closed: ShardModel): Lid {
 export const LOOK_TAG = 'look'
 
 /**
- * The largest look ONOSENDAI reads or writes, in bytes of its payload: past
- * it, a shard is hidden by reference instead of inline (lib/hidden.ts
- * REFERENCE_THRESHOLD_BYTES), and a look rides inline in every rewrite of its
- * bag (§3.6 Size).
+ * The largest look ONOSENDAI carries in a `look` tag, in bytes of its payload:
+ * past it, a shard is hidden by reference instead of inline (lib/hidden.ts
+ * REFERENCE_THRESHOLD_BYTES), since a look in its tag rides in every rewrite of
+ * its bag (§3.6 Size). A larger look goes as a sealed look, up to the size limit
+ * of its own event (lib/sealedLooks.ts sealedLookLimit).
  */
 export const MAX_LOOK_BYTES = 16_384
 
 const bytesOf = (s: string): number => new TextEncoder().encode(s).length
 
-/** Why a look of this many bytes is refused, in words, or null when it fits. */
-export function lookRefusal(bytes: number): string | null {
-  if (bytes <= MAX_LOOK_BYTES) return null
-  return `This model is too large to wear: ${bytes.toLocaleString('en-US')} of ${MAX_LOOK_BYTES.toLocaleString('en-US')} bytes.`
+/** Why a look of this many bytes is refused against a size limit (MAX_LOOK_BYTES, a look in its tag, unless said), in words, or null when it fits. */
+export function lookRefusal(bytes: number, limit: number = MAX_LOOK_BYTES): string | null {
+  if (bytes <= limit) return null
+  return `This model is over the size limit: ${bytes.toLocaleString('en-US')} of ${limit.toLocaleString('en-US')} bytes.`
 }
 
 /** One look tag's payload read as a model, or null: malformed, over MAX_LOOK_BYTES, or refused by the format (DECK-0003 §1.9). */
@@ -328,6 +339,168 @@ function expandDefault(w: ShardModel): ShardModel | null {
 export interface LookTags {
   closed: ShardModel | null
   open: ShardModel | null
+  /** A sealed look among them is still being fetched, or could not be: read again once sealedLooksVersion moves. */
+  pending?: boolean
+}
+
+/**
+ * A SEALED LOOK (DECK-0004 §3.6, "A look sealed as its own event"): a look in
+ * its tag whose only content is one placement, at the origin, unturned, at its
+ * own size, of a kind 33331 event of the chest's own signer, which is a hidden
+ * object (DECK-0003 §3.4) sealed with the key of the bag that holds the chest.
+ * Its address when `model` has that shape and `author` signed the chest, else
+ * null. A built-in's address is never one (expandDefault has it). Whether the
+ * event is sealed or public is known only once it is fetched: a public one is an
+ * ordinary placement (a FEED look of your own object), drawn as before.
+ */
+export function sealedLookAddress(model: ShardModel, author: string | null): string | null {
+  if (!author || model.vertices.length !== 0 || model.faces.length !== 0 || model.objects) return null
+  const ref = model.refs?.length === 1 ? model.refs[0] : null
+  const part = model.parts?.length === 1 ? model.parts[0] : null
+  if (!ref || ref[0] !== 'a' || !part || part.ref !== 0 || part.step !== 0) return null
+  if (!part.at.every((n) => n === 0) || !part.turn.every((n) => n === 0)) return null
+  if (!Object.keys(part).every((k) => k === 'ref' || k === 'at' || k === 'turn' || k === 'step')) return null
+  const address = String(ref[1])
+  const a = parseAddress(address)
+  if (!a || a.kind !== 33331 || a.pubkey !== author || DEFAULT_LOOK_ADDRESSES.has(address)) return null
+  return address
+}
+
+/** Fetches the event a sealed look's ref names (store/useShards wires lib/references.ts resolveReference), or null. */
+export type SealedLookFetch = (ref: string[]) => Promise<NostrEvent | null>
+let sealedFetch: SealedLookFetch | null = null
+
+/** How sealed looks are fetched, or null to fetch none (each then reads as missing). */
+export function setSealedLookFetch(fetch: SealedLookFetch | null): void {
+  sealedFetch = fetch
+}
+
+/** Where one sealed look stands, under one bag key. */
+export type SealedLookState =
+  | { state: 'loading' }
+  | { state: 'ready'; model: ShardModel; bytes: number }
+  /** The event is a public object: the look is an ordinary placement. */
+  | { state: 'public' }
+  | { state: 'missing'; at: number }
+
+/**
+ * Sealed looks opened, by address and bag key, oldest first. Bounded as the
+ * parsed cache above is: at most PARSED_MAX of them, and at most
+ * SEALED_LOOKS_KEPT_BYTES of decrypted payload, the most PARSED_MAX looks of
+ * MAX_LOOK_BYTES each could hold there, so sealing a look holds no more than
+ * the cache of tags already could. Only the model is kept, never the payload.
+ * The newest is always kept: one sealed look's event is far under the budget
+ * (lib/sealedLooks.ts sealedLookLimit), and a Look read from it holds its model
+ * for as long as its chest's tags are held.
+ */
+const sealedLooks = new Map<string, SealedLookState>()
+const SEALED_LOOKS_MAX = 256
+export const SEALED_LOOKS_KEPT_BYTES = SEALED_LOOKS_MAX * MAX_LOOK_BYTES
+let sealedBudget = SEALED_LOOKS_KEPT_BYTES
+let sealedBytes = 0
+/** How long a sealed look that could not be had stays missing before it is asked for again: lib/references.ts keeps a miss as long. */
+const SEALED_RETRY_MS = 60_000
+let sealedVersion = 0
+const sealedListeners = new Set<() => void>()
+
+/** Moves whenever a sealed look lands or turns out missing: whoever drew a chest without one draws it again. */
+export function sealedLooksVersion(): number {
+  return sealedVersion
+}
+
+/** Hear of sealedLooksVersion moving (useSyncExternalStore); the return stops it. */
+export function onSealedLooks(listener: () => void): () => void {
+  sealedListeners.add(listener)
+  return () => { sealedListeners.delete(listener) }
+}
+
+function sizeOf(s: SealedLookState): number {
+  return s.state === 'ready' ? s.bytes : 0
+}
+
+function dropSealed(key: string): void {
+  const was = sealedLooks.get(key)
+  if (!was) return
+  sealedLooks.delete(key)
+  sealedBytes -= sizeOf(was)
+}
+
+function keepSealed(key: string, s: SealedLookState): void {
+  dropSealed(key)
+  sealedLooks.set(key, s)
+  sealedBytes += sizeOf(s)
+  for (const [k] of sealedLooks) {
+    if (k === key || (sealedLooks.size <= SEALED_LOOKS_MAX && sealedBytes <= sealedBudget)) break
+    dropSealed(k)
+  }
+}
+
+function sealedChanged(): void {
+  sealedVersion++
+  for (const l of sealedListeners) l()
+}
+
+/** Forget every sealed look opened, and say how many there were: on a change of identity, and in tests, where `budget` sets the byte bound. */
+export function forgetSealedLooks(budget: number = SEALED_LOOKS_KEPT_BYTES): number {
+  const n = sealedLooks.size
+  sealedLooks.clear()
+  sealedBytes = 0
+  sealedBudget = budget
+  return n
+}
+
+/** What the sealed look cache holds now: for tests and the memory checks. */
+export function sealedLooksKept(): { count: number; bytes: number } {
+  return { count: sealedLooks.size, bytes: sealedBytes }
+}
+
+/**
+ * One sealed look under one bag key: ready, public, missing, or loading, in
+ * which case it is fetched now (once) and opened with `keyHex`. The event must
+ * verify, be the one the address names, and open with the bag's key; it is then
+ * read as a look in its tag is (DECK-0003 §1.9), its table under its signer,
+ * who is the chest's (§3.6, Reading a sealed look). Anything else is missing:
+ * the chest is drawn without that look, and never as the preview.
+ */
+export function sealedLookState(address: string, keyHex: string, hint?: string): SealedLookState {
+  const key = `${address}|${keyHex}`
+  const held = sealedLooks.get(key)
+  if (held && !(held.state === 'missing' && Date.now() - held.at >= SEALED_RETRY_MS)) {
+    // Asked again: last out.
+    if (held.state !== 'loading') { sealedLooks.delete(key); sealedLooks.set(key, held) }
+    return held
+  }
+  if (!sealedFetch) return { state: 'missing', at: Date.now() }
+  const loading: SealedLookState = { state: 'loading' }
+  keepSealed(key, loading)
+  void openSealedLook(address, keyHex, hint, sealedFetch).then((next) => {
+    // Forgotten or asked again meanwhile: whatever holds the key now stands.
+    if (sealedLooks.get(key) !== loading) return
+    keepSealed(key, next)
+    sealedChanged()
+  })
+  return loading
+}
+
+async function openSealedLook(address: string, keyHex: string, hint: string | undefined, fetch: SealedLookFetch): Promise<SealedLookState> {
+  const missing: SealedLookState = { state: 'missing', at: Date.now() }
+  try {
+    const a = parseAddress(address)
+    if (!a) return missing
+    const ev = await fetch(['a', address, hint ?? ''])
+    if (!ev || ev.kind !== a.kind || ev.pubkey !== a.pubkey || ev.tags.find((t) => t[0] === 'd')?.[1] !== a.d || !verifyOnce(ev)) return missing
+    const enc = ev.tags.find((t) => t[0] === 'encrypted')
+    if (!enc) return { state: 'public' }
+    if (enc[1] !== ALGO || !enc[2]) return missing
+    const plain = await decryptForRegion(hexToBytes(keyHex), enc[2])
+    if (plain === null) return missing
+    let model: ShardModel | null = null
+    try { model = fromPayload(JSON.parse(plain), `look:${address}`) } catch { model = null }
+    if (!model) return missing
+    return { state: 'ready', model: ownedLook(model, a.pubkey), bytes: bytesOf(plain) }
+  } catch {
+    return missing
+  }
 }
 
 /**
@@ -341,9 +514,12 @@ export interface LookTags {
  * back to a later tag, and never a reason to drop the chest. `author` is the
  * chest's (or door's) verified signer, the only key whose carried objects
  * count (DECK-0003 §1.10, lib/carried.ts keepOwnTable); null, for an
- * unsigned chest, honours no key.
+ * unsigned chest, honours no key. `keyHex`, the key of the bag that holds the
+ * chest, opens a sealed look (§3.6): until it is fetched, or when it cannot be
+ * had, that look reads as absent and `pending` says so. Without a key a sealed
+ * look's wrapper is read as it is, as before.
  */
-export function lookTagsOf(tags: readonly unknown[] | undefined, author: string | null = null): LookTags {
+export function lookTagsOf(tags: readonly unknown[] | undefined, author: string | null = null, keyHex?: string): LookTags {
   const out: LookTags = { closed: null, open: null }
   if (!tags) return out
   let closed: string | null = null
@@ -353,18 +529,29 @@ export function lookTagsOf(tags: readonly unknown[] | undefined, author: string 
     if (t.length === 2) closed ??= t[1]
     else if (t.length === 3 && t[2] === 'open') open ??= t[1]
   }
+  let pending = false
   const read = (payload: string | null): ShardModel | null => {
     const model = payload === null ? null : readLookPayload(payload)
     if (!model) return null
-    return expandDefault(model) ?? ownedLook(model, author)
+    const builtIn = expandDefault(model)
+    if (builtIn) return builtIn
+    const address = keyHex ? sealedLookAddress(model, author) : null
+    if (address && keyHex) {
+      const hint = model.refs?.[0]?.[2]
+      const s = sealedLookState(address, keyHex, typeof hint === 'string' ? hint : undefined)
+      if (s.state === 'ready') return s.model
+      if (s.state !== 'public') { pending = true; return null }
+    }
+    return ownedLook(model, author)
   }
-  return { closed: read(closed), open: read(open) }
+  return { closed: read(closed), open: read(open), ...(pending ? { pending } : {}) }
 }
 
-/** What lookOf reads: a chest, and its event's tags (and signer, and signature) when known. */
+/** What lookOf reads: a chest, and its event's tags (and signer, and signature) when known, and the key of the bag that holds it, which opens a sealed look. */
 export interface LookSubject {
   type: string
   event?: { tags: readonly unknown[]; pubkey?: string; sig?: string } | null
+  bagKeyHex?: string
 }
 
 /** Whose carried objects a look's table honours: the chest event's signer when it is signed, else nobody (§3.6, DECK-0003 §1.10). */
@@ -383,7 +570,8 @@ export function isTreasureShape(model: ShardModel): boolean {
   return model.faces.every((f, i) => f[0] === t.faces[i][0] && f[1] === t.faces[i][1] && f[2] === t.faces[i][2])
 }
 
-const custom = new WeakMap<readonly unknown[], Look>()
+/** A look read from its tags, the bag key it was read with, and, while a sealed look in it is pending, the sealedLooksVersion it was read at. */
+const custom = new WeakMap<readonly unknown[], { look: Look; keyHex?: string; version: number | null }>()
 
 /**
  * The look a chest or a door wears, or null for anything else: its own
@@ -392,7 +580,8 @@ const custom = new WeakMap<readonly unknown[], Look>()
  * DOOR is then not drawn at all, and only an opened chest keeps its closed
  * look (drawnLook). A custom open look with no closed one is drawn over the
  * built-in closed one ("with no closed look, a reader draws whatever it
- * draws for a chest"). Read once per tag list.
+ * draws for a chest"). Read once per tag list and bag key, and again once a
+ * sealed look in it lands (§3.6: drawn without it while it is fetched).
  */
 export function lookOf(item: LookSubject): Look | null {
   if (item.type !== 'chest') return null
@@ -400,9 +589,10 @@ export function lookOf(item: LookSubject): Look | null {
   const kind: LookKind = isDoor(tags) ? 'door' : 'chest'
   const builtIn = builtInLook(kind === 'door' ? 'door' : 'treasure')
   if (!tags || !tags.some((t) => Array.isArray(t) && t[0] === LOOK_TAG)) return builtIn
+  const keyHex = item.bagKeyHex
   const held = custom.get(tags)
-  if (held) return held
-  const own = lookTagsOf(tags, lookAuthor(item.event))
+  if (held && held.keyHex === keyHex && (held.version === null || held.version === sealedVersion)) return held.look
+  const own = lookTagsOf(tags, lookAuthor(item.event), keyHex)
   let look: Look
   if (!own.closed && !own.open) look = builtIn
   else if (!own.closed) look = { ...builtIn, name: 'custom', kind, open: own.open, lid: undefined }
@@ -412,7 +602,7 @@ export function lookOf(item: LookSubject): Look | null {
     const known = defaultOf.get(own.closed)
     if (kind === 'chest' && (known ? known.name === 'treasure' && known.part === 'closed' && !known.turned : isTreasureShape(own.closed))) look.lid = treasureLid(own.closed)
   }
-  custom.set(tags, look)
+  custom.set(tags, { look, keyHex, version: own.pending ? sealedVersion : null })
   return look
 }
 
@@ -522,15 +712,16 @@ export function wireOpenLook(model: ShardModel, pose: LookPose): ShardModel {
 /**
  * A look as tags (§3.6): the closed look, and the open one when there is
  * one, each the payload a kind 3330 would carry. Throws with lookRefusal's
- * words when either is over MAX_LOOK_BYTES, so the hide bar and the seal
- * refuse the same way.
+ * words when either is over `limit`, so the hide bar and the seal refuse the
+ * same way: MAX_LOOK_BYTES, what a tag carries, unless the caller seals a
+ * larger one as its own event (lib/sealedLooks.ts), which passes its limit.
  */
-export function lookTags(closed: ShardModel, open: ShardModel | null): string[][] {
+export function lookTags(closed: ShardModel, open: ShardModel | null, limit: number = MAX_LOOK_BYTES): string[][] {
   const out: string[][] = []
   for (const [model, extra] of [[closed, []], [open, ['open']]] as const) {
     if (!model) continue
     const payload = JSON.stringify(toPayload(model))
-    const refusal = lookRefusal(bytesOf(payload))
+    const refusal = lookRefusal(bytesOf(payload), limit)
     if (refusal) throw new Error(refusal)
     out.push([LOOK_TAG, payload, ...extra])
   }
@@ -565,6 +756,20 @@ interface At { x: bigint; y: bigint; z: bigint }
  */
 export function keptInChest(item: { chestId?: string; at: At }, parent: { at: At; tags?: readonly unknown[] } | undefined): boolean {
   return !!item.chestId && !!parent && !isDoor(parent.tags)
+}
+
+/**
+ * Whether OPEN (or CLOSE, `closing`) has a model to swap, so a ceremony draws
+ * the change: a look with an open version other than its closed one; or a door
+ * with none, which fades away as it opens (§3.6: an opened door with no open
+ * look is not drawn). A chest with no open version keeps its one model, exactly
+ * as drawn, through the opening and after it, with nothing faded, remounted or
+ * fetched (arkinox, 2026-11-18: "a custom chest only has 1 model"); and a door
+ * with none simply stands again as it closes.
+ */
+export function swapsOnOpen(look: Pick<Look, 'kind' | 'closed' | 'open'>, closing = false): boolean {
+  if (look.open && look.open !== look.closed) return true
+  return look.kind === 'door' && !closing
 }
 
 /**

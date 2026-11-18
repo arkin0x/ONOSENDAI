@@ -18,9 +18,6 @@ import type { Plane } from 'cyberspace-core'
 import type { Position, ViewAxes } from '../space'
 
 const fake = vi.hoisted(() => {
-  // The terrain worker's module, where UNKNOWN lives, installs its message
-  // handler on `self` when imported.
-  ;(globalThis as { self?: unknown }).self ??= globalThis
   // Two workers, so most of a volume's runs wait in the queue.
   Object.defineProperty(globalThis, 'navigator', { value: { hardwareConcurrency: 3 }, configurable: true })
 

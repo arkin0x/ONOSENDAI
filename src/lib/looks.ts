@@ -568,6 +568,20 @@ export function keptInChest(item: { chestId?: string; at: At }, parent: { at: At
 }
 
 /**
+ * Whether OPEN (or CLOSE, `closing`) has a model to swap, so a ceremony draws
+ * the change: a look with an open version other than its closed one; or a door
+ * with none, which fades away as it opens (§3.6: an opened door with no open
+ * look is not drawn). A chest with no open version keeps its one model, exactly
+ * as drawn, through the opening and after it, with nothing faded, remounted or
+ * fetched (arkinox, 2026-11-18: "a custom chest only has 1 model"); and a door
+ * with none simply stands again as it closes.
+ */
+export function swapsOnOpen(look: Pick<Look, 'kind' | 'closed' | 'open'>, closing = false): boolean {
+  if (look.open && look.open !== look.closed) return true
+  return look.kind === 'door' && !closing
+}
+
+/**
  * The model drawn for a look (§3.6 Drawing it): the closed one until opened;
  * once opened, the open one when there is one, else nothing for a door (an
  * opened door with no open look is not drawn at all) and the closed one for

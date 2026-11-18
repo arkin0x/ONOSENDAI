@@ -13,9 +13,11 @@
  */
 
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { useFrame } from '@react-three/fiber'
+import type { Group } from 'three'
 import { ACCENT } from '../lib/palette'
 import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
-import { drawnLook, lookFacing, lookOf, lookStand, type Look } from '../lib/looks'
+import { drawnLook, lookFacing, lookOf, lookStand, swapsOnOpen, type Look } from '../lib/looks'
 import { regionBox } from '../lib/clip'
 import type { ShardModel } from 'sno-core/shards'
 import { markShown } from '../lib/worldMarks'
@@ -23,8 +25,8 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { openedByHand, openedContents, openedKey, useOpenedChests } from '../store/useOpenedChests'
 import { useShards, type WorldItem } from '../store/useShards'
 import { useMutes } from '../store/useMutes'
-import { setDrawnLooks, useOpenCeremony } from '../store/useOpenCeremony'
-import { ChestCeremony } from './ChestCeremony'
+import { setDrawnLooks, useOpenCeremony, type Playing } from '../store/useOpenCeremony'
+import { ChestCeremony, restShowsFrom } from './ChestCeremony'
 import { DoorCeremony, DoorCloses } from './DoorCeremony'
 import { ChestLoot, HOVER_Y, LOOT_SIDE } from './ChestLoot'
 import { ShardMesh } from './ShardMesh'
@@ -154,6 +156,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
         // Opening plays on an open look, closing (CLOSE) on a shut one: a stale one of either is not drawn.
         const now = playing[openedKey(me, w.key)]
         const ceremony = now && w.opened === !now.closing ? now : undefined
+        const { swap } = restPlan(w.look, ceremony)
         const model = drawnLook(w.look, w.opened)
         const loot = w.loot.length > 0
         return (
@@ -169,19 +172,71 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
             clearTop={loot ? LOOT_TOP : 0}
             frame={w.frame}
             // Dims while it blocks the build cursor; not mid-ceremony, which sets its own materials each frame.
-            occluder={ceremony ? undefined : `look:${w.key}`}
+            occluder={swap ? undefined : `look:${w.key}`}
           >
-            {ceremony || loot
-              ? ({ dim }) => (
-                <>
-                  {ceremony ? (ceremony.kind === 'door' ? (ceremony.closing ? <DoorCloses look={w.look} at={ceremony.at} frame={w.frame} /> : <DoorCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} />) : <ChestCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} />) : model && <ShardMesh shard={model} world {...w.frame} dim={dim} />}
-                  {loot && <ChestLoot loot={w.loot} ceremony={ceremony} still={still} dim={dim} facing={lookFacing(w.look)} />}
-                </>
-              )
-              : undefined}
+            {({ dim }) => <LookBody look={w.look} opened={w.opened} ceremony={ceremony} loot={w.loot} frame={w.frame} dim={dim} still={still} />}
           </LookMark>
         )
       })}
     </>
   )
+}
+
+/**
+ * What a ceremony does to a look's resting mesh: `swap`, the ceremony when it
+ * has a model to swap (lib/looks.ts swapsOnOpen; a chest with one model has
+ * none, and its model stays drawn throughout), during which the resting mesh is
+ * hidden; and `showsFrom`, when it shows again before the ceremony ends (the
+ * lid's handoff, ChestCeremony restShowsFrom), or null for at its end.
+ */
+export function restPlan(look: Look, ceremony: Playing | undefined): { swap: Playing | undefined; showsFrom: number | null } {
+  const swap = ceremony && swapsOnOpen(look, !!ceremony.closing) ? ceremony : undefined
+  return { swap, showsFrom: swap && !swap.closing && swap.kind === 'chest' ? restShowsFrom(look, swap) : null }
+}
+
+/**
+ * Everything drawn in a look's own frame, in three places in the tree that
+ * never move: the ceremony swapping its model (or nothing), the resting mesh
+ * (RestLook), and the loot. Nothing OPEN, CLOSE, a ceremony or loot does moves
+ * the resting mesh, so it is never unmounted.
+ */
+export function LookBody({ look, opened, ceremony, loot, frame, dim, still }: { look: Look; opened: boolean; ceremony: Playing | undefined; loot: LootObject[]; frame: LookFrame; dim: number; still: boolean }): JSX.Element {
+  const { swap, showsFrom } = restPlan(look, ceremony)
+  return (
+    <>
+      {swap ? (swap.kind === 'door' ? (swap.closing ? <DoorCloses look={look} at={swap.at} frame={frame} /> : <DoorCeremony look={look} at={swap.at} calm={swap.calm} frame={frame} />) : <ChestCeremony look={look} at={swap.at} calm={swap.calm} frame={frame} />) : null}
+      <RestLook model={drawnLook(look, opened)} frame={frame} dim={dim} hidden={!!swap} showsFrom={showsFrom} />
+      {loot.length > 0 && <ChestLoot loot={loot} ceremony={ceremony} still={still} dim={dim} facing={lookFacing(look)} />}
+    </>
+  )
+}
+
+/**
+ * The look as it rests: the model drawnLook gives, in one place in the tree
+ * that OPEN, CLOSE, a ceremony and loot never move, so its mesh is never
+ * unmounted, rebuilt or fetched again by any of them (arkinox, 2026-11-18: the
+ * chest model disappeared for a few seconds as it opened). While a ceremony
+ * swaps the model (`hidden`), it is mounted and hidden: the ceremony draws the
+ * change, and this, already built with its parts fetched, shows the moment the
+ * ceremony lets it (`showsFrom`, performance.now() time) or ends. A chest whose
+ * look has one model has no ceremony to hide behind, so it is drawn on every
+ * frame through the opening.
+ */
+export function RestLook({ model, frame, dim, hidden = false, showsFrom = null }: { model: ShardModel | null; frame: LookFrame; dim: number; hidden?: boolean; showsFrom?: number | null }): JSX.Element | null {
+  const group = useRef<Group>(null)
+  useFrame(() => {
+    // Only while a ceremony hides it: at rest the `visible` prop below holds.
+    if (hidden && group.current) group.current.visible = restVisible(hidden, showsFrom, performance.now())
+  })
+  if (!model) return null
+  return (
+    <group ref={group} visible={restVisible(hidden, showsFrom, performance.now())}>
+      <ShardMesh shard={model} world {...frame} dim={dim} />
+    </group>
+  )
+}
+
+/** Whether the resting look shows now: always but behind a ceremony, and behind one from `showsFrom` on. */
+export function restVisible(hidden: boolean, showsFrom: number | null, now: number): boolean {
+  return !hidden || (showsFrom !== null && now >= showsFrom)
 }

@@ -31,12 +31,12 @@ export function DoorCeremony({ look, at, calm, frame }: { look: Look; at: number
 
 /**
  * A door closing (CLOSE, arkinox, 2026-11-01): its open look fades back into the
- * closed one over the calm crossfade. A custom door with no open look was not
- * drawn while open (lib/looks.ts drawnLook), so its slab simply stands again.
+ * closed one over the calm crossfade. A custom door with no open look plays no
+ * ceremony to close (lib/looks.ts swapsOnOpen): it was not drawn while open, and
+ * its slab simply stands again as the resting mesh (scene/ChestLooks RestLook).
  */
 export function DoorCloses({ look, at, frame }: { look: Look; at: number; frame?: LookFrame }): JSX.Element {
-  if (!look.open) return <ShardMesh shard={look.closed} world {...frame} />
-  return <CalmSwap from={look.open} to={look.closed} at={at} frame={frame} />
+  return <CalmSwap from={look.open ?? look.closed} to={look.closed} at={at} frame={frame} />
 }
 
 function SlabAway({ look, at, frame }: { look: Look; at: number; frame?: LookFrame }): JSX.Element {

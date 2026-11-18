@@ -51,7 +51,7 @@ vi.mock('../../lib/chains', async (orig) => ({
 }))
 vi.mock('../../lib/calibration', async (orig) => ({ ...(await orig<typeof import('../../lib/calibration')>()), recommendedHopHeight: () => 20 }))
 
-import { useCyberspace } from '../useCyberspace'
+import { WALK_NEEDS_HOSAKA_MESSAGE, useCyberspace } from '../useCyberspace'
 import { useWalk } from '../useWalk'
 import { placeSpawn } from '../fixtures/placeSpawn'
 import { moveDirection } from '../../lib/moves'
@@ -213,13 +213,17 @@ describe('WALK asks the relays once per step, before signing (arkinox, 2026-10-3
     relay.answers = [[await theirMove(4n)]]
     await S().applyProofMessage(done(posted[0]))
     expect(S().proof.message).toMatch(/Your aim is kept: commit again/)
-    // A WALK step's request answered as a HOSAKA result: never a WALK step's (a walk never pays).
+    // A WALK step's request answered as a HOSAKA result: never a WALK step's
+    // (a walk never pays). Its lane refuses it unsigned, and the walk stops.
     useCyberspace.setState({ proof: { ...S().proof, status: 'idle', message: null } })
     useWalk.getState().stop()
+    const events = S().events.length
+    const asked = relay.asked
     const req = await walkStep()
-    relay.answers = [[await theirMove(6n)]]
     await S().applyProofMessage({ ...done(req), source: 'cloud' as const })
-    expect(S().proof.message).toMatch(/Your aim is kept: commit again/)
+    expect(S().proof.message).toBe(WALK_NEEDS_HOSAKA_MESSAGE)
+    expect(S().events).toHaveLength(events)
+    expect(relay.asked).toBe(asked)
     useWalk.getState().exit()
   })
 

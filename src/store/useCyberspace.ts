@@ -31,6 +31,7 @@ import { checkCloudRide, type CloudRideCheck } from '../lib/cloudRide'
 import { Quaternion } from 'three'
 import { generateSecretKey, getEventHash, verifiedSymbol, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
 import { withNoBroadcast } from '../lib/noBroadcast'
+import { attributed } from '../lib/client'
 import { nip19 } from 'nostr-tools'
 import { exportNcryptsec, exportNsec } from '../lib/keyExport'
 import {
@@ -968,6 +969,13 @@ export interface CyberspaceState {
    * to `target` whatever the move mode is.
    */
   walkTo: (target: Position, stillAimed: () => boolean) => Promise<void>
+  /**
+   * WALK's next queued step down the lanes (see `lanes`): proved ahead,
+   * signed alongside the steps before it, landed in order. 'taken', 'full'
+   * (ask again when one lands) or 'serial' (it goes by walkTo once the lanes
+   * are empty).
+   */
+  walkLane: (target: Position) => 'taken' | 'full' | 'serial'
   /**
    * WALK is on (store/useWalk.ts owns the queue). The cursor is the walk's
    * predicted head then, so nothing else may move it: the pad and the keys
@@ -3688,6 +3696,114 @@ let requestId = 0
 let walkHopId: number | null = null
 
 /**
+ * WALK's lanes (arkinox, 2026-11-18: "When roaming in walk mode with fluid
+ * on, I can't explore for more than a few seconds until I have to wait for my
+ * chain to catch up ... I'm using bunker").
+ *
+ * A WALK step used to be proved, confirmed with the relays, signed and put on
+ * the chain before the next one was even proved. A local key signs at once,
+ * but a bunker (NIP-46) answers each signature over a relay, 0.3 to 2 s later,
+ * so every turn of a walk waited a whole round trip in line behind the one
+ * before it, and a turning walk ran 20 events ahead of the chain within 10 to
+ * 15 s. The steps now go down lanes:
+ *
+ * | Stage | How many at once | Waits for |
+ * |---|---|---|
+ * | proof | one (one worker) | the step before it to be proved: its event, and so its id, is known then, before it is signed (an id is the hash of the unsigned event, NIP-01) |
+ * | head confirmation and signature | up to WALK_SIGNS_OUT | its own proof only; each signature still has its own fresh look at the relays first (confirmHead, arkinox 2026-10-08) |
+ * | onto the chain, then the relays | one, in chain order | its signature, and the step before it on the chain |
+ *
+ * So a step is proved from where the one before it will land and names that
+ * one's id as its previous, exactly as it would have; only the waiting
+ * overlaps. A signature that comes back before an earlier one waits for it.
+ * A signed event whose id is not the one its successor was proved from (a
+ * signer that changed it) is never kept, and the walk stops. Any step that
+ * does not land stops the walk: what was signed before it, in order, stays on
+ * the chain, and nothing after it is kept or sent. The chain rules, the
+ * events and what is published are unchanged.
+ *
+ * Only plain hops within this machine's ceiling go down lanes; a route
+ * (a sidestep), a first move, a game or a chain choice waits for the lanes to
+ * empty and goes the old way, one at a time (commitToward).
+ */
+interface WalkLane {
+  /** Where it moves from: where the lane before it lands, or your head. */
+  from: Position
+  to: Position
+  /** It ends where it starts (a step that undid the one before): nothing to prove or sign. */
+  still: boolean
+  state: 'waiting' | 'proving' | 'proved' | 'signing' | 'signed'
+  /** Its proof request's id, while proving. */
+  proofId: number | null
+  /** What it names as the event before it, the `c` it moves from, and that event's created_at: set when its proof is asked. */
+  prevId: string | null
+  prevCoordHex: string | null
+  prevCreatedAt: number
+  /** The event exactly as it is signed, once proved, and what it leaves the chain at: its id, its C and its created_at (a still lane's are the lane before it's). */
+  template: EventTemplate | null
+  id: string | null
+  coordHex: string | null
+  createdAt: number
+  msg: Extract<ProofResponse, { type: 'done' }> | null
+  event: NostrEvent | null
+  /** Its head confirmation and signature, once asked: done when it is signed (and landed, if its turn) or the lanes stopped. */
+  signing: Promise<void> | null
+}
+
+/** The most steps down lanes at once; more wait in the walk's queue. */
+export const WALK_LANES_MAX = 16
+/** The most head confirmations and signatures out at once (NIP-46 requests carry ids, so a bunker answers each on its own). */
+export const WALK_SIGNS_OUT = 8
+
+const lanes = {
+  list: [] as WalkLane[],
+  /** Bumped whenever the lanes are dropped: an older value marks a wait whose lane is gone. */
+  epoch: 0,
+  /** The newest request id the lanes own: any other bump of requestId (a cancel, a respawn, a switch) ends them. */
+  ownId: -1,
+  chainEpoch: 0,
+  pubkey: '',
+  plane: 0 as Plane,
+  proving: false,
+  signsOut: 0,
+  /** The head the front lane moves from: your head when the first lane was handed, then each landed lane's event. */
+  baseHead: '',
+  /** The last landed step's proof, for the panel once the lanes are empty. */
+  lastDone: null as Extract<ProofResponse, { type: 'done' }> | null,
+}
+
+/** How the walk hears of its lanes (store/useWalk.ts): one landed, in order, or the walk has to stop with these words. */
+export interface WalkLaneHooks { landed: () => void; failed: (message: string) => void }
+let laneHooks: WalkLaneHooks | null = null
+export function setWalkLaneHooks(hooks: WalkLaneHooks | null): void {
+  laneHooks = hooks
+}
+
+/** Drop every lane: whatever they wait on is ignored when it comes back. */
+function dropLanes(): void {
+  lanes.list = []
+  lanes.epoch++
+  lanes.proving = false
+  lanes.signsOut = 0
+}
+
+/**
+ * The walk stops or starts afresh (store/useWalk.ts stop, enter): its lanes
+ * go, a proof of theirs still computing is stopped, and any answer still on
+ * its way for them is ignored. Nothing they signed and landed is touched.
+ */
+export function dropWalkLanes(): void {
+  if (lanes.list.length > 0) {
+    if (lanes.proving) cancelProof()
+    requestId++
+  }
+  dropLanes()
+}
+
+/** Said when a signer returns a different event than the one asked for: the steps after it were proved from the one asked for. */
+export const WALK_SIGNED_OTHER_MESSAGE = 'WALK stopped: your signer returned a different event than the step asked for, so it was not kept.'
+
+/**
  * Relay events for your own chain that arrived while a proof was computing.
  * Folding them then would move the head under the proof, so they wait here
  * and are folded the moment the proof is about to be signed or ends
@@ -3972,6 +4088,19 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * avatar, a choice between two chains, or the head that moved.
    */
   const stopForNewHead = (beforeHead: string): void => {
+    // WALK's lanes stop whole: nothing signed of theirs lands on a head that
+    // moved, and the walk hears why.
+    if (lanes.list.length > 0) {
+      dropLanes()
+      cancelProof()
+      requestId++
+      set({ proof: { ...IDLE_PROOF } })
+      foldDeferred()
+      const message = whyNoMove(get().actions()) ?? (get().chainConflict ? CHOOSE_FIRST_MESSAGE : headMovedWords(get().events, 'Re-aim from where you are now.'))
+      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message } })
+      laneHooks?.failed(message)
+      return
+    }
     // The worker is stopped; a finish already on its way is refused by
     // finishProof itself, whose head no longer matches.
     cancelProof()
@@ -5250,6 +5379,313 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     else await quoteRoute(++requestId)
   }
 
+  // WALK's lanes (see `lanes` above): prove ahead, sign several at once, land in order.
+
+  /**
+   * The lanes are still the walk's: no cancel, respawn or switch since they
+   * began (each bumps requestId), and WALK is on. Dropped when not.
+   */
+  const lanesAlive = (): boolean => {
+    if (lanes.list.length === 0) return true
+    if (requestId === lanes.ownId && chainEpoch === lanes.chainEpoch && get().identity.pubkey === lanes.pubkey && get().walking) return true
+    dropLanes()
+    return false
+  }
+
+  /** The panel's proof once a step has landed: done, as finishProof leaves it. */
+  const doneProof = (msg: Extract<ProofResponse, { type: 'done' }>): ProofState => ({
+    status: 'done', mode: msg.mode, progress: 1, elapsedMs: msg.elapsedMs, proofHash: msg.proofHash, terrainK: msg.terrainK,
+    lca: msg.lca, totalOps: msg.totalOps, message: null, source: 'local', costMsats: null, lookupId: null,
+  })
+
+  /**
+   * The walk cannot go on: what is signed, in order, from the front goes on
+   * the chain first when `land` (it is real; never when the head moved under
+   * the lanes, where it would fork), then every lane goes, and the walk hears
+   * why. A proof still computing is stopped and its answer ignored.
+   */
+  const failLanes = (message: string, land = true): void => {
+    if (land) landLanes(false)
+    const had = lanes.list.length > 0 || lanes.proving
+    if (lanes.proving) cancelProof()
+    dropLanes()
+    requestId++
+    if (had || get().proof.status === 'computing') set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message } })
+    laneHooks?.failed(message)
+  }
+
+  /** Why nothing may be signed onto your chain now, or null (as finishProof refuses). */
+  const laneRefusal = (): string | null => whyNoMove(get().actions()) ?? (get().chainConflict ? CHOOSE_FIRST_MESSAGE : null)
+
+  /** One lane onto the chain: what finishProof does once a hop is signed and checked. */
+  const landLane = (lane: WalkLane): void => {
+    const msg = lane.msg!
+    const event = lane.event!
+    const plane = lanes.plane
+    const now = get()
+    const stats: ChainStats = { ...now.chain, hops: now.chain.hops + 1, totalOps: now.chain.totalOps + msg.totalOps, totalMs: now.chain.totalMs + msg.elapsedMs }
+    const nextEvents = [...now.events, event]
+    const nextPublished = { ...now.published, [event.id]: 'queued' as const }
+    set({
+      position: lane.to,
+      headPlane: plane,
+      ...(now.atHead() ? { anchor: lane.to, anchorPlane: plane } : {}),
+      events: nextEvents,
+      prevEventId: event.id,
+      published: nextPublished,
+      chain: stats,
+      positionHistory: [...now.positionHistory, lane.to],
+    })
+    saveChain(nextEvents, nextPublished, stats)
+    lanes.lastDone = msg
+    lanes.baseHead = event.id
+    if (msg.region) {
+      useSecrets.getState().hold([{
+        lookupId: msg.region.lookupId,
+        keyHex: msg.region.keyHex,
+        height: Math.max(...msg.region.heights),
+        heights: { x: msg.region.heights[0], y: msg.region.heights[1], z: msg.region.heights[2] },
+        base: { x: msg.region.base[0], y: msg.region.base[1], z: msg.region.base[2] },
+        plane,
+        source: 'hop',
+        eventId: event.id,
+        at: Math.floor(Date.now() / 1000),
+      }])
+      scanHeldKey(msg.region.lookupId, msg.region.keyHex)
+      if (get().cloudPrefs.profile === 'loot') {
+        const n = Math.max(...msg.region.heights)
+        void holdDestinationCubes(lane.to, plane, destinationHeights(n, localKeyCeiling()), MAX_COMPUTE_HEIGHT, 'hop', event.id)
+      }
+    }
+  }
+
+  /**
+   * Land every lane at the front that is signed, in order. Each is checked
+   * against the chain as it stands now: what the live feed held back is
+   * folded first, and a head that is not the one the lane was proved from, a
+   * game, or a chain choice stops the walk (`fail`) with nothing landed.
+   */
+  const landLanes = (fail = true): void => {
+    while (lanes.list.length > 0 && lanes.list[0].state === 'signed') {
+      if (!lanesAlive()) return
+      const lane = lanes.list[0]
+      if (lane.event) {
+        foldDeferred()
+        const refusal = laneRefusal() ?? (get().prevEventId !== lane.prevId ? headMovedWords(get().events, 'Re-aim from where you are now.') : null)
+        if (refusal) { if (fail) failLanes(refusal, false); return }
+        landLane(lane)
+      }
+      lanes.list.shift()
+      if (lanes.list.length === 0 && get().proof.status === 'computing') set({ pendingTarget: null, proof: lanes.lastDone ? doneProof(lanes.lastDone) : IDLE_PROOF })
+      laneHooks?.landed()
+    }
+  }
+
+  /** Ask the signer for the proved lanes, front first, up to WALK_SIGNS_OUT at once. */
+  const signLanes = (): void => {
+    for (const lane of lanes.list) {
+      if (lanes.signsOut >= WALK_SIGNS_OUT) return
+      if (lane.state !== 'proved') continue
+      lane.state = 'signing'
+      lane.signing = signLane(lane)
+    }
+  }
+
+  const signLane = async (lane: WalkLane): Promise<void> => {
+    const epoch = lanes.epoch
+    const live = (): boolean => epoch === lanes.epoch && lanesAlive()
+    lanes.signsOut++
+    try {
+      // The head is confirmed immediately before every signature (arkinox,
+      // 2026-10-08), this lane's own look, while the lanes before it wait on
+      // theirs: a move another device made from your head stops the walk.
+      const unconfirmed = await confirmHead(() => {})
+      if (!live()) return
+      if (unconfirmed === STALE_CONFIRMATION) { dropLanes(); return }
+      if (unconfirmed) { failLanes(unconfirmed); return }
+      foldDeferred()
+      const refusal = laneRefusal() ?? (get().prevEventId !== lanes.list[0]?.prevId ? headMovedWords(get().events, 'Re-aim from where you are now.') : null)
+      if (refusal) { failLanes(refusal, false); return }
+      let event: NostrEvent
+      try {
+        event = await get().signEvent(lane.template!)
+      } catch (err) {
+        if (live()) failLanes(signingFailed(err))
+        return
+      }
+      if (!live()) return
+      // The steps after it were proved from this very id.
+      if (event.id !== lane.id) { failLanes(WALK_SIGNED_OTHER_MESSAGE); return }
+      // Level 1 under its own signed id before it is kept (spec 5.11), as every hop computed here is.
+      const failed = localHopFailures(event, lane.prevCoordHex!, lane.to, lanes.plane, lane.prevId!)
+      if (failed.length > 0) { failLanes(`${LOCAL_CHECK_FAILED_MESSAGE} (${failed.join(', ')})`); return }
+      lane.event = event
+      lane.state = 'signed'
+      landLanes()
+    } finally {
+      if (epoch === lanes.epoch) {
+        lanes.signsOut--
+        signLanes()
+      }
+    }
+  }
+
+  /**
+   * Prove the next waiting lane, from where the lane before it lands (or
+   * your head) and naming that lane's event (or your head) as the one
+   * before it. One proof at a time; the answer comes to walkLaneProof.
+   */
+  const proveNext = async (): Promise<void> => {
+    if (lanes.proving || !lanesAlive()) return
+    const i = lanes.list.findIndex((l) => l.state === 'waiting')
+    if (i < 0) return
+    const before = i > 0 ? lanes.list[i - 1] : null
+    if (before && before.id === null) return
+    const lane = lanes.list[i]
+    const epoch = lanes.epoch
+    lanes.proving = true
+    // What this device can check without a relay, as before any WALK step's
+    // proof (headCheckedHere): the saved chain's signatures, another tab's move.
+    const here = await headCheckedHere()
+    if (epoch !== lanes.epoch || !lanesAlive()) return
+    if (here === STALE_CONFIRMATION) { dropLanes(); return }
+    if (here) { lanes.proving = false; failLanes(here); return }
+    const s = get()
+    // Another tab's move just taken in, or anything else that moved your
+    // head since the walk handed this step over: nothing is proved from it.
+    if (!before && (s.prevEventId !== lanes.baseHead || !samePosition(s.position, lane.from))) {
+      lanes.proving = false
+      failLanes(headMovedWords(s.events, 'Re-aim from where you are now.'), false)
+      return
+    }
+    if (before) {
+      lane.prevId = before.id
+      lane.prevCoordHex = before.coordHex
+      lane.prevCreatedAt = before.createdAt
+    } else {
+      lane.prevId = s.prevEventId
+      lane.prevCoordHex = chainHead(parsedChain(s.events))?.coordHex ?? ''
+      lane.prevCreatedAt = s.events[s.events.length - 1]?.created_at ?? 0
+    }
+    if (lane.still) {
+      lane.id = lane.prevId
+      lane.coordHex = lane.prevCoordHex
+      lane.createdAt = lane.prevCreatedAt
+      lane.state = 'signed'
+      lanes.proving = false
+      landLanes()
+      void proveNext()
+      return
+    }
+    const id = ++requestId
+    lanes.ownId = id
+    lane.proofId = id
+    lane.state = 'proving'
+    set({ pendingTarget: { ...lane.to } })
+    postProof({ id, mode: 'hop', from: lane.from, to: lane.to, plane: lanes.plane, prevEventId: lane.prevId!, maxComputeHeight: Math.min(MAX_COMPUTE_HEIGHT, recommendedHopHeight()) })
+  }
+
+  /**
+   * A proof answer for a lane: its event is made now, exactly as it will be
+   * signed, so its id is known and the next lane is proved from it at once
+   * while this one waits on the relays and the signer. Null when the answer
+   * was not a lane's; else done once this lane is signed (and landed, if its
+   * turn) or the lanes stopped, which only a caller that awaits it (a test)
+   * waits for: the worker's handler does not.
+   */
+  const walkLaneProof = (msg: ProofResponse): Promise<void> | null => {
+    if (msg.type === 'progress') return null
+    const lane = lanes.list.find((l) => l.proofId === msg.id && l.state === 'proving')
+    if (!lane) return null
+    const settled = Promise.resolve()
+    if (!lanesAlive()) return settled
+    lanes.proving = false
+    // A walk never pays: a HOSAKA result is never a lane's to sign.
+    if (msg.type === 'done' && msg.source === 'cloud') { failLanes(WALK_NEEDS_HOSAKA_MESSAGE, false); return settled }
+    if (msg.type === 'error') {
+      const noWorker = msg.message === PROOF_WORKER_FAILED_MESSAGE
+      failLanes(noWorker && useVersionGate.getState().verdict === 'hint' ? NEW_VERSION_RELOAD_MESSAGE : msg.message)
+      return settled
+    }
+    if (msg.prevEventId !== undefined && msg.prevEventId !== lane.prevId) { failLanes(headMovedWords(get().events, 'Re-aim from where you are now.'), false); return settled }
+    let template: EventTemplate | null = null
+    try {
+      template = msg.mode === 'hop' && msg.hop && msg.hop.sealHex === msg.proofHash
+        ? hopTemplate({
+            createdAt: Math.max(Math.floor(Date.now() / 1000), lane.prevCreatedAt),
+            genesisId: get().genesisId,
+            previousId: lane.prevId!,
+            prevCoordHex: lane.prevCoordHex!,
+            to: lane.to,
+            plane: lanes.plane,
+            proofHash: msg.proofHash,
+            mn: msg.hop.mnHex,
+            mp: msg.hop.mpHex,
+          })
+        : null
+    } catch {
+      template = null
+    }
+    if (!template) { failLanes(OLD_FORMAT_PROOF_MESSAGE); return settled }
+    // The event exactly as the signer will be handed it, with the tags
+    // signEvent and the signer would add (both leave a template that has them
+    // alone), so its id now is its id once signed, under the key that signs.
+    const by = currentSigner.pubkey
+    const signed = attributed(withNoBroadcast(template, by))
+    lane.template = signed
+    lane.id = getEventHash({ ...signed, pubkey: by })
+    lane.coordHex = positionHex(lane.to, lanes.plane)
+    lane.createdAt = signed.created_at
+    lane.msg = msg
+    lane.state = 'proved'
+    signLanes()
+    void proveNext()
+    return lane.signing ?? settled
+  }
+
+  /**
+   * WALK hands its next queued step to the lanes (store/useWalk.ts pump).
+   * 'taken': it is on its way, and the walk hears when it lands
+   * (setWalkLaneHooks). 'full': ask again when one lands. 'serial': it
+   * cannot go down a lane (a route, a first move, a game, a chain choice),
+   * so once the lanes are empty it goes the old way (walkTo).
+   */
+  const walkLane = (to: Position): 'taken' | 'full' | 'serial' => {
+    lanesAlive()
+    const s = get()
+    const empty = lanes.list.length === 0
+    // The old way has a step in hand: it finishes first.
+    if (empty && (s.proof.status === 'computing' || s.plan !== null || s.cloud.status !== 'idle')) return 'full'
+    if (lanes.list.length >= WALK_LANES_MAX) return 'full'
+    if (!s.walking || !s.atHead() || s.events.length === 0 || !s.genesisId || laneRefusal() || s.plan !== null || s.cloud.status !== 'idle') return 'serial'
+    if (!empty && s.plane !== lanes.plane) return 'serial'
+    const from = empty ? s.position : lanes.list[lanes.list.length - 1].to
+    const still = samePosition(from, to)
+    if (!still) {
+      const ceiling = Math.min(MAX_COMPUTE_HEIGHT, recommendedHopHeight())
+      if (estimateHopCost(from.x, from.y, from.z, to.x, to.y, to.z, s.plane, ceiling).exceedsLimit) return 'serial'
+      if (movementCapabilityIssue('hop', from, to, s.plane)) return 'serial'
+    }
+    if (empty) {
+      lanes.ownId = requestId
+      lanes.chainEpoch = chainEpoch
+      lanes.pubkey = s.identity.pubkey
+      lanes.plane = s.plane
+      lanes.baseHead = s.prevEventId
+      lanes.lastDone = null
+      walkHopId = null
+      set({ proof: { ...IDLE_PROOF, status: 'computing', mode: 'hop' } })
+    }
+    lanes.list.push({
+      from: { ...from }, to: { ...to }, still, state: 'waiting', proofId: null, prevId: null, prevCoordHex: null, prevCreatedAt: 0,
+      template: null, id: null, coordHex: null, createdAt: 0, msg: null, event: null, signing: null,
+    })
+    // Never inside the hand-off itself: a still lane could land at once, and
+    // the walk counts this one as handed only once this returns.
+    queueMicrotask(() => { void proveNext() })
+    return 'taken'
+  }
+
   return {
   identity: { pubkey: pubkeyHex, npub: nip19.npubEncode(pubkeyHex) },
   ...initial,
@@ -5353,6 +5789,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   commit: () => commitToward(null),
 
   walkTo: (target, stillAimed) => commitToward({ target, stillAimed }),
+
+  walkLane: (target) => walkLane(target),
 
   walking: false,
 
@@ -5526,6 +5964,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   applyProofMessage: async (msg) => {
     // Stale responses from a cancelled commit must not overwrite fresh state.
     if (msg.id !== requestId) return
+    // A WALK lane's proof goes to its lane (walkLaneProof).
+    const lane = walkLaneProof(msg)
+    if (lane) { await lane; return }
 
     if (msg.type === 'progress') {
       set({

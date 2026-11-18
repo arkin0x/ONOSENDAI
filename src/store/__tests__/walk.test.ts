@@ -35,6 +35,7 @@ import { losingSync, segmentAffordable, SYNC_WARN_AT, WALK_SETTLE_MS, useWalk } 
 import { eventsAhead } from '../walkAhead'
 import { useCalibration } from '../../lib/calibration'
 import { useToast } from '../useToast'
+import { positionHex } from '../../lib/events'
 
 function done(req: (typeof posted)[number]) {
   return { type: 'done' as const, id: req.id, mode: req.mode as 'hop' | 'sidestep', elapsedMs: 5, ...provedFor(req), terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4 }
@@ -198,7 +199,10 @@ describe('WALK', () => {
     expect(s.position).toEqual(landed)                 // the first step stays
     expect(s.cursor).toEqual(landed)                   // the view comes home to it
     expect(s.proof.message).toContain('declined')
-    expect(posted).toHaveLength(2)                     // the third step never started
+    // The third step's proof was asked ahead while the second waited on the
+    // signer (useCyberspace walkLane), but it was never signed or kept.
+    expect(posted.length).toBeLessThanOrEqual(3)
+    expect(s.events[s.events.length - 1].tags.find((t) => t[0] === 'C')?.[1]).toBe(positionHex(landed, s.headPlane))
     // And the reason is on screen, not only in the menu.
     expect(useToast.getState().toast).toMatchObject({ label: 'WALK STOPPED', mark: 'walk' })
     expect(useToast.getState().toast?.meta).toContain('declined')

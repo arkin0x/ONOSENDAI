@@ -63,6 +63,7 @@ import { HosakaPulse } from './hud/HosakaPulse'
 import { useOfferView } from './store/useOffer'
 import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
+import { KeyLockGate } from './hud/KeyLock'
 import { Targets } from './hud/Targets'
 import { PersonModal } from './hud/PersonModal'
 import { ProfileView } from './hud/ProfileView'
@@ -513,6 +514,8 @@ export default function App(): JSX.Element {
       <ChainStoreTrial />
       {/* Which action broke your chain, why, and RESPAWN behind its warning. */}
       <BrokenChainModal />
+      {/* A brought key that needs its password, over everything: nothing signs until it is answered (hud/KeyLock.tsx). */}
+      <KeyLockGate />
       <button
         className="hamburger-menu"
         onContextMenu={(e) => e.preventDefault()}

@@ -69,7 +69,7 @@ async function device(name) {
   await page.addInitScript(([pk, ns]) => {
     try {
       localStorage.setItem('onosendai:live', '1')
-      localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns }))
+      { localStorage.setItem('onosendai:nsec', ns); localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns })) }
     } catch {}
   }, [pk, nsec])
   const errors = []

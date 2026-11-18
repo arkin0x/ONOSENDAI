@@ -6623,6 +6623,149 @@ select.avatars__input option:checked {
 
 .login__back:hover { color: var(--accent); }
 
+/* ---------- Key lock (hud/KeyLock.tsx) and new password (hud/ui/NewPassword.tsx) ---------- */
+/* Over everything, the tutorial and the workshop included: nothing signs until it is answered. */
+/* Copy the encrypted key before switching away from it: apart from the options under it. */
+.login__locked { margin-bottom: 11px; }
+.login__locked .login__note { margin: 0; }
+
+/* The login opened from the key lock: at the lock's height. */
+.modal.modal--over { z-index: 1100; }
+
+.modal.keylock-gate {
+  z-index: 1100;
+  background: rgba(3, 5, 10, 0.86);
+}
+
+/* The card's top-left and bottom-right corners cut, as the item thumbnails'
+ * (ui/Chamfer.tsx), each cut drawn as a line in the border's colour. */
+.modal__card.keylock {
+  --keylock-cut: 16px;
+  position: relative;
+  border-radius: 0;
+  border-color: rgba(0, 229, 255, 0.55);
+  background:
+    linear-gradient(180deg, rgba(0, 229, 255, 0.07), transparent 90px),
+    rgba(6, 14, 22, 0.98);
+  clip-path: polygon(var(--keylock-cut) 0, 100% 0, 100% calc(100% - var(--keylock-cut)), calc(100% - var(--keylock-cut)) 100%, 0 100%, 0 var(--keylock-cut));
+  box-shadow: inset 0 0 24px rgba(0, 229, 255, 0.06);
+}
+
+.modal__card.keylock::before,
+.modal__card.keylock::after {
+  content: '';
+  position: absolute;
+  width: calc(var(--keylock-cut) * 1.42);
+  height: 1px;
+  background: rgba(0, 229, 255, 0.75);
+  pointer-events: none;
+}
+
+.modal__card.keylock::before {
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  transform: translate(0, var(--keylock-cut)) rotate(-45deg);
+}
+
+.modal__card.keylock::after {
+  right: 0;
+  bottom: 0;
+  transform-origin: 100% 100%;
+  transform: translate(0, calc(var(--keylock-cut) * -1)) rotate(-45deg);
+}
+
+.keylock__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.keylock__title svg { color: var(--accent); flex: none; }
+
+.keylock__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Room kept for one line, so nothing moves when it fills or empties. */
+.keylock__error {
+  min-height: 15px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--danger);
+}
+
+.keylock__alt {
+  min-height: 40px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--fg);
+  border-color: rgba(200, 245, 255, 0.22);
+  background: transparent;
+}
+
+.keylock__line {
+  margin: 0 0 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #fff;
+}
+
+.keylock__pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.keylock__pair .login__act { min-height: 44px; margin-top: 0; }
+
+.keypw {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.keypw__hint {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 16px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+.keypw__meter {
+  display: inline-flex;
+  gap: 3px;
+  flex: none;
+}
+
+/* Three slanted cells, lit up to the strength. */
+.keypw__meter i {
+  display: block;
+  width: 18px;
+  height: 6px;
+  background: rgba(200, 245, 255, 0.12);
+  clip-path: polygon(4px 0, 100% 0, calc(100% - 4px) 100%, 0 100%);
+}
+
+.keypw__hint--l1 { color: var(--danger); }
+.keypw__hint--l2 { color: var(--warn); }
+.keypw__hint--l3 { color: var(--ok); }
+.keypw__hint--bad { color: var(--danger); }
+
+.keypw__hint--l1 .keypw__meter i:nth-child(-n + 1) { background: var(--danger); }
+.keypw__hint--l2 .keypw__meter i:nth-child(-n + 2) { background: var(--warn); }
+.keypw__hint--l3 .keypw__meter i { background: var(--ok); }
+
 .login__backup-details {
   margin-top: 16px;
   padding-top: 12px;

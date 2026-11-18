@@ -65,7 +65,7 @@ const sk = generateSecretKey()
 const pk = getPublicKey(sk)
 await page.addInitScript(([pk, ns]) => {
   localStorage.setItem('onosendai:live', '0')
-  localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns }))
+  { localStorage.setItem('onosendai:nsec', ns); localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns })) }
   localStorage.setItem('onosendai:workshop-intro', '1')
 }, [pk, nip19.nsecEncode(sk)])
 const errors = []

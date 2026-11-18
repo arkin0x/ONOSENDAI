@@ -38,7 +38,6 @@ export interface RunResponse {
 
 const AXIS_MAX = (1n << 85n) - 1n
 
-
 self.onmessage = (event: MessageEvent<RunRequest>) => {
   const { id, originX, originY, originZ, axis, step, count, plane } = event.data
 

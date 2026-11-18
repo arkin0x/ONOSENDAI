@@ -3,10 +3,10 @@
  *
  * A worker module sets `self.onmessage` when it runs. Imported by the page
  * for a constant, it runs on the page too, where `self` is the window: the
- * terrain worker's handler then answered every window message by posting one
+ * terrain worker's handler then answered almost every window message by posting one
  * back to the window, so a single message from anything started a loop of
  * about 30,000 messages a second for the life of the tab, hidden or not, and
- * its garbage froze the page in long GCs (arkinox, 2026-11-19, 7 GB within 30
+ * its garbage froze the page in long GCs (arkinox, 2026-11-18, 7 GB within 30
  * seconds of opening). Types are fine (`import type` is erased); anything the
  * page and a worker share lives in lib/ (lib/terrainUnknown.ts).
  */
@@ -27,21 +27,21 @@ function sources(dir: string): string[] {
   return out
 }
 
-/** Every import or re-export statement of a file, whole (they can span lines), with what it names and where from. */
+/** Every import or re-export statement of a file, whole (they can span lines), with what it names and where from; and every dynamic import. */
 function imports(text: string): Array<{ statement: string; from: string; typeOnly: boolean }> {
   const out: Array<{ statement: string; from: string; typeOnly: boolean }> = []
-  const re = /^(import|export)\s+(type\s+)?([^;'"]*?)\s*from\s*['"]([^'"]+)['"]|^import\s*['"]([^'"]+)['"]/gm
+  const re = /^\s*(import|export)\s+(type\s+)?([^;'"]*?)\s*from\s*['"]([^'"]+)['"]|^\s*import\s*['"]([^'"]+)['"]|\bimport\(\s*['"]([^'"]+)['"]\s*\)/gm
   for (let m; (m = re.exec(text));) {
-    const from = m[4] ?? m[5]
-    const names = m[3] ?? ''
+    const from = m[4] ?? m[5] ?? m[6]
+    const names = (m[3] ?? '').trim()
     // `import type { A }`, or `import { type A, type B }`: erased, nothing runs.
-    const inlineTypesOnly = /^\{[\s\S]*\}$/.test(names.trim()) && names.replace(/[{}\s]/g, '').split(',').filter(Boolean).every((n) => /^type\s/.test(n.trim()) || n.trim().startsWith('type'))
-    out.push({ statement: m[0], from, typeOnly: m[2] !== undefined || (names.length > 0 && inlineTypesOnly) })
+    const inlineTypesOnly = /^\{[\s\S]*\}$/.test(names) && names.slice(1, -1).split(',').map((n) => n.trim()).filter(Boolean).every((n) => /^type\s+\S/.test(n))
+    out.push({ statement: m[0].trim(), from, typeOnly: m[2] !== undefined || inlineTypesOnly })
   }
   return out
 }
 
-const isWorkerPath = (from: string): boolean => /(^|\/)workers\/[^/]+\.worker(\.ts)?$/.test(from)
+const isWorkerPath = (from: string): boolean => /(^|\/)workers\/[^/]+\.worker(\.[jt]s)?$/.test(from)
 
 describe('the page imports no worker module for a value', () => {
   it('only types come from workers/*.worker.ts outside src/workers', () => {
@@ -62,6 +62,9 @@ describe('the page imports no worker module for a value', () => {
     expect(imports("import {\n  type RunRequest,\n  type RunResponse,\n} from '../workers/terrain.worker'\n").map((i) => i.typeOnly)).toEqual([true])
     expect(imports("import { type RunRequest, UNKNOWN } from '../workers/terrain.worker'\n").map((i) => i.typeOnly)).toEqual([false])
     expect(imports("import '../workers/terrain.worker'\n").map((i) => [isWorkerPath(i.from), i.typeOnly])).toEqual([[true, false]])
+    expect(imports("import { typeLabel } from '../workers/terrain.worker'\n").map((i) => i.typeOnly)).toEqual([false])
+    expect(imports("  export { UNKNOWN } from '../workers/terrain.worker.js'\n").map((i) => [isWorkerPath(i.from), i.typeOnly])).toEqual([[true, false]])
+    expect(imports("const w = await import('../workers/terrain.worker')\n").map((i) => [isWorkerPath(i.from), i.typeOnly])).toEqual([[true, false]])
   })
 })
 

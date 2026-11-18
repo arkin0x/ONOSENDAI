@@ -7,12 +7,13 @@
  * every avatar's group by the shift, and the rig moves the camera by the
  * same shift in the next frame (OrbitControls.update, which brings the
  * camera's own matrix up to date). Nothing is rendered in between, so the
- * avatar's world matrix is still where the last render drew it. The
- * projector read that stale matrix against the moved camera: the name,
+ * avatar's world matrix is still where the last render drew it (Box3
+ * setFromObject does not update parents). The projector read that stale
+ * matrix against the moved camera: the name,
  * picture and ring were drawn a whole segment off for one frame, then
  * snapped back. Measured in the browser (scripts/walk-jitter-probe.mjs,
- * standing still while a proof landed): the label jumped 78 px and back on
- * one landing, about 1700 px on another; 0 px after the fix.
+ * standing still while a proof landed): the label jumped 78 to 980 px and
+ * back for one frame at each landing; 0 px after the fix.
  */
 import { describe, expect, it, vi } from 'vitest'
 
@@ -83,9 +84,10 @@ describe('the HUD label under another avatar, as a proof lands', () => {
     // Before the fix: the avatar as last drawn, against the moved camera.
     const stale = staleAnchor(drawn, camera)
     expect(stale).not.toBeNull()
-    expect(Math.abs(stale!.x - before!.x) * 812 / 2).toBeGreaterThan(20)
+    expect(Math.abs(stale!.x - before!.x) * 375 / 2).toBeGreaterThan(20)
 
-    // Now: exactly where it was on the screen.
+    // Now: exactly where it was on the screen (the projector updates the camera once a frame).
+    camera.updateMatrixWorld()
     const after = drawnLabelAnchor(drawn, camera)
     expect(after).toBeDefined()
     expect(after!.x).toBeCloseTo(before!.x, 9)

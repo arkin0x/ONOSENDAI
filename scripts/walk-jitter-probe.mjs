@@ -42,10 +42,13 @@ const check = (ok, what) => { if (!ok) fails.push(what); console.log(`${ok ? 'ok
 const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
 const size = { width: 375, height: 812 }
 const ctx = await browser.newContext({ viewport: size, isMobile: true, hasTouch: true, ...(process.env.VIDEO ? { recordVideo: { dir: out, size } } : {}) })
-await ctx.route((u) => !/^https?:\/\/(localhost|127\.0\.0\.1)/.test(u.toString()), (r) => r.abort())
+// Only this machine: matched on the host name itself, so no other host can pass for it.
+const LOCAL = new Set(['localhost', '127.0.0.1'])
+const local = (u) => { try { return LOCAL.has(new URL(u).hostname) } catch { return false } }
+await ctx.route((u) => !local(u.toString()), (r) => r.abort())
 const sent = []
 await ctx.routeWebSocket(/.*/, (ws) => {
-  if (/localhost|127\.0\.0\.1/.test(ws.url())) { ws.connectToServer(); return }
+  if (local(ws.url())) { ws.connectToServer(); return }
   ws.onMessage((raw) => {
     let m; try { m = JSON.parse(String(raw)) } catch { return }
     if (m[0] === 'REQ') ws.send(JSON.stringify(['EOSE', m[1]]))
@@ -84,7 +87,7 @@ await page.evaluate(async () => {
   const vertices = []
   const faces = []
   const lo = [-150, -1, -150], hi = [150, 0, 150]
-  for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) vertices.push({ p: [x, y, z], c: [0.2, 0.6, 1] })
+  for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) vertices.push({ p: [x, y, z], c: [0.04, 0.1, 0.16] })
   for (const [a, b, c, d] of [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]]) faces.push([a, b, c], [a, c, d])
   const shard = withConstrain({ id: 'floor-probe', name: 'Floor', unit: 0, extent: 8, mode: 'solid', vertices, faces, up: false, spin: 0, updatedAt: Date.now() }, 'all')
   const item = { key: 'floor-probe', type: 'shard', at: { x: s.position.x, y: s.position.y - 1n, z: s.position.z }, plane: s.plane, height: 84, mine: false, shard }

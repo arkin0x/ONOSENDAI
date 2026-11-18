@@ -18,7 +18,7 @@
  * | FLUID_ACCEL | FLUID_MAX_SPEED / 0.2 s (62.5 steps/s^2) | full speed in 0.2 s: quick, but you feel it pick up |
  * | FLUID_DECEL | FLUID_MAX_SPEED / 0.15 s (83 steps/s^2) | stops from full speed in 0.15 s, coasting under a step (0.94) |
  * | FLUID_AIR_ACCEL / FLUID_AIR_DECEL | 30 / 8 steps/s^2 | steering in the air is softer, and a running jump keeps its speed (so it goes as much further as the walk is faster) |
- * | FLUID_NUDGE_MS | 140 ms | a tap pushes this long: about one step, into the next gibson, stopping near its middle |
+ * | FLUID_NUDGE_STEPS / FLUID_NUDGE_MS | 0.78 of a step / 119 ms | a tap pushes just long enough to go about three quarters of a step, into the next gibson from the middle of one and never two on (140 ms at 9.09) |
  *
  * A step is 2^zoom gibsons, the length a press walked: at the usual 2^0 it
  * is one gibson.
@@ -36,9 +36,11 @@ import type { AxisDirection, AxisName, Position } from './space'
  * 12.5 since 2026-11-18 (arkinox: "my walk speed seems slow ... maybe we
  * should increase it"), 37.5% faster than the 9.09 it was (1000 / 110, the
  * step WALK's held key, one step every store/walkHold.ts WALK_HOLD_MS).
- * Measured with phone proof times (300 ms a proof), a walk that turns or
- * zigzags stays well under FLUID_EASE_FROM events ahead, so the slowdown
- * never comes into a normal walk (store/__tests__/walkSpeed.test.ts).
+ * Measured with phone proof times (300 ms a proof, more for a long hop), a
+ * walk that goes straight, turns or zigzags stays well under FLUID_EASE_FROM
+ * events ahead, so the slowdown never comes into a normal walk
+ * (store/__tests__/walkFluid.test.ts, the speed tests). A running jump keeps its speed in the air, so it goes 37.5%
+ * further too: about 9.7 gibsons on the flat, from 7.
  */
 export const FLUID_MAX_SPEED = 12.5
 
@@ -54,8 +56,16 @@ export const FLUID_AIR_ACCEL = 30
 /** Slowing in the air with nothing held: a running jump mostly keeps its speed. */
 export const FLUID_AIR_DECEL = 8
 
-/** How long a tap pushes, in ms: a tap is a short nudge, about three quarters of a step. */
-export const FLUID_NUDGE_MS = 140
+/** How far a tap goes, in steps: a short nudge, about three quarters of a step, into the next gibson from the middle of one and never two gibsons on. */
+export const FLUID_NUDGE_STEPS = 0.78
+
+/**
+ * How long a tap pushes, in ms: just long enough to go FLUID_NUDGE_STEPS,
+ * picking up at FLUID_ACCEL for that long and then coasting to rest at
+ * FLUID_DECEL (it never reaches full speed), so a tap goes as far whatever
+ * FLUID_MAX_SPEED is: about 119 ms at 12.5 steps a second, 140 at 9.09.
+ */
+export const FLUID_NUDGE_MS = 1000 * Math.sqrt(FLUID_NUDGE_STEPS / (FLUID_ACCEL / 2 + (FLUID_ACCEL * FLUID_ACCEL) / (2 * FLUID_DECEL)))
 
 /**
  * How near a corner both ways have to be for a crossing to be one diagonal

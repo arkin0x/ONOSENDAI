@@ -63,12 +63,14 @@ import { DOUBLE_JUMP_HEIGHT, JUMP_HEIGHT } from '../walkGravity'
 import { walkFacing, walkFall, walkGlide } from '../../lib/walkEye'
 import { useCalibration } from '../../lib/calibration'
 import { withConstrain, type Constrain } from '../../lib/walkConstrain'
-import { FLUID_ACCEL, FLUID_EASE_FROM, FLUID_HOLD_AT, FLUID_MAX_SPEED, FLUID_WALL_REACH, len, onLine, syncSpeedFactor, syncWarnOpacity } from '../../lib/fluidWalk'
+import { FLUID_ACCEL, FLUID_EASE_FROM, FLUID_HOLD_AT, FLUID_MAX_SPEED, FLUID_NUDGE_STEPS, FLUID_WALL_REACH, len, onLine, syncSpeedFactor, syncWarnOpacity } from '../../lib/fluidWalk'
 import { eventsAhead } from '../walkAhead'
 import { canonicalQuaternion, type Position, type ViewAxes } from '../../lib/space'
 import { walkKeyDown, walkKeyUp, walkKeysReleased } from '../../hooks/useKeyboard'
 import { rampFixture } from '../fixtures/rampFixture'
 import { holdEnd, holdStart } from '../walkHold'
+import { estimateHopCost } from 'cyberspace-core'
+import { projectCantorMs } from '../../lib/calibration'
 
 /** Right +X, up +Y, toward the camera +Z: 'away' walks -Z. */
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } }
@@ -242,7 +244,7 @@ describe('acceleration', () => {
     expect(coast).toBeLessThan(1)
   })
 
-  it('a tap is a short nudge: about half a step, into the next gibson', () => {
+  it('a tap is a short nudge: about three quarters of a step (FLUID_NUDGE_STEPS) whatever the speed, into the next gibson', () => {
     walk()
     down('KeyW')
     up('KeyW')
@@ -250,6 +252,12 @@ describe('acceleration', () => {
     expect(len(fluidState().v)).toBe(0)
     expect(rel(start)).toEqual([0, 0, -1])
     expect(fluidState().frac.z).toBeGreaterThan(-0.1)
+    // About FLUID_NUDGE_STEPS (a frame's worth less at 60 fps), and never two gibsons on, even
+    // from the far edge of the middle one (a tap from 0.5 stops short of 1.5).
+    const went = -(rel(start)[2] + fluidState().frac.z)
+    expect(went).toBeGreaterThan(FLUID_NUDGE_STEPS - 0.15)
+    expect(went).toBeLessThan(FLUID_NUDGE_STEPS + 0.05)
+    expect(FLUID_NUDGE_STEPS + 0.05).toBeLessThan(1)
   })
 })
 
@@ -303,10 +311,25 @@ describe('speed (arkinox, 2026-11-18: "my walk speed seems slow ... maybe faster
   })
 
   /**
-   * Walk 8 s holding W on a wide floor while `drive` steers, a phone proving
-   * each move in `proofMs` one after another: the most events it got ahead.
+   * A phone's proof of `req`, in ms: `overheadMs` for every move (the worker,
+   * the signature, the landing) and each changed axis's Cantor tree at its
+   * height, on a phone measured as lib/__tests__/crossover.test.ts has one,
+   * so a long hop costs more than a short one.
    */
-  async function aheadWithProofs(proofMs: number, drive: (ms: number) => void): Promise<number> {
+  const PHONE = { 14: 300, 15: 700, 16: 1600, 17: 3800 }
+  function phoneProofMs(req: (typeof posted)[number], overheadMs: number): number {
+    const est = estimateHopCost(req.from.x, req.from.y, req.from.z, req.to.x, req.to.y, req.to.z, useCyberspace.getState().plane as 0 | 1, 20)
+    const lca = { x: est.lcaX, y: est.lcaY, z: est.lcaZ }
+    return overheadMs + (['x', 'y', 'z'] as const).filter((a) => req.from[a] !== req.to[a]).reduce((ms, a) => ms + projectCantorMs(PHONE, lca[a]), 0)
+  }
+
+  /**
+   * Walk 8 s holding W on a wide floor while `drive` steers, a phone proving
+   * each move one after another in `proofMs(move)`, with the segment budget
+   * measured on that phone: the most events it got ahead.
+   */
+  async function aheadWithProofs(proofMs: (req: (typeof posted)[number]) => number, drive: (ms: number) => void): Promise<number> {
+    useCalibration.setState({ cantorMsByHeight: PHONE })
     world(start, [boxes('Floor', 'all', [[[-200, -1, -200], [200, 0, 200]]]), [0, -1, 0]])
     walk(true)
     await wallsBuilt()
@@ -323,7 +346,7 @@ describe('speed (arkinox, 2026-11-18: "my walk speed seems slow ... maybe faster
       // The walk asks for a proof a microtask or two after the move.
       await Promise.resolve(); await Promise.resolve()
       while (askedAt.length < posted.length) askedAt.push(clock)
-      if (landed < posted.length && clock >= Math.max(askedAt[landed], lastLand) + proofMs) {
+      if (landed < posted.length && clock >= Math.max(askedAt[landed], lastLand) + proofMs(posted[landed])) {
         await useCyberspace.getState().applyProofMessage(done(posted[landed]))
         landed++
         lastLand = clock
@@ -335,16 +358,18 @@ describe('speed (arkinox, 2026-11-18: "my walk speed seems slow ... maybe faster
     return most
   }
 
-  it('with phone proof times (300 ms a move), a walk that turns, zigzags or keeps jumping stays well under the slowdown', async () => {
+  it('with phone proof times (300 ms a move, more for a long hop), a walk that goes straight, turns, zigzags or keeps jumping stays well under the slowdown', async () => {
     let jumps = -1
     const walks: Array<[string, (ms: number) => void]> = [
+      ['straight on', () => {}],
       ['turning 120 degrees a second', (ms) => face((ms / 1000) * 120)],
       ['zigzag, 45 degrees each way every 0.4 s', (ms) => face(Math.floor(ms / 400) % 2 ? 45 : -45)],
       ['a running jump every 1.2 s', (ms) => { const k = Math.floor(ms / 1200); if (k !== jumps) { jumps = k; down('Space'); up('Space') } }],
     ]
     for (const [name, drive] of walks) {
-      const most = await aheadWithProofs(300, drive)
-      // Measured at most 4, as at the old 9.09 a second (700 ms proofs, a slow phone: 13 to 15, against 11 to 12); the slowdown starts past FLUID_EASE_FROM (14).
+      const most = await aheadWithProofs((req) => phoneProofMs(req, 300), drive)
+      // Measured 1, 3, 4 and 4 (1, 3, 3 and 4 at the old 9.09 a second). On a slow phone (700 ms a
+      // move) 1, 11, 12 and 12 (1, 8, 10 and 10 before). The slowdown starts past FLUID_EASE_FROM (14).
       expect(most, name).toBeLessThanOrEqual(6)
       expect(most, name).toBeLessThan(FLUID_EASE_FROM)
       walkKeysReleased()

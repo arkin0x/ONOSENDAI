@@ -255,6 +255,18 @@ export function tickFluid(now: number = performance.now()): boolean {
  */
 export const FOOT_DROP_SPEED = Number(STEP_UP_MAX) * FLUID_MAX_SPEED * 1.1
 
+/**
+ * How fast the drawn feet may rise with the camera following them exactly,
+ * in steps a second: a rise faster than this in a frame is a riser, and the
+ * camera climbs the rest of it over GLIDE_TAU_S (lib/walkEye.ts walkRise).
+ * It is about the camera, not the walk, so it stays 20 (what FOOT_DROP_SPEED
+ * was at 9.09 steps a second) whatever FLUID_MAX_SPEED is: a riser never
+ * lifts the camera more than a third of a gibson in a 60 fps frame. The
+ * steepest slope walked at full speed (25 a second at 12.5) eases by its
+ * last fifth, never below the feet (scene/Scene.tsx keeps EYE_ROOM).
+ */
+export const RISE_FOLLOW_SPEED = 20
+
 /** How long the walls under the walker are kept before they are listed again, in ms (as scene/walkEyeRig.ts keeps the eye's). */
 const FOOT_ITEMS_MS = 300
 
@@ -440,9 +452,9 @@ export function groundFluid(now: number = performance.now()): void {
     const col = groundUnder(cs.cursor, lead, items, g, rise, drop)
     if (col !== null && h < col) h = col
   }
-  // A riser stood on at once (faster than any slope is walked): the feet
-  // are on it, and the camera follows them up over GLIDE_TAU_S (walkRise).
-  const jump = h - was - FOOT_DROP_SPEED * stepG * dt
+  // A riser stood on at once (a rise faster than RISE_FOLLOW_SPEED): the
+  // feet are on it, and the camera follows them up over GLIDE_TAU_S (walkRise).
+  const jump = h - was - RISE_FOLLOW_SPEED * stepG * dt
   walkRise.offset = walkRise.offset * decayK - (!falling && !fresh && jump > 0 ? jump : 0)
   if (walkRise.offset > -1e-4 * stepG) walkRise.offset = 0
   walkRise.up.axis = ui

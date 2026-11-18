@@ -19,11 +19,12 @@
  * the last render left it, from before the shift, against the camera after
  * it, so for one frame at every landing the name, picture and ring under
  * another avatar were drawn as far off as the walk had come (a whole
- * segment), then snapped back; and the marker's own point was measured from
- * the store's anchor, which a landing moves a commit before the scene. Now
- * the avatar's and the camera's matrices are brought up to date first
- * (drawnLabelAnchor), and the point is placed against the committed anchor
- * (lib/renderFrame.ts), as the rig and your own avatar are.
+ * segment), then snapped back. Now the avatar's world matrix is brought up
+ * to date, parents included, before it is measured (drawnLabelAnchor), and
+ * the projector runs late in the frame (PROJECTOR_PRIORITY), after the rig
+ * and every avatar have moved, so the label never depends on which of them
+ * happened to subscribe first. The marker's own point is placed against the
+ * committed anchor (lib/renderFrame.ts), as the rig and your own avatar are.
  */
 
 import { useFrame } from '@react-three/fiber'
@@ -61,19 +62,25 @@ export function targetPoint(
 }
 
 /**
+ * When the projector reads the avatars and the camera: after everything that
+ * moves them (the Rig and every avatar at 0, Cyberspace TV's camera at 0.5)
+ * and before the composer draws the frame at 1, as HeadlampRig does.
+ */
+export const PROJECTOR_PRIORITY = 0.6
+
+/**
  * Where the label hangs under a drawn avatar, on the screen (lib/avatarLabel
  * labelAnchor), or undefined when none of it is in front of the camera.
+ * `camera`'s matrices must be current (the caller updates them once a frame).
  *
- * The avatar's world matrix and the camera's are brought up to date first,
- * parents included: a frame's callbacks move groups and the camera, and
- * three only recomputes world matrices when it renders. Box3.setFromObject
- * updates the object itself but not its parents, so an avatar whose group
- * was just re-placed (a landing's re-centring, in the commit before this
- * frame) was measured where the last render drew it, against a camera the
- * rig had already moved.
+ * The avatar's world matrix is brought up to date first, parents included:
+ * a frame's callbacks move groups, and three only recomputes world matrices
+ * when it renders. Box3.setFromObject updates the object itself but not its
+ * parents, so an avatar whose group was just re-placed (a landing's
+ * re-centring, in the commit before this frame) was measured where the last
+ * render drew it, against a camera the rig had already moved.
  */
 export function drawnLabelAnchor(drawn: Object3D, camera: Camera, box: Box3 = new Box3(), corner: Vector3 = new Vector3()): LabelAnchor | undefined {
-  camera.updateMatrixWorld()
   drawn.updateWorldMatrix(true, false)
   box.setFromObject(drawn)
   if (box.isEmpty()) return undefined
@@ -107,7 +114,7 @@ export function TargetProjector({ axes, targets }: Props): null {
     // The one the scene on screen was drawn with, which a landing moves a
     // commit after the store (lib/renderFrame.ts), as the camera is.
     const origin = projectorOrigin(s)
-    // The camera as the rig has left it this frame (drawnLabelAnchor).
+    // The camera as the rig has left it this frame, once for every target (drawnLabelAnchor).
     state.camera.updateMatrixWorld()
     const step = stepFor(s.scaleExp)
     const cam = state.camera as unknown as { fov?: number; position: Vector3 }
@@ -170,7 +177,7 @@ export function TargetProjector({ axes, targets }: Props): null {
           : (Number((t.radius * 10_000n) / step) / 10_000) * projScale / depth,
       }
     }
-  })
+  }, PROJECTOR_PRIORITY)
 
   return null
 }

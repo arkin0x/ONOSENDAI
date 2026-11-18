@@ -47,7 +47,7 @@ vi.mock('zustand', async (importOriginal) => {
   return { ...real, create: (init?: Parameters<typeof real.create>[0]) => (init === undefined ? live : live(init)) }
 })
 
-import { ViewPanel } from '../ViewPanel'
+import { ViewPanel, WALK_LIMITS_HINT } from '../ViewPanel'
 import { ProofPanel } from '../ProofPanel'
 import { ChainPanel } from '../ChainPanel'
 import { SecretsModal } from '../SecretsModal'
@@ -96,6 +96,7 @@ const ROWS: Array<[string, string, string]> = [
   ['view-walk-look', 'Look sphere in WALK', 'A ball in the bottom right to drag and look around.'],
   ['view-walk-gravity', 'Gravity in WALK', 'Fall, land and jump.'],
   ['view-walk-fluid', 'Fluid WALK', 'Hold to glide. Moves still land on whole gibsons.'],
+  ['view-walk-limits', 'Chain sync limit', WALK_LIMITS_HINT],
   ['view-chain-trail', 'Chain trail', 'The red line of your movement history.'],
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
   ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
@@ -105,7 +106,7 @@ const ROWS: Array<[string, string, string]> = [
 ]
 
 describe('the Settings panel', () => {
-  it('is a panel titled Settings with twelve switches, one to a row, each a title and a gray subtitle, in order', () => {
+  it('is a panel titled Settings with thirteen switches, one to a row, each a title and a gray subtitle, in order', () => {
     const html = view()
     expect(html).toMatch(/^<section class="panel panel--view">/)
     expect(html).toContain('<h2>Settings</h2>')
@@ -128,14 +129,14 @@ describe('the Settings panel', () => {
 
     viewSwitch('view-terrain-dots').props.onCheckedChange(false)
     expect(useLayers.getState()).toMatchObject({ dots: false, boxes: true })
-    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true, glow: true })
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true, glow: true, walkLimits: true })
     expect(switchTag(view(), 'view-terrain-dots')).toContain('aria-checked="false"')
     expect(switchTag(view(), 'view-hx-boxes')).toContain('aria-checked="true"')
 
     viewSwitch('view-hx-boxes').props.onCheckedChange(false)
     viewSwitch('view-terrain-dots').props.onCheckedChange(true)
     expect(useLayers.getState()).toMatchObject({ dots: true, boxes: false })
-    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true, glow: true })
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true, glow: true, walkLimits: true })
     expect(viewSwitch('view-hx-boxes').props.checked).toBe(false)
 
     viewSwitch('view-hx-boxes').props.onCheckedChange(true)

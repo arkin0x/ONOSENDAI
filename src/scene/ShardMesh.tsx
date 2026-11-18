@@ -519,8 +519,13 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
   // vertex for every corner of every face (about 130 bytes each), held for as
   // long as the shard was drawn. At arkinox's spot that is the bulk of the
   // heap left after a GC (?diag=1, 2026-11-18).
+  // A ghost is the one exception: one at a time, cut again at every cursor
+  // step, so it keeps its expansion rather than making it on each step.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const built = useMemo(() => shared ?? shardGeometry(expandFaceColors(given), clip, pose), [shared, given.vertices, given.faces, given.facecolors, clip, pose])
+  const ghostExpanded = useMemo(() => (ghost ? expandFaceColors(given) : null), [ghost, given.vertices, given.faces, given.facecolors])
+  const expanded = (): ShardModel => ghostExpanded ?? expandFaceColors(given)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const built = useMemo(() => shared ?? shardGeometry(expanded(), clip, pose), [shared, given.vertices, given.faces, given.facecolors, clip, pose, ghostExpanded])
   const { colors, faces, drawn } = built
   const positions = useSame(built.positions)
   const index = useSame(built.index)
@@ -635,9 +640,9 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
   // cursor step, then cut at its region box on each step, which is a pass
   // over the segments (ghostEdgeSegments). None past GHOST_EDGES.maxTriangles.
   const edgeSource = useMemo(
-    () => (edges && plan.faces && given.faces.length > 0 && given.faces.length <= GHOST_EDGES.maxTriangles ? ghostEdgeSegments(expandFaceColors(given), pose) : null),
+    () => (edges && plan.faces && given.faces.length > 0 && given.faces.length <= GHOST_EDGES.maxTriangles ? ghostEdgeSegments(expanded(), pose) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [edges, plan.faces, given.vertices, given.faces, given.facecolors, pose],
+    [edges, plan.faces, given.vertices, given.faces, given.facecolors, pose, ghostExpanded],
   )
   const ghostEdges = useMemo(() => (edgeSource ? segmentsGeometry(clip ? clipSegments(edgeSource, clip) : edgeSource) : null), [edgeSource, clip])
   useEffect(() => () => { ghostEdges?.dispose() }, [ghostEdges])

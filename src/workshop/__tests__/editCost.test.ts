@@ -54,7 +54,7 @@ describe('the shared attributes live as long as the geometries that share them (
 
 describe('a paint on the bench', () => {
   it('keeps the geometries and their GPU buffers: the colors go into the buffer that is there', () => {
-    expect(mesh).toMatch(/const built = useMemo\(\(\) => shared \?\? shardGeometry\(expandFaceColors\(given\), clip, pose\)/)
+    expect(mesh).toMatch(/const built = useMemo\(\(\) => shared \?\? shardGeometry\(expanded\(\), clip, pose\)/)
     expect(mesh).toMatch(/const positions = useSame\(built\.positions\)/)
     expect(mesh).toMatch(/const index = useSame\(built\.index\)/)
     expect(mesh).toMatch(/shared \? null : new Float32BufferAttribute\(positions\.slice\(\), 3\)\), \[\.\.\.buffers, shared\]\)/)

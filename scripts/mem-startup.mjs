@@ -2,7 +2,7 @@
  * mem-startup.mjs: what a heavy returning player's tab holds after it opens,
  * and what it allocates while it sits there (2026-11-18).
  *
- * arkinox, 2026-11-19, ?diag=1 on Brave/Windows: a 1.6 GB heap 21 s after
+ * arkinox, 2026-11-18, ?diag=1 on Brave/Windows: a 1.6 GB heap 21 s after
  * opening at his spot, about 850 MB left after each major GC, and the heap
  * climbing 13 to 20 MB/s while nothing happens, even with the tab hidden, so
  * the GCs that follow freeze the page for one to two and a half seconds.

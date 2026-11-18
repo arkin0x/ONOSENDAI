@@ -256,12 +256,6 @@ function refusal(s: string): '#url' | '#' | null {
 }
 
 /**
- * The only text that leaves: a browser's or the app's own label, cut down to the
- * characters such labels use. Anything naming a URL goes whole, tested first,
- * since the strip below takes the colon. Keys and long hex go after the strip,
- * so nothing rejoins past them, and the cut to length is last.
- */
-/**
  * The biggest localStorage keys, as [name, characters], largest first: names
  * through safeLabel, so a pubkey in a key reads `#`, and never a value. What
  * fills the origin's few megabytes is then known from a report (arkinox's of
@@ -271,6 +265,12 @@ export function largestKeys(entries: ReadonlyArray<readonly [string, number]>, n
   return [...entries].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, c]) => [safeLabel(k, 64), c])
 }
 
+/**
+ * The only text that leaves: a browser's or the app's own label, cut down to the
+ * characters such labels use. Anything naming a URL goes whole, tested first,
+ * since the strip below takes the colon. Keys and long hex go after the strip,
+ * so nothing rejoins past them, and the cut to length is last.
+ */
 export function safeLabel(s: unknown, max = 48): string {
   if (typeof s !== 'string') return ''
   const refused = refusal(s)

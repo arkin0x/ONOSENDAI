@@ -2,7 +2,7 @@
  * chainPanelRows.test.tsx: the Proof chain panel draws the newest rows of a
  * long chain, not every one (hud/ChainPanel.tsx CHAIN_ROWS_SHOWN).
  *
- * arkinox's ?diag=1 report of 2026-11-19 counted about 20,000 DOM nodes with
+ * arkinox's ?diag=1 report of 2026-11-18 counted about 20,000 DOM nodes with
  * the menu open and about 250 with it shut: one row of about eighteen nodes
  * for each of his ~1,300 actions, redrawn on every publish result. The panel
  * now draws the newest CHAIN_ROWS_SHOWN with their true numbers, and one line

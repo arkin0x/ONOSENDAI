@@ -53,7 +53,7 @@ import { CopyValue } from './ui/CopyValue'
  * The rows drawn: the newest this many. Every row is about eighteen DOM nodes,
  * and a long chain drew all of them: arkinox's ~1,300 actions were ~20,000
  * nodes in the open menu, redrawn on every publish result (?diag=1,
- * 2026-11-19). The chain explorer (the ACTIONS tag, or the line above the
+ * 2026-11-18). The chain explorer (the ACTIONS tag, or the line above the
  * rows) walks the rest.
  */
 export const CHAIN_ROWS_SHOWN = 100
@@ -207,8 +207,8 @@ export function ChainPanel(): JSX.Element {
         </div>
       </dl>
 
-      {/* Every action, oldest first, and where it is. State only: there is no
-          control on a row. */}
+      {/* The newest actions (CHAIN_ROWS_SHOWN), oldest of them first, and where
+          each is. State only: there is no control on a row. */}
       <ol className="chainrows" ref={list}>
         {from > 0 && (
           <li className="chainrows__older">

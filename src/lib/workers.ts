@@ -7,6 +7,7 @@
 
 import type { RunRequest, RunResponse } from '../workers/terrain.worker'
 import { tlog } from './log'
+import { useVersionGate } from './versionGate'
 import type { ProofMode, ProofRequest, ProofResponse, ProofWorkerMessage } from '../workers/proof.worker'
 
 let proofWorker: Worker | null = null
@@ -104,6 +105,8 @@ const terrainIdle: boolean[] = []
 const runQueue: RunRequest[] = []
 /** The id of the run each worker is on, so a worker that throws can say which run it lost. */
 const terrainRunning: (number | null)[] = []
+/** Whether each worker has answered a run yet: one that fails before it ever has did not load (its file gone with a deploy). */
+const terrainAnswered: boolean[] = []
 
 /**
  * Told the ids of runs that will never be answered: dropped from the queue
@@ -142,22 +145,36 @@ function poolIdle(): boolean {
   return runQueue.length === 0 && terrainIdle.every(Boolean)
 }
 
+/**
+ * Never once a newer build is deployed: a worker holds its code while it runs,
+ * but a new one asks for this build's hashed file, which the deploy may have
+ * taken away (the proof worker's note, preloadProofWorker).
+ */
+function mayRetire(): boolean {
+  return useVersionGate.getState().verdict === 'ok'
+}
+
 function armRetire(): void {
-  if (retireTimer !== null || terrainWorkers.length === 0 || !poolIdle()) return
+  if (retireTimer !== null || terrainWorkers.length === 0 || !poolIdle() || !mayRetire()) return
   retireTimer = setTimeout(retireTerrain, TERRAIN_IDLE_MS)
 }
 
 function retireTerrain(): void {
   retireTimer = null
-  if (!poolIdle()) return
+  if (!poolIdle() || !mayRetire()) return
   tlog(`[workers] pool idle ${TERRAIN_IDLE_MS / 1000} s: letting ${terrainWorkers.length} workers go`)
+  dropPool()
+}
+
+function dropPool(): void {
   for (const w of terrainWorkers) w.terminate()
   terrainWorkers.length = 0
   terrainIdle.length = 0
   terrainRunning.length = 0
+  terrainAnswered.length = 0
 }
 
-/** Terrain workers alive now (tests, and the diag). */
+/** Terrain workers alive now (tests). */
 export function terrainWorkersAlive(): number {
   return terrainWorkers.length
 }
@@ -218,6 +235,7 @@ export function getTerrainWorkers(): Worker[] {
       worker.addEventListener('message', (event: MessageEvent<RunResponse>) => {
         // A worker let go may still have an answer on its way: nobody's now.
         if (terrainWorkers[slot] !== worker) return
+        terrainAnswered[slot] = true
         terrainIdle[slot] = true
         terrainRunning[slot] = null
         pumpRunQueue()
@@ -230,6 +248,17 @@ export function getTerrainWorkers(): Worker[] {
       worker.addEventListener('error', (event) => {
         if (terrainWorkers[slot] !== worker) return
         tlog(`[workers] w${slot} FAILED:`, event.message)
+        if (!terrainAnswered[slot]) {
+          // It never loaded, and its siblings came from the same file: handed
+          // the next run, each would hold it for good and the pool would
+          // wedge. The whole pool goes, every run out or queued is given back,
+          // and the next run starts a new pool.
+          const lost = [...terrainRunning.filter((id): id is number => id !== null), ...runQueue.map((r) => r.id)]
+          runQueue.length = 0
+          dropPool()
+          if (lost.length) runDropHandler?.(lost)
+          return
+        }
         const lost = terrainRunning[slot]
         terrainIdle[slot] = true
         terrainRunning[slot] = null
@@ -240,6 +269,7 @@ export function getTerrainWorkers(): Worker[] {
       terrainWorkers.push(worker)
       terrainIdle.push(true)
       terrainRunning.push(null)
+      terrainAnswered.push(false)
     }
   }
   return terrainWorkers

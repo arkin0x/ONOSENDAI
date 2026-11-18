@@ -210,7 +210,13 @@ export function saveRows(name: string, rows: readonly MyDeployment[], stored: (d
     if (sig === undefined) { json = stored(row); sig = sigOf(json); storedAs.set(row, sig) }
     const e = b.get(key)
     if (e?.sig === sig) { e.row = row; return }
-    json ??= stored(row)
+    // Noted from another serialization (a load, another tab): made now, and signed as made.
+    if (json === undefined) {
+      json = stored(row)
+      sig = sigOf(json)
+      storedAs.set(row, sig)
+      if (e?.sig === sig) { e.row = row; return }
+    }
     const seq = e?.seq ?? seqFor(rows, i, b)
     b.set(key, { key, seq, sig, row })
     dirty.set(`r\0${name}\0${key}`, { put: { bucket: name, key, seq, json } })

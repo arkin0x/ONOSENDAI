@@ -19,6 +19,10 @@ const fake = vi.hoisted(() => {
     addEventListener(type: string, listener: Listener): void { (type === 'message' ? this.message : this.error).push(listener) }
     postMessage(run: { id: number; count: number }): void { this.running = run }
     terminate(): void { this.ended = true }
+    fail(): void {
+      this.running = null
+      for (const l of [...this.error]) l({ message: 'Failed to fetch a worker script' })
+    }
     answer(): void {
       const run = this.running!
       this.running = null
@@ -29,7 +33,8 @@ const fake = vi.hoisted(() => {
   return { state }
 })
 
-const { TERRAIN_IDLE_MS, postRun, setRunResultHandler, terrainWorkersAlive } = await import('../workers')
+const { TERRAIN_IDLE_MS, postRun, setRunDropHandler, setRunResultHandler, terrainWorkersAlive } = await import('../workers')
+const { useVersionGate } = await import('../versionGate')
 
 const run = (id: number) => ({ id, originX: 0n, originY: 0n, originZ: 0n, axis: 'x' as const, step: 1n, count: 2, plane: 0 as const })
 const answered: number[] = []
@@ -40,7 +45,10 @@ beforeEach(() => {
   answered.length = 0
   setRunResultHandler((a) => { answered.push(a.id) })
 })
-afterEach(() => { vi.useRealTimers() })
+afterEach(() => {
+  useVersionGate.setState({ verdict: 'ok' })
+  vi.useRealTimers()
+})
 
 describe('the terrain pool', () => {
   it('lets its workers go a minute after the last answer, and starts new ones for the next run', () => {
@@ -90,5 +98,48 @@ describe('the terrain pool', () => {
     w.running = { id: 99, count: 1 }
     w.answer()
     expect(answered).toEqual([])
+  })
+
+  it('keeps them once a newer build is deployed: a new worker may find its file gone', () => {
+    postRun(run(30))
+    busy()[0].answer()
+    useVersionGate.setState({ verdict: 'hint' })
+    vi.advanceTimersByTime(TERRAIN_IDLE_MS * 2)
+    expect(terrainWorkersAlive()).toBe(2)
+    // A move after the reload hint is still answered by the workers that hold their code.
+    postRun(run(31))
+    busy()[0].answer()
+    expect(answered).toEqual([30, 31])
+    useVersionGate.setState({ verdict: 'ok' })
+    postRun(run(32)); busy()[0].answer()
+    vi.advanceTimersByTime(TERRAIN_IDLE_MS)
+    expect(terrainWorkersAlive()).toBe(0)
+  })
+
+  it('a pool whose workers never loaded gives every run back and starts over at the next run, never wedged', () => {
+    const dropped: number[] = []
+    setRunDropHandler((ids) => { dropped.push(...ids) })
+    postRun(run(40)); postRun(run(41)); postRun(run(42))
+    const failing = busy()
+    expect(failing).toHaveLength(2)
+    failing[0].fail()
+    // Every run out or waiting given back, the whole pool gone.
+    expect(dropped.sort()).toEqual([40, 41, 42])
+    expect(terrainWorkersAlive()).toBe(0)
+    // The sibling's own failure, after, changes nothing.
+    failing[1].fail()
+    expect(dropped).toHaveLength(3)
+    // The next run: a new pool, answered.
+    postRun(run(43))
+    expect(terrainWorkersAlive()).toBe(2)
+    busy()[0].answer()
+    expect(answered).toEqual([43])
+    // A worker that has answered and then throws costs only its own run, as before.
+    postRun(run(44))
+    const w = busy()[0]
+    w.fail()
+    expect(dropped).toContain(44)
+    expect(terrainWorkersAlive()).toBe(2)
+    setRunDropHandler(null)
   })
 })

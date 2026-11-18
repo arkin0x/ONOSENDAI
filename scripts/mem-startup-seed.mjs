@@ -2,7 +2,7 @@
  * mem-startup-seed.mjs: build a local world that looks like a heavy returning
  * player's, for mem-startup.mjs to open again and again (2026-11-18).
  *
- * arkinox, 2026-11-19: "been in for 30 seconds and already at 7GB ... It
+ * arkinox, 2026-11-18: "been in for 30 seconds and already at 7GB ... It
  * loaded the app at my avatar which is surrounded by a lot of shards." His
  * chain is over ten thousand actions, his spot has about 135 shards around
  * it, and his storage is full.

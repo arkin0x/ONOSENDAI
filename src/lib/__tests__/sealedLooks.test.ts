@@ -17,7 +17,7 @@
  * Opened: a chest with one model keeps that very model drawn on every frame;
  * a two-part look always has one of the two drawn.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { toPayload, type ShardModel } from 'sno-core/shards'
 import { BAG_SAFE_BYTES, signedBytes } from '../bagSize'
@@ -169,6 +169,18 @@ describe('writing a sealed look', () => {
   })
 })
 
+describe('a FEED look of your own published object, which has a sealed look\u2019s shape', () => {
+  it('moves to another bag as it is: never refused, never resealed', async () => {
+    const pub = finalizeEvent({ kind: 33331, created_at: 1, content: payloadOf(sized('Statue', 1)), tags: [['d', 'statue']] }, sk) as NostrEvent
+    const tags = [['look', sealedLookPayload(payloadOf(sized('Statue', 1)), `33331:${PK}:statue`)]]
+    const { openSealedLookPayload } = await import('../sealedLooks')
+    const moved = await sealLookTags(tags, io(bagKey(), { fromKeyHex: bytesToHex(bagKey()), open: (a, k) => openSealedLookPayload(a, k, relayOf([pub])) }))
+    expect(moved.tags).toEqual(tags)
+    expect(moved.objects).toEqual([])
+    expect(moved.dropped).toEqual([])
+  })
+})
+
 describe('reading a sealed look', () => {
   async function sealedChest(key: Uint8Array, kb = 40): Promise<{ event: NostrEvent; objects: NostrEvent[]; model: ShardModel }> {
     const model = sized('Hoard', kb)
@@ -213,6 +225,32 @@ describe('reading a sealed look', () => {
     expect(drawnLook(look, true)).not.toBeNull()
     // Its contents open with its lock regardless of its look.
     expect(openWithSecret(chestItemOf(event)!, secret)).toEqual([])
+  })
+
+  it('a missing one is asked for again after a minute, and drawn once it can be had', async () => {
+    const key = bagKey()
+    const { event, objects, model } = await sealedChest(key)
+    let answer: NostrEvent | null = null
+    setSealedLookFetch(async () => answer)
+    const subject = { type: 'chest', event, bagKeyHex: bytesToHex(key) }
+    const flush = async (): Promise<void> => { for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r)) }
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      lookOf(subject)
+      await flush()
+      expect(lookOf(subject)).toBe(builtInLook('treasure'))
+      answer = objects[0]
+      // Within the minute it stays missing; the minute's wake-up has whoever drew it read again.
+      expect(lookOf(subject)).toBe(builtInLook('treasure'))
+      const v = sealedLooksVersion()
+      vi.advanceTimersByTime(60_000)
+      expect(sealedLooksVersion()).toBeGreaterThan(v)
+      lookOf(subject)
+      await flush()
+      expect(lookOf(subject)!.closed.vertices.length).toBe(model.vertices.length)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('is readable by someone who can see the chest (its bag key) and by nobody else', async () => {

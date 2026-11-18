@@ -446,6 +446,9 @@ export function forgetSealedLooks(budget: number = SEALED_LOOKS_KEPT_BYTES): num
   sealedLooks.clear()
   sealedBytes = 0
   sealedBudget = budget
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+  // Whatever was drawn from one reads again (under the new identity's keys).
+  if (n > 0) sealedChanged()
   return n
 }
 
@@ -474,12 +477,22 @@ export function sealedLookState(address: string, keyHex: string, hint?: string):
   const loading: SealedLookState = { state: 'loading' }
   keepSealed(key, loading)
   void openSealedLook(address, keyHex, hint, sealedFetch).then((next) => {
-    // Forgotten or asked again meanwhile: whatever holds the key now stands.
-    if (sealedLooks.get(key) !== loading) return
+    // Asked again meanwhile, whatever holds the key now stands. Pushed out of
+    // the cache while it loaded (or forgotten), whoever waits on it asks again.
+    if (sealedLooks.get(key) !== loading) { if (!sealedLooks.has(key)) sealedChanged(); return }
     keepSealed(key, next)
+    // A look that could not be had is asked for again once its minute is up: whoever drew the chest without it reads again then.
+    if (next.state === 'missing') retryLater()
     sealedChanged()
   })
   return loading
+}
+
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+/** One wake-up SEALED_RETRY_MS from now, for every missing sealed look at once. */
+function retryLater(): void {
+  if (retryTimer) return
+  retryTimer = setTimeout(() => { retryTimer = null; sealedChanged() }, SEALED_RETRY_MS)
 }
 
 async function openSealedLook(address: string, keyHex: string, hint: string | undefined, fetch: SealedLookFetch): Promise<SealedLookState> {

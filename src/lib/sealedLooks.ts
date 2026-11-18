@@ -104,15 +104,18 @@ function wrapperAddress(payload: string, author: string): string | null {
 /**
  * A sealed look's payload, fetched (lib/references.ts) and opened with the key
  * of the bag it was sealed for, or null: not fetched, not the author's, not
- * verifying, or not opening. A public object is null too: it is no sealed look.
+ * verifying, or not opening. A public object (no `encrypted` tag) is no sealed
+ * look at all, but a FEED look of your own published object, which has the
+ * same shape: `public`, and never moved, resealed or retracted as one.
  */
-export async function openSealedLookPayload(address: string, keyHex: string, fetch: (ref: string[]) => Promise<NostrEvent | null> = resolveReference): Promise<{ payload: string; event: NostrEvent } | null> {
+export async function openSealedLookPayload(address: string, keyHex: string, fetch: (ref: string[]) => Promise<NostrEvent | null> = resolveReference): Promise<{ payload: string; event: NostrEvent; public?: false } | { public: true; event: NostrEvent } | null> {
   const a = parseAddress(address)
   if (!a) return null
   const ev = await fetch(['a', address, '']).catch(() => null)
   if (!ev || ev.kind !== a.kind || ev.pubkey !== a.pubkey || ev.tags.find((t) => t[0] === 'd')?.[1] !== a.d || !verifyOnce(ev)) return null
   const enc = ev.tags.find((t) => t[0] === 'encrypted')
-  if (!enc || enc[1] !== ALGO || !enc[2]) return null
+  if (!enc) return { public: true, event: ev }
+  if (enc[1] !== ALGO || !enc[2] || enc[3] !== REGION_KEY_DERIVATION) return null
   const payload = await decryptForRegion(hexToBytes(keyHex), enc[2])
   return payload === null ? null : { payload, event: ev }
 }
@@ -136,7 +139,7 @@ export interface SealLooksIo {
    */
   fromKeyHex?: string
   /** Opens a sealed look under its old key (openSealedLookPayload by default). */
-  open?: (address: string, keyHex: string) => Promise<{ payload: string } | null>
+  open?: (address: string, keyHex: string) => Promise<{ payload: string; public?: false } | { public: true } | null>
 }
 
 /** The tags as they go into the chest, the objects sealed for them (sent already, or kept for BROADCAST while LOCAL), and the sealed looks they no longer name. */
@@ -173,6 +176,8 @@ export async function sealLookTags(tags: readonly string[][], io: SealLooksIo): 
     if (moved && io.fromKeyHex) {
       const opened = await (io.open ?? openSealedLookPayload)(moved, io.fromKeyHex)
       if (!opened) throw new Error(LOOK_NOT_FETCHED)
+      // A FEED look of your own published object: a live placement, which moves as it is.
+      if (opened.public) { out.push([...t]); continue }
       payload = opened.payload
       dropped.push(moved)
     }

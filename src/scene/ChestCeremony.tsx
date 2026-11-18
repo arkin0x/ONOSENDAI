@@ -81,9 +81,18 @@ export function restShowsFrom(look: Pick<Look, 'lid' | 'open'>, ceremony: { at: 
   return !ceremony.calm && look.lid && look.open ? ceremony.at + LID_MS : null
 }
 
-/** Whether the closed chest and its turning lid are drawn, this long into an opening: until the resting open look shows (restShowsFrom). */
+/**
+ * How long the closed chest and its lid stay drawn after the resting open look
+ * shows: the two read the clock in separate frame callbacks, so a frame that
+ * straddles LID_MS could otherwise find the open look not yet shown and the
+ * lid already gone (review). An overlap of a few frames, with the lid at the
+ * open look's own pose, is never seen; a gap would be.
+ */
+export const LID_HANDOFF_MS = 50
+
+/** Whether the closed chest and its turning lid are drawn, this long into an opening: until LID_HANDOFF_MS after the resting open look shows (restShowsFrom). */
 export function lidPartsShown(elapsed: number): boolean {
-  return !swappedAt(elapsed)
+  return !swappedAt(elapsed - LID_HANDOFF_MS)
 }
 
 /** A chest opening, drawn in its look's frame. */
@@ -103,11 +112,11 @@ export function ChestCeremony({ look, at, calm, frame }: Props): JSX.Element {
 function LidOpening({ look, at, frame }: { look: Look; at: number; frame?: LookFrame }): JSX.Element | null {
   const lid = look.lid!
   const turn = useRef<Group>(null)
-  const [done, setDone] = useState(() => swappedAt(performance.now() - at))
+  const [done, setDone] = useState(() => !lidPartsShown(performance.now() - at))
   const parts = useRef<Group>(null)
   useEffect(() => {
     if (done) return
-    const t = window.setTimeout(() => setDone(true), Math.max(0, at + LID_MS - performance.now()))
+    const t = window.setTimeout(() => setDone(true), Math.max(0, at + LID_MS + LID_HANDOFF_MS - performance.now()))
     return () => window.clearTimeout(t)
   }, [done, at])
   useFrame(() => {

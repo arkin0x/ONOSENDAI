@@ -57,9 +57,11 @@ const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, d
 const stats = { events: 0, aborted: 0 }
 const kept = []
 const subs = new Set()
-await ctx.route((u) => !/^https?:\/\/(localhost|127\.0\.0\.1)/.test(u.toString()), (r) => { stats.aborted++; return r.abort() })
+const LOCAL_HTTP = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/
+const LOCAL_WS = /^wss?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/
+await ctx.route((u) => !LOCAL_HTTP.test(u.toString()), (r) => { stats.aborted++; return r.abort() })
 await ctx.routeWebSocket(/.*/, (ws) => {
-  if (/^wss?:\/\/(localhost|127\.0\.0\.1)/.test(ws.url())) { ws.connectToServer(); return }
+  if (LOCAL_WS.test(ws.url())) { ws.connectToServer(); return }
   const mine = new Map()
   ws.onClose(() => { for (const s of mine.values()) subs.delete(s) })
   ws.onMessage((raw) => {
@@ -164,7 +166,7 @@ async function sample(label, settle = false) {
   const dom = await cdp.send('Memory.getDOMCounters').catch(() => ({}))
   const m = await ev(() => window.__mem())
   // The walls avatars stand on, where the build has the count (store/walkWalls restWallsKept).
-  m.restWalls = await mod('/src/store/walkWalls.ts', 'm.restWallsKept ? m.restWallsKept() : null').catch(() => null)
+  m.restWalls = await mod('/src/store/walkWalls.ts', 'm.restWallsKept ? (({ count, bytes }) => ({ count, bytes }))(m.restWallsKept()) : null').catch(() => null)
   const row = { t: Math.round((Date.now() - t0) / 1000), label, settle, heapMB: +(heap.usedSize / 1048576).toFixed(1), totalMB: +(heap.totalSize / 1048576).toFixed(1), extMB: +(((heap.backingStorageSize ?? 0) + (heap.embedderHeapUsedSize ?? 0)) / 1048576).toFixed(1), rss: procRss(), dom, ...m, relayEvents: stats.events, freeGB: +(freeKb() / 1048576).toFixed(1) }
   samples.write(JSON.stringify(row) + '\n')
   log(label, `heap ${row.heapMB} MB`, `frames ${m.frames}`, `gl buf ${m.gl.buffers} tex ${m.gl.textures} prog ${m.gl.programs} ctx ${m.gl.live}/${m.gl.made}`, `ext ${row.extMB} MB rss r ${row.rss.renderer} g ${row.rss.gpu}`, 'ri', JSON.stringify(m.renderers), `nodes ${dom.nodes} listeners ${dom.jsEventListeners}`)

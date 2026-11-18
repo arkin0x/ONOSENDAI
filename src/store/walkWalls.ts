@@ -1145,8 +1145,10 @@ export function groundUnder(from: Position, lead: readonly [number, number, numb
  */
 export function restDrop(at: Position, plane: number, down: AxisDirection = WORLD_DOWN): { drop: number; pending: boolean } {
   const out = { pending: false }
-  const items = wallItemsAt(plane, at)
-  const s = groundUnder(at, [0, 0, 0], items, down, 0, REST_REACH, out, (w) => restEntryFor(w, items))
+  // The keys of every shard in this plane, closed doors included (wallItemsAt leaves out a door that lets this avatar go): read once, and only if a build is needed.
+  let keys: Set<string> | null = null
+  const inWorld = (): Set<string> => (keys ??= new Set(wallItems(plane).map((x) => x.key)))
+  const s = groundUnder(at, [0, 0, 0], wallItemsAt(plane, at), down, 0, REST_REACH, out, (w) => restEntryFor(w, inWorld))
   return { drop: s === null || s < -REST_REACH ? REST_FLOOR : Math.min(1, Math.max(0, -s)), pending: out.pending }
 }
 
@@ -1158,7 +1160,7 @@ export function restDrop(at: Position, plane: number, down: AxisDirection = WORL
  * spends what holds the walker (review of #800). A part not yet built by
  * WALK holds no avatar up until it is.
  */
-function restEntryFor(w: WallItem, live: readonly WallItem[]): Entry {
+function restEntryFor(w: WallItem, inWorld: () => ReadonlySet<string>): Entry {
   const held = entries.get(w.key)
   if (held && !held.first && held.shard === w.shard && held.where === whereOf(w)) return held
   const kept = restEntries.get(w.key)
@@ -1171,9 +1173,9 @@ function restEntryFor(w: WallItem, live: readonly WallItem[]): Entry {
   if (kept) { restEntries.delete(w.key); restBytes -= kept.bytes }
   // A build is about to be made, which costs far more than this: the walls of
   // shards no longer in the world (moved, deleted, hidden again) go first.
-  // Only this plane's: `live` is the shards of the plane asked about.
+  // Only this plane's: `inWorld` is the shards of the plane asked about.
   if (restEntries.size > 0) {
-    const here = new Set(live.map((x) => x.key))
+    const here = inWorld()
     for (const [k, v] of restEntries) if (v.e.item.plane === w.plane && !here.has(k)) { restEntries.delete(k); restBytes -= v.bytes }
   }
   const e = build(w, [], false, false)
@@ -1182,7 +1184,7 @@ function restEntryFor(w: WallItem, live: readonly WallItem[]): Entry {
   restBytes += bytes
   // Least recently asked first out, past either bound; never the one just built.
   for (const [k, v] of restEntries) {
-    if (restEntries.size <= REST_ENTRIES_MAX && restBytes <= REST_BYTES_MAX) break
+    if (restEntries.size <= restBounds.count && restBytes <= restBounds.bytes) break
     if (k === w.key) continue
     restEntries.delete(k)
     restBytes -= v.bytes
@@ -1202,19 +1204,23 @@ function restEntryFor(w: WallItem, live: readonly WallItem[]): Entry {
 const restEntries = new Map<string, { e: Entry; bytes: number }>()
 let restBytes = 0
 
-/** The most restEntryFor keeps: a bound on memory, never on correctness (one let go is built again when asked). */
-export const REST_ENTRIES_MAX = 128
-/** The most bytes of triangles and placements restEntryFor keeps: enough for every shard near every avatar in view. */
-export const REST_BYTES_MAX = 48 * 1024 * 1024
+/**
+ * The most restEntryFor keeps, and the most bytes of triangles and placements:
+ * a backstop on memory, never on correctness (one let go is built again when
+ * asked). Shards that left the world go first anyway, so these bind only on a
+ * world holding more than this near avatars at once, where a smaller bound
+ * would build the same walls again at every ask (review).
+ */
+export const restBounds = { count: 512, bytes: 256 * 1024 * 1024 }
 
 /** About what one build holds of its own: its triangles and each placement's matrix and bounds (a model's walls are shared). */
 function wallBytes(mesh: WallMesh): number {
   return mesh.tris.byteLength + mesh.placements.length * 256 + 256
 }
 
-/** What restEntryFor keeps now: for tests, and the memory soak. */
-export function restWallsKept(): { count: number; bytes: number } {
-  return { count: restEntries.size, bytes: restBytes }
+/** What restEntryFor keeps now, least recently asked first: for tests, and the memory soak. */
+export function restWallsKept(): { count: number; bytes: number; keys: string[] } {
+  return { count: restEntries.size, bytes: restBytes, keys: [...restEntries.keys()] }
 }
 
 /** The floor of a gibson, in gibsons under its centre: where an avatar with nothing under it stands. */

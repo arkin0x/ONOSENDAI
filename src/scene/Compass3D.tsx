@@ -258,6 +258,7 @@ export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false, hidde
       aria-hidden={hidden || undefined}
     >
       <Canvas
+        frameloop={hidden ? 'never' : 'always'}
         camera={{ position: [0, 0, CAMERA_DISTANCE], fov: 40 }}
         gl={{ antialias: true, alpha: true }}
         style={{ background: 'transparent' }}

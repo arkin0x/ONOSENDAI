@@ -24,7 +24,7 @@
 import { type AxisDirection, type AxisName, type Position, stepFor } from '../lib/space'
 import {
   AXES, FLUID_ACCEL, FLUID_AIR_ACCEL, FLUID_AIR_DECEL, FLUID_DECEL, FLUID_EDGE_REACH, FLUID_FACE_GAP, FLUID_MAX_SPEED,
-  FLUID_WALL_REACH, accelerate, dueCrossing, len, syncSpeedFactor, wishOf, zero, type Vec,
+  FLUID_WALL_REACH, accelerate, dueCrossing, len, wishOf, zero, type Vec,
 } from '../lib/fluidWalk'
 import { moveDirection } from '../lib/moves'
 import { walkFacing, walkFall, walkFallUp, walkGlide, walkRise } from '../lib/walkEye'
@@ -34,6 +34,7 @@ import { fluidCross, fallState, setWalkerMoving, useWalk, walkDown } from './use
 import { fluidNudge, fluidOn, useFluidWalk } from './fluidSwitch'
 import { heldNow } from './walkHold'
 import { eventsAhead } from './walkAhead'
+import { walkSpeedFactor } from './walkLimits'
 import { walkInputOpen } from './walkInput'
 import { REST_FLOOR, faceDistance, groundUnder, restDrop, wallItemsAt, type WallItem } from './walkWalls'
 import { STEP_DOWN_MAX, STEP_UP_MAX } from './walkStep'
@@ -528,8 +529,9 @@ function substep(dt: number, now: number, wish: Vec, gravity: boolean, g: AxisDi
   const falling = fallState() !== null
   // Events ahead of the chain (store/walkAhead.ts): the speed eases from
   // FLUID_EASE_FROM and stops at FLUID_HOLD_AT, so neither a settle nor a
-  // landing can carry the queue past it.
-  const factor = syncSpeedFactor(eventsAhead())
+  // landing can carry the queue past it, unless the sync limit is off in
+  // Settings (store/walkLimits.ts).
+  const factor = walkSpeedFactor(eventsAhead())
   const max = FLUID_MAX_SPEED * factor
   if (falling) accelerate(st.v, wish, max, FLUID_AIR_ACCEL, FLUID_AIR_DECEL, dt)
   else accelerate(st.v, wish, max, FLUID_ACCEL, FLUID_DECEL, dt)

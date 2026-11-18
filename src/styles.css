@@ -11576,6 +11576,28 @@ a.feed__act { text-decoration: none; }
   letter-spacing: 0.16em;
   opacity: 0.85;
 }
+/* "Turn off this warning in settings" (hud/SyncWarning.tsx): just under the
+   box, absolutely placed so it moves nothing, at the box's opacity, and the
+   one thing here that takes a tap, only once the box is half shown. */
+.syncwarn__off {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  pointer-events: none;
+}
+.syncwarn.is-tappable .syncwarn__off { pointer-events: auto; }
+.syncwarn__off:focus-visible { outline: 1px solid #fff; outline-offset: 2px; }
 
 /* ---- /demo tour (hud/DemoCoach.tsx, arkinox 2026-10-14) ----
    The one place with paragraphs on screen, and only under /demo. Top

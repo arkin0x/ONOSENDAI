@@ -68,8 +68,22 @@ export interface Signer {
    * for a local key, which is always its own.
    */
   heldPubkey?: () => Promise<string>
-  /** Present only for local signers, so the key can be persisted. */
+  /** Present only for local signers, so the key can be signed with and exported. */
   secretKey?: Uint8Array
+  /**
+   * A local key as it is kept on this device: encrypted with the person's
+   * password (NIP-49). Set for a key someone brought (a pasted nsec, sealed
+   * at login, or a pasted ncryptsec as given), and the only form of it that
+   * prefOf will write. The plain key is never stored for one of these.
+   */
+  ncryptsec?: string
+  /**
+   * A local key this app generated on this device (a new visitor's key, NEW
+   * RANDOM KEY). It is kept as it always was, a full identity with no
+   * password to ask for (owner rule, 2026-11-11). Only a key with this mark
+   * is ever written in plain form.
+   */
+  minted?: boolean
   /** For a bunker: what to persist to reconnect it. */
   bunkerUri?: string
   clientSecretKey?: Uint8Array
@@ -166,9 +180,9 @@ export function localSigner(secretKey: Uint8Array): Signer {
   }
 }
 
-/** A fresh random local key. */
+/** A fresh random local key: one this app generated (`minted`). */
 export function randomSigner(): Signer {
-  return localSigner(generateSecretKey())
+  return { ...localSigner(generateSecretKey()), minted: true }
 }
 
 /** An nsec you paste. Throws a readable error if it is not a valid nsec. */
@@ -183,15 +197,20 @@ export function signerFromNsec(nsec: string): Signer {
   return localSigner(decoded.data)
 }
 
-/** An ncryptsec (NIP-49) plus its password. Throws a readable error if either is wrong. */
+/**
+ * An ncryptsec (NIP-49) plus its password. Throws a readable error if either
+ * is wrong. The signer keeps the ncryptsec as given, so that is what is
+ * stored for it, never the key it opened to.
+ */
 export function signerFromNcryptsec(ncryptsec: string, password: string): Signer {
+  const given = ncryptsec.trim()
   let sk
   try {
-    sk = nip49.decrypt(ncryptsec.trim(), password)
+    sk = nip49.decrypt(given, password)
   } catch {
     throw new Error('Could not decrypt. Wrong password, or not a valid ncryptsec.')
   }
-  return localSigner(sk)
+  return { ...localSigner(sk), ncryptsec: given }
 }
 
 /**
@@ -429,8 +448,14 @@ async function nostrConnectSessionSigner(bunkerUri: string, clientSecretKey: Uin
 export interface SignerPref {
   kind: SignerKind
   pubkey: string
-  /** local only. */
+  /** local only, and only for a key this app generated (Signer.minted). */
   nsec?: string
+  /**
+   * local only: a key someone brought, encrypted with their password
+   * (NIP-49). A reload asks for the password to open it. A local pref with
+   * neither this nor `nsec` remembers the identity but not its key.
+   */
+  ncryptsec?: string
   /** nip46 only. */
   bunkerUri?: string
   clientNsec?: string
@@ -439,7 +464,13 @@ export interface SignerPref {
 
 export function prefOf(signer: Signer): SignerPref {
   const base: SignerPref = { kind: signer.kind, pubkey: signer.pubkey }
-  if (signer.kind === 'local' && signer.secretKey) base.nsec = nip19.nsecEncode(signer.secretKey)
+  // A brought key is kept only encrypted; only a key this app generated is
+  // kept plain. A local key with neither mark is not written at all: it
+  // lasts for this visit, from memory.
+  if (signer.kind === 'local') {
+    if (signer.ncryptsec) base.ncryptsec = signer.ncryptsec
+    else if (signer.minted && signer.secretKey) base.nsec = nip19.nsecEncode(signer.secretKey)
+  }
   if (signer.kind === 'nip46') {
     base.bunkerUri = signer.bunkerUri
     if (signer.clientSecretKey) base.clientNsec = nip19.nsecEncode(signer.clientSecretKey)
@@ -450,7 +481,10 @@ export function prefOf(signer: Signer): SignerPref {
 
 /** Rebuild a signer from a persisted preference. Local is instant; the others reconnect. */
 export async function signerFromPref(pref: SignerPref, onStep?: HandshakeStep): Promise<Signer> {
-  if (pref.kind === 'local' && pref.nsec) return signerFromNsec(pref.nsec)
+  // A local key is never reconnected: it is live from load (the store's
+  // pickInitialSigner), and an encrypted one opens only with its password
+  // (unlockKey). Rebuilt here it would lose what decides how it is kept.
+  if (pref.kind === 'local') throw new Error('A key on this device is not reconnected.')
   if (pref.kind === 'nip07') {
     const signer = await nip07Signer(NIP07_WAIT_MS)
     // Same guard as a bunker's: an extension switched to another account

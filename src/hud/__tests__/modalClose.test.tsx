@@ -114,8 +114,9 @@ const TOUCHED = [
  * - ViewMenu: the camera pad, a control strip, not a modal.
  * - DeployBar: the bar a deploy is aimed and confirmed from, with its own CANCEL.
  * - Workshop: the workshop screen itself, closed from its top bar.
+ * - KeyLock: the key lock, answered and never closed: unlock, log in again or choose another identity.
  */
-const NOT_MODALS = ['game/GameView.tsx', 'hud/ViewMenu.tsx', 'hud/DeployBar.tsx', 'workshop/Workshop.tsx']
+const NOT_MODALS = ['game/GameView.tsx', 'hud/ViewMenu.tsx', 'hud/DeployBar.tsx', 'workshop/Workshop.tsx', 'hud/KeyLock.tsx']
 
 function sources(dir: URL, rel = ''): string[] {
   const out: string[] = []

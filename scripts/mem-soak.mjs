@@ -52,7 +52,7 @@ await page.addInitScript(([k, st]) => {
   try {
     if (st && !sessionStorage.getItem('restored')) { for (const [a, b] of Object.entries(st)) localStorage.setItem(a, b); sessionStorage.setItem('restored', '1') }
     localStorage.setItem('onosendai:live', '0')
-    if (k) localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: k.pubkey, nsec: k.nsec }))
+    if (k) { localStorage.setItem('onosendai:nsec', k.nsec); localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: k.pubkey, nsec: k.nsec })) }
   } catch {}
 }, [chainKey, chainStorage])
 const errors = []

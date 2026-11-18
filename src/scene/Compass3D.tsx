@@ -20,6 +20,12 @@
  * (arkinox, 2026-10-20: /tv and the main view chug on his Windows laptop; the
  * compass is not shown on /tv, so this is the main view's and the
  * workshop's part). A canvas nobody draws to keeps showing its last frame.
+ *
+ * Out of the way (a placement lined up, the phone's menu open), it is hidden,
+ * never unmounted: each mount is a WebGL context of its own, made and its
+ * shaders compiled again, and BUILD unmounted it at every hide and every move,
+ * a new context each time (2026-11-18, memory over a long session of kit
+ * imports and BUILD: 63 contexts made in 15 minutes for one compass).
  */
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
@@ -193,7 +199,7 @@ function CompassScene({ onLabelsUpdate, pose, given }: { onLabelsUpdate: (labels
  * passes the bench camera's pose and its own axis directions, and `bench`
  * takes the compass out of its fixed spot so the corner can hold it.
  */
-export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false }: { onTap?: () => void; pose?: Quaternion; dirs?: Dirs; bench?: boolean } = {}): JSX.Element {
+export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false, hidden = false }: { onTap?: () => void; pose?: Quaternion; dirs?: Dirs; bench?: boolean; hidden?: boolean } = {}): JSX.Element {
   // The labels follow the arrows every frame the camera turns, so they are
   // moved by hand rather than through state: as state, every frame of an
   // orbit re-rendered this component and, through its Canvas, the whole
@@ -245,10 +251,11 @@ export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false }: { o
 
   return (
     <div
-      className={`compass-3d${onTap ? ' compass-3d--tappable' : ''}${bench ? ' compass-3d--bench' : ''}`}
-      onPointerDown={onTap ? (e) => { e.preventDefault(); e.stopPropagation(); onTap() } : undefined}
-      role={onTap ? 'button' : undefined}
-      aria-label={onTap ? 'View controls' : undefined}
+      className={`compass-3d${onTap ? ' compass-3d--tappable' : ''}${bench ? ' compass-3d--bench' : ''}${hidden ? ' compass-3d--hidden' : ''}`}
+      onPointerDown={onTap && !hidden ? (e) => { e.preventDefault(); e.stopPropagation(); onTap() } : undefined}
+      role={onTap && !hidden ? 'button' : undefined}
+      aria-label={onTap && !hidden ? 'View controls' : undefined}
+      aria-hidden={hidden || undefined}
     >
       <Canvas
         camera={{ position: [0, 0, CAMERA_DISTANCE], fov: 40 }}

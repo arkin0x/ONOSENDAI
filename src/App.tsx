@@ -433,7 +433,8 @@ export default function App(): JSX.Element {
       )}
       {showPanels && !offerUp && <CrashNote where="the menu"><Hud menuOpen={crowded} /></CrashNote>}
       <SpectateBar />
-      {!crowded && !offerUp && !deploying && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
+      {/* Hidden, never unmounted, while out of the way: each mount is a new WebGL context (scene/Compass3D). */}
+      <Compass3D hidden={crowded || offerUp || deploying} onTap={() => setViewMenuOpen((open) => !open)} />
       {/* Not while spectating: the spectate bar owns the bottom of the screen,
           and on a foldable's wide screen the folded CHAT chip sat on top of
           it. You cannot speak from someone else's head anyway. */}

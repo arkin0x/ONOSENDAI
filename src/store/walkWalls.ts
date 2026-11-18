@@ -673,6 +673,7 @@ function later(fn: (idle?: IdleDeadline) => void): void {
 export function clearWalls(): void {
   entries.clear()
   restEntries.clear()
+  restBytes = 0
   bounceBuilt = false
   waited = false
   landed()
@@ -1160,18 +1161,52 @@ function restEntryFor(w: WallItem): Entry {
   const held = entries.get(w.key)
   if (held && !held.first && held.shard === w.shard && held.where === whereOf(w)) return held
   const kept = restEntries.get(w.key)
-  if (kept && kept.shard === w.shard && kept.where === whereOf(w)) return kept
-  if (restEntries.size >= REST_ENTRIES_MAX) restEntries.clear()
+  if (kept && kept.e.shard === w.shard && kept.e.where === whereOf(w)) {
+    // The most recently asked goes last, so it is the last to go.
+    restEntries.delete(w.key)
+    restEntries.set(w.key, kept)
+    return kept.e
+  }
+  if (kept) { restEntries.delete(w.key); restBytes -= kept.bytes }
   const e = build(w, [], false, false)
-  restEntries.set(w.key, e)
+  const bytes = wallBytes(e.mesh)
+  restEntries.set(w.key, { e, bytes })
+  restBytes += bytes
+  // Least recently asked first out, past either bound; never the one just built.
+  for (const [k, v] of restEntries) {
+    if (restEntries.size <= REST_ENTRIES_MAX && restBytes <= REST_BYTES_MAX) break
+    if (k === w.key) continue
+    restEntries.delete(k)
+    restBytes -= v.bytes
+  }
   return e
 }
 
-/** restEntryFor's own builds, by shard key. */
-const restEntries = new Map<string, Entry>()
+/**
+ * restEntryFor's own builds, by shard key, least recently asked first, with
+ * what each holds in bytes. A shard moved or hidden again is a new key, so
+ * the walls of where it was stood here until 512 had gathered (2026-11-18:
+ * a session of BUILD moves among large imported pieces grew it with every move,
+ * each entry its triangles and the old placement's whole model). Bounded now
+ * by count and by bytes, the least recently asked let go first.
+ */
+const restEntries = new Map<string, { e: Entry; bytes: number }>()
+let restBytes = 0
 
-/** The most restEntryFor keeps before it starts again: a bound on memory, never on correctness. */
-const REST_ENTRIES_MAX = 512
+/** The most restEntryFor keeps: a bound on memory, never on correctness (one let go is built again when asked). */
+export const REST_ENTRIES_MAX = 128
+/** The most bytes of triangles and placements restEntryFor keeps: enough for every shard near every avatar in view. */
+export const REST_BYTES_MAX = 48 * 1024 * 1024
+
+/** About what one build holds of its own: its triangles and each placement's matrix and bounds (a model's walls are shared). */
+function wallBytes(mesh: WallMesh): number {
+  return mesh.tris.byteLength + mesh.placements.length * 256 + 256
+}
+
+/** What restEntryFor keeps now: for tests, and the memory soak. */
+export function restWallsKept(): { count: number; bytes: number } {
+  return { count: restEntries.size, bytes: restBytes }
+}
 
 /** The floor of a gibson, in gibsons under its centre: where an avatar with nothing under it stands. */
 export const REST_FLOOR = 0.5

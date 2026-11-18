@@ -184,6 +184,9 @@ export function useKeyboard(): void {
       // In a game nothing of cyberspace's is on screen, so Escape closes none of it out of sight.
       if (useGame.getState().session) return
       if (escapeKey(event)) return
+      // A key that needs its password (hud/KeyLock.tsx): no key moves or
+      // commits behind the gate, to be signed all at once when it opens.
+      if (useCyberspace.getState().keyLock) return
       // Cyberspace TV is watching only: no key moves, zooms or commits.
       if (useTv.getState().on) return
       // Typing into a field, or building on the bench: not ours.

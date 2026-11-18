@@ -18,6 +18,8 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useEscape } from '../hooks/useEscape'
 import { ModalClose } from './ui/ModalClose'
 import { CopyValue } from './ui/CopyValue'
+import { NewPassword, newPasswordReady } from './ui/NewPassword'
+import { copyText } from '../lib/copyText'
 
 const KIND_LABEL: Record<string, string> = {
   local: 'Local key',
@@ -27,15 +29,23 @@ const KIND_LABEL: Record<string, string> = {
 
 type View = 'login' | 'qr'
 
-export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
+/** `over`: opened from the key lock (KeyLock.tsx), so it sits at the lock's height, over everything. */
+export function LoginModal({ onClose, over = false }: { onClose: () => void; over?: boolean }): JSX.Element {
   const signerKind = useCyberspace((s) => s.signerKind)
   const identity = useCyberspace((s) => s.identity)
   const loginError = useCyberspace((s) => s.loginError)
+  // A locked key has nothing in hand to back up.
+  const locked = useCyberspace((s) => s.keyLock !== null && s.keyLock.mode !== 'set')
+  // Locked with its encrypted key here: switching forgets it, so it can be copied first.
+  const lockedKey = useCyberspace((s) => (s.keyLock?.mode === 'unlock' ? s.lockedNcryptsec() : null))
+  const [keyCopied, setKeyCopied] = useState(false)
   const profile = useProfile(identity.pubkey)
 
   const [view, setView] = useState<View>('login')
   const [credential, setCredential] = useState('')
   const [password, setPassword] = useState('')
+  // A pasted nsec's new password, typed a second time.
+  const [again, setAgain] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [relay, setRelay] = useState(DEFAULT_SIGNER_RELAY)
   const [activeRelay, setActiveRelay] = useState(DEFAULT_SIGNER_RELAY)
@@ -93,7 +103,7 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
   }
 
   const submitCredential = (): Promise<void> =>
-    run('credential', () => useCyberspace.getState().useLogin(credential, password))
+    run('credential', () => useCyberspace.getState().useLogin(credential, password, again))
 
   const startQr = (relayInput = relay): void => {
     if (busy && busy !== 'qr') return
@@ -138,9 +148,11 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
 
   const kind = loginCredentialKind(credential)
   const encrypted = kind === 'ncryptsec'
+  // A pasted nsec is kept only encrypted, with a password chosen here.
+  const plain = kind === 'nsec'
   const extension = hasNip07()
   const disabled = busy !== null
-  const credentialReady = !!credential.trim() && (!encrypted || !!password)
+  const credentialReady = !!credential.trim() && (!encrypted || !!password) && (!plain || newPasswordReady(password, again))
   // A stopped QR (its relay dropped it) is tried again on the same relay, as
   // a fresh session with a new secret: the button used to stay disabled for
   // that relay, leaving only the way back (snocrash #37 offers the same).
@@ -151,7 +163,7 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
   useEscape('modal', true, close)
 
   return createPortal(
-    <div className="modal" role="dialog" aria-modal="true" aria-label="Change identity" onPointerDown={close}>
+    <div className={over ? 'modal modal--over' : 'modal'} role="dialog" aria-modal="true" aria-label="Change identity" onPointerDown={close}>
       <div className="modal__card login" onPointerDown={(event) => event.stopPropagation()}>
         <div className="login__head">
           <h2 className="modal__title">{view === 'qr' ? 'Nostr Connect' : 'Change Identity'}</h2>
@@ -225,10 +237,20 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
                 placeholder="nsec1…  ncryptsec1…  bunker://…"
                 value={credential}
                 onChange={(event) => {
+                  // Another kind of login, another password: none carries over.
+                  if (loginCredentialKind(event.target.value) !== kind) { setPassword(''); setAgain('') }
                   setCredential(event.target.value)
                   useCyberspace.getState().clearLoginError()
                 }}
               />
+              {plain && (
+                <NewPassword
+                  password={password}
+                  again={again}
+                  onPassword={(value) => { setPassword(value); useCyberspace.getState().clearLoginError() }}
+                  onAgain={(value) => { setAgain(value); useCyberspace.getState().clearLoginError() }}
+                />
+              )}
               {encrypted && (
                 <input
                   className="avatars__input login__input"
@@ -249,7 +271,16 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
             {loginError && <p className="notice login__error">{loginError}</p>}
 
             <div className="login__or"><span>OR</span></div>
-            {signerKind === 'local' && (
+            {lockedKey && (
+              <div className="login__options login__locked">
+                <p className="login__note login__note--warn">Switching removes your encrypted key from this device.</p>
+                <button
+                  className="secret__act login__act"
+                  onClick={() => { void copyText(lockedKey).then((ok) => setKeyCopied(ok)) }}
+                >{keyCopied ? 'COPIED' : 'COPY ENCRYPTED KEY'}</button>
+              </div>
+            )}
+            {signerKind === 'local' && !locked && (
               <p className="login__note login__note--warn">
                 This key lives only on this device. Back it up below before switching away,
                 or you cannot come back to this identity.
@@ -270,7 +301,7 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
               </button>
             </div>
 
-            {signerKind === 'local' && (
+            {signerKind === 'local' && !locked && (
               <details className="login__backup-details">
                 <summary>BACK UP CURRENT KEY</summary>
                 {backup ? (

@@ -72,7 +72,7 @@ async function open(options, pad = 0, lag = false) {
       localStorage.setItem('onosendai:live', '0')
       // A given key is not a first arrival, and the tutorial hides the chip.
       localStorage.setItem('onosendai:tutorial', 'off')
-      localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns }))
+      { localStorage.setItem('onosendai:nsec', ns); localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns })) }
     } catch {}
   }, [getPublicKey(sk), nip19.nsecEncode(sk)])
   const born = Date.now()

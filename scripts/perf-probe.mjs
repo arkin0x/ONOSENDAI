@@ -151,7 +151,7 @@ if (process.env.SEED) {
   const { nip19 } = await import('nostr-tools')
   const { getPublicKey } = await import('nostr-tools/pure')
   const sk = new Uint8Array(32).fill(Number(process.env.SEED))
-  await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('onosendai:signer', ${JSON.stringify(JSON.stringify({ kind: 'local', pubkey: getPublicKey(sk), nsec: nip19.nsecEncode(sk) }))}) } catch {}` })
+  await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('onosendai:nsec', ${JSON.stringify(nip19.nsecEncode(sk))}); localStorage.setItem('onosendai:signer', ${JSON.stringify(JSON.stringify({ kind: 'local', pubkey: getPublicKey(sk), nsec: nip19.nsecEncode(sk) }))}) } catch {}` })
 }
 const consoleErrors = []
 await cdp.send('Runtime.enable')

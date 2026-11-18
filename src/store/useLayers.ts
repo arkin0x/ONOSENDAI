@@ -22,6 +22,15 @@
  * preferences only: nothing about the proof, the movement, the cursor or the
  * chain reads them.
  *
+ * One more is kept here as a device setting, though it is not a layer:
+ * walkLimits, WALK's sync limit (arkinox, 2026-11-18: "maybe sync loss
+ * warning should be a setting"). On, as always, fluid WALK slows from 15
+ * events ahead of your chain, stops at 20, and the LOSING SYNC warning shows
+ * (lib/fluidWalk.ts syncSpeedFactor, hud/SyncWarning.tsx). Off, none of the
+ * three: the walk runs as far ahead as you like, at the risk of losing what
+ * has not reached your chain if something interrupts it. It changes how far
+ * the walk may run ahead, never a proof, an event or the chain's rules.
+ *
  * Kept in localStorage so the choice survives a reload on this device. Every
  * read and write is guarded: with storage blocked (private mode, an odd
  * embedding, tests under node) both layers read on and a toggle still works
@@ -30,13 +39,13 @@
 
 import { create } from 'zustand'
 
-export type SceneLayer = 'dots' | 'boxes' | 'walkAvatarHidden' | 'walkLookSphere' | 'headlamp' | 'audioSpheres' | 'glow'
+export type SceneLayer = 'dots' | 'boxes' | 'walkAvatarHidden' | 'walkLookSphere' | 'headlamp' | 'audioSpheres' | 'glow' | 'walkLimits'
 
 export type SceneLayers = Record<SceneLayer, boolean>
 
 export const LAYERS_KEY = 'onosendai:layers'
 
-export const DEFAULT_LAYERS: SceneLayers = { dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true, glow: true }
+export const DEFAULT_LAYERS: SceneLayers = { dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true, glow: true, walkLimits: true }
 
 /** The stored choice, or the defaults when there is none or it cannot be read. */
 export function loadLayers(): SceneLayers {
@@ -58,6 +67,8 @@ export function loadLayers(): SceneLayers {
       audioSpheres: p?.audioSpheres !== false,
       // On unless explicitly off.
       glow: p?.glow !== false,
+      // WALK's sync limit: on unless explicitly off, as it always was.
+      walkLimits: p?.walkLimits !== false,
     }
   } catch {
     return { ...DEFAULT_LAYERS }
@@ -75,7 +86,7 @@ interface LayersState extends SceneLayers {
 
 export const useLayers = create<LayersState>((set, get) => {
   const put = (layer: SceneLayer, on: boolean): void => {
-    const next = { dots: get().dots, boxes: get().boxes, walkAvatarHidden: get().walkAvatarHidden, walkLookSphere: get().walkLookSphere, headlamp: get().headlamp, audioSpheres: get().audioSpheres, glow: get().glow, [layer]: on }
+    const next = { dots: get().dots, boxes: get().boxes, walkAvatarHidden: get().walkAvatarHidden, walkLookSphere: get().walkLookSphere, headlamp: get().headlamp, audioSpheres: get().audioSpheres, glow: get().glow, walkLimits: get().walkLimits, [layer]: on }
     set({ [layer]: on })
     saveLayers(next)
   }

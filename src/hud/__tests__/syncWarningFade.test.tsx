@@ -50,7 +50,8 @@ describe('the LOSING SYNC warning', () => {
   })
 
   it('is the same box at every opacity: only the opacity changes', () => {
-    const strip = (html: string): string => html.replace(/ style="[^"]*"/, '').replace(/ is-on/, '').replace(/aria-hidden="\w+"/, '').replace(/\d+ BEHIND/, 'N BEHIND')
+    // The line under it takes the keyboard only while it shows (its tabindex).
+    const strip = (html: string): string => html.replace(/ style="[^"]*"/, '').replace(/ is-on/, '').replace(/aria-hidden="\w+"/, '').replace(/\d+ BEHIND/, 'N BEHIND').replace(/ tabindex="-?\d+"/, '')
     const base = strip(draw(3))
     for (const n of [15, 17, 20]) expect(strip(draw(n))).toBe(base)
   })

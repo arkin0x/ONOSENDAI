@@ -19,6 +19,10 @@
  * showTrail and showSecrets for the other two). It is a view preference
  * only: nothing here changes a proof, a move, the cursor or the chain.
  *
+ * Chain sync limit (store/walkLimits.ts; arkinox, 2026-11-18) is the one row
+ * that changes how far WALK may run ahead of your chain: off, it never slows,
+ * stops or warns. The line under the LOSING SYNC warning opens the menu here.
+ *
  * One row reaches the relay: Sync hidden list, your list of hidden things
  * saved encrypted to you (store/hidesSync.ts; owner ruling, 2026-11-15).
  *
@@ -35,6 +39,7 @@ import { useFluidWalk } from '../store/fluidSwitch'
 import { useHidesSync } from '../store/hidesSync'
 import { Field, Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
+import { WALK_LIMITS_ROW } from './settingsLink'
 
 interface ViewRow {
   id: string
@@ -44,6 +49,9 @@ interface ViewRow {
   set: (on: boolean) => void
 }
 
+/** The sync limit's line: what it does, both halves of it, and the risk of turning it off (arkinox, 2026-11-18). */
+export const WALK_LIMITS_HINT = 'WALK slows at 15 moves ahead of your chain, stops at 20, and warns you. Off, it does none of these. If your chain falls far behind and something interrupts it, like closing the tab or losing connection, moves that have not reached your chain can be lost.'
+
 export function ViewPanel(): JSX.Element {
   const dots = useLayers((s) => s.dots)
   const boxes = useLayers((s) => s.boxes)
@@ -52,6 +60,7 @@ export function ViewPanel(): JSX.Element {
   const headlamp = useLayers((s) => s.headlamp)
   const audioSpheres = useLayers((s) => s.audioSpheres)
   const glow = useLayers((s) => s.glow)
+  const walkLimits = useLayers((s) => s.walkLimits)
   const gravity = useWalk((s) => s.gravity)
   const fluidWalk = useFluidWalk((s) => s.on)
   const showTrail = useCyberspace((s) => s.showTrail)
@@ -119,6 +128,17 @@ export function ViewPanel(): JSX.Element {
       hint: 'Hold to glide. Moves still land on whole gibsons.',
       on: fluidWalk,
       set: (v) => useFluidWalk.getState().set(v),
+    },
+    // WALK's sync limit (store/walkLimits.ts; arkinox, 2026-11-18): the
+    // slowdown from 15 moves ahead of your chain, the stop at 20 and the
+    // warning, together. The line under the LOSING SYNC warning opens the
+    // menu here (hud/settingsLink.ts).
+    {
+      id: WALK_LIMITS_ROW,
+      title: 'Chain sync limit',
+      hint: WALK_LIMITS_HINT,
+      on: walkLimits,
+      set: (v) => useLayers.getState().setLayer('walkLimits', v),
     },
     {
       id: 'view-chain-trail',
@@ -196,6 +216,12 @@ export function ViewPanel(): JSX.Element {
         pink for the most; turning them off also stops the terrain scan. hX boxes
         are the nested power-of-two boundaries around you, named by their heights
         (h3, h4, h5 and up); a move that crosses a higher one costs more work.
+        Chain sync limit keeps WALK close to your chain: it slows when you get
+        15 moves ahead of it, stops at 20, and warns you. Turned off, WALK
+        never slows, stops or warns, and the CHAIN chip still shows how far
+        ahead you are. If your chain falls far behind and something
+        interrupts it, like closing the tab or losing connection, moves that
+        have not reached your chain can be lost.
         Hide avatar in WALK takes your own avatar out of the way while you walk in
         first person, where the camera sits inside it. Look sphere in WALK puts a
         ball in the bottom right while you walk: drag it to look around, as a

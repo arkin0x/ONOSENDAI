@@ -45,6 +45,7 @@ import { FLUID_HOLD_AT } from '../lib/fluidWalk'
 import { useCyberspace } from '../store/useCyberspace'
 import { SYNC_WARN_AT } from '../store/useWalk'
 import { useEventsAhead } from '../store/walkAhead'
+import { useLayers } from '../store/useLayers'
 
 /** One tick per event, to where the walk stops. */
 export const AHEAD_TICKS = FLUID_HOLD_AT
@@ -129,10 +130,14 @@ export function tickClass(i: number, bar: AheadBar, track: Pick<AheadTrack, 'ros
   return cls.join(' ')
 }
 
-/** The words the chip's label gains while anything is ahead; '' with nothing ahead. The real count, past the stop too. */
-export function aheadLabel(ahead: number): string {
+/**
+ * The words the chip's label gains while anything is ahead; '' with nothing
+ * ahead. The real count, past the stop too. With the sync limit off in
+ * Settings (`limits` false, store/walkLimits.ts) there is no stop to name.
+ */
+export function aheadLabel(ahead: number, limits = true): string {
   const n = Number.isFinite(ahead) ? Math.max(0, Math.floor(ahead)) : 0
-  return n === 0 ? '' : ` ${n} move${n === 1 ? '' : 's'} ahead of your chain. The walk stops at ${FLUID_HOLD_AT}.`
+  return n === 0 ? '' : ` ${n} move${n === 1 ? '' : 's'} ahead of your chain. ${limits ? `The walk stops at ${FLUID_HOLD_AT}.` : 'The sync limit is off.'}`
 }
 
 /** What the chip draws for the walk being ahead. */
@@ -155,6 +160,7 @@ export interface ChainAhead {
 export function useChainAhead(own: boolean, total: number): ChainAhead {
   const walking = useCyberspace((s) => s.walking)
   const events = useEventsAhead()
+  const limits = useLayers((s) => s.walkLimits)
   const ahead = own && walking ? events : 0
   const bar = aheadBar(ahead)
 
@@ -178,7 +184,7 @@ export function useChainAhead(own: boolean, total: number): ChainAhead {
 
   const drawn = own && (bar.on || lingering)
   const cls = drawn ? ` has-ahead${bar.on ? ' is-ahead' : ''}${bar.slow ? ' is-slow' : ''}${bar.limit ? ' is-limit' : ''}` : ''
-  return { drawn, bar, track: now, cls, label: aheadLabel(ahead) }
+  return { drawn, bar, track: now, cls, label: aheadLabel(ahead, limits) }
 }
 
 /**

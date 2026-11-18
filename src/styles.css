@@ -1305,6 +1305,23 @@ body {
 }
 .viewat__forget:hover { color: var(--danger); border-color: var(--danger); }
 .viewat__plane { display: inline-block; margin-right: 8px; padding: 1px 5px; font-size: 8px; }
+/* VIEW A COORDINATE's row: the box, VIEW and the dice on one line (arkinox,
+   2026-11-18: "the input box can shrink and the buttons can take more
+   room"). Both buttons are fixed widths, so FINDING fits where VIEW was and
+   nothing moves while a place is looked up; the box takes what is left and
+   its placeholder is cut, never wrapped. Taller than the other find rows,
+   for a thumb. */
+.avatars__find.viewat__find {
+  grid-template-columns: minmax(0, 1fr) 72px 40px;
+}
+.viewat__find .avatars__input { text-overflow: ellipsis; }
+.viewat__find .avatars__go { height: 30px; padding: 0; font-size: 9px; }
+.viewat__dice { display: inline-flex; align-items: center; justify-content: center; }
+.viewat__dice svg { width: 16px; height: 16px; transition: transform 0.25s ease; }
+/* A small tumble on the press: a turn of the icon only, nothing around it moves. */
+.viewat__dice:not(:disabled):active svg { transform: rotate(90deg); }
+.viewat__dice:focus-visible, .viewat__find .avatars__go:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) { .viewat__dice svg { transition: none; } }
 
 .legend__label {
   display: block;

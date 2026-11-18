@@ -62,7 +62,7 @@ await page.addInitScript(([pk, ns]) => {
   try {
     localStorage.setItem('onosendai:live', '0')
     localStorage.setItem('onosendai:tutorial', 'off')
-    localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns }))
+    { localStorage.setItem('onosendai:nsec', ns); localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns })) }
   } catch {}
   // Each message to a proof worker held back window.__proofLag ms, in order: a slower phone's proofs.
   window.__proofLag = 0

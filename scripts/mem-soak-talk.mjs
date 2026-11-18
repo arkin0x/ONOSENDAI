@@ -129,7 +129,7 @@ const nsec = nip19.nsecEncode(meSk)
 await page.addInitScript(([pk, ns, ext]) => {
   try {
     localStorage.setItem('onosendai:live', '0')
-    if (!ext) localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns }))
+    if (!ext) { localStorage.setItem('onosendai:nsec', ns); localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns })) }
     else {
       // EXT=hang|reject: a NIP-07 extension for the throwaway key whose
       // signatures never come back (a prompt nobody can see in a background

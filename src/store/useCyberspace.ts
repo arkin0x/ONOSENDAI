@@ -33,7 +33,9 @@ import { generateSecretKey, getEventHash, getPublicKey, verifiedSymbol, verifyEv
 import { withNoBroadcast } from '../lib/noBroadcast'
 import { nip19 } from 'nostr-tools'
 import { exportNcryptsec, exportNsec } from '../lib/keyExport'
-import { lockedSigner, openKey, paintFirst, sealKey, type KeyLockHandle } from '../lib/keyAtRest'
+import { lockedSigner, ncryptsecLogN, openKey, paintFirst, sealKey, type KeyLockHandle } from '../lib/keyAtRest'
+import { LOG_N } from '../lib/keyExport'
+import * as nip49 from 'nostr-tools/nip49'
 import {
   deferredReconnect,
   loginCredentialKind,
@@ -1200,6 +1202,8 @@ export interface CyberspaceState {
   setKeyPassword: (password: string, again: string) => Promise<boolean>
   /** Answer 'set' with no password: the plain key leaves storage, and this visit goes on from memory. */
   skipKeyPassword: () => void
+  /** While 'unlock': the encrypted key kept here, to copy before switching away forgets it. Never the key itself. */
+  lockedNcryptsec: () => string | null
   /** Switch to the browser extension (NIP-07). */
   useExtension: () => Promise<void>
   /** Switch to a remote bunker (NIP-46) from its bunker:// URI. */
@@ -1475,6 +1479,16 @@ function generatedHere(pubkey: string): boolean {
 function sealedSigner(signer: Signer, password: string, again: string): Signer {
   if (!signer.secretKey) throw new Error('Only a key held on this device can be kept with a password.')
   return { ...signer, ncryptsec: sealKey(signer.secretKey, password, again) }
+}
+
+/**
+ * A pasted ncryptsec, as it will be kept: as given, unless it was made with a
+ * weaker work factor than this app's (LOG_N), when it is sealed again with
+ * the same password at LOG_N. A stronger one is kept: it opened here already.
+ */
+function keptNcryptsec(signer: Signer, password: string): Signer {
+  if (!signer.ncryptsec || !signer.secretKey || ncryptsecLogN(signer.ncryptsec) >= LOG_N) return signer
+  return { ...signer, ncryptsec: nip49.encrypt(signer.secretKey, password, LOG_N) }
 }
 
 function loadOrGenerateKey(): Uint8Array {
@@ -6840,20 +6854,23 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return sealedSigner(signer, password, again ?? '')
     })
   },
-  useNcryptsec: async (ncryptsec, password) => { await login(() => signerFromNcryptsec(ncryptsec, password)) },
+  useNcryptsec: async (ncryptsec, password) => { await login(() => keptNcryptsec(signerFromNcryptsec(ncryptsec, password), password)) },
   useLogin: async (credential, password = '', again = '') => {
     const kind = loginCredentialKind(credential)
     await login(async () => {
       // A pasted nsec is kept only sealed with the password chosen for it.
       if (kind === 'nsec') {
         const signer = signerFromNsec(credential)
+        // This device's own generated key, pasted back: still the full
+        // identity it always was, kept as before and never asked for a password.
+        if (generatedHere(signer.pubkey)) return { ...signer, minted: true }
         await paintFirst()
         return sealedSigner(signer, password, again)
       }
       if (kind === 'ncryptsec') {
         if (!password) throw new Error('Enter the password for this ncryptsec.')
         await paintFirst()
-        return signerFromNcryptsec(credential, password)
+        return keptNcryptsec(signerFromNcryptsec(credential, password), password)
       }
       if (kind === 'bunker') return nip46Signer(credential)
       throw new Error('Paste an nsec, ncryptsec, or bunker:// URI.')
@@ -6888,6 +6905,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     if (keyLocked !== lock) return false
     keyLocked = null
+    // A login still on its way (a bunker asked from the gate, then left)
+    // must not switch away from the identity just unlocked.
+    loginTicket++
     // The same identity, now able to sign: no switch, and nothing to save
     // (the pref already holds this ncryptsec).
     if (currentSigner === lock.handle.signer) currentSigner = signer
@@ -6909,7 +6929,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // Switched away while it sealed: the new identity's pref is not this one's to write.
     if (currentSigner !== signer) return false
     currentSigner = sealed
-    saveSignerPref(prefOf(sealed))
+    // Only over the plain copy this was asked about: another tab may have
+    // logged in as someone else meanwhile, and that pref is not this one's
+    // to replace. The sealed key then lasts for this visit, from memory.
+    const stored = loadSignerPref()
+    if (stored?.kind === 'local' && stored.pubkey === asked.pubkey && stored.nsec) saveSignerPref(prefOf(sealed))
     set({ keyLock: null, keyLockError: null })
     return true
   },
@@ -6923,6 +6947,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (stored?.kind === 'local' && stored.pubkey === asked.pubkey && stored.nsec) saveSignerPref(prefOf(currentSigner))
     set({ keyLock: null, keyLockError: null })
   },
+  lockedNcryptsec: () => (keyLocked?.mode === 'unlock' ? keyLocked.ncryptsec ?? null : null),
 
   cloud: IDLE_CLOUD,
   cloudPrefs: loadCloudPrefs(),

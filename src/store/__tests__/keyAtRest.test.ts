@@ -383,6 +383,97 @@ describe('bunker and extension logins are unchanged', () => {
   }, 60_000)
 })
 
+describe('review follow-ups', () => {
+  it('a pref holding both forms loses the plain one on load', async () => {
+    wipe()
+    const sk = generateSecretKey()
+    const pk = getPublicKey(sk)
+    const ncryptsec = nip49.encrypt(sk, PW, LOG_N)
+    localStorage.setItem(PREF, JSON.stringify({ kind: 'local', pubkey: pk, ncryptsec, nsec: nip19.nsecEncode(sk) }))
+    const { useCyberspace: S } = await reload()
+    expect(S.getState().keyLock?.mode).toBe('unlock')
+    expect(pref()).toEqual({ kind: 'local', pubkey: pk, ncryptsec })
+    expect(await keyStored(sk)).toBe(false)
+    // The encrypted copy can be had while locked, to keep before switching away; never the key.
+    expect(S.getState().lockedNcryptsec()).toBe(ncryptsec)
+  }, 60_000)
+
+  it('an ncryptsec made with a weaker work factor is sealed again at LOG_N, same password', async () => {
+    wipe()
+    const { useCyberspace: S } = await reload()
+    const sk = generateSecretKey()
+    const weak = nip49.encrypt(sk, PW, 10)
+    await S.getState().useLogin(weak, PW)
+    const kept = pref()?.ncryptsec as string
+    expect(kept).not.toBe(weak)
+    expect(logNOf(kept)).toBe(LOG_N)
+    expect(bytesToHex(nip49.decrypt(kept, PW))).toBe(bytesToHex(sk))
+    expect(await keyStored(sk)).toBe(false)
+  }, 60_000)
+
+  it('logging in again by ncryptsec as the locked key signs what waited', async () => {
+    wipe()
+    const sk = generateSecretKey()
+    const pk = getPublicKey(sk)
+    localStorage.setItem(PREF, JSON.stringify({ kind: 'local', pubkey: pk }))
+    const { useCyberspace: S } = await reload()
+    expect(S.getState().keyLock?.mode).toBe('gone')
+    const waiting = S.getState().signEvent(template(8))
+    await S.getState().useLogin(nip49.encrypt(sk, PW, LOG_N), PW)
+    expect((await waiting).pubkey).toBe(pk)
+    expect(S.getState().keyLock).toBeNull()
+  }, 60_000)
+
+  it('saving a password leaves alone a pref another tab replaced meanwhile', async () => {
+    wipe()
+    const sk = generateSecretKey()
+    const pk = getPublicKey(sk)
+    localStorage.setItem(PREF, JSON.stringify({ kind: 'local', pubkey: pk, nsec: nip19.nsecEncode(sk) }))
+    const { useCyberspace: S } = await reload()
+    const other = { kind: 'nip07', pubkey: getPublicKey(generateSecretKey()) }
+    localStorage.setItem(PREF, JSON.stringify(other))
+    expect(await S.getState().setKeyPassword(PW, PW)).toBe(true)
+    expect(S.getState().keyLock).toBeNull()
+    expect(pref()).toEqual(other)
+    expect((await S.getState().signEvent(template(9))).pubkey).toBe(pk)
+  }, 60_000)
+
+  it("this device's own generated key, pasted back, stays as it was and is asked nothing", async () => {
+    wipe()
+    let { useCyberspace: S } = await reload()
+    const first = localStorage.getItem('onosendai:nsec') as string
+    await S.getState().useNewKey()
+    await S.getState().useLogin(first, '', '')
+    expect(S.getState().loginError).toBeNull()
+    expect(pref()?.nsec).toBe(first)
+    ;({ useCyberspace: S } = await reload())
+    expect(S.getState().keyLock).toBeNull()
+  }, 60_000)
+
+  it('a login still on its way when the key unlocks does not switch away from it', async () => {
+    wipe()
+    const sk = generateSecretKey()
+    const pk = getPublicKey(sk)
+    localStorage.setItem(PREF, JSON.stringify({ kind: 'local', pubkey: pk, ncryptsec: nip49.encrypt(sk, PW, LOG_N) }))
+    const g = globalThis as { window?: { nostr?: unknown } }
+    const hadWindow = 'window' in g
+    let answer: (pk: string) => void = () => {}
+    const extSk = generateSecretKey()
+    g.window = { nostr: { getPublicKey: () => new Promise<string>((r) => { answer = r }), signEvent: async (t: EventTemplate) => finalizeEvent(t, extSk) } }
+    try {
+      const { useCyberspace: S } = await reload()
+      const extension = S.getState().useExtension()
+      expect(await S.getState().unlockKey(PW)).toBe(true)
+      answer(getPublicKey(extSk))
+      await extension
+      expect(S.getState().identity.pubkey).toBe(pk)
+      expect(S.getState().signerKind).toBe('local')
+    } finally {
+      if (!hadWindow) delete g.window
+    }
+  }, 60_000)
+})
+
 describe('a local signer made by hand', () => {
   it('is never written plain by prefOf unless the app generated it', () => {
     const sk = generateSecretKey()

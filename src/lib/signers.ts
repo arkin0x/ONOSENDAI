@@ -481,9 +481,10 @@ export function prefOf(signer: Signer): SignerPref {
 
 /** Rebuild a signer from a persisted preference. Local is instant; the others reconnect. */
 export async function signerFromPref(pref: SignerPref, onStep?: HandshakeStep): Promise<Signer> {
-  if (pref.kind === 'local' && pref.nsec) return signerFromNsec(pref.nsec)
-  // An encrypted key opens only with its password, asked for on screen (store's unlockKey).
-  if (pref.kind === 'local') throw new Error('This key is locked. Unlock it with its password.')
+  // A local key is never reconnected: it is live from load (the store's
+  // pickInitialSigner), and an encrypted one opens only with its password
+  // (unlockKey). Rebuilt here it would lose what decides how it is kept.
+  if (pref.kind === 'local') throw new Error('A key on this device is not reconnected.')
   if (pref.kind === 'nip07') {
     const signer = await nip07Signer(NIP07_WAIT_MS)
     // Same guard as a bunker's: an extension switched to another account

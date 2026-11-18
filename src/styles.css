@@ -6608,6 +6608,9 @@ select.avatars__input option:checked {
 
 /* ---------- Key lock (hud/KeyLock.tsx) and new password (hud/ui/NewPassword.tsx) ---------- */
 /* Over everything, the tutorial and the workshop included: nothing signs until it is answered. */
+/* The login opened from the key lock: at the lock's height. */
+.modal.modal--over { z-index: 1100; }
+
 .modal.keylock-gate {
   z-index: 1100;
   background: rgba(3, 5, 10, 0.86);

@@ -20,6 +20,8 @@ import { profileLabel } from '../store/useProfiles'
 import { ProfilePic } from './ProfileBadge'
 import { LoginModal } from './LoginModal'
 import { NewPassword, newPasswordReady } from './ui/NewPassword'
+import { useEscape } from '../hooks/useEscape'
+import { copyText } from '../lib/copyText'
 import { nip19 } from 'nostr-tools'
 
 const MODE_TITLE = { unlock: 'Unlock your key', set: 'Set a password', gone: 'Log in again' } as const
@@ -35,15 +37,19 @@ export function KeyLockGate(): JSX.Element | null {
   const [again, setAgain] = useState('')
   const [busy, setBusy] = useState(false)
   const [skipping, setSkipping] = useState(false)
+  const [copied, setCopied] = useState(false)
+  // Escape under the gate closes nothing: the gate is the top layer, and it is answered, not closed.
+  useEscape('modal', !!lock && !loginOpen, () => {})
 
   // Another question, a fresh form: nothing typed for the last one carries over.
   useEffect(() => {
     setPassword('')
     setAgain('')
     setSkipping(false)
+    setCopied(false)
   }, [lock?.mode, pubkey])
 
-  const login = loginOpen ? <LoginModal onClose={() => setLoginOpen(false)} /> : null
+  const login = loginOpen ? <LoginModal over onClose={() => setLoginOpen(false)} /> : null
   if (!lock || loginOpen) return login
 
   const npub = nip19.npubEncode(lock.pubkey)
@@ -124,11 +130,16 @@ export function KeyLockGate(): JSX.Element | null {
 
         {lock.mode === 'set' && skipping && (
           <div className="keylock__form">
-            <p className="keylock__line">Your key will not be kept on this device. Next time, you log in again.</p>
+            <p className="keylock__line">Your key will not be kept on this device. Copy it first if it is not saved anywhere else.</p>
             <div className="keylock__pair">
-              <button className="secret__act login__act login__act--primary" onClick={() => setSkipping(false)}>SET PASSWORD</button>
+              <button className="secret__act login__act login__act--primary" autoFocus onClick={() => setSkipping(false)}>SET PASSWORD</button>
               <button className="secret__act login__act" onClick={() => useCyberspace.getState().skipKeyPassword()}>DON'T SAVE KEY</button>
             </div>
+            {/* The key itself, to the clipboard on purpose and never shown (as SHOW MY KEY, keyExport.ts exportNsec). */}
+            <button
+              className="secret__act login__act keylock__alt"
+              onClick={() => { void copyText(useCyberspace.getState().revealKey()).then((ok) => setCopied(ok)) }}
+            >{copied ? 'COPIED' : 'COPY MY KEY'}</button>
           </div>
         )}
 

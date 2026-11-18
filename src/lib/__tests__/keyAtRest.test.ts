@@ -8,7 +8,7 @@ import { renderToString } from 'react-dom/server'
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import * as nip49 from 'nostr-tools/nip49'
 import { bytesToHex } from '@noble/hashes/utils.js'
-import { lockedSigner, LOCK_ABANDONED, openKey, passwordProblem, passwordStrength, sealKey, WRONG_PASSWORD } from '../keyAtRest'
+import { lockedSigner, LOCK_ABANDONED, ncryptsecLogN, openKey, passwordProblem, passwordStrength, sealKey, WRONG_PASSWORD } from '../keyAtRest'
 import { localSigner } from '../signers'
 import { NewPassword } from '../../hud/ui/NewPassword'
 
@@ -52,6 +52,14 @@ describe('sealing and opening', () => {
     expect(() => openKey('ncryptsec1garbage', 'a good password', getPublicKey(sk))).toThrow(WRONG_PASSWORD)
     expect(() => sealKey(sk, 'short', 'short')).toThrow('At least 8 characters.')
     expect(() => sealKey(sk, 'a good password', 'another')).toThrow('The two passwords are different.')
+  })
+})
+
+describe('ncryptsecLogN', () => {
+  it('reads the work factor an ncryptsec was made with', () => {
+    for (const n of [1, 10, 16]) expect(ncryptsecLogN(nip49.encrypt(generateSecretKey(), 'pw', n))).toBe(n)
+    expect(ncryptsecLogN('nsec1qqqqqq')).toBe(0)
+    expect(ncryptsecLogN('ncryptsec1b')).toBe(0)
   })
 })
 

@@ -63,7 +63,7 @@ export async function launch({ phone, url, sk = generateSecretKey(), seed = [], 
     try {
       localStorage.setItem('onosendai:live', '0')
       // `mint`: no key given, so the app makes its own on load, as a first arrival's (the tutorial starts only for one).
-      if (ns) localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns }))
+      if (ns) { localStorage.setItem('onosendai:nsec', ns); localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns })) }
     } catch {}
   }, [pk, mint ? null : nip19.nsecEncode(sk)])
   const errors = []

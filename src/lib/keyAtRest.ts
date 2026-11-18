@@ -72,6 +72,27 @@ export function sealKey(secretKey: Uint8Array, password: string, again: string):
   return nip49.encrypt(secretKey, password, LOG_N)
 }
 
+const BECH32 = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
+
+/**
+ * The work factor (log2 of scrypt's rounds) an ncryptsec was made with: the
+ * second byte of its payload (NIP-49), read from the first four characters
+ * after `ncryptsec1`. 0 if it cannot be read. Only ever asked of one that
+ * already opened, so its checksum is known good.
+ */
+export function ncryptsecLogN(ncryptsec: string): number {
+  const m = /^ncryptsec1([a-z0-9]{4})/.exec(ncryptsec.trim().toLowerCase())
+  if (!m) return 0
+  let bits = 0
+  for (const c of m[1]) {
+    const v = BECH32.indexOf(c)
+    if (v < 0) return 0
+    bits = (bits << 5) | v
+  }
+  // 20 bits: the version byte, the work factor byte, then 4 spare bits.
+  return (bits >> 4) & 0xff
+}
+
 /**
  * What a wrong password is told. One message for every way opening can fail
  * (a wrong password, a damaged copy), and nothing about how long it took.

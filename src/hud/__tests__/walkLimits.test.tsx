@@ -14,7 +14,7 @@
  * The walk itself at 20 ahead with the limit off is walkFluid.test.ts.
  */
 import { readFileSync } from 'node:fs'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, settled, type Host } from '../../test/elementRoot'
 
 vi.hoisted(() => {
@@ -31,10 +31,10 @@ vi.mock('../../lib/relay', async (orig) => ({ ...(await orig() as object), publi
 const menu = vi.hoisted(() => ({ opened: [] as boolean[] }))
 vi.mock('../../hooks/useMenuOpen', async (orig) => ({ ...(await orig() as object), setMenuOpen: (open: boolean) => { menu.opened.push(open) } }))
 
-import { SyncWarning } from '../SyncWarning'
+import { SYNCWARN_TAP_FROM, SyncWarning, useSyncWarnAside } from '../SyncWarning'
 import { WALK_LIMITS_HINT } from '../ViewPanel'
 import { WALK_LIMITS_ROW, openSettingAt } from '../settingsLink'
-import { aheadLabel } from '../ChainAhead'
+import { aheadBar, aheadLabel, tickClass } from '../ChainAhead'
 import { DEFAULT_LAYERS, LAYERS_KEY, loadLayers, useLayers } from '../../store/useLayers'
 import { usePanelLayout } from '../../store/usePanelLayout'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -42,10 +42,15 @@ import { useWalk } from '../../store/useWalk'
 import { walkSpeedFactor, walkWarnOpacity } from '../../store/walkLimits'
 import { FLUID_EASE_FROM, FLUID_HOLD_AT, syncSpeedFactor, syncWarnOpacity } from '../../lib/fluidWalk'
 
-/** The page as the warning's line looks it up: the one switch it opens at, scrolled to and focused. */
-const row = { scrolled: 0, focused: 0 }
+/** The page as the warning's line looks it up: the one switch it opens at, scrolled to and focused, drawn after `missing` more looks (the menu still opening). */
+const row = { scrolled: 0, focused: 0, missing: 0 }
+const pageBefore = (globalThis as { document?: unknown }).document
 ;(globalThis as { document?: unknown }).document = {
-  getElementById: (id: string) => id === WALK_LIMITS_ROW ? { scrollIntoView: () => { row.scrolled++ }, focus: () => { row.focused++ } } : null,
+  getElementById: (id: string) => {
+    if (id !== WALK_LIMITS_ROW) return null
+    if (row.missing > 0) { row.missing--; return null }
+    return { scrollIntoView: () => { row.scrolled++ }, focus: () => { row.focused++ } }
+  },
   visibilityState: 'visible',
   addEventListener: () => undefined,
   removeEventListener: () => undefined,
@@ -53,12 +58,16 @@ const row = { scrolled: 0, focused: 0 }
 
 const panel = (all: Host[]): Host => all.find((h) => String(h.props.className ?? '').split(' ').includes('syncwarn'))!
 
+afterAll(() => { (globalThis as { document?: unknown }).document = pageBefore })
+
 beforeEach(() => {
   localStorage.removeItem(LAYERS_KEY)
   useLayers.setState({ ...loadLayers() })
   menu.opened.length = 0
   row.scrolled = 0
   row.focused = 0
+  row.missing = 0
+  useSyncWarnAside.setState({ aside: false })
 })
 
 afterEach(() => {
@@ -99,17 +108,26 @@ describe('the setting', () => {
     expect(loadLayers()).toMatchObject({ dots: false, walkLimits: true })
   })
 
-  it('says what it does and the risk, with no em dash', () => {
-    expect(WALK_LIMITS_HINT).toContain('slows at 15')
-    expect(WALK_LIMITS_HINT).toContain('stops at 20')
-    expect(WALK_LIMITS_HINT).toContain('If your chain falls far behind and something interrupts it, like closing the tab or losing connection, moves that have not reached your chain can be lost.')
-    expect(WALK_LIMITS_HINT).not.toMatch(/—/)
+  it('says what it does and the risk, with no em dash; the menu explanation has the risk in full', () => {
+    expect(WALK_LIMITS_HINT).toContain('slows and stops')
+    expect(WALK_LIMITS_HINT).toContain('can be lost')
+    const panelSource = readFileSync(new URL('../ViewPanel.tsx', import.meta.url), 'utf8').replace(/\s+/g, ' ')
+    expect(panelSource).toContain('If your chain falls far behind and something interrupts it, like closing the tab or losing connection, moves that have not reached your chain can be lost.')
+    expect(WALK_LIMITS_HINT).not.toMatch(/\u2014/)
   })
 
-  it('off, the CHAIN chip still counts how far ahead, and names no stop', () => {
+  it('off, the CHAIN chip still counts how far ahead, with no slowing stretch, brackets, red or stop', () => {
     expect(aheadLabel(22)).toBe(' 22 moves ahead of your chain. The walk stops at 20.')
     expect(aheadLabel(22, false)).toBe(' 22 moves ahead of your chain. The sync limit is off.')
     expect(aheadLabel(0, false)).toBe('')
+    expect(aheadBar(20)).toMatchObject({ n: 20, slow: true, limit: true, close: 1, zone: true })
+    for (const n of [5, 15, 20, 40]) {
+      const bar = aheadBar(n, false)
+      expect(bar, String(n)).toMatchObject({ n: Math.min(n, 20), on: true, slow: false, limit: false, close: 0, zone: false })
+      const ticks = Array.from({ length: 20 }, (_, k) => tickClass(k + 1, bar, { rose: false, goneTop: 0 }))
+      expect(ticks.filter((c) => c.split(' ').includes('is-lit'))).toHaveLength(Math.min(n, 20))
+      expect(ticks.some((c) => c.split(' ').includes('is-z'))).toBe(false)
+    }
   })
 })
 
@@ -126,12 +144,25 @@ describe('the LOSING SYNC warning', () => {
     expect(panel(m.all()).props.style).toEqual({ opacity: 1 })
     const [line] = m.buttons('Turn off this warning in settings')
     expect(line).toBeDefined()
-    expect(line.props.tabIndex).toBe(0)
+    expect(line.props.disabled).toBe(false)
+    // The line is outside the box's live region, so a screen reader hears the count, not the line.
+    expect(panel(m.all()).props.role).toBeUndefined()
     useLayers.getState().setLayer('walkLimits', false)
     await settled()
     expect(panel(m.all()).props.style).toEqual({ opacity: 0 })
-    expect(m.buttons('Turn off this warning in settings')[0].props.tabIndex).toBe(-1)
+    expect(m.buttons('Turn off this warning in settings')[0].props.disabled).toBe(true)
     await m.unmount()
+  })
+
+  it('the line takes a tap only once the box is half shown', async () => {
+    for (const [n, tappable] of [[15, false], [16, false], [17, true], [20, true]] as const) {
+      ahead(n)
+      const m = await mount(<SyncWarning />)
+      const opacity = (panel(m.all()).props.style as { opacity: number }).opacity
+      expect(opacity >= SYNCWARN_TAP_FROM, String(n)).toBe(tappable)
+      expect(m.buttons('Turn off this warning in settings')[0].props.disabled, String(n)).toBe(!tappable)
+      await m.unmount()
+    }
   })
 
   it('the line is always drawn, so nothing moves when the warning comes up, and the stylesheet keeps it out of the layout', async () => {
@@ -144,7 +175,7 @@ describe('the LOSING SYNC warning', () => {
     const rule = css.slice(css.indexOf('.syncwarn__off {'), css.indexOf('}', css.indexOf('.syncwarn__off {')))
     expect(rule).toContain('position: absolute')
     expect(rule).toContain('pointer-events: none')
-    expect(css).toContain('.syncwarn.is-on .syncwarn__off { pointer-events: auto; }')
+    expect(css).toContain('.syncwarn.is-tappable .syncwarn__off { pointer-events: auto; }')
   })
 
   it('the line opens the menu at the sync limit switch, unfolding Settings', async () => {
@@ -159,7 +190,23 @@ describe('the LOSING SYNC warning', () => {
     expect(row.focused).toBe(1)
     // Nothing is switched for you.
     expect(useLayers.getState().walkLimits).toBe(true)
+    // The warning steps aside so it does not cover the switch, until the walk catches up.
+    expect(panel(m.all()).props.style).toEqual({ opacity: 0 })
+    ahead(0)
+    await settled()
+    expect(useSyncWarnAside.getState().aside).toBe(false)
+    ahead(FLUID_HOLD_AT)
+    await settled()
+    expect(panel(m.all()).props.style).toEqual({ opacity: 1 })
     await m.unmount()
+  })
+
+  it('waits for the menu to draw the switch, then goes to it', async () => {
+    row.missing = 5
+    openSettingAt(WALK_LIMITS_ROW)
+    await new Promise((r) => setTimeout(r, 600))
+    expect(row.missing).toBe(0)
+    expect(row.focused).toBe(1)
   })
 
   it('an unfolded Settings stays unfolded', async () => {

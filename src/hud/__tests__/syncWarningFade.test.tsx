@@ -50,8 +50,8 @@ describe('the LOSING SYNC warning', () => {
   })
 
   it('is the same box at every opacity: only the opacity changes', () => {
-    // The line under it takes the keyboard only while it shows (its tabindex).
-    const strip = (html: string): string => html.replace(/ style="[^"]*"/, '').replace(/ is-on/, '').replace(/aria-hidden="\w+"/, '').replace(/\d+ BEHIND/, 'N BEHIND').replace(/ tabindex="-?\d+"/, '')
+    // The line under it takes a tap only once the box is half shown (is-tappable, disabled, its aria-hidden).
+    const strip = (html: string): string => html.replace(/ style="[^"]*"/, '').replace(/ is-on/, '').replace(/ is-tappable/, '').replace(/ aria-hidden="\w+"/g, '').replace(/\d+ BEHIND/, 'N BEHIND').replace(/ disabled=""/, '')
     const base = strip(draw(3))
     for (const n of [15, 17, 20]) expect(strip(draw(n))).toBe(base)
   })

@@ -73,13 +73,21 @@ export interface AheadBar {
   limit: boolean
   /** How far the brackets have closed in, 0 where they appear to 1 at the stop. */
   close: number
+  /** The slowing stretch is drawn (the hollow amber slots): the sync limit is on. */
+  zone: boolean
 }
 
-/** The bar for `ahead` events ahead (store/walkAhead.ts): the slowdown's own thresholds, never its own. */
-export function aheadBar(ahead: number): AheadBar {
+/**
+ * The bar for `ahead` events ahead (store/walkAhead.ts): the slowdown's own
+ * thresholds, never its own. With the sync limit off in Settings (`limits`
+ * false, store/walkLimits.ts) the walk neither slows nor stops, so the bar
+ * only counts: no amber, brackets or red.
+ */
+export function aheadBar(ahead: number, limits = true): AheadBar {
   const n = Number.isFinite(ahead) ? Math.max(0, Math.min(AHEAD_TICKS, Math.floor(ahead))) : 0
+  if (!limits) return { n, on: n > 0, slow: false, limit: false, close: 0, zone: false }
   const close = Math.max(0, Math.min(1, (n - SYNC_WARN_AT) / (FLUID_HOLD_AT - SYNC_WARN_AT)))
-  return { n, on: n > 0, slow: n >= SYNC_WARN_AT, limit: n >= FLUID_HOLD_AT, close }
+  return { n, on: n > 0, slow: n >= SYNC_WARN_AT, limit: n >= FLUID_HOLD_AT, close, zone: true }
 }
 
 /** What the last change to the count was, so the stylesheet can play it. */
@@ -121,8 +129,8 @@ export function aheadStep(was: AheadTrack, n: number, total: number): AheadTrack
 /** Tick `i` (1 to AHEAD_TICKS) of the bar: its classes. */
 export function tickClass(i: number, bar: AheadBar, track: Pick<AheadTrack, 'rose' | 'goneTop'>): string {
   const cls: string[] = []
-  if (i >= SYNC_WARN_AT) cls.push('is-z')
-  if (i === SYNC_WARN_AT) cls.push('is-z1')
+  if (bar.zone && i >= SYNC_WARN_AT) cls.push('is-z')
+  if (bar.zone && i === SYNC_WARN_AT) cls.push('is-z1')
   if (i <= bar.n) cls.push('is-lit')
   if (i === bar.n) cls.push('is-head')
   if (i === bar.n && track.rose) cls.push('is-ign')
@@ -162,7 +170,7 @@ export function useChainAhead(own: boolean, total: number): ChainAhead {
   const events = useEventsAhead()
   const limits = useLayers((s) => s.walkLimits)
   const ahead = own && walking ? events : 0
-  const bar = aheadBar(ahead)
+  const bar = aheadBar(ahead, limits)
 
   // Derived from the last render's count, the sanctioned way: set during
   // render, so the classes that play a change stay put through renders

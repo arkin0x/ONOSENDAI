@@ -50,7 +50,7 @@ interface ViewRow {
 }
 
 /** The sync limit's line: what it does, both halves of it, and the risk of turning it off (arkinox, 2026-11-18). */
-export const WALK_LIMITS_HINT = 'WALK slows at 15 moves ahead of your chain, stops at 20, and warns you. Off, it does none of these. If your chain falls far behind and something interrupts it, like closing the tab or losing connection, moves that have not reached your chain can be lost.'
+export const WALK_LIMITS_HINT = 'WALK slows and stops far ahead of your chain. Off, moves not yet on your chain can be lost if something interrupts it.'
 
 export function ViewPanel(): JSX.Element {
   const dots = useLayers((s) => s.dots)

@@ -11578,7 +11578,7 @@ a.feed__act { text-decoration: none; }
 }
 /* "Turn off this warning in settings" (hud/SyncWarning.tsx): just under the
    box, absolutely placed so it moves nothing, at the box's opacity, and the
-   one thing here that takes a tap, only while the warning shows. */
+   one thing here that takes a tap, only once the box is half shown. */
 .syncwarn__off {
   position: absolute;
   top: calc(100% + 8px);
@@ -11596,7 +11596,7 @@ a.feed__act { text-decoration: none; }
   cursor: pointer;
   pointer-events: none;
 }
-.syncwarn.is-on .syncwarn__off { pointer-events: auto; }
+.syncwarn.is-tappable .syncwarn__off { pointer-events: auto; }
 .syncwarn__off:focus-visible { outline: 1px solid #fff; outline-offset: 2px; }
 
 /* ---- /demo tour (hud/DemoCoach.tsx, arkinox 2026-10-14) ----

@@ -1145,7 +1145,8 @@ export function groundUnder(from: Position, lead: readonly [number, number, numb
  */
 export function restDrop(at: Position, plane: number, down: AxisDirection = WORLD_DOWN): { drop: number; pending: boolean } {
   const out = { pending: false }
-  const s = groundUnder(at, [0, 0, 0], wallItemsAt(plane, at), down, 0, REST_REACH, out, restEntryFor)
+  const items = wallItemsAt(plane, at)
+  const s = groundUnder(at, [0, 0, 0], items, down, 0, REST_REACH, out, (w) => restEntryFor(w, items))
   return { drop: s === null || s < -REST_REACH ? REST_FLOOR : Math.min(1, Math.max(0, -s)), pending: out.pending }
 }
 
@@ -1157,7 +1158,7 @@ export function restDrop(at: Position, plane: number, down: AxisDirection = WORL
  * spends what holds the walker (review of #800). A part not yet built by
  * WALK holds no avatar up until it is.
  */
-function restEntryFor(w: WallItem): Entry {
+function restEntryFor(w: WallItem, live: readonly WallItem[]): Entry {
   const held = entries.get(w.key)
   if (held && !held.first && held.shard === w.shard && held.where === whereOf(w)) return held
   const kept = restEntries.get(w.key)
@@ -1168,6 +1169,13 @@ function restEntryFor(w: WallItem): Entry {
     return kept.e
   }
   if (kept) { restEntries.delete(w.key); restBytes -= kept.bytes }
+  // A build is about to be made, which costs far more than this: the walls of
+  // shards no longer in the world (moved, deleted, hidden again) go first.
+  // Only this plane's: `live` is the shards of the plane asked about.
+  if (restEntries.size > 0) {
+    const here = new Set(live.map((x) => x.key))
+    for (const [k, v] of restEntries) if (v.e.item.plane === w.plane && !here.has(k)) { restEntries.delete(k); restBytes -= v.bytes }
+  }
   const e = build(w, [], false, false)
   const bytes = wallBytes(e.mesh)
   restEntries.set(w.key, { e, bytes })
@@ -1187,8 +1195,9 @@ function restEntryFor(w: WallItem): Entry {
  * what each holds in bytes. A shard moved or hidden again is a new key, so
  * the walls of where it was stood here until 512 had gathered (2026-11-18:
  * a session of BUILD moves among large imported pieces grew it with every move,
- * each entry its triangles and the old placement's whole model). Bounded now
- * by count and by bytes, the least recently asked let go first.
+ * each entry its triangles and the old placement's whole model). Now the
+ * walls of a shard no longer in the world go before the next build, and what
+ * stays is bounded by count and by bytes, the least recently asked let go first.
  */
 const restEntries = new Map<string, { e: Entry; bytes: number }>()
 let restBytes = 0

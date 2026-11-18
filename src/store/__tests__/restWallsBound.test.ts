@@ -5,7 +5,8 @@
  * A shard moved or hidden again in BUILD is a new world item with a new key,
  * so every move left the walls of where the shard had been, and its whole
  * model, in restDrop's cache until 512 had gathered. Each build here is a new
- * key for the same place, as a session of moves is.
+ * key for the same place, as a session of moves is; a world holding many
+ * shards at once checks the bounds by count and by bytes.
  *
  * The fixture is authored here: no kit piece is ever a fixture.
  */
@@ -50,10 +51,10 @@ function slab(name: string, cells: number): ShardModel {
 
 const start: Position = { x: 1_000_000n, y: 1_000_000n, z: 1_000_000n }
 
-/** The world holds this shard under `start`, under the key `key`: a placement made again is a new key. */
-function placed(shard: ShardModel, key: string): void {
+/** The world holds these shards under `start`, each under its own key: a placement made again is a new key. */
+function placed(list: Array<[ShardModel, string]>): void {
   const plane = useCyberspace.getState().plane as WorldItem['plane']
-  const items: WorldItem[] = [{ key, type: 'shard', at: start, plane, height: 84, mine: true, shard }]
+  const items: WorldItem[] = list.map(([shard, key]) => ({ key, type: 'shard', at: start, plane, height: 84, mine: true, shard }))
   useShards.setState({ worldItems: () => items })
 }
 
@@ -68,56 +69,55 @@ describe('restDrop keeps the walls it built within a bound', () => {
     const plane = useCyberspace.getState().plane
     const floor = slab('Small slab', 4)
     for (let n = 0; n < 3; n++) {
-      placed(floor, `move-${n}`)
+      placed([[floor, `move-${n}`]])
       expect(restDrop(start, plane).drop).toBeCloseTo(1, 9)
     }
   })
 
-  it('a long session of moves keeps no more than REST_ENTRIES_MAX builds', () => {
+  it('a shard moved again and again keeps only the walls of where it is now', () => {
     const plane = useCyberspace.getState().plane
     const floor = slab('Small slab', 2)
-    for (let n = 0; n < REST_ENTRIES_MAX * 3; n++) {
-      placed(floor, `move-${n}`)
+    const once = (() => { placed([[floor, 'first']]); restDrop(start, plane); return restWallsKept().bytes })()
+    for (let n = 0; n < 300; n++) {
+      placed([[floor, `move-${n}`]])
       restDrop(start, plane)
     }
+    expect(restWallsKept()).toEqual({ count: 1, bytes: once })
+  })
+
+  it('a shard still in the world keeps its walls while another is moved beside it', () => {
+    const plane = useCyberspace.getState().plane
+    const floor = slab('Small slab', 2)
+    for (let n = 0; n < 20; n++) {
+      placed([[floor, 'stays'], [floor, `moved-${n}`]])
+      restDrop(start, plane)
+    }
+    expect(restWallsKept().count).toBe(2)
+  })
+
+  it('many shards in the world at once keep no more than REST_ENTRIES_MAX builds', () => {
+    const plane = useCyberspace.getState().plane
+    const floor = slab('Small slab', 2)
+    placed(Array.from({ length: REST_ENTRIES_MAX * 2 }, (_, n): [ShardModel, string] => [floor, `here-${n}`]))
+    expect(restDrop(start, plane).drop).toBeCloseTo(1, 9)
     expect(restWallsKept().count).toBe(REST_ENTRIES_MAX)
   })
 
   it('and no more than REST_BYTES_MAX of triangles, however few the builds', () => {
     const plane = useCyberspace.getState().plane
-    // About 2.3 MB of triangles a build (72 bytes a triangle): the bytes bind long before the count.
+    // About 2.4 MB of triangles a build (72 bytes a triangle): the bytes bind long before the count.
     const big = slab('Big slab', 128)
-    for (let n = 0; n < 40; n++) {
-      placed(big, `move-${n}`)
-      expect(restDrop(start, plane).drop).toBeCloseTo(1, 9)
-    }
+    placed(Array.from({ length: 40 }, (_, n): [ShardModel, string] => [big, `big-${n}`]))
+    expect(restDrop(start, plane).drop).toBeCloseTo(1, 9)
     const kept = restWallsKept()
     expect(kept.bytes).toBeLessThanOrEqual(REST_BYTES_MAX)
     expect(kept.count).toBeLessThan(40)
     expect(kept.count).toBeGreaterThan(1)
   })
 
-  it('the one asked most recently is never the one let go', () => {
-    const plane = useCyberspace.getState().plane
-    const floor = slab('Small slab', 2)
-    placed(floor, 'stays')
-    restDrop(start, plane)
-    const once = restWallsKept().bytes
-    restDrop(start, plane)
-    expect(restWallsKept()).toEqual({ count: 1, bytes: once })
-    // Its key asked between every other build: never the least recent, so never let go.
-    for (let n = 0; n < REST_ENTRIES_MAX * 2; n++) {
-      placed(floor, `other-${n}`)
-      restDrop(start, plane)
-      placed(floor, 'stays')
-      restDrop(start, plane)
-    }
-    expect(restWallsKept().count).toBe(REST_ENTRIES_MAX)
-  })
-
   it('clearWalls forgets them, bytes and all', () => {
     const plane = useCyberspace.getState().plane
-    placed(slab('Small slab', 2), 'one')
+    placed([[slab('Small slab', 2), 'one']])
     restDrop(start, plane)
     expect(restWallsKept().count).toBe(1)
     clearWalls()

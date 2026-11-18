@@ -138,6 +138,12 @@ export interface SealLooksIo {
    * under `key` at a fresh address (§3.6, Moving a sealed look).
    */
   fromKeyHex?: string
+  /**
+   * False for a look MOVE keeps as it is (store/useShards LookChoice `kept`: one
+   * this client will not read): a payload in its tag stays exactly as written,
+   * whatever its size, and only a sealed look is sealed again for a new bag.
+   */
+  sealLarge?: boolean
   /** Opens a sealed look under its old key (openSealedLookPayload by default). */
   open?: (address: string, keyHex: string) => Promise<{ payload: string; public?: false } | { public: true } | null>
 }
@@ -182,7 +188,7 @@ export async function sealLookTags(tags: readonly string[][], io: SealLooksIo): 
       dropped.push(moved)
     }
     const bytes = bytesOf(payload)
-    if (!sealsLook(bytes)) { out.push([LOOK_TAG, payload, ...t.slice(2)]); continue }
+    if (!sealsLook(bytes) || (io.sealLarge === false && !moved)) { out.push([LOOK_TAG, payload, ...t.slice(2)]); continue }
     const refusal = lookRefusal(bytes, limit)
     if (refusal) throw new Error(refusal)
     const d = io.newD()

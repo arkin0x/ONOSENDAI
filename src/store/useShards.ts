@@ -3409,6 +3409,8 @@ export const useShards = create<ShardsState>((set, get) => {
      */
     looks: Array<{ next: NostrEvent }>
     lookDropped: string[]
+    /** Chests signed again for their sealed looks, old id to new: what is kept by a chest's id follows (finishMove). */
+    renamed: Array<[string, string]>
     to: MoveTarget
     settings: BagSettings
     bag: NostrEvent
@@ -3463,24 +3465,34 @@ export const useShards = create<ShardsState>((set, get) => {
     // FEED look of your own published object moves as it is.
     const looks: StagedMove['looks'] = []
     const lookDropped: string[] = []
+    const renamed: Array<[string, string]> = []
     const resealLooks = async (r: MyDeployment): Promise<MyDeployment> => {
       if (r.type !== 'chest' || !r.chest?.look || r.inner.pubkey !== me || src.keyHex.toLowerCase() === bytesToHex(to.key)) return r
       if (sealedLookAddresses(r.chest.look, me).length === 0) return r
       const guarded = (t: EventTemplate): Promise<NostrEvent> => { if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED); return cs.signEvent(t) }
       const sealedLook = await sealLookTags(r.chest.look, {
         key: to.key, owner: me, createdAt: now, newD: placementId, sign: guarded,
-        // Sent with the move, before its bag (sendMove).
-        send: async () => '',
+        // Sent with the move, before its bag (sendMove), to every relay of yours: the first named as the hint.
+        send: async () => relaySet()[0] ?? '',
         fromKeyHex: src.keyHex, open: (address, keyHex) => openSealedLookPayload(address, keyHex, fetchLookObject),
       })
       if (sealedLook.objects.length === 0) return r
+      // A door's secret is kept by its id: one this device does not hold could not follow the door to its new id, and its room would be lost.
+      const secret = r.chest.door !== undefined ? doorSecret(me, r.eventId) : null
+      if (r.chest.door !== undefined && !secret) throw new Error('A door in this room wears its own model, and this device does not hold its secret, so it cannot move with it. Open that door first.')
       const chest: ChestItem = { ...r.chest, look: sealedLook.tags }
       const inner = await guarded(chestInnerTemplate(chest, positionOf(r), r.plane, Math.max(now, r.inner.created_at + 1)))
+      // Kept under the new id before anything goes out, as a moved door's is (deploy).
+      if (secret) await commitDoorSecret(me, inner.id, secret)
       for (const next of sealedLook.objects) looks.push({ next })
       lookDropped.push(...sealedLook.dropped)
+      renamed.push([r.eventId, inner.id])
       const named = sealedLookAddresses(sealedLook.tags, me)
       const kept = (r.lookObjects ?? []).filter((o) => named.includes(`${o.kind}:${o.pubkey}:${dOf(o)}`))
-      return { ...r, eventId: inner.id, inner, chest, lookObjects: [...sealedLook.objects, ...kept] }
+      const { lookObjects: _was, ...rest } = r
+      void _was
+      // Kept on the row only while the target is LOCAL, for BROADCAST to send.
+      return { ...rest, eventId: inner.id, inner, chest, ...(targetLive ? {} : { lookObjects: [...sealedLook.objects, ...kept] }) }
     }
     const moving: MyDeployment[] = []
     for (const row of rows) moving.push(await resealLooks(row))
@@ -3526,7 +3538,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (left.length > 0) source = { bag: await signBag(left, srcKey, src.lookupId, src.height, kept, place, was.entries, me), settings: kept }
       else source = sourceLive ? { retraction: await bagRetraction(src.lookupId, src.bagId, me), sealed: was.entries.filter((e): e is Reference => isReference(e) && sealedRefParts(e)?.pubkey === me) } : {}
     }
-    return { owner: me, rows, moved, objects, looks, lookDropped, to, settings, bag, targetLive, source }
+    return { owner: me, rows, moved, objects, looks, lookDropped, renamed, to, settings, bag, targetLive, source }
   }
 
   /**
@@ -3569,9 +3581,9 @@ export const useShards = create<ShardsState>((set, get) => {
     for (const l of sent) await retractObject(l.next).catch(() => undefined)
   }
 
-  /** A landed move's old sealed looks, retracted now that no bag of yours names the chest that named them. */
-  async function retractDroppedLooks(stage: StagedMove): Promise<void> {
-    if (stage.lookDropped.length > 0 && stage.targetLive) await retractSealedLooks(stage.lookDropped, stage.owner)
+  /** A landed move's old sealed looks, retracted now that no bag of yours names the chest that named them, on `relays` (those that took the old bag's rewrite or retraction). */
+  async function retractDroppedLooks(stage: StagedMove, relays: string[] = relaySet()): Promise<void> {
+    if (stage.lookDropped.length > 0 && stage.targetLive && relays.length > 0) await retractSealedLooks(stage.lookDropped, stage.owner, relays)
   }
 
   /** The old versions of what went out, back: the row follows (rekeyTo), or keeps it to put back. */
@@ -3593,10 +3605,13 @@ export const useShards = create<ShardsState>((set, get) => {
       if (before.some((d) => d.lookupId === src.lookupId && d.published)) sourcePublished = await sendBag(stage.source.bag).then((r) => r.ok, () => false)
       else settleSealed(stage.source.bag, true)
     }
+    // Where the old bag no longer names what moved: the relays that took its rewrite, or its retraction.
+    let unnamedOn: string[] = []
     if (stage.source?.retraction) {
       const out = await publishMany(relaySet(), stage.source.retraction).catch(() => ({ ok: false as const, reason: '' }))
       // The bag is deleted: so is every sealed entry it named, on the relays that took the deletion.
       if (out.ok && stage.source.sealed) await retractSealedAmong(stage.source.sealed, stage.owner, tookOf(out))
+      if (out.ok) unnamedOn = tookOf(out)
     }
     const leaving = new Set(stage.rows.map((r) => r.eventId))
     const keyHex = bytesToHex(stage.to.key)
@@ -3620,9 +3635,16 @@ export const useShards = create<ShardsState>((set, get) => {
     if (cyber().identity.pubkey === stage.owner) set({ discovered })
     await commitRows(stage.owner, mine)
     for (const o of stage.objects) forgetReference(fresh.find((f) => f.inner.id === o.next.id)?.ref ?? [])
-    // The source no longer names the moved chests: their old sealed looks go. A kept
-    // source (a rotation's old room) still names them until its own retraction.
-    if (stage.source && !(stage.source.bag && wasLive && !sourcePublished)) await retractDroppedLooks(stage)
+    // What is kept by a re-signed chest's id follows it: a door's room (its secret already did, stageMove), and its open card.
+    for (const [from, to] of stage.renamed) {
+      retargetRoom(from, to, stage.owner)
+      if (cyber().identity.pubkey === stage.owner && get().selectedSecret === from) set({ selectedSecret: to })
+    }
+    // The source no longer names the moved chests: their old sealed looks go, only
+    // where it no longer does. A kept source (a rotation's old room) still names
+    // them until its own retraction.
+    if (stage.source?.bag && (sourcePublished || !wasLive)) unnamedOn = relaySet()
+    if (unnamedOn.length > 0) await retractDroppedLooks(stage, unnamedOn)
     if (stage.source?.bag && wasLive && !sourcePublished) throw new Error('It moved, but no relay took the old bag without it. Send that bag again, or the old place still names it.')
   }
 
@@ -4348,7 +4370,7 @@ export const useShards = create<ShardsState>((set, get) => {
         for (const retraction of retractions) for (const url of tookOf(await publishMany(relaySet(), retraction).catch(() => ({ ok: false as const, reason: '' })))) tookRetraction.add(url)
         if (live && tookRetraction.size > 0) await retractSealedAmong(oldSealed, me, [...tookRetraction])
         // And the old room's chests' sealed looks, sealed again under the new key at fresh addresses (stageMove).
-        if (stage && live && tookRetraction.size > 0) await retractDroppedLooks(stage)
+        if (stage && live && tookRetraction.size > 0) await retractDroppedLooks(stage, [...tookRetraction])
         return null
       } catch (err) {
         return err instanceof Error ? err.message : String(err)
@@ -4995,6 +5017,8 @@ export const useShards = create<ShardsState>((set, get) => {
           set({ deployNote: 'Sealing its model' })
           const sealedLook = await sealLookTags(chest.look, {
             key: rk.key, owner, createdAt, newD: placementId, sign: (t) => signAsOwner(t),
+            // A look this client will not read goes exactly as it is.
+            sealLarge: pending.look?.from !== 'kept',
             send: async (object) => {
               if (!live) return ''
               still()

@@ -446,7 +446,7 @@ export function forgetSealedLooks(budget: number = SEALED_LOOKS_KEPT_BYTES): num
   sealedLooks.clear()
   sealedBytes = 0
   sealedBudget = budget
-  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; retryAt = Infinity }
   // Whatever was drawn from one reads again (under the new identity's keys).
   if (n > 0) sealedChanged()
   return n
@@ -489,10 +489,30 @@ export function sealedLookState(address: string, keyHex: string, hint?: string):
 }
 
 let retryTimer: ReturnType<typeof setTimeout> | null = null
-/** One wake-up SEALED_RETRY_MS from now, for every missing sealed look at once. */
+let retryAt = Infinity
+/** The least a wake-up waits: what is due is read again by then, not woken for again and again. */
+const RETRY_MIN_MS = 1000
+/**
+ * One wake-up, when the earliest missing sealed look's minute is up: whoever
+ * drew a chest without it reads again then. Firing, it sets the next for the
+ * earliest still missing, so a look that went missing later is asked for again
+ * in its own time (review).
+ */
 function retryLater(): void {
-  if (retryTimer) return
-  retryTimer = setTimeout(() => { retryTimer = null; sealedChanged() }, SEALED_RETRY_MS)
+  let earliest = Infinity
+  for (const s of sealedLooks.values()) if (s.state === 'missing') earliest = Math.min(earliest, s.at + SEALED_RETRY_MS)
+  if (earliest === Infinity || (retryTimer && earliest >= retryAt)) return
+  if (retryTimer) clearTimeout(retryTimer)
+  retryAt = earliest
+  retryTimer = setTimeout(() => {
+    retryTimer = null
+    retryAt = Infinity
+    sealedChanged()
+    // Due ones are being read again now; one not yet due wakes in its own time.
+    let next = Infinity
+    for (const s of sealedLooks.values()) if (s.state === 'missing' && s.at + SEALED_RETRY_MS > Date.now()) next = Math.min(next, s.at + SEALED_RETRY_MS)
+    if (next !== Infinity) { retryAt = next; retryTimer = setTimeout(() => { retryTimer = null; retryAt = Infinity; sealedChanged(); retryLater() }, Math.max(RETRY_MIN_MS, next - Date.now())) }
+  }, Math.max(RETRY_MIN_MS, earliest - Date.now()))
 }
 
 async function openSealedLook(address: string, keyHex: string, hint: string | undefined, fetch: SealedLookFetch): Promise<SealedLookState> {

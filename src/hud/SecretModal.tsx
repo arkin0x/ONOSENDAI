@@ -192,7 +192,7 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
   // A chest's or a door's look, open once this identity opened it (R14), for the card's 3D header.
   useOpenedChests((s) => s.opened)
   // Drawn without a sealed look until it lands (DECK-0004 §3.6), then with it.
-  useSyncExternalStore(onSealedLooks, sealedLooksVersion)
+  useSyncExternalStore(onSealedLooks, sealedLooksVersion, sealedLooksVersion)
   const look = item.type === 'chest' ? lookOf(item) : null
 
   const npub = nip19.npubEncode(author)

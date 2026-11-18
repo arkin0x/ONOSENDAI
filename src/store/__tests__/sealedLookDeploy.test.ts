@@ -92,6 +92,9 @@ describe('a sealed look through MOVE, BROADCAST and DELETE', () => {
     // MOVE before the look was opened here: its tags go as they are, within the same bag.
     S().startMoveChest(first.eventId)
     expect(S().pending).toMatchObject({ type: 'chest', look: { from: 'kept' } })
+    // One gibson over: the same bag (2^4), another place.
+    const next = { ...CURSOR, x: CURSOR.x + 1n }
+    useCyberspace.setState({ position: next, anchor: next, cursor: next })
     await hide()
     expect(S().deployError).toBeNull()
     const moved = chestRow()

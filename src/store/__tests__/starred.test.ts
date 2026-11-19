@@ -35,10 +35,14 @@ const OTHER = 'dd'.repeat(32)
 type Mod = typeof import('../useStarred')
 let current: Mod | null = null
 /** A page load signed in as `owner`: what the last one wrote is on disk first. */
+let lists: typeof import('../personalLists') | null = null
 async function load(owner = ME): Promise<Mod['useStarred']> {
   await current?.starredList.flush()
+  // The page before is closed, as a reload closes it.
+  lists?.stopHearingOtherTabs()
   vi.resetModules()
   current = await import('../useStarred')
+  lists = await import('../personalLists')
   await current.starredList.setOwner(owner)
   return current.useStarred
 }
@@ -49,6 +53,7 @@ const spot = (x: bigint, plane: 0 | 1 = 0, label = `${x}, 2, 3`): StarSpot => ({
 
 describe('Starred Places', () => {
   beforeEach(() => {
+    lists?.stopHearingOtherTabs(); lists = null
     mem.clear(); g.localStorage = working; current = null
     ;(globalThis as { indexedDB?: unknown }).indexedDB = new IDBFactory()
     vi.spyOn(console, 'warn').mockImplementation(() => { /* the tests check what happened */ })

@@ -29,7 +29,7 @@ const union = (stored: string[], early: string[]): string[] => [...early, ...sto
 
 let instance = 0
 /** A page load. Earlier loads' modules stay alive and hear this one's BroadcastChannel, as other tabs would, so only the newest draws into `shown`. */
-async function fresh(mockDb?: (db: Db) => Partial<Db>): Promise<{ L: Lists; list: import('../personalLists').PersonalList<string[]> }> {
+async function fresh(mockDb?: (db: Db) => Partial<Db>, legacy: () => unknown = () => undefined): Promise<{ L: Lists; list: import('../personalLists').PersonalList<string[]> }> {
   const me = ++instance
   vi.resetModules()
   if (mockDb) {
@@ -39,7 +39,7 @@ async function fresh(mockDb?: (db: Db) => Partial<Db>): Promise<{ L: Lists; list
   const L = await import('../personalLists')
   const list = L.personalList<string[]>({
     name: 'words',
-    legacy: () => undefined,
+    legacy,
     clean: (raw) => (Array.isArray(raw) ? raw.filter((w): w is string => typeof w === 'string') : []),
     empty: [],
     merge: union,
@@ -137,5 +137,50 @@ describe('personal lists never lose a change', () => {
     expect(shown.value).toEqual(['kept'])
     expect(await stored(C)).toEqual(['kept'])
     expect(mem.has(`onosendai:personal:${C}:words`)).toBe(false)
+  })
+
+  it('the device-wide list adopted in a visit without IndexedDB is not adopted again by another identity when it opens (review of #827)', async () => {
+    const D = 'dd'.repeat(32)
+    const E = 'ee'.repeat(32)
+    mem.set('legacy-words', JSON.stringify(['old']))
+    ;(globalThis as { indexedDB?: unknown }).indexedDB = { open: () => { throw new Error('blocked') } }
+    const first = await fresh(undefined, () => JSON.parse(mem.get('legacy-words') ?? 'null') ?? undefined)
+    await first.list.setOwner(D)
+    expect(shown.value).toEqual(['old'])
+    ;(globalThis as { indexedDB?: unknown }).indexedDB = new IDBFactory()
+    const second = await fresh(undefined, () => JSON.parse(mem.get('legacy-words') ?? 'null') ?? undefined)
+    await second.list.setOwner(E)
+    expect(shown.value).toEqual([])
+    await second.list.setOwner(D)
+    expect(shown.value).toEqual(['old'])
+  })
+
+  it('a removal made while the first merged list is written stays removed (review of #827)', async () => {
+    let onWrite: (() => void) | null = null
+    const { list } = await fresh((real) => ({
+      writeList: async (...args: Parameters<Db['writeList']>) => { const hook = onWrite; onWrite = null; hook?.(); return real.writeList(...args) },
+    }))
+    const reading = list.setOwner(A)
+    list.save(['x'])
+    onWrite = () => list.save([])
+    await reading; await list.flush()
+    expect(shown.value).toEqual([])
+    expect(await stored(A)).toEqual([])
+  })
+
+  it('an older change whose write failed does not come back over a newer one that was kept (review of #827)', async () => {
+    let failNext = false
+    const { list } = await fresh((real) => ({
+      writeList: async (...args: Parameters<Db['writeList']>) => { if (failNext) { failNext = false; throw new Error('write failed') } return real.writeList(...args) },
+    }))
+    await list.setOwner(A)
+    failNext = true
+    list.save(['x'])
+    list.save([])
+    await list.flush()
+    await list.setOwner(B)
+    await list.setOwner(A)
+    expect(shown.value).toEqual([])
+    expect(await stored(A)).toEqual([])
   })
 })

@@ -140,6 +140,21 @@ export function adoptFallback(owner: string, name: string, legacy: unknown): unk
   return value
 }
 
+/**
+ * Whether the device-wide list was adopted in localStorage (a visit without
+ * IndexedDB): adopt in IndexedDB then treats it as adopted too, and the
+ * other way round (markAdoptedHere), so the two markers never hand the old
+ * list to two identities (review of #827).
+ */
+export function adoptedHere(name: string): boolean {
+  try { return localStorage.getItem(fallbackAdopted(name)) !== null } catch { return false }
+}
+
+/** Say in localStorage too that the device-wide list was adopted, by `owner`. */
+export function markAdoptedHere(name: string, owner: string): void {
+  try { if (localStorage.getItem(fallbackAdopted(name)) === null) localStorage.setItem(fallbackAdopted(name), isOwner(owner) ? owner : '') } catch { /* full: adopt in IndexedDB still holds its own marker */ }
+}
+
 /** Drop an identity's fallback list, once IndexedDB holds it. */
 export function clearFallback(owner: string, name: string): void {
   try { localStorage.removeItem(fallbackKey(owner, name)) } catch { /* it stays, and is merged again: a union, so nothing is lost */ }

@@ -29,7 +29,7 @@
  * into IndexedDB the next time it opens.
  */
 
-import { adopt, adoptFallback, clearFallback, isOwner, openPersonalDb, readFallback, writeFallback, writeList } from '../lib/personalDb'
+import { adopt, adoptFallback, adoptedHere, clearFallback, isOwner, markAdoptedHere, openPersonalDb, readFallback, writeFallback, writeList } from '../lib/personalDb'
 
 export interface PersonalListSpec<T> {
   /** The list's name in the database (lib/personalDb.ts). */
@@ -102,14 +102,21 @@ function ensureChannel(): void {
   } catch { channel = null }
 }
 
+/** Stop hearing other tabs: for tests, where each page load is a module copy that would otherwise hear the next one. */
+export function stopHearingOtherTabs(): void {
+  try { channel?.close() } catch { /* closed */ }
+  channel = null
+  lists.clear()
+}
+
 export function personalList<T>(spec: PersonalListSpec<T>): PersonalList<T> {
   let owner = ''
   /** Whether `owner`'s list has been read and is what the store shows. */
   let loaded = false
   /** Bumped by every change and every switch: a read that started before one does not draw over it. */
   let gen = 0
-  /** Whether a read for `owner` is queued or running. */
-  let reading = false
+  /** Reads for `owner` queued or running. */
+  let reading = 0
   /** Per identity, the newest whole list changed before its stored list was read (or after a write failed). */
   const early = new Map<string, T>()
   let queue: Promise<void> = Promise.resolve()
@@ -127,7 +134,9 @@ export function personalList<T>(spec: PersonalListSpec<T>): PersonalList<T> {
       const raw = adoptFallback(who, spec.name, legacy)
       return raw === undefined ? spec.empty : spec.clean(raw)
     }
-    const raw = await adopt(d, who, spec.name, legacy)
+    // Adopted already in a visit without IndexedDB: not again, for anyone.
+    const raw = await adopt(d, who, spec.name, adoptedHere(spec.name) ? undefined : legacy)
+    markAdoptedHere(spec.name, who)
     let value = raw === undefined ? spec.empty : spec.clean(raw)
     let away: unknown
     try { away = readFallback(who, spec.name) } catch { away = undefined }
@@ -158,10 +167,14 @@ export function personalList<T>(spec: PersonalListSpec<T>): PersonalList<T> {
       console.warn(`[personal] ${spec.name}: could not read your list: ${err instanceof Error ? err.message : String(err)}`)
       return null
     }
+    // Each round merges the newest held list with the list as read, never
+    // with the last round's result: a held list is made from what the store
+    // showed (the held list before it), so a place removed in it stays removed.
+    const read = value
     for (;;) {
       const held = early.get(who)
       if (held === undefined) return value
-      const merged = spec.merge(value, held)
+      const merged = spec.merge(read, held)
       try { await persist(who, merged) } catch (err) {
         console.warn(`[personal] ${spec.name}: could not keep a change: ${err instanceof Error ? err.message : String(err)}`)
         return null
@@ -173,7 +186,8 @@ export function personalList<T>(spec: PersonalListSpec<T>): PersonalList<T> {
   }
 
   const read = (who: string): Promise<void> => {
-    if (who === owner) reading = true
+    const counted = who === owner
+    if (counted) reading++
     const started = gen
     return then(async () => {
       try {
@@ -188,7 +202,7 @@ export function personalList<T>(spec: PersonalListSpec<T>): PersonalList<T> {
         loaded = true
         spec.show(value, who)
       } finally {
-        if (who === owner) reading = false
+        if (counted) reading = Math.max(0, reading - 1)
       }
     })
   }
@@ -204,6 +218,7 @@ export function personalList<T>(spec: PersonalListSpec<T>): PersonalList<T> {
       if (was && early.has(was) && isOwner(was)) void then(async () => { await settle(was) })
       owner = who
       loaded = false
+      reading = 0
       gen++
       // A new identity shows nothing of the old one's, from this moment.
       spec.show(early.get(who) ?? spec.empty, who)
@@ -216,15 +231,21 @@ export function personalList<T>(spec: PersonalListSpec<T>): PersonalList<T> {
       if (!loaded || !isOwner(who)) {
         early.set(who, value)
         // Nothing read yet, or the read failed: read (again), which writes it.
-        if (!reading) void read(who)
+        if (reading === 0) void read(who)
         return
       }
+      const mine = gen
       void then(async () => {
         try { await persist(who, value) } catch (err) {
           console.warn(`[personal] ${spec.name}: could not keep a change: ${err instanceof Error ? err.message : String(err)}`)
-          // Held, and merged on the next read: the next change reads again first.
-          early.set(who, value)
-          if (owner === who) loaded = false
+          // Held, and merged on the next read: the next change reads again
+          // first. Only while it is the newest: a later change is a whole
+          // list made after it, and holding this one would bring back what
+          // that one removed.
+          if (gen === mine) {
+            early.set(who, value)
+            if (owner === who) loaded = false
+          }
         }
       })
     },

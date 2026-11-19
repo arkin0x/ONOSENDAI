@@ -111,7 +111,7 @@ export interface StarSpot {
   input: string
 }
 
-/** Where the list lives on this device. Shared by every identity signed in here. */
+/** Where builds before 2026-11-19 kept the list, once per device; now only read, to adopt (legacyPlaces). */
 export const STARRED_KEY = 'onosendai:starred-places'
 
 /** The most places kept. Starring past this drops the oldest. */
@@ -202,19 +202,28 @@ function valid(p: unknown): p is StarredPlace {
   )
 }
 
-/** The list as stored on this device; empty when nothing is stored or storage cannot be read. */
-export function loadPlaces(): StarredPlace[] {
+/** A list as this app can use it, from whatever was stored. */
+export function cleanPlaces(raw: unknown): StarredPlace[] {
+  return Array.isArray(raw) ? raw.filter(valid).slice(0, MAX_STARRED) : []
+}
+
+/**
+ * The device-wide list builds before 2026-11-19 kept in localStorage, for
+ * adoption by the identity signed in when it is first read
+ * (store/useStarred.ts); undefined when there is none. Never written again.
+ */
+export function legacyPlaces(): unknown {
   try {
-    const v = JSON.parse(localStorage.getItem(STARRED_KEY) ?? '[]') as unknown
-    return Array.isArray(v) ? v.filter(valid).slice(0, MAX_STARRED) : []
+    const raw = localStorage.getItem(STARRED_KEY)
+    return raw === null ? undefined : JSON.parse(raw) as unknown
   } catch {
-    return []
+    return undefined
   }
 }
 
-/** Keep the list on this device. A storage that refuses (private mode, full) keeps it for this visit only. */
-export function savePlaces(list: StarredPlace[]): void {
-  try {
-    localStorage.setItem(STARRED_KEY, JSON.stringify(list))
-  } catch { /* private mode or full: the list still holds for this visit */ }
+/** Two lists as one: `early` (changes made before the stored list was read) first, then the stored places it does not hold. */
+export function unionPlaces(stored: StarredPlace[], early: StarredPlace[]): StarredPlace[] {
+  const out = [...early]
+  for (const p of stored) if (!out.some((q) => q.input === p.input && q.plane === p.plane)) out.push(p)
+  return out.slice(0, MAX_STARRED)
 }

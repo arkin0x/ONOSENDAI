@@ -8,7 +8,7 @@ import { create } from 'zustand'
 import { formatBig, formatStep } from '../lib/space'
 import { formatCellSizeLong } from 'sno-core/scale'
 import { geocode } from '../lib/geocode'
-import { canonicalViewAt, forgetView, parseViewAt, readRecentViews, rememberView, RECENT_VIEWS_EVENT, RECENT_VIEWS_KEY, type RecentView, type ViewTarget } from '../lib/viewAt'
+import { canonicalViewAt, forgetView, parseViewAt, readRecentViews, rememberView, RECENT_VIEWS_EVENT, RECENT_VIEWS_SHOWN, saveRecentViews, type RecentView, type ViewTarget } from '../lib/viewAt'
 import { coordLink, placeHex, typedCoordRoute } from '../lib/coordRoute'
 import { openCoordLink } from '../store/useCoordRoute'
 import { useCyberspace, type CyberspaceState } from '../store/useCyberspace'
@@ -156,12 +156,10 @@ function IdentityPanel(): JSX.Element {
   )
 }
 
-const RECENT_KEY = RECENT_VIEWS_KEY
-// Every pinned place (an End of Chain) and three others (viewAt readRecentViews).
+// Every pinned place (an End of Chain) and three others (viewAt readRecentViews),
+// the identity signed in's own (store/recentViewsList.ts).
 const loadRecent = readRecentViews
-function saveRecent(list: RecentView[]): void {
-  try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)) } catch { /* private mode */ }
-}
+const saveRecent = saveRecentViews
 
 /**
  * What is typed into the View panel's VIEW field, kept outside the panel:
@@ -282,8 +280,11 @@ export function ViewAtPanel(): JSX.Element {
   // addRecentView): shown at once, with the list open so it is seen.
   useEffect(() => {
     const reload = (): void => { setRecent(loadRecent()); setRecentOpen(true) }
+    // Another identity's list, or this one's read back: shown, the panel as it was.
+    const shown = (): void => { setRecent(loadRecent()) }
     window.addEventListener(RECENT_VIEWS_EVENT, reload)
-    return () => window.removeEventListener(RECENT_VIEWS_EVENT, reload)
+    window.addEventListener(RECENT_VIEWS_SHOWN, shown)
+    return () => { window.removeEventListener(RECENT_VIEWS_EVENT, reload); window.removeEventListener(RECENT_VIEWS_SHOWN, shown) }
   }, [])
   const [finding, setFinding] = useState(false)
   const [viewNote, setViewNote] = useState<string | null>(null)

@@ -323,6 +323,11 @@ describe('a signer request no relay took', () => {
       'No signer relay took the request: relay.onosendai.tech refused it as too large (Event size limit exceeded for kind); ' +
       'bucket.coracle.social refused it as too fast (rate-limited: slow down).',
     )
+    // A rate limit that "exceeded" is not too large; a policy that is "closed" is not a dropped connection.
+    const words = (reason: string) => (explainUndelivered(new AggregateError([new Error(reason)]), [DEFAULT_SIGNER_RELAY]) as Error).message
+    expect(words('blocked: rate limit exceeded')).toContain('refused it as too fast')
+    expect(words('restricted: relay closed to non-members')).toContain('relay.onosendai.tech refused it (restricted:')
+    expect(words('relay connection closed')).toContain('had no open connection')
     const other = new Error('user rejected')
     expect(explainUndelivered(other, [DEFAULT_SIGNER_RELAY])).toBe(other)
   })

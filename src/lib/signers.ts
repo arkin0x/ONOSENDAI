@@ -272,12 +272,13 @@ function unconfirmed(err: unknown): string {
   throw err
 }
 
-/** What one relay's refusal of a signer request says, in plain words. */
+/** What one relay's refusal of a signer request says, in plain words: by NIP-01's OK prefixes first, then grain's own words. */
 function relayWhy(reason: unknown): string {
   const text = reason instanceof Error ? reason.message : String(reason)
-  if (/size limit|too large|too big|exceed|max(imum)? (event|message) size/i.test(text)) return `refused it as too large (${text})`
-  if (/rate-limited|too fast|too many/i.test(text)) return `refused it as too fast (${text})`
-  if (/closed|SendingOnClosedConnection|not connected/i.test(text)) return `had no open connection (${text})`
+  if (/^rate-limited:/i.test(text) || /rate.?limit|too fast|too many/i.test(text)) return `refused it as too fast (${text})`
+  if (/^(blocked|restricted|invalid|auth-required|pow|duplicate|error):/i.test(text)) return `refused it (${text})`
+  if (/size limit|too large|too big|max(imum)? (event|message|content) (size|length)/i.test(text)) return `refused it as too large (${text})`
+  if (/SendingOnClosedConnection|connection closed|closed connection|not connected/i.test(text)) return `had no open connection (${text})`
   return `refused it (${text})`
 }
 
@@ -343,9 +344,9 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
   if (!bp) throw new Error('Not a valid bunker URI')
   const bunker = nip46.BunkerSigner.fromBunker(clientSk, bp, { pool: answersFirst() as never })
   onStep?.('connect')
-  await bunker.connect()
+  await said(bunker, bunker.connect())
   onStep?.('get_public_key')
-  const pubkey = await bunker.getPublicKey()
+  const pubkey = await said(bunker, bunker.getPublicKey())
   onStep?.(null)
   const signer: Signer = {
     kind: 'nip46',
@@ -404,7 +405,7 @@ async function waitForPublicKey(bunker: nip46.BunkerSigner, signal?: AbortSignal
     }
   })
   try {
-    return await Promise.race([bunker.getPublicKey(), stopped])
+    return await Promise.race([said(bunker, bunker.getPublicKey()), stopped])
   } finally {
     if (timeout) clearTimeout(timeout)
     if (signal && abort) signal.removeEventListener('abort', abort)

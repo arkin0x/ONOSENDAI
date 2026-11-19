@@ -16,7 +16,7 @@
  * Installed before the first render, because it has to see the contexts made.
  */
 
-import { getPool } from './relay'
+import { getPool, getSignerPool } from './relay'
 import { modalUp } from '../hooks/useEscape'
 import { useCyberspace } from '../store/useCyberspace'
 import { useHyperspace } from '../store/useHyperspace'
@@ -390,10 +390,13 @@ export function startDiag(): void {
     let open = 0
     for (const s of alive(sockets)) if (s.readyState === WebSocket.OPEN) open++
     row.wsOpen = open
-    const relays = (getPool() as unknown as { relays?: Map<string, { connected?: boolean; openSubs?: Map<string, unknown> }> }).relays
-    let up = 0, subs = 0
-    if (relays) for (const r of relays.values()) { if (r.connected) up++; subs += r.openSubs?.size ?? 0 }
-    row.relays = relays?.size ?? 0; row.relaysUp = up; row.subs = subs
+    // The app's sockets and the remote signer's (its own pool, relay.ts getSignerPool).
+    let count = 0, up = 0, subs = 0
+    for (const p of [getPool(), getSignerPool()]) {
+      const relays = (p as unknown as { relays?: Map<string, { connected?: boolean; openSubs?: Map<string, unknown> }> }).relays
+      if (relays) for (const r of relays.values()) { count++; if (r.connected) up++; subs += r.openSubs?.size ?? 0 }
+    }
+    row.relays = count; row.relaysUp = up; row.subs = subs
     row.txReq = wire.txReq; row.txClose = wire.txClose; row.txEvent = wire.txEvent; row.txAuth = wire.txAuth; row.rxN = wire.rxN; row.rxB = wire.rxB
     wire.txReq = 0; wire.txClose = 0; wire.txEvent = 0; wire.txAuth = 0; wire.rxN = 0; wire.rxB = 0
     row.workersMade = workers.made; row.workersLive = workers.made - workers.ended

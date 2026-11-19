@@ -18,13 +18,13 @@ import { v2 as nip44 } from 'nostr-tools/nip44'
 import * as nip04 from 'nostr-tools/nip04'
 import * as nip46 from 'nostr-tools/nip46'
 import * as nip49 from 'nostr-tools/nip49'
-import { getPool } from './relay'
+import { getSignerPool } from './relay'
 import type { AbstractSimplePool, SubscribeManyParams } from 'nostr-tools/abstract-pool'
 import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, NostrEvent } from './events'
 import { attributed } from './client'
-import { DEFAULT_SIGNER_RELAY, normalizeSignerRelay, signerRelays } from './loginCredentials'
-export { BACKUP_SIGNER_RELAY, DEFAULT_SIGNER_RELAY, loginCredentialKind, normalizeSignerRelay, signerRelays } from './loginCredentials'
+import { DEFAULT_SIGNER_RELAY, normalizeSignerRelay, signerRelays, withoutRetiredSignerRelays } from './loginCredentials'
+export { BACKUP_SIGNER_RELAY, DEFAULT_SIGNER_RELAY, loginCredentialKind, normalizeSignerRelay, signerRelays, withoutRetiredSignerRelays } from './loginCredentials'
 
 export type SignerKind = 'local' | 'nip07' | 'nip46'
 import { HANDSHAKE_PATIENCE_MS, HANDSHAKE_STEP_MS, SignerTimeout, handshakeWithin } from './signWithin'
@@ -266,7 +266,7 @@ export const ANSWERS_READY_MS = 3000
  * (the real-bunker run, 2026-11-04).
  */
 function answersFirst(): unknown {
-  const pool = getPool()
+  const pool = getSignerPool()
   let ready: Promise<void> = Promise.resolve()
   const bounded = (p: Promise<void>): Promise<void> => Promise.race([p, new Promise<void>((r) => setTimeout(r, ANSWERS_READY_MS))])
   return {
@@ -319,11 +319,23 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
     // request (nostr-tools re-subscribes when its subscription is gone), so
     // nothing is rebuilt and the bunker sees no new connect handshake.
     reconnect: async () => {
-      getPool().close([...bp.relays])
+      dropSignerSockets(bp.relays)
       return signer
     },
   }
   return signer
+}
+
+/**
+ * Drop the signer pool's sockets to a bunker's relays, so its next request
+ * opens fresh ones (and subscribes again: nostr-tools does once every part of
+ * its subscription has closed). The signer has a pool of its own
+ * (relay.ts getSignerPool), so this never closes a socket the app's own
+ * reads and writes use, even on ONOSENDAI's relay.
+ */
+export function dropSignerSockets(relays: readonly string[]): void {
+  if (relays.length === 0) return
+  try { getSignerPool().close([...relays]) } catch { /* nothing open */ }
 }
 
 function randomHex(bytes: Uint8Array): string {
@@ -373,7 +385,7 @@ function wrapBunkerSigner(
     close: () => bunker.close(),
     reconnect: async () => {
       const bp = await nip46.parseBunkerInput(bunkerUri)
-      if (bp) getPool().close([...bp.relays])
+      if (bp) dropSignerSockets(bp.relays)
       return signer
     },
   }
@@ -512,12 +524,23 @@ export async function signerFromPref(pref: SignerPref, onStep?: HandshakeStep): 
 const PREF_KEY = 'onosendai:signer'
 
 export function loadSignerPref(): SignerPref | null {
+  let pref: SignerPref | null
   try {
     const raw = localStorage.getItem(PREF_KEY)
-    return raw ? (JSON.parse(raw) as SignerPref) : null
+    pref = raw ? (JSON.parse(raw) as SignerPref) : null
   } catch {
     return null
   }
+  // A bunker session saved while a relay it names was still running: drop
+  // the relays that no longer answer and keep the rest, here and on disk.
+  if (pref?.kind === 'nip46' && typeof pref.bunkerUri === 'string') {
+    const bunkerUri = withoutRetiredSignerRelays(pref.bunkerUri)
+    if (bunkerUri !== pref.bunkerUri) {
+      pref = { ...pref, bunkerUri }
+      saveSignerPref(pref)
+    }
+  }
+  return pref
 }
 
 export function saveSignerPref(pref: SignerPref): void {
@@ -692,8 +715,7 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
       if (attempt) { attempt.giveUp(); attempt = null }
       // Its sockets to the bunker's relays may be the half-open ones that
       // lost the request: the fresh attempt opens its own.
-      const relays = bunkerRelaysOf(pref)
-      if (relays.length > 0) { try { getPool().close(relays) } catch { /* nothing open */ } }
+      dropSignerSockets(bunkerRelaysOf(pref))
     },
   }
 }

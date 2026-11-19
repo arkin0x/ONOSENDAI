@@ -5,7 +5,10 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../relay', () => ({ getPool: () => ({ relays: new Map([['r', { connected: true, openSubs: new Map([['s', {}]]) }]]) }) }))
+vi.mock('../relay', () => ({
+  getPool: () => ({ relays: new Map([['r', { connected: true, openSubs: new Map([['s', {}]]) }]]) }),
+  getSignerPool: () => ({ relays: new Map() }),
+}))
 vi.mock('../../hooks/useEscape', () => ({ modalUp: () => false }))
 vi.mock('../../store/useCyberspace', () => ({ useCyberspace: { getState: () => ({ walking: false, spectate: null, focus: null }) } }))
 vi.mock('../../store/useHyperspace', () => ({ useHyperspace: { getState: () => ({ viewOwned: false }) } }))

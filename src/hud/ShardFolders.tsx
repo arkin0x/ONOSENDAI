@@ -31,7 +31,6 @@ import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronRight, Folder as FolderIcon, FolderInput, FolderPlus, Pencil, X } from 'lucide-react'
 import { buildTree, canonical, contentsOf, flatFolders, newestFirst, parentOf, folderOf, isWithin, pathOf, type FolderNode, type FolderTree } from '../lib/shardFolders'
 import { useShardFolders } from '../store/useShardFolders'
-import { useCyberspace } from '../store/useCyberspace'
 import { useEscape } from '../hooks/useEscape'
 import { ConfirmModal } from './ConfirmModal'
 import { Field, Switch } from './ui/Switch'
@@ -191,12 +190,11 @@ export function moveTo(moving: Moving, to: string | null): void {
 }
 
 export function ShardFolders<T>({ items, refOf, nameOf, row, deleteContents, query = '' }: Props<T>): JSX.Element {
-  const me = useCyberspace((s) => s.identity.pubkey)
   const tree = useShardFolders((s) => s.tree)
+  // The device's folders, the same whoever is signed in (store/useShardFolders.ts).
   useEffect(() => {
-    const st = useShardFolders.getState()
-    if (st.owner !== me) void st.load(me)
-  }, [me])
+    if (useShardFolders.getState().storage === 'loading') void useShardFolders.getState().load()
+  }, [])
   const f = useShardFolders.getState
 
   const built = useMemo(() => buildTree(tree, items, refOf), [tree, items, refOf])

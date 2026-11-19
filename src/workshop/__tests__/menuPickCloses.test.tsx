@@ -19,7 +19,7 @@ vi.mock('../../hud/ShardThumb', () => ({ ShardThumb: () => null }))
 const { ShardList } = await import('../sheets/MenuSheet')
 const { useWorkshop } = await import('../../store/useWorkshop')
 const { useShardFolders } = await import('../../store/useShardFolders')
-const { useCyberspace } = await import('../../store/useCyberspace')
+await import('../../store/useCyberspace')
 const { EMPTY_TREE } = await import('../../lib/shardFolders')
 
 const workshop = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
@@ -49,7 +49,7 @@ async function menuList() {
   const select = vi.fn()
   const onOpen = vi.fn()
   useWorkshop.setState({ shards: SHARDS as never, currentId: 'oak', select })
-  useShardFolders.setState({ owner: useCyberspace.getState().identity.pubkey, tree: EMPTY_TREE, storage: 'indexeddb' })
+  useShardFolders.setState({ tree: EMPTY_TREE, storage: 'indexeddb' })
   const m = await mount(<ShardList currentId="oak" onOpen={onOpen} />)
   const pick = (name: string): Host => m.all().find((h) => h.type === 'button' && h.props.className === 'workshop__pick' && textOf(h).includes(name))!
   const box = (name: string): Host => m.all().find((h) => h.type === 'input' && h.props['aria-label'] === `Select ${name}`)!

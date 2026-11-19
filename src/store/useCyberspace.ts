@@ -1274,7 +1274,12 @@ export interface CyberspaceState {
    */
   cancelCloud: () => void
   /** Remember a balance HOSAKA just reported for this identity. */
-  noteBalance: (msats: number) => void
+  /**
+   * Keep a balance HOSAKA reported, for `forPubkey`, the identity that asked
+   * for it. Dropped when that is no longer the identity signed in: an answer
+   * for one identity is never shown or kept as another's.
+   */
+  noteBalance: (msats: number, forPubkey: string) => void
   /** Load the remembered balance for this identity, if the slice has none yet. */
   ensureBalance: () => void
   /** Ask HOSAKA for the balance (a signed request) and remember the answer. */
@@ -4497,10 +4502,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   }
 
   /** What a refusal that returned money left in the balance (400 job_not_runnable), noted at once. */
-  const noteRefusalBalance = (err: unknown): void => {
+  const noteRefusalBalance = (err: unknown, owner: string): void => {
     if (!(err instanceof HosakaError) || !err.jobNotRunnable) return
     const d = err.detail as { current_balance_msats?: unknown } | null
-    if (d && typeof d.current_balance_msats === 'number') get().noteBalance(d.current_balance_msats)
+    if (d && typeof d.current_balance_msats === 'number') get().noteBalance(d.current_balance_msats, owner)
   }
 
   /** The route cannot be bought: the plan ends with the reason, nothing is signed. */
@@ -4521,6 +4526,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    */
   const fundRoute = async (totalMsats: number, id: number): Promise<void> => {
     const { cloudPrefs, plan } = get()
+    // Whose balance the answers below are: the identity that started funding.
+    const owner = get().identity.pubkey
     if (!plan) return
     const client = cloudClient(cloudPrefs.apiUrl)
     stopCloud()
@@ -4531,7 +4538,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     try {
       set({ cloud: { ...get().cloud, status: 'funding', message: currentSigner.kind === 'local' ? 'Checking your HOSAKA balance.' : 'Waiting for your signer to approve the HOSAKA balance check.' } })
       const bal = await client.balance(abort.signal)
-      get().noteBalance(bal.balance_msats)
+      get().noteBalance(bal.balance_msats, owner)
       if (id !== requestId) return
       // Whole sats: a node refuses an invoice for a fraction of one.
       const shortfall = Math.ceil(Math.max(0, totalMsats - bal.balance_msats) / 1000) * 1000
@@ -4552,7 +4559,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
           onPoll: (d) => { if (id === requestId) set({ cloud: { ...get().cloud, checking: false, lastCheck: { at: Date.now(), status: d.status } } }) },
           onPollError: () => { if (id === requestId) set({ cloud: { ...get().cloud, checking: false } }) },
         })
-        if (typeof settled.balance_msats === 'number') get().noteBalance(settled.balance_msats)
+        if (typeof settled.balance_msats === 'number') get().noteBalance(settled.balance_msats, owner)
         if (id !== requestId) return
         if (settled.status !== 'settled') {
           clearCloudDeposit(payer, dep.deposit_id)
@@ -4638,7 +4645,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         ? await client.submitHop(v1, v2, prevEventId, abort.signal, hopWants('hop'))
         : await client.submitSidestep(v1, v2, prevEventId, abort.signal)
       const after = job.new_balance_msats ?? job.current_balance_msats
-      if (typeof after === 'number') get().noteBalance(after)
+      if (typeof after === 'number') get().noteBalance(after, identity.pubkey)
       if (job.followed_existing) {
         // The same move was already on HOSAKA with the other cube setting:
         // that job is followed rather than paid for twice (lib/hosaka.ts).
@@ -4652,7 +4659,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       if (id !== requestId || abort.signal.aborted) return
       // Paused: nothing was charged, and RESUME submits the same step again.
       if (err instanceof HosakaError && err.hopPaused) { routePause(describeCloudError(err), false, false); return }
-      noteRefusalBalance(err)
+      noteRefusalBalance(err, identity.pubkey)
       routeFail(describeCloudError(err))
       return
     } finally {
@@ -4734,7 +4741,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       if (err instanceof HosakaError && err.hopPaused) { routePause(describeCloudError(err), false, true); return }
       // job_not_runnable: failed, refunded to the balance, and the record
       // is worthless (retainsRecord drops it).
-      noteRefusalBalance(err)
+      noteRefusalBalance(err, record.pubkey)
       const keep = retainsRecord(err)
       if (!keep) clearCloudJob(record.pubkey, record.jobId)
       cloudFail(describeCloudError(err), keep)
@@ -5057,7 +5064,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const { job } = outcome
     const final = outcome.record
     const after = job.new_balance_msats ?? job.current_balance_msats
-    if (typeof after === 'number') get().noteBalance(after)
+    if (typeof after === 'number') get().noteBalance(after, final.pubkey)
     if (job.status !== 'completed') {
       // HOSAKA refunds a failed job to the balance; the same ride asked
       // again names a new job under the same key, paid from that refund.
@@ -7454,8 +7461,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     void fundRoute(cloud.quote.costMsats, requestId)
   },
 
-  noteBalance: (msats) => {
-    set({ cloud: { ...get().cloud, balance: saveBalance(get().identity.pubkey, msats), balanceError: null } })
+  noteBalance: (msats, forPubkey) => {
+    // HOSAKA answers for the key that signed the question. Kept under whoever
+    // was signed in when the answer came, a switch while it was out wrote one
+    // identity's balance into another's, on screen and on disk. Dropped
+    // instead: the next check for that identity asks again (identity-switch
+    // audit, 2026-11-19).
+    if (forPubkey !== get().identity.pubkey) return
+    set({ cloud: { ...get().cloud, balance: saveBalance(forPubkey, msats), balanceError: null } })
   },
 
   ensureBalance: () => {
@@ -7493,6 +7506,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
 
     const client = cloudClient(cloudPrefs.apiUrl)
+    // Whose balance the settled deposit reports: the identity that asked for the invoice.
+    const owner = get().identity.pubkey
     stopCloud()
     const id = ++requestId
     const abort = new AbortController()
@@ -7520,7 +7535,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         onPoll: (d) => { if (id === requestId) set({ cloud: { ...get().cloud, checking: false, lastCheck: { at: Date.now(), status: d.status } } }) },
         onPollError: () => { if (id === requestId) set({ cloud: { ...get().cloud, checking: false } }) },
       })
-      if (typeof settled.balance_msats === 'number') get().noteBalance(settled.balance_msats)
+      if (typeof settled.balance_msats === 'number') get().noteBalance(settled.balance_msats, owner)
       if (id !== requestId) return
       clearCloudDeposit(asked.pubkey, asked.depositId)
       if (settled.status !== 'settled') {
@@ -7542,6 +7557,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   buyRegionKey: async (at, plane, height, expect) => {
     const { cloud, cloudPrefs, plan, proof } = get()
+    // Whose balance HOSAKA's answers below report.
+    const owner = get().identity.pubkey
     if (cloudPrefs.mode === 'off') return { ok: false, error: 'Cloud compute is off in the Cloud compute panel.' }
     // A route in flight owns the cloud flow and its invoice, and a hop in hand would lose its proof.
     if (plan !== null || proof.status === 'computing' || (cloud.status !== 'idle' && cloud.status !== 'error')) {
@@ -7561,7 +7578,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       set({ cloud: { ...get().cloud, status: 'quoting', invoice: null, invoiceOpen: false, job: null, progress: null, message: currentSigner.kind === 'local' ? 'Asking HOSAKA for the key.' : 'Waiting for your signer to approve the HOSAKA request.' } })
       const job = await client.submitRegionKey(at, height, abort.signal)
       if (id !== requestId) return { ok: false, error: 'Superseded by another cloud job.' }
-      if (typeof job.new_balance_msats === 'number') get().noteBalance(job.new_balance_msats)
+      if (typeof job.new_balance_msats === 'number') get().noteBalance(job.new_balance_msats, owner)
       if (!job.poll_token) { set({ cloud: { ...get().cloud, ...idle } }); return { ok: false, error: 'HOSAKA took the job but gave no way to follow it.' } }
       const paying = job.payment_required === true && job.deposit !== undefined
       if (job.payment_required === true && !paying) {
@@ -7592,7 +7609,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       }, abort.signal, waker)
       if (id !== requestId) return { ok: false, error: 'Superseded by another cloud job.' }
       const done = outcome.job
-      if (typeof done.new_balance_msats === 'number') get().noteBalance(done.new_balance_msats)
+      if (typeof done.new_balance_msats === 'number') get().noteBalance(done.new_balance_msats, owner)
       set({ cloud: { ...get().cloud, ...idle } })
       if (done.status !== 'completed' || !done.result) return { ok: false, error: done.error ? `HOSAKA could not compute it: ${done.error}` : 'HOSAKA could not compute it.' }
       recordJobExperience(outcome.record, height)
@@ -7686,7 +7703,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     if (id !== requestId || abort.signal.aborted) return false
     const balanceNow = job.new_balance_msats ?? job.current_balance_msats
-    if (typeof balanceNow === 'number') get().noteBalance(balanceNow)
+    if (typeof balanceNow === 'number') get().noteBalance(balanceNow, identity.pubkey)
     if (!job.poll_token) {
       rideFail('HOSAKA took the ride but gave no way to follow it. Ride again: the same ride names the same job.', false)
       return false
@@ -7722,14 +7739,15 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   refreshBalance: async () => {
-    const { cloud, cloudPrefs } = get()
+    const { cloud, cloudPrefs, identity } = get()
     if (cloud.balanceChecking) return
     set({ cloud: { ...cloud, balanceChecking: true, balanceError: null } })
     try {
       const bal = await cloudClient(cloudPrefs.apiUrl).balance()
-      get().noteBalance(bal.balance_msats)
+      get().noteBalance(bal.balance_msats, identity.pubkey)
     } catch (err) {
-      set({ cloud: { ...get().cloud, balanceError: describeCloudError(err) } })
+      // A failure of the identity that asked: not said on another's panel.
+      if (get().identity.pubkey === identity.pubkey) set({ cloud: { ...get().cloud, balanceError: describeCloudError(err) } })
     } finally {
       set({ cloud: { ...get().cloud, balanceChecking: false } })
     }
@@ -7832,11 +7850,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       } else {
         try {
           const claimed = await cloudClient(cloudPrefs.apiUrl).claimDeposit(dep.depositId)
-          if (typeof claimed.balance_msats === 'number') get().noteBalance(claimed.balance_msats)
+          if (typeof claimed.balance_msats === 'number') get().noteBalance(claimed.balance_msats, dep.pubkey)
           if (claimed.status === 'settled') {
             clearCloudDeposit(dep.pubkey, dep.depositId)
             const msats = claimed.settled_msats ?? dep.amountMsats
-            set({ cloud: { ...get().cloud, message: `A ${satsOf(msats)} sat route deposit from an interrupted commit was credited to your HOSAKA balance.`, credited: { msats, at: Date.now() } } })
+            // Said to the identity whose deposit it was, and to no other signed in since.
+            if (get().identity.pubkey === dep.pubkey) set({ cloud: { ...get().cloud, message: `A ${satsOf(msats)} sat route deposit from an interrupted commit was credited to your HOSAKA balance.`, credited: { msats, at: Date.now() } } })
           } else if (claimed.status === 'expired') {
             clearCloudDeposit(dep.pubkey, dep.depositId)
           }

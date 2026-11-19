@@ -377,3 +377,13 @@ describe('mergeTrees (folders of every identity become the device tree, 2026-11-
     expect(m.alias.old).toBe('a1')
   })
 })
+
+describe('mergeTrees aliases (review of #822)', () => {
+  it('keeps a joined folder\'s old id naming the folder it joined', () => {
+    const a: FolderTree = { folders: { a1: { id: 'a1', name: 'kit', parent: null, at: 0 } }, assign: { oak: 'a1' }, collapsed: {}, alias: {} }
+    const b: FolderTree = { folders: { b1: { id: 'b1', name: 'kit', parent: null, at: 0 } }, assign: {}, collapsed: {}, alias: {} }
+    const m = mergeTrees([a, b])
+    expect(canonical(m, 'b1')).toBe('a1')
+    expect(Object.keys(m.folders)).toEqual(['a1'])
+  })
+})

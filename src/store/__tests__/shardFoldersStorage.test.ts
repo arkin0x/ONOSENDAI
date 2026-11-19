@@ -343,6 +343,20 @@ describe('the trees older builds kept per identity', () => {
     expect(Object.values(b.useShardFolders.getState().tree.folders).map((f) => f.name).sort()).toEqual(['early', 'forest', 'kit'])
   })
 
+  it('shows the merged folders, read only, when the first write is refused (a full disk)', async () => {
+    await seedOldRows({ [ME]: mine, [OTHER]: theirs })
+    const dbMod = await import('../../lib/shardFoldersDb')
+    vi.resetModules()
+    vi.doMock('../../lib/shardFoldersDb', async () => ({ ...dbMod, readTree: () => Promise.reject(new Error('QuotaExceededError')) }))
+    const a = await import('../useShardFolders')
+    await a.useShardFolders.getState().load()
+    vi.doUnmock('../../lib/shardFoldersDb')
+    const t = a.useShardFolders.getState().tree
+    expect(a.useShardFolders.getState().storage).toBe('memory')
+    expect(pathOf(t, folderOf(t, 'cactus'))).toEqual(['kit', 'desert'])
+    expect(Object.keys(t.folders)).toHaveLength(4)
+  })
+
   it('two tabs loading at once merge once', async () => {
     await seedOldRows({ [ME]: mine, [OTHER]: theirs })
     vi.resetModules()

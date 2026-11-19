@@ -107,6 +107,19 @@ export function commitOps(db: IDBDatabase, ops: readonly FolderOp[]): Promise<Fo
   return inTransaction(db, ops)
 }
 
+/**
+ * The device's tree, read only: its row, or the merge of the identities'
+ * rows when it has none yet, with nothing written. For when readTree failed
+ * (a full disk refuses the first write that keeps the merge): the folders are
+ * still shown, for the session, rather than none (review of #822).
+ */
+export async function peekTree(db: IDBDatabase): Promise<FolderTree> {
+  const rows = await request(db.transaction(TREES_STORE, 'readonly').objectStore(TREES_STORE).getAll()) as Row[]
+  const device = rows.find((r) => r?.owner === DEVICE_OWNER)
+  if (device) return normalizeTree(device.tree)
+  return mergeTrees(rows.filter((r) => r && typeof r.owner === 'string').map((r) => normalizeTree(r.tree)))
+}
+
 /** One identity's tree as a build before 2026-11-19 kept it; for tests and diagnosis. */
 export async function readIdentityTree(db: IDBDatabase, owner: string): Promise<FolderTree> {
   const row = await request(db.transaction(TREES_STORE, 'readonly').objectStore(TREES_STORE).get(owner)) as Row | undefined

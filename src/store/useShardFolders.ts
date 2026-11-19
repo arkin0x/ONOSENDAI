@@ -34,7 +34,7 @@
 import { create } from 'zustand'
 import { describeError } from '../lib/secrets/db'
 import { EMPTY_TREE, applyOp, canonical, childrenOf, cleanName, folderOf, newFolderId, type Folder, type FolderOp, type FolderTree } from '../lib/shardFolders'
-import { commitOps, openShardFoldersDb, readTree } from '../lib/shardFoldersDb'
+import { commitOps, openShardFoldersDb, peekTree, readTree } from '../lib/shardFoldersDb'
 import { fileCopiesWith, readLastUsedFrom } from './useWorkshop'
 
 export type FolderStorage = 'loading' | 'indexeddb' | 'memory'
@@ -131,7 +131,10 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
     let stored: FolderTree
     try { stored = await readTree(d) } catch (err) {
       console.warn(`[folders] could not read folders: ${describeError(err)}`)
-      set({ storage: 'memory' })
+      // Shown for the session from what is on disk, read only, rather than none.
+      let seen: FolderTree | null = null
+      try { seen = await peekTree(d) } catch { /* nothing readable either */ }
+      set(seen ? { storage: 'memory', tree: replay(seen) } : { storage: 'memory' })
       return
     }
     set({ tree: replay(stored), storage: 'indexeddb' })

@@ -428,8 +428,8 @@ export function filingCount(tree: FolderTree): number {
  *    where the identity with the most filings put it.
  * 4. When each shard was last deployed (sorting only): the latest of any tree.
  * Nothing is dropped: every folder of every tree is in the result, by its
- * own id or joined to one of the same path, and every filing names a folder
- * of the result.
+ * own id or joined to one of the same path (its old id then an alias of
+ * that folder, when free), and every filing names a folder of the result.
  */
 export function mergeTrees(trees: readonly FolderTree[]): FolderTree {
   const order = trees
@@ -457,10 +457,13 @@ export function mergeTrees(trees: readonly FolderTree[]): FolderTree {
       const up = parentOf(tree, f.id)
       const parent = up === null ? null : map.get(up) ?? null
       const same = childNamed(parent, f.name)
-      if (same !== null) { map.set(f.id, same); continue }
-      const id = folders[f.id] || alias[f.id] ? newFolderId() : f.id
-      folders[id] = { ...f, id, parent }
-      if (tree.collapsed[f.id]) collapsed[id] = true
+      const id = same ?? (folders[f.id] || alias[f.id] ? newFolderId() : f.id)
+      if (same === null) {
+        folders[id] = { ...f, id, parent }
+        if (tree.collapsed[f.id]) collapsed[id] = true
+      }
+      // Its old id still names it, when that id is free (review of #822).
+      if (id !== f.id && !folders[f.id] && !alias[f.id]) alias[f.id] = id
       map.set(f.id, id)
     }
     for (const [from, to] of Object.entries(tree.alias)) {

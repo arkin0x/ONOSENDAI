@@ -37,7 +37,7 @@ vi.mock('../ui/Switch', async () => {
 })
 
 /** Runs before the stand-in upload asks for its signature (the file is encrypted by then). */
-const upload = vi.hoisted(() => ({ beforeSign: null as null | (() => void) }))
+const upload = vi.hoisted(() => ({ beforeSign: null as null | (() => void), afterSign: null as null | (() => void) }))
 vi.mock('../../lib/audioFile', async (orig) => {
   const real = await orig<typeof import('../../lib/audioFile')>()
   return {
@@ -45,6 +45,7 @@ vi.mock('../../lib/audioFile', async (orig) => {
     sealAndUpload: async (_file: Blob, server: string, sign: (t: { kind: number; created_at: number; tags: string[][]; content: string }) => Promise<unknown>) => {
       upload.beforeSign?.()
       await sign({ kind: 24242, created_at: Math.floor(Date.now() / 1000), tags: [['t', 'upload']], content: 'Upload' })
+      upload.afterSign?.()
       const hash = 'ab'.repeat(32)
       return { url: `${server}/${hash}`, hash, originalHash: 'cd'.repeat(32), keyHex: '11'.repeat(32), nonceHex: '22'.repeat(12), mime: 'audio/mpeg', size: 4 }
     },
@@ -60,6 +61,7 @@ vi.mock('../../lib/blossom', async (orig) => {
     uploadBlob: async (server: string, _file: Blob, sign: (t: { kind: number; created_at: number; tags: string[][]; content: string }) => Promise<unknown>) => {
       upload.beforeSign?.()
       await sign({ kind: 24242, created_at: Math.floor(Date.now() / 1000), tags: [['t', 'upload']], content: 'Upload' })
+      upload.afterSign?.()
       const hash = 'ef'.repeat(32)
       return { url: `${server}/${hash}`, sha256: hash, size: 4, type: 'image/png', uploaded: 1 }
     },
@@ -79,6 +81,7 @@ let asked: { kind: number; as: string }[] = []
 beforeEach(() => {
   asked = []
   upload.beforeSign = null
+  upload.afterSign = null
 })
 
 describe('PLACE AUDIO when the identity switches while the file is encrypted', () => {
@@ -133,6 +136,42 @@ describe('a profile picture when the identity switches while the file is hashed'
       await view.unmount()
     } finally {
       useCyberspace.setState({ signEvent: realSign, identity: was })
+    }
+  })
+})
+
+describe('an upload that finishes after a switch of identity', () => {
+  it('PLACE AUDIO: is not handed on to be placed as the new identity', async () => {
+    const was = useCyberspace.getState().identity
+    const ready = vi.fn()
+    try {
+      const view = await mount(createElement(AudioUpload, { idPrefix: 't2', submitLabel: 'AIM IT', onReady: ready, onCancel: () => {} }))
+      const input = view.all().find((h: Host) => h.type === 'input' && h.props.type === 'file')!
+      ;(input.props.onChange as (e: unknown) => void)({ target: { files: [new File([new Uint8Array([1, 2, 3, 4])], 'drip.mp3', { type: 'audio/mpeg' })], value: '' } })
+      await new Promise((r) => setTimeout(r, 20))
+      upload.afterSign = () => { useCyberspace.setState({ identity: { pubkey: 'b2'.repeat(32), npub: 'npub-other' } }) }
+      await view.press('AIM IT')
+      expect(ready).not.toHaveBeenCalled()
+      expect(view.says('switched identity')).toBe(true)
+      await view.unmount()
+    } finally {
+      useCyberspace.setState({ identity: was })
+    }
+  })
+
+  it('profile picture: its address is not put in the form', async () => {
+    const was = useCyberspace.getState().identity
+    try {
+      const view = await mount(createElement(ProfileModal, { onClose: () => {} }))
+      const input = view.all().find((h: Host) => h.type === 'input' && h.props.type === 'file')!
+      upload.afterSign = () => { useCyberspace.setState({ identity: { pubkey: 'b2'.repeat(32), npub: 'npub-other' } }) }
+      ;(input.props.onChange as (e: unknown) => void)({ target: { files: [new File([new Uint8Array([1, 2, 3, 4])], 'me.png', { type: 'image/png' })], value: '' } })
+      await new Promise((r) => setTimeout(r, 50))
+      expect(view.all().some((h: Host) => typeof h.props.value === 'string' && (h.props.value as string).includes('ef'.repeat(32)))).toBe(false)
+      expect(view.says('switched identity')).toBe(true)
+      await view.unmount()
+    } finally {
+      useCyberspace.setState({ identity: was })
     }
   })
 })

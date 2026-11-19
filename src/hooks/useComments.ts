@@ -120,6 +120,10 @@ export function useComments(subject: CommentSubject | null): CommentsState {
       const template = await sealedComment(subject, parent ?? itemParent(subject), body, Math.floor(Date.now() / 1000), regionKey)
       if (useCyberspace.getState().identity.pubkey !== author) { setError(COMMENT_SWITCHED); return false }
       const event = await useCyberspace.getState().signEvent(template)
+      // And once the signature is back: an extension or a bunker can answer
+      // for the old identity after the switch, and published then, the old
+      // identity's comment went out over relays signed in as the new one.
+      if (useCyberspace.getState().identity.pubkey !== author) { setError(COMMENT_SWITCHED); return false }
       const result = await publish(event)
       if (!result.ok) { setError(`Not published: ${result.reason}`); return false }
       setEvents((prev) => [...prev, event])

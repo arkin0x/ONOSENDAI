@@ -78,9 +78,11 @@ vi.mock('../../lib/deployPlan', () => ({ localKeyCeiling: () => limit.ceiling })
 
 const SK = new Uint8Array(32).fill(3)
 const signed: string[] = []
+/** Runs once the signature is made, before it is handed back (a bunker answering after a switch). */
+const afterSign = { run: null as null | (() => void) }
 const cs = {
   identity: { pubkey: '' },
-  signEvent: async (t: Parameters<typeof finalizeEvent>[0]) => { signed.push(cs.identity.pubkey); return finalizeEvent(t, SK) },
+  signEvent: async (t: Parameters<typeof finalizeEvent>[0]) => { signed.push(cs.identity.pubkey); const ev = finalizeEvent(t, SK); afterSign.run?.(); return ev },
 }
 vi.mock('../../store/useCyberspace', () => ({
   MAX_COMPUTE_HEIGHT: 20,
@@ -137,6 +139,7 @@ beforeEach(() => {
   cs.identity.pubkey = 'a1'.repeat(32)
   signed.length = 0
   seal.during = null
+  afterSign.run = null
   vi.mocked(regionKeyAt).mockClear()
   vi.mocked(regionKeyOffThread).mockClear()
   vi.mocked(queryChecked).mockClear()
@@ -149,6 +152,15 @@ describe('a switch of identity while a comment is sealed', () => {
     seal.during = () => { cs.identity.pubkey = 'b2'.repeat(32) }
     expect(await state.post('written as A')).toBe(false)
     expect(signed).toEqual([])
+    expect(relay.published).toHaveLength(0)
+    expect((await settle(subject)).error).toMatch(/switched identity/)
+  })
+
+  it('a signer that answers for the old identity after the switch: nothing is published', async () => {
+    const subject = subjectAt(25, bytesToHex(BAG_KEY))
+    const state = await settle(subject)
+    afterSign.run = () => { cs.identity.pubkey = 'b2'.repeat(32) }
+    expect(await state.post('written as A, answered late')).toBe(false)
     expect(relay.published).toHaveLength(0)
     expect((await settle(subject)).error).toMatch(/switched identity/)
   })

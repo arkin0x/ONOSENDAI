@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
  * recorded, and it opens no socket, so no unit test touches the network
  * (this test used to open one to 127.0.0.1:9).
  */
-const bunker = vi.hoisted(() => ({ built: 0, asked: [] as string[], holds: '', relays: [] as string[] }))
+const bunker = vi.hoisted(() => ({ built: 0, asked: [] as string[], holds: '', relays: [] as string[], pool: null as unknown }))
 
 vi.mock('nostr-tools/nip46', async (importOriginal) => {
   const actual = await importOriginal<typeof import('nostr-tools/nip46')>()
@@ -22,7 +22,7 @@ vi.mock('nostr-tools/nip46', async (importOriginal) => {
     ...actual,
     BunkerSigner: {
       ...actual.BunkerSigner,
-      fromBunker: (_sk: Uint8Array, bp: { relays: string[] }) => { bunker.built++; bunker.relays = [...bp.relays]; return fake },
+      fromBunker: (_sk: Uint8Array, bp: { relays: string[] }, params?: { pool?: unknown }) => { bunker.built++; bunker.relays = [...bp.relays]; bunker.pool = params?.pool; return fake },
       fromURI: actual.BunkerSigner.fromURI,
     },
   }
@@ -240,7 +240,7 @@ describe('a bunker\'s sockets', () => {
     }
   })
 
-  it('are dropped on a restored session\'s reconnect, both relays, so nostr-tools subscribes again on both', async () => {
+  it('carry a restored session\'s traffic, and its reconnect drops both relays, so nostr-tools subscribes again on both', async () => {
     const { signerFromPref, createNostrConnectSession } = await signers()
     const { getPool, getSignerPool } = await import('../relay')
     // The relays a default QR names, as its saved session keeps them.
@@ -254,6 +254,18 @@ describe('a bunker\'s sockets', () => {
       clientNsec: nip19.nsecEncode(generateSecretKey()),
       nostrConnectSession: true,
     })
+    // Its requests and answers go over the signer pool, never the app's.
+    const appSub = vi.spyOn(getPool(), 'subscribe')
+    const signerSub = vi.spyOn(getSignerPool(), 'subscribe').mockImplementation(() => ({ close: () => {} }) as never)
+    try {
+      const pool = bunker.pool as { subscribe: (r: string[], f: object, p: object) => unknown }
+      pool.subscribe([DEFAULT_SIGNER_RELAY], { kinds: [24133] }, {})
+      expect(signerSub).toHaveBeenCalledTimes(1)
+      expect(appSub).not.toHaveBeenCalled()
+    } finally {
+      appSub.mockRestore()
+      signerSub.mockRestore()
+    }
     const appClose = vi.spyOn(getPool(), 'close').mockImplementation(() => {})
     const signerClose = vi.spyOn(getSignerPool(), 'close').mockImplementation(() => {})
     try {

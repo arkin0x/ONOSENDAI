@@ -242,6 +242,42 @@ describe('a pasted key comes back with its password alone', () => {
   }, 60_000)
 })
 
+describe('review of #824', () => {
+  it('a tab loaded before the password changed never puts the old copy back', async () => {
+    await wipe()
+    const sk = generateSecretKey()
+    const k = getPublicKey(sk)
+    localStorage.setItem(PREF, JSON.stringify({ kind: 'local', pubkey: k, ncryptsec: nip49.encrypt(sk, PW, LOG_N) }))
+    // Tab A loads locked under the first password.
+    const { S: tabA } = await reload()
+    expect(tabA.getState().keyLock?.mode).toBe('unlock')
+    // Tab B pastes the same key with a new password.
+    const { S: tabB } = await reload()
+    const fresh = 'a brand new password'
+    await tabB.getState().useLogin(nip19.nsecEncode(sk), fresh, fresh)
+    expect(tabB.getState().identity.pubkey).toBe(k)
+    // Tab A then chooses another identity from its lock screen.
+    await tabA.getState().useNewKey()
+    const { S } = await reload()
+    await S.getState().useNewKey()
+    await S.getState().useHeld(k, fresh)
+    expect(S.getState().loginError).toBeNull()
+    expect(S.getState().identity.pubkey).toBe(k)
+  }, 90_000)
+
+  it('the login knows a pasted older random key needs no password, and a stranger key does', async () => {
+    await wipe()
+    const { S, store } = await reload()
+    await S.getState().useNewKey()
+    const r1nsec = pref()?.nsec as string
+    await S.getState().useNewKey()
+    expect(await store.pastedKeyGeneratedHere(r1nsec)).toBe(true)
+    expect(await store.pastedKeyGeneratedHere(localStorage.getItem(FIRST) as string)).toBe(true)
+    expect(await store.pastedKeyGeneratedHere(nip19.nsecEncode(generateSecretKey()))).toBe(false)
+    expect(await store.pastedKeyGeneratedHere('not a key')).toBe(false)
+  }, 60_000)
+})
+
 describe('migration from what localStorage kept', () => {
   it('copies the first key and the pref in, leaving every localStorage entry as it was', async () => {
     await wipe()
@@ -395,6 +431,10 @@ describe('the merge', () => {
     // The same identity later through an extension, or as a key not kept: the sealed copy stays.
     expect(mergeHeld(sealed, { pubkey: pk, kind: 'nip07', lastUsed: 9 }, 10)).toMatchObject({ kind: 'nip07', ncryptsec: 'ncryptsec1abc', firstHeld: 1, lastUsed: 9 })
     expect(mergeHeld(sealed, { pubkey: pk, kind: 'local' }, 10)).toMatchObject({ ncryptsec: 'ncryptsec1abc', lastUsed: 5 })
+    // A copy that may be older only fills what the row lacks; the newest replaces.
+    expect(mergeHeld(sealed, { pubkey: pk, ncryptsec: 'ncryptsec1old' }, 10, false).ncryptsec).toBe('ncryptsec1abc')
+    expect(mergeHeld(sealed, { pubkey: pk, ncryptsec: 'ncryptsec1new' }, 10, true).ncryptsec).toBe('ncryptsec1new')
+    expect(mergeHeld(undefined, { pubkey: pk, ncryptsec: 'ncryptsec1old' }, 10, false).ncryptsec).toBe('ncryptsec1old')
     // A plain key from a pref goes in only when the app generated it.
     expect(heldFromPref({ kind: 'local', pubkey: pk, nsec: nip19.nsecEncode(sk) }, false)).toEqual({ pubkey: pk, kind: 'local' })
     expect(heldFromPref({ kind: 'local', pubkey: pk, nsec: nip19.nsecEncode(sk) }, true)?.nsec).toBe(nip19.nsecEncode(sk))

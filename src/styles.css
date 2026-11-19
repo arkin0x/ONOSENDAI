@@ -6727,6 +6727,9 @@ select.avatars__input option:checked {
 .login__held-icon { flex: none; color: var(--accent); }
 
 .login__held-unlock { margin-top: 0; }
+
+/* A pasted key this app made: said in place of the password fields. */
+.login__made-here { margin: 0; color: #fff; }
 .login__held-unlock .login__current { margin-bottom: 4px; }
 
 /* The login opened from the key lock: at the lock's height. */

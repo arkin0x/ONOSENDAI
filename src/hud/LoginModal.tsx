@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { nip19 } from 'nostr-tools'
 import { Check, ChevronRight, LockKeyhole, Puzzle, Smartphone, type LucideIcon } from 'lucide-react'
-import { cachedHeld, listHeld, type HeldEntry, type HeldWay } from '../lib/identitiesDb'
+import { cachedHeld, heldListed, listHeld, type HeldEntry, type HeldWay } from '../lib/identitiesDb'
+import { targetColor } from '../lib/targets'
 import {
   createNostrConnectSession,
   DEFAULT_SIGNER_RELAY,
@@ -16,8 +17,8 @@ import { MIN_PASSWORD, backupFileName, exportProblem } from '../lib/keyExport'
 import { shortHex } from '../lib/time'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { useProfile } from '../hooks/useProfile'
-import { profileLabel } from '../store/useProfiles'
-import { useCyberspace } from '../store/useCyberspace'
+import { profileLabel, useProfiles } from '../store/useProfiles'
+import { pastedKeyGeneratedHere, useCyberspace } from '../store/useCyberspace'
 import { useEscape } from '../hooks/useEscape'
 import { ModalClose } from './ui/ModalClose'
 import { CopyValue } from './ui/CopyValue'
@@ -47,11 +48,31 @@ const WAY_LABEL: Record<HeldWay, string> = {
 }
 
 /**
+ * A picture for an identity on this device from the profile cache alone,
+ * asking no relay (see HeldRow); the first letter on its colour otherwise.
+ */
+function CachedPic({ pubkey, size }: { pubkey: string; size: number }): JSX.Element {
+  const profile = useProfiles((s) => s.profiles[pubkey])
+  const [broken, setBroken] = useState(false)
+  const style = { width: size, height: size, minWidth: size } as const
+  if (profile?.picture && !broken) {
+    return <img className="pfp" style={style} src={profile.picture} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} />
+  }
+  const initial = (profile?.name ?? nip19.npubEncode(pubkey).slice(4, 5)).slice(0, 1).toUpperCase()
+  return <span className="pfp pfp--fallback" style={{ ...style, background: targetColor(pubkey), fontSize: size * 0.5 }} aria-hidden="true">{initial}</span>
+}
+
+/**
  * One identity this device holds, in the list at the top of the login
  * (lib/identitiesDb.ts). A tap switches to it, or asks for its password first.
+ *
+ * Its name and picture come only from profiles already cached here: no relay
+ * is asked for them. Asking would send every identity on this device in one
+ * request, from a connection that may be signed in as the one in use, and
+ * tell the relay they are the same person (review of #824).
  */
 function HeldRow({ entry, disabled, onPick }: { entry: HeldEntry; disabled: boolean; onPick: () => void }): JSX.Element {
-  const profile = useProfile(entry.pubkey)
+  const profile = useProfiles((s) => s.profiles[entry.pubkey])
   const npub = nip19.npubEncode(entry.pubkey)
   const Icon = WAY_ICON[entry.way]
   const name = profileLabel(profile, npub)
@@ -60,7 +81,7 @@ function HeldRow({ entry, disabled, onPick }: { entry: HeldEntry; disabled: bool
   const named = name !== profileLabel(null, npub)
   return (
     <button className="login__held-row" disabled={disabled} onClick={onPick} title={WAY_LABEL[entry.way]} aria-label={`${name}. ${WAY_LABEL[entry.way]}`}>
-      <ProfilePic pubkey={entry.pubkey} size={28} />
+      <CachedPic pubkey={entry.pubkey} size={28} />
       <span className="login__held-text">
         <span className="login__held-name">{name}</span>
         {named && <span className="login__held-npub">{shortHex(npub, 10, 6)}</span>}
@@ -85,16 +106,20 @@ export function LoginModal({ onClose, over = false }: { onClose: () => void; ove
   // The identities this device holds (lib/identitiesDb.ts): the last list at
   // once, so nothing jumps when the fresh one arrives a moment later.
   const [held, setHeld] = useState<HeldEntry[]>(cachedHeld)
+  const [heldRead, setHeldRead] = useState(heldListed)
   useEffect(() => {
     let live = true
-    void listHeld().then((rows) => { if (live) setHeld(rows) })
+    void listHeld().then((rows) => { if (live) { setHeld(rows); setHeldRead(true) } })
     return () => { live = false }
   }, [])
   // The identity a password is being typed for (view 'held').
   const [picked, setPicked] = useState<HeldEntry | null>(null)
-  const pickedProfile = useProfile(picked?.pubkey ?? null)
+  const pickedProfile = useProfiles((s) => (picked ? s.profiles[picked.pubkey] : undefined))
   const [heldPassword, setHeldPassword] = useState('')
-  const others = held.filter((entry) => entry.pubkey !== identity.pubkey)
+  // The identity in use is the card above, not a row: except when its key is
+  // not in hand ('Log in again'), when a row that holds it is the way back.
+  const gone = useCyberspace((s) => s.keyLock?.mode === 'gone')
+  const others = held.filter((entry) => entry.pubkey !== identity.pubkey || gone)
   // Whether the key in use is kept here, by the store and not only the one
   // pref slot a switch overwrites: then switching away loses nothing.
   const keptHere = held.some((entry) => entry.pubkey === identity.pubkey && (entry.way === 'generated' || entry.way === 'password'))
@@ -227,8 +252,18 @@ export function LoginModal({ onClose, over = false }: { onClose: () => void; ove
 
   const kind = loginCredentialKind(credential)
   const encrypted = kind === 'ncryptsec'
+  // A key this app made here, pasted back, is kept as it always was and asks
+  // for no password: the fields would promise encryption that never happens.
+  const [madeHere, setMadeHere] = useState<string | null>(null)
+  useEffect(() => {
+    if (kind !== 'nsec') return
+    let live = true
+    void pastedKeyGeneratedHere(credential).then((yes) => { if (live) setMadeHere(yes ? credential : null) })
+    return () => { live = false }
+  }, [credential, kind])
+  const generatedPaste = kind === 'nsec' && madeHere === credential
   // A pasted nsec is kept only encrypted, with a password chosen here.
-  const plain = kind === 'nsec'
+  const plain = kind === 'nsec' && !generatedPaste
   const extension = hasNip07()
   const disabled = busy !== null
   const credentialReady = !!credential.trim() && (!encrypted || !!password) && (!plain || newPasswordReady(password, again))
@@ -276,7 +311,7 @@ export function LoginModal({ onClose, over = false }: { onClose: () => void; ove
         {view === 'held' && picked ? (
           <form className="login__primary login__held-unlock" onSubmit={(event) => { event.preventDefault(); void unlockHeld() }}>
             <div className="login__current">
-              <ProfilePic pubkey={picked.pubkey} size={40} />
+              <CachedPic pubkey={picked.pubkey} size={40} />
               <div className="login__current-text">
                 <span className="secret__name">{profileLabel(pickedProfile, nip19.npubEncode(picked.pubkey))}</span>
                 <span className="login__kind">ENCRYPTED ON THIS DEVICE</span>
@@ -360,6 +395,7 @@ export function LoginModal({ onClose, over = false }: { onClose: () => void; ove
                   useCyberspace.getState().clearLoginError()
                 }}
               />
+              {generatedPaste && <p className="login__note login__made-here">This key was made on this device. No password needed.</p>}
               {plain && (
                 <NewPassword
                   password={password}
@@ -390,7 +426,10 @@ export function LoginModal({ onClose, over = false }: { onClose: () => void; ove
             <div className="login__or"><span>OR</span></div>
             {lockedKey && (
               <div className="login__options login__locked">
-                {keptHere
+                {!heldRead
+                  // Its room kept while the store is read, so nothing jumps when the line arrives.
+                  ? <p className="login__note" aria-hidden="true" style={{ visibility: 'hidden' }}>Your encrypted key stays on this device. Come back to it here with its password.</p>
+                  : keptHere
                   ? <p className="login__note">Your encrypted key stays on this device. Come back to it here with its password.</p>
                   : <p className="login__note login__note--warn">This device could not keep your encrypted key. Copy it before you switch.</p>}
                 <button

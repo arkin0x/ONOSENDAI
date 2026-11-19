@@ -123,11 +123,16 @@ export function heldFromPref(pref: SignerPref | null | undefined, generated: boo
 
 /**
  * The row after `next` lands on `old`. A secret `next` does not carry is kept
- * from `old`; one it carries replaces it (the same key sealed again with a new
- * password still opens to the same key). The kind is the newest; the last use
+ * from `old`. One it carries replaces it only when `replace` is set: the
+ * identity in use, or a key just sealed with a new password, is the newest
+ * copy (the same key sealed again still opens to the same key). Anything else
+ * (the identity a switch left, the copy behind a lock, what a load copies in)
+ * may be older than the row, from a tab that loaded before the password was
+ * changed in another, and only fills what the row lacks: it never puts an
+ * old password's copy over the new one. The kind is the newest; the last use
  * moves only forward. Whatever a later build keeps beside these is kept.
  */
-export function mergeHeld(old: HeldIdentity | undefined, next: Partial<HeldIdentity> & { pubkey: string }, now: number): HeldIdentity {
+export function mergeHeld(old: HeldIdentity | undefined, next: Partial<HeldIdentity> & { pubkey: string }, now: number, replace = true): HeldIdentity {
   const kept: Partial<HeldIdentity> = old && typeof old === 'object' ? old : {}
   const merged: HeldIdentity = {
     ...kept,
@@ -136,9 +141,9 @@ export function mergeHeld(old: HeldIdentity | undefined, next: Partial<HeldIdent
     firstHeld: kept.firstHeld ?? now,
     lastUsed: Math.max(kept.lastUsed ?? 0, next.lastUsed ?? 0),
   }
-  const nsec = next.nsec ?? kept.nsec
-  const ncryptsec = next.ncryptsec ?? kept.ncryptsec
-  const bunker = next.bunker ?? kept.bunker
+  const nsec = replace ? next.nsec ?? kept.nsec : kept.nsec ?? next.nsec
+  const ncryptsec = replace ? next.ncryptsec ?? kept.ncryptsec : kept.ncryptsec ?? next.ncryptsec
+  const bunker = replace ? next.bunker ?? kept.bunker : kept.bunker ?? next.bunker
   if (nsec) merged.nsec = nsec
   if (ncryptsec) merged.ncryptsec = ncryptsec
   if (bunker) merged.bunker = bunker
@@ -159,10 +164,18 @@ export function heldWay(row: HeldIdentity): HeldWay | null {
 }
 
 let opening: Promise<IDBDatabase> | null = null
+/**
+ * Set when an open ran out of time: this page then goes on without the store,
+ * and the next load tries again. Without it every queued write waited out its
+ * own timeout, and a paste that looks a key up behind them waited for all of
+ * them (review of #824). An open that fails at once is tried again.
+ */
+let gaveUp = false
 
-/** The store, opened once per page; a failed or slow open is tried again by the next call. */
+/** The store, opened once per page; a failed open is tried again by the next call, a slow one is not. */
 function db(): Promise<IDBDatabase> {
   if (opening) return opening
+  if (gaveUp) return Promise.reject(new Error('IndexedDB did not open in time'))
   const attempt = ((): Promise<IDBDatabase> => {
     if (typeof indexedDB === 'undefined') return Promise.reject(new Error('IndexedDB is not available'))
     let opened: Promise<IDBDatabase>
@@ -172,7 +185,7 @@ function db(): Promise<IDBDatabase> {
     let timedOut = false
     let timer: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => { timedOut = true; reject(new Error('IndexedDB did not open in time')) }, OPEN_TIMEOUT_MS)
+      timer = setTimeout(() => { timedOut = true; gaveUp = true; reject(new Error('IndexedDB did not open in time')) }, OPEN_TIMEOUT_MS)
     })
     opened.then((d) => { if (timedOut) d.close() }, () => { /* the race reports it */ })
     return Promise.race([opened, timeout]).finally(() => clearTimeout(timer))
@@ -187,14 +200,14 @@ function db(): Promise<IDBDatabase> {
 }
 
 /** One merge, in one readwrite transaction; resolves with the row as committed. */
-function mergeInto(d: IDBDatabase, next: Partial<HeldIdentity> & { pubkey: string }): Promise<HeldIdentity> {
+function mergeInto(d: IDBDatabase, next: Partial<HeldIdentity> & { pubkey: string }, replace: boolean): Promise<HeldIdentity> {
   return new Promise((resolve, reject) => {
     const tx = d.transaction(IDENTITIES_STORE, 'readwrite')
     const os = tx.objectStore(IDENTITIES_STORE)
     let row: HeldIdentity | null = null
     const got = os.get(next.pubkey)
     got.onsuccess = () => {
-      row = mergeHeld(got.result as HeldIdentity | undefined, next, Date.now())
+      row = mergeHeld(got.result as HeldIdentity | undefined, next, Date.now(), replace)
       os.put(row)
     }
     tx.oncomplete = () => resolve(row as HeldIdentity)
@@ -208,14 +221,16 @@ let queue: Promise<unknown> = Promise.resolve()
 
 /**
  * Record `next`, merged into its row, after every write asked before it.
- * Resolves true once it is committed, false when the store could not take it.
- * Never rejects, so a caller may leave it running.
+ * `replace`: its secrets are the newest copy and replace the row's (mergeHeld);
+ * otherwise they only fill what the row lacks. Resolves true once it is
+ * committed, false when the store could not take it. Never rejects, so a
+ * caller may leave it running.
  */
-export function recordHeld(next: Partial<HeldIdentity> & { pubkey: string } | null): Promise<boolean> {
+export function recordHeld(next: Partial<HeldIdentity> & { pubkey: string } | null, replace = false): Promise<boolean> {
   if (!next || !HEX64.test(next.pubkey)) return Promise.resolve(false)
   const done = queue.then(async () => {
     try {
-      await mergeInto(await db(), next)
+      await mergeInto(await db(), next, replace)
       return true
     } catch {
       return false
@@ -242,6 +257,16 @@ export async function readHeld(pubkey: string): Promise<HeldIdentity | null> {
   }
 }
 
+/**
+ * readHeld, but answering null after `ms`: for a lookup a person is waiting
+ * on (a paste), which then goes the safe way, as a key with no row here.
+ */
+export function readHeldWithin(pubkey: string, ms: number): Promise<HeldIdentity | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), ms) })
+  return Promise.race([readHeld(pubkey), late]).finally(() => clearTimeout(timer))
+}
+
 /** The key of a row this app generated, checked against its pubkey; null for any other row. */
 export function generatedKeyOf(row: HeldIdentity | null): Uint8Array | null {
   return row ? nsecOf(row.nsec, row.pubkey) : null
@@ -249,9 +274,15 @@ export function generatedKeyOf(row: HeldIdentity | null): Uint8Array | null {
 
 /** The last list read, so the login draws it at once on opening (no jump when it arrives). */
 let lastList: HeldEntry[] = []
+/** Whether a list has been read (or failed to be) on this page yet. */
+let listed = false
 
 export function cachedHeld(): HeldEntry[] {
   return lastList
+}
+
+export function heldListed(): boolean {
+  return listed
 }
 
 /**
@@ -265,6 +296,9 @@ export async function listHeld(): Promise<HeldEntry[]> {
     const d = await db()
     rows = await request(d.transaction(IDENTITIES_STORE, 'readonly').objectStore(IDENTITIES_STORE).getAll()) as HeldIdentity[]
   } catch {
+    // Unreadable now: nothing is claimed as kept, rather than an older list.
+    lastList = []
+    listed = true
     return lastList
   }
   const list: HeldEntry[] = []
@@ -275,6 +309,7 @@ export async function listHeld(): Promise<HeldEntry[]> {
   }
   list.sort((a, b) => b.lastUsed - a.lastUsed || a.pubkey.localeCompare(b.pubkey))
   lastList = list
+  listed = true
   return list
 }
 

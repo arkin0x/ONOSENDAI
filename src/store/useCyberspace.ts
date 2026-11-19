@@ -35,7 +35,7 @@ import { attributed } from '../lib/client'
 import { nip19 } from 'nostr-tools'
 import { exportNcryptsec, exportNsec } from '../lib/keyExport'
 import { lockedSigner, ncryptsecLogN, openKey, paintFirst, sealKey, type KeyLockHandle } from '../lib/keyAtRest'
-import { generatedKeyOf, heldFromPref, heldWay, readHeld, recordHeld, seedHeld } from '../lib/identitiesDb'
+import { generatedKeyOf, heldFromPref, heldWay, readHeld, readHeldWithin, recordHeld, seedHeld } from '../lib/identitiesDb'
 import { LOG_N } from '../lib/keyExport'
 import * as nip49 from 'nostr-tools/nip49'
 import {
@@ -2013,11 +2013,36 @@ export const heldIdentitiesSeeded: Promise<boolean> = seedHeldIdentities()
 
 /**
  * Keep the identity `signer` holds in the identities store, merged into what
- * is there. `inUse` marks it as the identity in use now. Never waited on.
+ * is there. `inUse` marks it as the identity in use now. `newest`: its key
+ * copy is the newest there is (in use, or just sealed) and replaces the row's;
+ * otherwise it only fills what the row lacks (lib/identitiesDb.ts mergeHeld).
+ * Never waited on.
  */
-function holdIdentity(signer: Signer, inUse: boolean): void {
+function holdIdentity(signer: Signer, inUse: boolean, newest: boolean): void {
   // prefOf writes a plain key only for a key this app generated (Signer.minted).
-  void recordHeld(heldFromPref(prefOf(signer), true, inUse ? Date.now() : undefined))
+  void recordHeld(heldFromPref(prefOf(signer), true, inUse ? Date.now() : undefined), newest)
+}
+
+/** How long a paste waits on the identities store to learn whether this app made the key. */
+const HELD_LOOKUP_MS = 1500
+
+/**
+ * Whether a pasted nsec is a key this app generated on this device: its first
+ * key, the last NEW RANDOM KEY, or an older one the identities store holds as
+ * generated. The login asks for no password for such a key. A store that does
+ * not answer in time counts as no: the paste then asks for a password, the
+ * safe side.
+ */
+export async function pastedKeyGeneratedHere(nsec: string): Promise<boolean> {
+  let pubkey: string
+  try {
+    const { type, data } = nip19.decode(nsec.trim())
+    if (type !== 'nsec') return false
+    pubkey = getPublicKey(data as Uint8Array)
+  } catch {
+    return false
+  }
+  return generatedHere(pubkey) || !!generatedKeyOf(await readHeldWithin(pubkey, HELD_LOOKUP_MS))
 }
 
 /**
@@ -5258,9 +5283,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // store under their pubkeys, and the one switched to is recorded as in
     // use. The signer pref below is one slot and is overwritten; the store is
     // what the login's list switches back from. Nothing here waits or signs.
-    holdIdentity(outgoing, false)
+    holdIdentity(outgoing, false, false)
     if (lock?.ncryptsec) void recordHeld({ pubkey: lock.handle.signer.pubkey, kind: 'local', ncryptsec: lock.ncryptsec })
-    holdIdentity(signer, true)
+    holdIdentity(signer, true, true)
     if (lock) {
       if (signer.pubkey === lock.handle.signer.pubkey && signer.kind === 'local' && signer.secretKey) lock.handle.release(signer)
       else lock.handle.abandon()
@@ -7419,7 +7444,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         if (generatedHere(signer.pubkey)) return { ...signer, minted: true }
         // An older key this app generated (an earlier NEW RANDOM KEY), kept
         // in the identities store: the same, never asked for a password.
-        if (generatedKeyOf(await readHeld(signer.pubkey))) { generatedBack = signer.pubkey; return { ...signer, minted: true } }
+        if (generatedKeyOf(await readHeldWithin(signer.pubkey, HELD_LOOKUP_MS))) { generatedBack = signer.pubkey; return { ...signer, minted: true } }
         await paintFirst()
         return sealedSigner(signer, password, again)
       }
@@ -7455,7 +7480,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // An extension or a bunker reconnects as the pref of that identity would,
       // and refuses one now on another account (SignerAccountMismatch).
       if (way === 'extension') return signerFromPref({ kind: 'nip07', pubkey })
-      return signerFromPref({ kind: 'nip46', pubkey, ...row.bunker })
+      // The tapped pubkey last: a stored field never names another account.
+      return signerFromPref({ ...row.bunker, kind: 'nip46', pubkey })
     })
     if (generated) markGeneratedBack(pubkey)
   },
@@ -7513,7 +7539,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (currentSigner !== signer) return false
     currentSigner = sealed
     // Kept under its pubkey too, so a later switch away does not lose it.
-    holdIdentity(sealed, false)
+    holdIdentity(sealed, false, true)
     // Only over the plain copy this was asked about: another tab may have
     // logged in as someone else meanwhile, and that pref is not this one's
     // to replace. The sealed key then lasts for this visit, from memory.

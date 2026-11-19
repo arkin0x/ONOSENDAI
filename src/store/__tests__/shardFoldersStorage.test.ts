@@ -1,9 +1,11 @@
 /**
- * shardFoldersStorage.test.ts: the folder tree kept in IndexedDB, per
- * identity, through the store. A page load is a fresh copy of the store
+ * shardFoldersStorage.test.ts: the folder tree kept in IndexedDB, the
+ * device's, through the store. A page load is a fresh copy of the store
  * module over the same database; a second tab is a second copy open at the
- * same time. A change made before the load has answered is kept; another
- * identity's folders are not shown; two tabs' changes both land.
+ * same time. A change made before the load has answered is kept; a switch of
+ * identity changes nothing (owner ruling, 2026-11-19); two tabs' changes
+ * both land; the trees older builds kept per identity are merged once and
+ * left in place.
  */
 
 import 'fake-indexeddb/auto'
@@ -26,11 +28,24 @@ vi.mock('../useCyberspace', () => ({
 type Mod = typeof import('../useShardFolders')
 
 /** A page load (or another tab): the module fresh, then the store's load. */
-async function boot(owner = identity): Promise<Mod> {
+async function boot(): Promise<Mod> {
   vi.resetModules()
   const mod = await import('../useShardFolders')
-  await mod.useShardFolders.getState().load(owner)
+  await mod.useShardFolders.getState().load()
   return mod
+}
+
+/** Rows as a build before 2026-11-19 kept them: one tree per identity, under its pubkey. */
+async function seedOldRows(rows: Record<string, unknown>): Promise<void> {
+  const { openShardFoldersDb, TREES_STORE } = await import('../../lib/shardFoldersDb')
+  const db = await openShardFoldersDb()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(TREES_STORE, 'readwrite')
+    for (const [owner, tree] of Object.entries(rows)) tx.objectStore(TREES_STORE).put({ owner, tree })
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+  db.close()
 }
 
 function switchTo(pubkey: string): void {
@@ -67,15 +82,16 @@ describe('shard folders in IndexedDB', () => {
     expect(t.collapsed[kit]).toBe(true)
   })
 
-  it('keeps when each shard was last deployed across a reload, per identity', async () => {
+  it('keeps when each shard was last deployed across a reload, for every identity (it only sorts)', async () => {
     const a = await boot()
     a.useShardFolders.getState().markUsed(['oak', ''], 42)
     expect(a.useShardFolders.getState().tree.used).toEqual({ oak: 42 })
     await a.useShardFolders.getState().flush()
     const b = await boot()
     expect(b.useShardFolders.getState().tree.used).toEqual({ oak: 42 })
-    const c = await boot(OTHER)
-    expect(c.useShardFolders.getState().tree.used ?? {}).toEqual({})
+    identity = OTHER
+    const c = await boot()
+    expect(c.useShardFolders.getState().tree.used).toEqual({ oak: 42 })
   })
 
   it('returns the existing folder when the path is already there', async () => {
@@ -200,29 +216,32 @@ describe('shard folders in IndexedDB', () => {
     expect(a.useShardFolders.getState().moveFolder(trees, 'gone')).toBe(false)
   })
 
-  it('keeps each identity\'s folders apart, and a switch shows the new one\'s only', async () => {
+  it('a switch of identity keeps every folder and filing on screen (the NEW RANDOM KEY bug)', async () => {
     const a = await boot()
-    a.createFolderPath(['mine'])
+    const mine = a.createFolderPath(['mine'])!
+    a.assignToFolder('oak', mine)
     await a.useShardFolders.getState().flush()
     switchTo(OTHER)
-    expect(a.useShardFolders.getState().owner).toBe(OTHER)
-    expect(Object.keys(a.useShardFolders.getState().tree.folders)).toHaveLength(0)
+    await a.useShardFolders.getState().flush()
+    expect(folderOf(a.useShardFolders.getState().tree, 'oak')).toBe(mine)
     a.createFolderPath(['theirs'])
     await a.useShardFolders.getState().flush()
-    expect(Object.values(a.useShardFolders.getState().tree.folders).map((f) => f.name)).toEqual(['theirs'])
     switchTo(ME)
     await a.useShardFolders.getState().flush()
-    expect(Object.values(a.useShardFolders.getState().tree.folders).map((f) => f.name)).toEqual(['mine'])
+    expect(Object.values(a.useShardFolders.getState().tree.folders).map((f) => f.name).sort()).toEqual(['mine', 'theirs'])
+    // And after a reload, as anyone.
+    identity = OTHER
+    const b = await boot()
+    expect(folderOf(b.useShardFolders.getState().tree, 'oak')).toBe(mine)
   })
 
-  it('writes a change queued before a switch to the identity it was made for', async () => {
+  it('writes a change queued before a switch, and shows it after', async () => {
     const a = await boot()
     a.createFolderPath(['before-switch'])
     switchTo(OTHER)
     await a.useShardFolders.getState().flush()
-    expect(Object.keys(a.useShardFolders.getState().tree.folders)).toHaveLength(0)
-    identity = ME
-    const b = await boot(ME)
+    expect(Object.values(a.useShardFolders.getState().tree.folders).map((f) => f.name)).toEqual(['before-switch'])
+    const b = await boot()
     expect(Object.values(b.useShardFolders.getState().tree.folders).map((f) => f.name)).toEqual(['before-switch'])
   })
 
@@ -238,7 +257,7 @@ describe('shard folders in IndexedDB', () => {
     expect(Object.values(c.useShardFolders.getState().tree.folders).map((f) => f.name).sort()).toEqual(['from-a', 'from-b'])
   })
 
-  it('lasts the session in memory where IndexedDB cannot open, per identity', async () => {
+  it('lasts the session in memory where IndexedDB cannot open, through a switch', async () => {
     ;(globalThis as { indexedDB?: unknown }).indexedDB = { open: () => { throw new Error('blocked') } }
     const a = await boot()
     expect(a.useShardFolders.getState().storage).toBe('memory')
@@ -248,9 +267,106 @@ describe('shard folders in IndexedDB', () => {
     expect(folderOf(a.useShardFolders.getState().tree, 'oak')).toBe(id)
     switchTo(OTHER)
     await a.useShardFolders.getState().flush()
-    expect(Object.keys(a.useShardFolders.getState().tree.folders)).toHaveLength(0)
-    switchTo(ME)
-    await a.useShardFolders.getState().flush()
     expect(folderOf(a.useShardFolders.getState().tree, 'oak')).toBe(id)
+  })
+})
+
+describe('the trees older builds kept per identity', () => {
+  const THIRD = 'cc'.repeat(32)
+  // ME filed three shards, OTHER two (one of them also filed by ME, elsewhere), THIRD none.
+  const mine = {
+    folders: {
+      fk: { id: 'fk', name: 'kit', parent: null, at: 1 },
+      ff: { id: 'ff', name: 'forest', parent: 'fk', at: 2 },
+    },
+    assign: { oak: 'ff', pine: 'ff', rock: 'fk' },
+    collapsed: { fk: true },
+    alias: {},
+    used: { oak: 10 },
+  }
+  const theirs = {
+    folders: {
+      g1: { id: 'g1', name: 'kit', parent: null, at: 5 },
+      g2: { id: 'g2', name: 'desert', parent: 'g1', at: 6 },
+      g3: { id: 'g3', name: 'props', parent: null, at: 7 },
+    },
+    assign: { rock: 'g3', cactus: 'g2' },
+    collapsed: { g3: true },
+    alias: {},
+    used: { oak: 30, cactus: 5 },
+  }
+  const third = { folders: { h1: { id: 'h1', name: 'empty', parent: null, at: 9 } }, assign: {}, collapsed: {}, alias: {} }
+
+  it('merges them into one tree on the first load, losing no folder and no filing', async () => {
+    await seedOldRows({ [OTHER]: theirs, [ME]: mine, [THIRD]: third })
+    identity = THIRD
+    const a = await boot()
+    const t = a.useShardFolders.getState().tree
+    const paths = Object.keys(t.folders).map((id) => pathOf(t, id).join('/')).sort()
+    // kit joined by path; desert added under it; props and empty added at the top.
+    expect(paths).toEqual(['empty', 'kit', 'kit/desert', 'kit/forest', 'props'])
+    expect(pathOf(t, folderOf(t, 'oak'))).toEqual(['kit', 'forest'])
+    expect(pathOf(t, folderOf(t, 'cactus'))).toEqual(['kit', 'desert'])
+    // Filed by both: ME filed more shards, so ME's filing stands.
+    expect(pathOf(t, folderOf(t, 'rock'))).toEqual(['kit'])
+    expect(t.collapsed.fk).toBe(true)
+    expect(t.collapsed.g3).toBe(true)
+    expect(t.used).toEqual({ oak: 30, cactus: 5 })
+  })
+
+  it('leaves the old rows exactly as they were, and merges only once', async () => {
+    await seedOldRows({ [ME]: mine, [OTHER]: theirs })
+    const a = await boot()
+    a.createFolderPath(['later'])
+    await a.useShardFolders.getState().flush()
+    const { openShardFoldersDb, readIdentityTree } = await import('../../lib/shardFoldersDb')
+    const db = await openShardFoldersDb()
+    expect(Object.keys((await readIdentityTree(db, ME)).folders).sort()).toEqual(['ff', 'fk'])
+    expect(Object.keys((await readIdentityTree(db, OTHER)).folders).sort()).toEqual(['g1', 'g2', 'g3'])
+    db.close()
+    // An old row changed after the merge (a tab of an older build) is not merged again over the device's tree.
+    await seedOldRows({ [OTHER]: { folders: { z: { id: 'z', name: 'late', parent: null, at: 1 } }, assign: {}, collapsed: {}, alias: {} } })
+    const b = await boot()
+    const names = Object.values(b.useShardFolders.getState().tree.folders).map((f) => f.name).sort()
+    expect(names).toEqual(['desert', 'forest', 'kit', 'later', 'props'])
+  })
+
+  it('a change made before the first load answered lands on the merged tree, not over it', async () => {
+    await seedOldRows({ [ME]: mine })
+    vi.resetModules()
+    const a = await import('../useShardFolders')
+    const p = a.useShardFolders.getState().load()
+    a.createFolderPath(['early'])
+    await p
+    await a.useShardFolders.getState().flush()
+    const b = await boot()
+    expect(Object.values(b.useShardFolders.getState().tree.folders).map((f) => f.name).sort()).toEqual(['early', 'forest', 'kit'])
+  })
+
+  it('shows the merged folders, read only, when the first write is refused (a full disk)', async () => {
+    await seedOldRows({ [ME]: mine, [OTHER]: theirs })
+    const dbMod = await import('../../lib/shardFoldersDb')
+    vi.resetModules()
+    vi.doMock('../../lib/shardFoldersDb', async () => ({ ...dbMod, readTree: () => Promise.reject(new Error('QuotaExceededError')) }))
+    const a = await import('../useShardFolders')
+    await a.useShardFolders.getState().load()
+    vi.doUnmock('../../lib/shardFoldersDb')
+    const t = a.useShardFolders.getState().tree
+    expect(a.useShardFolders.getState().storage).toBe('memory')
+    expect(pathOf(t, folderOf(t, 'cactus'))).toEqual(['kit', 'desert'])
+    expect(Object.keys(t.folders)).toHaveLength(4)
+  })
+
+  it('two tabs loading at once merge once', async () => {
+    await seedOldRows({ [ME]: mine, [OTHER]: theirs })
+    vi.resetModules()
+    const tab1 = await import('../useShardFolders')
+    vi.resetModules()
+    const tab2 = await import('../useShardFolders')
+    await Promise.all([tab1.useShardFolders.getState().load(), tab2.useShardFolders.getState().load()])
+    const n1 = Object.keys(tab1.useShardFolders.getState().tree.folders).sort()
+    const n2 = Object.keys(tab2.useShardFolders.getState().tree.folders).sort()
+    expect(n1).toEqual(n2)
+    expect(n1).toEqual(['ff', 'fk', 'g2', 'g3'])
   })
 })

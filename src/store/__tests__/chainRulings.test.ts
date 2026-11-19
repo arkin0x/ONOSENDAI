@@ -33,7 +33,7 @@ if (typeof localStorage === 'undefined') {
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { positionHex, sectorTags, spawnTemplate, type NostrEvent } from '../../lib/events'
-import { RECENT_VIEWS_KEY, type RecentView } from '../../lib/viewAt'
+import { readRecentViews, saveRecentViews, type RecentView } from '../../lib/viewAt'
 import { BROKEN_CHAIN_MESSAGE, useCyberspace, whyNoMove } from '../useCyberspace'
 import { confirmRespawn } from '../../hud/BrokenChain'
 import { derezzNow } from '../../hud/DerezzPanel'
@@ -53,7 +53,7 @@ async function land(dx: bigint): Promise<void> {
   })
 }
 
-const recent = (): RecentView[] => JSON.parse(localStorage.getItem(RECENT_VIEWS_KEY) ?? '[]') as RecentView[]
+const recent = (): RecentView[] => readRecentViews()
 
 let fresh: Pick<ReturnType<typeof S>, 'events' | 'prevEventId' | 'genesisId' | 'published' | 'position' | 'plane' | 'headPlane' | 'positionHistory' | 'chain'>
 
@@ -68,7 +68,7 @@ beforeEach(async () => {
     }
   }
   relayHolds = []
-  localStorage.removeItem(RECENT_VIEWS_KEY)
+  saveRecentViews([])
   useCyberspace.setState({
     ...fresh, events: [...fresh.events], published: { ...fresh.published }, positionHistory: [...fresh.positionHistory],
     cursor: fresh.position, pendingTarget: null, forkNotice: null, chainConflict: null, plan: null,

@@ -37,6 +37,8 @@ const FETCH_WAIT_MS = 5000
 const SIGN_PATIENCE_MS = 120_000
 /** The upload token is small and the prompt says what it is for. */
 const UPLOAD_SIGN_PATIENCE_MS = 60_000
+/** Said when the identity changed while a picture was prepared for upload. */
+const UPLOAD_SWITCHED = 'You switched identity while this picture was being uploaded, so it was not used. Upload it again as the identity signed in now.'
 
 const SIGNER_NOTE: Record<string, string> = {
   local: 'This profile belongs to the key generated on this device. Export the key (CHANGE) before you invest in it.',
@@ -127,8 +129,18 @@ export function ProfileModal({ onClose }: { onClose: () => void }): JSX.Element 
     const host = target.replace(/^https?:\/\//, '')
     setUploading(field)
     setStatus({ kind: 'note', text: `Signing the upload for ${host}. Your signer may ask.` })
+    // The upload is signed after the file is hashed, by whoever is signed in
+    // by then: a switch meanwhile had the new identity sign the old one's
+    // upload, and its address went into the new identity's profile form.
+    // Neither now (identity-switch audit, 2026-11-19).
+    const owner = identity.pubkey
+    const switched = (): boolean => useCyberspace.getState().identity.pubkey !== owner
     try {
-      const desc = await uploadBlob(target, file, (t) => useCyberspace.getState().signEvent(t, UPLOAD_SIGN_PATIENCE_MS))
+      const desc = await uploadBlob(target, file, (t) => {
+        if (switched()) throw new Error(UPLOAD_SWITCHED)
+        return useCyberspace.getState().signEvent(t, UPLOAD_SIGN_PATIENCE_MS)
+      })
+      if (switched()) throw new Error(UPLOAD_SWITCHED)
       set(field, desc.url)
       if (field === 'picture') setPictureBroken(false)
       setStatus({ kind: 'ok', text: `Uploaded to ${host} (${Math.max(1, Math.round(file.size / 1024))} KB). Publish the profile to use it.` })

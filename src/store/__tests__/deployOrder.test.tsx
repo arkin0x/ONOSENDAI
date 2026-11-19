@@ -47,7 +47,6 @@ import { newestId, useWorkshop } from '../useWorkshop'
 
 const S = () => useShards.getState()
 const F = () => useShardFolders.getState()
-const me = () => useCyberspace.getState().identity.pubkey
 
 function model(id: string, updatedAt: number): ShardModel {
   return {
@@ -92,7 +91,7 @@ beforeEach(async () => {
   useCyberspace.setState({ live: false })
   // Newest edited first: A, then B and C in the folder, then D.
   useWorkshop.setState({ shards: [model('D', 500), model('C', 1000), model('B', 2000), model('A', 3000)], currentId: 'A' })
-  await F().load(me())
+  await F().load()
   useShardFolders.setState({ tree: EMPTY_TREE })
   const kit = F().createFolder('kit', null)!
   F().assignToFolder(['B', 'C'], kit)

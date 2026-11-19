@@ -272,6 +272,39 @@ function unconfirmed(err: unknown): string {
   throw err
 }
 
+/** What one relay's refusal of a signer request says, in plain words: by NIP-01's OK prefixes first, then grain's own words. */
+function relayWhy(reason: unknown): string {
+  const text = reason instanceof Error ? reason.message : String(reason)
+  if (/^rate-limited:/i.test(text) || /rate.?limit|too fast|too many/i.test(text)) return `refused it as too fast (${text})`
+  if (/^(blocked|restricted|invalid|auth-required|pow|duplicate|error):/i.test(text)) return `refused it (${text})`
+  if (/size limit|too large|too big|max(imum)? (event|message|content) (size|length)/i.test(text)) return `refused it as too large (${text})`
+  if (/SendingOnClosedConnection|connection closed|closed connection|not connected/i.test(text)) return `had no open connection (${text})`
+  return `refused it (${text})`
+}
+
+/**
+ * nostr-tools sends a signer request with Promise.any over the bunker's
+ * relays, so when none takes it the error is a bare "All promises were
+ * rejected". Said instead: which relay answered what, in the order the
+ * session names them (Promise.any keeps that order). Still an
+ * AggregateError, so the store's lost-in-transit check (one retry over fresh
+ * sockets) sees it as before.
+ */
+export function explainUndelivered(err: unknown, relays: readonly string[]): unknown {
+  if (typeof AggregateError === 'undefined' || !(err instanceof AggregateError)) return err
+  const parts = err.errors.map((reason, i) => {
+    let host = relays[i] ?? `relay ${i + 1}`
+    try { host = new URL(host).host } catch { /* as named */ }
+    return `${host} ${relayWhy(reason)}`
+  })
+  return new AggregateError(err.errors, `No signer relay took the request: ${parts.join('; ')}.`)
+}
+
+/** A bunker request, with a failure to reach any relay said plainly (explainUndelivered). */
+function said<T>(bunker: { bp: { relays: string[] } }, request: Promise<T>): Promise<T> {
+  return request.catch((err: unknown) => { throw explainUndelivered(err, bunker.bp?.relays ?? []) })
+}
+
 /**
  * The pool, as a bunker signer uses it, with each request held until the
  * subscription its answer comes on is in place (its EOSE), at most
@@ -311,22 +344,22 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
   if (!bp) throw new Error('Not a valid bunker URI')
   const bunker = nip46.BunkerSigner.fromBunker(clientSk, bp, { pool: answersFirst() as never })
   onStep?.('connect')
-  await bunker.connect()
+  await said(bunker, bunker.connect())
   onStep?.('get_public_key')
-  const pubkey = await bunker.getPublicKey()
+  const pubkey = await said(bunker, bunker.getPublicKey())
   onStep?.(null)
   const signer: Signer = {
     kind: 'nip46',
     pubkey,
     bunkerUri,
     clientSecretKey: clientSk,
-    signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
-    nip44Decrypt: (pk, ct) => bunker.nip44Decrypt(pk, ct),
-    nip44Encrypt: (pk, pt) => bunker.nip44Encrypt(pk, pt),
-    nip04Decrypt: (pk, ct) => bunker.nip04Decrypt(pk, ct),
-    nip04Encrypt: (pk, pt) => bunker.nip04Encrypt(pk, pt),
+    signEvent: (template) => said(bunker, bunker.signEvent(attributed(template))) as unknown as Promise<NostrEvent>,
+    nip44Decrypt: (pk, ct) => said(bunker, bunker.nip44Decrypt(pk, ct)),
+    nip44Encrypt: (pk, pt) => said(bunker, bunker.nip44Encrypt(pk, pt)),
+    nip04Decrypt: (pk, ct) => said(bunker, bunker.nip04Decrypt(pk, ct)),
+    nip04Encrypt: (pk, pt) => said(bunker, bunker.nip04Encrypt(pk, pt)),
     // Not bunker.getPublicKey(): nostr-tools keeps its first answer for good.
-    heldPubkey: () => bunker.sendRequest('get_public_key', []),
+    heldPubkey: () => said(bunker, bunker.sendRequest('get_public_key', [])),
     close: () => bunker.close(),
     // A phone that suspends the tab leaves its relay sockets half-open: the
     // browser still calls them connected, so the pool reuses them and a
@@ -372,7 +405,7 @@ async function waitForPublicKey(bunker: nip46.BunkerSigner, signal?: AbortSignal
     }
   })
   try {
-    return await Promise.race([bunker.getPublicKey(), stopped])
+    return await Promise.race([said(bunker, bunker.getPublicKey()), stopped])
   } finally {
     if (timeout) clearTimeout(timeout)
     if (signal && abort) signal.removeEventListener('abort', abort)
@@ -392,13 +425,13 @@ function wrapBunkerSigner(
     bunkerUri,
     clientSecretKey,
     nostrConnectSession,
-    signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
-    nip44Decrypt: (pk, ct) => bunker.nip44Decrypt(pk, ct),
-    nip44Encrypt: (pk, pt) => bunker.nip44Encrypt(pk, pt),
-    nip04Decrypt: (pk, ct) => bunker.nip04Decrypt(pk, ct),
-    nip04Encrypt: (pk, pt) => bunker.nip04Encrypt(pk, pt),
+    signEvent: (template) => said(bunker, bunker.signEvent(attributed(template))) as unknown as Promise<NostrEvent>,
+    nip44Decrypt: (pk, ct) => said(bunker, bunker.nip44Decrypt(pk, ct)),
+    nip44Encrypt: (pk, pt) => said(bunker, bunker.nip44Encrypt(pk, pt)),
+    nip04Decrypt: (pk, ct) => said(bunker, bunker.nip04Decrypt(pk, ct)),
+    nip04Encrypt: (pk, pt) => said(bunker, bunker.nip04Encrypt(pk, pt)),
     // Not bunker.getPublicKey(): nostr-tools keeps its first answer for good.
-    heldPubkey: () => bunker.sendRequest('get_public_key', []),
+    heldPubkey: () => said(bunker, bunker.sendRequest('get_public_key', [])),
     close: () => bunker.close(),
     reconnect: async () => {
       const bp = await nip46.parseBunkerInput(bunkerUri)

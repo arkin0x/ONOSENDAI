@@ -35,6 +35,7 @@ import { attributed } from '../lib/client'
 import { nip19 } from 'nostr-tools'
 import { exportNcryptsec, exportNsec } from '../lib/keyExport'
 import { lockedSigner, ncryptsecLogN, openKey, paintFirst, sealKey, type KeyLockHandle } from '../lib/keyAtRest'
+import { generatedKeyOf, heldFromPref, heldWay, readHeld, readHeldWithin, recordHeld, seedHeld } from '../lib/identitiesDb'
 import { LOG_N } from '../lib/keyExport'
 import * as nip49 from 'nostr-tools/nip49'
 import {
@@ -1196,6 +1197,13 @@ export interface CyberspaceState {
   /** Replace the identity from an ncryptsec and its password; the ncryptsec is what is kept. */
   useNcryptsec: (ncryptsec: string, password: string) => Promise<void>
   /**
+   * Switch to an identity this device holds (lib/identitiesDb.ts), as the
+   * list in the login offers it: a key this app generated at once, a brought
+   * key with its `password` (a wrong one switches nothing), an extension or a
+   * bunker by reconnecting to it. Nothing is signed to switch.
+   */
+  useHeld: (pubkey: string, password?: string) => Promise<void>
+  /**
    * Use the single login field's nsec, ncryptsec, or bunker URI. An nsec
    * needs a new password, typed twice (`password`, `again`), to be kept
    * encrypted on this device; an ncryptsec needs its own password.
@@ -1216,7 +1224,7 @@ export interface CyberspaceState {
   setKeyPassword: (password: string, again: string) => Promise<boolean>
   /** Answer 'set' with no password: the plain key leaves storage, and this visit goes on from memory. */
   skipKeyPassword: () => void
-  /** While 'unlock': the encrypted key kept here, to copy before switching away forgets it. Never the key itself. */
+  /** While 'unlock': the encrypted key kept here, to copy as a backup. Never the key itself. */
   lockedNcryptsec: () => string | null
   /** Switch to the browser extension (NIP-07). */
   useExtension: () => Promise<void>
@@ -2015,6 +2023,76 @@ function spawnOf(pubkey: string): { position: Position; plane: Plane } {
  * awaits it: local keys resolve at once, the others are genuinely remote.
  */
 let currentSigner: Signer = pickInitialSigner()
+
+/**
+ * Every identity this device holds goes into its own store (lib/identitiesDb.ts),
+ * keyed by pubkey, so a switch never loses one. This load copies in what
+ * localStorage kept before the store existed: this device's first generated
+ * key, the signer pref, and the identity now in use. It runs on every load
+ * and only ever adds: a copy a closed page cut short is done again next time,
+ * and localStorage is never written or cleared by it. Read after the pick,
+ * which may have tidied the pref (a plain copy beside an encrypted one goes).
+ */
+function seedHeldIdentities(): Promise<boolean> {
+  let first: string | null = null
+  try { first = localStorage.getItem(STORAGE_KEY) } catch { /* private mode */ }
+  const pref = loadSignerPref()
+  const now = Date.now()
+  return seedHeld(first, [
+    // A plain key in the pref goes in only when this app generated it.
+    { pref, generated: !!pref && generatedHere(pref.pubkey), lastUsed: pref?.pubkey === currentSigner.pubkey ? now : undefined },
+    // prefOf writes a plain key only for a key this app generated.
+    { pref: currentSigner.kind === 'local' ? prefOf(currentSigner) : null, generated: true, lastUsed: now },
+  ])
+}
+/** The load's copy into the identities store; true once it is written and confirmed. */
+export const heldIdentitiesSeeded: Promise<boolean> = seedHeldIdentities()
+
+/**
+ * Keep the identity `signer` holds in the identities store, merged into what
+ * is there. `inUse` marks it as the identity in use now. `newest`: its key
+ * copy is the newest there is (in use, or just sealed) and replaces the row's;
+ * otherwise it only fills what the row lacks (lib/identitiesDb.ts mergeHeld).
+ * Never waited on.
+ */
+function holdIdentity(signer: Signer, inUse: boolean, newest: boolean): void {
+  // prefOf writes a plain key only for a key this app generated (Signer.minted).
+  void recordHeld(heldFromPref(prefOf(signer), true, inUse ? Date.now() : undefined), newest)
+}
+
+/** How long a paste waits on the identities store to learn whether this app made the key. */
+const HELD_LOOKUP_MS = 1500
+
+/**
+ * Whether a pasted nsec is a key this app generated on this device: its first
+ * key, the last NEW RANDOM KEY, or an older one the identities store holds as
+ * generated. The login asks for no password for such a key. A store that does
+ * not answer in time counts as no: the paste then asks for a password, the
+ * safe side.
+ */
+export async function pastedKeyGeneratedHere(nsec: string): Promise<boolean> {
+  let pubkey: string
+  try {
+    const { type, data } = nip19.decode(nsec.trim())
+    if (type !== 'nsec') return false
+    pubkey = getPublicKey(data as Uint8Array)
+  } catch {
+    return false
+  }
+  return generatedHere(pubkey) || !!generatedKeyOf(await readHeldWithin(pubkey, HELD_LOOKUP_MS))
+}
+
+/**
+ * A key this app generated, come back by the list or pasted back: marked as
+ * the generated key in use (MINTED_KEY), so a reload keeps it as one rather
+ * than asking for a password, and as chosen (CHOSEN_KEY), so it is never
+ * taken for a first arrival.
+ */
+function markGeneratedBack(pubkey: string): void {
+  if (currentSigner.pubkey !== pubkey || !currentSigner.minted) return
+  markMinted(pubkey)
+  markChosen(pubkey)
+}
 
 function pickInitialSigner(): Signer {
   const pref = loadSignerPref()
@@ -5233,11 +5311,20 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // A cloud flow in progress was signing as the old identity; it ends here.
     stopCloud()
     requestId++
+    const outgoing = currentSigner
     currentSigner = signer
     // A locked key ends here: what waited on it signs with the same key
     // logged in again, or ends, and nothing is asked about it any more.
     const lock = keyLocked
     keyLocked = null
+    // No identity is lost to a switch (owner ruling, 2026-11-19): the one
+    // left and the encrypted key behind a lock are kept in the identities
+    // store under their pubkeys, and the one switched to is recorded as in
+    // use. The signer pref below is one slot and is overwritten; the store is
+    // what the login's list switches back from. Nothing here waits or signs.
+    holdIdentity(outgoing, false, false)
+    if (lock?.ncryptsec) void recordHeld({ pubkey: lock.handle.signer.pubkey, kind: 'local', ncryptsec: lock.ncryptsec })
+    holdIdentity(signer, true, true)
     if (lock) {
       if (signer.pubkey === lock.handle.signer.pubkey && signer.kind === 'local' && signer.secretKey) lock.handle.release(signer)
       else lock.handle.abandon()
@@ -7415,6 +7502,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   useNcryptsec: async (ncryptsec, password) => { await login(() => keptNcryptsec(signerFromNcryptsec(ncryptsec, password), password)) },
   useLogin: async (credential, password = '', again = '') => {
     const kind = loginCredentialKind(credential)
+    let generatedBack: string | null = null
     await login(async () => {
       // A pasted nsec is kept only sealed with the password chosen for it.
       if (kind === 'nsec') {
@@ -7422,6 +7510,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         // This device's own generated key, pasted back: still the full
         // identity it always was, kept as before and never asked for a password.
         if (generatedHere(signer.pubkey)) return { ...signer, minted: true }
+        // An older key this app generated (an earlier NEW RANDOM KEY), kept
+        // in the identities store: the same, never asked for a password.
+        if (generatedKeyOf(await readHeldWithin(signer.pubkey, HELD_LOOKUP_MS))) { generatedBack = signer.pubkey; return { ...signer, minted: true } }
         await paintFirst()
         return sealedSigner(signer, password, again)
       }
@@ -7433,6 +7524,34 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       if (kind === 'bunker') return nip46Signer(credential)
       throw new Error('Paste an nsec, ncryptsec, or bunker:// URI.')
     })
+    if (generatedBack) markGeneratedBack(generatedBack)
+  },
+  useHeld: async (pubkey, password = '') => {
+    let generated = false
+    await login(async () => {
+      const row = await readHeld(pubkey)
+      const way = row ? heldWay(row) : null
+      if (!row || !way) throw new Error('That identity is not on this device any more.')
+      if (way === 'generated') {
+        const sk = generatedKeyOf(row)
+        if (!sk) throw new Error('That identity is not on this device any more.')
+        generated = true
+        return { ...localSigner(sk), minted: true }
+      }
+      if (way === 'password') {
+        if (!password) throw new Error('Enter the password for this key.')
+        await paintFirst()
+        // openKey refuses a wrong password, and a copy that opens to another
+        // key, with one message (WRONG_PASSWORD); the switch never happens.
+        return { ...localSigner(openKey(row.ncryptsec as string, password, pubkey)), ncryptsec: row.ncryptsec }
+      }
+      // An extension or a bunker reconnects as the pref of that identity would,
+      // and refuses one now on another account (SignerAccountMismatch).
+      if (way === 'extension') return signerFromPref({ kind: 'nip07', pubkey })
+      // The tapped pubkey last: a stored field never names another account.
+      return signerFromPref({ ...row.bunker, kind: 'nip46', pubkey })
+    })
+    if (generated) markGeneratedBack(pubkey)
   },
   useExtension: async () => { await login(() => nip07Signer()) },
   useBunker: async (uri) => { await login(() => nip46Signer(uri)) },
@@ -7487,6 +7606,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // Switched away while it sealed: the new identity's pref is not this one's to write.
     if (currentSigner !== signer) return false
     currentSigner = sealed
+    // Kept under its pubkey too, so a later switch away does not lose it.
+    holdIdentity(sealed, false, true)
     // Only over the plain copy this was asked about: another tab may have
     // logged in as someone else meanwhile, and that pref is not this one's
     // to replace. The sealed key then lasts for this visit, from memory.

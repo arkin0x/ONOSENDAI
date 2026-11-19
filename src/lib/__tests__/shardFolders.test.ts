@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { EMPTY_TREE, applyOp, applyOps, buildTree, canonical, contentsOf, flatFolders, folderOf, newestFirst, normalizeTree, pathOf, type FolderNode, type FolderOp, type FolderTree } from '../shardFolders'
+import { EMPTY_TREE, applyOp, applyOps, buildTree, canonical, contentsOf, flatFolders, folderOf, mergeTrees, newestFirst, normalizeTree, pathOf, type FolderNode, type FolderOp, type FolderTree } from '../shardFolders'
 
 const mk = (id: string, name: string, parent: string | null = null): FolderOp => ({ op: 'create', id, name, parent, at: 1 })
 const file = (refs: string[], folder: string | null): FolderOp => ({ op: 'assign', refs, folder })
@@ -331,5 +331,49 @@ describe('a deploy counted as an edit (the use op, newestFirst)', () => {
     expect(order({ d: 40 })).toEqual(['d', 'a', 'b', 'c'])
     // A deploy older than the last edit changes nothing.
     expect(order({ a: 5, c: 25 })).toEqual(['a', 'c', 'b', 'd'])
+  })
+})
+
+describe('mergeTrees (folders of every identity become the device tree, 2026-11-19)', () => {
+  const tree = (folders: Array<[string, string, string | null]>, assign: Record<string, string> = {}): FolderTree => ({
+    folders: Object.fromEntries(folders.map(([id, name, parent]) => [id, { id, name, parent, at: 0 }])),
+    assign,
+    collapsed: {},
+    alias: {},
+  })
+
+  it('is the empty tree for none, and the tree itself for one', () => {
+    expect(mergeTrees([])).toEqual(EMPTY_TREE)
+    const one = tree([['a', 'kit', null]], { oak: 'a' })
+    const m = mergeTrees([one])
+    expect(m.folders).toEqual(one.folders)
+    expect(m.assign).toEqual(one.assign)
+  })
+
+  it('gives a folder whose id is taken by another path a new id, and keeps its filings', () => {
+    const first = tree([['x', 'kit', null]], { oak: 'x', pine: 'x' })
+    const second = tree([['x', 'props', null]], { rock: 'x' })
+    const m = mergeTrees([second, first])
+    expect(m.folders.x.name).toBe('kit')
+    const props = Object.values(m.folders).find((f) => f.name === 'props')!
+    expect(props.id).not.toBe('x')
+    expect(m.assign.rock).toBe(props.id)
+  })
+
+  it('drops no folder and leaves no filing pointing nowhere, broken parents included', () => {
+    const a = tree([['a1', 'kit', null], ['a2', 'forest', 'a1'], ['a3', 'lost', 'missing']], { oak: 'a2', pine: 'a3' })
+    const b = tree([['b1', 'kit', null], ['b2', 'forest', 'b1'], ['b3', 'deep', 'b2'], ['b4', 'loop1', 'b5'], ['b5', 'loop2', 'b4']], { fir: 'b3', elm: 'b4' })
+    const m = mergeTrees([a, b])
+    const paths = new Set(Object.keys(m.folders).map((id) => pathOf(m, id).join('/')))
+    for (const t of [a, b]) for (const id of Object.keys(t.folders)) expect(paths.has(pathOf(t, id).join('/'))).toBe(true)
+    for (const ref of ['oak', 'pine', 'fir', 'elm']) expect(folderOf(m, ref)).not.toBeNull()
+    expect(pathOf(m, folderOf(m, 'fir'))).toEqual(['kit', 'forest', 'deep'])
+  })
+
+  it('keeps an alias of a joined folder pointing at the folder it joined', () => {
+    const a = tree([['a1', 'kit', null]], { oak: 'a1' })
+    const b = { ...tree([['b1', 'kit', null]]), alias: { old: 'b1' } }
+    const m = mergeTrees([a, b])
+    expect(m.alias.old).toBe('a1')
   })
 })

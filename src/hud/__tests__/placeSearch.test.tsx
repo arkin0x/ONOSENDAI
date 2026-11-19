@@ -69,7 +69,7 @@ function store(): void {
     { op: 'assign', refs: ['red', 'blue'], folder: 'banners' },
     { op: 'assign', refs: ['door', 'arch'], folder: 'walls' },
   ])
-  useShardFolders.setState({ owner: 'ee'.repeat(32), tree: { ...tree, collapsed: { plugs: true, props: true, banners: true, walls: true } }, storage: 'indexeddb' })
+  useShardFolders.setState({ tree: { ...tree, collapsed: { plugs: true, props: true, banners: true, walls: true } }, storage: 'indexeddb' })
 }
 
 /** MINE as PLACE OBJECT draws it: the list, then the search box under it. */

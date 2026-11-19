@@ -1,8 +1,9 @@
 /**
  * shardFolders.ts: the folder tree your shard lists are sorted into, as pure
  * data. Local only: nothing here is ever published, and the tree belongs to
- * one identity (store/useShardFolders.ts keeps one per pubkey, in IndexedDB
- * through lib/shardFoldersDb.ts).
+ * the device, as the workshop library does: every identity on it sees the
+ * same folders (store/useShardFolders.ts keeps one tree, in IndexedDB
+ * through lib/shardFoldersDb.ts; owner ruling, 2026-11-19).
  *
  * A folder is a name and a parent; a shard is filed by its ref (a workshop
  * model's id, which is also the `d` of the object it publishes as) pointing at
@@ -400,4 +401,81 @@ export function normalizeTree(raw: unknown): FolderTree {
   const used: Record<string, number> = {}
   if (r.used && typeof r.used === 'object') for (const [k, v] of Object.entries(r.used as Record<string, unknown>)) if (typeof v === 'number' && Number.isFinite(v)) used[k] = v
   return { folders, assign: strings(r.assign), collapsed, alias: strings(r.alias), used }
+}
+
+/** How many shards a tree files in a folder that still exists. */
+export function filingCount(tree: FolderTree): number {
+  let n = 0
+  for (const ref of Object.keys(tree.assign)) if (folderOf(tree, ref) !== null) n += 1
+  return n
+}
+
+/**
+ * One tree out of several, losing no folder and no filing: how the folders
+ * each identity kept on this device became the device's one tree (owner
+ * ruling, 2026-11-19: the workshop is a local repository of SNO on the
+ * device, and its folders must not disappear on a switch).
+ *
+ * The rule, in order:
+ * 1. Start from the tree that files the most shards (filingCount); on a tie,
+ *    the one with more folders, then the earlier in `trees`.
+ * 2. Take each other tree in the same order. Each of its folders, parents
+ *    first, joins the folder already there by the same path (the same names
+ *    from the top), or is added under its parent's place, with its own id
+ *    (a new one only if that id is taken) and its fold.
+ * 3. A shard keeps the filing of the first tree, in that order, that files
+ *    it: a shard filed in different folders by different identities stays
+ *    where the identity with the most filings put it.
+ * 4. When each shard was last deployed (sorting only): the latest of any tree.
+ * Nothing is dropped: every folder of every tree is in the result, by its
+ * own id or joined to one of the same path, and every filing names a folder
+ * of the result.
+ */
+export function mergeTrees(trees: readonly FolderTree[]): FolderTree {
+  const order = trees
+    .map((tree, index) => ({ tree, index, filings: filingCount(tree), folders: Object.keys(tree.folders).length }))
+    .sort((a, b) => b.filings - a.filings || b.folders - a.folders || a.index - b.index)
+    .map((t) => t.tree)
+  if (order.length === 0) return EMPTY_TREE
+  const base = order[0]
+  const folders: Record<string, Folder> = { ...base.folders }
+  const assign: Record<string, string> = { ...base.assign }
+  const collapsed: Record<string, true> = { ...base.collapsed }
+  const alias: Record<string, string> = { ...base.alias }
+  const used: Record<string, number> = { ...(base.used ?? {}) }
+  /** The merged folder under `parent` named `name`, as the merged tree stands now. */
+  const childNamed = (parent: string | null, name: string): string | null => {
+    const view: FolderTree = { folders, assign, collapsed, alias }
+    for (const f of Object.values(folders)) if (f.name === name && parentOf(view, f.id) === parent) return f.id
+    return null
+  }
+  for (const tree of order.slice(1)) {
+    const map = new Map<string, string>()
+    // Parents first: a folder's path is one longer than its parent's.
+    const theirs = Object.values(tree.folders).sort((a, b) => pathOf(tree, a.id).length - pathOf(tree, b.id).length)
+    for (const f of theirs) {
+      const up = parentOf(tree, f.id)
+      const parent = up === null ? null : map.get(up) ?? null
+      const same = childNamed(parent, f.name)
+      if (same !== null) { map.set(f.id, same); continue }
+      const id = folders[f.id] || alias[f.id] ? newFolderId() : f.id
+      folders[id] = { ...f, id, parent }
+      if (tree.collapsed[f.id]) collapsed[id] = true
+      map.set(f.id, id)
+    }
+    for (const [from, to] of Object.entries(tree.alias)) {
+      const target = canonical(tree, to)
+      const mapped = target === null ? undefined : map.get(target)
+      if (mapped && !folders[from] && !alias[from]) alias[from] = mapped
+    }
+    const merged: FolderTree = { folders, assign, collapsed, alias }
+    for (const ref of Object.keys(tree.assign)) {
+      const at = folderOf(tree, ref)
+      if (at === null || folderOf(merged, ref) !== null) continue
+      const mapped = map.get(at)
+      if (mapped) assign[ref] = mapped
+    }
+    for (const [ref, at] of Object.entries(tree.used ?? {})) if (!(used[ref] >= at)) used[ref] = at
+  }
+  return { folders, assign, collapsed, alias, used }
 }

@@ -40,7 +40,7 @@ const INSIDE = ['gate', 'arch', 'drain', 'wall', 'corner1', 'corner2', 'pond']
 const id = (s: string): string => s
 
 function setup(): FolderNode<string> {
-  useShardFolders.setState({ owner: 'ee'.repeat(32), tree: applyOps(EMPTY_TREE, OPS), storage: 'indexeddb' })
+  useShardFolders.setState({ tree: applyOps(EMPTY_TREE, OPS), storage: 'indexeddb' })
   return node('kit')
 }
 function node(folder: string): FolderNode<string> {

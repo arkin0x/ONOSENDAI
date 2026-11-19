@@ -242,7 +242,8 @@ export function personalList<T>(spec: PersonalListSpec<T>): PersonalList<T> {
       const n = (seq.get(who) ?? 0) + 1
       seq.set(who, n)
       if (!loaded || !isOwner(who)) {
-        early.set(who, { value, whole: shownStored })
+        // Made from a whole list shown (after a failed write) is whole too.
+        early.set(who, { value, whole: shownStored || early.get(who)?.whole === true })
         // Nothing read yet, or the read failed: read (again), which writes it.
         if (reading === 0) void read(who)
         return

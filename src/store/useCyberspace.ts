@@ -1276,7 +1276,7 @@ export interface CyberspaceState {
   /** Remember a balance HOSAKA just reported for this identity. */
   /**
    * Keep a balance HOSAKA reported, for `forPubkey`, the identity that asked
-   * for it. Dropped when that is no longer the identity signed in: an answer
+   * for it, and show it only while that is the identity signed in: an answer
    * for one identity is never shown or kept as another's.
    */
   noteBalance: (msats: number, forPubkey: string) => void
@@ -7462,13 +7462,15 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   noteBalance: (msats, forPubkey) => {
-    // HOSAKA answers for the key that signed the question. Kept under whoever
-    // was signed in when the answer came, a switch while it was out wrote one
-    // identity's balance into another's, on screen and on disk. Dropped
-    // instead: the next check for that identity asks again (identity-switch
-    // audit, 2026-11-19).
+    // HOSAKA answers for the key that signed the question, and every caller
+    // names the identity it asked as, with no wait between that and the
+    // request. Kept under whoever was signed in when the answer came, a
+    // switch while it was out wrote one identity's balance into another's, on
+    // screen and on disk. Now kept for the identity that asked, and shown only
+    // while it is the one signed in (identity-switch audit, 2026-11-19).
+    const kept = saveBalance(forPubkey, msats)
     if (forPubkey !== get().identity.pubkey) return
-    set({ cloud: { ...get().cloud, balance: saveBalance(forPubkey, msats), balanceError: null } })
+    set({ cloud: { ...get().cloud, balance: kept, balanceError: null } })
   },
 
   ensureBalance: () => {
@@ -7747,9 +7749,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       get().noteBalance(bal.balance_msats, identity.pubkey)
     } catch (err) {
       // A failure of the identity that asked: not said on another's panel.
-      if (get().identity.pubkey === identity.pubkey) set({ cloud: { ...get().cloud, balanceError: describeCloudError(err) } })
+      if (get().identity.pubkey === identity.pubkey) set({ cloud: { ...get().cloud, balanceChecking: false, balanceError: describeCloudError(err) } })
     } finally {
-      set({ cloud: { ...get().cloud, balanceChecking: false } })
+      // Another identity's check may be out by now: its button is its own.
+      if (get().identity.pubkey === identity.pubkey) set({ cloud: { ...get().cloud, balanceChecking: false } })
     }
   },
 

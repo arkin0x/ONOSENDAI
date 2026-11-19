@@ -6,8 +6,9 @@
  * used to keep the answer under whoever was signed in when it came back, so
  * a switch while the question was out wrote one identity's balance into
  * another's: B's panel showed A's sats, and B's saved figure was A's until
- * the next check. The HOSAKA client is faked, and each answer is held until
- * the test has switched identity. No network.
+ * the next check. Each answer is now kept for the identity that asked, and
+ * shown only while it is signed in. The HOSAKA client is faked, and each
+ * answer is held until the test has switched identity. No network.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -86,6 +87,10 @@ describe('a switch of identity while HOSAKA answers a balance question', () => {
     expect(S().identity.pubkey).toBe(b)
     expect(S().cloud.balance?.msats).not.toBe(7000)
     expect(loadBalance(b)?.msats).not.toBe(7000)
+    // A's own figure is kept for A.
+    expect(loadBalance(a)?.msats).toBe(7000)
+    // B's panel is B's: A's late check does not end a check B has started.
+    expect(S().cloud.balanceError).toBeNull()
   })
 
   it('a route deposit of A claimed at startup, answered after B signed in: B neither shows nor keeps A\'s figure', async () => {
@@ -100,6 +105,10 @@ describe('a switch of identity while HOSAKA answers a balance question', () => {
     expect(S().identity.pubkey).toBe(b)
     expect(S().cloud.balance?.msats).not.toBe(22000)
     expect(loadBalance(b)?.msats).not.toBe(22000)
+    expect(loadBalance(a)?.msats).toBe(22000)
+    // A's credit is not announced on B's screen.
+    expect(S().cloud.message ?? '').not.toMatch(/route deposit/)
+    expect(S().cloud.credited).toBeFalsy()
   })
 
   it('TOP UP paid as A, settled after B signed in: B neither shows nor keeps A\'s figure', async () => {
@@ -115,6 +124,24 @@ describe('a switch of identity while HOSAKA answers a balance question', () => {
     expect(S().identity.pubkey).toBe(b)
     expect(S().cloud.balance?.msats).not.toBe(33000)
     expect(loadBalance(b)?.msats).not.toBe(33000)
+  })
+
+  it('B\'s check in flight when A\'s late one comes back: B\'s stays checking', async () => {
+    const late = deferred<{ pubkey: string; balance_msats: number; ledger: [] }>()
+    fake.balance.mockReturnValueOnce(late.promise)
+    const asking = S().refreshBalance()
+    await signInFresh()
+    const mine = deferred<{ pubkey: string; balance_msats: number; ledger: [] }>()
+    fake.balance.mockReturnValueOnce(mine.promise)
+    const bAsking = S().refreshBalance()
+    expect(S().cloud.balanceChecking).toBe(true)
+    late.resolve({ pubkey: '', balance_msats: 1000, ledger: [] })
+    await asking
+    expect(S().cloud.balanceChecking).toBe(true)
+    mine.resolve({ pubkey: S().identity.pubkey, balance_msats: 2000, ledger: [] })
+    await bAsking
+    expect(S().cloud.balanceChecking).toBe(false)
+    expect(S().cloud.balance?.msats).toBe(2000)
   })
 
   it('with no switch, the figure is shown and kept for the identity that asked', async () => {

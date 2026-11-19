@@ -37,7 +37,7 @@ if (typeof localStorage === 'undefined') {
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { useWorkshop } from '../../store/useWorkshop'
 import { useShardFolders } from '../../store/useShardFolders'
-import { useCyberspace } from '../../store/useCyberspace'
+import '../../store/useCyberspace'
 import { EMPTY_TREE } from '../../lib/shardFolders'
 import { BounceChip, BounceRow } from '../shardRows'
 import { ShardList } from '../sheets/MenuSheet'
@@ -197,7 +197,7 @@ describe('the chip', () => {
     const a = withBounce(pad('Trampoline'), 6)
     const b = pad('Plain')
     useWorkshop.setState({ shards: [a, b], currentId: a.id })
-    useShardFolders.setState({ owner: useCyberspace.getState().identity.pubkey, tree: EMPTY_TREE, storage: 'indexeddb' })
+    useShardFolders.setState({ tree: EMPTY_TREE, storage: 'indexeddb' })
     const m = await mount(<ShardList currentId={a.id} onOpen={() => {}} />)
     expect(m.says('Plain')).toBe(true)
     const chips = m.all().filter((h) => String(h.props.className ?? '').includes('ws__bounce-chip'))

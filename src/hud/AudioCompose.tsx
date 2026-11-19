@@ -27,6 +27,8 @@ import { GoArrow } from './ui/GoArrow'
 
 /** A person reads the upload prompt, as for a profile picture. */
 const UPLOAD_SIGN_PATIENCE_MS = 60_000
+/** Said when the identity changed while a file was prepared for upload. */
+const UPLOAD_SWITCHED = 'You switched identity while this file was being uploaded, so it was not used. Upload it again as the identity signed in now.'
 
 type Status = { tone: 'ok' | 'warn' | 'note'; text: string }
 
@@ -104,8 +106,19 @@ export function AudioUpload({ idPrefix, initial, submitLabel, onReady, onCancel 
     const host = target.replace(/^https?:\/\//, '')
     setBusy(true)
     setStatus({ tone: 'note', text: `Encrypting and uploading to ${host}. Your signer may ask.` })
+    // The upload is signed after the file is encrypted, by whoever is signed
+    // in by then: a switch meanwhile had the new identity sign the old one's
+    // upload. Refused before the signer is asked, and an upload finished
+    // after a switch is not handed on to be placed (identity-switch audit,
+    // 2026-11-19).
+    const owner = me
+    const switched = (): boolean => useCyberspace.getState().identity.pubkey !== owner
     try {
-      const u = await sealAndUpload(file, target, (t) => useCyberspace.getState().signEvent(t, UPLOAD_SIGN_PATIENCE_MS))
+      const u = await sealAndUpload(file, target, (t) => {
+        if (switched()) throw new Error(UPLOAD_SWITCHED)
+        return useCyberspace.getState().signEvent(t, UPLOAD_SIGN_PATIENCE_MS)
+      })
+      if (switched()) throw new Error(UPLOAD_SWITCHED)
       // Kept even when the form has closed: the upload went there.
       blossom.remember(target)
       if (gone.current) return

@@ -183,4 +183,36 @@ describe('personal lists never lose a change', () => {
     expect(shown.value).toEqual([])
     expect(await stored(A)).toEqual([])
   })
+
+  it('a failed write followed by a switch is held for its identity and written later (review of #827)', async () => {
+    let failNext = false
+    const { list } = await fresh((real) => ({
+      writeList: async (...args: Parameters<Db['writeList']>) => { if (failNext) { failNext = false; throw new Error('write failed') } return real.writeList(...args) },
+    }))
+    await list.setOwner(A)
+    failNext = true
+    list.save(['kept'])
+    const away = list.setOwner(B)
+    await away; await list.flush()
+    await list.setOwner(A)
+    expect(shown.value).toEqual(['kept'])
+    expect(await stored(A)).toEqual(['kept'])
+  })
+
+  it('a list made after the stored one was shown replaces it, even after a failed write (review of #827)', async () => {
+    let failNext = false
+    const { list } = await fresh((real) => ({
+      writeList: async (...args: Parameters<Db['writeList']>) => { if (failNext) { failNext = false; throw new Error('write failed') } return real.writeList(...args) },
+    }))
+    await list.setOwner(A)
+    list.save(['x', 'y'])
+    await list.flush()
+    failNext = true
+    list.save(['y'])
+    await list.flush()
+    list.save(['z', 'y'])
+    await list.flush()
+    expect(shown.value).toEqual(['z', 'y'])
+    expect(await stored(A)).toEqual(['z', 'y'])
+  })
 })

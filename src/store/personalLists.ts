@@ -117,8 +117,17 @@ export function personalList<T>(spec: PersonalListSpec<T>): PersonalList<T> {
   let gen = 0
   /** Reads for `owner` queued or running. */
   let reading = 0
-  /** Per identity, the newest whole list changed before its stored list was read (or after a write failed). */
-  const early = new Map<string, T>()
+  /**
+   * Per identity, the newest list changed before its stored list was read,
+   * or after a write failed. `whole`: made from the stored list as shown
+   * (after a failed write), so it replaces it as it is; otherwise it was
+   * made before the stored list was ever shown, and is merged with it.
+   */
+  const early = new Map<string, { value: T; whole: boolean }>()
+  /** Per identity, changes counted: a failed write is held only while it is that identity's newest. */
+  const seq = new Map<string, number>()
+  /** Whether `owner`'s stored list has been shown since the switch to it. */
+  let shownStored = false
   let queue: Promise<void> = Promise.resolve()
   const then = (step: () => Promise<void>): Promise<void> => {
     queue = queue.then(step).catch((err: unknown) => { console.warn(`[personal] ${spec.name}: ${err instanceof Error ? err.message : String(err)}`) })
@@ -174,7 +183,7 @@ export function personalList<T>(spec: PersonalListSpec<T>): PersonalList<T> {
     for (;;) {
       const held = early.get(who)
       if (held === undefined) return value
-      const merged = spec.merge(read, held)
+      const merged = held.whole ? held.value : spec.merge(read, held.value)
       try { await persist(who, merged) } catch (err) {
         console.warn(`[personal] ${spec.name}: could not keep a change: ${err instanceof Error ? err.message : String(err)}`)
         return null
@@ -192,7 +201,7 @@ export function personalList<T>(spec: PersonalListSpec<T>): PersonalList<T> {
     return then(async () => {
       try {
         if (!isOwner(who)) {
-          if (owner === who && gen === started) { loaded = true; spec.show(early.get(who) ?? spec.empty, who) }
+          if (owner === who && gen === started) { loaded = true; shownStored = true; spec.show(early.get(who)?.value ?? spec.empty, who) }
           return
         }
         const value = await settle(who)
@@ -200,6 +209,7 @@ export function personalList<T>(spec: PersonalListSpec<T>): PersonalList<T> {
         // A change on screen since this read began is newer, and is written after it.
         if (loaded && gen !== started) return
         loaded = true
+        shownStored = true
         spec.show(value, who)
       } finally {
         if (counted) reading = Math.max(0, reading - 1)
@@ -218,23 +228,25 @@ export function personalList<T>(spec: PersonalListSpec<T>): PersonalList<T> {
       if (was && early.has(was) && isOwner(was)) void then(async () => { await settle(was) })
       owner = who
       loaded = false
+      shownStored = false
       reading = 0
       gen++
       // A new identity shows nothing of the old one's, from this moment.
-      spec.show(early.get(who) ?? spec.empty, who)
+      spec.show(early.get(who)?.value ?? spec.empty, who)
       return read(who)
     },
     save: (value) => {
       const who = owner
       if (!who) { console.warn(`[personal] ${spec.name}: a change before any identity was known was not kept`); return }
       gen++
+      const n = (seq.get(who) ?? 0) + 1
+      seq.set(who, n)
       if (!loaded || !isOwner(who)) {
-        early.set(who, value)
+        early.set(who, { value, whole: shownStored })
         // Nothing read yet, or the read failed: read (again), which writes it.
         if (reading === 0) void read(who)
         return
       }
-      const mine = gen
       void then(async () => {
         try { await persist(who, value) } catch (err) {
           console.warn(`[personal] ${spec.name}: could not keep a change: ${err instanceof Error ? err.message : String(err)}`)
@@ -242,8 +254,8 @@ export function personalList<T>(spec: PersonalListSpec<T>): PersonalList<T> {
           // first. Only while it is the newest: a later change is a whole
           // list made after it, and holding this one would bring back what
           // that one removed.
-          if (gen === mine) {
-            early.set(who, value)
+          if (seq.get(who) === n) {
+            early.set(who, { value, whole: true })
             if (owner === who) loaded = false
           }
         }

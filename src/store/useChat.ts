@@ -183,6 +183,9 @@ export function buzzFor(senders: readonly string[], now = Date.now()): boolean {
   return buzzGate(senders, now, MENTION_BUZZ_MS, 60)
 }
 
+/** Said when the identity changed while a line was sealed: nothing was signed or sent. */
+const CHAT_SWITCHED = 'You switched identity while this line was being sealed, so it was not sent. Send it again to say it as the identity signed in now.'
+
 export const useChat = create<ChatState>((set, get) => ({
   lines: loadLines(),
   open: false,
@@ -243,7 +246,23 @@ export const useChat = create<ChatState>((set, get) => ({
       // (DECK-0005 §3.2, The plane).
       const inner = chatRumor(chatInnerTemplate(wire.text, cyber.position, cyber.headPlane, now, key.lookupId, wire.pubkeys), cyber.identity.pubkey)
       set({ sendStatus: 'sending' })
-      const outer = await cyber.signEvent(await bagTemplate([inner], hexToBytes(key.keyHex), key.lookupId, key.height, now, CHAT_BAG_KIND))
+      const sealed = await bagTemplate([inner], hexToBytes(key.keyHex), key.lookupId, key.height, now, CHAT_BAG_KIND)
+      // The line names its author, and the envelope is signed by whoever is
+      // signed in when the seal is done. A switch while it was sealed had the
+      // new identity sign an envelope holding the old one's line: both keys in
+      // one event anyone in the room can open, a public link between them.
+      // Looked at before the signer is asked, so the new identity is never
+      // asked to sign it, and again after, so it is never sent (identity-switch
+      // audit, 2026-11-19). The line stays in the box to send again.
+      if (useCyberspace.getState().identity.pubkey !== inner.pubkey) {
+        set({ sendStatus: 'error', sendError: CHAT_SWITCHED })
+        return
+      }
+      const outer = await cyber.signEvent(sealed)
+      if (outer.pubkey !== inner.pubkey) {
+        set({ sendStatus: 'error', sendError: CHAT_SWITCHED })
+        return
+      }
       const result = await publishMany(relaySet(), outer)
       if (!result.ok) {
         set({ sendStatus: 'error', sendError: `Not sent: ${result.reason}` })

@@ -488,7 +488,10 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
   const budgetKey = budget && !nested ? budget.key : undefined
   // Coarsely, in eighths of a doubling: a step of the anchor moves every
   // shard's centre a little, and a shard says so only when it has moved a
-  // good way nearer or farther, not on every step.
+  // good way nearer or farther, not on every step. A world shard that places
+  // nothing is handed its first centre for good (WorldShards budgetCentre):
+  // its demand is nothing, so its distance is never read. Read the centre for
+  // anything else here and that shard's goes stale.
   const distance = budget ? Math.round(Math.log2(1 + Math.hypot(...budget.centre)) * 8) / 8 : 0
   useLayoutEffect(() => {
     if (!budgetKey) return

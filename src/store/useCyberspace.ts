@@ -1029,8 +1029,13 @@ export interface CyberspaceState {
    * because the old chain's events still exist on relays but no longer lead
    * anywhere.
    */
-  /** Rejects when the signature is refused, or when the identity changed while it was asked for. */
-  respawn: () => Promise<void>
+  /**
+   * Rejects when the signature is refused, or when the identity changed
+   * while it was asked for. `forPubkey`: the identity it was asked for, when
+   * the asking began before this call (respawnFromBrokenChain); else the one
+   * signed in now.
+   */
+  respawn: (forPubkey?: string) => Promise<void>
   /**
    * Respawn from a broken chain (arkinox, 2026-10-07, Q3): first the last
    * valid position goes into the View panel's RECENT as "End of Chain"
@@ -6425,12 +6430,27 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     set({ publishRequest: get().publishRequest + 1 })
   },
 
-  respawn: async () => {
+  respawn: async (forPubkey) => {
+    // The identity this respawn is for, fixed before anything is awaited. The
+    // look below can wait on the network, and the identity read after it was
+    // whoever was signed in by then: a switch meanwhile respawned the new
+    // identity, which signed a spawn nobody asked it for, lost its chain to
+    // it, and had its kept paid HOSAKA job forgotten (identity-switch audit,
+    // 2026-11-19). A switch to another identity and back counts as a switch
+    // too: the work it would cancel and clear may be a different job by now.
+    const forKey = forPubkey ?? get().identity.pubkey
+    const switches = switchCount
+    const stillFor = (): void => {
+      if (switchCount !== switches || get().identity.pubkey !== forKey) throw new Error('the identity changed before this respawn could start, so nothing was respawned')
+    }
+    stillFor()
     // A deploy requiring newer chain rules refuses the new spawn's signing,
     // so ask first: before it, nothing may be cancelled or cleared, a kept
     // HOSAKA job above all, which is paid work (lib/versionGate.ts).
     const versionLook = lookBeforeMove()
-    if (!(versionLook instanceof Promise ? await versionLook : versionLook)) {
+    const mayMove = versionLook instanceof Promise ? await versionLook : versionLook
+    stillFor()
+    if (!mayMove) {
       set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: VERSION_BLOCKED_MESSAGE } })
       throw new Error(VERSION_BLOCKED_MESSAGE)
     }
@@ -6471,7 +6491,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // review of #227). Compared by key, because signEvent may have rebuilt a
     // dead remote signer's channel and swapped in the rebuilt one for the
     // same identity.
-    if (get().identity.pubkey !== identity.pubkey || currentSigner.pubkey !== signer.pubkey) {
+    // A switch away and back counts too, as before the signature: the cloud
+    // flow below is reset, and it may be a newer job of the same identity by
+    // now (review of the identity-switch audit, 2026-11-19).
+    if (switchCount !== switches || get().identity.pubkey !== identity.pubkey || currentSigner.pubkey !== signer.pubkey) {
       throw new Error('the identity changed while the respawn waited for its signature, so nothing was respawned')
     }
     const fresh = derive({ ...signed, held: keepHeld })
@@ -6498,19 +6521,30 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   respawnFromBrokenChain: async (forPubkey) => {
-    // Confirmed for one identity: never carried out for another.
-    if (forPubkey !== undefined && forPubkey !== get().identity.pubkey) throw new Error('the identity changed after this respawn was confirmed, so nothing was respawned')
+    // Confirmed for one identity: never carried out for another, neither now
+    // nor after either wait below. Each wait can be long enough for a switch,
+    // and the respawn at the end used to go ahead on whoever was signed in by
+    // then (identity-switch audit, 2026-11-19).
+    const forKey = forPubkey ?? get().identity.pubkey
+    const switches = switchCount
+    const stillFor = (): void => {
+      if (switchCount !== switches || get().identity.pubkey !== forKey) throw new Error('the identity changed after this respawn was confirmed, so nothing was respawned')
+    }
+    stillFor()
     // A deploy requiring newer chain rules refuses the respawn (respawn
     // below): asked before the End of Chain entry is added for it.
     const versionLook = lookBeforeMove()
-    if (!(versionLook instanceof Promise ? await versionLook : versionLook)) throw new Error(VERSION_BLOCKED_MESSAGE)
+    const mayMove = versionLook instanceof Promise ? await versionLook : versionLook
+    stillFor()
+    if (!mayMove) throw new Error(VERSION_BLOCKED_MESSAGE)
     // The stop that asks for this respawn: a structural break, or a proof
     // in a form the rules reject (lib/chainStop.ts). With no valid event at
     // all (an invalid spawn, Q7), the spawn row names the entry, and it
     // stands where the identity is frozen: the spawn coordinate.
     const at = await respawnPointOf(get().actions())
+    stillFor()
     if (at) addRecentView({ input: at.coordHex, label: endOfChainLabel(at.id), plane: at.plane, pinned: true })
-    await get().respawn()
+    await get().respawn(forKey)
   },
 
   applySelfCheck: (pubkey, verdict) => {

@@ -295,6 +295,10 @@ describe('a request a relay does not confirm in time', () => {
     const pool = bunker.pool as { publish: (r: string[], e: object) => Promise<string>[] }
     const publish = vi.spyOn(getSignerPool(), 'publish')
     try {
+      // The text nostr-tools rejects an unconfirmed publish with (AbstractRelay,
+      // publishTimeout): the wrapper keys on it, so a rewording must fail here.
+      const { readFileSync } = await import('node:fs')
+      expect(readFileSync('node_modules/nostr-tools/lib/esm/abstract-relay.js', 'utf8')).toContain('new Error("publish timed out")')
       // What nostr-tools' BunkerSigner does with each request: Promise.any over the relays.
       publish.mockImplementation(() => [Promise.reject(new Error('publish timed out'))])
       await expect(Promise.any(pool.publish([BACKUP_SIGNER_RELAY], {}))).resolves.toMatch(/^unconfirmed: /)

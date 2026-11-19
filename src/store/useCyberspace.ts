@@ -6491,7 +6491,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // review of #227). Compared by key, because signEvent may have rebuilt a
     // dead remote signer's channel and swapped in the rebuilt one for the
     // same identity.
-    if (get().identity.pubkey !== identity.pubkey || currentSigner.pubkey !== signer.pubkey) {
+    // A switch away and back counts too, as before the signature: the cloud
+    // flow below is reset, and it may be a newer job of the same identity by
+    // now (review of the identity-switch audit, 2026-11-19).
+    if (switchCount !== switches || get().identity.pubkey !== identity.pubkey || currentSigner.pubkey !== signer.pubkey) {
       throw new Error('the identity changed while the respawn waited for its signature, so nothing was respawned')
     }
     const fresh = derive({ ...signed, held: keepHeld })

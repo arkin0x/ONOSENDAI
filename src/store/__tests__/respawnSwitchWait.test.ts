@@ -32,6 +32,12 @@ vi.mock('../../lib/versionGate', async (orig) => ({
   ...(await orig<typeof import('../../lib/versionGate')>()),
   lookBeforeMove: () => gate.hold ?? true,
 }))
+/** The look for where a broken chain froze, held open the same way. */
+const point = vi.hoisted(() => ({ hold: null as Promise<void> | null }))
+vi.mock('../../lib/chainStop', async (orig) => {
+  const real = await orig<typeof import('../../lib/chainStop')>()
+  return { ...real, respawnPointOf: async (...args: Parameters<typeof real.respawnPointOf>) => { if (point.hold) await point.hold; return real.respawnPointOf(...args) } }
+})
 const cleared = vi.hoisted(() => [] as string[])
 vi.mock('../../lib/cloud', async (orig) => {
   const real = await orig<typeof import('../../lib/cloud')>()
@@ -41,6 +47,7 @@ vi.mock('../../lib/cloud', async (orig) => {
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
 import { useCyberspace } from '../useCyberspace'
+import { derezzNow } from '../../hud/DerezzPanel'
 import type { PendingCloudJob } from '../../lib/cloud'
 
 const S = () => useCyberspace.getState()
@@ -92,6 +99,35 @@ describe('a switch of identity while a respawn waits for its version look', () =
     expect(S().respawns).toBe(b.respawns)
     expect(S().cloud.job?.jobId).toBe('b-kept-job')
     expect(cleared).not.toContain(b.pubkey)
+  })
+
+  it('RESPAWN NOW confirmed for A, switched to B and back to A while it finds where the chain froze: refused', async () => {
+    const a = generateSecretKey()
+    await S().useNsec(nip19.nsecEncode(a))
+    const before = S().respawns
+    let release: () => void = () => {}
+    point.hold = new Promise<void>((resolve) => { release = resolve })
+    const respawning = S().respawnFromBrokenChain(getPublicKey(a))
+    await switchToB()
+    await S().useNsec(nip19.nsecEncode(a))
+    point.hold = null
+    release()
+    await expect(respawning).rejects.toThrow(/identity changed/)
+    expect(S().respawns).toBe(before)
+  })
+
+  it('DEREZZ NOW pressed as A, B signed in while it looks at the chain: nothing is respawned for B', async () => {
+    await S().useNsec(nip19.nsecEncode(generateSecretKey()))
+    let release: () => void = () => {}
+    point.hold = new Promise<void>((resolve) => { release = resolve })
+    const derezzing = derezzNow()
+    const b = await switchToB()
+    point.hold = null
+    release()
+    expect(await derezzing).toMatch(/identity changed/)
+    expect(S().identity.pubkey).toBe(b.pubkey)
+    expect(S().respawns).toBe(b.respawns)
+    expect(S().cloud.job?.jobId).toBe('b-kept-job')
   })
 
   it('with no switch, the respawn still lands once the look says go', async () => {

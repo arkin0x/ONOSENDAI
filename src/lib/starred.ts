@@ -111,7 +111,6 @@ export interface StarSpot {
   input: string
 }
 
-/** Where the list lives on this device. Shared by every identity signed in here. */
 /** Where builds before 2026-11-19 kept the list, once per device; now only read, to adopt (legacyPlaces). */
 export const STARRED_KEY = 'onosendai:starred-places'
 

@@ -104,3 +104,43 @@ export function adopt(db: IDBDatabase, owner: string, name: string, legacy: unkn
     tx.onabort = () => reject(tx.error ?? new Error('IndexedDB write aborted'))
   })
 }
+
+/**
+ * Where IndexedDB cannot be opened at all (some private windows), each
+ * identity's list is kept in localStorage under its own key instead, with
+ * the same adoption rule (a marker key). The next time IndexedDB opens, such
+ * a list is merged into the identity's row and its key removed only after
+ * that write is confirmed (store/personalLists.ts).
+ */
+export const fallbackKey = (owner: string, name: string): string => `onosendai:personal:${owner}:${name}`
+const fallbackAdopted = (name: string): string => `onosendai:personal:adopted:${name}`
+
+/** An identity's fallback list, or undefined. Throws when localStorage cannot be read. */
+export function readFallback(owner: string, name: string): unknown {
+  const raw = localStorage.getItem(fallbackKey(owner, name))
+  if (raw === null) return undefined
+  try { return JSON.parse(raw) as unknown } catch { return undefined }
+}
+
+/** Keep an identity's fallback list. Throws when localStorage refuses (full, private mode). */
+export function writeFallback(owner: string, name: string, value: unknown): void {
+  if (!isOwner(owner)) throw new Error('not an identity')
+  localStorage.setItem(fallbackKey(owner, name), JSON.stringify(value))
+}
+
+/** adopt, in localStorage: the device-wide list goes to `owner` once, unless it has its own. */
+export function adoptFallback(owner: string, name: string, legacy: unknown): unknown {
+  let value = readFallback(owner, name)
+  if (localStorage.getItem(fallbackAdopted(name)) !== null) return value
+  if (value === undefined && legacy !== undefined && isOwner(owner)) {
+    writeFallback(owner, name, legacy)
+    value = legacy
+  }
+  localStorage.setItem(fallbackAdopted(name), isOwner(owner) ? owner : '')
+  return value
+}
+
+/** Drop an identity's fallback list, once IndexedDB holds it. */
+export function clearFallback(owner: string, name: string): void {
+  try { localStorage.removeItem(fallbackKey(owner, name)) } catch { /* it stays, and is merged again: a union, so nothing is lost */ }
+}

@@ -1956,7 +1956,8 @@ const targetsList = personalList<KeptTarget[]>({
   },
   clean: cleanTargets,
   empty: [],
-  merge: (stored, early) => cleanTargets([...early, ...stored]),
+  // The early list is the newer whole list; a name it lacks is kept from what was stored.
+  merge: (stored, early) => cleanTargets([...early.map((t) => ({ ...t, name: t.name ?? stored.find((o) => o.pubkey === t.pubkey)?.name ?? null })), ...stored]),
   show: (list) => {
     const was = useCyberspace.getState().targets
     const targets: Record<string, TrackedTarget> = {}

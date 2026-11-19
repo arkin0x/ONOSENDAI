@@ -680,7 +680,11 @@ export async function driveCloudJob(
 
     if (record.stage === 'paid') {
       hooks.onStage('paid', { invoice: null, message: 'Payment settled. Starting the job.' })
-      const started = await client.startJob(record.jobId)
+      // Under the flow's signal like every other request here: started without
+      // it, a switch of identity that ended the flow still had the new
+      // identity sign and send the START of the old one's paid job
+      // (identity-switch audit, 2026-11-19).
+      const started = await client.startJob(record.jobId, signal)
       if (started.payment_required && started.deposit) {
         // Settled short: HOSAKA credited what arrived and asks for the rest.
         record = { ...record, stage: 'awaiting_payment', deposit: invoiceOf(started.deposit) }

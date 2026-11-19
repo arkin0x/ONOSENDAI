@@ -8,7 +8,7 @@
  * the honest picture. Culled past the same reach as Earth and the spawn mark.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { followsVersion, onFollows, readFollows, trustedPlacement } from '../lib/trust'
 import { useFrame } from '@react-three/fiber'
 import type { Group, Material, Object3D } from 'three'
@@ -261,12 +261,64 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
  * dimmed, so a tap reaches what is behind them.
  */
 export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef, occludes = false }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void; occludes?: boolean }): JSX.Element {
+  // A landing moves the anchor, and with it every shard's centre: only this
+  // group's position follows it. What the shard draws keeps its props, so
+  // React skips it (PlacedShardBody), as it skips its GPU buffers (steadied).
+  // Written during render on purpose: the same value every time for a shard
+  // that places nothing, and this render's centre for one that does.
+  const told = useRef(w.centre)
+  told.current = budgetCentre(told.current, w.centre, w.shard)
+  return (
+    <group position={w.centre}>
+      <PlacedShardBody shardKey={w.key} shard={w.shard} trusted={trustedPlacement(w.container, w.author)} scale={w.scale} clip={w.clip} pose={w.pose} centre={told.current} birth={birth} moving={moving} tappable={tappable && !passesTaps(w.key)} drawnRef={drawnRef} occludes={occludes} />
+    </group>
+  )
+}
+
+/**
+ * The centre a world shard tells the scene's budget (ShardMesh `budget`),
+ * kept from `was` while it changes nothing there (arkinox, 2026-11-19: WALK
+ * "unbearable" on his phone). Every landing moves the anchor and so every
+ * shard's centre, and a new centre re-rendered every shard in the world, its
+ * mesh, wall hint and tap target, two or three times a landing: at a spot of
+ * a hundred shards that was most of what a landing cost the page. The budget
+ * reads the centre only for placed objects: how near the shard is, to share
+ * the scene's placements out nearest first, and where each of its own
+ * placements stands, to keep the nearest (scene/meshBudget.ts, ShardMesh
+ * budgeted). A shard that places nothing asks the budget for nothing, so the
+ * distance it reports from its first centre, stale after a move, is never
+ * read; one that places objects always has the new centre.
+ */
+export function budgetCentre(was: [number, number, number], now: [number, number, number], shard: ShardModel): [number, number, number] {
+  return (shard.parts?.length ?? 0) > 0 ? now : was
+}
+
+interface PlacedShardBodyProps {
+  shardKey: string
+  shard: ShardModel
+  /** Whether its placed objects draw from the trusted share (lib/trust.ts trustedPlacement): asked by the parent on each of its renders, as whom you follow changes. */
+  trusted: boolean
+  scale: number
+  clip: Box
+  pose: Pose
+  /** Where it stands in the render frame, as its budget is told (budgetCentre). */
+  centre: [number, number, number]
+  birth: number | undefined
+  moving: boolean
+  /** It takes taps: false for TV's finds, and for a shard the tutorial lets taps through (passesTaps). */
+  tappable: boolean
+  drawnRef?: (g: Group | null) => void
+  occludes: boolean
+}
+
+/** What a placed shard draws, at the place its parent group puts it: re-rendered only when one of its own props changes. */
+const PlacedShardBody = memo(function PlacedShardBody({ shardKey, shard, trusted, scale, clip, pose, centre, birth, moving, tappable, drawnRef, occludes }: PlacedShardBodyProps): JSX.Element {
   const drawn = useRef<Group | null>(null)
   const setDrawn = useCallback((g: Group | null) => { drawn.current = g; drawnRef?.(g) }, [drawnRef])
-  const dim = useBuildDimmed(occludes && !moving ? w.key : undefined, drawn)
+  const dim = useBuildDimmed(occludes && !moving ? shardKey : undefined, drawn)
   // Its placed objects are drawn within the scene's budget, by trust and nearest first (scene/meshBudget.ts).
-  const trusted = trustedPlacement(w.container, w.author)
-  const budget = useMemo(() => ({ key: w.key, trusted, centre: w.centre, scale: w.scale }), [w.key, trusted, w.centre, w.scale])
+  const budget = useMemo(() => ({ key: shardKey, trusted, centre, scale }), [shardKey, trusted, centre, scale])
+  const tap = useCallback(() => useShards.getState().selectSecret(shardKey), [shardKey])
   // Moving (EDIT): drawn as a ghost is, with ordinary blending, since a world
   // face writes its colour opaque whatever its opacity (ShardMesh TAG_BLEND),
   // and every material's opacity follows the breath each frame.
@@ -276,15 +328,15 @@ export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRe
     drawn.current.traverse(breathe)
   })
   return (
-    <group position={w.centre}>
+    <>
       <group ref={setDrawn}>
-        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} noBloom={moving} clip={w.clip} pose={w.pose} budget={budget} dim={moving ? 1 : dim} />
+        <ShardMesh shard={shard} scale={scale} birth={birth} world ghost={moving} noBloom={moving} clip={clip} pose={pose} budget={budget} dim={moving ? 1 : dim} />
       </group>
       {/* A wall you cannot see, outlined for a moment after it stopped your walk (store/wallHint.ts). */}
-      <WalkContactHint shardKey={w.key} shard={w.shard} scale={w.scale} clip={w.clip} pose={w.pose} />
+      <WalkContactHint shardKey={shardKey} shard={shard} scale={scale} clip={clip} pose={pose} />
       {/* Not tappable while it moves: the ghost is the one being aimed. */}
       {/* Dimmed in build mode, a tap passes through it (BuildOccluders tapsPassThrough). */}
-      {!moving && tappable && !passesTaps(w.key) && <TapTarget measure={drawn} occluder={occludes ? w.key : undefined} onTap={() => useShards.getState().selectSecret(w.key)} />}
-    </group>
+      {!moving && tappable && <TapTarget measure={drawn} occluder={occludes ? shardKey : undefined} onTap={tap} />}
+    </>
   )
-}
+})

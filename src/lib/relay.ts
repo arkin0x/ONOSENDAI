@@ -696,9 +696,23 @@ let watchingSigner = false
  * throwaway key a page starts with (the real-bunker run, 2026-11-04).
  */
 function reauthAs(pubkey: string): void {
-  const stale = [...authedAs].filter(([, as]) => as !== pubkey).map(([url]) => url)
-  if (stale.length === 0) return
-  live.resumeAll(() => dropRelays(stale))
+  const stale = new Set([...authedAs].filter(([, as]) => as !== pubkey).map(([url]) => url))
+  // And every socket whose AUTH another key signed, whether or not this
+  // file's own sign-in settled on it. authedAs is written only there
+  // (settleAuth); nostr-tools answers a challenge by itself the moment it
+  // comes (automaticallyAuth), and a publish or a feed told auth-required
+  // signs in by itself too (onauth). A socket signed in only so, opened by a
+  // read that does not sign in first (a count, a feed read, a light publish),
+  // stayed signed in as the old key through a switch, and the new identity's
+  // reads and writes went over the old one's sign-in, tying the two keys
+  // together at the relay (identity-switch audit, 2026-11-19).
+  for (const [url, relay] of (pool as unknown as { relays?: Map<string, AuthRelay> } | null)?.relays ?? []) {
+    const ws = relay.ws
+    const as = typeof ws === 'object' && ws !== null ? signedBy.get(ws) : undefined
+    if (as && as !== pubkey) stale.add(url)
+  }
+  if (stale.size === 0) return
+  live.resumeAll(() => dropRelays([...stale]))
 }
 
 /**

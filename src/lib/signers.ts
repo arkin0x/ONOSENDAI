@@ -256,6 +256,23 @@ export async function nip07Signer(waitMs = 0): Promise<Signer> {
 export const ANSWERS_READY_MS = 3000
 
 /**
+ * A request a relay took but did not confirm in time (nostr-tools' "publish
+ * timed out", 4.4 s) may well have reached the signer: a slow relay, or a
+ * phone's slow link, confirms late. nostr-tools sends each request with
+ * Promise.any over the bunker's relays, so one such timeout on every relay
+ * failed the signature at once ("All promises were rejected") while its
+ * answer was on its way. Until 2026-11-19 a dead second relay in every saved
+ * session hid this: a relay that cannot be reached counts as sent. Now the
+ * request waits for its answer like any other, and a request truly lost runs
+ * into the signature's own time limit, which drops the sockets and asks again.
+ * A relay's refusal (an OK false) still fails it.
+ */
+function unconfirmed(err: unknown): string {
+  if (/timed out/i.test(String(err))) return `unconfirmed: ${String(err)}`
+  throw err
+}
+
+/**
  * The pool, as a bunker signer uses it, with each request held until the
  * subscription its answer comes on is in place (its EOSE), at most
  * ANSWERS_READY_MS. nostr-tools opens that subscription and sends the
@@ -277,7 +294,7 @@ function answersFirst(): unknown {
     },
     publish: (relays: string[], event: NostrEvent, params?: Parameters<AbstractSimplePool['publish']>[2]) => {
       const waited = ready
-      return relays.map((url) => waited.then(() => pool.publish([url], event as never, params)[0]))
+      return relays.map((url) => waited.then(() => pool.publish([url], event as never, params)[0]).catch(unconfirmed))
     },
   }
 }

@@ -279,3 +279,34 @@ describe('a bunker\'s sockets', () => {
     }
   })
 })
+
+describe('a request a relay does not confirm in time', () => {
+  it('still counts as sent: its answer may be on its way; a refusal still fails it', async () => {
+    const { signerFromPref } = await signers()
+    const { getSignerPool } = await import('../relay')
+    const remote = getPublicKey(generateSecretKey())
+    const signer = await signerFromPref({
+      kind: 'nip46',
+      pubkey: getPublicKey(generateSecretKey()),
+      bunkerUri: `bunker://${remote}?relay=${encodeURIComponent(BACKUP_SIGNER_RELAY)}`,
+      clientNsec: nip19.nsecEncode(generateSecretKey()),
+      nostrConnectSession: true,
+    })
+    const pool = bunker.pool as { publish: (r: string[], e: object) => Promise<string>[] }
+    const publish = vi.spyOn(getSignerPool(), 'publish')
+    try {
+      // The text nostr-tools rejects an unconfirmed publish with (AbstractRelay,
+      // publishTimeout): the wrapper keys on it, so a rewording must fail here.
+      const { readFileSync } = await import('node:fs')
+      expect(readFileSync('node_modules/nostr-tools/lib/esm/abstract-relay.js', 'utf8')).toContain('new Error("publish timed out")')
+      // What nostr-tools' BunkerSigner does with each request: Promise.any over the relays.
+      publish.mockImplementation(() => [Promise.reject(new Error('publish timed out'))])
+      await expect(Promise.any(pool.publish([BACKUP_SIGNER_RELAY], {}))).resolves.toMatch(/^unconfirmed: /)
+      publish.mockImplementation(() => [Promise.reject(new Error('blocked: no'))])
+      await expect(Promise.any(pool.publish([BACKUP_SIGNER_RELAY], {}))).rejects.toThrow('All promises were rejected')
+    } finally {
+      publish.mockRestore()
+      await signer.close?.()
+    }
+  })
+})

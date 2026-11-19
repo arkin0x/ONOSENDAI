@@ -796,6 +796,12 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
     const url = apiUrl + path
     const headers: Record<string, string> = { accept: 'application/json', ...(init.headers ?? {}) }
     if (init.body !== undefined) headers['content-type'] = 'application/json'
+    // An ended flow asks the signer for nothing. A switch of identity ends
+    // the cloud flow by aborting its signal, and the authorization was signed
+    // first: the identity signed in now was asked to sign for the old one's
+    // request (identity-switch audit, 2026-11-19). Looked at again after the
+    // signature, which can take a remote signer a while.
+    if (init.signal?.aborted) throw abortError()
     if (init.auth) headers.authorization = await authorization(url, init.method)
 
     if (init.signal?.aborted) throw abortError()

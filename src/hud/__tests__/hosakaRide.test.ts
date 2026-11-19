@@ -175,7 +175,8 @@ describe('RIDE VIA HOSAKA', () => {
     paid.resolve({ ...deposit, status: 'settled', settled_msats: 6_000 })
     await run
     expect(fake.waitForDeposit.mock.calls[0][0]).toBe('dep-1')
-    expect(fake.startJob).toHaveBeenCalledWith('job-ride')
+    // Under the flow's signal, so a switch of identity that ends the flow ends the start too.
+    expect(fake.startJob).toHaveBeenCalledWith('job-ride', expect.any(AbortSignal))
     expect(tag(head(), 'A')).toBe('hyperjump')
     expect(fake.submitRide).toHaveBeenCalledTimes(1)
   })

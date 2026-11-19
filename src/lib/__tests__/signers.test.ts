@@ -154,8 +154,9 @@ describe('a saved session that names a retired signer relay', () => {
     expect(url.host).toBe(remote)
     expect(url.searchParams.getAll('relay')).toEqual([OLD_QR])
     expect(url.searchParams.get('secret')).toBe('abc')
-    // Any spelling of it: a trailing slash, upper case, unencoded.
+    // Any spelling of it: a trailing slash, upper case, unencoded, a trailing dot.
     expect(new URL(withoutRetiredSignerRelays(`bunker://${remote}?relay=wss://relay.example&relay=WSS://Relay.NSEC.app/`)).searchParams.getAll('relay')).toEqual(['wss://relay.example'])
+    expect(new URL(withoutRetiredSignerRelays(`bunker://${remote}?relay=wss://relay.nsec.app.&relay=wss://relay.example`)).searchParams.getAll('relay')).toEqual(['wss://relay.example'])
   })
 
   it('leaves a URI alone when it names nothing retired, or nothing else', () => {
@@ -166,6 +167,9 @@ describe('a saved session that names a retired signer relay', () => {
     const only = `bunker://${remote}?relay=${RETIRED}`
     expect(withoutRetiredSignerRelays(only)).toBe(only)
     expect(withoutRetiredSignerRelays('not a uri')).toBe('not a uri')
+    // With a path, nostr-tools would read no relays from the rewritten URI: left alone.
+    const slashed = `bunker://${remote}/?relay=${RETIRED}&relay=wss://relay.example`
+    expect(withoutRetiredSignerRelays(slashed)).toBe(slashed)
   })
 
   it('mends the saved preference on load, on disk too, and the session still signs without a new pairing', async () => {
@@ -187,6 +191,8 @@ describe('a saved session that names a retired signer relay', () => {
     expect(pref?.nostrConnectSession).toBe(true)
     expect(new URL(pref!.bunkerUri!).searchParams.getAll('relay')).toEqual([OLD_QR])
     expect(new URL(pref!.bunkerUri!).host).toBe(remote)
+    const { parseBunkerInput } = await import('nostr-tools/nip46')
+    expect((await parseBunkerInput(pref!.bunkerUri!))?.relays).toEqual([OLD_QR])
     const onDisk = JSON.parse(localStorage.getItem('onosendai:signer')!)
     expect(onDisk.bunkerUri).toBe(pref!.bunkerUri)
 
@@ -217,23 +223,47 @@ describe('a saved session that names a retired signer relay', () => {
   })
 })
 
-describe('dropping a bunker\'s sockets', () => {
-  it('leaves the sockets the app itself reads and writes over to the relay layer', async () => {
+describe('a bunker\'s sockets', () => {
+  it('are its own: dropping them closes every bunker relay in the signer pool and none of the app\'s', async () => {
     const { dropSignerSockets } = await signers()
-    const { getPool, relaySet } = await import('../relay')
-    // ONOSENDAI's own relay is both the default signer relay and one the app uses.
-    expect(relaySet().map((u) => new URL(u).host)).toContain('relay.onosendai.tech')
-    const close = vi.spyOn(getPool(), 'close').mockImplementation(() => {})
+    const { getPool, getSignerPool } = await import('../relay')
+    expect(getSignerPool()).not.toBe(getPool())
+    const appClose = vi.spyOn(getPool(), 'close').mockImplementation(() => {})
+    const signerClose = vi.spyOn(getSignerPool(), 'close').mockImplementation(() => {})
     try {
       dropSignerSockets([DEFAULT_SIGNER_RELAY, BACKUP_SIGNER_RELAY])
-      expect(close).toHaveBeenCalledTimes(1)
-      expect(close).toHaveBeenCalledWith([BACKUP_SIGNER_RELAY])
-      close.mockClear()
-      // Only shared relays: nothing is closed.
-      dropSignerSockets([`${DEFAULT_SIGNER_RELAY}/`])
-      expect(close).not.toHaveBeenCalled()
+      expect(signerClose).toHaveBeenCalledWith([DEFAULT_SIGNER_RELAY, BACKUP_SIGNER_RELAY])
+      expect(appClose).not.toHaveBeenCalled()
     } finally {
-      close.mockRestore()
+      appClose.mockRestore()
+      signerClose.mockRestore()
+    }
+  })
+
+  it('are dropped on a restored session\'s reconnect, both relays, so nostr-tools subscribes again on both', async () => {
+    const { signerFromPref, createNostrConnectSession } = await signers()
+    const { getPool, getSignerPool } = await import('../relay')
+    // The relays a default QR names, as its saved session keeps them.
+    const qrRelays = new URL(createNostrConnectSession().uri).searchParams.getAll('relay')
+    const saved = new URL(`bunker://${getPublicKey(generateSecretKey())}`)
+    for (const r of qrRelays) saved.searchParams.append('relay', r)
+    const signer = await signerFromPref({
+      kind: 'nip46',
+      pubkey: getPublicKey(generateSecretKey()),
+      bunkerUri: saved.toString(),
+      clientNsec: nip19.nsecEncode(generateSecretKey()),
+      nostrConnectSession: true,
+    })
+    const appClose = vi.spyOn(getPool(), 'close').mockImplementation(() => {})
+    const signerClose = vi.spyOn(getSignerPool(), 'close').mockImplementation(() => {})
+    try {
+      await signer.reconnect?.()
+      expect(signerClose).toHaveBeenCalledWith([DEFAULT_SIGNER_RELAY, BACKUP_SIGNER_RELAY])
+      expect(appClose).not.toHaveBeenCalled()
+    } finally {
+      appClose.mockRestore()
+      signerClose.mockRestore()
+      await signer.close?.()
     }
   })
 })

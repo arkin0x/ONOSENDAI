@@ -748,6 +748,33 @@ export function getPool(): AbstractSimplePool {
   return pool
 }
 
+let signerPool: AbstractSimplePool | null = null
+
+/**
+ * The pool a remote signer (NIP-46) talks over: sockets of its own, even to a
+ * relay the app also reads and writes. The default signer relay is
+ * ONOSENDAI's own, and sharing its socket tied the signer's subscription to
+ * everything that drops that socket (a switch of identity, a dead-socket
+ * probe, the relay's subscription cap closing the oldest), let the signer's
+ * sends skip the pacing (paceSends) and the signer's own socket drops
+ * (signers.ts dropSignerSockets) close the app's. Built like the app's pool
+ * (pings counted, sends to a closing socket caught), without its AUTH: the
+ * signer relays never ask for one.
+ */
+export function getSignerPool(): AbstractSimplePool {
+  if (!signerPool) {
+    signerPool = new Pool({
+      verifyEvent: verifyUnlessDeferred,
+      maxWaitForConnection: 3000,
+      enablePing: true,
+      // nostr-tools' BunkerSigner subscribes again on its next request once
+      // its subscription has closed; a dropped socket is dialled then.
+      enableReconnect: false,
+    })
+  }
+  return signerPool
+}
+
 interface AuthRelay {
   challenge?: string
   /** nostr-tools' AUTH for the current challenge, kept for the socket's life. */

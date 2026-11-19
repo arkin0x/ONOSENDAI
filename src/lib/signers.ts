@@ -18,8 +18,7 @@ import { v2 as nip44 } from 'nostr-tools/nip44'
 import * as nip04 from 'nostr-tools/nip04'
 import * as nip46 from 'nostr-tools/nip46'
 import * as nip49 from 'nostr-tools/nip49'
-import { getPool, relaySet } from './relay'
-import { normalizeURL } from 'nostr-tools/utils'
+import { getSignerPool } from './relay'
 import type { AbstractSimplePool, SubscribeManyParams } from 'nostr-tools/abstract-pool'
 import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, NostrEvent } from './events'
@@ -267,7 +266,7 @@ export const ANSWERS_READY_MS = 3000
  * (the real-bunker run, 2026-11-04).
  */
 function answersFirst(): unknown {
-  const pool = getPool()
+  const pool = getSignerPool()
   let ready: Promise<void> = Promise.resolve()
   const bounded = (p: Promise<void>): Promise<void> => Promise.race([p, new Promise<void>((r) => setTimeout(r, ANSWERS_READY_MS))])
   return {
@@ -328,22 +327,15 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
 }
 
 /**
- * Drop the pool's sockets to a bunker's relays, so its next request opens
- * fresh ones, except those the app's own reads and writes also use (the
- * default signer relay is ONOSENDAI's own relay). Those belong to the relay
- * layer, which watches them itself (pings, a return to the tab) and knows
- * what a dropped socket costs: its feeds reopened, its AUTH signed again. A
- * bare close there would leave the relay layer counting a new socket as
- * signed in. The bunker's other relay still carries the request.
+ * Drop the signer pool's sockets to a bunker's relays, so its next request
+ * opens fresh ones (and subscribes again: nostr-tools does once every part of
+ * its subscription has closed). The signer has a pool of its own
+ * (relay.ts getSignerPool), so this never closes a socket the app's own
+ * reads and writes use, even on ONOSENDAI's relay.
  */
 export function dropSignerSockets(relays: readonly string[]): void {
-  let shared: Set<string>
-  try { shared = new Set(relaySet().map((url) => normalizeURL(url))) } catch { shared = new Set() }
-  const own = relays.filter((url) => {
-    try { return !shared.has(normalizeURL(url)) } catch { return true }
-  })
-  if (own.length === 0) return
-  try { getPool().close(own) } catch { /* nothing open */ }
+  if (relays.length === 0) return
+  try { getSignerPool().close([...relays]) } catch { /* nothing open */ }
 }
 
 function randomHex(bytes: Uint8Array): string {

@@ -32,7 +32,7 @@ export function signerRelays(relay: string): string[] {
 const RETIRED_SIGNER_RELAY_HOSTS = new Set(['relay.nsec.app'])
 
 function isRetiredSignerRelay(relay: string): boolean {
-  try { return RETIRED_SIGNER_RELAY_HOSTS.has(new URL(relay.trim()).hostname.toLowerCase()) } catch { return false }
+  try { return RETIRED_SIGNER_RELAY_HOSTS.has(new URL(relay.trim()).hostname.toLowerCase().replace(/\.$/, '')) } catch { return false }
 }
 
 /**
@@ -45,6 +45,9 @@ function isRetiredSignerRelay(relay: string): boolean {
 export function withoutRetiredSignerRelays(bunkerUri: string): string {
   let url: URL
   try { url = new URL(bunkerUri.trim()) } catch { return bunkerUri }
+  // Only the plain form, bunker://<key>?relay=...: nostr-tools reads no
+  // relays from one with a path (bunker://<key>/?relay=...) once rewritten.
+  if (url.protocol !== 'bunker:' || url.pathname !== '') return bunkerUri
   const relays = url.searchParams.getAll('relay')
   const kept = relays.filter((r) => !isRetiredSignerRelay(r))
   if (kept.length === relays.length || kept.length === 0) return bunkerUri

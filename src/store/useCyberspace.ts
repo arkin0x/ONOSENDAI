@@ -194,6 +194,7 @@ import {
 import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { addRecentView } from '../lib/viewAt'
+import { personalList } from './personalLists'
 import { endOfChainLabel } from '../lib/chainBreak'
 import { chainStopOf, onV1HopList, relayFreezeOf, respawnPointOf } from '../lib/chainStop'
 import { moveStepOf } from '../lib/buildCursor'
@@ -1412,6 +1413,7 @@ function loadMoveMode(): MoveMode {
 function saveMoveMode(mode: MoveMode): void {
   try { localStorage.setItem(MOVE_MODE_KEY, mode) } catch { /* private mode */ }
 }
+/** Where builds before 2026-11-19 kept TARGET, once per device; now only read, to adopt (targetsList). */
 const TARGETS_KEY = 'onosendai:targets'
 
 /**
@@ -1922,25 +1924,49 @@ function storedMark(pubkey: string): string | null {
   try { return localStorage.getItem(chainMarkKeyFor(pubkey)) } catch { return null }
 }
 
-/** Only who and what they are called survive a reload; positions are refetched. */
-function loadTargets(): Record<string, TrackedTarget> {
-  try {
-    const raw = localStorage.getItem(TARGETS_KEY)
-    if (!raw) return {}
-    const list = JSON.parse(raw) as Array<{ pubkey: string; name?: string | null }>
-    const out: Record<string, TrackedTarget> = {}
-    for (const t of list) {
-      if (!/^[0-9a-f]{64}$/.test(t.pubkey)) continue
-      out[t.pubkey] = unresolvedTarget(t.pubkey, t.name ?? null)
-    }
-    return out
-  } catch { return {} }
+/** Who is tracked and what they are called, as kept: positions are refetched. */
+type KeptTarget = { pubkey: string; name: string | null }
+
+/** A kept list as this app can use it, from whatever was stored. */
+function cleanTargets(raw: unknown): KeptTarget[] {
+  if (!Array.isArray(raw)) return []
+  const out: KeptTarget[] = []
+  for (const t of raw as Array<{ pubkey?: unknown; name?: unknown }>) {
+    if (typeof t?.pubkey !== 'string' || !/^[0-9a-f]{64}$/.test(t.pubkey) || out.some((o) => o.pubkey === t.pubkey)) continue
+    out.push({ pubkey: t.pubkey, name: typeof t.name === 'string' ? t.name : null })
+  }
+  return out
 }
 
+/**
+ * TARGET, the people this identity tracks, is its own (store/personalLists.ts;
+ * owner ruling, 2026-11-19): a new identity tracks nobody, and each finds its
+ * own again when it logs back in on this device. The list builds before kept
+ * once per device (TARGETS_KEY) goes to the identity signed in when it is
+ * first read. A target already resolved keeps its position when the list is
+ * shown again; the tracker (lib/tracker.ts) resolves the rest.
+ */
+const targetsList = personalList<KeptTarget[]>({
+  name: 'targets',
+  legacy: () => {
+    try {
+      const raw = localStorage.getItem(TARGETS_KEY)
+      return raw === null ? undefined : JSON.parse(raw) as unknown
+    } catch { return undefined }
+  },
+  clean: cleanTargets,
+  empty: [],
+  merge: (stored, early) => cleanTargets([...early, ...stored]),
+  show: (list) => {
+    const was = useCyberspace.getState().targets
+    const targets: Record<string, TrackedTarget> = {}
+    for (const t of list) targets[t.pubkey] = was[t.pubkey] ? { ...was[t.pubkey], name: t.name ?? was[t.pubkey].name } : unresolvedTarget(t.pubkey, t.name)
+    useCyberspace.setState({ targets })
+  },
+})
+
 function saveTargets(targets: Record<string, TrackedTarget>): void {
-  try {
-    localStorage.setItem(TARGETS_KEY, JSON.stringify(Object.values(targets).map((t) => ({ pubkey: t.pubkey, name: t.name }))))
-  } catch { /* private mode */ }
+  targetsList.save(Object.values(targets).map((t) => ({ pubkey: t.pubkey, name: t.name })))
 }
 
 function unresolvedTarget(pubkey: string, name: string | null): TrackedTarget {
@@ -5864,7 +5890,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   focus: null,
   focusReturnScale: null,
   transit: null,
-  targets: loadTargets(),
+  targets: {},
   cursor: initial.position,
   pendingTarget: null,
   plan: null,

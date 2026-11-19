@@ -22,7 +22,7 @@ if (typeof localStorage === 'undefined') {
 import { BROKEN_CHAIN_MESSAGE, RELAY_STOPPED_MESSAGE, useCyberspace, whyNoMove } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
 import { derezzNow } from '../../hud/DerezzPanel'
-import { RECENT_VIEWS_KEY, type RecentView } from '../../lib/viewAt'
+import { readRecentViews, saveRecentViews, type RecentView } from '../../lib/viewAt'
 import { resetChainStops, setV1HopListForTests } from '../../lib/chainStop'
 import { loadV1HopList } from '../../lib/v1HopList'
 import type { ActionEvent, NostrEvent } from '../../lib/events'
@@ -31,14 +31,14 @@ import { TUTORIAL_GAME } from '../../lib/games/tutorialGame'
 
 const S = () => useCyberspace.getState()
 const EVENT_22 = 'daf160627616b019dff4d1363e510b09bde200894b1aba8eb1bc9e5e9b2bce64'
-const recent = (): RecentView[] => JSON.parse(localStorage.getItem(RECENT_VIEWS_KEY) ?? '[]') as RecentView[]
+const recent = (): RecentView[] => readRecentViews()
 let list: ReadonlySet<string>
 
 beforeEach(async () => {
   await placeSpawn()
   list ??= await loadV1HopList()
   resetChainStops()
-  localStorage.removeItem(RECENT_VIEWS_KEY)
+  saveRecentViews([])
   const events = owner as NostrEvent[]
   useCyberspace.setState({ events: [...events], published: Object.fromEntries(events.map((e) => [e.id, 'ok'])), proof: { ...S().proof, status: 'idle', message: null }, plan: null, pendingTarget: null })
 })

@@ -9,17 +9,48 @@ export function loginCredentialKind(value: string): LoginCredentialKind | null {
   return null
 }
 
-export const DEFAULT_SIGNER_RELAY = 'wss://bucket.coracle.social'
+/**
+ * The first relay a login QR names: ONOSENDAI's own relay, which relays
+ * Nostr Connect messages (kind 24133) live and never stores them.
+ */
+export const DEFAULT_SIGNER_RELAY = 'wss://relay.onosendai.tech'
 /**
  * A second relay the default QR carries, so a session is not tied to one
- * third-party relay for good: the handshake and every later signature can go
- * over either. relay.nsec.app is run for Nostr Connect traffic.
+ * relay for good: the handshake and every later signature can go over either.
  */
-export const BACKUP_SIGNER_RELAY = 'wss://relay.nsec.app'
+export const BACKUP_SIGNER_RELAY = 'wss://bucket.coracle.social'
 
 /** The relays a QR names: the chosen one, plus the backup when the default was kept. */
 export function signerRelays(relay: string): string[] {
   return relay === DEFAULT_SIGNER_RELAY ? [DEFAULT_SIGNER_RELAY, BACKUP_SIGNER_RELAY] : [relay]
+}
+
+/**
+ * Signer relays that no longer answer. The default QR named one of them as its
+ * backup until 2026-11-19, so a session saved before then still lists it.
+ */
+const RETIRED_SIGNER_RELAY_HOSTS = new Set(['relay.nsec.app'])
+
+function isRetiredSignerRelay(relay: string): boolean {
+  try { return RETIRED_SIGNER_RELAY_HOSTS.has(new URL(relay.trim()).hostname.toLowerCase()) } catch { return false }
+}
+
+/**
+ * A saved bunker URI without the retired relays, so a session saved with one
+ * stops trying it and keeps talking over the others. A URI that names no
+ * other relay is returned as it is: the signer listens only where the URI
+ * says, so moving it elsewhere would end a session instead of mending it.
+ * Everything else in the URI (the signer's key, a secret) is kept.
+ */
+export function withoutRetiredSignerRelays(bunkerUri: string): string {
+  let url: URL
+  try { url = new URL(bunkerUri.trim()) } catch { return bunkerUri }
+  const relays = url.searchParams.getAll('relay')
+  const kept = relays.filter((r) => !isRetiredSignerRelay(r))
+  if (kept.length === relays.length || kept.length === 0) return bunkerUri
+  url.searchParams.delete('relay')
+  for (const r of kept) url.searchParams.append('relay', r)
+  return url.toString()
 }
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])

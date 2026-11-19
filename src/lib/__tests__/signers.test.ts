@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
  * recorded, and it opens no socket, so no unit test touches the network
  * (this test used to open one to 127.0.0.1:9).
  */
-const bunker = vi.hoisted(() => ({ built: 0, asked: [] as string[], holds: '', relays: [] as string[], pool: null as unknown }))
+const bunker = vi.hoisted(() => ({ built: 0, asked: [] as string[], holds: '', relays: [] as string[], pool: null as unknown, fail: null as unknown }))
 
 vi.mock('nostr-tools/nip46', async (importOriginal) => {
   const actual = await importOriginal<typeof import('nostr-tools/nip46')>()
@@ -13,7 +13,7 @@ vi.mock('nostr-tools/nip46', async (importOriginal) => {
     connect: async () => { bunker.asked.push('connect') },
     getPublicKey: async () => { bunker.asked.push('getPublicKey'); return bunker.holds },
     sendRequest: async (method: string) => { bunker.asked.push(method); return method === 'get_public_key' ? bunker.holds : '' },
-    signEvent: async () => { bunker.asked.push('sign_event'); throw new Error('not in this test') },
+    signEvent: async () => { bunker.asked.push('sign_event'); throw bunker.fail ?? new Error('not in this test') },
     nip44Decrypt: async () => { bunker.asked.push('nip44_decrypt'); return '' },
     nip44Encrypt: async () => { bunker.asked.push('nip44_encrypt'); return '' },
     close: async () => undefined,
@@ -22,7 +22,7 @@ vi.mock('nostr-tools/nip46', async (importOriginal) => {
     ...actual,
     BunkerSigner: {
       ...actual.BunkerSigner,
-      fromBunker: (_sk: Uint8Array, bp: { relays: string[] }, params?: { pool?: unknown }) => { bunker.built++; bunker.relays = [...bp.relays]; bunker.pool = params?.pool; return fake },
+      fromBunker: (_sk: Uint8Array, bp: { relays: string[] }, params?: { pool?: unknown }) => { bunker.built++; bunker.relays = [...bp.relays]; bunker.pool = params?.pool; return { ...fake, bp } },
       fromURI: actual.BunkerSigner.fromURI,
     },
   }
@@ -306,6 +306,43 @@ describe('a request a relay does not confirm in time', () => {
       await expect(Promise.any(pool.publish([BACKUP_SIGNER_RELAY], {}))).rejects.toThrow('All promises were rejected')
     } finally {
       publish.mockRestore()
+      await signer.close?.()
+    }
+  })
+})
+
+describe('a signer request no relay took', () => {
+  it('says which relay answered what, and stays an AggregateError for the retry', async () => {
+    const { explainUndelivered } = await signers()
+    const err = explainUndelivered(
+      new AggregateError([new Error('Event size limit exceeded for kind'), new Error('rate-limited: slow down')], 'All promises were rejected'),
+      [DEFAULT_SIGNER_RELAY, BACKUP_SIGNER_RELAY],
+    )
+    expect(err).toBeInstanceOf(AggregateError)
+    expect((err as Error).message).toBe(
+      'No signer relay took the request: relay.onosendai.tech refused it as too large (Event size limit exceeded for kind); ' +
+      'bucket.coracle.social refused it as too fast (rate-limited: slow down).',
+    )
+    const other = new Error('user rejected')
+    expect(explainUndelivered(other, [DEFAULT_SIGNER_RELAY])).toBe(other)
+  })
+
+  it('reaches the caller of a restored session\'s signEvent', async () => {
+    const { signerFromPref } = await signers()
+    const signer = await signerFromPref({
+      kind: 'nip46',
+      pubkey: getPublicKey(generateSecretKey()),
+      bunkerUri: `bunker://${getPublicKey(generateSecretKey())}?relay=${encodeURIComponent(DEFAULT_SIGNER_RELAY)}`,
+      clientNsec: nip19.nsecEncode(generateSecretKey()),
+      nostrConnectSession: true,
+    })
+    bunker.fail = new AggregateError([new Error('Event size limit exceeded for kind')], 'All promises were rejected')
+    try {
+      const err = await signer.signEvent({ kind: 1, created_at: 1, tags: [], content: '' }).then(() => null, (e: unknown) => e)
+      expect(err).toBeInstanceOf(AggregateError)
+      expect((err as Error).message).toBe('No signer relay took the request: relay.onosendai.tech refused it as too large (Event size limit exceeded for kind).')
+    } finally {
+      bunker.fail = null
       await signer.close?.()
     }
   })

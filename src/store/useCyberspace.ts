@@ -2152,7 +2152,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
 function lostInTransit(err: unknown): boolean {
   if (err instanceof SignerTimeout || (err instanceof Error && err.name === 'SignerTimeout')) return true
   if (typeof AggregateError !== 'undefined' && err instanceof AggregateError) return true
-  return /All promises were rejected/.test(err instanceof Error ? err.message : String(err))
+  return /All promises were rejected|No signer relay took the request/.test(err instanceof Error ? err.message : String(err))
 }
 
 /**

@@ -3595,11 +3595,20 @@ export const useShards = create<ShardsState>((set, get) => {
     // key, as PLACE AGAIN's copy is, so no two placements share one.
     const at = positionOf(d)
     const now = Math.floor(Date.now() / 1000)
+    // Every signature here is the hider's, and each comes after a wait: the
+    // file fetched, opened and sealed again before its upload is signed, the
+    // bag read before the copy is signed. A switch meanwhile had the identity
+    // signed in since sign the upload, and the copy, of the one that began
+    // it (identity-switch audit, 2026-11-19). Stopped instead, as PLACE stops.
+    const signAsOwner = (t: EventTemplate, patienceMs?: number): Promise<NostrEvent> => {
+      if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED)
+      return cs.signEvent(t, patienceMs)
+    }
     try {
       let audio = d.audio
       let template: EventTemplate
       if (d.type === 'audio' && d.audio) {
-        audio = { ...d.audio, ...(await resealCopy(d.audio, (t) => cs.signEvent(t, AUDIO_SIGN_PATIENCE_MS))) }
+        audio = { ...d.audio, ...(await resealCopy(d.audio, (t) => signAsOwner(t, AUDIO_SIGN_PATIENCE_MS))) }
         template = audioInnerTemplate(audio, at, d.plane, Math.max(now, d.inner.created_at + 1))
       } else template = freshCopyTemplate(d.inner, Math.max(now, d.inner.created_at + 1))
       const rumor = d.type === 'message' || d.type === 'audio'
@@ -3615,7 +3624,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const fitted = fit.refs.get(planned.id)
       // A message and hidden audio are rumors, never signed (spec §7.6). A
       // shard that goes by reference is signed only as its object.
-      let inner = rumor ? rumorOf(template, owner) as NostrEvent : fitted ? planned : await cs.signEvent(template)
+      let inner = rumor ? rumorOf(template, owner) as NostrEvent : fitted ? planned : await signAsOwner(template)
       let ref: Reference | undefined
       if (fitted) {
         // The object first: a bag never names what no relay has.

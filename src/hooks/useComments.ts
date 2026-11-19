@@ -46,6 +46,9 @@ export interface CommentsState {
   refresh: () => void
 }
 
+/** Said when the identity changed while a comment was sealed: nothing was signed or posted. */
+const COMMENT_SWITCHED = 'You switched identity while this comment was being sealed, so it was not posted. Post it again as the identity signed in now.'
+
 export function useComments(subject: CommentSubject | null): CommentsState {
   const [events, setEvents] = useState<NostrEvent[]>([])
   const [opened, setOpened] = useState<Map<string, string>>(new Map())
@@ -107,9 +110,15 @@ export function useComments(subject: CommentSubject | null): CommentsState {
   const post = useCallback(async (text: string, parent?: CommentParent): Promise<boolean> => {
     if (!subject || !regionKey) return false
     setPosting(true); setError(null)
+    // Who wrote it. Sealing takes a moment, and the comment is signed by
+    // whoever is signed in once it is sealed: a switch meanwhile signed and
+    // published as the new identity what was written as the old one. Looked
+    // at before the signer is asked (identity-switch audit, 2026-11-19).
+    const author = useCyberspace.getState().identity.pubkey
     try {
       const body = text.trim().slice(0, MAX_COMMENT_LENGTH)
       const template = await sealedComment(subject, parent ?? itemParent(subject), body, Math.floor(Date.now() / 1000), regionKey)
+      if (useCyberspace.getState().identity.pubkey !== author) { setError(COMMENT_SWITCHED); return false }
       const event = await useCyberspace.getState().signEvent(template)
       const result = await publish(event)
       if (!result.ok) { setError(`Not published: ${result.reason}`); return false }

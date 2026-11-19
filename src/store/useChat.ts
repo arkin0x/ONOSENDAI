@@ -183,8 +183,8 @@ export function buzzFor(senders: readonly string[], now = Date.now()): boolean {
   return buzzGate(senders, now, MENTION_BUZZ_MS, 60)
 }
 
-/** Said when the identity changed while a line was sealed: nothing was signed or sent. */
-const CHAT_SWITCHED = 'You switched identity while this line was being sealed, so it was not sent. Send it again to say it as the identity signed in now.'
+/** Said when the identity changed while a line was sealed or signed: nothing was sent. */
+const CHAT_SWITCHED = 'You switched identity while this line was on its way, so it was not sent. Send it again to say it as the identity signed in now.'
 
 export const useChat = create<ChatState>((set, get) => ({
   lines: loadLines(),
@@ -252,14 +252,17 @@ export const useChat = create<ChatState>((set, get) => ({
       // new identity sign an envelope holding the old one's line: both keys in
       // one event anyone in the room can open, a public link between them.
       // Looked at before the signer is asked, so the new identity is never
-      // asked to sign it, and again after, so it is never sent (identity-switch
-      // audit, 2026-11-19). The line stays in the box to send again.
+      // asked to sign it, and again once the signature is back: a remote
+      // signer can answer for the old identity after the switch, and sent
+      // then, the old line went out over relays signed in as the new one, as
+      // relay.ts never lets an AUTH do (StaleIdentity). The line stays in the
+      // box to send again (identity-switch audit, 2026-11-19).
       if (useCyberspace.getState().identity.pubkey !== inner.pubkey) {
         set({ sendStatus: 'error', sendError: CHAT_SWITCHED })
         return
       }
       const outer = await cyber.signEvent(sealed)
-      if (outer.pubkey !== inner.pubkey) {
+      if (outer.pubkey !== inner.pubkey || useCyberspace.getState().identity.pubkey !== inner.pubkey) {
         set({ sendStatus: 'error', sendError: CHAT_SWITCHED })
         return
       }

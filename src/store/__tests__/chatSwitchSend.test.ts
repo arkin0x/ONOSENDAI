@@ -53,6 +53,9 @@ import { useCyberspace } from '../useCyberspace'
 const region = 'dd'.repeat(32)
 const keyHex = '11'.repeat(32)
 
+/** The store's own signEvent, before any test wraps it. */
+const storeSign = useCyberspace.getState().signEvent
+
 /** Every signature the store was asked for, with the identity on screen when it was asked. */
 let asked: { kind: number; as: string }[] = []
 
@@ -62,7 +65,7 @@ describe('a switch of identity while a chat line is sealed', () => {
     seal.during = null
     asked = []
     await useCyberspace.getState().useNsec(nip19.nsecEncode(generateSecretKey()))
-    const real = useCyberspace.getState().signEvent
+    const real = storeSign
     useCyberspace.setState({
       signEvent: (t: EventTemplate, patience?: number, late?: Parameters<typeof real>[2]) => {
         asked.push({ kind: t.kind, as: useCyberspace.getState().identity.pubkey })
@@ -86,6 +89,27 @@ describe('a switch of identity while a chat line is sealed', () => {
     expect(s.sendError).toMatch(/switched identity/)
     // The line stays in the box, to send again as whoever is signed in now.
     expect(s.draft).toBe('said as A')
+    expect(s.lines).toEqual([])
+  })
+
+  it('a signer that answers for the old identity after the switch: the line is not sent', async () => {
+    const b = generateSecretKey()
+    const sign = useCyberspace.getState().signEvent
+    useCyberspace.setState({
+      signEvent: async (t: EventTemplate, patience?: number, late?: Parameters<typeof sign>[2]) => {
+        const signed = await sign(t, patience, late)
+        // Switched while the signer (a bunker on a phone) was still answering.
+        await useCyberspace.getState().useNsec(nip19.nsecEncode(b))
+        return signed
+      },
+    })
+    useChat.getState().setDraft('said as A, answered late')
+    await useChat.getState().send()
+    expect(useCyberspace.getState().identity.pubkey).toBe(getPublicKey(b))
+    expect(publishMany).not.toHaveBeenCalled()
+    const s = useChat.getState()
+    expect(s.sendError).toMatch(/switched identity/)
+    expect(s.draft).toBe('said as A, answered late')
     expect(s.lines).toEqual([])
   })
 

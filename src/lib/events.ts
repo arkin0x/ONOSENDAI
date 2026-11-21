@@ -906,6 +906,19 @@ export interface ActionLink {
 }
 
 /**
+ * actionLink's answers, by event object: the same event is read again at
+ * every head confirmation, every page of a chain fetch and every parse, and
+ * reading an event's tags (its A, genesis and previous, two patterns) for
+ * each of a 2,600-action chain was a long task per WALK step on a phone
+ * (chainGap, owner's walk of 2026-11-21). An entry stands only while the
+ * fields it was read from are the same objects and values (tags array and
+ * its length, id, kind, pubkey, created_at): an event object is not changed
+ * once signed, and one that were would be read afresh, unless a tag was
+ * rewritten in place, which no code here does to a signed event.
+ */
+const links = new WeakMap<NostrEvent, { tags: string[][]; n: number; id: string; kind: number; pubkey: string; createdAt: number; link: Readonly<ActionLink> | null }>()
+
+/**
  * The links of an event, recognized or not: what buildChain needs to follow
  * a chain through an action it cannot read (spec §8.9 rule 1). Null for
  * another kind, a spawn (which names no previous event, wherever it is
@@ -917,7 +930,17 @@ export interface ActionLink {
  * chain, or make a fork beside another event, and it is then where the
  * chain stops being valid (§8.8), not a gap the chain quietly ends at.
  */
-export function actionLink(ev: NostrEvent): ActionLink | null {
+export function actionLink(ev: NostrEvent): Readonly<ActionLink> | null {
+  const kept = links.get(ev)
+  if (kept && kept.tags === ev.tags && kept.n === ev.tags.length && kept.id === ev.id && kept.kind === ev.kind && kept.pubkey === ev.pubkey && kept.createdAt === ev.created_at) return kept.link
+  // Frozen: every caller now shares the one answer.
+  const read = readLink(ev)
+  const link = read ? Object.freeze(read) : null
+  if (Array.isArray(ev.tags)) links.set(ev, { tags: ev.tags, n: ev.tags.length, id: ev.id, kind: ev.kind, pubkey: ev.pubkey, createdAt: ev.created_at, link })
+  return link
+}
+
+function readLink(ev: NostrEvent): ActionLink | null {
   if (ev.kind !== ACTION_KIND) return null
   if (carriesSpawn(ev)) return null
   const name = tag(ev, 'A') ?? ''

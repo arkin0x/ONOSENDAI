@@ -28,7 +28,9 @@ vi.mock('../../lib/relay', () => ({
 import { newShard, type ShardModel } from 'sno-core/shards'
 import type { FeedObject } from 'sno-core/feed'
 import { forgeKey } from '../../lib/chests'
-import { HIDDEN_KIND, chestItemOf } from '../../lib/hidden'
+import { HIDDEN_KIND, OBJECT_KIND, OBJECT_PREVIEW, chestItemOf } from '../../lib/hidden'
+import { decryptForRegion } from '../../lib/shardCrypto'
+import { hexToBytes } from '../../lib/events'
 import { builtInLookTags, isTreasureShape, lookOf, lookTagsOf } from '../../lib/looks'
 import { publishMany } from '../../lib/relay'
 import { constrainOf } from '../../lib/walkConstrain'
@@ -164,13 +166,60 @@ describe('a chest hides with the look it wears', () => {
     expect(closed.refs?.[0][1]).toBe(object.address)
   })
 
-  it('a look over 16,384 bytes is refused in words, and nothing is hidden', async () => {
+  it('a look over 16,384 bytes goes as a sealed look (DECK-0004 §3.6): its own hidden object under the bag key, the tag a small wrapper', async () => {
+    vi.mocked(publishMany).mockClear()
+    const big = model('Monument', 0, 1400)
+    useWorkshop.setState({ shards: [big] })
+    start()
+    S().setDeployLook({ from: 'mine', shardId: big.id })
+    const chest = await hide()
+    expect(S().deployError).toBeNull()
+    const row = S().mine.find((x) => x.type === 'chest')!
+    // LOCAL: signed and kept for BROADCAST, sent nowhere.
+    expect(row.lookObjects).toHaveLength(1)
+    const object = row.lookObjects![0]
+    expect(object.kind).toBe(OBJECT_KIND)
+    expect(object.content).toBe(OBJECT_PREVIEW)
+    expect(object.tags.some((t) => t[0] === 'C' || t[0] === 'H')).toBe(false)
+    const tag = chest!.look![0]
+    expect(new TextEncoder().encode(tag[1]).length).toBeLessThan(400)
+    expect(JSON.parse(tag[1]).refs[0][1]).toBe(`${OBJECT_KIND}:${object.pubkey}:${object.tags.find((t) => t[0] === 'd')![1]}`)
+    // It opens with the chest's own bag key, to the look as the bar posed it.
+    const plain = await decryptForRegion(hexToBytes(row.keyHex), object.tags.find((t) => t[0] === 'encrypted')![2])
+    expect(JSON.parse(plain!).name).toBe('Monument')
+    expect(JSON.parse(plain!).vertices).toHaveLength(1400)
+    // Nothing of the look went out in the clear: no relay was asked to take anything.
+    expect(vi.mocked(publishMany)).not.toHaveBeenCalled()
+  })
+
+  it('LIVE, the sealed look goes out before the bag that names it, and never in the clear', async () => {
+    useCyberspace.setState({ live: true })
+    vi.mocked(publishMany).mockClear()
     const big = model('Monument', 0, 1400)
     useWorkshop.setState({ shards: [big] })
     start()
     S().setDeployLook({ from: 'mine', shardId: big.id })
     await hide()
-    expect(S().deployError).toMatch(/too large to wear/)
+    expect(S().deployError).toBeNull()
+    const sent = vi.mocked(publishMany).mock.calls.map((c) => c[1] as { kind: number; content: string; tags: string[][] })
+    const objectAt = sent.findIndex((e) => e.kind === OBJECT_KIND)
+    const bagAt = sent.findIndex((e) => e.kind === HIDDEN_KIND)
+    expect(objectAt).toBeGreaterThanOrEqual(0)
+    expect(bagAt).toBeGreaterThan(objectAt)
+    // Every 33331 sent is the encrypted hidden object: its content only the preview.
+    for (const e of sent.filter((x) => x.kind === OBJECT_KIND)) {
+      expect(e.content).toBe(OBJECT_PREVIEW)
+      expect(e.tags.some((t) => t[0] === 'encrypted')).toBe(true)
+    }
+  })
+
+  it('a look over the size limit of its own event is refused in words, and nothing is hidden', async () => {
+    const huge = model('Mountain', 0, 30_000)
+    useWorkshop.setState({ shards: [huge] })
+    start()
+    S().setDeployLook({ from: 'mine', shardId: huge.id })
+    await hide()
+    expect(S().deployError).toMatch(/over the size limit/)
     expect(S().mine).toEqual([])
   })
 })

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { nip19 } from 'nostr-tools'
-import { Check, ChevronRight, LockKeyhole, Puzzle, Smartphone, type LucideIcon } from 'lucide-react'
+import { Check, ChevronRight, LockKeyhole, Puzzle, QrCode, Smartphone, type LucideIcon } from 'lucide-react'
 import { cachedHeld, heldListed, listHeld, type HeldEntry, type HeldWay } from '../lib/identitiesDb'
 import { targetColor } from '../lib/targets'
 import {
@@ -39,12 +39,14 @@ const WAY_ICON: Record<HeldWay, LucideIcon> = {
   password: LockKeyhole,
   extension: Puzzle,
   bunker: Smartphone,
+  pair: QrCode,
 }
 const WAY_LABEL: Record<HeldWay, string> = {
   generated: 'Switch now',
   password: 'Needs its password',
   extension: 'Opens your browser extension',
   bunker: 'Asks your remote signer',
+  pair: 'Pair your signer again with a QR code',
 }
 
 /**
@@ -86,13 +88,19 @@ function HeldRow({ entry, disabled, onPick }: { entry: HeldEntry; disabled: bool
         <span className="login__held-name">{name}</span>
         {named && <span className="login__held-npub">{shortHex(npub, 10, 6)}</span>}
       </span>
+      {entry.way === 'pair' && <span className="login__held-pair">PAIR AGAIN</span>}
       <Icon className="login__held-icon" size={15} aria-hidden="true" />
     </button>
   )
 }
 
-/** `over`: opened from the key lock (KeyLock.tsx), so it sits at the lock's height, over everything. */
-export function LoginModal({ onClose, over = false }: { onClose: () => void; over?: boolean }): JSX.Element {
+/**
+ * `over`: opened from the key lock (KeyLock.tsx), so it sits at the lock's height, over everything.
+ * `pairFor`: PAIR AGAIN for this pubkey (a remote signer logged out of, or
+ * not answering): it opens straight on the QR, and a signer that answers as
+ * another account pairs nothing (store useNostrConnect `expect`).
+ */
+export function LoginModal({ onClose, over = false, pairFor }: { onClose: () => void; over?: boolean; pairFor?: string }): JSX.Element {
   const signerKind = useCyberspace((s) => s.signerKind)
   const identity = useCyberspace((s) => s.identity)
   const loginError = useCyberspace((s) => s.loginError)
@@ -137,6 +145,9 @@ export function LoginModal({ onClose, over = false }: { onClose: () => void; ove
   const [qrConnected, setQrConnected] = useState(false)
   const qrCanvas = useRef<HTMLCanvasElement | null>(null)
   const qrController = useRef<AbortController | null>(null)
+  // The identity a QR is pairing again (PAIR AGAIN), kept across TRY AGAIN and another relay.
+  const [pairing, setPairing] = useState<string | null>(null)
+  const pairingProfile = useProfiles((s) => (pairing ? s.profiles[pairing] : undefined))
 
   const [pw1, setPw1] = useState('')
   const [pw2, setPw2] = useState('')
@@ -188,9 +199,10 @@ export function LoginModal({ onClose, over = false }: { onClose: () => void; ove
   const submitCredential = (): Promise<void> =>
     run('credential', () => useCyberspace.getState().useLogin(credential, password, again))
 
-  const startQr = (relayInput = relay): void => {
+  const startQr = (relayInput = relay, expect: string | null = pairing): void => {
     if (busy && busy !== 'qr') return
     stopQr()
+    setPairing(expect)
     useCyberspace.getState().clearLoginError()
     setQrError(null)
     setQrConnected(false)
@@ -212,7 +224,7 @@ export function LoginModal({ onClose, over = false }: { onClose: () => void; ove
 
     void useCyberspace.getState().useNostrConnect(session, controller.signal, () => {
       if (qrController.current === controller) setQrConnected(true)
-    }).then(() => {
+    }, expect ?? undefined).then(() => {
       if (qrController.current !== controller) return
       qrController.current = null
       setBusy(null)
@@ -228,8 +240,16 @@ export function LoginModal({ onClose, over = false }: { onClose: () => void; ove
     setQrUri(null)
     setPicked(null)
     setHeldPassword('')
+    setPairing(null)
     setView('login')
   }
+
+  // PAIR AGAIN from the Identity panel or the not-answering chip: straight to the QR.
+  useEffect(() => {
+    if (pairFor) startQr(DEFAULT_SIGNER_RELAY, pairFor)
+    // Once, on opening.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const pickHeld = (entry: HeldEntry): void => {
     if (busy) return
@@ -238,6 +258,10 @@ export function LoginModal({ onClose, over = false }: { onClose: () => void; ove
       setPicked(entry)
       setHeldPassword('')
       setView('held')
+      return
+    }
+    if (entry.way === 'pair') {
+      startQr(relay, entry.pubkey)
       return
     }
     void run('held', () => useCyberspace.getState().useHeld(entry.pubkey))
@@ -280,7 +304,7 @@ export function LoginModal({ onClose, over = false }: { onClose: () => void; ove
     <div className={over ? 'modal modal--over' : 'modal'} role="dialog" aria-modal="true" aria-label="Change identity" onPointerDown={close}>
       <div className="modal__card login" onPointerDown={(event) => event.stopPropagation()}>
         <div className="login__head">
-          <h2 className="modal__title">{view === 'qr' ? 'Nostr Connect' : view === 'held' ? 'Unlock your key' : 'Change Identity'}</h2>
+          <h2 className="modal__title">{view === 'qr' ? (pairing ? 'Pair again' : 'Nostr Connect') : view === 'held' ? 'Unlock your key' : 'Change Identity'}</h2>
           <ModalClose onClose={close} />
         </div>
 
@@ -337,7 +361,11 @@ export function LoginModal({ onClose, over = false }: { onClose: () => void; ove
           </form>
         ) : view === 'qr' ? (
           <div className="login__qr-flow">
-            <p className="login__qr-instruction">Scan with a Nostr signer to connect this identity.</p>
+            <p className="login__qr-instruction">
+              {pairing
+                ? `Scan with the signer that holds ${profileLabel(pairingProfile, nip19.npubEncode(pairing))}. Everything on this device stays.`
+                : 'Scan with a Nostr signer to connect this identity.'}
+            </p>
             {qrUri && (
               <a className="login__qr-link" href={qrUri} aria-label="Open Nostr Connect signer">
                 <canvas ref={qrCanvas} className="login__qr" width={264} height={264} />

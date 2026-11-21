@@ -106,7 +106,7 @@ import { chainHeld, chainLost, checkRowsInTime, clearMarker, clearTail, committe
 import { eventDbAvailable } from '../lib/eventDb/client'
 import type { ChainRead, ChainSource } from '../lib/eventDb/chainRows'
 import { checkSignatures } from '../lib/sigCheck'
-import { checkedElsewhere } from '../lib/verifiedSigs'
+import { checkedElsewhere, signedHere } from '../lib/verifiedSigs'
 import {
   firstMove,
   foldHeldConflict,
@@ -2324,6 +2324,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     // are authentic by construction, and are remembered as checked.
     const own = await signer.signEvent(template)
     verifiedSigs.add(`${own.id}:${own.sig}`)
+    signedHere(own)
     if (own.kind === ACTION_KIND) signedThisPage.add(own.id)
     return own
   }
@@ -2425,6 +2426,7 @@ function checkedAnswer(signed: NostrEvent, signer: Signer): NostrEvent {
     throw new SignerAccountMismatch()
   }
   signerHome(signer)
+  signedHere(signed)
   return signed
 }
 

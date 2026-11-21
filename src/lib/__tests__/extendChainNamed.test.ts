@@ -41,7 +41,9 @@ function feedBoth(events: NostrEvent[]): Array<[string, string]> {
     expect(fast).toEqual(plain)
     out.push([plain === null ? 'null' : 'ext', fast === null ? 'null' : 'ext'])
     namedIds([events[k]], named)
-    chain = buildChain(events.slice(0, k + 1))
+    // Each extension built on the one before, as the store's memo does; a refusal starts over from a full build.
+    chain = fast ?? buildChain(events.slice(0, k + 1))
+    expect(chain).toEqual(buildChain(events.slice(0, k + 1)))
   }
   return out
 }
@@ -70,5 +72,19 @@ describe('extendChain with the ids the chain names', () => {
     expect(named.has(events[3].id)).toBe(false)
     expect(namedIds([events[4]], named)).toBe(named)
     expect(named.has(events[3].id)).toBe(true)
+  })
+})
+
+describe('the ids gathered only when they are needed', () => {
+  it('an event refused before any tag is read never gathers them', () => {
+    const events = hops(5)
+    let asked = 0
+    const named = () => { asked++; return namedIds(events) }
+    // A spawn, which extendChain refuses on its kind of action alone.
+    expect(extendChain(buildChain(events), events, spawn, named)).toBeNull()
+    expect(asked).toBe(0)
+    const next = hopEvent({ pubkey: pk, createdAt: 1_100, genesisId: spawn.id, previousId: events[5].id, c: positionHex(at(5n), plane), to: at(6n), plane })
+    expect(extendChain(buildChain(events), events, next, named)?.length).toBe(7)
+    expect(asked).toBe(1)
   })
 })

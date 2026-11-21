@@ -234,13 +234,15 @@ function appendedTo(memo: { events: NostrEvent[]; actions: ActionEvent[]; named:
   // The ids the chain's e tags name, gathered once after a full parse and then
   // grown by each event added: whether the new one is already named is one
   // lookup (extendChain), not a pass over every tag of the chain.
-  const named = memo.named ?? namedIds(memo.events)
+  // Gathered only if extendChain gets past the refusals that need no tags.
+  const named = (): Set<string> => (memo.named ??= namedIds(memo.events))
   const ev = events[events.length - 1]
   const actions = extendChain(memo.actions, memo.events, ev, named)
   if (!actions) return null
   // Handed on to the memo that replaces this one; nothing else holds it.
+  const set = named()
   memo.named = null
-  return { events, actions, named: namedIds([ev], named) }
+  return { events, actions, named: namedIds([ev], set) }
 }
 
 /**

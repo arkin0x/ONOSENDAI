@@ -1147,6 +1147,12 @@ export function buildChain(events: NostrEvent[], pubkey?: string): ActionEvent[]
   return chain
 }
 
+/** Every id an `e` tag of `events` names: what extendChain asks of a new event, gathered once (namedIds) and grown as events are added. */
+export function namedIds(events: readonly NostrEvent[], into: Set<string> = new Set()): Set<string> {
+  for (const e of events) for (const t of e.tags) if (t[0] === 'e' && typeof t[1] === 'string') into.add(t[1])
+  return into
+}
+
 /**
  * buildChain(events.concat(ev)), from `chain`, which is buildChain(events), in
  * the one case that cannot change any row already there: `ev` names the head
@@ -1167,20 +1173,14 @@ export function buildChain(events: NostrEvent[], pubkey?: string): ActionEvent[]
  * the head has exactly one, `ev`, read against the head and the bracket open
  * at it by the same placeInChain and rideBreak; nothing before it moves, and
  * with no event naming `ev` the walk ends there.
+ *
+ * `named`, when given, is namedIds(events), or makes it when asked: every id an
+ * `e` tag of `events` names, so whether one already names `ev` is one lookup
+ * rather than a pass over every tag of the chain, which on a 2,600-action
+ * chain was a long task per WALK step on a phone (owner, 2026-11-21). Made
+ * only past the refusals that need no tags.
  */
-/** Every id an `e` tag of `events` names: what extendChain asks of a new event, gathered once (namedIds) and grown as events are added. */
-export function namedIds(events: readonly NostrEvent[], into: Set<string> = new Set()): Set<string> {
-  for (const e of events) for (const t of e.tags) if (t[0] === 'e' && typeof t[1] === 'string') into.add(t[1])
-  return into
-}
-
-/**
- * `named`, when given, is namedIds(events): every id an `e` tag of `events`
- * names, so whether one already names `ev` is one lookup rather than a pass
- * over every tag of the chain, which on a 2,600-action chain was a long task
- * per WALK step on a phone (owner, 2026-11-21).
- */
-export function extendChain(chain: ActionEvent[], events: NostrEvent[], ev: NostrEvent, named?: ReadonlySet<string>): ActionEvent[] | null {
+export function extendChain(chain: ActionEvent[], events: NostrEvent[], ev: NostrEvent, named?: ReadonlySet<string> | (() => ReadonlySet<string>)): ActionEvent[] | null {
   if (chain.length === 0 || ev.kind !== ACTION_KIND || carriesSpawn(ev)) return null
   const spawn = chain[0]
   if (spawn.fork !== undefined || chain.some((a) => a.breaks)) return null
@@ -1190,7 +1190,7 @@ export function extendChain(chain: ActionEvent[], events: NostrEvent[], ev: Nost
   const head = chain[chain.length - 1]
   if (link.previousId !== head.id || link.id === head.id) return null
   // An event already here that names `ev` (any e tag, so a child of every kind): the walk would go on.
-  if (named) { if (named.has(ev.id)) return null }
+  if (named) { if ((typeof named === 'function' ? named() : named).has(ev.id)) return null }
   else for (const e of events) for (const t of e.tags) if (t[0] === 'e' && t[1] === ev.id) return null
   let open: ActionEvent | null = null
   for (let i = chain.length - 1; i >= 0; i--) {

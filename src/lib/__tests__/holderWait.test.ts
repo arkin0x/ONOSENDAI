@@ -22,7 +22,9 @@ vi.unmock('../relay')
 /** Each relay's behavior, by normalized URL: when it answers, what it holds, or that it never answers or cannot be reached. */
 const net = vi.hoisted(() => ({
   relays: [] as string[],
-  behavior: new Map<string, { eoseMs?: number; events?: unknown[]; hung?: boolean; down?: boolean; connectMs?: number }>(),
+  behavior: new Map<string, { eoseMs?: number; events?: unknown[]; hung?: boolean; down?: boolean; connectMs?: number; cap?: number }>(),
+  /** Each REQ written, by relay: how many filters it carried. */
+  reqs: new Map<string, number[]>(),
 }))
 vi.mock('../../store/useRelays', () => ({
   DEFAULT_RELAY: 'ws://canonical.test',
@@ -42,6 +44,14 @@ vi.mock('nostr-tools/abstract-pool', async () => {
     // A challenge, so authenticating is one quick signature rather than a wait for a challenge that never comes.
     challenge = 'c'
     authPromise: Promise<string> | undefined
+    // What relay.ts wraps on every relay it dials (countPings, guardSend), as nostr-tools' relay has them.
+    // Without them the first question on each relay failed, and was passed over only because the spawns
+    // and the chain went as two questions and the other one got through.
+    ongoingOperations = 0
+    openSubs = new Map<string, unknown>()
+    scheduleIdleClose(): void {}
+    clearIdleTimeout(): void {}
+    send(): Promise<void> { return Promise.resolve() }
     constructor(url: string) { this.url = url }
     auth(): Promise<string> {
       this.authPromise ??= Promise.resolve('ok')
@@ -49,8 +59,12 @@ vi.mock('nostr-tools/abstract-pool', async () => {
     }
     subscribe(filters: Array<Parameters<typeof matchFilter>[0]>, h: { onevent: (e: Ev) => void; oneose: () => void }): { close: () => void } {
       const b = net.behavior.get(this.url) ?? {}
+      net.reqs.set(this.url, [...(net.reqs.get(this.url) ?? []), filters.length])
       const t = setTimeout(() => {
-        for (const e of (b.events ?? []) as Ev[]) if (filters.some((f) => matchFilter(f, e))) h.onevent(e)
+        // `cap`: one limit over the whole REQ, newest first, as the canonical relay's nostrdb applies it.
+        const matched = ((b.events ?? []) as Ev[]).filter((e) => filters.some((f) => matchFilter(f, e)))
+        const sent = b.cap === undefined ? matched : [...matched].sort((x, y) => y.created_at - x.created_at).slice(0, b.cap)
+        for (const e of sent) h.onevent(e)
         if (!b.hung) h.oneose()
       }, b.eoseMs ?? 10)
       return { close: () => clearTimeout(t) }
@@ -110,6 +124,37 @@ describe('waiting for the relays that hold the chain (ruling of 2026-10-08 on th
     const { got, ms } = await confirm(c)
     expect(got?.map((e) => e.id)).toContain(c.hop2.id)
     expect(ms).toBeGreaterThanOrEqual(950)
+  })
+
+  it('asks each relay one REQ holding both the spawns and the chain, not two (owner\'s walk, 2026-11-21)', async () => {
+    const c = chainFor('e5')
+    const U = normalizeURL('ws://mine-one-req.test')
+    net.relays = [C, U]
+    noteChainHolders(c.pk, [U])
+    net.behavior.set(C, { eoseMs: 10, events: [c.spawn, c.hop1] })
+    net.behavior.set(U, { eoseMs: 10, events: [c.spawn, c.hop1, c.hop2] })
+    net.reqs.clear()
+    const { got } = await confirm(c)
+    expect(got?.map((e) => e.id)).toContain(c.hop2.id)
+    expect(net.reqs.get(C)).toEqual([2])
+    expect(net.reqs.get(U)).toEqual([2])
+  })
+
+  it('a relay that caps the whole REQ, with more new moves than the cap: the spawns are asked again and the hole is filled', async () => {
+    const c = chainFor('f6')
+    // Three more moves from another device: hop2 (from chainFor), then hop3 to hop5.
+    const more: NostrEvent[] = []
+    let prev = c.hop2
+    for (let n = 3; n <= 5; n++) {
+      const e: NostrEvent = { ...hopTemplate({ createdAt: 1_000 + n * 10, genesisId: c.spawn.id, previousId: prev.id, prevCoordHex: c.pk, to: { x: BigInt(n), y: 1n, z: 1n }, plane: 0, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00' }), id: `f60${n + 1}`.padEnd(64, '0'), pubkey: c.pk, sig: '0'.repeat(128) }
+      more.push(e)
+      prev = e
+    }
+    net.relays = [C]
+    net.behavior.set(C, { eoseMs: 10, events: [c.spawn, c.hop1, c.hop2, ...more], cap: 3 })
+    const { got } = await confirm(c)
+    // The two-question form found every move: the spawn on its own, the hole below hop3 by the page before it.
+    expect(got?.map((e) => e.id)).toEqual(expect.arrayContaining([c.hop2.id, ...more.map((e) => e.id)]))
   })
 
   it('a slow relay that never held the chain does not delay a pass', async () => {

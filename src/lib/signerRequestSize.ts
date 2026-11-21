@@ -65,14 +65,20 @@ function answerResult(method: string, params: readonly string[]): string | null 
 }
 
 /**
+ * Room left on a predicted answer for what a signer may add around it: an
+ * `"error":null` beside the result, or non-ASCII written as \uXXXX escapes.
+ */
+const ANSWER_SLACK_BYTES = 256
+
+/**
  * The bytes of NIP-44 plaintext a NIP-46 request needs: its own JSON, or the
- * answer it asks for, whichever is longer. `id` is the request id it will be
- * sent with (its length counts).
+ * answer it asks for (with ANSWER_SLACK_BYTES on top), whichever is longer.
+ * `id` is the request id it will be sent with (its length counts).
  */
 export function nip46PlaintextBytes(method: string, params: readonly string[], id: string): number {
   const request = bytesOf(JSON.stringify({ id, method, params }))
   const result = answerResult(method, params)
-  return result === null ? request : Math.max(request, bytesOf(JSON.stringify({ id, result })))
+  return result === null ? request : Math.max(request, bytesOf(JSON.stringify({ id, result })) + ANSWER_SLACK_BYTES)
 }
 
 /** Bytes as whole kilobytes, rounded up, so a size just past the limit never reads as the limit. */

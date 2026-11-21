@@ -4,8 +4,11 @@
  * localStorage is moved, before any module of the app is loaded: many read
  * their record the moment they load, as they did when it was in localStorage.
  * Then the app (boot.tsx). A database slow to answer holds the page at most
- * HYDRATE_WAIT_MS; past that the app loads reading localStorage.
+ * HYDRATE_WAIT_MS; past that the app loads without it (kvStore withoutDatabase).
  */
 import { hydrateKv } from './lib/kvStore'
 
-void hydrateKv().finally(() => import('./boot'))
+void hydrateKv()
+  .catch(() => undefined)
+  .then(() => import('./boot'))
+  .catch((err) => console.error('[boot] the app could not load:', err))

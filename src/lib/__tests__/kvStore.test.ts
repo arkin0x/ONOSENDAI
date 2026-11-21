@@ -16,7 +16,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  fingerprint, hydrateKv, kvFlush, kvGet, kvKeys, kvMode, kvRemove, kvSet, kvSuperseded, KV_DB, moveOne, movesToKv, resetKvForTests,
+  hydrateKv, kvFlush, kvGet, kvKeys, kvMode, kvRemove, kvSaved, kvSet, kvSuperseded, KV_DB, moveOne, MOVED_MARK, movesToKv, resetKvForTests,
 } from '../kvStore'
 
 /** A localStorage with a quota, in characters, as a phone's is: a write past it throws. */
@@ -52,10 +52,11 @@ afterEach(() => { resetKvForTests(); vi.restoreAllMocks() })
 
 describe('which records move', () => {
   it('the owner’s big three and the rest of his top list, by name or per identity; small switches stay', () => {
-    for (const k of ['onosendai:shards', 'onosendai:deployments', `onosendai:chain:${ME}`, 'onosendai:seen', 'onosendai:secrets', 'onosendai:secrets:bought', `onosendai:mutes:${ME}`, 'onosendai:published', 'onosendai:deployments-deleted', 'onosendai:cloudRegionKeys', `onosendai:deployments:${ME}`]) {
+    for (const k of ['onosendai:shards', 'onosendai:deployments', `onosendai:chain:${ME}`, 'onosendai:seen', 'onosendai:secrets', `onosendai:mutes:${ME}`, 'onosendai:published', 'onosendai:deployments-deleted', 'onosendai:cloudRegionKeys', `onosendai:deployments:${ME}`]) {
       expect(movesToKv(k), k).toBe(true)
     }
-    for (const k of ['onosendai:nsec', `onosendai:chain-mark:${ME}`, 'onosendai:shards:moved', 'onosendai:live', 'onosendai:calibration']) {
+    // The region key backstops stay: they are the copy for when IndexedDB fails.
+    for (const k of ['onosendai:secrets:bought', 'onosendai:secrets:refused', 'onosendai:secrets:fallback', 'onosendai:nsec', `onosendai:chain-mark:${ME}`, 'onosendai:shards:moved', 'onosendai:live', 'onosendai:calibration', MOVED_MARK]) {
       expect(movesToKv(k), k).toBe(false)
     }
   })
@@ -90,6 +91,14 @@ describe('the move', () => {
     await hydrateKv()
     expect(store.getItem('onosendai:seen')).toBe('["a","b"]')
     expect(kvGet('onosendai:seen')).toBe('["a","b"]')
+    // Kept, it is written where it is read, so its two copies never part.
+    kvSet('onosendai:seen', '["a","b","c"]')
+    expect(store.getItem('onosendai:seen')).toBe('["a","b","c"]')
+    vi.restoreAllMocks()
+    resetKvForTests()
+    await hydrateKv()
+    expect(kvGet('onosendai:seen')).toBe('["a","b","c"]')
+    expect(store.getItem('onosendai:seen')).toBeNull()
   })
 
   it('resumes when interrupted after the copy and before the removal: the next load only removes it', async () => {
@@ -123,7 +132,7 @@ describe('the move', () => {
     expect(kvGet('onosendai:cloudRegionKeys')).toBe('[1,2,3]')
   })
 
-  it('works with localStorage full, freeing it as it goes, and never writes localStorage', async () => {
+  it('works with localStorage full, freeing it as it goes, and writes nothing there but the mark', async () => {
     store = quotaStorage(650_000)
     ;(globalThis as { localStorage?: Storage }).localStorage = store
     store.setItem('onosendai:shards', 'a'.repeat(300_000))
@@ -133,25 +142,112 @@ describe('the move', () => {
     expect(() => store.setItem('onosendai:probe', 'y'.repeat(2_000))).toThrow()
     const set = vi.spyOn(store, 'setItem')
     await hydrateKv()
-    expect(set).not.toHaveBeenCalled()
-    expect(store.used()).toBe(0)
+    // Only the one-character mark that says records moved, written once room was made.
+    expect(set.mock.calls.every(([k]) => k === MOVED_MARK)).toBe(true)
+    expect(store.used()).toBe(MOVED_MARK.length + 1)
     expect(kvGet('onosendai:shards')!.length).toBe(300_000)
     expect(kvGet('onosendai:deployments')!.length).toBe(200_000)
     expect(kvGet(`onosendai:chain:${ME}`)!.length).toBe(149_000)
   })
 
-  it('a record an older build wrote after the move is the newer one, and the copy it replaces is kept', async () => {
-    store.setItem(`onosendai:mutes:${ME}`, '["old"]')
+  it('a record an older build wrote after the move (from an empty read) does not replace the stored one; its text is kept aside', async () => {
+    store.setItem(`onosendai:mutes:${ME}`, '["a","b","c"]')
     await hydrateKv()
-    kvSet(`onosendai:mutes:${ME}`, '["mine"]')
+    kvSet(`onosendai:mutes:${ME}`, '["a","b","c","d"]')
     await kvFlush()
-    // A tab of the build before this one writes localStorage again.
+    // A tab of the build before this one reads localStorage empty and writes what it has.
     store.setItem(`onosendai:mutes:${ME}`, '["older tab"]')
     resetKvForTests()
     await hydrateKv()
-    expect(kvGet(`onosendai:mutes:${ME}`)).toBe('["older tab"]')
+    expect(kvGet(`onosendai:mutes:${ME}`)).toBe('["a","b","c","d"]')
     expect(store.getItem(`onosendai:mutes:${ME}`)).toBeNull()
-    expect((await kvSuperseded()).map((r) => [r.key, r.value])).toEqual([[`onosendai:mutes:${ME}`, '["mine"]']])
+    expect((await kvSuperseded()).map((r) => [r.key, r.value])).toEqual([[`onosendai:mutes:${ME}`, '["older tab"]']])
+  })
+})
+
+describe('a database that does not open', () => {
+  /** An open that never answers. */
+  function hangOpen(): void {
+    vi.spyOn(indexedDB, 'open').mockImplementation(() => ({}) as IDBOpenDBRequest)
+  }
+
+  it('before anything moved: the page runs on localStorage as before, and the move waits for the next load', async () => {
+    store.setItem('onosendai:published', '{"a":1}')
+    hangOpen()
+    expect(await hydrateKv(50)).toBe('local')
+    expect(kvGet('onosendai:published')).toBe('{"a":1}')
+    kvSet('onosendai:published', '{"a":1,"b":2}')
+    expect(store.getItem('onosendai:published')).toBe('{"a":1,"b":2}')
+    vi.restoreAllMocks()
+    resetKvForTests()
+    await hydrateKv()
+    expect(kvGet('onosendai:published')).toBe('{"a":1,"b":2}')
+    expect(store.getItem('onosendai:published')).toBeNull()
+  })
+
+  it('after records moved: nothing starts from an empty copy and saves it over them (blind), and the next load has them whole', async () => {
+    store.setItem('onosendai:seen', '["a","b","c"]')
+    await hydrateKv()
+    expect(store.getItem(MOVED_MARK)).toBe('1')
+    resetKvForTests()
+    hangOpen()
+    expect(await hydrateKv(50)).toBe('blind')
+    // The session reads nothing for it, and what it writes stays in memory.
+    expect(kvGet('onosendai:seen')).toBeNull()
+    kvSet('onosendai:seen', '["z"]')
+    expect(kvGet('onosendai:seen')).toBe('["z"]')
+    expect(store.getItem('onosendai:seen')).toBeNull()
+    await kvFlush()
+    vi.restoreAllMocks()
+    resetKvForTests()
+    await hydrateKv()
+    expect(kvGet('onosendai:seen')).toBe('["a","b","c"]')
+  })
+
+  it('an open that answers after the page gave up is closed and changes nothing this session', async () => {
+    store.setItem('onosendai:published', '{"a":1}')
+    const real = indexedDB.open.bind(indexedDB)
+    vi.spyOn(indexedDB, 'open').mockImplementation((...a: Parameters<IDBFactory['open']>) => {
+      const req = real(...a)
+      const fire = req.onsuccess
+      void fire
+      return req
+    })
+    // A wait too short for even a fast open.
+    const m = await hydrateKv(0)
+    expect(['local', 'idb']).toContain(m)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(kvMode()).toBe(m)
+    if (m === 'local') expect(store.getItem('onosendai:published')).toBe('{"a":1}')
+  })
+})
+
+describe('a write that fails', () => {
+  it('is kept in memory and tried again until it lands', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      await hydrateKv()
+      const real = IDBDatabase.prototype.transaction
+      let refuse = 2
+      vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(function (this: IDBDatabase, ...a: Parameters<IDBDatabase['transaction']>) {
+        if (a[1] === 'readwrite' && refuse-- > 0) throw Object.assign(new Error('connection lost'), { name: 'UnknownError' })
+        return real.apply(this, a)
+      })
+      kvSet('onosendai:published', '{"kept":1}')
+      expect(await kvFlush()).toBe(false)
+      expect(kvSaved()).toBe(false)
+      expect(kvGet('onosendai:published')).toBe('{"kept":1}')
+      await vi.advanceTimersByTimeAsync(1_100)
+      await vi.advanceTimersByTimeAsync(2_100)
+      await kvFlush()
+      expect(kvSaved()).toBe(true)
+      vi.restoreAllMocks()
+      resetKvForTests()
+      await hydrateKv()
+      expect(kvGet('onosendai:published')).toBe('{"kept":1}')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
@@ -188,12 +284,13 @@ describe('reading and writing', () => {
   })
 
   it('moveOne is idempotent on a verified record', async () => {
-    store.setItem('onosendai:secrets:bought', '{"k":1}')
+    store.setItem('onosendai:secrets', '{"k":1}')
     await hydrateKv()
     const db = await new Promise<IDBDatabase>((resolve) => { const r = indexedDB.open(KV_DB); r.onsuccess = () => resolve(r.result) })
-    store.setItem('onosendai:secrets:bought', '{"k":1}')
-    expect(await moveOne(db, 'onosendai:secrets:bought', '{"k":1}')).toBe('removed')
-    expect(fingerprint('{"k":1}')).toBe(fingerprint('{"k":1}'))
+    store.setItem('onosendai:secrets', '{"k":1}')
+    expect(await moveOne(db, 'onosendai:secrets', '{"k":1}')).toBe('removed')
+    expect(store.getItem('onosendai:secrets')).toBeNull()
+    expect(await kvSuperseded()).toEqual([])
     db.close()
   })
 })
@@ -210,9 +307,9 @@ describe('nothing writes a moved record to localStorage again', () => {
   }
   walk(SRC)
 
-  it('no localStorage.setItem names a moved key, and the modules that keep them read through kvStore', () => {
+  it('no localStorage.setItem or getItem names a moved key: the modules that keep them go through kvStore', () => {
     const offenders: string[] = []
-    const moved = /localStorage\.setItem\(\s*(['`]onosendai:(shards|deployments|chain|seen|published|cloudRegionKeys|secrets|mutes)[^'`]*['`]|LOCAL_KEY|BARE_KEY|DELETED_KEY|UNCLAIMED_KEY|SEEN_KEY|REGION_KEYS_KEY|STORAGE\b|chainKeyFor|CHAIN_KEY|localKey\(|goneKey\(|BOUGHT_KEY|REFUSED_KEY|FALLBACK_KEY|LEGACY_KEY|keyFor\()/
+    const moved = /localStorage\.(setItem|getItem)\(\s*(['`]onosendai:(shards|deployments|chain[:'`]|seen|published|cloudRegionKeys|secrets['`]|mutes|tutorial:stage)[^'`]*['`]|LOCAL_KEY|BARE_KEY|DELETED_KEY|UNCLAIMED_KEY|SEEN_KEY|REGION_KEYS_KEY|STORAGE\b|chainKeyFor|CHAIN_KEY\b|localKey\(|goneKey\(|LEGACY_KEY|keyFor\(|STAGE_PREFIX)/
     for (const f of files) {
       // mineRollback.ts is for a revert only, imported by nothing: it writes the old list back for the old code on purpose.
       if (f.endsWith('mineRollback.ts')) continue

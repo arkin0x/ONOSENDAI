@@ -31,12 +31,21 @@
  * verified), or gone from localStorage (done). A record whose copy does not
  * read back the same stays in localStorage and is read from there.
  *
- * NEVER LOST. This build never writes these records to localStorage. One
- * found there that does not match its fingerprint was written since by a
- * build from before this one (a tab left open through the deploy): it is
- * newer, so it is moved in, and the copy it replaces is kept in `superseded`,
- * never deleted. The same for a write made while the database had not opened
- * yet and that lands over a record written meanwhile.
+ * NEVER LOST, NEVER WRITTEN OVER. This build never writes a moved record to
+ * localStorage. One found there beside the database's copy and not matching
+ * its fingerprint was written since by a build from before this one (a tab
+ * left open through the deploy), which read localStorage empty and wrote
+ * what it had: the database's copy stays, and that text is kept in
+ * `superseded`, never deleted. A record whose copy did not verify stays in
+ * localStorage and is read and written there (`stayed`), so its two copies
+ * never part.
+ *
+ * A DATABASE THAT DOES NOT OPEN. Before anything moved (no MOVED_MARK), the
+ * page runs on localStorage as before, and the move waits for the next load.
+ * After (the mark is set before the first removal), the records are only in
+ * the database, so a session without it must not start from nothing and
+ * save that over them: it runs `blind`, keeping its changes to those records
+ * in memory only, and the next load reads the database again.
  *
  * READS prefer the database and fall back to localStorage: a record not in
  * the database is read from localStorage, so during the move, and on a
@@ -48,7 +57,9 @@
  * `storage` event they listened for before, so their listeners need no change.
  *
  * Without IndexedDB (or before hydrateKv, as in unit tests), it is
- * localStorage, exactly as before.
+ * localStorage, exactly as before. The region key backstops
+ * (lib/secrets/backstop.ts) stay in localStorage on purpose: they are the
+ * copy kept for when IndexedDB fails.
  */
 
 import { openDatabase, request } from './idb'
@@ -58,6 +69,8 @@ const KV_VERSION = 1
 const ENTRIES = 'entries'
 const SUPERSEDED = 'superseded'
 const CHANNEL = 'onosendai:kv'
+/** Set in localStorage before the first record leaves it: from then on some records are only in the database. */
+export const MOVED_MARK = 'onosendai:kv:moved'
 
 /** Records moved by their exact name. */
 export const MOVED_KEYS: readonly string[] = [
@@ -71,11 +84,8 @@ export const MOVED_KEYS: readonly string[] = [
   'onosendai:seen',
   'onosendai:published',
   'onosendai:cloudRegionKeys',
-  // Region keys: the old list (lib/secrets/db.ts), and the backstops (lib/secrets/backstop.ts).
+  // The old region key list, only ever read since the keys moved to their own database (lib/secrets/db.ts).
   'onosendai:secrets',
-  'onosendai:secrets:bought',
-  'onosendai:secrets:refused',
-  'onosendai:secrets:fallback',
 ]
 
 /** Records moved by the start of their name: one per identity, or per bucket of hides. */
@@ -89,15 +99,16 @@ export const MOVED_PREFIXES: readonly string[] = [
 ]
 
 /**
- * What stays in localStorage: a device's small switches and marks, read
+ * What stays in localStorage on purpose: the region key backstops (the copy
+ * for when IndexedDB fails), and a device's small switches and marks, read
  * before anything else or by a tab of an older build, a few characters each.
- * Listed so the line is drawn on purpose; not exhaustive (the PR that
- * made this lists every record left in localStorage).
+ * Not exhaustive: the PR that made this lists every record left there.
  */
-export const DEVICE_PREFS: readonly string[] = [
+export const STAYS_IN_LOCAL_STORAGE: readonly string[] = [
+  'onosendai:secrets:bought', 'onosendai:secrets:refused', 'onosendai:secrets:fallback',
   'onosendai:nsec', 'onosendai:mintedKey', 'onosendai:signer', 'onosendai:live', 'onosendai:moveMode',
   'onosendai:showSecrets', 'onosendai:showTrail', 'onosendai:chain-mark:', 'onosendai:chain-rows:',
-  'onosendai:chain-unsaved:', 'onosendai:shards:moved', 'onosendai:calibration', 'onosendai:menu-open',
+  'onosendai:chain-unsaved:', 'onosendai:shards:moved', 'onosendai:calibration', 'onosendai:menu-open', MOVED_MARK,
 ]
 
 /** Whether this record lives in the database (when there is one). */
@@ -105,20 +116,23 @@ export function movesToKv(key: string): boolean {
   return MOVED_KEYS.includes(key) || MOVED_PREFIXES.some((p) => key.startsWith(p))
 }
 
-type Mode = 'pending' | 'idb' | 'local' | 'late'
+type Mode = 'pending' | 'idb' | 'local' | 'blind'
 let mode: Mode = 'pending'
 let db: IDBDatabase | null = null
 /** The database's records, as this tab knows them. */
 const mirror = new Map<string, string>()
 /** Fingerprints of the localStorage text each record was moved from. */
 const seen = new Map<string, string>()
-/** Records changed here and not yet written: the text, or null to delete. */
+/** Records whose copy did not verify: they stay in localStorage, read and written there. */
+const stayed = new Set<string>()
+/** Records changed here and not yet written: the text, or null to delete. In `blind` mode, never written. */
 const dirty = new Map<string, string | null>()
 let flushTimer: ReturnType<typeof setTimeout> | null = null
 let flushing: Promise<boolean> = Promise.resolve(true)
 let channel: BroadcastChannel | null = null
-/** What the last write to the database did: false when it failed (the changes stay in memory and go with the next). */
+/** What the last write to the database did: false when it failed (the changes stay in memory and are tried again). */
 let lastFlushOk = true
+let retryMs = 0
 
 /** Which store records are read from now: for tests and the diagnostics. */
 export function kvMode(): Mode { return mode }
@@ -137,40 +151,44 @@ export function fingerprint(text: string): string {
   return `${text.length}:${(h >>> 0).toString(36)}`
 }
 
+/** Whether this record is kept by this module now, rather than in localStorage. */
+function heldHere(key: string): boolean {
+  return (mode === 'idb' || mode === 'blind') && movesToKv(key) && !stayed.has(key)
+}
+
 /** The record, from the database when it has it, else from localStorage. */
 export function kvGet(key: string): string | null {
-  if (mode === 'idb' || mode === 'late') {
+  if (heldHere(key)) {
     if (dirty.has(key)) return dirty.get(key) ?? null
     const v = mirror.get(key)
     if (v !== undefined) return v
-    // Not moved (yet, or its copy did not verify): where it was.
+    // Not in the database: where it was, if anywhere.
   }
   try { return ls()?.getItem(key) ?? null } catch { return null }
 }
 
 /**
- * Keep the record. In localStorage mode it is localStorage's setItem, which
- * may throw as it always did; otherwise it never throws, and the write lands
- * a moment later (kvFlush).
+ * Keep the record. Where localStorage keeps it (before the move, without a
+ * database, a record whose copy did not verify) it is localStorage's
+ * setItem, which may throw as it always did; otherwise it never throws, and
+ * the write lands a moment later (kvFlush).
  */
 export function kvSet(key: string, value: string): void {
-  if (mode === 'pending' || mode === 'local' || !movesToKv(key)) { ls()?.setItem(key, value); return }
+  if (!heldHere(key)) { ls()?.setItem(key, value); return }
   dirty.set(key, String(value))
   scheduleFlush()
 }
 
 /** Take the record away, from both stores. */
 export function kvRemove(key: string): void {
-  if (mode === 'idb' || mode === 'late') {
-    if (movesToKv(key)) { dirty.set(key, null); scheduleFlush() }
-  }
+  if (heldHere(key)) { dirty.set(key, null); scheduleFlush() }
   try { ls()?.removeItem(key) } catch { /* private mode */ }
 }
 
 /** The names of the records starting with `prefix`, in either store. */
 export function kvKeys(prefix: string): string[] {
   const out = new Set<string>()
-  if (mode === 'idb' || mode === 'late') {
+  if (mode === 'idb' || mode === 'blind') {
     for (const k of mirror.keys()) if (k.startsWith(prefix) && dirty.get(k) !== null) out.add(k)
     for (const [k, v] of dirty) if (k.startsWith(prefix) && v !== null) out.add(k)
   }
@@ -179,7 +197,7 @@ export function kvKeys(prefix: string): string[] {
     try {
       for (let i = 0; i < s.length; i++) {
         const k = s.key(i)
-        if (k && k.startsWith(prefix) && !(mode === 'idb' && dirty.get(k) === null)) out.add(k)
+        if (k && k.startsWith(prefix) && !(heldHere(k) && dirty.get(k) === null)) out.add(k)
       }
     } catch { /* private mode */ }
   }
@@ -193,30 +211,44 @@ export const kvStorage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = {
   removeItem: kvRemove,
 }
 
-function scheduleFlush(): void {
-  if (flushTimer !== null) return
-  flushTimer = setTimeout(() => { flushTimer = null; void kvFlush() }, FLUSH_AFTER_MS)
+function scheduleFlush(delay = FLUSH_AFTER_MS): void {
+  if (mode !== 'idb' || flushTimer !== null) return
+  flushTimer = setTimeout(() => { flushTimer = null; void kvFlush() }, delay)
 }
 /** How long writes gather before they go to the database together. */
 export const FLUSH_AFTER_MS = 100
+/** The longest a failed write waits before it is tried again. */
+export const RETRY_MAX_MS = 30_000
 
-/** Write what changed here, now. Resolves true once it is committed (or there was nothing to write). */
+/**
+ * Write what changed here, now. Resolves true once it is committed (or there
+ * was nothing to write). A failure keeps the changes and tries again, with a
+ * fresh connection when the old one was closed under it, waiting longer each
+ * time up to RETRY_MAX_MS.
+ */
 export function kvFlush(): Promise<boolean> {
   if (flushTimer !== null) { clearTimeout(flushTimer); flushTimer = null }
   flushing = flushing.then(async () => {
-    if (!db || mode !== 'idb' || dirty.size === 0) return lastFlushOk = dirty.size === 0 || mode !== 'idb'
+    if (mode !== 'idb') return lastFlushOk = mode !== 'blind' || dirty.size === 0
+    if (dirty.size === 0) return lastFlushOk = true
     const batch = new Map(dirty)
     try {
-      await writeBatch(db, batch, false)
+      const d = db ?? (db = watch(await openKv()))
+      await writeBatch(d, batch)
       for (const [k, v] of batch) {
         if (dirty.get(k) === v) dirty.delete(k)
         if (v === null) mirror.delete(k)
         else mirror.set(k, v)
       }
       channel?.postMessage({ keys: [...batch.keys()] })
+      retryMs = 0
       return lastFlushOk = true
     } catch (err) {
-      console.warn(`[kv] could not save ${batch.size} record(s), kept in this tab and tried again with the next change: ${err instanceof Error ? err.message : String(err)}`)
+      console.warn(`[kv] could not save ${batch.size} record(s); kept in this tab and tried again: ${err instanceof Error ? err.message : String(err)}`)
+      try { db?.close() } catch { /* already closed */ }
+      db = null
+      retryMs = Math.min(RETRY_MAX_MS, retryMs ? retryMs * 2 : 1000)
+      scheduleFlush(retryMs)
       return lastFlushOk = false
     }
   })
@@ -226,23 +258,34 @@ export function kvFlush(): Promise<boolean> {
 /** Whether the last write to the database landed. */
 export function kvSaved(): boolean { return lastFlushOk }
 
-/** One transaction: put or delete each record; with `keepOld`, what a put replaces is kept in `superseded` first. */
-function writeBatch(d: IDBDatabase, batch: ReadonlyMap<string, string | null>, keepOld: boolean, seenOf?: ReadonlyMap<string, string>): Promise<void> {
+/** A connection that forgets itself when the browser closes it or another tab upgrades the database. */
+function watch(d: IDBDatabase): IDBDatabase {
+  d.onclose = () => { if (db === d) db = null }
+  d.onversionchange = () => { d.close(); if (db === d) db = null }
+  return d
+}
+
+/** One transaction: put or delete each record. `seenOf` gives the fingerprint to keep beside a put; otherwise the one already known. */
+function writeBatch(d: IDBDatabase, batch: ReadonlyMap<string, string | null>, seenOf?: ReadonlyMap<string, string>): Promise<void> {
   return new Promise((resolve, reject) => {
-    const tx = d.transaction([ENTRIES, SUPERSEDED], 'readwrite')
+    const tx = d.transaction([ENTRIES], 'readwrite')
     const entries = tx.objectStore(ENTRIES)
-    const superseded = tx.objectStore(SUPERSEDED)
     for (const [key, value] of batch) {
       if (value === null) { entries.delete(key); continue }
-      const put = (): void => { entries.put({ key, value, at: Date.now(), ...(seenOf?.has(key) ? { seen: seenOf.get(key) } : seen.has(key) ? { seen: seen.get(key) } : {}) }) }
-      if (!keepOld) { put(); continue }
-      const was = entries.get(key)
-      was.onsuccess = () => {
-        const old = was.result as { value?: string } | undefined
-        if (old && typeof old.value === 'string' && old.value !== value) superseded.add({ key, value: old.value, at: Date.now() })
-        put()
-      }
+      const print = seenOf?.get(key) ?? seen.get(key)
+      entries.put({ key, value, at: Date.now(), ...(print !== undefined ? { seen: print } : {}) })
     }
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB write failed'))
+    tx.onabort = () => reject(tx.error ?? new Error('IndexedDB write aborted'))
+  })
+}
+
+/** Keep a text set aside (NEVER LOST): one row per copy, never overwritten. Resolves once committed. */
+function keepAside(d: IDBDatabase, key: string, value: string, why: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = d.transaction([SUPERSEDED], 'readwrite')
+    tx.objectStore(SUPERSEDED).add({ key, value, at: Date.now(), why })
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error ?? new Error('IndexedDB write failed'))
     tx.onabort = () => reject(tx.error ?? new Error('IndexedDB write aborted'))
@@ -253,38 +296,56 @@ async function readOne(d: IDBDatabase, key: string): Promise<{ value: string; se
   return await request(d.transaction(ENTRIES, 'readonly').objectStore(ENTRIES).get(key)) as { value: string; seen?: string } | undefined
 }
 
-/** The copies a newer record replaced (NEVER LOST): for recovery by hand, oldest first. */
-export async function kvSuperseded(): Promise<Array<{ key: string; value: string; at: number }>> {
+/** The copies set aside (NEVER LOST): for recovery by hand, oldest first. */
+export async function kvSuperseded(): Promise<Array<{ key: string; value: string; at: number; why: string }>> {
   if (!db) return []
-  return await request(db.transaction(SUPERSEDED, 'readonly').objectStore(SUPERSEDED).getAll()) as Array<{ key: string; value: string; at: number }>
+  return await request(db.transaction(SUPERSEDED, 'readonly').objectStore(SUPERSEDED).getAll()) as Array<{ key: string; value: string; at: number; why: string }>
+}
+
+/** Mark that records have left localStorage (MOVED_MARK). True once it is there. */
+function markMoved(): boolean {
+  const s = ls()
+  try { if (s?.getItem(MOVED_MARK)) return true } catch { return false }
+  try { s?.setItem(MOVED_MARK, '1'); return true } catch { return false }
 }
 
 /**
  * Move one record out of localStorage (THE MOVE). Resolves to what happened:
- * `moved` (copied, verified, removed), `removed` (already verified on an
- * earlier load), `kept` (the copy did not verify, or could not be written:
- * it stays in localStorage and is read from there).
+ * `moved` (copied, verified, removed), `removed` (the database already holds
+ * it: verified on an earlier load, or newer than an older build's text,
+ * which is set aside first), `kept` (the copy did not verify or could not be
+ * written: it stays in localStorage, read and written there).
  */
 export async function moveOne(d: IDBDatabase, key: string, text: string): Promise<'moved' | 'removed' | 'kept'> {
   const s = ls()
   const print = fingerprint(text)
-  if (seen.get(key) === print) {
-    // Verified on an earlier load, and the removal did not happen.
-    try { s?.removeItem(key) } catch { return 'kept' }
+  const remove = (): void => {
+    // The mark goes first, so a load that finds the database slow knows not to start from nothing. Full: room is made by the removal.
+    const marked = markMoved()
+    try { s?.removeItem(key) } catch { /* verified: removed next load */ }
+    if (!marked) markMoved()
+  }
+  if (mirror.has(key)) {
+    if (seen.get(key) !== print) {
+      // Written to localStorage after the move, by a build that read it empty: the database's copy stays, and this text is set aside.
+      console.warn(`[kv] ${key} was written to localStorage after it moved (a tab of an older build): the stored copy stays, and that text is kept aside`)
+      try { await keepAside(d, key, text, 'written to localStorage after the move') } catch { stayed.delete(key); return 'kept' }
+    }
+    remove()
     return 'removed'
   }
-  if (seen.has(key)) console.warn(`[kv] ${key} was written to localStorage after it moved (a tab of an older build): it is the newer copy, and the one it replaces is kept`)
   try {
-    await writeBatch(d, new Map([[key, text]]), true, new Map([[key, print]]))
+    await writeBatch(d, new Map([[key, text]]), new Map([[key, print]]))
     const back = await readOne(d, key)
-    if (!back || back.value !== text || back.seen !== print) return 'kept'
+    if (!back || back.value !== text || back.seen !== print) { stayed.add(key); return 'kept' }
   } catch (err) {
     console.warn(`[kv] ${key} stays in localStorage for now: ${err instanceof Error ? err.message : String(err)}`)
+    stayed.add(key)
     return 'kept'
   }
   seen.set(key, print)
   mirror.set(key, text)
-  try { s?.removeItem(key) } catch { /* verified: removed next load */ }
+  remove()
   return 'moved'
 }
 
@@ -305,7 +366,7 @@ function waitingInLocalStorage(): Array<[string, string]> {
 }
 
 function openKv(): Promise<IDBDatabase> {
-  // `superseded` numbers its own rows: one per replaced copy, never overwritten.
+  // `superseded` numbers its own rows: one per copy set aside, never overwritten.
   return openDatabase(KV_DB, KV_VERSION, [[ENTRIES, 'key']], (tx) => {
     if (!tx.db.objectStoreNames.contains(SUPERSEDED)) tx.db.createObjectStore(SUPERSEDED, { autoIncrement: true })
   })
@@ -321,55 +382,71 @@ async function readAll(d: IDBDatabase): Promise<void> {
   }
 }
 
+function hasMoved(): boolean {
+  try { return !!ls()?.getItem(MOVED_MARK) } catch { return false }
+}
+
+/** The mode a page takes when the database is missing, failed or slow: localStorage before anything moved, `blind` after. */
+function withoutDatabase(why: string): Mode {
+  if (hasMoved()) {
+    console.warn(`[kv] ${why}: records already moved there are not read this session, and nothing is saved over them; reload to try again`)
+    return 'blind'
+  }
+  return 'local'
+}
+
 let hydrating: Promise<Mode> | null = null
 
 /**
  * Open the database, read it, and move what is still in localStorage. Before
  * the app is imported (main.tsx), so every module that reads a record at
- * load finds it. Waits at most `waitMs`: past that the app loads reading
- * localStorage (`late`), and what is written meanwhile lands once the
- * database opens, the copies it replaces kept.
+ * load finds it. The open waits at most `waitMs`; past that the page goes on
+ * without it (withoutDatabase), and a database that opens later is closed and
+ * left for the next load. Once open, the reading and the move run to the end
+ * before the app loads: a page must never start on half of one store.
  */
 export function hydrateKv(waitMs = HYDRATE_WAIT_MS): Promise<Mode> {
   if (hydrating) return hydrating
-  if (typeof indexedDB === 'undefined') { mode = 'local'; return hydrating = Promise.resolve(mode) }
-  const work = (async (): Promise<Mode> => {
-    try {
-      const d = await openKv()
-      db = d
-      await readAll(d)
-      if (mode === 'late') {
-        // The app is already running on localStorage: what it wrote meanwhile goes in now, over what was there, which is kept.
-        const batch = new Map(dirty)
-        if (batch.size > 0) await writeBatch(d, batch, true)
-        for (const [k, v] of batch) { if (dirty.get(k) === v) dirty.delete(k); if (v === null) mirror.delete(k); else mirror.set(k, v) }
-        mode = 'idb'
-        listen()
-        return mode
+  if (typeof indexedDB === 'undefined') { mode = withoutDatabase('IndexedDB is missing'); return hydrating = Promise.resolve(mode) }
+  hydrating = new Promise<Mode>((resolve) => {
+    let gaveUp = false
+    const timer = setTimeout(() => {
+      gaveUp = true
+      mode = withoutDatabase('IndexedDB is slow to open')
+      resolve(mode)
+    }, waitMs)
+    void openKv().then(async (d) => {
+      if (gaveUp) { d.close(); return }
+      clearTimeout(timer)
+      try {
+        await readAll(d)
+      } catch (err) {
+        // Unread, the database cannot be the store: nothing may start from an empty copy of it.
+        d.close()
+        mode = withoutDatabase(`IndexedDB could not be read (${err instanceof Error ? err.message : String(err)})`)
+        resolve(mode)
+        return
       }
-      for (const [key, text] of waitingInLocalStorage()) await moveOne(d, key, text)
+      try {
+        for (const [key, text] of waitingInLocalStorage()) await moveOne(d, key, text)
+      } catch (err) {
+        console.warn(`[kv] the move stopped and resumes next load: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      db = watch(d)
       mode = 'idb'
       listen()
-      return mode
-    } catch (err) {
-      console.warn(`[kv] IndexedDB unavailable, records stay in localStorage: ${err instanceof Error ? err.message : String(err)}`)
-      if (mode === 'late') {
-        // What was written while waiting goes where it always went.
-        for (const [k, v] of dirty) { try { if (v === null) ls()?.removeItem(k); else ls()?.setItem(k, v) } catch { /* quota: as localStorage always refused */ } }
-        dirty.clear()
-      }
-      mode = 'local'
-      return mode
-    }
-  })()
-  hydrating = Promise.race([work, new Promise<Mode>((resolve) => setTimeout(() => {
-    if (mode === 'pending') { mode = 'late'; console.warn('[kv] IndexedDB slow to open: reading localStorage until it does') }
-    resolve(mode)
-  }, waitMs))])
+      resolve(mode)
+    }, (err: unknown) => {
+      if (gaveUp) return
+      clearTimeout(timer)
+      mode = withoutDatabase(`IndexedDB did not open (${err instanceof Error ? err.message : String(err)})`)
+      resolve(mode)
+    })
+  })
   return hydrating
 }
 /** How long the app waits for the database before it loads without it. */
-export const HYDRATE_WAIT_MS = 5_000
+export const HYDRATE_WAIT_MS = 8_000
 
 function listen(): void {
   if (typeof window === 'undefined') return
@@ -408,14 +485,16 @@ export function resetKvForTests(): void {
   if (flushTimer !== null) clearTimeout(flushTimer)
   flushTimer = null
   mode = 'pending'
-  db?.close()
+  try { db?.close() } catch { /* closed */ }
   db = null
   mirror.clear()
   seen.clear()
+  stayed.clear()
   dirty.clear()
   hydrating = null
   flushing = Promise.resolve(true)
   lastFlushOk = true
+  retryMs = 0
   channel?.close()
   channel = null
 }

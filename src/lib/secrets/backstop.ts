@@ -23,7 +23,6 @@
  * megabytes shared with the action chain, and a full one refuses.
  */
 
-import { kvStorage } from '../kvStore'
 import type { HeldKey } from '../../store/useSecrets'
 import { describeError, parseLegacy } from './db'
 
@@ -102,9 +101,8 @@ export function setAsideRefused(key: RefusedKey): string | null {
   }
 }
 
-/** Where the backstops are kept: IndexedDB once they moved (lib/kvStore.ts), else localStorage, as before. */
-function storage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
-  return kvStorage
+function storage(): Storage | null {
+  try { return typeof localStorage === 'undefined' ? null : localStorage } catch { return null }
 }
 
 /** The bought keys kept here, by lookup id. */
@@ -191,7 +189,7 @@ export function readFallback(): FallbackRecord {
   }
 }
 
-function writeFallback(s: Pick<Storage, 'setItem' | 'removeItem'>, rec: FallbackRecord): void {
+function writeFallback(s: Storage, rec: FallbackRecord): void {
   if (Object.keys(rec.held).length === 0 && rec.forgotten.length === 0) s.removeItem(FALLBACK_KEY)
   else s.setItem(FALLBACK_KEY, JSON.stringify(rec))
 }

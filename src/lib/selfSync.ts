@@ -21,19 +21,32 @@
  * answer was "nobody could say" and the connection shows signs of life: the
  * network coming back, the tab returning, a dead socket replaced
  * (relay.ts onResume), or the live subscription below reaching its EOSE.
+ *
+ * Kept caught up (owner, 2026-11-21: "when I go to my tablet and refresh, it
+ * doesn't immediately get the movement chain events I did on my phone"):
+ *
+ * | When | What is asked | Cost |
+ * |---|---|---|
+ * | load, identity switch | the self-check: spawns and the newest page of the chain, then every page down to what this device holds (chains.ts gatherChain); the HUD says CHECKING YOUR CHAIN meanwhile, and a move waits for it (useCyberspace confirmHead) | one check |
+ * | the tab shown or focused, the network back, a dead socket replaced | the chain from the newest event the relays hold that this device has (the head check's question), paged the same way | one ask, at most every CATCH_UP_GAP_MS |
+ * | another device publishes | the live watch delivers it (chains.ts watchOwnChain: no `since`, so moves signed hours ago while LOCAL and published now arrive too); one that does not link to the chain in hand asks the relays for what lies between | nothing per step |
+ *
+ * None of it ever signs anything. Every signature still asks the relays for
+ * the head itself first (confirmHead), so a catch-up that is late or fails
+ * costs a moment of a stale view, never a fork.
  */
 
-import { askChainEvents, fetchChainEvents, watchAuthor } from './chains'
+import { askChainEvents, fetchChainEvents, watchOwnChain } from './chains'
 import { decideSelfCheck } from './chainHold'
 import { onResume, retryFailedAuth } from './relay'
 import { chainHolders } from './chainHolders'
 import { signerHeld } from './authOpen'
-import { newestSpawn, type NostrEvent } from './events'
+import { actionLink, newestSpawn, type NostrEvent } from './events'
 import type { RelayAnswer } from './relayOutcome'
 import { requeueForCanonical } from './publisher'
 import { normalizeURL } from 'nostr-tools/utils'
 import { DEFAULT_RELAY } from '../store/useRelays'
-import { useCyberspace } from '../store/useCyberspace'
+import { newestOnRelays, useCyberspace } from '../store/useCyberspace'
 
 let close: (() => void) | null = null
 let started = false
@@ -75,10 +88,17 @@ async function check(pubkey: string): Promise<void> {
   checking = pubkey
   again = false
   useCyberspace.getState().applySelfCheck(pubkey, { status: 'checking' })
+  // Only the identity's first look on this page is CHECKING YOUR CHAIN and
+  // holds a move: a recheck while the relays stay silent (every resume, every
+  // dead probe) leaves CHAIN NOT CHECKED up until one answers.
+  const first = useCyberspace.getState().chainSync?.pubkey !== pubkey
+  if (first) setSync(pubkey, 'checking')
   try {
     const answers = await askChainEvents(pubkey, knownGenesis(pubkey), knownEvents(pubkey))
     if (useCyberspace.getState().identity.pubkey !== pubkey) return
-    useCyberspace.getState().applySelfCheck(pubkey, decideSelfCheck(answers, DEFAULT_RELAY, online(), chainHolders(pubkey)))
+    const verdict = decideSelfCheck(answers, DEFAULT_RELAY, online(), chainHolders(pubkey))
+    useCyberspace.getState().applySelfCheck(pubkey, verdict)
+    setSync(pubkey, verdict.status === 'unknown' ? 'unreachable' : 'done')
     requeueMissingOnCanonical(pubkey, answers)
   } catch {
     // The query reports rather than throws; anything that escapes is a
@@ -86,10 +106,89 @@ async function check(pubkey: string): Promise<void> {
     if (useCyberspace.getState().identity.pubkey === pubkey) {
       useCyberspace.getState().applySelfCheck(pubkey, { status: 'unknown', cause: online() ? { kind: 'unreachable', reason: 'query failed' } : { kind: 'offline' } })
     }
+    setSync(pubkey, 'unreachable')
   } finally {
     if (checking === pubkey) checking = null
+    // A check that was not taken in (an identity switch) leaves no CHECKING behind.
+    const s = useCyberspace.getState()
+    if (s.chainSync?.pubkey === pubkey && s.chainSync.status === 'checking') setSync(pubkey, 'unreachable')
     if (again) { again = false; recheckIfUnknown() }
+    if (catchAgain) { catchAgain = false; catchUp('again') }
   }
+}
+
+/** What the HUD and a waiting move read about the check (store chainSync). */
+function setSync(pubkey: string, status: 'checking' | 'done' | 'unreachable'): void {
+  const cur = useCyberspace.getState().chainSync
+  if (cur?.pubkey === pubkey && cur.status === status) return
+  useCyberspace.setState({ chainSync: { pubkey, status } })
+}
+
+/** The least time between two catch-ups that a tab return or a focus asks for. */
+export const CATCH_UP_GAP_MS = 3000
+/** A catch-up out right now. */
+let catching = false
+/** One was asked for while a check or a catch-up was out: it runs once that one ends. */
+let catchAgain = false
+let lastCatchUp = -Infinity
+
+/**
+ * Why a catch-up was asked for: `gap` is a live event that did not link to
+ * the chain in hand, `again` one asked for while another was out; both skip
+ * the gap between catch-ups. Any other reason (a focus, a tab return, the
+ * network back) is held to one per CATCH_UP_GAP_MS.
+ */
+export type CatchUpReason = 'focus' | 'resume' | 'gap' | 'again'
+
+/**
+ * Ask the relays for the chain from the newest event they hold that this
+ * device has (the head check's question, paged the same way: chains.ts
+ * gatherChain) and fold in what is newer, so the position, the chip and the
+ * scene go to the true head without a move. Never signs; a fork against
+ * unpublished moves raises the diverged-branch prompt (adoptChain). One at a
+ * time, and nothing while the self-check is out, which asks the same
+ * question already.
+ */
+export function catchUp(reason: CatchUpReason = 'focus'): void {
+  const s = useCyberspace.getState()
+  const pubkey = s.identity.pubkey
+  // One out already answers a focus; a gap or a resume may be about something
+  // newer than its question, so it is asked once more when that one ends.
+  if (checking === pubkey || catching) { if (reason !== 'focus') catchAgain = true; return }
+  // No chain here yet: the question is the self-check's, asked again when it could not say.
+  if (s.events.length === 0) { recheckIfUnknown(); return }
+  const now = Date.now()
+  if (reason !== 'gap' && reason !== 'again' && now - lastCatchUp < CATCH_UP_GAP_MS) return
+  lastCatchUp = now
+  catching = true
+  const since = newestOnRelays(s.events, s.published)
+  void fetchChainEvents(pubkey, knownGenesis(pubkey), knownEvents(pubkey), since)
+    .then((events) => {
+      if (useCyberspace.getState().identity.pubkey !== pubkey) return
+      useCyberspace.getState().adoptChain(events)
+      const sync = useCyberspace.getState().chainSync
+      if (sync?.pubkey === pubkey && sync.status === 'unreachable') setSync(pubkey, 'done')
+    })
+    .catch(() => { /* unreachable, or a hole: the head check before any signature asks again */ })
+    .finally(() => {
+      catching = false
+      if (catchAgain) { catchAgain = false; catchUp('again') }
+    })
+}
+
+/**
+ * A live event of the chain in hand that the fold did not take: its
+ * previous event is not here (it was published while this socket was
+ * down, or the watch only just opened). The relays are asked for what lies
+ * between. Not during a proof, a held chain or a pending choice, where the
+ * store keeps what arrives for later on purpose.
+ */
+function linkMissing(ev: NostrEvent): boolean {
+  const s = useCyberspace.getState()
+  if (s.held || s.chainConflict || s.proof.status === 'computing' || s.events.length === 0) return false
+  const link = actionLink(ev)
+  if (!link || link.genesisId !== s.genesisId) return false
+  return !s.events.some((e) => e.id === ev.id)
 }
 
 /**
@@ -173,11 +272,12 @@ function resync(pubkey: string): void {
   const ifCurrent = (fn: () => void): void => {
     if (useCyberspace.getState().identity.pubkey === pubkey) fn()
   }
-  const since = Math.floor(Date.now() / 1000) - 60
-  close = watchAuthor(
+  close = watchOwnChain(
     pubkey,
-    since,
-    (ev) => ifCurrent(() => useCyberspace.getState().adoptChain([ev])),
+    (ev) => ifCurrent(() => {
+      useCyberspace.getState().adoptChain([ev])
+      if (linkMissing(ev)) catchUp('gap')
+    }),
     // The live subscription reaching EOSE is the relay talking again; if the
     // check could not get through before, it may now.
     () => ifCurrent(recheckIfUnknown),
@@ -199,4 +299,19 @@ export function startSelfSync(): void {
   // drop and read as "unreachable". onResume fires after the drop.
   onResume(recheckIfUnknown)
   onResume(compareUnpublished)
+  onResume(() => catchUp('resume'))
+  watchShown(() => catchUp('focus'))
+}
+
+/**
+ * The tab shown again or the window focused. Its own listeners rather than
+ * relay.ts watchTabReturn, which also asks the signer to sign in again after
+ * an absence: App.tsx already does that once.
+ */
+function watchShown(fn: () => void): void {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return
+  const shown = (): void => { if (document.visibilityState === 'visible') fn() }
+  document.addEventListener('visibilitychange', shown)
+  window.addEventListener('focus', shown)
+  window.addEventListener('pageshow', shown)
 }

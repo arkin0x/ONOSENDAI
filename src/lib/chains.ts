@@ -430,6 +430,18 @@ export function watchAuthor(pubkey: string, since: number, onEvent: (ev: NostrEv
   return subscribe({ kinds: [KIND], authors: [pubkey], since }, onEvent, onEose)
 }
 
+/**
+ * Your own new actions as the relays take them, whatever their created_at:
+ * no `since`, and `limit: 1`, so a (re)subscription costs one stored event
+ * and every event the relay stores from then on is delivered. A `since`
+ * would drop the moves another device of yours signed while LOCAL or
+ * offline and publishes now (owner's tablet, 2026-11-21: 458 moves, signed
+ * hours before the phone went LIVE, never reached the open tablet).
+ */
+export function watchOwnChain(pubkey: string, onEvent: (ev: NostrEvent) => void, onEose?: () => void): () => void {
+  return subscribe({ kinds: [KIND], authors: [pubkey], limit: 1 }, onEvent, onEose)
+}
+
 /** Accepts an npub, an nprofile (its relay hints dropped) or 64-char hex; returns hex, or null when it is none of them. */
 export function parsePubkey(input: string): string | null {
   const v = input.trim()

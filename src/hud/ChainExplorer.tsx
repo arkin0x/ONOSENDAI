@@ -57,7 +57,7 @@ import { keyStateForAction, useSecrets } from '../store/useSecrets'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { CopyValue } from './ui/CopyValue'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
-import { useCyberspace } from '../store/useCyberspace'
+import { useCyberspace, type CyberspaceState } from '../store/useCyberspace'
 import { actionKind, actionLabel } from '../lib/events'
 import { nip19 } from 'nostr-tools'
 import { ConfirmModal } from './ConfirmModal'
@@ -112,9 +112,46 @@ function ChainExplorerUnlessBuilding(): JSX.Element | null {
   return building ? null : <ChainExplorerChip />
 }
 
+/** Unpublished events of the chain in hand, counted once per change of the chain or its publish states. */
+let keptMemo: { events: unknown; published: unknown; count: number } | null = null
+function keptHere(events: CyberspaceState['events'], published: CyberspaceState['published']): number {
+  if (keptMemo && keptMemo.events === events && keptMemo.published === published) return keptMemo.count
+  let count = 0
+  for (const e of events) if (published[e.id] !== 'ok') count++
+  keptMemo = { events, published, count }
+  return count
+}
+
+/**
+ * What the chip says about your own chain beyond its count, as one string so
+ * the chip renders only when it changes (owner, 2026-11-21):
+ *
+ * | State | Chip |
+ * |---|---|
+ * | the page's first look at the relays is out | CHECKING YOUR CHAIN |
+ * | the relays could not be asked | CHAIN NOT CHECKED |
+ * | LOCAL, moves kept on this device | LOCAL: n KEPT HERE |
+ * | anything else | '' (the usual CHAIN i/N) |
+ *
+ * A held chain or a pending choice says so under the LIVE switch instead
+ * (ChainStatus.tsx), and is not repeated here.
+ */
+export function chainChipState(s: Pick<CyberspaceState, 'identity' | 'chainSync' | 'events' | 'published' | 'live' | 'held' | 'chainConflict'>): string {
+  if (s.events.length === 0 || s.held || s.chainConflict) return ''
+  const sync = s.chainSync?.pubkey === s.identity.pubkey ? s.chainSync.status : null
+  if (sync === 'checking') return 'checking'
+  if (sync === 'unreachable') return 'unchecked'
+  if (!s.live) {
+    const kept = keptHere(s.events, s.published)
+    if (kept > 0) return `local:${kept}`
+  }
+  return ''
+}
+
 function ChainExplorerChip(): JSX.Element {
   const events = useCyberspace((s) => s.events)
   const fork = useCyberspace((s) => s.forkNotice)
+  const chipState = useCyberspace(chainChipState)
   const [showFork, setShowFork] = useState(false)
   // An adoption explains itself and goes; a drop is work that vanished and
   // stays on the chip until somebody reads it.
@@ -258,8 +295,35 @@ function ChainExplorerChip(): JSX.Element {
           className="chip explorer__toggle explorer__toggle--adopted"
           {...noCallout}
           onPointerDown={pressForkChip}
-          label={`${fork.adopted} actions arrived from another device. Tap to read why.`}
-          words={[fork.adopted, ' FROM ANOTHER DEVICE']}
+          label={`Caught up: ${fork.adopted} ${fork.adopted === 1 ? 'move' : 'moves'} from another device. Tap to read why.`}
+          words={['CAUGHT UP: ', fork.adopted, fork.adopted === 1 ? ' MOVE' : ' MOVES', ' FROM ANOTHER DEVICE']}
+        />
+      ) : own && chipState === 'checking' ? (
+        <AheadChip
+          own={own}
+          className="chip explorer__toggle explorer__toggle--syncing"
+          {...noCallout}
+          onPointerDown={pressChip}
+          label="Checking your chain on the relays. A move waits until this is done."
+          words="CHECKING YOUR CHAIN"
+        />
+      ) : own && chipState === 'unchecked' ? (
+        <AheadChip
+          own={own}
+          className="chip explorer__toggle explorer__toggle--unchecked"
+          {...noCallout}
+          onPointerDown={pressChip}
+          label="The relays did not answer, so this device could not check for moves made elsewhere. Nothing is signed until they answer."
+          words="CHAIN NOT CHECKED"
+        />
+      ) : own && chipState.startsWith('local:') ? (
+        <AheadChip
+          own={own}
+          className="chip explorer__toggle explorer__toggle--local"
+          {...noCallout}
+          onPointerDown={pressChip}
+          label={`LOCAL: ${chipState.slice(6)} ${chipState.slice(6) === '1' ? 'move' : 'moves'} kept on this device. Switch to LIVE to publish.`}
+          words={['LOCAL: ', chipState.slice(6), ' KEPT HERE']}
         />
       ) : (
         <AheadChip

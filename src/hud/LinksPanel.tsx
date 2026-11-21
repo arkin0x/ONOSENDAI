@@ -44,9 +44,10 @@ export const OFFICIAL: OfficialLink[] = [
 ]
 
 /** A plain tap on a profile row opens the profile here; a modified or middle click keeps the link. */
-export function openProfileHere(e: Pick<MouseEvent, 'button' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'preventDefault'>, pubkey: string): void {
+export function openProfileHere(e: Pick<MouseEvent, 'button' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'preventDefault' | 'stopPropagation'>, pubkey: string): void {
   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
   e.preventDefault()
+  e.stopPropagation()
   useProfileView.getState().open(pubkey)
 }
 
@@ -65,6 +66,7 @@ export function LinksPanel(): JSX.Element {
               href={l.href}
               target="_blank"
               rel="noopener noreferrer"
+              title={pubkey ? 'Opens his profile here' : undefined}
               onClick={pubkey ? (e) => openProfileHere(e, pubkey) : undefined}
             >{Mark && <Mark />}{l.name}</a>
             <span className="links__what"> - {l.what}</span>

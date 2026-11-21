@@ -4,7 +4,7 @@
  * profile to the onosendai menu official links, as well as my nostr profile
  * under that. put an appropriate icon for each").
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { readFileSync } from 'node:fs'
 import { ARKINOX_PUBKEY, LinksPanel, OFFICIAL, openProfileHere } from '../LinksPanel'
@@ -13,12 +13,21 @@ import { useProfileView } from '../../store/useProfileView'
 // The npub in the cyberspace repo's AUTHOR file.
 const NPUB = 'npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w'
 
+afterEach(() => { useProfileView.getState().close() })
+
 describe('Official links: arkinox on X and nostr', () => {
   const html = renderToStaticMarkup(<LinksPanel />)
-  const links = [...html.matchAll(/<a href="([^"]+)" target="_blank" rel="noopener noreferrer">([\s\S]*?)<\/a>/g)]
+  // Each link's href and inner markup, and whether it opens in a new tab with the panel's rel.
+  const links = [...html.matchAll(/<a ([^>]*)>([\s\S]*?)<\/a>/g)].map((m) => {
+    const attrs = m[1]
+    const href = /href="([^"]+)"/.exec(attrs)?.[1] ?? ''
+    const newTab = attrs.includes('target="_blank"') && attrs.includes('rel="noopener noreferrer"')
+    return [attrs, href, m[2], newTab] as const
+  })
 
   it('ends with X, then nostr under it, every row opening in a new tab', () => {
     expect(links).toHaveLength(OFFICIAL.length)
+    expect(links.every((m) => m[3])).toBe(true)
     expect(links.slice(-2).map((m) => m[1])).toEqual([
       'https://x.com/arkinoxreturns',
       `https://njump.me/${NPUB}`,
@@ -36,7 +45,7 @@ describe('Official links: arkinox on X and nostr', () => {
   it('opens the nostr profile in the app on a plain tap, and keeps the link otherwise', () => {
     let prevented = 0
     const click = (over: Partial<Parameters<typeof openProfileHere>[0]> = {}) =>
-      openProfileHere({ button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, preventDefault: () => { prevented++ }, ...over }, ARKINOX_PUBKEY)
+      openProfileHere({ button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, preventDefault: () => { prevented++ }, stopPropagation: () => {}, ...over }, ARKINOX_PUBKEY)
     useProfileView.getState().close()
     click({ metaKey: true })
     click({ button: 1 })

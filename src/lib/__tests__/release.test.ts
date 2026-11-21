@@ -46,6 +46,14 @@ describe('the release gate', () => {
     expect(gateAfter(false, z, { ...z, headId: 'c' })).toBe(true)
   })
 
+  it('a new unsent head that was not signed here (read from storage on a load or a switch back) does not open it; one signed here does', () => {
+    const before = { live: true, headId: 'a', headSent: true, headSignedHere: true }
+    const stored = { live: true, headId: 'kept', headSent: false, headSignedHere: false }
+    expect(gateAfter(false, before, stored)).toBe(false)
+    expect(gateAfter(false, stored, { live: true, headId: 'mine', headSent: false, headSignedHere: true })).toBe(true)
+    expect(gateAfter(false, stored, { ...stored, release: 1 })).toBe(true)
+  })
+
   it('reads its facts off the store shape', () => {
     expect(chainFacts({ live: true, prevEventId: 'b', published: { a: 'ok', b: 'queued' } }))
       .toEqual({ live: true, headId: 'b', headSent: false })

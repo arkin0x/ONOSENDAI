@@ -486,7 +486,7 @@ export function startPublisher(): void {
     if (s.identity.pubkey !== prev.identity.pubkey) { restorePending(); backlogChecked = null; lastFailed = false }
     // Every change is offered to the gate first, because the thing that opens
     // it, a new head signed here, arrives as an ordinary store update.
-    released = gateAfter(released, chainFacts(prev), chainFacts(s))
+    released = gateAfter(released, chainFacts(prev, signedOnThisPage), chainFacts(s, signedOnThisPage))
     if (s.live === prev.live && s.events === prev.events && s.held === prev.held && s.publishRequest === prev.publishRequest && s.chainConflict === prev.chainConflict) return
     if (!s.live) backlogChecked = null
     if (!maySend(s, released)) {

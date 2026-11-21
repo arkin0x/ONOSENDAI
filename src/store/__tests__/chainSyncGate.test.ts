@@ -202,7 +202,10 @@ describe('the CHAIN chip', () => {
     const kept = { ...b.published }
     for (const e of b.events.slice(-1)) delete kept[e.id]
     expect(chainChipState({ ...b, live: false, published: kept })).toBe('local:1')
-    expect(chainChipState({ ...b, live: true, published: kept })).toBe('')
+    // LIVE: a move this page signed is the publisher's to send, and the chip says nothing of it...
+    expect(chainChipState({ ...b, live: true, published: kept }, () => true)).toBe('')
+    // ...one kept from before waits for an action or PUBLISH, and the chip says so.
+    expect(chainChipState({ ...b, live: true, published: kept }, () => false)).toBe('kept:1')
     expect(chainChipState({ ...b, live: false })).toBe('')
   })
   it('leaves a held chain and a pending choice to the strip under the switch', () => {

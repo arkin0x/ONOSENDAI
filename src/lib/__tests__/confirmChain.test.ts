@@ -24,6 +24,8 @@ const net = vi.hoisted(() => ({
   reqDelayMs: 0,
   /** The relays each question was told to wait for. */
   waitFor: [] as string[][],
+  /** The filters each question carried, one REQ per relay each. */
+  reqs: [] as number[],
 }))
 vi.mock('../relay', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../relay')>()
@@ -42,9 +44,10 @@ vi.mock('../relay', async (importOriginal) => {
         return a.outcome === 'answered' ? { url, outcome: 'answered', events: a.events } : { url, outcome: 'unreachable', reason: 'no answer in time', events: a.events }
       })
     },
-    queryEachSettled: async (relays: string[], filter: Record<string, unknown>, _maxWait: number, _primary: string, waitFor: string[], opts: { onSent?: () => void } = {}) => {
+    queryEachSettled: async (relays: string[], filter: Record<string, unknown> | Array<Record<string, unknown>>, _maxWait: number, _primary: string, waitFor: string[], opts: { onSent?: () => void } = {}) => {
       net.log.push(`ask ${relays.join(',')}`)
-      net.filters.push(filter)
+      net.filters.push(...(Array.isArray(filter) ? filter : [filter]))
+      net.reqs.push(Array.isArray(filter) ? filter.length : 1)
       net.waitFor.push(waitFor)
       if (net.reqDelayMs > 0) await new Promise((r) => setTimeout(r, net.reqDelayMs))
       opts.onSent?.()
@@ -68,7 +71,7 @@ const child: NostrEvent = { ...hopTemplate({ createdAt: 1_010, genesisId: spawn.
 const canonical = normalizeURL(CYBERSPACE_RELAY)
 /** The player's own relay, as confirmation names it (normalized). */
 const user = normalizeURL(net.user)
-const reset = (): void => { net.answers.clear(); net.log = []; net.filters = []; net.authing.clear(); net.reqDelayMs = 0; net.waitFor = [] }
+const reset = (): void => { net.answers.clear(); net.log = []; net.filters = []; net.authing.clear(); net.reqDelayMs = 0; net.waitFor = []; net.reqs = [] }
 
 describe('confirming a head against the canonical relay and the configured relays (option B)', () => {
   it('asks them all together', async () => {
@@ -110,6 +113,13 @@ describe('confirming a head against the canonical relay and the configured relay
     await confirmChainEvents(PK, spawn.id, [spawn], { since: 1_234 })
     expect(net.filters.find((f) => Array.isArray(f['#e']))).toMatchObject({ '#e': [spawn.id], since: 1_234 })
     expect(net.filters.find((f) => Array.isArray(f['#A']))).not.toHaveProperty('since')
+  })
+
+  it('asks the spawns and the chain in one REQ to each relay, not two (owner\'s walk, 2026-11-21)', async () => {
+    reset()
+    await confirmChainEvents(PK, spawn.id, [spawn], { since: 1_234 })
+    expect(net.reqs).toEqual([2])
+    expect(net.log).toEqual([`ask ${canonical},${user}`])
   })
 
   it('with `reconnect`, drops the sockets first; without, does not', async () => {

@@ -10,6 +10,9 @@
  * for its size, and all text passes safeLabel. No key, no plaintext, no relay
  * address and no coordinate is ever kept.
  *
+ * Long animation frames of 50 ms or more are summed by who ran in them (diagCore
+ * LoafLedger): invoker, function name and position, file name. Never a URL.
+ *
  * A tab that crashes at a spike takes a log in memory with it, so the last report
  * is kept in this tab's sessionStorage once a minute, and the next load offers it.
  *
@@ -25,7 +28,7 @@ import { useTv } from '../store/useTv'
 import { useWorkshop } from '../store/useWorkshop'
 import { DIAG_FOUND_KEY, DIAG_LAST_KEY, diagForget } from './diagGate'
 import { hudFlags } from './hudFlags'
-import { DIAG_COLUMNS, GlLedger, Ring, frameVerb, framePercentiles, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
+import { DIAG_COLUMNS, GlLedger, LOAF_COLUMNS, LOAF_SCRIPT_COLUMNS, LoafLedger, Ring, type LoafFrame, frameVerb, scriptFile, framePercentiles, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
 
 /** Seconds between samples, and how long each ring reaches back. */
 const SAMPLE_MS = 5_000
@@ -38,6 +41,8 @@ const SLOW_ROWS = 200
 const EVENT_ROWS = 200
 /** A frame this long is logged with its scripts. */
 const SLOW_FRAME_MS = 200
+/** Windows with long frames kept, by who ran in them (diagCore LoafLedger): 15 minutes of 5 s windows. */
+const LOAF_ROWS = 180
 const STORAGE_EVERY_MS = 60_000
 /** How often the report is kept for a tab that crashes. */
 const KEEP_EVERY_MS = 60_000
@@ -261,10 +266,13 @@ export function startDiag(): void {
     try { new PerformanceObserver((l) => { for (const e of l.getEntries()) f(e) }).observe({ type, buffered: true }) } catch { /* not in this browser */ }
   }
   observe('longtask', (e) => { long.n++; long.ms += e.duration; long.max = Math.max(long.max, e.duration) })
+  const loafs = new LoafLedger()
+  const loaf = new Ring<unknown[]>(LOAF_ROWS)
   observe('long-animation-frame', (e) => {
+    loafs.add(e as unknown as LoafFrame)
     if (e.duration < SLOW_FRAME_MS) return
     const scripts = (e as unknown as { scripts?: Array<{ duration: number; invoker?: string; sourceFunctionName?: string; sourceCharPosition?: number; sourceURL?: string }> }).scripts ?? []
-    slow.push([Math.round(performance.now() / 1000), Math.round(e.duration), scripts.slice().sort((a, b) => b.duration - a.duration).slice(0, 3).map((s) => [Math.round(s.duration), invokerLabel(s.invoker), safeLabel(s.sourceFunctionName), s.sourceCharPosition ?? -1, safeLabel((s.sourceURL ?? '').split('/').pop())])])
+    slow.push([Math.round(performance.now() / 1000), Math.round(e.duration), scripts.slice().sort((a, b) => b.duration - a.duration).slice(0, 3).map((s) => [Math.round(s.duration), invokerLabel(s.invoker), safeLabel(s.sourceFunctionName), s.sourceCharPosition ?? -1, scriptFile(s.sourceURL)])])
   })
   observe('resource', (e) => { long.res++; long.resB += (e as PerformanceResourceTiming).encodedBodySize ?? 0 })
 
@@ -333,6 +341,8 @@ export function startDiag(): void {
     row.longN = long.n; row.longMs = Math.round(long.ms); row.longMax = Math.round(long.max)
     row.resN = long.res; row.resB = long.resB
     long.n = 0; long.ms = 0; long.max = 0; long.res = 0; long.resB = 0
+    const lf = loafs.take(row.t as number)
+    if (lf) loaf.push(lf)
 
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number; totalJSHeapSize: number } }).memory
     if (mem) {
@@ -488,6 +498,13 @@ export function startDiag(): void {
       fine: fine.all(),
       coarse: coarse.all(),
       slow: slow.all(),
+      // Frames of 50 ms or more, per window, by who ran in them; and the whole capture's top.
+      // False where the browser has no long animation frames (Firefox, Safari): an empty table there means nothing.
+      loafSupported: PerformanceObserver.supportedEntryTypes?.includes('long-animation-frame') ?? false,
+      loafColumns: LOAF_COLUMNS,
+      loafScriptColumns: LOAF_SCRIPT_COLUMNS,
+      loaf: loaf.all(),
+      loafTop: loafs.top(),
       events: events.all(),
     })
   }

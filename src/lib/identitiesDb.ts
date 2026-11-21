@@ -26,8 +26,11 @@
  * A write is always a merge into the row that is there, in one readwrite
  * transaction (IndexedDB runs those one at a time on a store, across tabs
  * too). A merge never drops a secret the row holds: nothing here deletes a
- * key, and this file has no delete at all. Removing an identity from the
- * device is a later, deliberate control.
+ * key, and no row is ever deleted. Removing an identity from the device is a
+ * later, deliberate control. The one thing taken out of a row is a remote
+ * signer's session, by LOG OUT (forgetHeldSession): its client key is this
+ * device's pairing with the signer, never the identity's key, and the row
+ * stays, offering PAIR AGAIN.
  *
  * Writes go through one queue per page, so they land in the order they were
  * asked, and nothing waits on them: a switch of identity never waits for
@@ -73,9 +76,10 @@ export interface HeldIdentity {
 /**
  * How the list in the login offers a way back to an identity: 'generated'
  * switches at once, 'password' asks for the password first, 'extension' and
- * 'bunker' reconnect to the signer that holds it.
+ * 'bunker' reconnect to the signer that holds it, and 'pair' is a remote
+ * signer logged out of on this device: PAIR AGAIN opens the QR for it.
  */
-export type HeldWay = 'generated' | 'password' | 'extension' | 'bunker'
+export type HeldWay = 'generated' | 'password' | 'extension' | 'bunker' | 'pair'
 
 /** A row as the login shows it: no secret leaves this file through a list. */
 export interface HeldEntry {
@@ -160,6 +164,7 @@ export function heldWay(row: HeldIdentity): HeldWay | null {
   if (typeof row.ncryptsec === 'string' && row.ncryptsec.startsWith('ncryptsec1')) return 'password'
   if (row.kind === 'nip07') return 'extension'
   if (row.kind === 'nip46' && row.bunker?.bunkerUri) return 'bunker'
+  if (row.kind === 'nip46') return 'pair'
   return null
 }
 
@@ -231,6 +236,41 @@ export function recordHeld(next: Partial<HeldIdentity> & { pubkey: string } | nu
   const done = queue.then(async () => {
     try {
       await mergeInto(await db(), next, replace)
+      return true
+    } catch {
+      return false
+    }
+  })
+  queue = done
+  return done
+}
+
+/**
+ * LOG OUT of a remote signer: its session (the bunker URI and this device's
+ * client key for it) leaves the row, after every write asked before it, and
+ * the row stays with everything else it holds. A row that is not a remote
+ * signer's is left as it is. Resolves true once committed (or nothing to
+ * take), false when the store could not be written. Never rejects.
+ */
+export function forgetHeldSession(pubkey: string): Promise<boolean> {
+  if (!HEX64.test(pubkey)) return Promise.resolve(false)
+  const done = queue.then(async () => {
+    try {
+      const d = await db()
+      await new Promise<void>((resolve, reject) => {
+        const tx = d.transaction(IDENTITIES_STORE, 'readwrite')
+        const os = tx.objectStore(IDENTITIES_STORE)
+        const got = os.get(pubkey)
+        got.onsuccess = () => {
+          const row = got.result as HeldIdentity | undefined
+          if (!row || row.kind !== 'nip46' || !row.bunker) return
+          const { bunker: _session, ...kept } = row
+          os.put(kept)
+        }
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error ?? new Error('IndexedDB write failed'))
+        tx.onabort = () => reject(tx.error ?? new Error('IndexedDB write aborted'))
+      })
       return true
     } catch {
       return false

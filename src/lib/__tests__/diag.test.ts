@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { diagWanted, DIAG_FOUND_KEY, DIAG_KEY, DIAG_LAST_KEY } from '../diagGate'
-import { DIAG_COLUMNS, GlLedger, Ring, bytesPerPixel, framePercentiles, frameVerb, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes } from '../diagCore'
+import { DIAG_COLUMNS, GlLedger, LOAF_COLUMNS, LOAF_MIN_MS, LOAF_SCRIPT_COLUMNS, LOAF_TOP, LoafLedger, Ring, scriptFile, bytesPerPixel, framePercentiles, frameVerb, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes } from '../diagCore'
 
 const SRC = path.resolve(__dirname, '../..')
 
@@ -307,5 +307,77 @@ describe('how exact the heap reading is', () => {
     expect(heapReading([])).toBe('absent')
     expect(heapReading([10_000_000, 11_000_000])).toBe('bucketed')
     expect(heapReading([10_000_000, 11_234_567])).toBe('precise')
+  })
+})
+
+describe('long animation frames, by who ran in them (owner walk of 2026-11-21)', () => {
+  const frame = (duration: number, scripts: Array<Record<string, unknown>>, extra: Record<string, number> = {}) => ({ startTime: 1000, duration, ...extra, scripts: scripts as never })
+  const ws = { duration: 70, invokerType: 'event-listener', invoker: 'WebSocket.onmessage', sourceFunctionName: 'h', sourceURL: 'https://onosendai.tech/assets/boot-SKDJhwQn.js?v=1', sourceCharPosition: 1234, forcedStyleAndLayoutDuration: 2 }
+
+  it('counts every frame of 50 ms or more, not only the 200 ms ones, and skips shorter frames', () => {
+    const l = new LoafLedger()
+    l.add(frame(LOAF_MIN_MS - 1, [ws]))
+    expect(l.take(5)).toBeNull()
+    // A frame whose animation frame callback (3 ms of script) ran from 1072 and whose style and layout ran from 1076 to its end at 1082.
+    l.add(frame(82, [ws, { startTime: 1072, duration: 3, invokerType: 'user-callback', invoker: 'FrameRequestCallback', sourceFunctionName: 'tick', sourceURL: 'https://onosendai.tech/assets/boot-SKDJhwQn.js' }], { blockingDuration: 32, renderStart: 1072, styleAndLayoutStart: 1076 }))
+    l.add(frame(88, [ws, { ...ws, duration: 9, invoker: 'IDBRequest.onsuccess', sourceFunctionName: 'put', sourceCharPosition: 77 }], { blockingDuration: 38 }))
+    const row = l.take(10)!
+    const at = (c: (typeof LOAF_COLUMNS)[number]) => row[LOAF_COLUMNS.indexOf(c)]
+    expect(at('t')).toBe(10)
+    expect(at('frames')).toBe(2)
+    expect(at('ms')).toBe(170)
+    expect(at('maxMs')).toBe(88)
+    expect(at('blockMs')).toBe(70)
+    expect(at('scriptMs')).toBe(152)
+    expect(at('rafMs')).toBe(4)
+    expect(at('layoutMs')).toBe(6)
+    // 170 - 152 script - (4 - 3) callbacks outside any script - 6 layout.
+    expect(at('otherMs')).toBe(11)
+    const top = at('top') as Array<Array<string | number>>
+    const e = Object.fromEntries(LOAF_SCRIPT_COLUMNS.map((c, i) => [c, top[0][i]]))
+    expect(e).toEqual({ invokerType: 'event-listener', invoker: 'WebSocket.onmessage', fn: 'h', pos: 1234, file: 'boot-SKDJhwQn.js', n: 2, ms: 140, maxMs: 70, forcedMs: 4 })
+    expect(top[1][1]).toBe('IDBRequest.onsuccess')
+    // The window starts over; the whole capture keeps its sums.
+    expect(l.take(15)).toBeNull()
+    expect(l.top()[0][5]).toBe(2)
+  })
+
+  it('keeps no URL, key or content: a file by name only, other schemes by scheme only', () => {
+    expect(scriptFile('https://onosendai.tech/assets/index-r_sQnZEa.js#x')).toBe('index-r_sQnZEa.js')
+    expect(scriptFile('blob:https://onosendai.tech/3f2a9c1e-5b7d-4e8f-a1b2-c3d4e5f6a7b8')).toBe('blob')
+    expect(scriptFile('data:text/javascript;base64,ZXZpbA==')).toBe('data')
+    expect(scriptFile('chrome-extension://abcdefabcdefabcdef/inpage.js')).toBe('chrome-extension')
+    expect(scriptFile(undefined)).toBe('')
+    // The page's own address (an inline script, a timer): never its host or its path.
+    expect(scriptFile('https://onosendai.tech/')).toBe('page')
+    expect(scriptFile('https://onosendai.tech')).toBe('page')
+    expect(scriptFile('https://onosendai.tech/C/3fa2b9c1')).toBe('page')
+    expect(scriptFile('https://onosendai.tech/C/3fa2b9c1?x=1#y')).toBe('page')
+    const l = new LoafLedger()
+    l.add(frame(90, [{ duration: 60, invokerType: 'user-callback', invoker: `IMG#a[src="https://x.example/${'a'.repeat(64)}"].onload`, sourceFunctionName: `f${'ab12'.repeat(16)}`, sourceURL: 'https://h.example/u/npub1qqqqqqqqqqqqqqqqqqqqqqqq/x.js' }]))
+    const s = JSON.stringify(l.top())
+    expect(s).not.toMatch(/https?:|x\.example|npub1|[0-9a-f]{16}/)
+    expect(s).toContain('IMG.onload')
+  })
+
+  it('a window keeps its top few by time, and a full ring stays small', () => {
+    const l = new LoafLedger()
+    for (let i = 0; i < 40; i++) l.add(frame(60, [{ ...ws, duration: 10 + i, sourceFunctionName: `fn_${i}`, sourceCharPosition: 123456 + i }]))
+    const top = l.take(5)![LOAF_COLUMNS.indexOf('top')] as Array<Array<string | number>>
+    expect(top).toHaveLength(LOAF_TOP)
+    expect(top.map((e) => e[2])).toEqual(['fn_39', 'fn_38', 'fn_37', 'fn_36', 'fn_35', 'fn_34', 'fn_33', 'fn_32'])
+    // Every label at its longest.
+    const long = (i: number) => ({ duration: 60, invokerType: 'x'.repeat(30), invoker: `I${'y'.repeat(60)}`, sourceFunctionName: `f${i}${'z'.repeat(60)}`, sourceURL: `https://onosendai.tech/assets/${'w'.repeat(60)}${i}.js`, sourceCharPosition: 12345678 + i, forcedStyleAndLayoutDuration: 1.25 })
+    for (let i = 0; i < 40; i++) l.add(frame(60, [long(i)]))
+    expect(JSON.stringify(l.take(10)).length * 180 + JSON.stringify(l.top()).length).toBeLessThan(400 * 1024)
+  })
+
+  it('the report carries the table, fed by every long frame', () => {
+    const text = fs.readFileSync(path.join(SRC, 'lib/diag.ts'), 'utf8')
+    expect(text).toMatch(/loafs\.add\(e as unknown as LoafFrame\)\n\s*if \(e\.duration < SLOW_FRAME_MS\) return/)
+    expect(text).toMatch(/loaf: loaf\.all\(\)/)
+    expect(text).toMatch(/loafTop: loafs\.top\(\)/)
+    // The slow log names files the same way.
+    expect(text).not.toMatch(/sourceURL \?\? ''\)\.split/)
   })
 })

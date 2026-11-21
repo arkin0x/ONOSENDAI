@@ -151,8 +151,13 @@ function ChainExplorerChip(): JSX.Element {
     const t = window.setTimeout(() => setSettled(action?.id ?? null), COUNT_AFTER_MS)
     return () => window.clearTimeout(t)
   }, [action?.id])
-  const counted = useActionComments(action && settled === action.id ? { id: action.id, pubkey: action.pubkey, kind: ACTION_KIND } : null)
-  const commentCount = action && settled === action.id && !counted.loading ? countComments(counted.comments) : null
+  // Counted only while the explorer is open, where the count is shown: closed,
+  // a count asked 450 ms after every landed move was one more question to
+  // every relay per WALK step, for a number nobody sees (arkinox,
+  // 2026-11-21: WALK stutters on his phone).
+  const shown = useChainUi((s) => s.explorerOpen)
+  const counted = useActionComments(shown && action && settled === action.id ? { id: action.id, pubkey: action.pubkey, kind: ACTION_KIND } : null)
+  const commentCount = shown && action && settled === action.id && !counted.loading ? countComments(counted.comments) : null
   // Counted again when the modal closes: something may have been said there.
   const modalOpen = useSocialUi((s) => s.action !== null)
   const wasOpen = useRef(false)

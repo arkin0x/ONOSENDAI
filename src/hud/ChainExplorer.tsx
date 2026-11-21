@@ -147,17 +147,24 @@ function ChainExplorerChip(): JSX.Element {
     [action, actions, index, secretKeys],
   )
 
-  // The action the mark has rested on, and its comment count.
-  const [settled, setSettled] = useState<string | null>(null)
-  useEffect(() => {
-    const t = window.setTimeout(() => setSettled(action?.id ?? null), COUNT_AFTER_MS)
-    return () => window.clearTimeout(t)
-  }, [action?.id])
   // Counted only while the explorer is open, where the count is shown: closed,
   // a count asked 450 ms after every landed move was one more question to
   // every relay per WALK step, for a number nobody sees (arkinox,
   // 2026-11-21: WALK stutters on his phone).
   const shown = useChainUi((s) => s.explorerOpen)
+  // The action the mark has rested on, and its comment count. Followed only
+  // while the explorer is open: closed, the wait after every landed move was
+  // one more render of all this per WALK step for nothing. Opening counts the
+  // action under the mark at once, as it did when the wait had run closed.
+  const [settled, setSettled] = useState<string | null>(null)
+  const wasShown = useRef(false)
+  useEffect(() => {
+    if (!shown) { wasShown.current = false; return }
+    const opened = !wasShown.current
+    wasShown.current = true
+    const t = window.setTimeout(() => setSettled(action?.id ?? null), opened ? 0 : COUNT_AFTER_MS)
+    return () => window.clearTimeout(t)
+  }, [action?.id, shown])
   const counted = useActionComments(shown && action && settled === action.id ? { id: action.id, pubkey: action.pubkey, kind: ACTION_KIND } : null)
   const commentCount = shown && action && settled === action.id && !counted.loading ? countComments(counted.comments) : null
   // Counted again when the modal closes: something may have been said there.

@@ -46,6 +46,7 @@ import { ChainExplorer } from '../ChainExplorer'
 import { SyncWarning, useSyncWarnAside } from '../SyncWarning'
 import { useActionComments } from '../../hooks/useSocial'
 import { useChainUi } from '../../store/useChainUi'
+import { useSecrets } from '../../store/useSecrets'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useWalk } from '../../store/useWalk'
 import { useAheadSelect } from '../../store/walkAhead'
@@ -134,16 +135,29 @@ describe('the CHAIN chip renders for the count, and only for it', () => {
     await m.unmount()
   })
 
-  it('leaves the button alone when the explorer renders for its own reasons: its comment count settling', async () => {
+  it('leaves the button alone when the explorer renders for its own reasons: the keys it holds changing', async () => {
     chainOf(1253)
     walkAt(6)
-    const m = await mount(<ChainExplorer />)
-    resetCounts()
-    // The mark rests on the head: 450 ms later the explorer renders again, to count its comments.
+    const m = await mountChip()
+    for (let i = 0; i < 5; i++) {
+      useSecrets.setState({ keys: { ...useSecrets.getState().keys } })
+      await settled()
+    }
+    expect(explorerRenders()).toBe(5)
+    expect(aheadRenders()).toBe(0)
+    await m.unmount()
+  })
+
+  it('closed, the explorer does not render again after a landing to count comments nobody sees', async () => {
+    chainOf(1253)
+    walkAt(6)
+    const m = await mountChip()
+    chainOf(1254)
+    await settled()
+    expect(explorerRenders()).toBe(1)
     await new Promise((r) => setTimeout(r, 520))
     await settled()
-    expect(explorerRenders()).toBeGreaterThanOrEqual(1)
-    expect(aheadRenders()).toBe(0)
+    expect(explorerRenders()).toBe(1)
     await m.unmount()
   })
 })

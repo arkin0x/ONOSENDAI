@@ -84,3 +84,51 @@ describe('verifyRelayEvent', () => {
     expect(checks.n).toBe(before + 1)
   })
 })
+
+describe('a repeat compared with the fields that were checked, not hashed again (owner\'s phone walk, 2026-11-21)', () => {
+  it('a copy of a checked event passes without its id being recomputed', async () => {
+    const pure = await import('nostr-tools/pure')
+    const ev = signed('x'.repeat(9_000))
+    expect(verifyRelayEvent(copy(ev))).toBe(true)
+    const spy = vi.spyOn(pure, 'getEventHash')
+    for (let i = 0; i < 20; i++) expect(verifyRelayEvent(copy(ev))).toBe(true)
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('a copy that differs in any field, a tag, a tag value, or a type, is refused as before', () => {
+    const ev = signed('fields')
+    expect(verifyRelayEvent(copy(ev))).toBe(true)
+    expect(verifyRelayEvent({ ...copy(ev), content: 'fieldz' })).toBe(false)
+    expect(verifyRelayEvent({ ...copy(ev), kind: 3334 })).toBe(false)
+    expect(verifyRelayEvent({ ...copy(ev), created_at: String(ev.created_at) } as never)).toBe(false)
+    expect(verifyRelayEvent({ ...copy(ev), tags: [['A', 'hop'], ['x']] })).toBe(false)
+    expect(verifyRelayEvent({ ...copy(ev), tags: [['A', 'hip']] })).toBe(false)
+    expect(verifyRelayEvent({ ...copy(ev), tags: [['A']] })).toBe(false)
+    expect(verifyRelayEvent({ ...copy(ev), tags: [] })).toBe(false)
+    expect(verifyRelayEvent({ ...copy(ev), pubkey: getPublicKey(generateSecretKey()) })).toBe(false)
+    // And the real one still passes after all of those.
+    expect(verifyRelayEvent(copy(ev))).toBe(true)
+  })
+
+  it('changing the event that was checked does not change what a later copy is compared with', () => {
+    const ev = signed('kept')
+    const first = copy(ev)
+    expect(verifyRelayEvent(first)).toBe(true)
+    first.tags[0][1] = 'forged'
+    first.tags.push(['p', 'x'])
+    ;(first as { content: string }).content = 'forged'
+    expect(verifyRelayEvent({ ...copy(ev), content: 'forged', tags: [['A', 'forged'], ['p', 'x']] })).toBe(false)
+    expect(verifyRelayEvent(copy(ev))).toBe(true)
+  })
+
+  it('an object already marked verified is not taken as the fields to compare with', () => {
+    const ev = signed('premarked')
+    const forged = { ...copy(ev), content: 'forged' } as Record<string | symbol, unknown>
+    forged[verifiedSymbol] = true
+    // verifyEvent trusts the mark, as nostr-tools always has; what it lets through must not vouch for another copy.
+    verifyRelayEvent(forged as never)
+    expect(verifyRelayEvent({ ...copy(ev), content: 'forged' })).toBe(false)
+    expect(verifyRelayEvent(copy(ev))).toBe(true)
+  })
+})

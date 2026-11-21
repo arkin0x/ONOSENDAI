@@ -153,3 +153,28 @@ describe('a repeat compared with the fields that were checked, not hashed again 
     expect(verifyRelayEvent(copy(ev))).toBe(true)
   })
 })
+
+describe('an event signed here comes back from the relays without a second check (owner\'s phone walk, 2026-11-21)', () => {
+  it('its copies pass with neither a Schnorr check nor a hash', async () => {
+    const pure = await import('nostr-tools/pure')
+    const { signedHere } = await import('../verifiedSigs')
+    const ev = finalizeEvent({ kind: 3333, created_at: 1_760_000_003, tags: [['A', 'hop']], content: 'z'.repeat(9_000) }, generateSecretKey())
+    signedHere(ev)
+    const before = checks.n
+    const spy = vi.spyOn(pure, 'getEventHash')
+    for (let i = 0; i < 16; i++) expect(verifyRelayEvent(copy(ev))).toBe(true)
+    expect(checks.n).toBe(before)
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+    // A forged copy under its id and signature is still refused.
+    expect(verifyRelayEvent({ ...copy(ev), content: 'forged' })).toBe(false)
+  })
+
+  it('the store remembers every event it signs or checks from a signer (useCyberspace signEvent, checkedAnswer)', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const text = fs.readFileSync(path.resolve(__dirname, '../../store/useCyberspace.ts'), 'utf8')
+    expect(text).toMatch(/const own = await signer\.signEvent\(template\)\n\s*verifiedSigs\.add\([^\n]*\)\n\s*signedHere\(own\)/)
+    expect(text).toMatch(/signerHome\(signer\)\n\s*signedHere\(signed\)\n\s*return signed/)
+  })
+})

@@ -357,17 +357,18 @@ function ScreenAxes(): null {
 }
 
 /**
- * Shares the camera, each frame, with what cannot reach this Canvas's: its
- * orientation for the compass (its own Canvas), and in a dev build the scene,
- * renderer and camera for the browser harness.
+ * Hands the camera, each frame, to the things that cannot reach this Canvas:
+ * its orientation to the compass, which has its own Canvas, and in a dev build
+ * the scene, renderer and camera to the browser harness.
  *
  * Nothing here writes to the page. It used to publish the on-screen size of one
  * cell as `--cell-px` on the root element for the HUD's scale instrument; that
  * instrument went in August (e89798eb) and nothing has read the variable since,
  * but it was still set on every frame the camera moved, and a custom property
- * changed on the root restyles the whole document: measured during the CHAIN
- * chip work (#847, 2026-11-21) as most of the HUD's style time in WALK.
- * scene/__tests__/cameraShare.test.tsx holds it so.
+ * changed on the root restyles the whole document. Taking it out cut style
+ * recalculation in fluid WALK from 73 to 14 ms a second (headless production
+ * build, 4x CPU throttle, 2026-11-21). scene/__tests__/cameraShare.test.tsx
+ * checks that nothing here writes to the page.
  */
 export function CameraShare(): null {
   useFrame((state) => {

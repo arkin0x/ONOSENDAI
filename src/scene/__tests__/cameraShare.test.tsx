@@ -5,14 +5,16 @@
  * It used to set `--cell-px` on the root element on every frame the camera
  * moved, for a HUD scale instrument removed in August (e89798eb). Nothing read
  * it, and a custom property changed on the root restyles the whole document:
- * the CHAIN chip work (#847, 2026-11-21) measured it as most of the HUD's style
- * time in WALK. The camera's orientation still reaches the compass.
+ * taking it out cut style recalculation in fluid WALK from 73 to 14 ms a second
+ * (headless production build, 4x CPU throttle, 2026-11-21). The camera's
+ * orientation still reaches the compass.
  *
  * Runs CameraShare in a real R3F root (test/r3fRoot.ts) with the camera moving
  * every frame, and watches every write to the root element's style.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
 import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
@@ -82,16 +84,18 @@ describe("the scene's per-frame camera share", () => {
   })
 })
 
-describe('no per-frame write to the root element anywhere', () => {
+// A cheap guard on the source, not a proof: it reads each useFrame call written inline, not
+// callbacks passed by name or helpers they call.
+describe('no per-frame write to the root element', () => {
   const files = (dir: string): string[] => readdirSync(dir).flatMap((f) => {
     const p = join(dir, f)
     if (statSync(p).isDirectory()) return f === '__tests__' || f === 'test' ? [] : files(p)
     return /\.(ts|tsx)$/.test(f) ? [p] : []
   })
-  const src = new URL('../../', import.meta.url).pathname
+  const src = fileURLToPath(new URL('../../', import.meta.url))
 
   it('nothing sets or reads --cell-px: the variable is gone', () => {
-    const hits = [...files(src), join(src, 'styles.css')].filter((f) => readFileSync(f, 'utf8').includes('--cell-px') && !f.endsWith('Scene.tsx'))
+    const hits = [...files(src), join(src, 'styles.css')].filter((f) => readFileSync(f, 'utf8').includes('--cell-px') && f !== join(src, 'scene/Scene.tsx'))
     expect(hits).toEqual([])
     // Scene.tsx only names it in the comment that says why it went.
     const scene = readFileSync(join(src, 'scene/Scene.tsx'), 'utf8')

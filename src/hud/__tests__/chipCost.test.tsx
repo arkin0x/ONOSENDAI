@@ -207,7 +207,10 @@ function motion(section: string): { animations: string[]; eased: string[] } {
   }
   for (const m of section.matchAll(/(?:^|[;{\s])transition\s*:\s*([^;}]+)/g)) {
     for (const part of m[1].split(/,(?![^(]*\))/)) {
-      const prop = part.trim().split(/\s+/)[0]
+      const words = part.trim().split(/\s+/)
+      const prop = words[0]
+      // A zero-length one is a value set once, after its delay: nothing is drawn frame by frame.
+      if (words[1] === '0s') continue
       if (prop && prop !== 'none') eased.add(prop)
     }
   }

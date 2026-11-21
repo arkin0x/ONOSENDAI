@@ -477,7 +477,9 @@ describe('the bar in the stylesheet', () => {
     expect(Object.keys(rule('.explorer__toggle.has-ahead', section)).sort()).toEqual(['position'])
     // The red border's fade is a layer over the chip's own border, the same box: out of the layout too.
     expect(rule('.explorer__toggle.has-ahead::after', section)).toMatchObject({ position: 'absolute', inset: '-1px', border: '1px solid var(--limit)', 'border-radius': 'inherit', 'pointer-events': 'none' })
-    expect(Object.keys(rule('.explorer__toggle.is-limit', section))).toEqual(['border-color'])
+    expect(Object.keys(rule('.explorer__toggle.is-limit', section)).sort()).toEqual(['border-color', 'transition'])
+    // Not an ease: the red is set in one step, once the red layer has faded in over the border.
+    expect(rule('.explorer__toggle.is-limit', section).transition).toBe('border-color 0s 300ms')
     // The words' span is inline and only lifted above the glow.
     expect(Object.keys(rule('.aheadtxt', section)).sort()).toEqual(['position', 'z-index'])
   })

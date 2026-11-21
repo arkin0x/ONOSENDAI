@@ -258,6 +258,7 @@ if (want('unreachable')) {
   await until(tablet, (s) => s.n > 0, 30_000)
   const chips = () => tablet.page.evaluate(() => [...document.querySelectorAll('.explorer__toggle')].map((e) => e.textContent).join(' | '))
   const seen = new Set([await chips()])
+  for (let i = 0; i < 8 && !(await chips()).includes('CHECKING'); i++) { await sleep(250); seen.add(await chips()) }
   await tablet.page.evaluate(() => { const s = window.__store.getState(); s.moveCursor({ axis: 'y', dir: 1 }); void s.commit() })
   const msgs = new Set()
   const t = await until(tablet, (s) => { msgs.add(s.msg); return s.msg === "Can't confirm your latest move. Try again." }, 90_000)
@@ -266,7 +267,7 @@ if (want('unreachable')) {
   const s = await tablet.state()
   await tablet.page.screenshot({ path: `${out}/unreachable.png` })
   const chipText = [...seen].join(' / ')
-  ok('unreachable: nothing signed on an unconfirmed head, the move is refused in words, and the chip says CHECKING then NOT CHECKED', store.length === before && t !== null && /CHECKING YOUR CHAIN/.test(chipText) && /CHAIN NOT CHECKED/.test(chipText), `${t} ms; messages ${JSON.stringify([...msgs])}; sync ${JSON.stringify(s.sync?.status)}; chips ${chipText}`)
+  ok('unreachable: nothing signed on an unconfirmed head, the move is refused in words, CHECKING is said (chip or panel), then the chip says NOT CHECKED', store.length === before && t !== null && (/CHECKING YOUR CHAIN/.test(chipText) || msgs.has('Checking your chain on the relays.')) && /CHAIN NOT CHECKED/.test(chipText), `${t} ms; messages ${JSON.stringify([...msgs])}; sync ${JSON.stringify(s.sync?.status)}; chips ${chipText}`)
   relay.silent.delete('tablet')
   await tablet.close()
 }

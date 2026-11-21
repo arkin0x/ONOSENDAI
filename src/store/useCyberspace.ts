@@ -2324,6 +2324,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     // are authentic by construction, and are remembered as checked.
     const own = await signer.signEvent(template)
     verifiedSigs.add(`${own.id}:${own.sig}`)
+    if (own.kind === ACTION_KIND) signedThisPage.add(own.id)
     return own
   }
   // A wake skipped for an AUTH's answer, and this is not an AUTH: drop the
@@ -2371,7 +2372,23 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     pendingSigns--
     if (late) pendingAuthSigns--
   }
-  return checkedAnswer(signed, signer)
+  const answer = checkedAnswer(signed, signer)
+  if (answer.kind === ACTION_KIND) signedThisPage.add(answer.id)
+  return answer
+}
+
+/**
+ * Chain actions this page signed. Anything else waiting to go out came from
+ * storage (a reload, an identity switched back to, another tab's save), was
+ * signed before this page could look at the relays, and gets the
+ * publisher's look first however few there are (publisher.ts preflight;
+ * review of the per-identity LIVE switch, 2026-11-21).
+ */
+const signedThisPage = new Set<string>()
+
+/** Whether this page signed the chain action `id` (signedThisPage). */
+export function signedOnThisPage(id: string): boolean {
+  return signedThisPage.has(id)
 }
 
 /**
@@ -2955,8 +2972,12 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
   // this move waits for it, so it starts from what it brings rather than
   // racing it, and then checks here and asks the relays as always below.
   // First, so another tab's move made during the wait is still read.
-  await chainSyncSettled(pubkey)
-  if (chainEpoch !== epoch) return STALE_CONFIRMATION
+  // Only when it is out: an await with nothing to wait for would put the
+  // saved-chain check's own word on the panel a tick late.
+  if (chainSyncOut(pubkey)) {
+    await chainSyncSettled(pubkey)
+    if (chainEpoch !== epoch) return STALE_CONFIRMATION
+  }
   const here = await headCheckedHere()
   if (here) return here
   // No confirmation is reused, however recent (arkinox, 2026-10-08): another
@@ -3006,11 +3027,14 @@ export const CHAIN_SYNC_WAIT_MS = 15_000
  * identity changed. While it waits, a panel with nothing else to say, or
  * only CHECKING_RELAYS_MESSAGE, says CHAIN_SYNC_MESSAGE.
  */
+/** Whether the page's own look at the relays for `pubkey` is out now (store chainSync). */
+function chainSyncOut(pubkey: string): boolean {
+  const s = useCyberspace.getState()
+  return s.identity.pubkey === pubkey && s.chainSync?.pubkey === pubkey && s.chainSync.status === 'checking'
+}
+
 async function chainSyncSettled(pubkey: string): Promise<void> {
-  const out = (): boolean => {
-    const s = useCyberspace.getState()
-    return s.identity.pubkey === pubkey && s.chainSync?.pubkey === pubkey && s.chainSync.status === 'checking'
-  }
+  const out = (): boolean => chainSyncOut(pubkey)
   if (!out()) return
   const said = useCyberspace.getState().proof
   const speak = said.message === null || said.message === CHECKING_RELAYS_MESSAGE

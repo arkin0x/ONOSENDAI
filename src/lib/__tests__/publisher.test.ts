@@ -19,10 +19,10 @@ const sent: string[] = []
  * (as publish reports them); `canonicalFailsLeft` is how many more times the
  * canonical relay refuses a retry of its own; `toCanonical` logs each retry.
  */
-const pub = vi.hoisted(() => ({ acceptedBy: null as string[] | null, canonicalFailsLeft: 0, toCanonical: [] as string[] }))
+const pub = vi.hoisted(() => ({ acceptedBy: null as string[] | null, canonicalFailsLeft: 0, toCanonical: [] as string[], hold: null as Promise<void> | null }))
 vi.mock('../relay', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../relay')>()),
-  publish: (e: NostrEvent) => { sent.push(e.id); return Promise.resolve(pub.acceptedBy ? { ok: true as const, accepted: pub.acceptedBy } : { ok: true as const }) },
+  publish: async (e: NostrEvent) => { sent.push(e.id); if (pub.hold) await pub.hold; return pub.acceptedBy ? { ok: true as const, accepted: pub.acceptedBy } : { ok: true as const } },
   // The canonical relay's background check by id (publisher.ts
   // reconcileCanonical): it answers, holding none of them.
   countRelay: () => Promise.resolve(null),
@@ -159,6 +159,51 @@ describe('the publisher and the release gate', () => {
     } finally {
       canonical.answers = true
       useCyberspace.setState({ live: false })
+      await idle()
+    }
+  })
+
+  it('one waiting move this page did not sign (read from storage: a reload, an identity switched back to) gets the look first, and no answer sends nothing (review of the per-identity LIVE switch, 2026-11-21)', async () => {
+    canonical.answers = false
+    try {
+      setChain(['a1', 'b2'])
+      useCyberspace.setState({ live: true, published: { [ev('a1').id]: 'ok', [ev('b2').id]: 'queued' } })
+      await idle()
+      useCyberspace.getState().publishNow()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(sent).toEqual([])
+    } finally {
+      canonical.answers = true
+      useCyberspace.setState({ live: false })
+      await idle()
+    }
+  })
+
+  it('a look at one identity\'s backlog does not count for the next: Y mid-drain, a switch to X, X\'s one kept move waits for its own look (review, 2026-11-21)', async () => {
+    const me = useCyberspace.getState().identity
+    let release!: () => void
+    pub.hold = new Promise((r) => { release = r })
+    try {
+      // Y: a backlog, released by an action, looked at, and its first send in flight.
+      setChain(['a1', 'b2', 'c3'])
+      useCyberspace.setState({ live: true })
+      await idle()
+      append('d4')
+      await until(() => sent.length === 1)
+      // The switch to X, LIVE, then X's saved chain arriving with one kept move: the gate opens on it.
+      const x = 'b'.repeat(64)
+      useCyberspace.setState({ identity: { pubkey: x, npub: 'npub-x' } })
+      setChain(['x1', 'x2'], { [ev('x1').id]: 'ok' })
+      canonical.answers = false
+      pub.hold = null
+      release()
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      expect(sent).not.toContain(ev('x2').id)
+    } finally {
+      pub.hold = null
+      release?.()
+      canonical.answers = true
+      useCyberspace.setState({ live: false, identity: me })
       await idle()
     }
   })

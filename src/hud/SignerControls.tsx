@@ -26,7 +26,7 @@ import { useEffect, useState } from 'react'
 import { create } from 'zustand'
 import { nip19 } from 'nostr-tools'
 import { LogOut, QrCode, Radio, Unplug } from 'lucide-react'
-import { useCyberspace } from '../store/useCyberspace'
+import { LOGOUT_UNKEPT, useCyberspace } from '../store/useCyberspace'
 import { activityOf, agoWords, signerHealth, useSignerActivity, type SignerActivity } from '../lib/signerActivity'
 import { listHeld } from '../lib/identitiesDb'
 import { ConfirmModal } from './ConfirmModal'
@@ -61,8 +61,8 @@ export const useSignerUi = create<SignerUi>((set) => ({
 export const LOGOUT_WORDS = 'Log out of this signer on this device. Your data stays here; log in again to pick up where you left off.'
 /** A remote signer's line: how to come back. */
 export const LOGOUT_PAIR_WORDS = 'This device stops asking your signer. To come back, open the login and tap PAIR AGAIN.'
-/** A key used for this visit only: it is not kept, so it has to be pasted again. */
-export const LOGOUT_UNKEPT_WORDS = 'This key is not kept on this device. Back it up first, or you will need to paste it again.'
+/** A key this device does not keep: LOG OUT would lose it, so it waits until the key is kept or backed up. */
+export const LOGOUT_UNKEPT_WORDS = LOGOUT_UNKEPT
 
 /** The status line's words for a remote signer's activity. */
 export function signerStatusWords(a: SignerActivity, now: number = Date.now()): string {
@@ -109,8 +109,10 @@ export function SignerStatus(): JSX.Element | null {
   const [testing, setTesting] = useState(false)
   if (kind !== 'nip46') return null
   const health = signerHealth(activity, now)
-  // A test's answer stands until something newer is known: a later answer, or a later request left waiting.
-  const tested = test && test.pubkey === pubkey && test.at >= (activity.answeredAt ?? 0) - 1000 ? test : null
+  // A test's answer stands until something newer is known: a later answer,
+  // a later request left waiting, or a signature that ran out of time since.
+  const newer = Math.max((activity.answeredAt ?? 0) - 1000, activity.waitingSince ?? 0, activity.stuckAt ?? 0)
+  const tested = test && test.pubkey === pubkey && test.at >= newer ? test : null
   const words = testing ? 'Asking your signer…' : tested ? tested.words : signerStatusWords(activity, now)
   const bad = testing ? false : tested ? !tested.ok : health === 'silent'
   const runTest = async (): Promise<void> => {
@@ -126,7 +128,8 @@ export function SignerStatus(): JSX.Element | null {
   const Icon = bad ? Unplug : Radio
   return (
     <div className={`signer-status${bad ? ' is-bad' : ''}`}>
-      <p className={`signer-status__line${bad ? ' is-bad' : ''}`} role="status" aria-live="polite">
+      {/* Read out for a test, not for the clock ticking under "12 s ago". */}
+      <p className={`signer-status__line${bad ? ' is-bad' : ''}`} role="status" aria-live={testing || tested ? 'polite' : 'off'}>
         <Icon className="signer-status__icon" size={11} strokeWidth={2.25} aria-hidden />
         <span className="signer-status__label">SIGNER</span>
         <span className="signer-status__words">{words}</span>
@@ -173,26 +176,36 @@ export function SignerStuckChip(): JSX.Element | null {
 
 /** The LOG OUT confirm: one step, in plain words. */
 function LogoutConfirm(): JSX.Element {
-  const kind = useCyberspace((s) => s.signerKind)
-  const pubkey = useCyberspace((s) => s.identity.pubkey)
-  const locked = useCyberspace((s) => s.keyLock !== null && s.keyLock.mode !== 'set')
+  // What it is about, fixed as it opens: once LOG OUT has switched, the
+  // identity on screen is the device's own, and the card must not change
+  // under the spinner while the old signer closes.
+  const [about] = useState(() => {
+    const s = useCyberspace.getState()
+    return { kind: s.signerKind, pubkey: s.identity.pubkey, lock: s.keyLock?.mode ?? null }
+  })
+  const { kind, pubkey, lock } = about
   const [busy, setBusy] = useState(false)
-  // A key brought here is kept only if it was sealed with a password: one
-  // used for this visit alone is gone with LOG OUT, and that is said.
-  const [kept, setKept] = useState<boolean | null>(null)
+  const [refused, setRefused] = useState<string | null>(null)
+  // A key brought here is kept only if it was sealed with a password. One
+  // used for this visit alone, or saved plain before keys were sealed, would
+  // be lost, so LOG OUT is refused for it (store logOut) and that is said
+  // here first. A locked key's sealed copy is kept by logOut itself; a key
+  // not in hand ('gone') has nothing to lose.
+  const checks = kind === 'local' && lock !== 'unlock' && lock !== 'gone'
+  const [kept, setKept] = useState<boolean | null>(checks ? null : true)
   useEffect(() => {
-    if (kind !== 'local' || locked) return
+    if (!checks) return
     let live = true
     void listHeld().then((rows) => { if (live) setKept(rows.some((r) => r.pubkey === pubkey && (r.way === 'password' || r.way === 'generated'))) })
     return () => { live = false }
-  }, [kind, locked, pubkey])
+  }, [checks, pubkey])
   const confirm = async (): Promise<void> => {
     if (busy) return
     setBusy(true)
-    try { await useCyberspace.getState().logOut() } finally {
-      setBusy(false)
-      useSignerUi.getState().close()
-    }
+    let why: string | null = null
+    try { why = await useCyberspace.getState().logOut() } finally { setBusy(false) }
+    if (why) setRefused(why)
+    else useSignerUi.getState().close()
   }
   return (
     <ConfirmModal
@@ -200,6 +213,7 @@ function LogoutConfirm(): JSX.Element {
       danger={false}
       cardClassName="logout"
       busy={busy}
+      confirmDisabled={kept === false || refused !== null}
       confirmLabel="LOG OUT"
       onConfirm={() => void confirm()}
       onCancel={() => useSignerUi.getState().close()}
@@ -209,11 +223,12 @@ function LogoutConfirm(): JSX.Element {
           <p className="logout__npub">{shortHex(nip19.npubEncode(pubkey), 14, 8)}</p>
           {kind === 'nip46' && <p className="logout__note">{LOGOUT_PAIR_WORDS}</p>}
           {/* Its room kept while the list is read, so nothing jumps when it arrives. */}
-          {kind === 'local' && !locked && (
-            <p className={`logout__note${kept === false ? ' logout__note--warn' : ''}`} style={kept === false ? undefined : { visibility: 'hidden' }} aria-hidden={kept !== false}>
-              {LOGOUT_UNKEPT_WORDS}
+          {checks && (
+            <p className={`logout__note${kept === false || refused ? ' logout__note--warn' : ''}`} style={kept === false || refused ? undefined : { visibility: 'hidden' }} aria-hidden={kept !== false && !refused} role={kept === false || refused ? 'alert' : undefined}>
+              {refused ?? LOGOUT_UNKEPT_WORDS}
             </p>
           )}
+          {!checks && refused && <p className="logout__note logout__note--warn" role="alert">{refused}</p>}
         </>
       )}
     />

@@ -34,6 +34,8 @@ vi.hoisted(() => {
 const bus = vi.hoisted(() => ({
   /** The bunker answers while this is on. */
   alive: true,
+  /** How long the bunker takes to answer (ms). */
+  delayMs: 5,
   /** The bunker's key, which is also the account it holds (as Amber's is). */
   key: null as Uint8Array | null,
   subs: [] as Array<{ filter: { authors?: string[]; '#p'?: string[] }; params: { onevent?: (e: unknown) => void; oneose?: () => void; onclose?: () => void } }>,
@@ -72,7 +74,7 @@ vi.mock('../../lib/relay', async (orig) => {
     publish: (relays: string[], event: { kind: number; pubkey: string; content: string }) => {
       if (event.kind === 24133) {
         bus.requests++
-        if (bus.alive) setTimeout(() => respond(event), 5)
+        if (bus.alive) setTimeout(() => respond(event), bus.delayMs)
       }
       return relays.map(() => Promise.resolve('ok'))
     },
@@ -194,9 +196,10 @@ function storageBut(): Record<string, string> {
 }
 
 /** A device whose signer is the bunker in this file, paired by Nostr Connect, reloaded into it. */
-async function pairedDevice(): Promise<{ device: string; user: string; session: string; loaded: Awaited<ReturnType<typeof reload>> }> {
+async function pairedDevice(nostrConnect = true): Promise<{ device: string; user: string; session: string; loaded: Awaited<ReturnType<typeof reload>> }> {
   await wipe()
   bus.alive = true
+  bus.delayMs = 5
   bus.key = generateSecretKey()
   bus.subs = []
   bus.closed = []
@@ -209,7 +212,7 @@ async function pairedDevice(): Promise<{ device: string; user: string; session: 
     pubkey: user,
     bunkerUri: `bunker://${user}?relay=${encodeURIComponent(DEFAULT_SIGNER_RELAY)}`,
     clientNsec: nip19.nsecEncode(client),
-    nostrConnectSession: true,
+    ...(nostrConnect ? { nostrConnectSession: true } : {}),
   }))
   const loaded = await reload()
   expect(loaded.S.getState().identity.pubkey).toBe(user)
@@ -386,15 +389,72 @@ describe('a remote signer', () => {
     expect(S.getState().cloud.balance?.msats).toBe(7_000_000)
   }, 60_000)
 
-  it('LOG OUT of a session never brought up stops its handshake: a late answer is closed, not switched to', async () => {
-    const { device, user, loaded: { S, db } } = await pairedDevice()
-    // Nothing has asked the bunker yet: the signer is the stand-in.
+  it('LOG OUT while the handshake is out: its late answer is closed, not switched to, and asks nothing more', async () => {
+    const { device, user, loaded: { S, db } } = await pairedDevice(false)
     expect(S.getState().identity.pubkey).toBe(user)
-    await S.getState().logOut()
+    bus.delayMs = 400
+    const asked = bus.requests
+    const reconnecting = S.getState().initSigner()
+    await new Promise((r) => setTimeout(r, 30))
+    // The handshake's connect is out, unanswered.
+    expect(bus.requests).toBeGreaterThan(asked)
+    expect(await S.getState().logOut()).toBeNull()
     await db.heldSettled()
     expect(S.getState().identity.pubkey).toBe(device)
-    await new Promise((r) => setTimeout(r, 50))
+    // The answers land: the handshake finishes into a signer that is closed at once.
+    await reconnecting
+    await new Promise((r) => setTimeout(r, 1200))
     expect(S.getState().identity.pubkey).toBe(device)
+    expect(S.getState().signerKind).toBe('local')
+    expect(S.getState().loginError).toBeNull()
     expect(bus.subs).toHaveLength(0)
+    expect(JSON.stringify(pref())).not.toContain('bunker')
+    expect((await db.readHeld(user))?.bunker).toBeUndefined()
+    const after = bus.requests
+    await new Promise((r) => setTimeout(r, 500))
+    expect(bus.requests).toBe(after)
+  }, 60_000)
+
+  it('PAIR AGAIN on the stuck pairing closes the old one once the new one is in', async () => {
+    const { user, session, loaded: { S, store, activity } } = await pairedDevice()
+    expect(await S.getState().testSigner()).toEqual({ ok: true, words: store.SIGNER_ANSWERED })
+    expect(bus.subs.length).toBeGreaterThan(0)
+    const { localSigner } = await import('../../lib/signers')
+    const fresh = generateSecretKey()
+    await S.getState().useNostrConnect({ uri: 'nostrconnect://test', relay: DEFAULT_SIGNER_RELAY, connect: async () => ({ ...localSigner(bus.key!), kind: 'nip46' as const, session: getPublicKey(fresh) }) }, undefined, undefined, user)
+    expect(S.getState().identity.pubkey).toBe(user)
+    expect(S.getState().signerSession).toBe(getPublicKey(fresh))
+    expect(bus.subs).toHaveLength(0)
+    expect(activity.activityOf(session).answeredAt).toBeNull()
+  }, 60_000)
+})
+
+describe('LOG OUT never loses a key it would have to delete', () => {
+  it('a key used for this visit only is refused, with the words why, and nothing switches', async () => {
+    await wipe()
+    const { S, store } = await reload()
+    const sk = generateSecretKey()
+    await S.getState().useNsec(nip19.nsecEncode(sk))
+    expect(S.getState().identity.pubkey).toBe(getPublicKey(sk))
+    expect(await S.getState().logOut()).toBe(store.LOGOUT_UNKEPT)
+    expect(S.getState().identity.pubkey).toBe(getPublicKey(sk))
+    expect((await S.getState().signEvent(template(5))).pubkey).toBe(getPublicKey(sk))
+  }, 60_000)
+
+  it('a locked key logs out with its sealed copy kept, and comes back with its password', async () => {
+    await wipe()
+    let { S, db } = await reload()
+    const device = S.getState().identity.pubkey
+    const sk = generateSecretKey()
+    const p = getPublicKey(sk)
+    await S.getState().useLogin(nip19.nsecEncode(sk), PW, PW)
+    ;({ S, db } = await reload())
+    expect(S.getState().keyLock?.mode).toBe('unlock')
+    expect(await S.getState().logOut()).toBeNull()
+    expect(S.getState().identity.pubkey).toBe(device)
+    expect(S.getState().keyLock).toBeNull()
+    expect((await db.readHeld(p))?.ncryptsec?.startsWith('ncryptsec1')).toBe(true)
+    await S.getState().useHeld(p, PW)
+    expect(S.getState().identity.pubkey).toBe(p)
   }, 60_000)
 })

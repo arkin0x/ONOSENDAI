@@ -12755,6 +12755,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 /* The not-answering chip: the signer's warning, with its two ways out. */
 .signer-stuck { cursor: default; flex-wrap: wrap; row-gap: 6px; }
 .signer-stuck .hyperbar__text { flex: 1 1 160px; }
+/* White over the scene, as every word there is (owner, 2026-11-15). */
+.signer-stuck .hyperbar__meta { color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
 .signer-stuck__acts { display: flex; gap: 6px; }
 .signer-stuck__act { height: 28px; background: var(--warn); border-color: var(--warn); }
 .signer-stuck__act--quiet { color: var(--warn); background: rgba(255, 176, 32, 0.08); }

@@ -46,7 +46,7 @@ const WAY_LABEL: Record<HeldWay, string> = {
   password: 'Needs its password',
   extension: 'Opens your browser extension',
   bunker: 'Asks your remote signer',
-  pair: 'Logged out here. Pair your signer again with a QR code',
+  pair: 'Pair your signer again with a QR code',
 }
 
 /**

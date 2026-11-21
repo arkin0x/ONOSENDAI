@@ -35,7 +35,7 @@ import { attributed } from '../lib/client'
 import { nip19 } from 'nostr-tools'
 import { exportNcryptsec, exportNsec } from '../lib/keyExport'
 import { lockedSigner, ncryptsecLogN, openKey, paintFirst, sealKey, type KeyLockHandle } from '../lib/keyAtRest'
-import { forgetHeldSession, generatedKeyOf, heldFromPref, heldWay, listHeld, readHeld, readHeldWithin, recordHeld, seedHeld } from '../lib/identitiesDb'
+import { forgetHeldSession, generatedKeyOf, heldFromPref, heldSettled, heldWay, listHeld, readHeld, readHeldWithin, recordHeld, seedHeld } from '../lib/identitiesDb'
 import { forgetActivity, noteSignerStuck } from '../lib/signerActivity'
 import { LOG_N } from '../lib/keyExport'
 import * as nip49 from 'nostr-tools/nip49'
@@ -257,6 +257,8 @@ export interface SignerTestResult {
 export const SIGNER_ANSWERED = 'Your signer answered.'
 export const SIGNER_SILENT = `Your signer did not answer in ${Math.round(SIGN_PATIENCE_MS / 1000)} s.`
 export const SIGNER_ANSWERED_OTHER = 'Your signer answered, but it is on a different account. Switch it back, or LOG OUT and pair again.'
+/** LOG OUT refused: the key in use is not kept on this device, and leaving it would lose it. */
+export const LOGOUT_UNKEPT = 'This key is not kept on this device, so LOG OUT would lose it. Open CHANGE to back it up, or log in with it again with a password, first.'
 /** PAIR AGAIN, answered by a signer that holds another account than the one being paired. */
 export const PAIR_OTHER_ACCOUNT = 'That signer holds a different account. Pair the signer that holds this one, or use the login for the other.'
 
@@ -1212,9 +1214,12 @@ export interface CyberspaceState {
    * this device's own generated identity takes over. Nothing else goes: the
    * identity's data stays here under its npub, a key brought here stays
    * sealed under it, and it stays in the login's list (a bunker as PAIR
-   * AGAIN). Nothing is signed.
+   * AGAIN). Nothing is signed. A key brought here that this device does not
+   * keep (used for this visit only, or saved plain before keys were sealed)
+   * would be lost, so LOG OUT refuses it: resolves to the words why, or null
+   * once logged out.
    */
-  logOut: () => Promise<void>
+  logOut: () => Promise<string | null>
   /**
    * Ask the remote signer something harmless (which account it holds) and
    * say within SIGN_PATIENCE_MS whether it answered. Its sockets are dropped
@@ -7630,6 +7635,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // An extension or a bunker reconnects as the pref of that identity would,
       // and refuses one now on another account (SignerAccountMismatch).
       if (way === 'extension') return signerFromPref({ kind: 'nip07', pubkey })
+      // Logged out of here: its pairing is gone, and only a new one brings it back.
+      if (way === 'pair') throw new Error('Pair your signer again: tap PAIR AGAIN to show the QR code.')
       // The tapped pubkey last: a stored field never names another account.
       return signerFromPref({ ...row.bunker, kind: 'nip46', pubkey })
     })
@@ -7638,6 +7645,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   useExtension: async () => { await login(() => nip07Signer()) },
   useBunker: async (uri) => { await login(() => nip46Signer(uri)) },
   useNostrConnect: async (session, signal, onConnected, expect) => {
+    // PAIR AGAIN while still on the pairing that stopped answering: once the
+    // new one is in, the old one is closed, its sockets and activity let go.
+    const before = currentSigner
+    const beforeSession = get().signerSession
     // Left the QR screen while the signer was answering: no switch, and no
     // error for a screen that is no longer there.
     await login(async () => {
@@ -7647,12 +7658,29 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       if (expect && signer.pubkey !== expect) { await signer.close?.(); throw new Error(PAIR_OTHER_ACCOUNT) }
       return signer
     }, '', () => signal?.aborted === true)
+    if (expect && before.kind === 'nip46' && before.pubkey === expect && currentSigner !== before && get().signerSession !== beforeSession) {
+      try { await before.close?.() } catch { /* closed already */ }
+      forgetActivity(beforeSession)
+    }
   },
   logOut: async () => {
     const outgoing = currentSigner
     // The device's own identity is where LOG OUT goes: from it, there is nowhere.
-    if (outgoing.kind === 'local' && outgoing.minted) return
+    if (outgoing.kind === 'local' && outgoing.minted) return null
     const leaving = outgoing.pubkey
+    // A key in hand on this device is never lost to LOG OUT (owner ruling,
+    // 2026-11-19): it goes only once the identities store holds it, sealed,
+    // read back. The encrypted copy behind a lock is written there first, and
+    // waited for, rather than left to the switch's write that nothing waits on.
+    // A key not in hand at all ('gone') has nothing to lose.
+    if (outgoing.kind === 'local' && keyLocked?.mode !== 'gone') {
+      const lockCopy = keyLocked?.handle.signer === outgoing ? keyLocked.ncryptsec : undefined
+      const sealed = outgoing.ncryptsec ?? lockCopy
+      if (sealed) await recordHeld({ pubkey: leaving, kind: 'local', ncryptsec: sealed })
+      await within(heldSettled(), HELD_LOOKUP_MS, undefined)
+      const row = await readHeldWithin(leaving, HELD_LOOKUP_MS)
+      if (!row?.ncryptsec?.startsWith('ncryptsec1') && !generatedKeyOf(row)) return LOGOUT_UNKEPT
+    }
     const session = get().signerSession
     // Read before the switch overwrites the one pref slot: the relays its sockets are to.
     const saved = loadSignerPref()
@@ -7660,7 +7688,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const switches = switchCount
     const target = await deviceIdentity(leaving)
     // Another switch landed while the list was read: that choice stands.
-    if (switches !== switchCount) return
+    if (switches !== switchCount) return null
     // A login still on its way (a QR waiting, a bunker handshake) lands nowhere now.
     loginTicket++
     // The switch is what every switch of identity is (#823 to #832): what
@@ -7676,6 +7704,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       forgetActivity(session)
     }
     try { await outgoing.close?.() } catch { /* closed already */ }
+    return null
   },
   testSigner: async () => {
     const signer = currentSigner

@@ -20,6 +20,7 @@
  */
 
 import { getPool, getSignerPool } from './relay'
+import { countVerifies } from './verifiedSigs'
 import { modalUp } from '../hooks/useEscape'
 import { useCyberspace } from '../store/useCyberspace'
 import { useHyperspace } from '../store/useHyperspace'
@@ -28,7 +29,7 @@ import { useTv } from '../store/useTv'
 import { useWorkshop } from '../store/useWorkshop'
 import { DIAG_FOUND_KEY, DIAG_LAST_KEY, diagForget } from './diagGate'
 import { hudFlags } from './hudFlags'
-import { DIAG_COLUMNS, GlLedger, LOAF_COLUMNS, LOAF_SCRIPT_COLUMNS, LoafLedger, Ring, type LoafFrame, frameVerb, scriptFile, framePercentiles, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
+import { DIAG_COLUMNS, GlLedger, LOAF_COLUMNS, LOAF_SCRIPT_COLUMNS, LoafLedger, Ring, VERIFY_COLUMNS, VERIFY_KIND_COLUMNS, type LoafFrame, frameVerb, rxVerb, scriptFile, verifyRow, framePercentiles, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
 
 /** Seconds between samples, and how long each ring reaches back. */
 const SAMPLE_MS = 5_000
@@ -210,7 +211,14 @@ export function startDiag(): void {
   }
 
   // ---- Sockets: verbs and lengths only.
-  const wire = { txReq: 0, txClose: 0, txEvent: 0, txAuth: 0, rxN: 0, rxB: 0 }
+  const wire = { txReq: 0, txClose: 0, txEvent: 0, txAuth: 0, rxN: 0, rxB: 0, rxEv: 0, rxOk: 0, rxEose: 0 }
+  // What a relay's frame is, by its verb alone (rxVerb), as what is sent is read for its verb.
+  const rxCount = (data: unknown): void => {
+    const v = rxVerb(data)
+    if (v === 'event') wire.rxEv++
+    else if (v === 'ok') wire.rxOk++
+    else if (v === 'eose') wire.rxEose++
+  }
   const sockets: Array<WeakRef<WebSocket>> = []
   const seenSocket = new WeakSet<WebSocket>()
   const send = WebSocket.prototype.send
@@ -218,7 +226,7 @@ export function startDiag(): void {
     if (!seenSocket.has(this)) {
       seenSocket.add(this)
       sockets.push(new WeakRef(this))
-      this.addEventListener('message', (e: MessageEvent) => { wire.rxN++; wire.rxB += typeof e.data === 'string' ? e.data.length : 0 })
+      this.addEventListener('message', (e: MessageEvent) => { wire.rxN++; wire.rxB += typeof e.data === 'string' ? e.data.length : 0; rxCount(e.data) })
     }
     const v = frameVerb(d)
     if (v === 'req') wire.txReq++
@@ -266,6 +274,9 @@ export function startDiag(): void {
     try { new PerformanceObserver((l) => { for (const e of l.getEntries()) f(e) }).observe({ type, buffered: true }) } catch { /* not in this browser */ }
   }
   observe('longtask', (e) => { long.n++; long.ms += e.duration; long.max = Math.max(long.max, e.duration) })
+  // Each relay event's check, by kind (lib/verifiedSigs countVerifies): counted only while the capture runs.
+  const verifies = countVerifies()
+  const verify = new Ring<unknown[]>(LOAF_ROWS)
   const loafs = new LoafLedger()
   const loaf = new Ring<unknown[]>(LOAF_ROWS)
   observe('long-animation-frame', (e) => {
@@ -409,7 +420,10 @@ export function startDiag(): void {
     }
     row.relays = count; row.relaysUp = up; row.subs = subs
     row.txReq = wire.txReq; row.txClose = wire.txClose; row.txEvent = wire.txEvent; row.txAuth = wire.txAuth; row.rxN = wire.rxN; row.rxB = wire.rxB
-    wire.txReq = 0; wire.txClose = 0; wire.txEvent = 0; wire.txAuth = 0; wire.rxN = 0; wire.rxB = 0
+    row.rxEv = wire.rxEv; row.rxOk = wire.rxOk; row.rxEose = wire.rxEose
+    wire.txReq = 0; wire.txClose = 0; wire.txEvent = 0; wire.txAuth = 0; wire.rxN = 0; wire.rxB = 0; wire.rxEv = 0; wire.rxOk = 0; wire.rxEose = 0
+    const vr = verifyRow(row.t as number, verifies.take())
+    if (vr) verify.push(vr)
     row.workersMade = workers.made; row.workersLive = workers.made - workers.ended
     row.timeouts = timers.timeouts; row.intervals = timers.intervals
     timers.timeouts = 0; timers.intervals = 0
@@ -505,6 +519,10 @@ export function startDiag(): void {
       loafScriptColumns: LOAF_SCRIPT_COLUMNS,
       loaf: loaf.all(),
       loafTop: loafs.top(),
+      // Relay events checked per window, by kind: how many, how (Schnorr, hashed, compared with one checked before) and the time.
+      verifyColumns: VERIFY_COLUMNS,
+      verifyKindColumns: VERIFY_KIND_COLUMNS,
+      verify: verify.all(),
       events: events.all(),
     })
   }

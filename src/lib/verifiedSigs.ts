@@ -108,12 +108,50 @@ function forgetBody(key: string): void {
  * trusts a verdict already marked on the object, and an object marked and
  * then changed would be remembered as it is.
  */
+/**
+ * What each check of a relay's event cost, by kind, while ?diag=1 counts
+ * (lib/diag.ts): how many; how many were checked in full (`schnorr`: a new
+ * signature, or a copy that matched nothing kept); how many repeats passed on
+ * a hash alone; how many were compared with a body kept; and the time. Off,
+ * nothing is timed.
+ */
+export interface VerifyKindStats { n: number; schnorr: number; hashed: number; compared: number; ms: number }
+let verifyStats: Map<number, VerifyKindStats> | null = null
+
+/** Start counting (the capture behind ?diag=1); `take` hands over the window's counts and starts a new one. */
+export function countVerifies(): { take: () => Map<number, VerifyKindStats> } {
+  verifyStats ??= new Map()
+  return { take: () => { const out = verifyStats ?? new Map(); verifyStats = new Map(); return out } }
+}
+
+type VerifyPath = 'compared' | 'hashed' | 'schnorr'
+
+function counted(ev: NostrEvent, t0: number, path: VerifyPath): void {
+  if (!verifyStats) return
+  const kind = typeof ev.kind === 'number' ? ev.kind : -1
+  let k = verifyStats.get(kind)
+  if (!k) { k = { n: 0, schnorr: 0, hashed: 0, compared: 0, ms: 0 }; verifyStats.set(kind, k) }
+  k.n++
+  k[path]++
+  k.ms += performance.now() - t0
+}
+
 export function verifyOnce(ev: NostrEvent): boolean {
+  if (!verifyStats) return check(ev, null)
+  const t0 = performance.now()
+  const path: { took: VerifyPath } = { took: 'schnorr' }
+  const ok = check(ev, path)
+  counted(ev, t0, path.took)
+  return ok
+}
+
+function check(ev: NostrEvent, path: { took: VerifyPath } | null): boolean {
   const key = keyOf(ev)
   if (key !== null && verifiedSigs.has(key)) {
     let same = false
     const body = bodies.get(key)
     if (body) same = sameBody(body, ev)
+    if (path) path.took = same ? 'compared' : 'hashed'
     if (!same) {
       try { same = getEventHash(ev) === ev.id } catch { same = false }
       // Hashed to its id just now: its fields are remembered, so the next copy is compared.
@@ -125,6 +163,7 @@ export function verifyOnce(ev: NostrEvent): boolean {
       return true
     }
   }
+  if (path) path.took = 'schnorr'
   // verifyEvent trusts a verdict already marked on the object: only fields it hashed itself are remembered.
   const marked = (ev as unknown as Record<symbol, unknown>)[verifiedSymbol] === true
   const ok = verifyEvent(ev as unknown as VerifiedEvent)

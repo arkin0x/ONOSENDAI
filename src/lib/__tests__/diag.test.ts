@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { diagWanted, DIAG_FOUND_KEY, DIAG_KEY, DIAG_LAST_KEY } from '../diagGate'
-import { DIAG_COLUMNS, GlLedger, LOAF_COLUMNS, LOAF_MIN_MS, LOAF_SCRIPT_COLUMNS, LOAF_TOP, LoafLedger, Ring, scriptFile, bytesPerPixel, framePercentiles, frameVerb, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes } from '../diagCore'
+import { DIAG_COLUMNS, GlLedger, VERIFY_COLUMNS, rxVerb, verifyRow, LOAF_COLUMNS, LOAF_MIN_MS, LOAF_SCRIPT_COLUMNS, LOAF_TOP, LoafLedger, Ring, scriptFile, bytesPerPixel, framePercentiles, frameVerb, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes } from '../diagCore'
 
 const SRC = path.resolve(__dirname, '../..')
 
@@ -174,7 +174,10 @@ describe('nothing private leaves', () => {
     // The address is read once, to go back to it without the flag, and never kept.
     expect(text.match(/location\.href/g)).toHaveLength(1)
     expect(text).toMatch(/new URL\(location\.href\)/)
-    expect(text.match(/e\.data\b[^;\n]*/g)!.every((l) => /\.length/.test(l))).toBe(true)
+    // Message data is read for its length, and for its verb only through rxVerb (its first bytes).
+    expect(text.match(/e\.data\b[^;\n]*/g)!.every((l) => /\.length/.test(l) || l === 'e.data) })')).toBe(true)
+    expect(text).toMatch(/rxCount\(e\.data\)/)
+    expect(text).toMatch(/const rxCount = \(data: unknown\): void => \{\n\s*const v = rxVerb\(data\)/)
     expect(text).not.toMatch(/JSON\.parse/)
   })
 })
@@ -379,5 +382,32 @@ describe('long animation frames, by who ran in them (owner walk of 2026-11-21)',
     expect(text).toMatch(/loafTop: loafs\.top\(\)/)
     // The slow log names files the same way.
     expect(text).not.toMatch(/sourceURL \?\? ''\)\.split/)
+  })
+})
+
+describe('relay frames and checks, counted by kind (owner\'s phone walk, 2026-11-21)', () => {
+  it('a frame a relay sends gives up only its verb', () => {
+    expect(rxVerb('["EVENT","s",{"content":"x"}]')).toBe('event')
+    expect(rxVerb('["OK","id",true,""]')).toBe('ok')
+    expect(rxVerb('["EOSE","s"]')).toBe('eose')
+    expect(rxVerb('["CLOSED","s","x"]')).toBe('closed')
+    expect(rxVerb('["NOTICE","x"]')).toBe('other')
+    expect(rxVerb(new ArrayBuffer(2))).toBe('other')
+  })
+
+  it('a window\'s checks as a row of numbers, the costliest kinds first', () => {
+    expect(verifyRow(5, new Map())).toBeNull()
+    const row = verifyRow(10, new Map([[3333, { n: 9, schnorr: 1, hashed: 0, compared: 8, ms: 12.34 }], [33330, { n: 3, schnorr: 3, hashed: 0, compared: 0, ms: 20 }]]))!
+    expect(row.slice(0, VERIFY_COLUMNS.length - 1)).toEqual([10, 12, 4, 0, 8, 32.3])
+    expect(row[VERIFY_COLUMNS.indexOf('top')]).toEqual([[33330, 3, 3, 0, 0, 20], [3333, 9, 1, 0, 8, 12.3]])
+    expect(JSON.stringify(row)).toMatch(/^[\[\]0-9.,]+$/)
+  })
+
+  it('the capture counts checks and frames, and nothing counts while it is off', async () => {
+    const text = fs.readFileSync(path.join(SRC, 'lib/diag.ts'), 'utf8')
+    expect(text).toMatch(/const verifies = countVerifies\(\)/)
+    expect(text).toMatch(/verify: verify\.all\(\)/)
+    const vs = fs.readFileSync(path.join(SRC, 'lib/verifiedSigs.ts'), 'utf8')
+    expect(vs).toMatch(/if \(!verifyStats\) return check\(ev, null\)/)
   })
 })

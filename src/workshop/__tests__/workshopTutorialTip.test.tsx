@@ -61,7 +61,7 @@ const { useWorkshop } = await import('../../store/useWorkshop')
 const { useBeginner } = await import('../beginner')
 const { ADVANCE_MS, runTutorialEffect, useTutorial } = await import('../../store/useTutorial')
 const { TUTORIAL_SCRIPT, WORKSHOP } = await import('../../tutorial/script')
-const { TIP_BACK, TIP_TEXT, WORKSHOP_STEP_ID, tipFor } = await import('../shell/TutorialTip')
+const { TIP_TEXT, WORKSHOP_STEP_ID, tipFor } = await import('../shell/TutorialTip')
 const { newShard } = await import('sno-core/shards')
 await import('../../tutorial/director')
 
@@ -120,7 +120,7 @@ describe('the workshop step, walked', () => {
     let card = tip(m.all())
     expect(card, 'a tip in the workshop on the tutorial step').not.toBeNull()
     expect(textOf(card!)).toContain(TIP_TEXT.menu)
-    expect(textOf(card!)).toContain(TIP_BACK)
+    expect(textOf(card!)).toContain('BACK TO THE TOUR')
     expect(byClass(m.all(), 'ws__sheet').length).toBe(1)
 
     // A piece picked closes MENU: the tip moves on to what to try with it, in the same place.
@@ -146,13 +146,15 @@ describe('the workshop step, walked', () => {
 })
 
 describe('the tip, as written', () => {
-  it('is drawn only while the tutorial runs, and says the tour is waiting on any other step', async () => {
+  it('is drawn only on the tour workshop step, never outside the tour or while the eye is set', async () => {
     expect(tipFor(false, 'workshop', 'menu')).toBeNull()
     expect(tipFor(true, undefined, null)).toBeNull()
     expect(tipFor(true, 'workshop', 'menu')).toBe('menu')
     expect(tipFor(true, 'workshop', null)).toBe('bench')
     expect(tipFor(true, 'workshop', 'shard')).toBe('bench')
-    expect(tipFor(true, 'build-place', 'menu')).toBe('other')
+    expect(tipFor(true, 'workshop', null, true)).toBeNull()
+    // BUILD's step says the workshop will not interrupt it: no card there.
+    expect(tipFor(true, 'build-place', 'menu')).toBeNull()
 
     useTutorial.setState({ active: false })
     useWorkshop.setState({ open: true })
@@ -162,17 +164,23 @@ describe('the tip, as written', () => {
     await m.unmount()
   })
 
-  it('is plain: no em dash, no jargon the tour has not taught, and white text in a kept two-line slot', () => {
-    for (const line of [...Object.values(TIP_TEXT), TIP_BACK]) {
+  it('is plain and fits: no em dash, no jargon, two lines at most at 375px, white text in a kept two-line slot, clear of the rail', () => {
+    for (const line of Object.values(TIP_TEXT)) {
       expect(line).not.toContain('—')
       expect(line).not.toMatch(/commit|shard|vertex|extent|sno/i)
+      // About 25 characters a line in the narrowest card (a short phone, the rail folded to two columns).
+      expect(line.length).toBeLessThanOrEqual(46)
     }
-    const rule = CSS.slice(CSS.indexOf('.ws__tuttip-text {'), CSS.indexOf('}', CSS.indexOf('.ws__tuttip-text {')))
-    expect(rule).toContain('color: #fff')
-    expect(rule).toContain('min-height: calc(2 * 1.45em)')
-    // One place in every state: under the top bar, clear of the rail.
-    const box = CSS.slice(CSS.indexOf('.ws__tuttip {'), CSS.indexOf('}', CSS.indexOf('.ws__tuttip {')))
-    expect(box).toContain('top: calc(var(--ws-top-end) + 10px)')
-    expect(box).toContain('left: calc(var(--ws-gutter) + 44px + 8px)')
+    const rule = (sel: string): string => { const i = CSS.indexOf(sel); return CSS.slice(i, CSS.indexOf('}', i)) }
+    expect(rule('.ws__tuttip-text {')).toContain('color: #fff')
+    expect(rule('.ws__tuttip-text {')).toContain('min-height: calc(2 * 1.45em)')
+    // One place in every state: under the top bar, clear of the rail, one column or folded to two.
+    expect(rule('.ws__tuttip {')).toContain('top: calc(var(--ws-top-end) + 10px)')
+    expect(rule('.ws__tuttip {')).toContain('left: calc(var(--ws-gutter) + 44px + 8px)')
+    const short = CSS.slice(CSS.indexOf('@media (max-height: 700px) {\n  .ws__tuttip'))
+    expect(short).toContain('.ws__tuttip { left: calc(var(--ws-gutter) + 94px + 8px); }')
+    // The workshop's notices stand below it, never under it.
+    expect(CSS).toContain('.workshop:has(.ws__tuttip) .ws__toast {')
+    expect(CSS).toContain('.workshop:has(.ws__tuttip) .ws__storage {')
   })
 })

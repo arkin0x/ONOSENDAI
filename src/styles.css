@@ -4185,10 +4185,9 @@ select.avatars__input option:checked {
   left: calc(var(--ws-gutter) + 44px + 8px);
   right: calc(var(--ws-gutter) + 60px + 8px);
   z-index: 6;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 8px 10px;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   max-width: 480px;
   margin: 0 auto;
   padding: 10px 12px;
@@ -4198,13 +4197,9 @@ select.avatars__input option:checked {
   /* The house chamfer: top-left and bottom-right corners cut. */
   clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
 }
-.ws__tuttip-icon { color: var(--accent); margin-top: 1px; }
-.ws__tuttip-body { min-width: 0; }
+.ws__tuttip-icon { color: var(--accent); vertical-align: -2px; margin-right: 6px; }
 .ws__tuttip-text { margin: 0; min-height: calc(2 * 1.45em); font-size: 12px; line-height: 1.45; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
-.ws__tuttip-sub { margin: 4px 0 0; font-size: 9.5px; letter-spacing: 0.1em; color: var(--dim); }
 .ws__tuttip-back {
-  grid-column: 1 / -1;
-  justify-self: stretch;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4221,6 +4216,13 @@ select.avatars__input option:checked {
   clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
 }
 .ws__tuttip-back:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* While it is up, the workshop's notices and the unsaved-changes warning stand below it, never under it. */
+.workshop:has(.ws__tuttip) .ws__toast { top: calc(var(--ws-top-end) + 10px + 118px); }
+.workshop:has(.ws__tuttip) .ws__storage { top: calc(var(--ws-top-end) + 10px + 172px); }
+/* A short screen folds the rail to two columns (44 + 6 + 44): the card keeps clear of it. */
+@media (max-height: 700px) {
+  .ws__tuttip { left: calc(var(--ws-gutter) + 94px + 8px); }
+}
 /* What a tap does with the tool in hand: one line over the strip, gone after a few uses. */
 .ws__toolhint {
   position: absolute;

@@ -288,7 +288,7 @@ export function Workshop(): JSX.Element | null {
 
       <TopBar open={area} onArea={toggle} />
       {/* The tour's word here while the tutorial runs: what to do first, and the way back (new-user feedback 2026-11-21). */}
-      <TutorialTip sheet={sheet} />
+      <TutorialTip sheet={sheet} eyeEdit={eyeEdit} />
       <Rail />
       <ViewBall open={viewOpen} onToggle={toggleView} onClose={() => setViewOpen(false)} />
       {/* SET EYE's WHAT YOU SEE, under the view ball and under the handles too, so a handle is never hidden behind it. */}

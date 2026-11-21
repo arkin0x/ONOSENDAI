@@ -47,6 +47,7 @@ import { useV1HopList } from '../hooks/useChainStop'
 import { closeScrubber, exitHyperspaceView, firstUnhashedHeight, getBlockHash, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, stopScale, useHyperspace, viewHyperspace } from '../store/useHyperspace'
 import { Explanation } from './Explanation'
 import { useChainUi } from '../store/useChainUi'
+import { setRideDestination } from '../store/destination'
 
 /**
  * Where a stop sits, for the camera. The float64-approximate coordinate is
@@ -442,6 +443,8 @@ export function HyperspacePanel(): JSX.Element {
   const rideError = useRideRun((s) => s.error)
   const hosakaPlanning = useRideRun((s) => s.hosaka)
   const boarding = useRideRun((s) => s.boarding)
+  // A tap on a stop in the scene picks the destination right now (the tour's pick and board steps).
+  const tapPicks = useStopTapPicks((s) => s.on)
   const cloud = useCyberspace((s) => s.cloud)
   const profile = useCyberspace((s) => s.cloudPrefs.profile)
   const ready = sync.status === 'ready'
@@ -754,10 +757,25 @@ export function HyperspacePanel(): JSX.Element {
           </p>
         ))}
       {!inGame && zeroRide && progress === null && <p className="notice">{zeroRide}</p>}
+      {/* Every gate that holds BOARD dark says so (new-user feedback, 2026-11-21:
+          "The board button was never available, so I couldn't ride"). A
+          destination missing used to say nothing at all. */}
       {!inGame && !onLine && progress === null && (
         !ready ? (
-          <p className="hyper__why">BOARD UNLOCKS WHEN THE LINE FINISHES SYNCING</p>
-        ) : destination === null ? null : !ownChain ? (
+          <p className="hyper__why">{boardLoadingLine(sync)}</p>
+        ) : destination === null ? (
+          tapPicks > 0 ? (
+            <p className="hyper__why">
+              {BOARD_TAP_A_STOP}
+              <button className="tag tag--tap hyper__whybtn" onClick={showEarthForPick}>SHOW EARTH</button>
+            </p>
+          ) : (
+            <p className="hyper__why">
+              {BOARD_NEEDS_DESTINATION}
+              <button className="tag tag--tap hyper__whybtn" onClick={() => { const hs = useHyperspace.getState(); if (hs.scrubHeight === null) hs.setScrubHeight(hs.viewedStop ?? hs.tipHeight ?? 0) }}>PICK ONE</button>
+            </p>
+          )
+        ) : !ownChain ? (
           <p className="hyper__why">BOARD STARTS FROM YOUR OWN CHAIN: STOP SPECTATING OR LEAVE HISTORY FIRST</p>
         ) : null
       )}
@@ -786,6 +804,51 @@ export function HyperspacePanel(): JSX.Element {
 
 
 const stopTapListeners = new Set<(height: number) => void>()
+
+/** What BOARD says while no destination is set and a tap on a stop picks one (the tour's Earth route). */
+export const BOARD_TAP_A_STOP = 'PICK A STOP FIRST: TAP A GLOWING DOT ON EARTH'
+/** What BOARD says while no destination is set anywhere else: a tap only views a stop there (arkinox, 2026-11-11), so the overlay's SET DESTINATION is the way. */
+export const BOARD_NEEDS_DESTINATION = 'BOARD NEEDS A DESTINATION: PICK A BLOCK, THEN SET DESTINATION'
+
+/** What BOARD says while the stops are still loading, with how far along. Pure. */
+export function boardLoadingLine(sync: { status: string; loaded: number; total: number }): string {
+  if (sync.status === 'error') return 'THE STOPS DID NOT LOAD YET: TRYING AGAIN. BOARD OPENS WHEN THEY ARE IN'
+  const pct = sync.total > 0 ? Math.min(99, Math.floor((sync.loaded / sync.total) * 100)) : 0
+  return `LOADING THE STOPS: ${pct}%. BOARD OPENS WHEN THEY ARE ALL IN`
+}
+
+/** How many places make a tap on a stop pick the destination now (pickStopByTap); the panel's reason line follows it. */
+export const useStopTapPicks = create<{ on: number }>(() => ({ on: 0 }))
+
+/**
+ * While it is on, a tap on a stop in the scene also makes it the ride's
+ * destination when none is set (the tour's pick and board steps: a tap only
+ * views a stop everywhere else, arkinox 2026-11-11), through
+ * setRideDestination as every other way to set one is. A destination
+ * already set is kept. Returns what turns it off.
+ */
+export function pickStopByTap(): () => void {
+  const off = onSceneStopTap((height) => {
+    if (useHyperspace.getState().destination === null) setRideDestination(height)
+  })
+  useStopTapPicks.setState((s) => ({ on: s.on + 1 }))
+  let done = false
+  return () => {
+    if (done) return
+    done = true
+    off()
+    useStopTapPicks.setState((s) => ({ on: Math.max(0, s.on - 1) }))
+  }
+}
+
+/**
+ * SHOW EARTH on BOARD's reason line: the whole planet, in the plane you are
+ * in (the tour's 'view-earth' does the same; Earth is looked at, never lined
+ * up for the next move), so a stop can be tapped.
+ */
+export function showEarthForPick(): void {
+  viewHyperspace({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', EARTH_SCALE_EXP, null)
+}
 
 /**
  * Hear each tap on a stop in the scene (selectStopInScene), by height, before

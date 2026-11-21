@@ -58,7 +58,7 @@ if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
   ;(globalThis as { window?: unknown }).window = { setTimeout: (f: () => void, ms: number) => setTimeout(f, ms) }
 }
 
-import { startPublisher } from '../publisher'
+import { MARK_WINDOW_MS, flushPublishMarks, startPublisher } from '../publisher'
 import { mayMove, movementBlocked, resetVersionGateForTests, useVersionGate } from '../versionGate'
 import { CHAIN_RULES_EPOCH, versionFileOf } from '../chainRulesEpoch'
 import { useCyberspace, type PublishStatus } from '../../store/useCyberspace'
@@ -106,7 +106,51 @@ describe('the publisher and the release gate', () => {
     // Local first: that is what shuts the gate, whatever the last test left.
     useCyberspace.setState({ live: false, held: false, chainConflict: null })
     await idle()
+    // The last test's marks, written before this one reuses its ids.
+    flushPublishMarks()
     sent.length = 0
+  })
+
+  it('marks nothing and sends nothing more inside the relay\'s OK; the marks reach the store together, within the window (owner\'s phone diag, 2026-11-21)', async () => {
+    setChain(['a1'], { [ev('a1').id]: 'ok' })
+    useCyberspace.setState({ live: true })
+    await idle()
+    let release: () => void = () => {}
+    pub.hold = new Promise<void>((r) => { release = r })
+    const changes: string[] = []
+    const stop = useCyberspace.subscribe((st, prev) => { if (st.published !== prev.published) changes.push('published') })
+    try {
+      append('b2')
+      append('c3')
+      await until(() => sent.includes(ev('b2').id))
+      changes.length = 0
+      // The OK arrives, and every promise it settles runs, as within one socket message.
+      pub.hold = null
+      release()
+      for (let i = 0; i < 20; i++) await Promise.resolve()
+      expect(changes).toEqual([])
+      expect(sent).not.toContain(ev('c3').id)
+      // The next one goes out in a task of its own, and the marks land within the window, together.
+      await until(() => sent.includes(ev('c3').id))
+      await until(() => useCyberspace.getState().published[ev('b2').id] === 'ok' && useCyberspace.getState().published[ev('c3').id] === 'ok')
+      expect(changes.length).toBeLessThanOrEqual(2)
+    } finally {
+      stop()
+      pub.hold = null
+    }
+  })
+
+  it('a kept ack is written before a fold from the relays reads the marks, and a late \'sending\' never takes an \'ok\' back', async () => {
+    setChain(['a1'], { [ev('a1').id]: 'ok' })
+    useCyberspace.setState({ live: true })
+    await idle()
+    append('b2')
+    await until(() => sent.includes(ev('b2').id))
+    // Within the window: a fold from the relays writes the kept marks first.
+    useCyberspace.getState().adoptChain([])
+    expect(useCyberspace.getState().published[ev('b2').id]).toBe('ok')
+    useCyberspace.getState().setPublishStatuses([[ev('b2').id, 'sending']])
+    expect(useCyberspace.getState().published[ev('b2').id]).toBe('ok')
   })
 
   it('sends nothing when the switch goes Live with a backlog waiting', async () => {
@@ -142,9 +186,8 @@ describe('the publisher and the release gate', () => {
     // Chain order, spawn first: the new action goes last, so every prefix the
     // relay holds is a chain that reads from the spawn.
     expect(sent).toEqual([ev('a1').id, ev('b2').id, ev('c3').id, ev('d4').id])
-    for (const id of ['a1', 'b2', 'c3', 'd4']) {
-      expect(useCyberspace.getState().published[ev(id).id]).toBe('ok')
-    }
+    // Marked published within the window after the last relay's OK, never before it.
+    await until(() => ['a1', 'b2', 'c3', 'd4'].every((id) => useCyberspace.getState().published[ev(id).id] === 'ok'))
   })
 
   it('sends no backlog when the look did not count: no relay answered that holds the chain (review of #236, item 9; option B)', async () => {
@@ -218,7 +261,8 @@ describe('the publisher and the release gate', () => {
       useCyberspace.setState({ live: true })
       await vi.advanceTimersByTimeAsync(10)
       append('b2')
-      await vi.advanceTimersByTimeAsync(10)
+      // Marked published within the window after the OK (publisher.ts MARK_WINDOW_MS).
+      await vi.advanceTimersByTimeAsync(MARK_WINDOW_MS + 10)
       expect(useCyberspace.getState().published[ev('b2').id]).toBe('ok')
       expect(pub.toCanonical).toEqual([])
       // First background try: the canonical relay still refuses.

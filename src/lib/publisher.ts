@@ -37,7 +37,8 @@ import { noteChainHolders } from './chainHolders'
 import { chainLanded, onReleased } from './chainStore'
 import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend } from './release'
-import { newestEventOnRelays, noteStaleFormatStuck, retireStaleFormat, signedOnThisPage, useCyberspace } from '../store/useCyberspace'
+import { yieldTask } from './hopStage'
+import { newestEventOnRelays, noteStaleFormatStuck, retireStaleFormat, setMarkFlusher, signedOnThisPage, useCyberspace } from '../store/useCyberspace'
 import { staleHopFormat } from './staleFormat'
 import { movementBlocked, useVersionGate } from './versionGate'
 
@@ -60,6 +61,57 @@ let backoff = RETRY_MS
 let backlogChecked: string | null = null
 /** The last send failed, so the next one starts a fresh look at the relays. */
 let lastFailed = false
+
+/**
+ * How long the store's publish statuses may lag the relays, at most: the
+ * marks a send makes ('sending', then 'ok' once a relay took it) are kept
+ * here and written together once per window (flushMarks), in one store
+ * update and one save, never inside a relay's message handler. Marking each
+ * move as its last relay's OK settled it (a store update, the renders it asks
+ * for, the chain saved) and sending the next were a long task inside that OK,
+ * one per move, more of them the more moves wait to go out (owner's phone
+ * diag of 2026-11-21, #852; the window chosen by the sweep in the PR). Only a
+ * relay's OK marks an action 'ok', later, never sooner; the actions are on
+ * this device already (each is saved as it is signed); and one the store
+ * still reads as 'queued' is landed, so the take-back after another tab's
+ * commit (useCyberspace reconcileWithRows) never sees it among its own.
+ */
+export const MARK_WINDOW_MS = 250
+const marks = new Map<string, 'sending' | 'ok'>()
+let markFlush: ReturnType<typeof setTimeout> | null = null
+
+/** Write the marks kept: one store update, and the chain saved once when any is 'ok'. */
+function flushMarks(): void {
+  if (markFlush !== null) { clearTimeout(markFlush); markFlush = null }
+  if (marks.size === 0) return
+  const updates = [...marks]
+  marks.clear()
+  useCyberspace.getState().setPublishStatuses(updates)
+}
+
+/** Write what is kept now (tests, and anything that must see the store current). */
+export function flushPublishMarks(): void {
+  flushMarks()
+}
+
+/** Keep a mark for the next window. */
+function mark(id: string, status: 'sending' | 'ok'): void {
+  marks.set(id, status)
+  markFlush ??= setTimeout(flushMarks, MARK_WINDOW_MS)
+}
+
+// A page that goes away, or a phone that freezes it in the background, writes what it kept first: an ack it never wrote is an action sent again on the next load, which a relay takes as a duplicate.
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('pagehide', flushMarks)
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushMarks() })
+  document.addEventListener('freeze', flushMarks)
+}
+
+/** Taken by a relay, though the store may not say so yet. */
+const acked = (id: string): boolean => marks.get(id) === 'ok'
+
+/** Not on a relay yet, as far as the drain goes: acks waiting to be marked count as on one. */
+const notSent = (s: { published: Record<string, string> }, id: string): boolean => s.published[id] !== 'ok' && !acked(id)
 
 /**
  * Look at the relays once before sending a backlog: more than one event
@@ -109,9 +161,9 @@ async function pump(): Promise<void> {
   if (movementBlocked()) return
   let s = useCyberspace.getState()
   if (!maySend(s, released)) return
-  if (!s.events.some((e) => s.published[e.id] !== 'ok')) { backlogChecked = null; return }
+  if (!s.events.some((e) => notSent(s, e.id))) { backlogChecked = null; return }
 
-  const unsent = s.events.filter((e) => s.published[e.id] !== 'ok')
+  const unsent = s.events.filter((e) => notSent(s, e.id))
   // One waiting move is sent without a look only when this page signed it,
   // right after its own head check. One that came from storage (a reload, an
   // identity switched back to) was signed before anything here asked the
@@ -128,7 +180,7 @@ async function pump(): Promise<void> {
     if (!answered) { retryLater(); return }
     backlogChecked = who
   }
-  const next = s.events.find((e) => s.published[e.id] !== 'ok')
+  const next = s.events.find((e) => notSent(s, e.id))
   if (!next) { backlogChecked = null; return }
   // Never a hop in the old proof format (hop proof version 2): the store
   // cuts it away as it lands, and this is the last place it could slip out.
@@ -151,7 +203,7 @@ async function pump(): Promise<void> {
   if (!landed || !maySend(s, released) || movementBlocked() || !s.events.some((e) => e.id === next.id)) return
 
   inFlight = true
-  s.setPublishStatus(next.id, 'sending')
+  mark(next.id, 'sending')
   const result = await publish(next)
   inFlight = false
 
@@ -167,13 +219,17 @@ async function pump(): Promise<void> {
     // Every relay that took it now holds this chain, and a move's
     // confirmation waits for it from now on (chainHolders.ts).
     if (result.accepted) noteChainHolders(next.pubkey, result.accepted)
-    now.setPublishStatus(next.id, 'ok')
     backoff = RETRY_MS
     lastFailed = false
-    if (maySend(now, released)) void pump()
+    // Marked published within the window (flushMarks); the next one is sent in a task of its own, not inside this OK.
+    mark(next.id, 'ok')
+    void yieldTask().then(() => { if (maySend(useCyberspace.getState(), released)) void pump() })
     return
   }
 
+  // A failure is said at once, with what was kept before it.
+  marks.delete(next.id)
+  flushMarks()
   now.setPublishStatus(next.id, 'failed', result.reason)
   lastFailed = true
   backlogChecked = null
@@ -476,6 +532,8 @@ async function reconcileOnce(pubkey: string): Promise<void> {
 export function startPublisher(): void {
   if (started) return
   started = true
+  // What decides with the published marks (another tab's commit, a fold from the relays, a switch) writes the kept ones first.
+  setMarkFlusher(flushMarks)
   // Actions held back until a commit or the relays answered are free: the drain goes on, behind the same gate.
   onReleased(() => { if (maySend(useCyberspace.getState(), released)) void pump() })
   // What a reload left waiting for the canonical relay is asked for again.

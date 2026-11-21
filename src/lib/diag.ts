@@ -28,7 +28,7 @@ import { useTv } from '../store/useTv'
 import { useWorkshop } from '../store/useWorkshop'
 import { DIAG_FOUND_KEY, DIAG_LAST_KEY, diagForget } from './diagGate'
 import { hudFlags } from './hudFlags'
-import { DIAG_COLUMNS, GlLedger, LOAF_COLUMNS, LOAF_SCRIPT_COLUMNS, LoafLedger, Ring, type LoafFrame, frameVerb, framePercentiles, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
+import { DIAG_COLUMNS, GlLedger, LOAF_COLUMNS, LOAF_SCRIPT_COLUMNS, LoafLedger, Ring, type LoafFrame, frameVerb, scriptFile, framePercentiles, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
 
 /** Seconds between samples, and how long each ring reaches back. */
 const SAMPLE_MS = 5_000
@@ -272,7 +272,7 @@ export function startDiag(): void {
     loafs.add(e as unknown as LoafFrame)
     if (e.duration < SLOW_FRAME_MS) return
     const scripts = (e as unknown as { scripts?: Array<{ duration: number; invoker?: string; sourceFunctionName?: string; sourceCharPosition?: number; sourceURL?: string }> }).scripts ?? []
-    slow.push([Math.round(performance.now() / 1000), Math.round(e.duration), scripts.slice().sort((a, b) => b.duration - a.duration).slice(0, 3).map((s) => [Math.round(s.duration), invokerLabel(s.invoker), safeLabel(s.sourceFunctionName), s.sourceCharPosition ?? -1, safeLabel((s.sourceURL ?? '').split('/').pop())])])
+    slow.push([Math.round(performance.now() / 1000), Math.round(e.duration), scripts.slice().sort((a, b) => b.duration - a.duration).slice(0, 3).map((s) => [Math.round(s.duration), invokerLabel(s.invoker), safeLabel(s.sourceFunctionName), s.sourceCharPosition ?? -1, scriptFile(s.sourceURL)])])
   })
   observe('resource', (e) => { long.res++; long.resB += (e as PerformanceResourceTiming).encodedBodySize ?? 0 })
 
@@ -499,6 +499,8 @@ export function startDiag(): void {
       coarse: coarse.all(),
       slow: slow.all(),
       // Frames of 50 ms or more, per window, by who ran in them; and the whole capture's top.
+      // False where the browser has no long animation frames (Firefox, Safari): an empty table there means nothing.
+      loafSupported: PerformanceObserver.supportedEntryTypes?.includes('long-animation-frame') ?? false,
       loafColumns: LOAF_COLUMNS,
       loafScriptColumns: LOAF_SCRIPT_COLUMNS,
       loaf: loaf.all(),

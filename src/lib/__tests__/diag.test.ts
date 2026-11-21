@@ -318,7 +318,8 @@ describe('long animation frames, by who ran in them (owner walk of 2026-11-21)',
     const l = new LoafLedger()
     l.add(frame(LOAF_MIN_MS - 1, [ws]))
     expect(l.take(5)).toBeNull()
-    l.add(frame(82, [ws], { blockingDuration: 32, renderStart: 1072 }))
+    // A frame whose animation frame callback (3 ms of script) ran from 1072 and whose style and layout ran from 1076 to its end at 1082.
+    l.add(frame(82, [ws, { duration: 3, invokerType: 'user-callback', invoker: 'FrameRequestCallback', sourceFunctionName: 'tick', sourceURL: 'https://onosendai.tech/assets/boot-SKDJhwQn.js' }], { blockingDuration: 32, renderStart: 1072, styleAndLayoutStart: 1076 }))
     l.add(frame(88, [ws, { ...ws, duration: 9, invoker: 'IDBRequest.onsuccess', sourceFunctionName: 'put', sourceCharPosition: 77 }], { blockingDuration: 38 }))
     const row = l.take(10)!
     const at = (c: (typeof LOAF_COLUMNS)[number]) => row[LOAF_COLUMNS.indexOf(c)]
@@ -327,8 +328,10 @@ describe('long animation frames, by who ran in them (owner walk of 2026-11-21)',
     expect(at('ms')).toBe(170)
     expect(at('maxMs')).toBe(88)
     expect(at('blockMs')).toBe(70)
-    expect(at('scriptMs')).toBe(149)
-    expect(at('renderMs')).toBe(10)
+    expect(at('scriptMs')).toBe(152)
+    expect(at('rafMs')).toBe(4)
+    expect(at('layoutMs')).toBe(6)
+    // 170 - 152 script - (4 - 3) callbacks outside any script - 6 layout.
     expect(at('otherMs')).toBe(11)
     const top = at('top') as Array<Array<string | number>>
     const e = Object.fromEntries(LOAF_SCRIPT_COLUMNS.map((c, i) => [c, top[0][i]]))
@@ -345,6 +348,11 @@ describe('long animation frames, by who ran in them (owner walk of 2026-11-21)',
     expect(scriptFile('data:text/javascript;base64,ZXZpbA==')).toBe('data')
     expect(scriptFile('chrome-extension://abcdefabcdefabcdef/inpage.js')).toBe('chrome-extension')
     expect(scriptFile(undefined)).toBe('')
+    // The page's own address (an inline script, a timer): never its host or its path.
+    expect(scriptFile('https://onosendai.tech/')).toBe('page')
+    expect(scriptFile('https://onosendai.tech')).toBe('page')
+    expect(scriptFile('https://onosendai.tech/C/3fa2b9c1')).toBe('page')
+    expect(scriptFile('https://onosendai.tech/C/3fa2b9c1?x=1#y')).toBe('page')
     const l = new LoafLedger()
     l.add(frame(90, [{ duration: 60, invokerType: 'user-callback', invoker: `IMG#a[src="https://x.example/${'a'.repeat(64)}"].onload`, sourceFunctionName: `f${'ab12'.repeat(16)}`, sourceURL: 'https://h.example/u/npub1qqqqqqqqqqqqqqqqqqqqqqqq/x.js' }]))
     const s = JSON.stringify(l.top())
@@ -358,8 +366,10 @@ describe('long animation frames, by who ran in them (owner walk of 2026-11-21)',
     const top = l.take(5)![LOAF_COLUMNS.indexOf('top')] as Array<Array<string | number>>
     expect(top).toHaveLength(LOAF_TOP)
     expect(top.map((e) => e[2])).toEqual(['fn_39', 'fn_38', 'fn_37', 'fn_36', 'fn_35', 'fn_34', 'fn_33', 'fn_32'])
-    for (let i = 0; i < 40; i++) l.add(frame(60, [{ ...ws, invoker: 'MessagePort.onmessage', sourceFunctionName: `fn_${i}`, sourceCharPosition: 123456 + i }]))
-    expect(JSON.stringify(l.take(10)).length * 180 + JSON.stringify(l.top()).length).toBeLessThan(256 * 1024)
+    // Every label at its longest.
+    const long = (i: number) => ({ duration: 60, invokerType: 'x'.repeat(30), invoker: `I${'y'.repeat(60)}`, sourceFunctionName: `f${i}${'z'.repeat(60)}`, sourceURL: `https://onosendai.tech/assets/${'w'.repeat(60)}${i}.js`, sourceCharPosition: 12345678 + i, forcedStyleAndLayoutDuration: 1.25 })
+    for (let i = 0; i < 40; i++) l.add(frame(60, [long(i)]))
+    expect(JSON.stringify(l.take(10)).length * 180 + JSON.stringify(l.top()).length).toBeLessThan(400 * 1024)
   })
 
   it('the report carries the table, fed by every long frame', () => {
@@ -367,5 +377,7 @@ describe('long animation frames, by who ran in them (owner walk of 2026-11-21)',
     expect(text).toMatch(/loafs\.add\(e as unknown as LoafFrame\)\n\s*if \(e\.duration < SLOW_FRAME_MS\) return/)
     expect(text).toMatch(/loaf: loaf\.all\(\)/)
     expect(text).toMatch(/loafTop: loafs\.top\(\)/)
+    // The slow log names files the same way.
+    expect(text).not.toMatch(/sourceURL \?\? ''\)\.split/)
   })
 })

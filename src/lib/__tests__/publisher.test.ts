@@ -52,13 +52,17 @@ vi.mock('../chains', async (importOriginal) => ({
   confirmChainEvents: () => Promise.resolve(canonical.answers ? [] : null),
 }))
 
-// What this page signed (useCyberspace signedOnThisPage): every fixture action
-// here stands for one signed on this page, except those a test says were read
-// from storage (a reload, an identity switched back to).
+// What this page signed (useCyberspace signedOnThisPage, takeFreshHead): every
+// fixture action stands for one signed on this page, except those a test says
+// were read from storage (a reload, an identity switched back to); an
+// appended one is an action just taken, and opens the gate the first time it
+// becomes the head.
 const storage = vi.hoisted(() => new Set<string>())
+const fresh = vi.hoisted(() => new Set<string>())
 vi.mock('../../store/useCyberspace', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../store/useCyberspace')>()),
   signedOnThisPage: (id: string) => !storage.has(id),
+  takeFreshHead: (id: string) => fresh.delete(id),
 }))
 
 // A retry needs window.setTimeout; nothing here fails, but a stub costs one
@@ -91,6 +95,7 @@ function setChain(ids: string[], statuses: Record<string, PublishStatus> = {}): 
 function append(id: string): void {
   const s = useCyberspace.getState()
   const e = ev(id)
+  fresh.add(e.id)
   useCyberspace.setState({
     events: [...s.events, e],
     prevEventId: e.id,
@@ -117,6 +122,7 @@ describe('the publisher and the release gate', () => {
     await idle()
     sent.length = 0
     storage.clear()
+    fresh.clear()
   })
 
   it('sends nothing when the switch goes Live with a backlog waiting', async () => {
@@ -205,6 +211,29 @@ describe('the publisher and the release gate', () => {
     expect(sent).toEqual([ev('k1').id, ev('k2').id, ev('k3').id])
   })
 
+  it('a move this page signed while LOCAL, read back after a switch away and back on LIVE, waits too: an action opens the gate once (review, 2026-11-21)', async () => {
+    const me = useCyberspace.getState().identity
+    try {
+      setChain(['m0'], { [ev('m0').id]: 'ok' })
+      await idle()
+      // LOCAL: the move is taken here, and becomes the head.
+      append('m1')
+      await idle()
+      useCyberspace.setState({ live: true })
+      await idle()
+      expect(sent).toEqual([])
+      // Away to X and back: the chain arrives after the switch, in a later update.
+      useCyberspace.setState({ identity: { pubkey: 'c'.repeat(64), npub: 'npub-x' } })
+      useCyberspace.setState({ identity: me, events: [], prevEventId: '', published: {} })
+      setChain(['m0', 'm1'], { [ev('m0').id]: 'ok' })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(sent).toEqual([])
+    } finally {
+      useCyberspace.setState({ live: false, identity: me })
+      await idle()
+    }
+  })
+
   it('LIVE, moves kept from before go out on PUBLISH, with no move', async () => {
     setChain(['p0'], { [ev('p0').id]: 'ok' })
     useCyberspace.setState({ live: true })
@@ -229,13 +258,12 @@ describe('the publisher and the release gate', () => {
       await idle()
       append('d4')
       await until(() => sent.length === 1)
-      // The switch to X, LIVE, then X's saved chain arriving with one kept move: the gate opens on it.
+      // The switch to X, LIVE, then X's saved chain arriving with one kept move, then PUBLISH.
       const x = 'b'.repeat(64)
       useCyberspace.setState({ identity: { pubkey: x, npub: 'npub-x' } })
       storage.add(ev('x2').id)
       setChain(['x1', 'x2'], { [ev('x1').id]: 'ok' })
       canonical.answers = false
-      // Its own action would open the gate; PUBLISH asks the same.
       useCyberspace.getState().publishNow()
       pub.hold = null
       release()

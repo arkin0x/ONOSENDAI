@@ -36,7 +36,15 @@
  * chain; the gate only decides whether it drains at all.
  */
 
+import { create } from 'zustand'
 import type { PublishStatus } from '../store/useCyberspace'
+
+/**
+ * The release gate as the publisher last set it (publisher.ts), for the HUD:
+ * the CHAIN chip says "n KEPT HERE: PUBLISH" while LIVE with it shut and moves
+ * unsent (ChainExplorer chainChipState). Written only when it changes.
+ */
+export const useReleaseGate = create<{ open: boolean }>(() => ({ open: false }))
 
 /** The three things about the store the gate rule reads. */
 export interface ChainFacts {
@@ -66,10 +74,12 @@ export interface ChainFacts {
    */
   who?: string
   /**
-   * The head was signed on this page (useCyberspace signedOnThisPage). A
-   * head that is new and unsent but came from storage (the saved chain read
-   * on a load, or after a switch back to an identity, moves another tab of
-   * this browser signed) is no action taken here, so it never opens the gate:
+   * The head is an action this page just signed, arriving as the head for
+   * the first time (useCyberspace takeFreshHead). A head that is new and
+   * unsent but came from storage (the saved chain read on a load, or after a
+   * switch back to an identity, moves another tab of this browser signed, a
+   * move of this page's own read back after a switch) is no action taken
+   * here, so it never opens the gate:
    * moves kept while LOCAL go out on this device's next action, or on PUBLISH
    * (owner, 2026-11-21, after his phone sent 458 kept moves on its own).
    * Absent reads as signed here.

@@ -36,8 +36,8 @@ import { confirmChainEvents } from './chains'
 import { noteChainHolders } from './chainHolders'
 import { chainLanded, onReleased } from './chainStore'
 import type { NostrEvent } from './events'
-import { chainFacts, gateAfter, maySend } from './release'
-import { newestEventOnRelays, noteStaleFormatStuck, retireStaleFormat, signedOnThisPage, useCyberspace } from '../store/useCyberspace'
+import { chainFacts, gateAfter, maySend, useReleaseGate } from './release'
+import { newestEventOnRelays, noteStaleFormatStuck, retireStaleFormat, signedOnThisPage, takeFreshHead, useCyberspace } from '../store/useCyberspace'
 import { staleHopFormat } from './staleFormat'
 import { movementBlocked, useVersionGate } from './versionGate'
 
@@ -486,7 +486,12 @@ export function startPublisher(): void {
     if (s.identity.pubkey !== prev.identity.pubkey) { restorePending(); backlogChecked = null; lastFailed = false }
     // Every change is offered to the gate first, because the thing that opens
     // it, a new head signed here, arrives as an ordinary store update.
-    released = gateAfter(released, chainFacts(prev, signedOnThisPage), chainFacts(s, signedOnThisPage))
+    // A head this page signed opens it once: the head's first arrival, LIVE
+    // or LOCAL, counts it (takeFreshHead), and the same move read back later
+    // from storage does not.
+    const fresh = s.prevEventId !== prev.prevEventId && takeFreshHead(s.prevEventId)
+    released = gateAfter(released, chainFacts(prev), chainFacts(s, () => fresh))
+    if (useReleaseGate.getState().open !== released) useReleaseGate.setState({ open: released })
     if (s.live === prev.live && s.events === prev.events && s.held === prev.held && s.publishRequest === prev.publishRequest && s.chainConflict === prev.chainConflict) return
     if (!s.live) backlogChecked = null
     if (!maySend(s, released)) {

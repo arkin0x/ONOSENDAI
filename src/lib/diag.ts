@@ -24,6 +24,7 @@ import { useThumbs } from '../store/useThumbs'
 import { useTv } from '../store/useTv'
 import { useWorkshop } from '../store/useWorkshop'
 import { DIAG_FOUND_KEY, DIAG_LAST_KEY, diagForget } from './diagGate'
+import { hudFlags } from './hudFlags'
 import { DIAG_COLUMNS, GlLedger, Ring, frameVerb, framePercentiles, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
 
 /** Seconds between samples, and how long each ring reaches back. */
@@ -474,6 +475,8 @@ export function startDiag(): void {
         gpu: gpuInfo?.gpu ?? null, maxSamples: gpuInfo?.maxSamples ?? null, lateStart, route: safeLabel(location.pathname.split('/')[1] ?? '', 12), isolated: window.crossOriginIsolated,
         heapLimit: (performance as unknown as { memory?: { jsHeapSizeLimit: number } }).memory?.jsHeapSizeLimit ?? null,
       },
+      // The test conditions: HUD pieces taken off the page (?nochip=1, ?nosyncwarn=1).
+      hud: hudFlags(),
       contexts: { made: contextsMade, lostEver: contextsLostEver },
       workers: { made: workers.made, ended: workers.ended },
       renderers: alive(renderers).map((r) => ({ w: r.domElement?.width, h: r.domElement?.height, pr: r.getPixelRatio?.(), geoms: r.info?.memory.geometries, textures: r.info?.memory.textures, programs: r.info?.programs?.length ?? 0 })),

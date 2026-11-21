@@ -70,6 +70,7 @@ import { useChainUi } from '../store/useChainUi'
 import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
 import { everyWhileVisible } from '../lib/whileVisible'
 import { AheadMarks, AheadWords, useChainAhead } from './ChainAhead'
+import { hudFlags } from '../lib/hudFlags'
 
 // Spectating opens the chain explorer: the chain is the thing you came to
 // look at. What you had it set to is put back when the spectation ends, and
@@ -96,8 +97,16 @@ const COUNT_AFTER_MS = 450
 /** How long an adoption stays on the chip: long enough to explain the move it caused. */
 const ADOPTED_MS = 8000
 
-/** The chain's chip and its body; not while BUILD mode is on (ChainExplorerChip). */
+/**
+ * The chain's chip and its body; not while BUILD mode is on (ChainExplorerChip).
+ * Not at all with ?nochip=1 (lib/hudFlags.ts): nothing below runs, the edge
+ * bar's hooks included.
+ */
 export function ChainExplorer(): JSX.Element | null {
+  return hudFlags().nochip ? null : <ChainExplorerUnlessBuilding />
+}
+
+function ChainExplorerUnlessBuilding(): JSX.Element | null {
   const building = useBuilder((s) => s.active)
   return building ? null : <ChainExplorerChip />
 }

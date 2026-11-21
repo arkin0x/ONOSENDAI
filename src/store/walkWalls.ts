@@ -1466,10 +1466,20 @@ export function enclosesWalker(w: WallItem, from: Position): boolean {
  */
 export function wallItems(plane: number): WallItem[] {
   const all = useShards.getState().drawnItems()
-  const shards = all.filter((w): w is WorldItem & { shard: ShardModel } => w.type === 'shard' && !!w.shard && w.plane === plane)
+  // The shards and chests of this plane, picked out once per world (drawnItems
+  // keeps its list until the world changes): every WALK step, fall and stand
+  // asks for the walls, many times a frame. What a chest is drawn as is asked
+  // again each time below, as it changes with OPEN, CLOSE and a look arriving.
+  let picked = wallPicks
+  if (!picked || picked.all !== all || picked.plane !== plane) {
+    const shards = all.filter((w): w is WorldItem & { shard: ShardModel } => w.type === 'shard' && !!w.shard && w.plane === plane)
+    const chests = all.filter((w) => w.type === 'chest' && !!w.chest && w.plane === plane)
+    picked = wallPicks = { all, plane, shards, chests, looks: [], out: shards }
+  }
+  const { shards, chests } = picked
   const me = useCyberspace.getState().identity.pubkey
   const looks: WallItem[] = []
-  for (const w of all) {
+  for (const w of chests) {
     if (w.type !== 'chest' || !w.chest || w.plane !== plane) continue
     const look = lookOf(w)
     if (!look) continue
@@ -1480,7 +1490,29 @@ export function wallItems(plane: number): WallItem[] {
     const closedRoom = typeof roomHeight === 'number' && closedByMe(me, w.key, w.chest.lockPubkey) ? roomHeight : undefined
     looks.push({ key: doorWallKey(w.key), at: w.at, height: w.height, plane: w.plane, author: w.author, mine: w.mine, shard: model, uncut: look.name !== 'custom', door: look.kind === 'door', ...(closedRoom !== undefined ? { closedRoom } : {}) })
   }
-  return looks.length > 0 ? [...shards, ...looks] : shards
+  if (looks.length === 0) return shards
+  // The same looks as last time: the same list, so a caller holding it holds one that is still right.
+  if (sameLooks(picked.looks, looks)) return picked.out
+  picked.looks = looks
+  picked.out = [...shards, ...looks]
+  return picked.out
+}
+
+/**
+ * wallItems' picks from the world it last read (drawnItems' list), for one
+ * plane: its shards, its chests, and the looks and the list it last gave.
+ */
+let wallPicks: { all: WorldItem[]; plane: number; shards: WallItem[]; chests: WorldItem[]; looks: WallItem[]; out: WallItem[] } | null = null
+
+/** Whether two lists of chest looks stand for the same walls: each the same chest, as the same model, the same way. */
+function sameLooks(a: readonly WallItem[], b: readonly WallItem[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]
+    const y = b[i]
+    if (x.key !== y.key || x.shard !== y.shard || x.at !== y.at || x.height !== y.height || x.plane !== y.plane || x.author !== y.author || x.mine !== y.mine || x.uncut !== y.uncut || x.door !== y.door || x.closedRoom !== y.closedRoom) return false
+  }
+  return true
 }
 
 /**
@@ -1493,7 +1525,12 @@ export function wallItems(plane: number): WallItem[] {
  * every WALK step, fall and jump asks.
  */
 export function wallItemsAt(plane: number, from: Position): WallItem[] {
-  return wallItems(plane)
+  const all = wallItems(plane)
+  // Only a door closed with CLOSE, a built-in look or a door depends on where
+  // the walker stands; where none of them lets the walker go or holds them,
+  // the walls are wallItems' own list, with nothing copied.
+  if (!all.some((w) => closedDoorLets(w, from) || ((w.uncut || w.door) && enclosesWalker(w, from)))) return all
+  return all
     .filter((w) => !closedDoorLets(w, from))
     .map((w) => ((w.uncut || w.door) && enclosesWalker(w, from) ? { ...w, inside: true } : w))
 }

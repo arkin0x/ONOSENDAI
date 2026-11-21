@@ -73,6 +73,19 @@ export function closedByMe(owner: string, doorId: string, lock?: string): boolea
   return !!r?.shut && (lock === undefined || r.lock === lock)
 }
 
+/**
+ * What this identity's closed doors are now, as one string that changes
+ * whenever any of them is closed, opened or locked anew: what a list built
+ * from the closed doors (store/useShards worldItems) is kept against, so it
+ * is built again only when they change. A handful of doors, so cheap to ask
+ * on every read.
+ */
+export function closedSignature(owner: string): string {
+  let out = ''
+  for (const r of recordsOf(owner)) if (r.shut) out += `${r.doorId}:${r.lock ?? ''};`
+  return out
+}
+
 /** The door ids this identity has closed now, under any lock. */
 export function closedDoorIds(owner: string): Set<string> {
   return new Set(recordsOf(owner).filter((r) => r.shut).map((r) => r.doorId))

@@ -135,6 +135,23 @@ describe('the move', () => {
     expect(kvGet('onosendai:published')).toBe('{"v":2}')
   })
 
+  it('a final write that reads back different never becomes the record, and localStorage keeps its copy', async () => {
+    store.setItem('onosendai:published', '{"good":1}')
+    const real = IDBObjectStore.prototype.put
+    const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) {
+      const v = value as { value?: string; seen?: string }
+      if (this.name === 'entries' && typeof v?.seen === 'string') return real.call(this, { ...v, value: 'bad' }, key)
+      return real.call(this, value, key)
+    })
+    await hydrateKv()
+    expect(store.getItem('onosendai:published')).toBe('{"good":1}')
+    put.mockRestore()
+    resetKvForTests()
+    await hydrateKv()
+    expect(kvGet('onosendai:published')).toBe('{"good":1}')
+    expect(store.getItem('onosendai:published')).toBeNull()
+  })
+
   it('resumes when interrupted after the copy and before the removal: the next load only removes it', async () => {
     store.setItem('onosendai:published', '{"x":1}')
     // The removal never happens this load (the tab closed at that moment).
@@ -237,6 +254,22 @@ describe('a database that does not open', () => {
     expect(kvGet('onosendai:seen')).toBe('["a","b","c"]')
     expect(store.getItem('onosendai:seen')).toBeNull()
     expect((await kvSuperseded()).map((r) => r.value)).toEqual(['["z"]'])
+  })
+
+  it('a record first made after the move (never in localStorage) is not written over by a visit without the database', async () => {
+    store.setItem('onosendai:seen', '[]')
+    await hydrateKv()
+    kvSet('onosendai:cloudRegionKeys', '["A","B"]')
+    await kvFlush()
+    resetKvForTests()
+    hangOpen()
+    expect(await hydrateKv(50)).toBe('blind')
+    kvSet('onosendai:cloudRegionKeys', '["C"]')
+    vi.restoreAllMocks()
+    resetKvForTests()
+    await hydrateKv()
+    expect(kvGet('onosendai:cloudRegionKeys')).toBe('["A","B"]')
+    expect((await kvSuperseded()).map((r) => [r.key, r.value])).toEqual([['onosendai:cloudRegionKeys', '["C"]']])
   })
 
   it('an open that answers after the page gave up is closed and changes nothing this session', async () => {

@@ -25,7 +25,10 @@
  * (`seen`), in one transaction; read back in another and compared, character
  * for character; and only then removed from localStorage. One record at a
  * time, so a full localStorage frees space as it goes and never needs any to
- * move. Interrupted anywhere, the next load finds one of three things: the
+ * move. Precisely: written as `pending` (never taken for the record), read
+ * back and compared, then made the record with its fingerprint and read back
+ * again, and only then removed from localStorage. Any row not `pending` is
+ * the record, whether it was moved or written here since. Interrupted anywhere, the next load finds one of three things: the
  * record not yet written (copied again), written and still in localStorage
  * with the fingerprint written beside it (only removed: it was already
  * verified), or gone from localStorage (done). A record whose copy does not
@@ -303,8 +306,8 @@ function keepAside(d: IDBDatabase, key: string, value: string, why: string): Pro
   })
 }
 
-async function readOne(d: IDBDatabase, key: string): Promise<{ value: string; seen?: string } | undefined> {
-  return await request(d.transaction(ENTRIES, 'readonly').objectStore(ENTRIES).get(key)) as { value: string; seen?: string } | undefined
+async function readOne(d: IDBDatabase, key: string): Promise<{ value: string; seen?: string; pending?: boolean } | undefined> {
+  return await request(d.transaction(ENTRIES, 'readonly').objectStore(ENTRIES).get(key)) as { value: string; seen?: string; pending?: boolean } | undefined
 }
 
 /** The copies set aside (NEVER LOST): for recovery by hand, oldest first. */
@@ -336,37 +339,43 @@ export async function moveOne(d: IDBDatabase, key: string, text: string): Promis
     try { s?.removeItem(key) } catch { /* verified: removed next load */ }
     if (!marked) markMoved()
   }
-  // A row without a fingerprint was never verified: it is not the record (a copy that did not read back, cut short).
-  const stored = mirror.has(key) && seen.has(key)
-  if (stored) {
+  // The database's record (any row not `pending`): moved and verified, or written there since.
+  if (mirror.has(key)) {
     if (seen.get(key) !== print) {
-      // Written to localStorage after the move, by a build that read it empty: the database's copy stays, and this text is set aside.
-      console.warn(`[kv] ${key} was written to localStorage after it moved (a tab of an older build): the stored copy stays, and that text is kept aside`)
+      // Not the text it was moved from: written to localStorage after the move, by a build or a visit that read it empty. The stored record stays, and this text is set aside.
+      console.warn(`[kv] ${key} was written to localStorage after it moved: the stored copy stays, and that text is kept aside`)
       try { await keepAside(d, key, text, 'written to localStorage after the move') } catch { stayed.add(key); return 'kept' }
     }
     remove()
     return 'removed'
   }
   try {
-    // Written without its fingerprint, read back and compared, and only then fingerprinted: a copy that did not verify can never pass for one that did.
-    const outcome = await putIfAbsent(d, key, text)
+    // 1. Written as `pending`, never taken for the record, unless another tab moved it since this one read the database.
+    const outcome = await putPending(d, key, text)
     if (outcome === 'taken') {
-      // Another tab on its first load moved it a moment ago: its copy is the record now, and this one is the older text.
       const row = await readOne(d, key)
-      if (row && typeof row.seen === 'string') { mirror.set(key, row.value); seen.set(key, row.seen); return moveOne(d, key, text) }
+      if (row && !row.pending) { mirror.set(key, row.value); if (typeof row.seen === 'string') seen.set(key, row.seen); return moveOne(d, key, text) }
       stayed.add(key)
       return 'kept'
     }
+    // 2. Read back and compared.
     const back = await readOne(d, key)
-    if (!back || back.value !== text) {
-      await writeBatch(d, new Map([[key, null]])).catch(() => undefined)
+    if (!back || back.value !== text || !back.pending) {
+      await dropIf(d, key, (r) => r.pending === true)
       stayed.add(key)
       return 'kept'
     }
-    await writeBatch(d, new Map([[key, text]]), new Map([[key, print]]))
+    // 3. Made the record, with its fingerprint, and read back again before localStorage lets go of it.
+    await finalize(d, key, text, print)
+    const done = await readOne(d, key)
+    if (!done || done.value !== text || done.seen !== print || done.pending) {
+      await dropIf(d, key, (r) => r.seen === print && r.value !== text)
+      stayed.add(key)
+      return 'kept'
+    }
   } catch (err) {
     console.warn(`[kv] ${key} stays in localStorage for now: ${err instanceof Error ? err.message : String(err)}`)
-    await writeBatch(d, new Map([[key, null]])).catch(() => undefined)
+    await dropIf(d, key, (r) => r.pending === true).catch(() => undefined)
     stayed.add(key)
     return 'kept'
   }
@@ -376,26 +385,42 @@ export async function moveOne(d: IDBDatabase, key: string, text: string): Promis
   return 'moved'
 }
 
-/**
- * Write a record that has no verified row, in one transaction with the look:
- * `taken` when a verified row is there already (another tab moved it since
- * this one read the database), else `written`. An unverified row is written over.
- */
-function putIfAbsent(d: IDBDatabase, key: string, text: string): Promise<'written' | 'taken'> {
+type Row = { key: string; value: string; seen?: string; pending?: boolean }
+
+/** One transaction: run `body` on the row as it is now. */
+function withRow<T>(d: IDBDatabase, key: string, body: (row: Row | undefined, entries: IDBObjectStore) => T): Promise<T> {
   return new Promise((resolve, reject) => {
     const tx = d.transaction([ENTRIES], 'readwrite')
     const entries = tx.objectStore(ENTRIES)
-    let outcome: 'written' | 'taken' = 'written'
+    let out: T
     const was = entries.get(key)
-    was.onsuccess = () => {
-      const row = was.result as { seen?: unknown } | undefined
-      if (row && typeof row.seen === 'string') { outcome = 'taken'; return }
-      entries.put({ key, value: text, at: Date.now() })
-    }
-    tx.oncomplete = () => resolve(outcome)
+    was.onsuccess = () => { out = body(was.result as Row | undefined, entries) }
+    tx.oncomplete = () => resolve(out)
     tx.onerror = () => reject(tx.error ?? new Error('IndexedDB write failed'))
     tx.onabort = () => reject(tx.error ?? new Error('IndexedDB write aborted'))
   })
+}
+
+/** Write a record being moved as `pending`; `taken` when a record (a row not pending) is there already. */
+function putPending(d: IDBDatabase, key: string, text: string): Promise<'written' | 'taken'> {
+  return withRow(d, key, (row, entries) => {
+    if (row && !row.pending) return 'taken'
+    entries.put({ key, value: text, pending: true, at: Date.now() })
+    return 'written'
+  })
+}
+
+/** The pending row, verified, becomes the record with its fingerprint: only if it is still that pending row. */
+function finalize(d: IDBDatabase, key: string, text: string, print: string): Promise<void> {
+  return withRow(d, key, (row, entries) => {
+    if (!row || !row.pending || row.value !== text) throw new Error('the copy changed before it was verified')
+    entries.put({ key, value: text, seen: print, at: Date.now() })
+  })
+}
+
+/** Delete the row only if it is still the one `which` names: never another tab's record. */
+function dropIf(d: IDBDatabase, key: string, which: (row: Row) => boolean): Promise<void> {
+  return withRow(d, key, (row, entries) => { if (row && which(row)) entries.delete(key) })
 }
 
 /** Every moving record still in localStorage, biggest first, so a full one frees the most soonest. */
@@ -423,9 +448,10 @@ function openKv(): Promise<IDBDatabase> {
 
 /** Read every record into memory. */
 async function readAll(d: IDBDatabase): Promise<void> {
-  const rows = await request(d.transaction(ENTRIES, 'readonly').objectStore(ENTRIES).getAll()) as Array<{ key: string; value: string; seen?: string }>
+  const rows = await request(d.transaction(ENTRIES, 'readonly').objectStore(ENTRIES).getAll()) as Array<{ key: string; value: string; seen?: string; pending?: boolean }>
   for (const r of rows) {
-    if (typeof r?.key !== 'string' || typeof r.value !== 'string') continue
+    // A move not yet verified is not the record: localStorage still holds it, and it is moved again.
+    if (typeof r?.key !== 'string' || typeof r.value !== 'string' || r.pending) continue
     mirror.set(r.key, r.value)
     if (typeof r.seen === 'string') seen.set(r.key, r.seen)
   }
@@ -524,7 +550,8 @@ async function heard(keys: string[]): Promise<void> {
     if (dirty.has(key)) continue
     const oldValue = mirror.get(key) ?? null
     const row = await readOne(db, key).catch(() => undefined)
-    const newValue = row?.value ?? null
+    const newValue = row && !row.pending ? row.value : null
+    if (row?.pending) continue
     if (newValue === null) mirror.delete(key)
     else mirror.set(key, newValue)
     if (oldValue === newValue) continue

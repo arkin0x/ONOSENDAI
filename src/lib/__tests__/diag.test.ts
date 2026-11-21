@@ -397,9 +397,9 @@ describe('relay frames and checks, counted by kind (owner\'s phone walk, 2026-11
 
   it('a window\'s checks as a row of numbers, the costliest kinds first', () => {
     expect(verifyRow(5, new Map())).toBeNull()
-    const row = verifyRow(10, new Map([[3333, { n: 9, schnorr: 1, hashed: 0, compared: 8, ms: 12.34 }], [33330, { n: 3, schnorr: 3, hashed: 0, compared: 0, ms: 20 }]]))!
-    expect(row.slice(0, VERIFY_COLUMNS.length - 1)).toEqual([10, 12, 4, 0, 8, 32.3])
-    expect(row[VERIFY_COLUMNS.indexOf('top')]).toEqual([[33330, 3, 3, 0, 0, 20], [3333, 9, 1, 0, 8, 12.3]])
+    const row = verifyRow(10, new Map([[3333, { n: 9, schnorr: 1, hashed: 0, compared: 8, deferred: 0, ms: 12.34 }], [33330, { n: 3, schnorr: 2, hashed: 0, compared: 0, deferred: 1, ms: 20 }]]))!
+    expect(row.slice(0, VERIFY_COLUMNS.length - 1)).toEqual([10, 12, 3, 0, 8, 1, 32.3])
+    expect(row[VERIFY_COLUMNS.indexOf('top')]).toEqual([[33330, 3, 2, 0, 0, 1, 20], [3333, 9, 1, 0, 8, 0, 12.3]])
     expect(JSON.stringify(row)).toMatch(/^[\[\]0-9.,]+$/)
   })
 
@@ -409,5 +409,12 @@ describe('relay frames and checks, counted by kind (owner\'s phone walk, 2026-11
     expect(text).toMatch(/verify: verify\.all\(\)/)
     const vs = fs.readFileSync(path.join(SRC, 'lib/verifiedSigs.ts'), 'utf8')
     expect(vs).toMatch(/if \(!verifyStats\) return check\(ev, null\)/)
+  })
+})
+
+describe('columns added later', () => {
+  it('come after every column a report already had, so a reader by position still reads those', () => {
+    expect(DIAG_COLUMNS.slice(-3)).toEqual(['rxEv', 'rxOk', 'rxEose'])
+    expect(DIAG_COLUMNS.indexOf('ui')).toBe(DIAG_COLUMNS.length - 4)
   })
 })

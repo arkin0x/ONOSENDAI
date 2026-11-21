@@ -340,20 +340,20 @@ export function rxVerb(data: unknown): 'event' | 'ok' | 'eose' | 'closed' | 'oth
 }
 
 /** One row per window with relay events checked (lib/verifiedSigs countVerifies): totals, then the top kinds by time. */
-export const VERIFY_COLUMNS = ['t', 'n', 'schnorr', 'hashed', 'compared', 'ms', 'top'] as const
+export const VERIFY_COLUMNS = ['t', 'n', 'schnorr', 'hashed', 'compared', 'deferred', 'ms', 'top'] as const
 /** One entry of a verify row's `top`. */
-export const VERIFY_KIND_COLUMNS = ['kind', 'n', 'schnorr', 'hashed', 'compared', 'ms'] as const
+export const VERIFY_KIND_COLUMNS = ['kind', 'n', 'schnorr', 'hashed', 'compared', 'deferred', 'ms'] as const
 /** Kinds kept per window. */
 export const VERIFY_TOP = 8
 
 /** A window's checks as a row (VERIFY_COLUMNS), or null when none were made. Numbers only: a kind is a number. */
-export function verifyRow(t: number, byKind: ReadonlyMap<number, { n: number; schnorr: number; hashed: number; compared: number; ms: number }>): Array<number | number[][]> | null {
+export function verifyRow(t: number, byKind: ReadonlyMap<number, { n: number; schnorr: number; hashed: number; compared: number; deferred: number; ms: number }>): Array<number | number[][]> | null {
   if (byKind.size === 0) return null
-  let n = 0, schnorr = 0, hashed = 0, compared = 0, ms = 0
-  for (const k of byKind.values()) { n += k.n; schnorr += k.schnorr; hashed += k.hashed; compared += k.compared; ms += k.ms }
+  let n = 0, schnorr = 0, hashed = 0, compared = 0, deferred = 0, ms = 0
+  for (const k of byKind.values()) { n += k.n; schnorr += k.schnorr; hashed += k.hashed; compared += k.compared; deferred += k.deferred; ms += k.ms }
   const top = [...byKind.entries()].sort((a, b) => b[1].ms - a[1].ms).slice(0, VERIFY_TOP)
-    .map(([kind, k]) => [kind, k.n, k.schnorr, k.hashed, k.compared, Math.round(k.ms * 10) / 10])
-  return [t, n, schnorr, hashed, compared, Math.round(ms * 10) / 10, top]
+    .map(([kind, k]) => [kind, k.n, k.schnorr, k.hashed, k.compared, k.deferred, Math.round(k.ms * 10) / 10])
+  return [t, n, schnorr, hashed, compared, deferred, Math.round(ms * 10) / 10, top]
 }
 
 /** The columns of one sample row. Counts over the window unless the name says otherwise. */
@@ -364,8 +364,10 @@ export const DIAG_COLUMNS = [
   'glBuffers', 'glBufferB', 'glTextures', 'glTextureB', 'glRbs', 'glRbB', 'glCanvasB', 'glFbos', 'glVaos', 'glPrograms',
   'draws', 'verts', 'bufData', 'bufDataB', 'bufSub', 'bufSubB', 'texUp', 'texUpB', 'links',
   'objects', 'meshes', 'visibleMeshes', 'shardFaces', 'points', 'lines', 'instanced', 'geoms', 'sceneVerts',
-  'wsOpen', 'relays', 'relaysUp', 'subs', 'txReq', 'txClose', 'txEvent', 'txAuth', 'rxN', 'rxB', 'rxEv', 'rxOk', 'rxEose',
+  'wsOpen', 'relays', 'relaysUp', 'subs', 'txReq', 'txClose', 'txEvent', 'txAuth', 'rxN', 'rxB',
   'workersMade', 'workersLive', 'timeouts', 'intervals', 'resN', 'resB', 'dom', 'canvases', 'idbB', 'storeB', 'thumbs', 'thumbQueue', 'selfMs', 'ui',
+  // Added 2026-11-21, at the end so a reader by position still reads the columns before them.
+  'rxEv', 'rxOk', 'rxEose',
 ] as const
 
 export type DiagColumn = (typeof DIAG_COLUMNS)[number]

@@ -101,21 +101,16 @@ function forgetBody(key: string): void {
 }
 
 /**
- * verifyEvent, skipping the Schnorr check for a signature already checked
- * here (verifiedSigs). For events freshly parsed, as the pool hands them over
- * (lib/relay.ts verifyRelayEvent) and as a bag's entries come out of its
- * decryption (lib/hidden.ts innerAuthentic, fromReference): verifyEvent
- * trusts a verdict already marked on the object, and an object marked and
- * then changed would be remembered as it is.
+ * What each check of an event cost (a relay's, or a bag's entry), by kind,
+ * while ?diag=1 counts (lib/diag.ts): how many; how many were checked in full
+ * (`schnorr`: a new signature, or a copy that matched nothing kept); how many
+ * repeats passed on a hash alone; how many were compared with a body kept;
+ * how many were left to the reader that asked (`deferred`, checked in its
+ * worker); and the time. Not counted: kind 321, which the pool does not
+ * check, and batches checked in the kept worker (sigCheck). Off, nothing is
+ * timed.
  */
-/**
- * What each check of a relay's event cost, by kind, while ?diag=1 counts
- * (lib/diag.ts): how many; how many were checked in full (`schnorr`: a new
- * signature, or a copy that matched nothing kept); how many repeats passed on
- * a hash alone; how many were compared with a body kept; and the time. Off,
- * nothing is timed.
- */
-export interface VerifyKindStats { n: number; schnorr: number; hashed: number; compared: number; ms: number }
+export interface VerifyKindStats { n: number; schnorr: number; hashed: number; compared: number; deferred: number; ms: number }
 let verifyStats: Map<number, VerifyKindStats> | null = null
 
 /** Start counting (the capture behind ?diag=1); `take` hands over the window's counts and starts a new one. */
@@ -124,18 +119,26 @@ export function countVerifies(): { take: () => Map<number, VerifyKindStats> } {
   return { take: () => { const out = verifyStats ?? new Map(); verifyStats = new Map(); return out } }
 }
 
-type VerifyPath = 'compared' | 'hashed' | 'schnorr'
+type VerifyPath = 'compared' | 'hashed' | 'schnorr' | 'deferred'
 
 function counted(ev: NostrEvent, t0: number, path: VerifyPath): void {
   if (!verifyStats) return
-  const kind = typeof ev.kind === 'number' ? ev.kind : -1
+  const kind = Number.isInteger(ev.kind) ? ev.kind : -1
   let k = verifyStats.get(kind)
-  if (!k) { k = { n: 0, schnorr: 0, hashed: 0, compared: 0, ms: 0 }; verifyStats.set(kind, k) }
+  if (!k) { k = { n: 0, schnorr: 0, hashed: 0, compared: 0, deferred: 0, ms: 0 }; verifyStats.set(kind, k) }
   k.n++
   k[path]++
   k.ms += performance.now() - t0
 }
 
+/**
+ * verifyEvent, skipping the Schnorr check for a signature already checked
+ * here (verifiedSigs). For events freshly parsed, as the pool hands them over
+ * (lib/relay.ts verifyRelayEvent) and as a bag's entries come out of its
+ * decryption (lib/hidden.ts innerAuthentic, fromReference): verifyEvent
+ * trusts a verdict already marked on the object, and an object marked and
+ * then changed would be remembered as it is.
+ */
 export function verifyOnce(ev: NostrEvent): boolean {
   if (!verifyStats) return check(ev, null)
   const t0 = performance.now()
@@ -244,6 +247,7 @@ export function deferCheck(id: string): false {
 export function verifyUnlessDeferred(ev: NostrEvent): boolean {
   if (checkedLater !== null && ev.id === checkedLater) {
     checkedLater = null
+    if (verifyStats) counted(ev, performance.now(), 'deferred')
     return true
   }
   return verifyOnce(ev)

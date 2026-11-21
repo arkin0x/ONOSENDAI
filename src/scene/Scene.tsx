@@ -37,7 +37,7 @@ import { keepPrograms } from '../lib/keepPrograms'
 import { sortWithoutBoxing } from '../lib/sortNoAlloc'
 import { FrameDriver } from './frameDriver'
 import { BG } from '../lib/palette'
-import { GRID_RADIUS, cellDelta, claimScreenAxes, itemCentre, levelScreenAxes, originShift, placeCentre, renderDirection, viewAxes, type AxisName, type Position } from '../lib/space'
+import { GRID_RADIUS, cellDelta, claimScreenAxes, itemCentre, levelScreenAxes, originShift, placeCentre, renderDirection, viewAxes, type AxisName, type Position, type ViewAxes } from '../lib/space'
 import { upOf } from '../lib/walkDown'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
@@ -182,13 +182,32 @@ function FrameCommit(): null {
   return null
 }
 
-function World(): JSX.Element {
+/**
+ * The gibson K field: the view window and the terrain volume around it,
+ * which follow every landing (the anchor) and every settle of the cursor.
+ * Their own component, so a landing re-renders this and not the whole world
+ * (World): each part of the world already follows what it draws by itself,
+ * and World rendering all of them again at each landing was a long task per
+ * step of a walk (owner's diag, 2026-11-21).
+ */
+function TerrainField({ axes, idle }: { axes: ViewAxes; idle: boolean }): JSX.Element | null {
+  const win = useViewWindow()
+  const volume = useTerrainVolume(win, axes, idle)
+  return idle ? null : <ShaderPointField volume={volume} win={win} />
+}
+
+/** The target and presence markers, which follow where you stand (useTargets): their own component, as TerrainField. */
+function TargetMarkers({ axes }: { axes: ViewAxes }): JSX.Element {
+  const targets = useTargets()
+  return <TargetProjector axes={axes} targets={targets} />
+}
+
+export function World(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const pubkey = useCyberspace((s) => s.focusPubkey())
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
 
-  const win = useViewWindow()
   // The gibson K field is meaningless wallpaper while an Earth or hyperspace
   // view holds the camera, and its scans are real CPU: suspend both together.
   // A hyperspace VIEW counts only while its cursor is on the thing: driven
@@ -203,8 +222,6 @@ function World(): JSX.Element {
   const dotsOn = useLayers((s) => s.dots)
   const boxesOn = useLayers((s) => s.boxes)
   const dotsIdle = hyperView || !dotsOn
-  const volume = useTerrainVolume(win, axes, dotsIdle)
-  const targets = useTargets()
   // Cyberspace TV draws the tape, not today: the space itself stays, and
   // everything that is about now (you, your cursor, the people here, what
   // you have found) steps aside for the avatars on tape (TvLayer).
@@ -215,7 +232,7 @@ function World(): JSX.Element {
       <group>
         <FrameCommit />
         <BlackSun axes={axes} />
-        {!dotsIdle && <ShaderPointField volume={volume} win={win} />}
+        <TerrainField axes={axes} idle={dotsIdle} />
         {boxesOn && <Rooms axes={axes} />}
         <SectorBox axes={axes} />
         <Earth axes={axes} />
@@ -230,12 +247,12 @@ function World(): JSX.Element {
       <FrameCommit />
       {/* Runs before anything that reads travelOffset. */}
       <Travel axes={axes} />
-      <TargetProjector axes={axes} targets={targets} />
+      <TargetMarkers axes={axes} />
       {/* Hidden audio sounding where it is hidden, heard at the camera (DECK-0007). */}
       <HiddenAudio axes={axes} />
       {/* At infinity, so it draws behind everything regardless of tree order. */}
       <BlackSun axes={axes} />
-      {!dotsIdle && <ShaderPointField volume={volume} win={win} />}
+      <TerrainField axes={axes} idle={dotsIdle} />
       {boxesOn && <Rooms axes={axes} />}
       <SectorBox axes={axes} />
       <Earth axes={axes} />

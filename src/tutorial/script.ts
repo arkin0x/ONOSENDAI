@@ -265,13 +265,14 @@ export const EARTH_PICK: TutorialStep = {
   then: 'earth-board',
 }
 
-/** The HYPERSPACE panel is first in the menu while the trip is taught, and BOARD glows. */
+/** The HYPERSPACE panel is first in the menu while the trip is taught, and BOARD glows; a stop not picked yet is asked for first. */
 export const EARTH_BOARD: TutorialStep = {
   id: 'earth-board',
   title: 'Board',
   caption: 'Open the menu. Your trip is at the top. Tap BOARD.',
   scene: { target: 'keep', highlight: `${MENU_SHUT}, [data-panel-id="hyperspace"] .hyper__btn--board` },
-  effect: 'hyperspace-first',
+  // HYPERSPACE first in the menu; while no stop is picked, the step says so and a tap on one picks it (tutorial/earthRoute.ts).
+  effect: 'board-step',
   wait: 'board',
   branch: true,
   then: 'earth-ride',

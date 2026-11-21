@@ -169,6 +169,10 @@ export function alreadyChecked(events: readonly NostrEvent[]): string[] {
 export function signedHere(ev: NostrEvent): void {
   const key = keyOf(ev)
   if (key === null) return
+  // One hash per signature, not per copy: fields changed since signing are not remembered, and their copies are checked in full.
+  let holds = false
+  try { holds = getEventHash(ev) === ev.id } catch { holds = false }
+  if (!holds) return
   remember(key)
   keepBody(key, ev)
 }

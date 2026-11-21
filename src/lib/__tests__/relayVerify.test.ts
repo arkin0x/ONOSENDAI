@@ -165,9 +165,21 @@ describe('an event signed here comes back from the relays without a second check
     for (let i = 0; i < 16; i++) expect(verifyRelayEvent(copy(ev))).toBe(true)
     expect(checks.n).toBe(before)
     expect(spy).not.toHaveBeenCalled()
-    spy.mockRestore()
-    // A forged copy under its id and signature is still refused.
+    // A forged copy under its id and signature is still refused, and is hashed to be.
     expect(verifyRelayEvent({ ...copy(ev), content: 'forged' })).toBe(false)
+    expect(spy).toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('an event changed after it was signed is not remembered: its copies are checked in full and refused', async () => {
+    const { signedHere } = await import('../verifiedSigs')
+    const ev = finalizeEvent({ kind: 1, created_at: 1_760_000_004, tags: [], content: 'as signed' }, generateSecretKey())
+    const changed = { ...ev, content: 'changed after signing' }
+    signedHere(changed)
+    const before = checks.n
+    expect(verifyRelayEvent(copy(changed))).toBe(false)
+    expect(checks.n).toBe(before + 1)
+    expect(verifyRelayEvent(copy(ev))).toBe(true)
   })
 
   it('the store remembers every event it signs or checks from a signer (useCyberspace signEvent, checkedAnswer)', async () => {

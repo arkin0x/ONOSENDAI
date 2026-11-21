@@ -57,6 +57,14 @@ export interface ChainFacts {
    * opens the gate the way a new head would. Absent reads as unchanged.
    */
   release?: number
+  /**
+   * Whose chain it is. A switch to another identity shuts the gate: what
+   * that identity kept on this device goes out on its next action here,
+   * never because the identity before it was LIVE with the gate open
+   * (review of the per-identity LIVE switch, 2026-11-21). Absent reads as
+   * unchanged.
+   */
+  who?: string
 }
 
 /** Read the facts out of the store, or out of anything shaped like it. */
@@ -65,8 +73,9 @@ export function chainFacts(s: {
   prevEventId: string
   published: Record<string, PublishStatus>
   publishRequest?: number
+  identity?: { pubkey: string }
 }): ChainFacts {
-  return { live: s.live, headId: s.prevEventId, headSent: s.published[s.prevEventId] === 'ok', release: s.publishRequest }
+  return { live: s.live, headId: s.prevEventId, headSent: s.published[s.prevEventId] === 'ok', release: s.publishRequest, who: s.identity?.pubkey }
 }
 
 /**
@@ -75,6 +84,7 @@ export function chainFacts(s: {
  * | Change | Gate |
  * |---|---|
  * | anything, ending LOCAL | shut |
+ * | a switch to another identity | shut: its kept moves wait for its own next action |
  * | LOCAL to LIVE | shut: the flip publishes nothing |
  * | LIVE, a new head this device signed | open: and the backlog goes with it |
  * | LIVE, a head adopted from the relay | unchanged: not an action of ours |
@@ -89,6 +99,7 @@ export function chainFacts(s: {
 export function gateAfter(open: boolean, prev: ChainFacts, next: ChainFacts): boolean {
   if (!next.live) return false
   if (!prev.live) return false
+  if (prev.who !== undefined && next.who !== undefined && prev.who !== next.who) return false
   if (next.headId !== prev.headId && !next.headSent) return true
   if ((next.release ?? 0) !== (prev.release ?? 0)) return true
   return open

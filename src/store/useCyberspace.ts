@@ -1455,6 +1455,8 @@ function chainKeyFor(pubkey: string): string {
 export const VIEW_FOCUS_LABEL = 'VIEW'
 
 const LIVE_KEY = 'onosendai:live'
+/** Set once the device's old LIVE setting has been made the identity in use's own (loadLive). */
+const LIVE_MOVED_KEY = 'onosendai:live-moved'
 const MOVE_MODE_KEY = 'onosendai:moveMode'
 const SHOW_SECRETS_KEY = 'onosendai:showSecrets'
 
@@ -2062,13 +2064,22 @@ function unresolvedTarget(pubkey: string, name: string | null): TrackedTarget {
  * keeps the device's old setting (`legacy`): the switch does not change under
  * the person's hand on an upgrade.
  */
-function loadLive(pubkey: string, legacy = false): boolean {
+export function loadLive(pubkey: string, legacy = false): boolean {
   try {
+    // Once, on the first load of a build that keeps it per identity: the
+    // device's old setting becomes the identity in use's own, and the old
+    // record is never read again. Read on every load instead, it handed a
+    // new key LOCAL again after a reload, and an identity left before its
+    // setting was saved came back LIVE and published what it kept (review,
+    // 2026-11-21).
+    if (legacy && localStorage.getItem(LIVE_MOVED_KEY) === null) {
+      const raw = localStorage.getItem(LIVE_KEY)
+      if (raw !== null && localStorage.getItem(`${LIVE_KEY}:${pubkey}`) === null) localStorage.setItem(`${LIVE_KEY}:${pubkey}`, raw)
+      localStorage.setItem(LIVE_MOVED_KEY, '1')
+    }
     const own = localStorage.getItem(`${LIVE_KEY}:${pubkey}`)
-    if (own !== null) return own === '1'
     // Live is the default: the chain is meant to be seen.
-    const raw = legacy ? localStorage.getItem(LIVE_KEY) : null
-    return raw === null ? true : raw === '1'
+    return own === null ? true : own === '1'
   } catch { return true }
 }
 
@@ -2940,13 +2951,14 @@ let chainEpoch = 0
 async function confirmHead(retrying: () => void): Promise<string | null | typeof STALE_CONFIRMATION> {
   const pubkey = useCyberspace.getState().identity.pubkey
   const epoch = chainEpoch
-  const here = await headCheckedHere()
-  if (here) return here
   // The page's own look at the relays is still out (CHECKING YOUR CHAIN):
   // this move waits for it, so it starts from what it brings rather than
-  // racing it, and then asks for itself as always below.
+  // racing it, and then checks here and asks the relays as always below.
+  // First, so another tab's move made during the wait is still read.
   await chainSyncSettled(pubkey)
   if (chainEpoch !== epoch) return STALE_CONFIRMATION
+  const here = await headCheckedHere()
+  if (here) return here
   // No confirmation is reused, however recent (arkinox, 2026-10-08): another
   // device can move in the second between two looks, and only a fresh answer
   // makes the relay's silence mean "nothing newer".

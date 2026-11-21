@@ -131,12 +131,18 @@ let catching = false
 /** One was asked for while a check or a catch-up was out: it runs once that one ends. */
 let catchAgain = false
 let lastCatchUp = -Infinity
+/** Catch-ups in a row that got no answer: each doubles the gap before the next (to 16 times CATCH_UP_GAP_MS). */
+let failures = 0
+/** A catch-up put off to the end of the gap, at most one. */
+let later: ReturnType<typeof setTimeout> | null = null
 
 /**
  * Why a catch-up was asked for: `gap` is a live event that did not link to
- * the chain in hand, `again` one asked for while another was out; both skip
- * the gap between catch-ups. Any other reason (a focus, a tab return, the
- * network back) is held to one per CATCH_UP_GAP_MS.
+ * the chain in hand, `again` one asked for while another was out. Every
+ * reason is held to one per CATCH_UP_GAP_MS (doubled after each that got
+ * no answer); a gap or a resume asked inside it runs once at its end,
+ * since it may be about something new. A focus inside it is dropped: the
+ * last catch-up answered it.
  */
 export type CatchUpReason = 'focus' | 'resume' | 'gap' | 'again'
 
@@ -158,18 +164,25 @@ export function catchUp(reason: CatchUpReason = 'focus'): void {
   // No chain here yet: the question is the self-check's, asked again when it could not say.
   if (s.events.length === 0) { recheckIfUnknown(); return }
   const now = Date.now()
-  if (reason !== 'gap' && reason !== 'again' && now - lastCatchUp < CATCH_UP_GAP_MS) return
+  const gap = CATCH_UP_GAP_MS * 2 ** Math.min(failures, 4)
+  if (now - lastCatchUp < gap) {
+    if (reason !== 'focus' && later === null) later = setTimeout(() => { later = null; catchUp('again') }, gap - (now - lastCatchUp))
+    return
+  }
   lastCatchUp = now
   catching = true
   const since = newestOnRelays(s.events, s.published)
   void fetchChainEvents(pubkey, knownGenesis(pubkey), knownEvents(pubkey), since)
     .then((events) => {
+      // Nothing back at all is no answer: a relay holding this chain sends
+      // at least the event `since` was taken from.
+      failures = events.length === 0 && since !== undefined ? failures + 1 : 0
       if (useCyberspace.getState().identity.pubkey !== pubkey) return
       useCyberspace.getState().adoptChain(events)
       const sync = useCyberspace.getState().chainSync
-      if (sync?.pubkey === pubkey && sync.status === 'unreachable') setSync(pubkey, 'done')
+      if (failures === 0 && sync?.pubkey === pubkey && sync.status === 'unreachable') setSync(pubkey, 'done')
     })
-    .catch(() => { /* unreachable, or a hole: the head check before any signature asks again */ })
+    .catch(() => { failures++ /* unreachable, or a hole: the head check before any signature asks again */ })
     .finally(() => {
       catching = false
       if (catchAgain) { catchAgain = false; catchUp('again') }

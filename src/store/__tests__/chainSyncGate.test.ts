@@ -53,7 +53,7 @@ vi.mock('../../lib/workers', async (orig) => ({
 }))
 vi.mock('../../lib/hyperspace/enter', async (orig) => ({ ...(await orig() as object), computeEnterProof: () => '0'.repeat(64) }))
 
-import { CHAIN_SYNC_MESSAGE, CHAIN_SYNC_WAIT_MS, HEAD_UNCONFIRMED_MESSAGE, useCyberspace } from '../useCyberspace'
+import { CHAIN_SYNC_MESSAGE, CHAIN_SYNC_WAIT_MS, HEAD_UNCONFIRMED_MESSAGE, loadLive, useCyberspace } from '../useCyberspace'
 import { chainChipState } from '../../hud/ChainExplorer'
 import { actionEvent } from '../../lib/__tests__/chainFixtures'
 import { placeSpawn } from '../fixtures/placeSpawn'
@@ -132,6 +132,18 @@ describe('a move pressed during the first look at the relays', () => {
     expect(S().proof.message).toBe(HEAD_UNCONFIRMED_MESSAGE)
   })
 
+  it('an identity switch during the wait ends it at once, and nothing is signed for the identity left', async () => {
+    const me = S().identity.pubkey
+    useCyberspace.setState({ chainSync: { pubkey: me, status: 'checking' } })
+    S().moveCursor(moveDirection(S().axes(), 'right'))
+    const pressed = S().commit()
+    await settle()
+    await S().useNewKey()
+    await pressed
+    expect(posted).toEqual([])
+    expect(relay.asked).toBe(0)
+  })
+
   it('no look out (tests, or one already answered): no wait at all', async () => {
     S().moveCursor(moveDirection(S().axes(), 'right'))
     await S().commit()
@@ -141,6 +153,23 @@ describe('a move pressed during the first look at the relays', () => {
 })
 
 describe('LIVE or LOCAL is per identity', () => {
+  it('the device\'s old setting becomes the identity in use\'s own once, and is never read again', () => {
+    const x = 'aa'.repeat(32)
+    const z = 'bb'.repeat(32)
+    localStorage.removeItem('onosendai:live-moved')
+    localStorage.removeItem(`onosendai:live:${x}`)
+    localStorage.removeItem(`onosendai:live:${z}`)
+    localStorage.setItem('onosendai:live', '0')
+    // The first load of this build, on X, keeps X LOCAL, under X's own name.
+    expect(loadLive(x, true)).toBe(false)
+    expect(localStorage.getItem(`onosendai:live:${x}`)).toBe('0')
+    // A new key Z is LIVE, now and after a reload, though the old record still says LOCAL.
+    expect(loadLive(z)).toBe(true)
+    expect(loadLive(z, true)).toBe(true)
+    // And X, left and come back to, is LOCAL still: never flipped to LIVE under the person's hand.
+    expect(loadLive(x)).toBe(false)
+  })
+
   it('a new key is LIVE though the identity before it was LOCAL; going back finds that identity LOCAL again', async () => {
     const sk = generateSecretKey()
     await S().useNsec(nip19.nsecEncode(sk))

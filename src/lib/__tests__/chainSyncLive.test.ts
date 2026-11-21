@@ -70,8 +70,10 @@ beforeEach(async () => {
   useCyberspace.setState({ published: Object.fromEntries(S().events.map((e) => [e.id, 'ok' as const])), chainConflict: null, held: false })
   net.fetches.length = 0
   net.fetchAnswer = []
+  net.check = null
   vi.useFakeTimers({ toFake: ['Date'] })
-  clock += CATCH_UP_GAP_MS * 2
+  // Past any gap a catch-up before this case left, backed off or not.
+  clock += CATCH_UP_GAP_MS * 17
   vi.setSystemTime(clock)
 })
 
@@ -113,6 +115,18 @@ describe('the watch on your own chain', () => {
 })
 
 describe('catching up on a return to the tab', () => {
+  it('live events that keep failing to link do not start a fetch each: one per gap, backed off after a fetch that heard nothing', async () => {
+    startSelfSync()
+    const other = movesAfter(3)
+    net.fetchAnswer = []
+    for (const ev of other.slice(1)) net.onEvent!(ev)
+    await settle()
+    net.onEvent!(other[2])
+    net.onEvent!(other[1])
+    await settle()
+    expect(net.fetches).toHaveLength(1)
+  })
+
   it('one ask per CATCH_UP_GAP_MS however many focus and visibility events come', async () => {
     const moves = movesAfter(3)
     net.fetchAnswer = moves
@@ -169,7 +183,15 @@ describe('the page\'s first look at the relays, as the HUD reads it', () => {
     expect(S().chainSync).toEqual({ pubkey: S().identity.pubkey, status: 'unreachable' })
     answer([{ url: DEFAULT_RELAY, outcome: 'unreachable', reason: 'no answer in time', events: [] }])
     await settle()
-    // A catch-up that gets an answer takes the warning down.
+    // A catch-up that hears nothing leaves it up: silence is not an answer.
+    net.fetchAnswer = []
+    catchUp('resume')
+    await settle()
+    expect(S().chainSync).toEqual({ pubkey: S().identity.pubkey, status: 'unreachable' })
+    // One that hears the chain back takes the warning down.
+    clock += CATCH_UP_GAP_MS * 17
+    vi.setSystemTime(clock)
+    net.fetchAnswer = S().events.slice(-1)
     catchUp('resume')
     await settle()
     expect(S().chainSync).toEqual({ pubkey: S().identity.pubkey, status: 'done' })

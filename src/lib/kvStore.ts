@@ -110,7 +110,7 @@ export const MOVED_PREFIXES: readonly string[] = [
  */
 export const STAYS_IN_LOCAL_STORAGE: readonly string[] = [
   'onosendai:secrets:bought', 'onosendai:secrets:refused', 'onosendai:secrets:fallback',
-  'onosendai:nsec', 'onosendai:mintedKey', 'onosendai:signer', 'onosendai:live', 'onosendai:live:', 'onosendai:moveMode',
+  'onosendai:nsec', 'onosendai:mintedKey', 'onosendai:signer', 'onosendai:live', 'onosendai:live:', 'onosendai:live-moved', 'onosendai:moveMode',
   'onosendai:showSecrets', 'onosendai:showTrail', 'onosendai:chain-mark:', 'onosendai:chain-rows:',
   'onosendai:chain-unsaved:', 'onosendai:shards:moved', 'onosendai:calibration', 'onosendai:menu-open', MOVED_MARK,
 ]

@@ -26,6 +26,7 @@
  * re-derives nothing.
  */
 
+import { kvStorage } from '../lib/kvStore'
 import { create } from 'zustand'
 import { verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from '../lib/events'
@@ -107,7 +108,8 @@ const liveDeps: MuteDeps = {
   crypto: () => useCyberspace.getState().selfCrypto(),
   self: () => useCyberspace.getState().identity.pubkey,
   now: () => Math.floor(Date.now() / 1000),
-  storage: typeof localStorage !== 'undefined' ? localStorage : null,
+  // IndexedDB once the record moved (lib/kvStore.ts), else localStorage.
+  storage: kvStorage,
   general: GENERAL_RELAYS,
   canonical: DEFAULT_RELAY,
 }

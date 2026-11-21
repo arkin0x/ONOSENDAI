@@ -48,6 +48,7 @@ export type CloudMode = 'auto' | 'ask' | 'off'
  * invoice is shown at once.
  */
 import type { RouteProfile } from './movePlan'
+import { kvGet, kvSet } from './kvStore'
 
 export interface CloudPrefs {
   mode: CloudMode
@@ -440,7 +441,7 @@ const REGION_KEYS_MAX = 200
 
 export function loadCloudRegionKeys(): CloudRegionKey[] {
   try {
-    const raw = localStorage.getItem(REGION_KEYS_KEY)
+    const raw = kvGet(REGION_KEYS_KEY)
     const list = raw ? (JSON.parse(raw) as unknown) : []
     return Array.isArray(list) ? (list as CloudRegionKey[]) : []
   } catch {
@@ -452,7 +453,7 @@ export function saveCloudRegionKey(entry: CloudRegionKey): void {
   try {
     const list = loadCloudRegionKeys().filter((k) => k.lookupId !== entry.lookupId)
     list.push(entry)
-    localStorage.setItem(REGION_KEYS_KEY, JSON.stringify(list.slice(-REGION_KEYS_MAX)))
+    kvSet(REGION_KEYS_KEY, JSON.stringify(list.slice(-REGION_KEYS_MAX)))
   } catch { /* private mode */ }
 }
 

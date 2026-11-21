@@ -59,6 +59,7 @@ import { refTags } from 'sno-core/parts'
 import { SNO_KIND, creditAuthor, creditOf, creditTags, objectAddress, readCredit, type Credit } from 'sno-core/feed'
 import type { EventTemplate } from './events'
 import { withAuthoredConstrain } from './walkConstrain'
+import { kvGet, kvSet } from './kvStore'
 
 const STORAGE = 'onosendai:published'
 
@@ -160,7 +161,7 @@ export function fingerprint(payload: unknown): string {
 
 export function loadLedger(): Ledger {
   try {
-    const raw = JSON.parse(localStorage.getItem(STORAGE) ?? '{}') as unknown
+    const raw = JSON.parse(kvGet(STORAGE) ?? '{}') as unknown
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
     const out: Ledger = {}
     for (const [id, rec] of Object.entries(raw as Record<string, unknown>)) {
@@ -173,7 +174,7 @@ export function loadLedger(): Ledger {
 }
 
 export function saveLedger(ledger: Ledger): void {
-  try { localStorage.setItem(STORAGE, JSON.stringify(ledger)) } catch { /* quota or private mode */ }
+  try { kvSet(STORAGE, JSON.stringify(ledger)) } catch { /* quota or private mode */ }
 }
 
 /**

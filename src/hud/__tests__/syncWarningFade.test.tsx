@@ -12,7 +12,7 @@ const st = vi.hoisted(() => ({ walking: true, ahead: 0 }))
 vi.mock('../../store/useCyberspace', () => ({
   useCyberspace: (sel: (s: { walking: boolean }) => unknown) => sel({ walking: st.walking }),
 }))
-vi.mock('../../store/walkAhead', () => ({ useEventsAhead: () => st.ahead }))
+vi.mock('../../store/walkAhead', () => ({ useAheadSelect: <T,>(pick: (ahead: number) => T): T => pick(st.ahead) }))
 
 import { SyncWarning } from '../SyncWarning'
 

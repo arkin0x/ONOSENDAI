@@ -3,7 +3,7 @@
  * switches for testing whether the CHAIN chip's edge bar or the LOSING SYNC
  * warning makes WALK stutter on a phone (arkinox, 2026-11-21). Each takes its
  * piece off the page entirely: the component is not mounted and the hooks
- * that feed it (useChainAhead, useEventsAhead, the chip's store reads) do not
+ * that feed it (useAheadSelect, the chip's store reads) do not
  * run. Without them nothing changes. The flags stay on through reloads of the
  * tab until `=0`, as ?diag=1 does.
  */
@@ -26,11 +26,7 @@ vi.mock('../../hooks/useSocial', () => ({ useActionComments: () => ({ comments: 
 // The hooks that feed the chip and the warning, watched.
 vi.mock('../../store/walkAhead', async (orig) => {
   const real = await orig() as typeof import('../../store/walkAhead')
-  return { ...real, useEventsAhead: vi.fn(real.useEventsAhead) }
-})
-vi.mock('../ChainAhead', async (orig) => {
-  const real = await orig() as typeof import('../ChainAhead')
-  return { ...real, useChainAhead: vi.fn(real.useChainAhead) }
+  return { ...real, useAheadSelect: vi.fn(real.useAheadSelect) }
 })
 vi.mock('../../store/useBuilder', async (orig) => {
   const real = await orig() as typeof import('../../store/useBuilder')
@@ -40,12 +36,11 @@ vi.mock('../../store/useBuilder', async (orig) => {
 
 import { ChainExplorer } from '../ChainExplorer'
 import { SyncWarning } from '../SyncWarning'
-import { useChainAhead } from '../ChainAhead'
 import { hudFlagKey, hudFlagsFrom, setHudFlagsForTest, type HudFlags } from '../../lib/hudFlags'
 import { useBuilder } from '../../store/useBuilder'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useWalk } from '../../store/useWalk'
-import { useEventsAhead } from '../../store/walkAhead'
+import { useAheadSelect } from '../../store/walkAhead'
 
 ;(globalThis as { window?: unknown }).window ??= globalThis
 ;(globalThis as { document?: unknown }).document ??= { visibilityState: 'visible', addEventListener: () => undefined, removeEventListener: () => undefined }
@@ -64,8 +59,7 @@ const OFF: HudFlags = { nochip: false, nosyncwarn: false }
 
 afterEach(() => {
   setHudFlagsForTest(null)
-  vi.mocked(useEventsAhead).mockClear()
-  vi.mocked(useChainAhead).mockClear()
+  vi.mocked(useAheadSelect).mockClear()
   vi.mocked(useBuilder).mockClear()
   useWalk.setState({ behind: 0, open: null, queue: [], running: null })
   useCyberspace.setState({ walking: false, focusChain: realChain, events: [], spectate: null, exploreIndex: null, forkNotice: null })
@@ -81,8 +75,7 @@ describe('?nochip=1', () => {
     aheadInWalk()
     const m = await mount(<ChainExplorer />)
     expect(m.all()).toEqual([])
-    expect(useChainAhead).not.toHaveBeenCalled()
-    expect(useEventsAhead).not.toHaveBeenCalled()
+    expect(useAheadSelect).not.toHaveBeenCalled()
     expect(useBuilder).not.toHaveBeenCalled()
     await m.unmount()
   })
@@ -102,7 +95,7 @@ describe('?nosyncwarn=1', () => {
     aheadInWalk()
     const m = await mount(<SyncWarning />)
     expect(m.all()).toEqual([])
-    expect(useEventsAhead).not.toHaveBeenCalled()
+    expect(useAheadSelect).not.toHaveBeenCalled()
     await m.unmount()
   })
 
@@ -122,15 +115,14 @@ describe('without either', () => {
     const chip = await mount(<ChainExplorer />)
     expect(classes(chip)).toContain('CHAIN ')
     expect(classes(chip)).toContain('aheadbar')
-    expect(useChainAhead).toHaveBeenCalled()
     expect(useBuilder).toHaveBeenCalled()
-    expect(useEventsAhead).toHaveBeenCalled()
+    expect(useAheadSelect).toHaveBeenCalled()
     await chip.unmount()
-    vi.mocked(useEventsAhead).mockClear()
+    vi.mocked(useAheadSelect).mockClear()
     const warn = await mount(<SyncWarning />)
     expect(classes(warn)).toContain('WARNING: LOSING SYNC')
     expect(classes(warn)).toContain('is-on')
-    expect(useEventsAhead).toHaveBeenCalled()
+    expect(useAheadSelect).toHaveBeenCalled()
     await warn.unmount()
   })
 })

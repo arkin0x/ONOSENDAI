@@ -49,7 +49,7 @@
  * head, and the chip is the same size with it and without.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MessageCircle, TriangleAlert } from 'lucide-react'
 import { ItemIcon } from './ItemIcon'
 import { findLcaHeight } from 'cyberspace-core'
@@ -69,7 +69,7 @@ import { useEscape } from '../hooks/useEscape'
 import { useChainUi } from '../store/useChainUi'
 import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
 import { everyWhileVisible } from '../lib/whileVisible'
-import { AheadMarks, AheadWords, useChainAhead } from './ChainAhead'
+import { AheadChip } from './ChainAhead'
 import { hudFlags } from '../lib/hudFlags'
 
 // Spectating opens the chain explorer: the chain is the thing you came to
@@ -137,25 +137,34 @@ function ChainExplorerChip(): JSX.Element {
   const index = marked === null ? last : Math.min(marked, last)
   const action = actions[index]
   const atHead = marked === null
-  // How far ahead of this chain the walk is: yours, at its head, only.
-  const ahead = useChainAhead(spectate === null && atHead && !building, actions.length)
+  // How far ahead of this chain the walk is: yours, at its head, only. The
+  // count itself is read inside the chip's button (ChainAhead.tsx AheadChip),
+  // so a step renders the button, not all of this.
+  const own = spectate === null && atHead && !building
   const secretKeys = useSecrets((s) => s.keys)
   const key = useMemo(
     () => (action ? keyStateForAction(action, actions[index - 1] ?? null, secretKeys, findLcaHeight) : { state: 'none' as const, height: null }),
     [action, actions, index, secretKeys],
   )
 
-  // The action the mark has rested on, and its comment count.
-  const [settled, setSettled] = useState<string | null>(null)
-  useEffect(() => {
-    const t = window.setTimeout(() => setSettled(action?.id ?? null), COUNT_AFTER_MS)
-    return () => window.clearTimeout(t)
-  }, [action?.id])
   // Counted only while the explorer is open, where the count is shown: closed,
   // a count asked 450 ms after every landed move was one more question to
   // every relay per WALK step, for a number nobody sees (arkinox,
   // 2026-11-21: WALK stutters on his phone).
   const shown = useChainUi((s) => s.explorerOpen)
+  // The action the mark has rested on, and its comment count. Followed only
+  // while the explorer is open: closed, the wait after every landed move was
+  // one more render of all this per WALK step for nothing. Opening counts the
+  // action under the mark at once, as it did when the wait had run closed.
+  const [settled, setSettled] = useState<string | null>(null)
+  const wasShown = useRef(false)
+  useEffect(() => {
+    if (!shown) { wasShown.current = false; return }
+    const opened = !wasShown.current
+    wasShown.current = true
+    const t = window.setTimeout(() => setSettled(action?.id ?? null), opened ? 0 : COUNT_AFTER_MS)
+    return () => window.clearTimeout(t)
+  }, [action?.id, shown])
   const counted = useActionComments(shown && action && settled === action.id ? { id: action.id, pubkey: action.pubkey, kind: ACTION_KIND } : null)
   const commentCount = shown && action && settled === action.id && !counted.loading ? countComments(counted.comments) : null
   // Counted again when the modal closes: something may have been said there.
@@ -176,6 +185,15 @@ function ChainExplorerChip(): JSX.Element {
     const ui = useChainUi.getState()
     ui.setExplorerOpen(typeof next === 'function' ? next(ui.explorerOpen) : next)
   }
+  // The chip's presses, made once: the chip's button (AheadChip) is memoized,
+  // so a render of all this for its own reasons (a clock, a comment count)
+  // leaves the button alone.
+  const pressForkChip = useCallback((e: React.PointerEvent) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }, [])
+  const pressChip = useCallback((e: React.PointerEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    const ui = useChainUi.getState()
+    ui.setExplorerOpen(!ui.explorerOpen)
+  }, [])
   // The open body is a chip on the Escape stack (arkinox, 2026-10-01). Not
   // while there are no actions: then nothing but the chip is drawn.
   useEscape('chip', open && actions.length > 0, () => setOpen(false))
@@ -217,46 +235,43 @@ function ChainExplorerChip(): JSX.Element {
         // The case the generic counts used to hide: the whole chain
         // superseded by a newer spawn (arkinox, 2026-10-01). It stays on the
         // chip until read, like any drop.
-        <button
-          className={`chip explorer__toggle explorer__toggle--dropped${ahead.cls}`}
+        <AheadChip
+          own={own}
+          className="chip explorer__toggle explorer__toggle--dropped"
           {...noCallout}
-          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
-          aria-label={`Your chain was replaced by a new spawn from another device. Tap to read why.${ahead.label}`}
-        >
-          <AheadWords ahead={ahead}>CHAIN REPLACED BY A NEW SPAWN</AheadWords>
-          <AheadMarks ahead={ahead} />
-        </button>
+          onPointerDown={pressForkChip}
+          label="Your chain was replaced by a new spawn from another device. Tap to read why."
+          words="CHAIN REPLACED BY A NEW SPAWN"
+        />
       ) : fork && fork.dropped > 0 ? (
-        <button
-          className={`chip explorer__toggle explorer__toggle--dropped${ahead.cls}`}
+        <AheadChip
+          own={own}
+          className="chip explorer__toggle explorer__toggle--dropped"
           {...noCallout}
-          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
-          aria-label={`${fork.dropped} actions from this device were dropped. Tap to read why.${ahead.label}`}
-        >
-          <AheadWords ahead={ahead}>{fork.dropped} ACTION{fork.dropped === 1 ? '' : 'S'} DROPPED</AheadWords>
-          <AheadMarks ahead={ahead} />
-        </button>
+          onPointerDown={pressForkChip}
+          label={`${fork.dropped} actions from this device were dropped. Tap to read why.`}
+          words={[fork.dropped, ' ACTION', fork.dropped === 1 ? '' : 'S', ' DROPPED']}
+        />
       ) : fork && fork.adopted > 0 && fresh ? (
-        <button
-          className={`chip explorer__toggle explorer__toggle--adopted${ahead.cls}`}
+        <AheadChip
+          own={own}
+          className="chip explorer__toggle explorer__toggle--adopted"
           {...noCallout}
-          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
-          aria-label={`${fork.adopted} actions arrived from another device. Tap to read why.${ahead.label}`}
-        >
-          <AheadWords ahead={ahead}>{fork.adopted} FROM ANOTHER DEVICE</AheadWords>
-          <AheadMarks ahead={ahead} />
-        </button>
+          onPointerDown={pressForkChip}
+          label={`${fork.adopted} actions arrived from another device. Tap to read why.`}
+          words={[fork.adopted, ' FROM ANOTHER DEVICE']}
+        />
       ) : (
-        <button
-          className={`chip explorer__toggle${ahead.cls}`}
+        <AheadChip
+          own={own}
+          className="chip explorer__toggle"
           {...noCallout}
-          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v) }}
-          aria-label={`${open ? 'Hide chain explorer' : 'Show chain explorer'}${ahead.label ? `.${ahead.label}` : ''}`}
+          onPointerDown={pressChip}
+          label={open ? 'Hide chain explorer' : 'Show chain explorer'}
+          sep="."
           aria-pressed={open}
-        >
-          <AheadWords ahead={ahead}>CHAIN {index + 1}/{actions.length}{atHead || building ? '' : ' HISTORY'}</AheadWords>
-          <AheadMarks ahead={ahead} />
-        </button>
+          words={['CHAIN ', index + 1, '/', actions.length, atHead || building ? '' : ' HISTORY']}
+        />
       )}
 
       {showFork && fork && (fork.replaced ? (

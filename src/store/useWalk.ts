@@ -239,7 +239,7 @@ function armSettle(): void {
 /** The pad modes WALK can be entered from and goes back to (store/padMode.ts). */
 export type WalkFrom = 'hop' | 'view' | 'build' | 'scan'
 
-interface WalkState {
+export interface WalkState {
   /** Closed segments not yet landed, by their ends, oldest first. The first is the one in flight. */
   queue: Position[]
   /** The segment still being walked, or null. */

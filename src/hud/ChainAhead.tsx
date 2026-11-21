@@ -35,16 +35,25 @@
  * a custom property on a render that happens once per count change; the
  * motion is the stylesheet's.
  *
+ * Kept cheap (arkinox, 2026-11-21: "I like the visual, but I don't want to
+ * sacrifice the performance"). The count is read in AheadChip, the chip's
+ * button, and nowhere else in the chip, so a step renders the button and
+ * not the chain explorer around it; a store change that leaves the count
+ * alone renders nothing; no state is set during a render. The stylesheet
+ * moves only transform and opacity, which the compositor plays without
+ * painting the chip again (hud/__tests__/chipCost.test.tsx holds all of
+ * this).
+ *
  * Drawn after augmented-ui's corner regions, Halo's shield states (the
  * limit changes the frame, not just the fill) and FUI registration marks;
  * the research is in the design plan. All hand-written CSS.
  */
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useLayoutEffect, useMemo, useReducer, useRef, type ButtonHTMLAttributes, type CSSProperties } from 'react'
 import { FLUID_HOLD_AT } from '../lib/fluidWalk'
 import { useCyberspace } from '../store/useCyberspace'
 import { SYNC_WARN_AT } from '../store/useWalk'
-import { useEventsAhead } from '../store/walkAhead'
+import { useAheadSelect } from '../store/walkAhead'
 import { useLayers } from '../store/useLayers'
 
 /** One tick per event, to where the walk stops. */
@@ -164,60 +173,143 @@ export interface ChainAhead {
  * The chain chip's ahead state. `own` is whether the chip is showing your
  * own chain at its head (not spectating, not in history); `total` is the
  * chain's length on the chip.
+ *
+ * It renders again only when the count, WALK, the sync limit or the props
+ * change: the one number it subscribes to is a primitive, so a step that
+ * does not change the count, a cursor move or a frame renders nothing. No
+ * state is set during render: the track is derived from the last committed
+ * one (kept in a ref, written after commit), and the linger after catching
+ * up is a ref the commit sets and a timer clears.
  */
 export function useChainAhead(own: boolean, total: number): ChainAhead {
   const walking = useCyberspace((s) => s.walking)
-  const events = useEventsAhead()
+  const active = own && walking
+  const events = useAheadSelect((n) => (active ? n : 0))
   const limits = useLayers((s) => s.walkLimits)
-  const ahead = own && walking ? events : 0
-  const bar = aheadBar(ahead, limits)
+  const bar = aheadBar(events, limits)
 
-  // Derived from the last render's count, the sanctioned way: set during
-  // render, so the classes that play a change stay put through renders
-  // that are not about the count.
-  // A chain that is not yours to walk (a spectated one, history) is not
+  // The track: what the last change to the count played. Derived from the
+  // last committed track, so a render that is not about the count (a new
+  // face, the explorer opening) keeps the classes that play a change. A
+  // chain that is not yours to walk (a spectated one, history) is not
   // followed: its length is no landing of yours.
-  const [track, setTrack] = useState<AheadTrack>(() => ({ ...AHEAD_TRACK_START, n: bar.n, total }))
-  const now = own ? aheadStep(track, bar.n, total) : aheadStep(track, 0, track.total)
-  if (now !== track) setTrack(now)
+  const committed = useRef<AheadTrack | null>(null)
+  if (committed.current === null) committed.current = { ...AHEAD_TRACK_START, n: bar.n, total }
+  const was = committed.current
+  const track = own ? aheadStep(was, bar.n, total) : aheadStep(was, 0, was.total)
+  useLayoutEffect(() => { committed.current = track })
 
-  // On the page while ahead, and for the fade after catching up.
-  const [lingering, setLingering] = useState(false)
-  if (bar.on && !lingering) setLingering(true)
-  useEffect(() => {
-    if (bar.on || !lingering) return
-    const t = setTimeout(() => setLingering(false), AHEAD_LINGER_MS)
+  // On the page while ahead, and for the fade after catching up: set once
+  // the bar has been on, cleared AHEAD_LINGER_MS after it goes off (a step
+  // inside the wait starts it again).
+  const shown = useRef(bar.on)
+  const [, lingerOver] = useReducer((x: number) => x + 1, 0)
+  useLayoutEffect(() => {
+    if (bar.on) { shown.current = true; return }
+    if (!shown.current) return
+    const t = setTimeout(() => { shown.current = false; lingerOver() }, AHEAD_LINGER_MS)
     return () => clearTimeout(t)
-  }, [bar.on, lingering])
+  }, [bar.on])
 
-  const drawn = own && (bar.on || lingering)
+  const drawn = own && (bar.on || shown.current)
   const cls = drawn ? ` has-ahead${bar.on ? ' is-ahead' : ''}${bar.slow ? ' is-slow' : ''}${bar.limit ? ' is-limit' : ''}` : ''
-  return { drawn, bar, track: now, cls, label: aheadLabel(ahead, limits) }
+  return { drawn, bar, track, cls, label: aheadLabel(events, limits) }
 }
+
+/** The CHAIN chip's button: everything on it that the count changes, in a component of its own. */
+export interface AheadChipProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className' | 'aria-label' | 'children'> {
+  /** Your own chain, at its head, out of BUILD: the only chain the bar is drawn on. */
+  own: boolean
+  /** The button's own classes; the ahead classes are added after them. */
+  className: string
+  /** The button's label; the count is added after it, after `sep`. */
+  label: string
+  /** Put between the label and the count's words ('.' after a label with no full stop of its own). */
+  sep?: string
+  /**
+   * The chip's words, in the parts the page draws them in (a number on its
+   * own, as JSX children are): split the same way, they are laid out on the
+   * same pixels as ever.
+   */
+  words: ChipWords
+}
+
+/** The chip's words: a string, or the parts of one. */
+export type ChipWords = string | ReadonlyArray<string | number>
+
+const wordsText = (words: ChipWords): string => (typeof words === 'string' ? words : words.join(''))
+
+/** The same words, part for part: an explorer render that rebuilds the parts does not render the button. */
+function sameWords(a: ChipWords, b: ChipWords): boolean {
+  if (typeof a === 'string' || typeof b === 'string') return a === b
+  return a.length === b.length && a.every((w, i) => w === b[i])
+}
+
+/**
+ * The CHAIN chip's button, on whichever face it has. The count is
+ * subscribed to here and nowhere else in the chip, so a step renders this
+ * button and its marks, not the chain explorer around it (its chain, its
+ * key state, its comments and its body); and memoized, so a render of the
+ * explorer for its own reasons (a clock, a comment count) does not render
+ * the button.
+ */
+export const AheadChip = memo(function AheadChip({ own, className, label, sep = '', words, ...button }: AheadChipProps): JSX.Element {
+  // The chain's length, to see a move land, read from the store here rather
+  // than handed down: a landing changes it and the count in one store change,
+  // and whichever of the two this renders for first, it sees both.
+  const total = useCyberspace((s) => s.focusChain().length)
+  const ahead = useChainAhead(own, total)
+  return (
+    <button className={`${className}${ahead.cls}`} aria-label={`${label}${ahead.label ? `${sep}${ahead.label}` : ''}`} {...button}>
+      <AheadWords ahead={ahead} words={words} />
+      <AheadMarks ahead={ahead} />
+    </button>
+  )
+}, (was, now) => {
+  const keys = new Set([...Object.keys(was), ...Object.keys(now)]) as Set<keyof AheadChipProps>
+  for (const k of keys) if (k === 'words' ? !sameWords(was.words, now.words) : was[k] !== now[k]) return false
+  return true
+})
 
 /**
  * The chip's words. With nothing drawn they are the bare words, as the chip
  * always had them. While the bar is drawn they sit above it, and a move
- * landing on the chain glints them white once: a new span per landing, so
- * the stylesheet's glint plays again.
+ * landing on the chain glints them white once: a white copy of the words
+ * (in its data-words, drawn by the stylesheet, so the page's text is the
+ * words once) laid over them and faded in and out, a new one per landing so
+ * the glint plays again.
  */
-export function AheadWords({ ahead, children }: { ahead: ChainAhead; children: ReactNode }): JSX.Element {
-  if (!ahead.drawn) return <>{children}</>
+export function AheadWords({ ahead, words }: { ahead: ChainAhead; words: ChipWords }): JSX.Element {
+  if (!ahead.drawn) return <>{words}</>
   const landed = ahead.track.landed
-  return <span key={landed} className={landed > 0 ? 'aheadtxt is-glint' : 'aheadtxt'}>{children}</span>
+  return (
+    <>
+      <span className="aheadtxt">{words}</span>
+      {landed > 0 && <span key={landed} className="aheadglint is-glint" aria-hidden="true" data-words={wordsText(words)} />}
+    </>
+  )
 }
 
 /** The bar and the corner brackets, inside the chip's button; nothing with nothing drawn. */
 export function AheadMarks({ ahead }: { ahead: ChainAhead }): JSX.Element | null {
-  if (!ahead.drawn) return null
-  const { bar, track } = ahead
-  const gap = BRACKET_NEAR + (BRACKET_FAR - BRACKET_NEAR) * (1 - bar.close)
+  return ahead.drawn ? <AheadMarksDrawn bar={ahead.bar} track={ahead.track} /> : null
+}
+
+function AheadMarksDrawn({ bar, track }: { bar: AheadBar; track: AheadTrack }): JSX.Element {
+  const gap = (BRACKET_NEAR + (BRACKET_FAR - BRACKET_NEAR) * (1 - bar.close)).toFixed(2)
+  // Where the brackets were: the frame takes its new place at once and the
+  // corners, new for each gap, play the move from there by transform.
+  const was = useRef(gap)
+  const from = useMemo(() => (Number(was.current) - Number(gap)).toFixed(2), [gap])
+  useLayoutEffect(() => { was.current = gap }, [gap])
   const ticks: JSX.Element[] = []
   for (let i = 1; i <= AHEAD_TICKS; i++) ticks.push(<i key={i} className={tickClass(i, bar, track) || undefined} />)
   return (
     <>
       <span className="aheadbar" aria-hidden="true">{ticks}</span>
-      <span className="aheadbrk" aria-hidden="true" style={{ '--ahead-gap': `${gap.toFixed(2)}px` } as CSSProperties} />
+      <span className="aheadbrk" aria-hidden="true" style={{ '--ahead-gap': `${gap}px`, '--ahead-from': `${from}px` } as CSSProperties}>
+        <i key={`a${gap}`} /><i key={`b${gap}`} /><i key={`c${gap}`} /><i key={`d${gap}`} />
+      </span>
     </>
   )
 }

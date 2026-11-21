@@ -319,23 +319,27 @@ describe('the CHAIN chip in WALK', () => {
     await m.unmount()
   })
 
-  it('glints the total when a move lands, with a new span each time', async () => {
+  it('glints the total when a move lands, with a new glint each time', async () => {
     chainOf(3)
     walkAt(2)
     const m = await mount(<ChainExplorer />)
     const words = (): Host => kids(chipOf(m.all()), 'aheadtxt')[0]
+    const glint = (): Host | undefined => kids(chipOf(m.all()), 'aheadglint')[0]
     expect(String(words().props.className)).toBe('aheadtxt')
-    const first = words()
+    expect(glint()).toBeUndefined()
     land(4, 1); await settled()
-    expect(String(words().props.className)).toBe('aheadtxt is-glint')
+    // A white copy of the words, laid over them: the page's text is still the words once.
+    expect(String(glint()!.props.className)).toBe('aheadglint is-glint')
+    expect(glint()!.props['data-words']).toBe('CHAIN 4/4')
+    expect(glint()!.props['aria-hidden']).toBe('true')
+    expect(glint()!.children).toEqual([])
     expect(m.says('CHAIN 4/4')).toBe(true)
-    const second = words()
-    expect(second).not.toBe(first)
+    const first = glint()
     const bar = kids(chipOf(m.all()), 'aheadbar')[0].children as Host[]
     expect(has(String(bar[1].props.className), 'is-going')).toBe(true)
     land(5, 0); await settled()
-    expect(words()).not.toBe(second)
-    expect(String(words().props.className)).toBe('aheadtxt is-glint')
+    expect(glint()).not.toBe(first)
+    expect(glint()!.props['data-words']).toBe('CHAIN 5/5')
     await m.unmount()
   })
 
@@ -343,19 +347,19 @@ describe('the CHAIN chip in WALK', () => {
     chainOf(3)
     walkAt(0)
     const m = await mount(<ChainExplorer />)
-    const words = (): string => String(kids(chipOf(m.all()), 'aheadtxt')[0].props.className)
+    const glints = (): boolean => kids(chipOf(m.all()), 'aheadglint').length > 0
     walkAt(1); await settled()
-    expect(words()).toBe('aheadtxt')
+    expect(glints()).toBe(false)
     // It lands, and the walk has caught up: the total glinted for that.
     land(4, 0); await settled()
-    expect(words()).toBe('aheadtxt is-glint')
+    expect(glints()).toBe(true)
     // A step while the bar is still fading out, and one after it has gone: neither is a landing.
     walkAt(1); await settled()
-    expect(words()).toBe('aheadtxt')
+    expect(glints()).toBe(false)
     land(5, 0)
     await gone(m)
     walkAt(1); await settled()
-    expect(words()).toBe('aheadtxt')
+    expect(glints()).toBe(false)
     await m.unmount()
   })
 
@@ -470,8 +474,12 @@ describe('the bar in the stylesheet', () => {
     const onChip = blocks.filter((b) => b.sel.split(',').some((s) => /\.explorer__toggle[.\w-]*$/.test(s.trim())))
     expect(onChip.map((b) => b.sel)).toEqual(['.explorer__toggle.has-ahead', '.explorer__toggle.is-limit'])
     for (const b of onChip) expect([b.sel, sizing.test(b.body)]).toEqual([b.sel, false])
-    expect(Object.keys(rule('.explorer__toggle.has-ahead', section)).sort()).toEqual(['position', 'transition'])
-    expect(Object.keys(rule('.explorer__toggle.is-limit', section))).toEqual(['border-color'])
+    expect(Object.keys(rule('.explorer__toggle.has-ahead', section)).sort()).toEqual(['position'])
+    // The red border's fade is a layer over the chip's own border, the same box: out of the layout too.
+    expect(rule('.explorer__toggle.has-ahead::after', section)).toMatchObject({ position: 'absolute', inset: '-1px', border: '1px solid var(--limit)', 'border-radius': 'inherit', 'pointer-events': 'none' })
+    expect(Object.keys(rule('.explorer__toggle.is-limit', section)).sort()).toEqual(['border-color', 'transition'])
+    // Not an ease: the chip's own border steps aside in one step, once the red layer has faded in over it.
+    expect(rule('.explorer__toggle.is-limit', section)).toEqual({ 'border-color': 'transparent', transition: 'border-color 0s 300ms' })
     // The words' span is inline and only lifted above the glow.
     expect(Object.keys(rule('.aheadtxt', section)).sort()).toEqual(['position', 'z-index'])
   })
@@ -488,7 +496,8 @@ describe('the bar in the stylesheet', () => {
     const red = /--limit:\s*(#[0-9a-f]{6})/.exec(css)![1]
     const warning = css.slice(css.indexOf('.syncwarn__panel {'))
     expect(new RegExp(`color: ${red};`).test(warning.slice(0, warning.indexOf('}')))).toBe(true)
-    expect(rule('.explorer__toggle.is-limit', section)['border-color']).toBe('var(--limit)')
+    expect(rule('.explorer__toggle.has-ahead::after', section).border).toBe('1px solid var(--limit)')
+    expect(rule('.explorer__toggle.is-limit::after', section).opacity).toBe('1')
     expect(rule('.explorer__toggle.is-limit .aheadbar i.is-lit', section).background).toContain('var(--limit)')
     expect(rule('.explorer__toggle.is-limit .aheadbrk', section)['--ahead-line']).toBe('var(--limit)')
   })
@@ -505,12 +514,11 @@ describe('the bar in the stylesheet', () => {
     const media = bare.slice(bare.lastIndexOf('@media (prefers-reduced-motion: reduce)'))
     // Every rule in the section that sets an animation, by its selector.
     const animated = [...bare.slice(0, bare.lastIndexOf('@media')).matchAll(/([^{}]+)\{[^{}]*\banimation:[^{}]*\}/g)].map((m) => m[1].trim())
-    expect(animated.sort()).toEqual(['.aheadbar', '.aheadbar i.is-going', '.aheadbar i.is-ign', '.aheadtxt.is-glint', '.explorer__toggle.is-limit .aheadbar'].sort())
+    expect(animated.sort()).toEqual(['.aheadbar', '.aheadbar i.is-going', '.aheadbar i.is-going::after', '.aheadbar i.is-ign', '.aheadbar i.is-ign::after', '.aheadglint.is-glint', '.aheadbrk i', '.explorer__toggle.is-limit .aheadbar'].sort())
     // The reduced-motion rule that turns animation off names each of them, selector for selector.
     const off = [...media.matchAll(/([^{}]+)\{\s*animation: none;\s*\}/g)].flatMap((m) => m[1].split(',').map((sel) => sel.trim()))
     expect(off.sort()).toEqual([...animated].sort())
-    // Only the brackets' movement is taken away besides; nothing there hides a state.
-    expect(media.replace(/\s+/g, ' ')).toContain('.aheadbrk { transition: opacity 300ms ease; }')
+    // Nothing there hides a state.
     expect(media).not.toMatch(/display|visibility|opacity: 0/)
   })
 })

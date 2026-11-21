@@ -42,10 +42,11 @@
  *
  * A DATABASE THAT DOES NOT OPEN. Before anything moved (no MOVED_MARK), the
  * page runs on localStorage as before, and the move waits for the next load.
- * After (the mark is set before the first removal), the records are only in
- * the database, so a session without it must not start from nothing and
- * save that over them: it runs `blind`, keeping its changes to those records
- * in memory only, and the next load reads the database again.
+ * After (the mark is set before the first record is written), some records
+ * are only in the database, so a session without it must not start from
+ * nothing and save that over them: it runs `blind`, on localStorage, and
+ * what it writes there is found by the next load beside the stored copy and
+ * kept aside (NEVER LOST), never written over it.
  *
  * READS prefer the database and fall back to localStorage: a record not in
  * the database is read from localStorage, so during the move, and on a
@@ -125,7 +126,7 @@ const mirror = new Map<string, string>()
 const seen = new Map<string, string>()
 /** Records whose copy did not verify: they stay in localStorage, read and written there. */
 const stayed = new Set<string>()
-/** Records changed here and not yet written: the text, or null to delete. In `blind` mode, never written. */
+/** Records changed here and not yet written: the text, or null to delete. */
 const dirty = new Map<string, string | null>()
 let flushTimer: ReturnType<typeof setTimeout> | null = null
 let flushing: Promise<boolean> = Promise.resolve(true)
@@ -153,7 +154,7 @@ export function fingerprint(text: string): string {
 
 /** Whether this record is kept by this module now, rather than in localStorage. */
 function heldHere(key: string): boolean {
-  return (mode === 'idb' || mode === 'blind') && movesToKv(key) && !stayed.has(key)
+  return mode === 'idb' && movesToKv(key) && !stayed.has(key)
 }
 
 /** The record, from the database when it has it, else from localStorage. */
@@ -233,7 +234,7 @@ export function kvFlush(): Promise<boolean> {
     if (dirty.size === 0) return lastFlushOk = true
     const batch = new Map(dirty)
     try {
-      const d = db ?? (db = watch(await openKv()))
+      const d = db ?? (db = watch(await withTimeout(openKv(), REOPEN_WAIT_MS)))
       await writeBatch(d, batch)
       for (const [k, v] of batch) {
         if (dirty.get(k) === v) dirty.delete(k)
@@ -253,6 +254,16 @@ export function kvFlush(): Promise<boolean> {
     }
   })
   return flushing
+}
+
+/** How long a fresh connection for a retried write may take before the write counts as failed (and is retried later). */
+export const REOPEN_WAIT_MS = 5_000
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('IndexedDB did not open in time')), ms)
+    p.then((v) => { clearTimeout(t); resolve(v) }, (e: unknown) => { clearTimeout(t); reject(e) })
+  })
 }
 
 /** Whether the last write to the database landed. */
@@ -320,26 +331,42 @@ export async function moveOne(d: IDBDatabase, key: string, text: string): Promis
   const s = ls()
   const print = fingerprint(text)
   const remove = (): void => {
-    // The mark goes first, so a load that finds the database slow knows not to start from nothing. Full: room is made by the removal.
+    // The mark is set before any record is written (hydrateKv); again here, in case that write found no room. Full: the removal makes it.
     const marked = markMoved()
     try { s?.removeItem(key) } catch { /* verified: removed next load */ }
     if (!marked) markMoved()
   }
-  if (mirror.has(key)) {
+  // A row without a fingerprint was never verified: it is not the record (a copy that did not read back, cut short).
+  const stored = mirror.has(key) && seen.has(key)
+  if (stored) {
     if (seen.get(key) !== print) {
       // Written to localStorage after the move, by a build that read it empty: the database's copy stays, and this text is set aside.
       console.warn(`[kv] ${key} was written to localStorage after it moved (a tab of an older build): the stored copy stays, and that text is kept aside`)
-      try { await keepAside(d, key, text, 'written to localStorage after the move') } catch { stayed.delete(key); return 'kept' }
+      try { await keepAside(d, key, text, 'written to localStorage after the move') } catch { stayed.add(key); return 'kept' }
     }
     remove()
     return 'removed'
   }
   try {
-    await writeBatch(d, new Map([[key, text]]), new Map([[key, print]]))
+    // Written without its fingerprint, read back and compared, and only then fingerprinted: a copy that did not verify can never pass for one that did.
+    const outcome = await putIfAbsent(d, key, text)
+    if (outcome === 'taken') {
+      // Another tab on its first load moved it a moment ago: its copy is the record now, and this one is the older text.
+      const row = await readOne(d, key)
+      if (row && typeof row.seen === 'string') { mirror.set(key, row.value); seen.set(key, row.seen); return moveOne(d, key, text) }
+      stayed.add(key)
+      return 'kept'
+    }
     const back = await readOne(d, key)
-    if (!back || back.value !== text || back.seen !== print) { stayed.add(key); return 'kept' }
+    if (!back || back.value !== text) {
+      await writeBatch(d, new Map([[key, null]])).catch(() => undefined)
+      stayed.add(key)
+      return 'kept'
+    }
+    await writeBatch(d, new Map([[key, text]]), new Map([[key, print]]))
   } catch (err) {
     console.warn(`[kv] ${key} stays in localStorage for now: ${err instanceof Error ? err.message : String(err)}`)
+    await writeBatch(d, new Map([[key, null]])).catch(() => undefined)
     stayed.add(key)
     return 'kept'
   }
@@ -347,6 +374,28 @@ export async function moveOne(d: IDBDatabase, key: string, text: string): Promis
   mirror.set(key, text)
   remove()
   return 'moved'
+}
+
+/**
+ * Write a record that has no verified row, in one transaction with the look:
+ * `taken` when a verified row is there already (another tab moved it since
+ * this one read the database), else `written`. An unverified row is written over.
+ */
+function putIfAbsent(d: IDBDatabase, key: string, text: string): Promise<'written' | 'taken'> {
+  return new Promise((resolve, reject) => {
+    const tx = d.transaction([ENTRIES], 'readwrite')
+    const entries = tx.objectStore(ENTRIES)
+    let outcome: 'written' | 'taken' = 'written'
+    const was = entries.get(key)
+    was.onsuccess = () => {
+      const row = was.result as { seen?: unknown } | undefined
+      if (row && typeof row.seen === 'string') { outcome = 'taken'; return }
+      entries.put({ key, value: text, at: Date.now() })
+    }
+    tx.oncomplete = () => resolve(outcome)
+    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB write failed'))
+    tx.onabort = () => reject(tx.error ?? new Error('IndexedDB write aborted'))
+  })
 }
 
 /** Every moving record still in localStorage, biggest first, so a full one frees the most soonest. */
@@ -428,7 +477,10 @@ export function hydrateKv(waitMs = HYDRATE_WAIT_MS): Promise<Mode> {
         return
       }
       try {
-        for (const [key, text] of waitingInLocalStorage()) await moveOne(d, key, text)
+        const waiting = waitingInLocalStorage()
+        // Before the first write: a load that finds the database slow must know a record may be only there now.
+        if (waiting.length > 0) markMoved()
+        for (const [key, text] of waiting) await moveOne(d, key, text)
       } catch (err) {
         console.warn(`[kv] the move stopped and resumes next load: ${err instanceof Error ? err.message : String(err)}`)
       }

@@ -101,6 +101,40 @@ describe('the move', () => {
     expect(store.getItem('onosendai:seen')).toBeNull()
   })
 
+  it('a copy that reads back different is taken out again, and the next load moves the record whole', async () => {
+    store.setItem('onosendai:published', '{"good":1}')
+    // The first write lands cut short (a disk that lies).
+    const real = IDBObjectStore.prototype.put
+    const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) {
+      const v = value as { value?: string; seen?: string }
+      if (this.name === 'entries' && typeof v?.value === 'string' && v.seen === undefined) return real.call(this, { ...v, value: v.value.slice(0, 5) }, key)
+      return real.call(this, value, key)
+    })
+    await hydrateKv()
+    expect(store.getItem('onosendai:published')).toBe('{"good":1}')
+    expect(kvGet('onosendai:published')).toBe('{"good":1}')
+    put.mockRestore()
+    resetKvForTests()
+    await hydrateKv()
+    expect(kvGet('onosendai:published')).toBe('{"good":1}')
+    expect(store.getItem('onosendai:published')).toBeNull()
+  })
+
+  it('two tabs on their first load: the one that moves second never writes its older text over the first one\u2019s', async () => {
+    store.setItem('onosendai:published', '{"v":1}')
+    await hydrateKv()
+    kvSet('onosendai:published', '{"v":2}')
+    await kvFlush()
+    // The second tab still finds the old text in its localStorage snapshot (it read before the removal).
+    const db = await new Promise<IDBDatabase>((resolve) => { const r = indexedDB.open(KV_DB); r.onsuccess = () => resolve(r.result) })
+    resetKvForTests()
+    expect(await moveOne(db, 'onosendai:published', '{"v":1}')).toBe('removed')
+    db.close()
+    resetKvForTests()
+    await hydrateKv()
+    expect(kvGet('onosendai:published')).toBe('{"v":2}')
+  })
+
   it('resumes when interrupted after the copy and before the removal: the next load only removes it', async () => {
     store.setItem('onosendai:published', '{"x":1}')
     // The removal never happens this load (the tab closed at that moment).
@@ -185,23 +219,24 @@ describe('a database that does not open', () => {
     expect(store.getItem('onosendai:published')).toBeNull()
   })
 
-  it('after records moved: nothing starts from an empty copy and saves it over them (blind), and the next load has them whole', async () => {
+  it('after records moved: nothing starts from an empty copy and saves it over them (blind); what it wrote is kept aside', async () => {
     store.setItem('onosendai:seen', '["a","b","c"]')
     await hydrateKv()
     expect(store.getItem(MOVED_MARK)).toBe('1')
     resetKvForTests()
     hangOpen()
     expect(await hydrateKv(50)).toBe('blind')
-    // The session reads nothing for it, and what it writes stays in memory.
+    // The session reads nothing for it, and writes where it reads.
     expect(kvGet('onosendai:seen')).toBeNull()
     kvSet('onosendai:seen', '["z"]')
-    expect(kvGet('onosendai:seen')).toBe('["z"]')
-    expect(store.getItem('onosendai:seen')).toBeNull()
-    await kvFlush()
+    expect(store.getItem('onosendai:seen')).toBe('["z"]')
     vi.restoreAllMocks()
     resetKvForTests()
     await hydrateKv()
+    // The stored copy stands; the blind session's text is set aside, not lost.
     expect(kvGet('onosendai:seen')).toBe('["a","b","c"]')
+    expect(store.getItem('onosendai:seen')).toBeNull()
+    expect((await kvSuperseded()).map((r) => r.value)).toEqual(['["z"]'])
   })
 
   it('an open that answers after the page gave up is closed and changes nothing this session', async () => {

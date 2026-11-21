@@ -1178,7 +1178,8 @@ const NO_ANSWER = 'no answer in time'
  */
 export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?: { quietMs: number; capMs: number }; graceMs?: number }
 
-async function askOne(url: string, filter: Filter, deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
+/** `filter` may be several: one REQ, one EOSE, the union of their matches (NIP-01). */
+async function askOne(url: string, filter: Filter | Filter[], deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
   const { answerMs, onSent, stop, onEvent, deferChecks, quietMs, capAt } = opts
   const remaining = (): number => Math.max(0, deadline - Date.now())
   const late = (events: NostrEvent[] = []): RelayAnswer => ({ url, outcome: 'unreachable', reason: NO_ANSWER, events })
@@ -1244,7 +1245,7 @@ async function askOne(url: string, filter: Filter, deadline: number, opts: AskOp
       // False once this subscription is closed to sign in and ask again: its close is not the answer.
       let current = true
       try {
-        sub = relay.subscribe([filter], {
+        sub = relay.subscribe(Array.isArray(filter) ? filter : [filter], {
           ...(deferChecks ? { alreadyHaveEvent: deferCheck } : {}),
           onevent: (e) => {
             if (settled || events.has(e.id)) return
@@ -1522,10 +1523,13 @@ export function subscribeOne(url: string, filter: Filter, handlers: { onevent: (
  * With `primary` not answering, every relay is waited for on its own timers,
  * as before: then nobody knows yet which answer will count. Without `stop`,
  * an outer backstop still ends the wait.
+ *
+ * Several filters are asked in one REQ per relay, answered by one EOSE: a
+ * relay has answered all of them or none.
  */
 export function queryEachSettled(
   relays: string[],
-  filter: Filter,
+  filter: Filter | Filter[],
   maxWait: number,
   primary: string,
   waitFor: string[],

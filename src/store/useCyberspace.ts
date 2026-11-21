@@ -35,7 +35,8 @@ import { attributed } from '../lib/client'
 import { nip19 } from 'nostr-tools'
 import { exportNcryptsec, exportNsec } from '../lib/keyExport'
 import { lockedSigner, ncryptsecLogN, openKey, paintFirst, sealKey, type KeyLockHandle } from '../lib/keyAtRest'
-import { generatedKeyOf, heldFromPref, heldWay, readHeld, readHeldWithin, recordHeld, seedHeld } from '../lib/identitiesDb'
+import { forgetHeldSession, generatedKeyOf, heldFromPref, heldSettled, heldWay, listHeld, readHeld, readHeldWithin, recordHeld, seedHeld } from '../lib/identitiesDb'
+import { forgetActivity, noteSignerStuck } from '../lib/signerActivity'
 import { LOG_N } from '../lib/keyExport'
 import * as nip49 from 'nostr-tools/nip49'
 import {
@@ -62,8 +63,10 @@ import {
   signWithin,
   lateSignsPending,
   SignerTimeout,
+  bunkerRelaysOf,
+  dropSignerSockets,
 } from '../lib/signers'
-import { onAskAgain, onSignerAnswered, signingFailed } from '../lib/signWithin'
+import { SIGN_PATIENCE_MS, onAskAgain, onSignerAnswered, signingFailed } from '../lib/signWithin'
 import {
   coordToXyz,
   estimateHopCost,
@@ -244,6 +247,20 @@ function settledChain(events: NostrEvent[], prevEventId: string, pubkey: string)
 
 /** What signing a game's event came to (enterGame, signGameAction, exitGame): the event, or why not. */
 export type GameSigned = { event: NostrEvent } | { refused: string }
+
+/** What TEST SIGNER found, in the words the Identity panel shows. */
+export interface SignerTestResult {
+  ok: boolean
+  words: string
+}
+/** TEST SIGNER's words. */
+export const SIGNER_ANSWERED = 'Your signer answered.'
+export const SIGNER_SILENT = `Your signer did not answer in ${Math.round(SIGN_PATIENCE_MS / 1000)} s.`
+export const SIGNER_ANSWERED_OTHER = 'Your signer answered, but it is on a different account. Switch it back, or LOG OUT and pair again.'
+/** LOG OUT refused: the key in use is not kept on this device, and leaving it would lose it. */
+export const LOGOUT_UNKEPT = 'This key is not kept on this device, so LOG OUT would lose it. Open CHANGE to back it up, or log in with it again with a password, first.'
+/** PAIR AGAIN, answered by a signer that holds another account than the one being paired. */
+export const PAIR_OTHER_ACCOUNT = 'That signer holds a different account. Pair the signer that holds this one, or use the login for the other.'
 
 /** Refusals of a game's events, in words (DECK-0002 §2, §7). */
 export const GAME_NEEDS_CHAIN_MESSAGE = 'Move once first. A game holds your place in cyberspace, and you have no place on your chain yet.'
@@ -1183,6 +1200,33 @@ export interface CyberspaceState {
 
   /** How the current identity signs: a local key, an extension, or a bunker. */
   signerKind: SignerKind
+  /** For a bunker: its session's client pubkey, what its activity is kept under (lib/signerActivity.ts). */
+  signerSession: string | null
+  /**
+   * Whether the identity in use is a key this app generated on this device:
+   * the device's own identity, where LOG OUT returns to, so it offers none.
+   */
+  generatedKey: boolean
+  /**
+   * LOG OUT of the signer in use, on this device (arkinox, 2026-11-21). A
+   * bunker's session is closed and forgotten (its saved URI and client key,
+   * its sockets); whatever waited to sign as it ends, as on any switch; and
+   * this device's own generated identity takes over. Nothing else goes: the
+   * identity's data stays here under its npub, a key brought here stays
+   * sealed under it, and it stays in the login's list (a bunker as PAIR
+   * AGAIN). Nothing is signed. A key brought here that this device does not
+   * keep (used for this visit only, or saved plain before keys were sealed)
+   * would be lost, so LOG OUT refuses it: resolves to the words why, or null
+   * once logged out.
+   */
+  logOut: () => Promise<string | null>
+  /**
+   * Ask the remote signer something harmless (which account it holds) and
+   * say within SIGN_PATIENCE_MS whether it answered. Its sockets are dropped
+   * first unless a move waits on them, so a dead socket is not mistaken for a
+   * dead signer.
+   */
+  testSigner: () => Promise<SignerTestResult>
   /** The last login attempt's failure, shown in the identity panel; null when clear. */
   loginError: string | null
   /** Reconnect a stored extension/bunker signer on startup, if there is one. */
@@ -1231,8 +1275,12 @@ export interface CyberspaceState {
   useExtension: () => Promise<void>
   /** Switch to a remote bunker (NIP-46) from its bunker:// URI. */
   useBunker: (uri: string) => Promise<void>
-  /** Wait for and activate a client-initiated Nostr Connect QR session. */
-  useNostrConnect: (session: NostrConnectSession, signal?: AbortSignal, onConnected?: () => void) => Promise<void>
+  /**
+   * Wait for and activate a client-initiated Nostr Connect QR session.
+   * `expect`: PAIR AGAIN for this pubkey; a signer holding another account is
+   * refused and closed, and nothing switches.
+   */
+  useNostrConnect: (session: NostrConnectSession, signal?: AbortSignal, onConnected?: () => void, expect?: string) => Promise<void>
   /** Clear a shown login error. */
   clearLoginError: () => void
   /**
@@ -2095,6 +2143,36 @@ function markGeneratedBack(pubkey: string): void {
   markChosen(pubkey)
 }
 
+/**
+ * Where LOG OUT goes: this device's own generated identity. The generated key
+ * used last here (the identities store keeps each one, lib/identitiesDb.ts),
+ * else the device's first key, else a fresh one. Never `leaving` itself.
+ * Signs nothing.
+ */
+async function deviceIdentity(leaving: string): Promise<Signer> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const list = await Promise.race([
+    listHeld(),
+    new Promise<never[]>((resolve) => { timer = setTimeout(() => resolve([]), HELD_LOOKUP_MS) }),
+  ]).finally(() => clearTimeout(timer))
+  for (const entry of list) {
+    if (entry.way !== 'generated' || entry.pubkey === leaving) continue
+    const sk = generatedKeyOf(await readHeldWithin(entry.pubkey, HELD_LOOKUP_MS))
+    if (sk) return { ...localSigner(sk), minted: true }
+  }
+  const first = loadOrGenerateKey()
+  if (getPublicKey(first) !== leaving) return { ...localSigner(first), minted: true }
+  const fresh = randomSigner()
+  markMinted(fresh.pubkey)
+  return fresh
+}
+
+/** A promise, or `fallback` once `ms` has passed. */
+function within<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([p, new Promise<T>((resolve) => { timer = setTimeout(() => resolve(fallback), ms) })]).finally(() => clearTimeout(timer))
+}
+
 function pickInitialSigner(): Signer {
   const pref = loadSignerPref()
   // A stored extension/bunker identity: reconnect lazily, keeping its pubkey
@@ -2250,6 +2328,10 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     }
   } catch (err) {
     if (err instanceof SignerAccountMismatch) otherAccount(signer.pubkey)
+    // A signature this device needed (not a relay's AUTH, which is asked
+    // again by itself) ran out of time with a remote signer, over fresh
+    // sockets too: the chip offering LOG OUT and PAIR AGAIN comes up.
+    else if (!late && signer.kind === 'nip46' && lostInTransit(err)) noteSignerStuck(signer.session)
     throw err
   } finally {
     pendingSigns--
@@ -4198,7 +4280,7 @@ async function signGameEvent(
   try {
     event = await get().signEvent(template)
   } catch (err) {
-    return { refused: signingFailed(err) }
+    return { refused: signingFailed(err, currentSigner.kind) }
   }
   // The chain may have moved on while a remote signer thought about it.
   if (get().prevEventId !== prevEventId || get().identity.pubkey !== before.identity.pubkey) return { refused: GAME_MOVED_MESSAGE }
@@ -4268,7 +4350,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       try {
         spawn = await signEvent(spawnTemplate(pubkey, Math.floor(Date.now() / 1000)))
       } catch (err) {
-        set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: signingFailed(err) } })
+        set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: signingFailed(err, currentSigner.kind) } })
         return false
       }
       if (get().identity.pubkey !== pubkey) return false
@@ -5349,6 +5431,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     set({
       identity: { pubkey: signer.pubkey, npub: nip19.npubEncode(signer.pubkey) },
       signerKind: signer.kind,
+      signerSession: signer.session ?? null,
+      generatedKey: signer.kind === 'local' && !!signer.minted,
       loginError: null,
       keyLock: null,
       keyLockError: null,
@@ -5805,7 +5889,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       try {
         event = await get().signEvent(lane.template!)
       } catch (err) {
-        if (live()) failLanes(signingFailed(err))
+        if (live()) failLanes(signingFailed(err, currentSigner.kind))
         return
       }
       if (!live()) return
@@ -6016,6 +6100,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   chainConflict: null,
   publishRequest: 0,
   signerKind: currentSigner.kind,
+  signerSession: currentSigner.session ?? null,
+  generatedKey: currentSigner.kind === 'local' && !!currentSigner.minted,
   loginError: null,
   keyLock: keyLockAtLoad,
   keyLockError: null,
@@ -6403,7 +6489,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
           ...IDLE_PROOF,
           status: 'infeasible',
           elapsedMs: msg.elapsedMs,
-          message: signingFailed(err),
+          message: signingFailed(err, currentSigner.kind),
         },
       })
       return
@@ -6604,7 +6690,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // verify: nothing is respawned, and it says so where a hop's refusal
       // is said, as well as to whoever asked for the respawn.
       const reason = err instanceof Error ? err.message : String(err)
-      if (get().identity.pubkey === identity.pubkey) set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: signingFailed(err) } })
+      if (get().identity.pubkey === identity.pubkey) set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: signingFailed(err, currentSigner.kind) } })
       throw new Error(`signing failed: ${reason}`)
     }
     // A remote signer can wait minutes for an approval on a phone. If the
@@ -7086,7 +7172,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // chain moved on meanwhile, when this refusal is about nothing current.
       if (get().identity.pubkey !== pubkey) return null
       if (get().prevEventId !== prevEventId) return headMovedWords(get().events, 'Board again from where you are now.')
-      const words = signingFailed(err)
+      const words = signingFailed(err, currentSigner.kind)
       set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: words } })
       return words
     }
@@ -7196,7 +7282,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // verify: no ride. Thrown with the words a hop's refusal uses, so the
       // Hyperspace panel shows it where the ride ran and keeps the
       // destination, instead of clearing it as if the ride had gone.
-      throw new Error(signingFailed(err))
+      throw new Error(signingFailed(err, currentSigner.kind))
     }
     if (get().prevEventId !== prevEventId) return
     const dest = coordToXyz(hexToCoord(ride.toCoordHex))
@@ -7549,6 +7635,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // An extension or a bunker reconnects as the pref of that identity would,
       // and refuses one now on another account (SignerAccountMismatch).
       if (way === 'extension') return signerFromPref({ kind: 'nip07', pubkey })
+      // Logged out of here: its pairing is gone, and only a new one brings it back.
+      if (way === 'pair') throw new Error('Pair your signer again: tap PAIR AGAIN to show the QR code.')
       // The tapped pubkey last: a stored field never names another account.
       return signerFromPref({ ...row.bunker, kind: 'nip46', pubkey })
     })
@@ -7556,14 +7644,96 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
   useExtension: async () => { await login(() => nip07Signer()) },
   useBunker: async (uri) => { await login(() => nip46Signer(uri)) },
-  useNostrConnect: async (session, signal, onConnected) => {
+  useNostrConnect: async (session, signal, onConnected, expect) => {
+    // PAIR AGAIN while still on the pairing that stopped answering: once the
+    // new one is in, the old one is closed, its sockets and activity let go.
+    const before = currentSigner
+    const beforeSession = get().signerSession
     // Left the QR screen while the signer was answering: no switch, and no
     // error for a screen that is no longer there.
     await login(async () => {
       const signer = await session.connect(signal, onConnected)
       if (signal?.aborted) { await signer.close?.(); throw new Error('left the QR screen') }
+      // PAIR AGAIN is for one identity: a signer on another account pairs nothing.
+      if (expect && signer.pubkey !== expect) { await signer.close?.(); throw new Error(PAIR_OTHER_ACCOUNT) }
       return signer
     }, '', () => signal?.aborted === true)
+    if (expect && before.kind === 'nip46' && before.pubkey === expect && currentSigner !== before && get().signerSession !== beforeSession) {
+      try { await before.close?.() } catch { /* closed already */ }
+      forgetActivity(beforeSession)
+    }
+  },
+  logOut: async () => {
+    const outgoing = currentSigner
+    // The device's own identity is where LOG OUT goes: from it, there is nowhere.
+    if (outgoing.kind === 'local' && outgoing.minted) return null
+    const leaving = outgoing.pubkey
+    // A key in hand on this device is never lost to LOG OUT (owner ruling,
+    // 2026-11-19): it goes only once the identities store holds it, sealed,
+    // read back. The encrypted copy behind a lock is written there first, and
+    // waited for, rather than left to the switch's write that nothing waits on.
+    // A key not in hand at all ('gone') has nothing to lose.
+    if (outgoing.kind === 'local' && keyLocked?.mode !== 'gone') {
+      const lockCopy = keyLocked?.handle.signer === outgoing ? keyLocked.ncryptsec : undefined
+      const sealed = outgoing.ncryptsec ?? lockCopy
+      if (sealed) await recordHeld({ pubkey: leaving, kind: 'local', ncryptsec: sealed })
+      await within(heldSettled(), HELD_LOOKUP_MS, undefined)
+      const row = await readHeldWithin(leaving, HELD_LOOKUP_MS)
+      if (!row?.ncryptsec?.startsWith('ncryptsec1') && !generatedKeyOf(row)) return LOGOUT_UNKEPT
+    }
+    const session = get().signerSession
+    // Read before the switch overwrites the one pref slot: the relays its sockets are to.
+    const saved = loadSignerPref()
+    const bunkerUri = outgoing.bunkerUri ?? (saved?.pubkey === leaving ? saved.bunkerUri : undefined)
+    const switches = switchCount
+    const target = await deviceIdentity(leaving)
+    // Another switch landed while the list was read: that choice stands.
+    if (switches !== switchCount) return null
+    // A login still on its way (a QR waiting, a bunker handshake) lands nowhere now.
+    loginTicket++
+    // The switch is what every switch of identity is (#823 to #832): what
+    // waited to sign as the identity left ends, a walk stops, a HOSAKA flow
+    // stops, and the identity left is kept in the identities store.
+    await switchTo(target)
+    markGeneratedBack(target.pubkey)
+    if (outgoing.kind === 'nip46') {
+      // Queued after the switch's own record of the identity left, so the
+      // session is gone from its row and the row stays (PAIR AGAIN).
+      void forgetHeldSession(leaving)
+      dropSignerSockets(bunkerRelaysOf({ kind: 'nip46', bunkerUri }))
+      forgetActivity(session)
+    }
+    try { await outgoing.close?.() } catch { /* closed already */ }
+    return null
+  },
+  testSigner: async () => {
+    const signer = currentSigner
+    if (signer.kind === 'local') return { ok: true, words: 'This key signs on this device.' }
+    const deadline = Date.now() + SIGN_PATIENCE_MS
+    let asking = signer
+    // Fresh sockets first, as RETRY does, unless a move waits on these.
+    if (pendingSigns === pendingAuthSigns) {
+      if (signer.retry) signer.retry()
+      else if (signer.reconnect) {
+        const fresh = await within(signer.reconnect().catch(() => signer), SIGN_PATIENCE_MS, signer)
+        if (currentSigner === signer && fresh !== signer) currentSigner = fresh
+        asking = fresh
+      }
+    }
+    const ask = asking.heldPubkey
+    if (!ask) return { ok: false, words: 'This signer cannot be asked which account it holds.' }
+    const silent = Symbol('silent')
+    let answer: string | typeof silent
+    try {
+      answer = await within<string | typeof silent>(ask(), Math.max(0, deadline - Date.now()), silent)
+    } catch (err) {
+      // The signer said no, or no relay took the request: either way, said as it was.
+      const words = err instanceof Error ? err.message : String(err)
+      return { ok: false, words: `Your signer could not be asked: ${words}` }
+    }
+    if (answer === silent) return { ok: false, words: SIGNER_SILENT }
+    if (answer !== signer.pubkey) return { ok: false, words: SIGNER_ANSWERED_OTHER }
+    return { ok: true, words: SIGNER_ANSWERED }
   },
   clearLoginError: () => set({ loginError: null }),
 

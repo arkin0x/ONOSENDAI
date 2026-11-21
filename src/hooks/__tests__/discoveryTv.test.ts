@@ -40,7 +40,10 @@ vi.mock('../../store/useTv', () => ({ useTv: Object.assign((sel: (s: typeof tv) 
 vi.mock('../../store/useShards', () => ({ SCAN_MAX_HEIGHT: 12, useShards: { getState: () => ({ setScanning, freshOf: () => [], addDiscovered: () => {} }) } }))
 vi.mock('../../store/useSecrets', () => ({ useSecrets: { getState: () => ({ setCurrent: () => {}, recordPlace: async () => {}, hold: () => {} }) } }))
 vi.mock('../../store/useCeremony', () => ({ useCeremony: { getState: () => ({ mark: () => {} }) } }))
-vi.mock('../../lib/relay', () => ({ query: async () => [], relaySet: () => [] }))
+vi.mock('../../lib/relay', () => {
+  const query = async () => []
+  return { query, queryEach: async (f: unknown) => [{ url: 'wss://relay.test', outcome: 'answered', events: await (query as (f: unknown) => Promise<unknown[]>)(f) }], troubleOf: () => null, relaySet: () => [] }
+})
 vi.mock('../../lib/foundCache', () => ({ unbagRemembered: async () => [] }))
 vi.mock('../../lib/references', () => ({ resolveReference: async () => null }))
 

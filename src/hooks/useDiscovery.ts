@@ -13,7 +13,8 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { query, relaySet } from '../lib/relay'
+import { query, queryEach, relaySet, troubleOf } from '../lib/relay'
+import { mergeAnswers } from '../lib/relayOutcome'
 import { HIDDEN_KIND, unbag, type Hidden } from '../lib/hidden'
 import type { NostrEvent } from 'nostr-tools'
 import { unbagRemembered } from '../lib/foundCache'
@@ -34,7 +35,6 @@ function base(v: bigint, h: number): bigint {
   return (v >> BigInt(h)) << BigInt(h)
 }
 
-/** A signature of which regions the current anchor sits in, all heights. */
 /**
  * How long a region the relays answered for stays answered while you are
  * still in it. A scan runs at every crossing of the smallest cube, which in
@@ -58,6 +58,7 @@ export function regionsToAsk(lookupIds: Iterable<string>, answered: ReadonlyMap<
   return out
 }
 
+/** A signature of which regions the current anchor sits in, all heights. */
 function regionSignature(x: bigint, y: bigint, z: bigint): string {
   let sig = ''
   for (let h = 0; h <= SCAN_MAX_HEIGHT; h++) sig += `${base(x, h)},${base(y, h)},${base(z, h)};`
@@ -263,8 +264,8 @@ export function useDiscovery(): void {
 
       // Only the regions not answered lately (regionsToAsk): the rest are on
       // screen already, as the last answer for them left them. Another set of
-      // relays has answered nothing yet.
-      const relays = relaySet().join(',')
+      // relays, or another identity, has had no answer yet.
+      const relays = `${useCyberspace.getState().identity?.pubkey ?? ''}|${relaySet().join(',')}`
       if (answered.current.relays !== relays) answered.current = { relays, at: new Map() }
       for (const k of [...answered.current.at.keys()]) if (!keys.has(k)) answered.current.at.delete(k)
       const asking = regionsToAsk(keys.keys(), answered.current.at, Date.now())
@@ -274,7 +275,12 @@ export function useDiscovery(): void {
       }
       const askedAt = Date.now()
       // A superseded scan must not write stale finds.
-      const sent = await query({ kinds: [HIDDEN_KIND], '#d': asking })
+      const answers = await queryEach({ kinds: [HIDDEN_KIND], '#d': asking })
+      const sent = mergeAnswers(answers)
+      // Only an answer from the canonical relay counts as an answer (relay.ts
+      // troubleOf): one it did not give (down, slow, waiting on the signer)
+      // is asked again at the next step, as every scan used to.
+      const heard = troubleOf(answers) === null
       if (id !== reqId.current) return
       // One version per bag, the newest, none its author deleted: relays hold
       // different versions, and opening all of them drew what a DELETE took
@@ -292,7 +298,7 @@ export function useDiscovery(): void {
         useShards.getState().honorRetractions(asking, events, deletions)
         useShards.getState().setScanning(false)
         // Answered: not asked again while you stay in them, for a while.
-        for (const k of asking) answered.current.at.set(k, askedAt)
+        if (heard) for (const k of asking) answered.current.at.set(k, askedAt)
         // The ceremony: only for what this scan opened for the first time.
         useCeremony.getState().mark(fresh)
       }

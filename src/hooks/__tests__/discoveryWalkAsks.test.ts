@@ -47,8 +47,12 @@ vi.mock('../../store/useSecrets', () => ({ useSecrets: { getState: () => ({ setC
 vi.mock('../../store/useCeremony', () => ({ useCeremony: { getState: () => ({ mark: () => {} }) } }))
 /** Every `#d` list the scan sent the relays. */
 const asked: string[][] = []
+/** Whether the canonical relay answers: when it does not, nothing counts as answered. */
+const relay = { canonicalAnswers: true }
 vi.mock('../../lib/relay', () => ({
-  query: async (f: { '#d'?: string[] }) => { if (f['#d']) asked.push([...f['#d']]); return [] },
+  query: async () => [],
+  queryEach: async (f: { '#d'?: string[] }) => { if (f['#d']) asked.push([...f['#d']]); return [{ url: 'wss://relay.test', outcome: relay.canonicalAnswers ? 'answered' : 'unreachable', reason: '', events: [] }] },
+  troubleOf: () => (relay.canonicalAnswers ? null : 'unreachable'),
   relaySet: () => ['wss://relay.test'],
 }))
 
@@ -91,6 +95,7 @@ async function step(dx: bigint): Promise<void> {
 }
 
 beforeEach(() => {
+  relay.canonicalAnswers = true
   effects.length = 0
   refs.length = 0
   asked.length = 0
@@ -128,6 +133,19 @@ describe('the scan while walking', () => {
     } finally {
       now.mockRestore()
     }
+  })
+
+  it('a scan the canonical relay did not answer (down, slow, waiting on the signer) counts for nothing: the next step asks again', async () => {
+    relay.canonicalAnswers = false
+    render()
+    await vi.waitFor(() => { expect(asked).toHaveLength(1) })
+    await step(1n)
+    expect(asked[1]).toHaveLength(13)
+    relay.canonicalAnswers = true
+    await step(1n)
+    expect(asked[2]).toHaveLength(13)
+    await step(1n)
+    expect(asked[3].length).toBeLessThan(13)
   })
 
   it('regionsToAsk: what has no answer, or one older than ANSWER_FRESH_MS', () => {

@@ -286,7 +286,21 @@ export function BagMeterRow({ meter, others = false, room = false }: { meter: Ba
   )
 }
 
+/**
+ * The bar, only while something is being placed. It is mounted all the time
+ * (App.tsx), and its body asks the store about the build cursor, your hides
+ * and the bag they would land in on every change: in WALK, where the cursor
+ * is the walker and moves several times a second, that was every hide you
+ * have read again at each gibson (ownBagIn), for a bar that draws nothing
+ * (arkinox, 2026-11-21: WALK stutters on his phone). Nothing placed, nothing
+ * asked.
+ */
 export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | null {
+  const placing = useShards((s) => s.pending !== null)
+  return placing ? <DeployBarOpen pad={pad} /> : null
+}
+
+function DeployBarOpen({ pad }: { pad: boolean }): JSX.Element | null {
   // Covers the scene from below: BUILD frames the cursor above it (hooks/useCover).
   const coverRef = useCover('bottom')
   const pending = useShards((s) => s.pending)

@@ -543,49 +543,6 @@ body {
 .relay--retrying { color: var(--danger); }
 .relay--local { color: var(--dim); }
 
-/* ---------- Scale bar (integrated left edge) ---------- */
-
-.scale-bar {
-  position: absolute;
-  /* A constant now. It used to be derived from the orthographic grid's left
-     edge, which no longer exists under a perspective camera; this is where that
-     formula put it at a typical desktop size. */
-  left: 200px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  z-index: 2;
-  pointer-events: none;
-}
-
-
-
-
-
-
-.scale-bar__text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  white-space: nowrap;
-}
-
-.scale-bar__value {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-}
-
-.scale-bar__name {
-  font-size: 9px;
-  color: var(--fg);
-  text-transform: lowercase;
-}
-
 /* ---------- Compass 3D ---------- */
 
 .compass-3d {
@@ -5224,10 +5181,6 @@ select.avatars__input option:checked {
     max-height: none;
     overflow: visible;
   }
-
-  .scale-bar {
-    left: 16px;
-  }
 }
 
 /*
@@ -5382,25 +5335,6 @@ select.avatars__input option:checked {
   z-index: 0;
 }
 
-
-/* Scale instrument: an isometric cube the exact on-screen size of one cell. */
-.scale-bar__cube {
-  width: var(--cell-px, 24px);
-  height: var(--cell-px, 24px);
-  min-width: 10px;
-  min-height: 10px;
-  flex: none;
-  overflow: visible;
-}
-
-.scale-bar__cube polygon,
-.scale-bar__cube path {
-  fill: none;
-  stroke: var(--warn, #ffb020);
-  stroke-width: 3;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-}
 
 /* ---------- Touch controls (cyberspace ops) ----------
  *

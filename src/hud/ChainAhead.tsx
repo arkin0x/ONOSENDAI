@@ -226,8 +226,23 @@ export interface AheadChipProps extends Omit<ButtonHTMLAttributes<HTMLButtonElem
   label: string
   /** Put between the label and the count's words ('.' after a label with no full stop of its own). */
   sep?: string
-  /** The chip's words. */
-  words: string
+  /**
+   * The chip's words, in the parts the page draws them in (a number on its
+   * own, as JSX children are): split the same way, they are laid out on the
+   * same pixels as ever.
+   */
+  words: ChipWords
+}
+
+/** The chip's words: a string, or the parts of one. */
+export type ChipWords = string | ReadonlyArray<string | number>
+
+const wordsText = (words: ChipWords): string => (typeof words === 'string' ? words : words.join(''))
+
+/** The same words, part for part: an explorer render that rebuilds the parts does not render the button. */
+function sameWords(a: ChipWords, b: ChipWords): boolean {
+  if (typeof a === 'string' || typeof b === 'string') return a === b
+  return a.length === b.length && a.every((w, i) => w === b[i])
 }
 
 /**
@@ -250,6 +265,10 @@ export const AheadChip = memo(function AheadChip({ own, className, label, sep = 
       <AheadMarks ahead={ahead} />
     </button>
   )
+}, (was, now) => {
+  const keys = new Set([...Object.keys(was), ...Object.keys(now)]) as Set<keyof AheadChipProps>
+  for (const k of keys) if (k === 'words' ? !sameWords(was.words, now.words) : was[k] !== now[k]) return false
+  return true
 })
 
 /**
@@ -260,13 +279,13 @@ export const AheadChip = memo(function AheadChip({ own, className, label, sep = 
  * words once) laid over them and faded in and out, a new one per landing so
  * the glint plays again.
  */
-export function AheadWords({ ahead, words }: { ahead: ChainAhead; words: string }): JSX.Element {
+export function AheadWords({ ahead, words }: { ahead: ChainAhead; words: ChipWords }): JSX.Element {
   if (!ahead.drawn) return <>{words}</>
   const landed = ahead.track.landed
   return (
     <>
       <span className="aheadtxt">{words}</span>
-      {landed > 0 && <span key={landed} className="aheadglint is-glint" aria-hidden="true" data-words={words} />}
+      {landed > 0 && <span key={landed} className="aheadglint is-glint" aria-hidden="true" data-words={wordsText(words)} />}
     </>
   )
 }

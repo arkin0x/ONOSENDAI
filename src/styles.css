@@ -6209,10 +6209,12 @@ select.avatars__input option:checked {
   opacity: 0;
   transition: opacity 300ms ease;
 }
+/* Each corner is a layer the size of the frame, drawing only its own two
+   lines, so at rest every line falls on exactly the pixels one frame of
+   eight lines drew. */
 .aheadbrk i {
   position: absolute;
-  width: 6px;
-  height: 6px;
+  inset: 0;
   filter: drop-shadow(0 0 2px var(--ahead-line));
   animation: ahead-brk 300ms cubic-bezier(0.2, 0.9, 0.3, 1);
 }
@@ -6220,29 +6222,21 @@ select.avatars__input option:checked {
   from { transform: translate(var(--ahead-fx), var(--ahead-fy)); }
 }
 .aheadbrk i:nth-child(1) {
-  left: 0;
-  top: 0;
   background: linear-gradient(var(--ahead-line), var(--ahead-line)) left top / 6px 1px no-repeat, linear-gradient(var(--ahead-line), var(--ahead-line)) left top / 1px 6px no-repeat;
   --ahead-fx: calc(-1 * var(--ahead-from, 0px));
   --ahead-fy: calc(-1 * var(--ahead-from, 0px));
 }
 .aheadbrk i:nth-child(2) {
-  right: 0;
-  top: 0;
   background: linear-gradient(var(--ahead-line), var(--ahead-line)) right top / 6px 1px no-repeat, linear-gradient(var(--ahead-line), var(--ahead-line)) right top / 1px 6px no-repeat;
   --ahead-fx: var(--ahead-from, 0px);
   --ahead-fy: calc(-1 * var(--ahead-from, 0px));
 }
 .aheadbrk i:nth-child(3) {
-  left: 0;
-  bottom: 0;
   background: linear-gradient(var(--ahead-line), var(--ahead-line)) left bottom / 6px 1px no-repeat, linear-gradient(var(--ahead-line), var(--ahead-line)) left bottom / 1px 6px no-repeat;
   --ahead-fx: calc(-1 * var(--ahead-from, 0px));
   --ahead-fy: var(--ahead-from, 0px);
 }
 .aheadbrk i:nth-child(4) {
-  right: 0;
-  bottom: 0;
   background: linear-gradient(var(--ahead-line), var(--ahead-line)) right bottom / 6px 1px no-repeat, linear-gradient(var(--ahead-line), var(--ahead-line)) right bottom / 1px 6px no-repeat;
   --ahead-fx: var(--ahead-from, 0px);
   --ahead-fy: var(--ahead-from, 0px);

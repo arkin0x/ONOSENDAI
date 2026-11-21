@@ -243,7 +243,7 @@ function ChainExplorerChip(): JSX.Element {
           {...noCallout}
           onPointerDown={pressForkChip}
           label={`${fork.dropped} actions from this device were dropped. Tap to read why.`}
-          words={`${fork.dropped} ACTION${fork.dropped === 1 ? '' : 'S'} DROPPED`}
+          words={[fork.dropped, ' ACTION', fork.dropped === 1 ? '' : 'S', ' DROPPED']}
         />
       ) : fork && fork.adopted > 0 && fresh ? (
         <AheadChip
@@ -252,7 +252,7 @@ function ChainExplorerChip(): JSX.Element {
           {...noCallout}
           onPointerDown={pressForkChip}
           label={`${fork.adopted} actions arrived from another device. Tap to read why.`}
-          words={`${fork.adopted} FROM ANOTHER DEVICE`}
+          words={[fork.adopted, ' FROM ANOTHER DEVICE']}
         />
       ) : (
         <AheadChip
@@ -263,7 +263,7 @@ function ChainExplorerChip(): JSX.Element {
           label={open ? 'Hide chain explorer' : 'Show chain explorer'}
           sep="."
           aria-pressed={open}
-          words={`CHAIN ${index + 1}/${actions.length}${atHead || building ? '' : ' HISTORY'}`}
+          words={['CHAIN ', index + 1, '/', actions.length, atHead || building ? '' : ' HISTORY']}
         />
       )}
 

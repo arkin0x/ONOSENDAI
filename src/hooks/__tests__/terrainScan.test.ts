@@ -13,9 +13,6 @@ import type { Plane } from 'cyberspace-core'
 import type { AxisName, Position, ViewAxes } from '../../lib/space'
 
 const fake = vi.hoisted(() => {
-  // The terrain worker's module, where UNKNOWN lives, installs its message
-  // handler on `self` when imported.
-  ;(globalThis as { self?: unknown }).self ??= globalThis
   return {
     seed: 0,
     runs: [] as unknown[],
@@ -76,7 +73,7 @@ vi.mock('../../lib/terrainCache', async (original) => {
 
 const { layoutVolume, readVolume, VOLUME_RADIUS, VOLUME_SIZE } = await import('../useTerrainVolume')
 const { BLOCK_BITS, BLOCK_SIZE, blockKey, isPending, readK, requestRun } = await import('../../lib/terrainCache')
-const { UNKNOWN } = await import('../../workers/terrain.worker')
+const { UNKNOWN } = await import('../../lib/terrainUnknown')
 
 /** The scan as it was before 2026-10-20: every cell built and looked up on its own. */
 function referenceScan(centre: Position, axes: ViewAxes, scaleExp: number, plane: Plane): Uint8Array {

@@ -56,7 +56,7 @@ import { useCyberspace } from '../../store/useCyberspace'
 import { useBuilder } from '../../store/useBuilder'
 import { useStarred } from '../../store/useStarred'
 import { placeHex } from '../../lib/coordRoute'
-import { RECENT_VIEWS_KEY } from '../../lib/viewAt'
+import { readRecentViews, saveRecentViews, showRecentViews } from '../../lib/viewAt'
 import { placeInput } from '../../lib/starred'
 import { formatLatLonDeg } from '../../lib/earthSurface'
 
@@ -187,11 +187,11 @@ describe('the figures and the links', () => {
 
 describe('VIEW A COORDINATE, RECENT and STARRED PLACES moved to View', () => {
   beforeEach(() => {
-    localStorage.setItem(RECENT_VIEWS_KEY, JSON.stringify([{ input: '1, 2, 3', label: '1, 2, 3', plane: 0 }]))
+    showRecentViews([{ input: '1, 2, 3', label: '1, 2, 3', plane: 0 }])
     useStarred.setState({ places: [{ input: placeInput({ x: 4n, y: 5n, z: 6n }), label: '4, 5, 6', plane: 0, at: 1, nickname: 'ROOFTOP' }] })
   })
   afterEach(() => {
-    localStorage.removeItem(RECENT_VIEWS_KEY)
+    saveRecentViews([])
     useStarred.setState({ places: [] })
   })
 
@@ -400,7 +400,7 @@ describe("View's dice: a completely random coordinate (arkinox, 2026-11-18)", ()
     useCoordRoute.setState({ region: null, label: null })
     useCyberspace.setState({ plane: 0, anchorPlane: 0 })
     useViewDraft.getState().setText('')
-    localStorage.removeItem(RECENT_VIEWS_KEY)
+    saveRecentViews([])
     vi.mocked(geocode).mockClear()
     ;(globalThis as { window?: unknown }).window = { location: loc, history }
   })
@@ -409,7 +409,7 @@ describe("View's dice: a completely random coordinate (arkinox, 2026-11-18)", ()
     cs().clearFocus()
     useCyberspace.setState({ plane: 0, anchorPlane: 0 })
     useViewDraft.getState().setText('')
-    localStorage.removeItem(RECENT_VIEWS_KEY)
+    saveRecentViews([])
     delete (globalThis as { window?: unknown }).window
   })
 
@@ -440,18 +440,18 @@ describe("View's dice: a completely random coordinate (arkinox, 2026-11-18)", ()
     expect((spy.mock.calls[0][0] as unknown as Uint8Array).length).toBe(32)
     expect(useViewDraft.getState().text).toBe(HEX)
     expect(HEX).toMatch(/^[0-9a-f]{64}$/)
-    const rolled = { focus: cs().focus, cursor: cs().cursor, anchorPlane: cs().anchorPlane, recent: localStorage.getItem(RECENT_VIEWS_KEY) }
+    const rolled = { focus: cs().focus, cursor: cs().cursor, anchorPlane: cs().anchorPlane, recent: JSON.stringify(readRecentViews()) }
     expect(geocode).not.toHaveBeenCalled()
     expect(history.pushState).not.toHaveBeenCalled()
 
     // The same coordinate typed into the box and VIEW pressed ends in the same place.
     cs().clearFocus()
-    localStorage.removeItem(RECENT_VIEWS_KEY)
+    saveRecentViews([])
     useViewDraft.getState().setText(HEX)
     const form = findAll(tree(ViewAtPanel), (p) => typeof p.onSubmit === 'function')[0]
     ;(form.props.onSubmit as (e: { preventDefault: () => void }) => void)({ preventDefault: () => {} })
     await new Promise((r) => setTimeout(r, 0))
-    expect(rolled).toEqual({ focus: cs().focus, cursor: cs().cursor, anchorPlane: cs().anchorPlane, recent: localStorage.getItem(RECENT_VIEWS_KEY) })
+    expect(rolled).toEqual({ focus: cs().focus, cursor: cs().cursor, anchorPlane: cs().anchorPlane, recent: JSON.stringify(readRecentViews()) })
     expect(rolled.focus?.position).toEqual(placeOf(HEX).position)
     expect(rolled.anchorPlane).toBe(placeOf(HEX).plane)
   })

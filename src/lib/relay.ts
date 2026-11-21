@@ -193,6 +193,14 @@ const holds = new WeakMap<object, number>()
 
 /** Every connection comes through ensureRelay, publishing and live subscriptions included. */
 class Pool extends AbstractSimplePool {
+  /**
+   * Whether a full connect timeout marks the relay hung (noteTimeout), which
+   * the app's publishes and reads then skip for a while. Off for the signer's
+   * pool: a signer relay slow to connect says nothing about the app's use of
+   * the same relay.
+   */
+  tracksHung = true
+
   override async ensureRelay(...[url, params]: Parameters<AbstractSimplePool['ensureRelay']>): ReturnType<AbstractSimplePool['ensureRelay']> {
     if (isRetiredRelay(url)) throw new Error('retired relay, not dialed')
     const norm = normalizeURL(url)
@@ -208,7 +216,7 @@ class Pool extends AbstractSimplePool {
         // nostr-tools detaches its handlers from a socket that timed out and never closes it.
         try { (relay as unknown as { ws?: WebSocket } | undefined)?.ws?.close() } catch { /* already gone */ }
         // Only a full wait counts: a caller's short question may run out on a healthy relay.
-        if (Date.now() - started >= CONNECT_MS) noteTimeout(url)
+        if (this.tracksHung && Date.now() - started >= CONNECT_MS) noteTimeout(url)
       }
       throw err
     }
@@ -688,9 +696,23 @@ let watchingSigner = false
  * throwaway key a page starts with (the real-bunker run, 2026-11-04).
  */
 function reauthAs(pubkey: string): void {
-  const stale = [...authedAs].filter(([, as]) => as !== pubkey).map(([url]) => url)
-  if (stale.length === 0) return
-  live.resumeAll(() => dropRelays(stale))
+  const stale = new Set([...authedAs].filter(([, as]) => as !== pubkey).map(([url]) => url))
+  // And every socket whose AUTH another key signed, whether or not this
+  // file's own sign-in settled on it. authedAs is written only there
+  // (settleAuth); nostr-tools answers a challenge by itself the moment it
+  // comes (automaticallyAuth), and a publish or a feed told auth-required
+  // signs in by itself too (onauth). A socket signed in only so, opened by a
+  // read that does not sign in first (a count, a feed read, a light publish),
+  // stayed signed in as the old key through a switch, and the new identity's
+  // reads and writes went over the old one's sign-in, tying the two keys
+  // together at the relay (identity-switch audit, 2026-11-19).
+  for (const [url, relay] of (pool as unknown as { relays?: Map<string, AuthRelay> } | null)?.relays ?? []) {
+    const ws = relay.ws
+    const as = typeof ws === 'object' && ws !== null ? signedBy.get(ws) : undefined
+    if (as && as !== pubkey) stale.add(url)
+  }
+  if (stale.size === 0) return
+  live.resumeAll(() => dropRelays([...stale]))
 }
 
 /**
@@ -746,6 +768,35 @@ export function getPool(): AbstractSimplePool {
   }
   if (!watchingSigner) watchSigner()
   return pool
+}
+
+let signerPool: AbstractSimplePool | null = null
+
+/**
+ * The pool a remote signer (NIP-46) talks over: sockets of its own, even to a
+ * relay the app also reads and writes. The default signer relay is
+ * ONOSENDAI's own, and sharing its socket tied the signer's subscription to
+ * everything that drops that socket (a switch of identity, a dead-socket
+ * probe, the relay's subscription cap closing the oldest), let the signer's
+ * sends skip the pacing (paceSends) and the signer's own socket drops
+ * (signers.ts dropSignerSockets) close the app's. Built like the app's pool
+ * (pings counted, sends to a closing socket caught), without its AUTH: the
+ * signer relays never ask for one.
+ */
+export function getSignerPool(): AbstractSimplePool {
+  if (!signerPool) {
+    const p = new Pool({
+      verifyEvent: verifyUnlessDeferred,
+      maxWaitForConnection: 3000,
+      enablePing: true,
+      // nostr-tools' BunkerSigner subscribes again on its next request once
+      // its subscription has closed; a dropped socket is dialled then.
+      enableReconnect: false,
+    })
+    p.tracksHung = false
+    signerPool = p
+  }
+  return signerPool
 }
 
 interface AuthRelay {

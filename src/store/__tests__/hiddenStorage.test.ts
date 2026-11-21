@@ -321,6 +321,50 @@ describe('two tabs', () => {
   })
 })
 
+describe('what a stored row costs in memory', () => {
+  // arkinox's spot, seeded (2026-11-18): every row's JSON was kept beside the row, 25 MB for 120 hides.
+  it('a row is held with a short signature of its JSON, never the JSON', async () => {
+    const big = row(X, 'big', { text: 'x'.repeat(200_000) })
+    h.mem.set(BARE, JSON.stringify([big]))
+    const p = await page()
+    p.signIn(X)
+    const [e] = p.st.entriesIn(X)
+    expect(e.row?.eventId).toBe('big')
+    expect(Object.keys(e).sort()).toEqual(['key', 'row', 'seq', 'sig'])
+    expect(e.sig.length).toBeLessThan(40)
+    expect(e.sig).toBe(p.st.sigOf(JSON.stringify(big)))
+  })
+
+  it('a save writes the rows that changed and none that did not, by signature', async () => {
+    h.mem.set(BARE, JSON.stringify([row(X, 'a1'), row(X, 'a2')]))
+    const p = await page()
+    p.signIn(X)
+    const rows = (): Array<Record<string, unknown>> => p.st.entriesIn(X).map((e) => e.row as never)
+    const written: string[] = []
+    const stored = (d: object): string => { written.push((d as { eventId: string }).eventId); return JSON.stringify(d) }
+    // Rows read back from the database, saved as they are: nothing serialized twice, nothing written.
+    const loaded = rows()
+    for (const [i, e] of p.st.entriesIn(X).entries()) p.st.noteStored(loaded[i] as never, e.sig)
+    expect(await p.st.saveRows(X, loaded as never, stored, () => false)).toBe(true)
+    expect(written).toEqual([])
+    // One character changed: that row, and only that row, goes to the database.
+    const changed = [loaded[0], { ...loaded[1], text: 'hellO' }]
+    await p.st.saveRows(X, changed as never, stored, () => false)
+    expect(written).toEqual(['a2'])
+    expect((await dbRows()).find((r) => r.key === 'a2')?.json).toContain('hellO')
+  })
+
+  it('tells apart JSON that differs in one character, or only in length', () => {
+    return import('../hiddenStorage').then(({ sigOf }) => {
+      const a = JSON.stringify(row(X, 'a', { text: 'abc' }))
+      expect(sigOf(a)).toBe(sigOf(String(a)))
+      expect(sigOf(a)).not.toBe(sigOf(a.replace('abc', 'abd')))
+      expect(sigOf('ab')).not.toBe(sigOf('ba'))
+      expect(sigOf('a')).not.toBe(sigOf('a ' ))
+    })
+  })
+})
+
 describe('a switch mid-write', () => {
   it('a door sealed by P that finishes after a switch lands on P\'s list, never Q\'s', async () => {
     const p = await page()

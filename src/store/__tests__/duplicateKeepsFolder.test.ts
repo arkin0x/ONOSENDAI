@@ -28,7 +28,7 @@ async function boot(): Promise<{ folders: Folders; workshop: Workshop }> {
   vi.resetModules()
   const folders = await import('../useShardFolders')
   const workshop = await import('../useWorkshop')
-  await folders.useShardFolders.getState().load(ME)
+  await folders.useShardFolders.getState().load()
   workshop.useWorkshop.setState({ shards: [], currentId: null })
   return { folders, workshop }
 }
@@ -141,7 +141,7 @@ describe('DUPLICATE keeps the folder', () => {
     workshop.useWorkshop.setState({ shards: a.workshop.useWorkshop.getState().shards, currentId: null })
     expect(folders.useShardFolders.getState().storage).toBe('loading')
     const copy = workshop.useWorkshop.getState().duplicate(src)
-    await folders.useShardFolders.getState().load(ME)
+    await folders.useShardFolders.getState().load()
     await folders.useShardFolders.getState().flush()
     expect(folderOf(folders.useShardFolders.getState().tree, copy)).toBe(kit)
   })

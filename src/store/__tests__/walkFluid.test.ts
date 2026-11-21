@@ -65,6 +65,7 @@ import { useCalibration } from '../../lib/calibration'
 import { withConstrain, type Constrain } from '../../lib/walkConstrain'
 import { FLUID_ACCEL, FLUID_EASE_FROM, FLUID_HOLD_AT, FLUID_MAX_SPEED, FLUID_NUDGE_STEPS, FLUID_WALL_REACH, len, onLine, syncSpeedFactor, syncWarnOpacity } from '../../lib/fluidWalk'
 import { eventsAhead } from '../walkAhead'
+import { useLayers } from '../useLayers'
 import { canonicalQuaternion, type Position, type ViewAxes } from '../../lib/space'
 import { walkKeyDown, walkKeyUp, walkKeysReleased } from '../../hooks/useKeyboard'
 import { rampFixture } from '../fixtures/rampFixture'
@@ -609,6 +610,33 @@ describe('the queue stays honest', () => {
     expect(speed()).toBeCloseTo(FLUID_MAX_SPEED, 6)
     up('KeyW')
     useWalk.setState({ behind: 0 })
+  })
+
+  it('with the sync limit off in Settings: full speed at 15, 20 and 40 ahead, never stopped (arkinox, 2026-11-18)', () => {
+    useLayers.getState().setLayer('walkLimits', false)
+    try {
+      walk()
+      down('KeyW')
+      const at = (n: number, ms: number): void => {
+        for (let t = 0; t < ms; t += 16) {
+          clock += 16
+          vi.advanceTimersByTime(16)
+          useWalk.setState({ behind: n - (useWalk.getState().open ? 1 : 0) })
+          tickFluid(clock)
+          tickFall(clock)
+        }
+      }
+      for (const n of [15, 20, 40]) {
+        const before = rel(start)
+        at(n, 600)
+        expect(len(fluidState().v), `${n} ahead`).toBeCloseTo(FLUID_MAX_SPEED, 6)
+        expect(rel(start), `${n} ahead`).not.toEqual(before)
+      }
+      up('KeyW')
+      useWalk.setState({ behind: 0 })
+    } finally {
+      useLayers.getState().setLayer('walkLimits', true)
+    }
   })
 
   it('a zigzag faster than the proofs stops at the gibson edge 20 events ahead, never past; it walks on once they land', async () => {

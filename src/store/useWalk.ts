@@ -18,11 +18,14 @@
  * one straight hop is never dearer than the steps it replaces, and a long
  * straight walk is a few hops instead of a proof per press.
  *
- * Closed segments queue. Each is proved from where the one before it landed,
- * in order, through the store's own commit (walkTo), so a WALK move is
- * checked, signed and published exactly like a COMMIT. One past this
- * machine's ceiling runs as its route (hops to the wall, the sidestep, hops
- * on), still as one move.
+ * Closed segments queue. Each is proved from where the one before it will
+ * land, naming that one's event as its previous, and they go down the store's
+ * lanes (useCyberspace walkLane, 2026-11-18): the next is proved while the
+ * ones before it wait on the relays and the signer, several signatures are
+ * out at once, and they land on the chain, and go to the relays, strictly in
+ * order. Each is checked and signed exactly like a COMMIT. One past this
+ * machine's ceiling, or a first move, waits for the lanes to empty and goes
+ * through the store's own commit (walkTo), a route run as one move.
  *
  * The walk stops, all of it, the moment a step does not land: refused,
  * infeasible, a signature declined, a step only HOSAKA could sell (a walk
@@ -112,7 +115,7 @@ import { HOP_AXIS_BUDGET_MS, projectCantorMs, recommendedHopHeight, useCalibrati
 import { moveDirection, type MoveName } from '../lib/moves'
 import { clampAxis, stepFor, type AxisDirection, type AxisName, type Position } from '../lib/space'
 import { WORLD_DOWN, atHeight, heightOf, raised, sameDir, upOf, viewDown } from '../lib/walkDown'
-import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace'
+import { MAX_COMPUTE_HEIGHT, checkWalkLanes, dropWalkLanes, samePosition, setWalkLaneHooks, useCyberspace } from './useCyberspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { standing, walkStep, type WalkStep } from './walkStep'
 import { planWalkMove, walkHeading, type Stepper, type WalkHeading } from '../lib/walkSlide'
@@ -241,8 +244,10 @@ interface WalkState {
   queue: Position[]
   /** The segment still being walked, or null. */
   open: WalkSegment | null
-  /** The step handed to the store, until it lands or the walk stops. */
+  /** The step handed to the store the old way (walkTo), until it lands or the walk stops. */
   running: Position | null
+  /** How many of the queue, from the front, are down the store's lanes (useCyberspace walkLane): proved, signed and landed in order. */
+  handed: number
   /** Closed segments not yet proven, the one in flight included. */
   behind: number
   /** GRAVITY in WALK, kept on this device (store/walkGravity.ts). Off by default. */
@@ -290,6 +295,7 @@ export const useWalk = create<WalkState>((set, get) => ({
   queue: [],
   open: null,
   running: null,
+  handed: 0,
   behind: 0,
   gravity: loadGravity(),
   falling: false,
@@ -323,7 +329,8 @@ export const useWalk = create<WalkState>((set, get) => ({
     warmWalls(useCyberspace.getState().plane, useCyberspace.getState().position)
     clearSettle()
     dropFall()
-    set({ queue: [], open: null, running: null, behind: 0, from: 'hop' })
+    dropWalkLanes()
+    set({ queue: [], open: null, running: null, handed: 0, behind: 0, from: 'hop' })
     refreshDown()
     if (get().gravity) fallIfAirborne()
   },
@@ -343,9 +350,11 @@ export const useWalk = create<WalkState>((set, get) => ({
     holdReleaseAll()
     // A fall not yet resolved has made nothing: it goes with the queue.
     dropFall()
-    set({ queue: [], open: null, running: null, behind: 0 })
-    // Whatever is in flight goes too: a proof is killed, a route abandoned,
-    // a cloud flow ended the way X ends it (cancel). What was signed stays.
+    set({ queue: [], open: null, running: null, handed: 0, behind: 0 })
+    // Whatever is in flight goes too: the lanes, a proof is killed, a route
+    // abandoned, a cloud flow ended the way X ends it (cancel). What was
+    // signed and landed stays.
+    dropWalkLanes()
     if (moveBusy() || cs.plan) cs.cancel()
     const now = useCyberspace.getState()
     useCyberspace.setState({
@@ -1206,24 +1215,51 @@ function turnGravity(): void {
  */
 let walkInFlight = false
 
+/** A pump is running: a store change it makes (a hand-off sets the store) pumps again after it, never inside it, or one step could be handed twice. */
+let pumping = false
+let pumpAgain = false
+
 /**
- * Move the walk along: start the next step when nothing is in flight, and
- * when the one in flight has finished, either take it off the queue (it
- * landed) or stop the walk (it did not). Runs on every store change while
- * walking, so it needs no timer and cannot miss a landing.
+ * Move the walk along. Queued steps go down the store's lanes in order
+ * (useCyberspace walkLane: proved ahead, signed several at once, landed in
+ * chain order), so a remote signer's round trip no longer holds every step
+ * behind the one before it (arkinox, 2026-11-18: "I can't explore for more
+ * than a few seconds ... I'm using bunker"). A step that cannot go down a
+ * lane (a route past the ceiling, a first move) waits for the lanes to empty
+ * and goes the old way, one at a time: when the one in flight has finished,
+ * it is taken off the queue (it landed) or the walk stops (it did not). Runs
+ * on every store change while walking, so it needs no timer and cannot miss a
+ * landing.
  */
 function pump(): void {
+  if (pumping) { pumpAgain = true; return }
+  pumping = true
+  try {
+    do {
+      pumpAgain = false
+      pumpOnce()
+    } while (pumpAgain)
+  } finally {
+    pumping = false
+  }
+}
+
+function pumpOnce(): void {
+  if (!useCyberspace.getState().walking) return
+  // Lanes something else ended (an X, a HOSAKA flow) are dropped here, and the walk hears of it.
+  checkWalkLanes()
   const walk = useWalk.getState()
   const cs = useCyberspace.getState()
   if (!cs.walking) return
-  if (walkInFlight || moveBusy()) return
+  if (walkInFlight) return
 
   if (walk.running) {
+    if (moveBusy()) return
     const ran = walk.running
     if (samePosition(cs.position, ran)) {
       const rest = walk.queue.slice(1)
       useWalk.setState({ queue: rest, running: null, behind: rest.length })
-      pump()
+      pumpAgain = true
       return
     }
     // It ended without landing. A route paused on a declined signature, or
@@ -1233,15 +1269,23 @@ function pump(): void {
     return
   }
 
-  const target = walk.queue[0]
-  if (!target) return
-  // Already there: nothing to prove (a step that undid the one before it lands on your head).
-  if (samePosition(cs.position, target)) {
-    const rest = walk.queue.slice(1)
-    useWalk.setState({ queue: rest, behind: rest.length })
-    pump()
+  for (;;) {
+    const w = useWalk.getState()
+    const target = w.queue[w.handed]
+    if (!target) return
+    // Already there with nothing down the lanes: nothing to prove (a step that undid the one before it lands on your head).
+    if (w.handed === 0 && !moveBusy() && samePosition(useCyberspace.getState().position, target)) {
+      const rest = w.queue.slice(1)
+      useWalk.setState({ queue: rest, behind: rest.length })
+      continue
+    }
+    const lane = useCyberspace.getState().walkLane(target)
+    if (lane === 'taken') { useWalk.setState({ handed: w.handed + 1 }); continue }
+    if (lane === 'serial' && w.handed === 0 && !moveBusy()) break
     return
   }
+
+  const target = useWalk.getState().queue[0]
   useWalk.setState({ running: target })
   walkInFlight = true
   const stillAimed = (): boolean => {
@@ -1253,6 +1297,24 @@ function pump(): void {
     pump()
   })
 }
+
+// The lanes report back in order: a step landed (the front of the queue), or
+// the walk stops with the reason (what was signed before it stays).
+setWalkLaneHooks({
+  landed: () => {
+    const w = useWalk.getState()
+    const rest = w.queue.slice(1)
+    useWalk.setState({ queue: rest, handed: Math.max(0, w.handed - 1), behind: rest.length })
+    pump()
+  },
+  failed: (message) => {
+    if (useCyberspace.getState().walking) useWalk.getState().stop(message)
+  },
+  // A respawn or a switch ended them: the walk goes back to the head without a word.
+  dropped: () => {
+    if (useCyberspace.getState().walking && useWalk.getState().handed > 0) useWalk.getState().stop()
+  },
+})
 
 // The walk follows the store: a landing, a failure, or leaving your head
 // (a spectation, a respawn, an identity switch, history) all arrive here.
@@ -1267,7 +1329,8 @@ useCyberspace.subscribe((s, prev) => {
     useCyberspace.setState({ walking: false })
     clearSettle()
     dropFall()
-    useWalk.setState({ queue: [], open: null, running: null, behind: 0 })
+    useWalk.setState({ queue: [], open: null, running: null, handed: 0, behind: 0 })
+    dropWalkLanes()
     if (moveBusy() || useCyberspace.getState().plan) useCyberspace.getState().cancelPlan()
     return
   }
@@ -1284,13 +1347,13 @@ useCyberspace.subscribe((s, prev) => {
   // Your head moved mid-fall with none of the walk's own hops in flight:
   // another device's move, or a chain cut short. The fall's hops would start
   // from a place you never were, so it goes, with the walk, back to the head.
-  if (fall !== null && w.running === null && !samePosition(s.position, prev.position)) {
+  if (fall !== null && w.running === null && w.handed === 0 && !samePosition(s.position, prev.position)) {
     w.stop()
     return
   }
   // Your head moved with nothing of the walk's queued: another device's move
   // folded in (the fold leaves a walk's cursor alone). The eye goes to it.
-  if (s.position !== prev.position && fall === null && w.queue.length === 0 && w.open === null && w.running === null && !samePosition(s.cursor, s.position)) {
+  if (s.position !== prev.position && fall === null && w.queue.length === 0 && w.open === null && w.running === null && w.handed === 0 && !samePosition(s.cursor, s.position)) {
     useCyberspace.setState({ cursor: { ...s.position } })
     return
   }

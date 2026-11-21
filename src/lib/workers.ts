@@ -5,8 +5,9 @@
  * Proof worker: single worker for Cantor proof computation.
  */
 
-import type { RunRequest, RunResponse } from '../workers/terrain.worker'
+import type { RunRequest, RunResponse, TerrainReady } from '../workers/terrain.worker'
 import { tlog } from './log'
+import { checkVersion, useVersionGate } from './versionGate'
 import type { ProofMode, ProofRequest, ProofResponse, ProofWorkerMessage } from '../workers/proof.worker'
 
 let proofWorker: Worker | null = null
@@ -104,6 +105,8 @@ const terrainIdle: boolean[] = []
 const runQueue: RunRequest[] = []
 /** The id of the run each worker is on, so a worker that throws can say which run it lost. */
 const terrainRunning: (number | null)[] = []
+/** Whether each worker has said it loaded (terrain.worker.ts TerrainReady): one that errors before it has never loaded, its file gone with a deploy. */
+const terrainLoaded: boolean[] = []
 
 /**
  * Told the ids of runs that will never be answered: dropped from the queue
@@ -115,6 +118,70 @@ let runDropHandler: ((ids: number[]) => void) | null = null
 
 export function setRunDropHandler(handler: ((ids: number[]) => void) | null): void {
   runDropHandler = handler
+}
+
+/**
+ * Told each run's answer, after its worker is free again. One handler for
+ * the pool rather than a listener on each worker, so the pool can let its
+ * workers go and start new ones without anyone listening to a dead worker.
+ */
+let runResultHandler: ((answer: RunResponse) => void) | null = null
+
+export function setRunResultHandler(handler: ((answer: RunResponse) => void) | null): void {
+  runResultHandler = handler
+}
+
+/**
+ * A pool with nothing to do for this long lets its workers go, and the next
+ * run starts them again. One per core but one, each its own V8 heap with
+ * cyberspace-core loaded, they sat idle for the life of the page: 7 of the
+ * 12 workers alive in arkinox's ?diag=1 report (2026-11-18), on a view that
+ * asks for terrain only when it moves.
+ */
+export const TERRAIN_IDLE_MS = 60_000
+/** Pools in a row that failed to load before the next waits LOAD_REST_MS. */
+export const LOAD_FAILURES_BEFORE_REST = 3
+export const LOAD_REST_MS = 60_000
+let loadFailures = 0
+let lastLoadFailure = 0
+let retireTimer: ReturnType<typeof setTimeout> | null = null
+
+function poolIdle(): boolean {
+  return runQueue.length === 0 && terrainIdle.every(Boolean)
+}
+
+/**
+ * Never once a newer build is deployed: a worker holds its code while it runs,
+ * but a new one asks for this build's hashed file, which the deploy may have
+ * taken away (the proof worker's note, preloadProofWorker).
+ */
+function mayRetire(): boolean {
+  return useVersionGate.getState().verdict === 'ok'
+}
+
+function armRetire(): void {
+  if (retireTimer !== null || terrainWorkers.length === 0 || !poolIdle() || !mayRetire()) return
+  retireTimer = setTimeout(retireTerrain, TERRAIN_IDLE_MS)
+}
+
+function retireTerrain(): void {
+  retireTimer = null
+  if (!poolIdle() || !mayRetire()) return
+  tlog(`[workers] pool idle ${TERRAIN_IDLE_MS / 1000} s: letting ${terrainWorkers.length} workers go`)
+  dropPool()
+}
+
+function dropPool(): void {
+  for (const w of terrainWorkers) w.terminate()
+  terrainWorkers.length = 0
+  terrainIdle.length = 0
+  terrainRunning.length = 0
+  terrainLoaded.length = 0
+}
+
+/** Terrain workers alive now (tests). */
+export function terrainWorkersAlive(): number {
+  return terrainWorkers.length
 }
 
 export function setProofHandler(handler: ((msg: ProofResponse) => void) | null): void {
@@ -170,25 +237,48 @@ export function getTerrainWorkers(): Worker[] {
       const slot = i
       // Free the slot before the consumer's own listener runs, so the next
       // job is already in flight while the result is being folded into cache.
-      worker.addEventListener('message', () => {
+      worker.addEventListener('message', (event: MessageEvent<RunResponse | TerrainReady>) => {
+        // A worker let go may still have an answer on its way: nobody's now.
+        if (terrainWorkers[slot] !== worker) return
+        if ('ready' in event.data) { terrainLoaded[slot] = true; loadFailures = 0; return }
         terrainIdle[slot] = true
         terrainRunning[slot] = null
         pumpRunQueue()
+        runResultHandler?.(event.data)
+        armRetire()
       })
       // A worker that throws never posts back, so without this its slot stays
       // busy forever and the queue drains one worker short each time until the
       // pool wedges completely and no result ever arrives again.
       worker.addEventListener('error', (event) => {
+        if (terrainWorkers[slot] !== worker) return
         tlog(`[workers] w${slot} FAILED:`, event.message)
+        if (!terrainLoaded[slot]) {
+          // It never loaded, and its siblings came from the same file: handed
+          // the next run, each would hold it for good and the pool would
+          // wedge. The whole pool goes, every run out or queued is given back,
+          // and the next run starts a new pool. A file gone with a deploy means
+          // a newer build: the version gate is asked now, so the page says so.
+          const lost = [...terrainRunning.filter((id): id is number => id !== null), ...runQueue.map((r) => r.id)]
+          runQueue.length = 0
+          dropPool()
+          loadFailures++
+          lastLoadFailure = Date.now()
+          void checkVersion().catch(() => { /* asked again on its own clock */ })
+          if (lost.length) runDropHandler?.(lost)
+          return
+        }
         const lost = terrainRunning[slot]
         terrainIdle[slot] = true
         terrainRunning[slot] = null
         pumpRunQueue()
         if (lost !== null) runDropHandler?.([lost])
+        armRetire()
       })
       terrainWorkers.push(worker)
       terrainIdle.push(true)
       terrainRunning.push(null)
+      terrainLoaded.push(false)
     }
   }
   return terrainWorkers
@@ -225,6 +315,13 @@ export function postProof(request: ProofRequest): void {
 
 /** Queue a run. Order is preserved: the first queued is the first started. */
 export function postRun(request: RunRequest): void {
+  if (retireTimer !== null) { clearTimeout(retireTimer); retireTimer = null }
+  // Pools that keep failing to load are not started again on every move: a
+  // minute's rest after the third in a row, the run given back meanwhile.
+  if (terrainWorkers.length === 0 && loadFailures >= LOAD_FAILURES_BEFORE_REST && Date.now() - lastLoadFailure < LOAD_REST_MS) {
+    runDropHandler?.([request.id])
+    return
+  }
   getTerrainWorkers()
   runQueue.push(request)
   pumpRunQueue()

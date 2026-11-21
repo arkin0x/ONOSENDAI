@@ -105,6 +105,7 @@ import { useHyperspace } from './store/useHyperspace'
 import { useSecrets, watchFocus } from './store/useSecrets'
 import { useInventory } from './store/useInventory'
 import { useShardFolders } from './store/useShardFolders'
+import { startPersonalLists } from './store/personalStart'
 import { useFound } from './store/useFound'
 import { watchMyAvatar } from './store/useAvatars'
 import { setSyncPriority } from './lib/hyperspace/anchors'
@@ -136,7 +137,7 @@ export default function App(): JSX.Element {
   useProofListener()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startVersionGate(); startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); startHidesSync(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); watchMyAvatar(); void useSecrets.getState().load(); void useInventory.getState().load(); void useShardFolders.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn(); watchDoorReturn() }, [])
+  useEffect(() => { startVersionGate(); startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); startHidesSync(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); watchMyAvatar(); void useSecrets.getState().load(); void useInventory.getState().load(); void useShardFolders.getState().load(); void useFound.getState().load(); startPersonalLists(); watchFocus(); watchNearbyReturn(); watchDoorReturn() }, [])
   // onosendai.tech/C/<hex>: a place or a region to open on, and Back and
   // Forward over the ones the View box opens (store/useCoordRoute.ts).
   useEffect(() => {
@@ -434,7 +435,8 @@ export default function App(): JSX.Element {
       )}
       {showPanels && !offerUp && <CrashNote where="the menu"><Hud menuOpen={crowded} /></CrashNote>}
       <SpectateBar />
-      {!crowded && !offerUp && !deploying && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
+      {/* Hidden, never unmounted, while out of the way: each mount is a new WebGL context (scene/Compass3D). */}
+      <Compass3D hidden={crowded || offerUp || deploying} onTap={() => setViewMenuOpen((open) => !open)} />
       {/* Not while spectating: the spectate bar owns the bottom of the screen,
           and on a foldable's wide screen the folded CHAT chip sat on top of
           it. You cannot speak from someone else's head anyway. */}

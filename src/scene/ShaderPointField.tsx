@@ -20,7 +20,7 @@ import {
   Vector3,
 } from 'three'
 import { VOLUME_RADIUS, VOLUME_SIZE, type TerrainVolume } from '../hooks/useTerrainVolume'
-import { UNKNOWN } from '../workers/terrain.worker'
+import { UNKNOWN } from '../lib/terrainUnknown'
 import { useCyberspace } from '../store/useCyberspace'
 import type { ViewWindow } from '../hooks/useViewWindow'
 import { stepFor, type Position, type ViewAxes } from '../lib/space'

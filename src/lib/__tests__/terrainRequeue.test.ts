@@ -18,9 +18,6 @@ import type { Plane } from 'cyberspace-core'
 import type { Position, ViewAxes } from '../space'
 
 const fake = vi.hoisted(() => {
-  // The terrain worker's module, where UNKNOWN lives, installs its message
-  // handler on `self` when imported.
-  ;(globalThis as { self?: unknown }).self ??= globalThis
   // Two workers, so most of a volume's runs wait in the queue.
   Object.defineProperty(globalThis, 'navigator', { value: { hardwareConcurrency: 3 }, configurable: true })
 
@@ -43,7 +40,10 @@ const fake = vi.hoisted(() => {
       if (type === 'message') this.message.push(listener)
       if (type === 'error') this.error.push(listener)
     }
+    saidReady = false
     postMessage(run: Run): void {
+      // The real worker says it loaded before it reads its first run (terrain.worker.ts TerrainReady).
+      if (!this.saidReady) { this.saidReady = true; for (const listener of [...this.message]) listener({ data: { ready: true } }) }
       if (this.running) throw new Error('a busy worker was handed a run')
       this.running = run
       const at = { x: run.originX, y: run.originY, z: run.originZ }

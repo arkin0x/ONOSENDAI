@@ -63,7 +63,32 @@ export function isListed(d: MyDeployment | null | undefined): d is MyDeployment 
 
 export const rowKey = (d: MyDeployment | null | undefined): string => d?.eventId ?? JSON.stringify(d)
 
-interface Entry { key: string; seq: number; json: string; row: MyDeployment | null }
+/**
+ * A stored row: its place, its row, and a signature of the JSON it is stored
+ * as (sigOf), not the JSON. Kept, the JSON was a second copy of every row in
+ * memory, shard model, inner event and all, often larger than the row itself:
+ * in a seeded copy of arkinox's spot, 25 MB for 120 hides, held for the life
+ * of the page (2026-11-18). The JSON is made when a row is written, and let go.
+ */
+interface Entry { key: string; seq: number; sig: string; row: MyDeployment | null }
+
+/**
+ * What a row's JSON is, in a few dozen characters: its length and two
+ * independent 32-bit hashes of it. Two rows that differ and still match on
+ * all three would need a 1 in 2^64 accident, so a save that compares these
+ * writes every row that changed and none that did not.
+ */
+export function sigOf(json: string): string {
+  let a = 0x811c9dc5
+  let b = 0x9747b28c
+  for (let i = 0; i < json.length; i++) {
+    const c = json.charCodeAt(i)
+    a = Math.imul(a ^ c, 0x01000193)
+    b = Math.imul(b ^ c, 0x5bd1e995)
+    b ^= b >>> 15
+  }
+  return `${json.length}:${(a >>> 0).toString(36)}:${(b >>> 0).toString(36)}`
+}
 
 let mode: HiddenStorage = 'local'
 let buckets: Map<string, Map<string, Entry>> | null = null
@@ -81,7 +106,7 @@ let expired = false
 const DECIDE_TIMEOUT_MS = 15_000
 const COMMIT_TIMEOUT_MS = 10_000
 const listeners = new Set<() => void>()
-/** The JSON each row object was stored as, so a save knows what did not change without serializing it. */
+/** The signature (sigOf) of the JSON each row object was stored as, so a save knows what did not change without serializing it. */
 const storedAs = new WeakMap<object, string>()
 
 export function storageMode(): HiddenStorage { return mode }
@@ -137,7 +162,7 @@ function localView(): Map<string, Map<string, Entry>> {
   const deleted = deletedIds()
   readArray(BARE_KEY).forEach((d, i) => {
     const key = rowKey(d)
-    at(bareBucket(d, deleted)).set(key, { key, seq: i, json: JSON.stringify(d), row: d })
+    at(bareBucket(d, deleted)).set(key, { key, seq: i, sig: sigOf(JSON.stringify(d)), row: d })
   })
   for (const name of localBuckets()) {
     const b = at(name)
@@ -145,19 +170,19 @@ function localView(): Map<string, Map<string, Entry>> {
     let last = Math.max(0, ...[...b.values()].map((e) => e.seq))
     for (const d of readArray(localKey(name))) {
       const key = rowKey(d)
-      b.set(key, { key, seq: b.get(key)?.seq ?? ++last, json: JSON.stringify(d), row: d })
+      b.set(key, { key, seq: b.get(key)?.seq ?? ++last, sig: sigOf(JSON.stringify(d)), row: d })
     }
   }
   return view
 }
 
-/** A bucket's rows, in order, each as stored. A row that did not parse is null: kept, listed by nobody. */
-export function entriesIn(name: string): Array<{ row: MyDeployment | null; json: string }> {
+/** A bucket's rows, in order, each with the signature of the JSON it is stored as. A row that did not parse is null: kept, listed by nobody. */
+export function entriesIn(name: string): Array<{ row: MyDeployment | null; sig: string }> {
   return [...bucketOf(name).values()].sort((a, b) => a.seq - b.seq || (a.key < b.key ? -1 : 1))
 }
 
-/** Say this row object is what this JSON was read as, so saving it unchanged writes nothing. */
-export function noteStored(row: MyDeployment, json: string): void { storedAs.set(row, json) }
+/** Say this row object is what the JSON with this signature was read as, so saving it unchanged writes nothing. */
+export function noteStored(row: MyDeployment, sig: string): void { storedAs.set(row, sig) }
 
 function seqFor(rows: readonly MyDeployment[], i: number, b: Map<string, Entry>): number {
   const prev = i > 0 ? b.get(rowKey(rows[i - 1]))?.seq : undefined
@@ -180,12 +205,20 @@ export function saveRows(name: string, rows: readonly MyDeployment[], stored: (d
   rows.forEach((row, i) => {
     const key = rowKey(row)
     present.add(key)
-    let json = storedAs.get(row)
-    if (json === undefined) { json = stored(row); storedAs.set(row, json) }
+    let json: string | undefined
+    let sig = storedAs.get(row)
+    if (sig === undefined) { json = stored(row); sig = sigOf(json); storedAs.set(row, sig) }
     const e = b.get(key)
-    if (e?.json === json) { e.row = row; return }
+    if (e?.sig === sig) { e.row = row; return }
+    // Noted from another serialization (a load, another tab): made now, and signed as made.
+    if (json === undefined) {
+      json = stored(row)
+      sig = sigOf(json)
+      storedAs.set(row, sig)
+      if (e?.sig === sig) { e.row = row; return }
+    }
     const seq = e?.seq ?? seqFor(rows, i, b)
-    b.set(key, { key, seq, json, row })
+    b.set(key, { key, seq, sig, row })
     dirty.set(`r\0${name}\0${key}`, { put: { bucket: name, key, seq, json } })
     any = true
   })
@@ -204,12 +237,12 @@ function writeLocal(): boolean {
   const names = new Set([...dirty.values()].map((c) => ('put' in c ? c.put.bucket : 'del' in c ? c.del.bucket : '')).filter(Boolean))
   dirty = new Map([...dirty].filter(([, c]) => 'secret' in c || 'closed' in c || 'unclosed' in c))
   const deleted = deletedIds()
-  const bare = new Map<string, { name: string; json: string }>()
-  for (const d of readArray(BARE_KEY)) bare.set(rowKey(d), { name: bareBucket(d, deleted), json: JSON.stringify(d) })
+  const bare = new Map<string, { name: string; sig: string }>()
+  for (const d of readArray(BARE_KEY)) bare.set(rowKey(d), { name: bareBucket(d, deleted), sig: sigOf(JSON.stringify(d)) })
   let ok = true
   for (const name of names) {
     const b = bucketOf(name)
-    const own = [...b.values()].sort((x, y) => x.seq - y.seq).filter((e) => bare.get(e.key)?.json !== e.json || bare.get(e.key)?.name !== name).map((e) => e.row)
+    const own = [...b.values()].sort((x, y) => x.seq - y.seq).filter((e) => bare.get(e.key)?.sig !== e.sig || bare.get(e.key)?.name !== name).map((e) => e.row)
     const gone = [...bare].filter(([k, v]) => v.name === name && !b.has(k)).map(([k]) => k)
     try {
       localStorage.setItem(localKey(name), JSON.stringify(own))
@@ -293,7 +326,7 @@ async function heard(m: { rows: Array<[string, string]>; secrets: Array<[string,
     m.rows.forEach(([name, key], i) => {
       if (dirty.has(`r\0${name}\0${key}`)) return
       const rec = got.rows[i]
-      if (rec) bucketOf(name).set(key, { key, seq: rec.seq, json: rec.json, row: parsed(rec.json) })
+      if (rec) bucketOf(name).set(key, { key, seq: rec.seq, sig: sigOf(rec.json), row: parsed(rec.json) })
       else bucketOf(name).delete(key)
     })
     for (const rec of got.secrets) if (rec) (secrets[rec.owner] ??= {})[rec.doorId] = rec
@@ -455,7 +488,7 @@ async function decide(): Promise<HiddenStorage> {
     for (const r of all.rows) {
       let b = view.get(r.bucket)
       if (!b) view.set(r.bucket, b = new Map())
-      b.set(r.key, { key: r.key, seq: r.seq, json: r.json, row: parsed(r.json) })
+      b.set(r.key, { key: r.key, seq: r.seq, sig: sigOf(r.json), row: parsed(r.json) })
     }
     secrets = {}
     for (const s of all.secrets) (secrets[s.owner] ??= {})[s.doorId] = s
@@ -463,7 +496,7 @@ async function decide(): Promise<HiddenStorage> {
     for (const c of all.closed) (closed[c.owner] ??= {})[c.doorId] = c
     // What the session changed while this was deciding goes on top, and is written next.
     for (const c of dirty.values()) {
-      if ('put' in c) { let b = view.get(c.put.bucket); if (!b) view.set(c.put.bucket, b = new Map()); b.set(c.put.key, { key: c.put.key, seq: c.put.seq, json: c.put.json, row: parsed(c.put.json) }) }
+      if ('put' in c) { let b = view.get(c.put.bucket); if (!b) view.set(c.put.bucket, b = new Map()); b.set(c.put.key, { key: c.put.key, seq: c.put.seq, sig: sigOf(c.put.json), row: parsed(c.put.json) }) }
       else if ('del' in c) view.get(c.del.bucket)?.delete(c.del.key)
       else if ('closed' in c) (closed[c.closed.owner] ??= {})[c.closed.doorId] = c.closed
       else if ('unclosed' in c) delete closed[c.unclosed.owner]?.[c.unclosed.doorId]

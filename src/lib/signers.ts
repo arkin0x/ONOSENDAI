@@ -24,6 +24,7 @@ import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, NostrEvent } from './events'
 import { attributed } from './client'
 import { guardRequestSize } from './signerRequestSize'
+import { trackActivity } from './signerActivity'
 import { DEFAULT_SIGNER_RELAY, normalizeSignerRelay, signerRelays, withoutRetiredSignerRelays } from './loginCredentials'
 export { BACKUP_SIGNER_RELAY, DEFAULT_SIGNER_RELAY, loginCredentialKind, normalizeSignerRelay, signerRelays, withoutRetiredSignerRelays } from './loginCredentials'
 
@@ -90,6 +91,12 @@ export interface Signer {
   clientSecretKey?: Uint8Array
   /** A client-initiated Nostr Connect session does not repeat the bunker connect handshake. */
   nostrConnectSession?: boolean
+  /**
+   * For a bunker: the session's client pubkey (hex), what its activity is
+   * kept under (signerActivity.ts). The same for a restored session's
+   * stand-in and the live signer it becomes, since both use one client key.
+   */
+  session?: string
   close?: () => Promise<void>
   /** For a deferred signer: force the reconnection and return the real one. */
   reconnect?: () => Promise<Signer>
@@ -343,8 +350,10 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
   const clientSk = clientSecretKey ?? generateSecretKey()
   const bp = await nip46.parseBunkerInput(bunkerUri.trim())
   if (!bp) throw new Error('Not a valid bunker URI')
-  // Every request held to what one NIP-44 message carries (signerRequestSize.ts).
-  const bunker = guardRequestSize(nip46.BunkerSigner.fromBunker(clientSk, bp, { pool: answersFirst() as never }))
+  const session = getPublicKey(clientSk)
+  // Every request watched for its answer (signerActivity.ts), then held to
+  // what one NIP-44 message carries (signerRequestSize.ts).
+  const bunker = guardRequestSize(trackActivity(nip46.BunkerSigner.fromBunker(clientSk, bp, { pool: answersFirst() as never }), session))
   onStep?.('connect')
   await said(bunker, bunker.connect())
   onStep?.('get_public_key')
@@ -355,6 +364,7 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
     pubkey,
     bunkerUri,
     clientSecretKey: clientSk,
+    session,
     signEvent: (template) => said(bunker, bunker.signEvent(attributed(template))) as unknown as Promise<NostrEvent>,
     nip44Decrypt: (pk, ct) => said(bunker, bunker.nip44Decrypt(pk, ct)),
     nip44Encrypt: (pk, pt) => said(bunker, bunker.nip44Encrypt(pk, pt)),
@@ -421,14 +431,17 @@ function wrapBunkerSigner(
   bunkerUri: string,
   nostrConnectSession = false,
 ): Signer {
-  // Every request held to what one NIP-44 message carries (signerRequestSize.ts).
-  guardRequestSize(bunker)
+  const session = getPublicKey(clientSecretKey)
+  // Every request watched for its answer (signerActivity.ts), then held to
+  // what one NIP-44 message carries (signerRequestSize.ts).
+  guardRequestSize(trackActivity(bunker, session))
   const signer: Signer = {
     kind: 'nip46',
     pubkey,
     bunkerUri,
     clientSecretKey,
     nostrConnectSession,
+    session,
     signEvent: (template) => said(bunker, bunker.signEvent(attributed(template))) as unknown as Promise<NostrEvent>,
     nip44Decrypt: (pk, ct) => said(bunker, bunker.nip44Decrypt(pk, ct)),
     nip44Encrypt: (pk, pt) => said(bunker, bunker.nip44Encrypt(pk, pt)),
@@ -480,6 +493,8 @@ export function createNostrConnectSession(relayInput = DEFAULT_SIGNER_RELAY): No
         { pool: answersFirst() as never, skipSwitchRelays: true },
         signal ?? 300_000,
       )
+      // Its get_public_key is the session's first request: watched from there.
+      trackActivity(bunker, getPublicKey(clientSecretKey))
       onConnected?.()
       let pubkey: string
       try { pubkey = await waitForPublicKey(bunker, signal) }
@@ -632,6 +647,8 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
    * a new approval prompt on every focus (the real-bunker run, 2026-11-04).
    */
   let failed: { err: unknown } | null = null
+  /** LOG OUT closed it: nothing more is asked, and a handshake that still answers is closed at once. */
+  let closed = false
   // Whichever attempt answers first answers everyone, those waiting on an older one too.
   let announce: (s: Signer) => void = () => {}
   const arrived = new Promise<Signer>((resolve) => { announce = resolve })
@@ -684,6 +701,10 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
     ? JSON.stringify([t.kind, t.tags.find((x) => x[0] === 'relay')?.[1]])
     : JSON.stringify([t.kind, t.created_at, t.tags, t.content])
   const adopt = (s: Signer): Signer => {
+    if (closed) {
+      void s.close?.()
+      throw new Error('This signer was logged out on this device.')
+    }
     if (!live) {
       liveRaw = s
       live = { ...s, signEvent: (t) => joinable(t) ?? s.signEvent(t) }
@@ -721,6 +742,7 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
     return mine
   }
   const ensure = (restart = true): Promise<Signer> => {
+    if (closed) return Promise.reject(new Error('This signer was logged out on this device.'))
     if (live) return Promise.resolve(live)
     // A failed reconnect is not kept for a signature: the next one tries
     // again. Kept, one early failure (an extension not injected yet, a bunker
@@ -740,9 +762,11 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
     // limit. A wake (and the store's retry) stops waiting once it goes stale.
     return handshakeWithin(Promise.race(restart ? [a.done, arrived] : [a.done, arrived, a.gaveUp]))
   }
+  const session = sessionOfPref(pref)
   return {
     kind: pref.kind,
     pubkey: pref.pubkey,
+    ...(session ? { session } : {}),
     signEvent: (template) => viaHandshake(template, (s) => s.signEvent(template)),
     // Whether the live signer offers NIP-44 is known only once it is up.
     nip44Decrypt: (pk, ct) => ensure().then((s) => {
@@ -763,8 +787,19 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
     }),
     heldPubkey: () => ensure().then((s) => (s.heldPubkey ? s.heldPubkey() : s.pubkey)),
     reconnect: () => ensure(false),
+    // LOG OUT: the handshake in progress is given up, the live signer (if it
+    // came up) closed, and the sockets to the bunker's relays dropped.
+    close: async () => {
+      closed = true
+      if (attempt) { attempt.giveUp(); attempt = null }
+      const raw = liveRaw
+      live = null
+      liveRaw = null
+      dropSignerSockets(bunkerRelaysOf(pref))
+      await raw?.close?.()
+    },
     retry: () => {
-      if (live) return
+      if (live || closed) return
       failed = null
       if (attempt) { attempt.giveUp(); attempt = null }
       // Its sockets to the bunker's relays may be the half-open ones that
@@ -777,8 +812,19 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
 /** How soon after a signature goes out the same one asked again is the same request (deferredReconnect). */
 const SAME_REQUEST_MS = 1000
 
+/** The client pubkey of a saved bunker session (Signer.session), or undefined when it keeps none. */
+export function sessionOfPref(pref: SignerPref): string | undefined {
+  if (pref.kind !== 'nip46' || !pref.clientNsec) return undefined
+  try {
+    const { type, data } = nip19.decode(pref.clientNsec)
+    return type === 'nsec' ? getPublicKey(data as Uint8Array) : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** The relays a saved bunker login talks over, read without a lookup. */
-function bunkerRelaysOf(pref: SignerPref): string[] {
+export function bunkerRelaysOf(pref: Pick<SignerPref, 'kind' | 'bunkerUri'>): string[] {
   if (pref.kind !== 'nip46' || !pref.bunkerUri) return []
   try { return new URL(pref.bunkerUri.trim()).searchParams.getAll('relay') } catch { return [] }
 }

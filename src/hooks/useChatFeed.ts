@@ -1,11 +1,12 @@
 /**
  * useChatFeed.ts — listen for what is said where you stand, and one cube over.
  *
- * One live subscription for ephemeral envelopes (kind 23330) filed under any
- * of the regions the passive scan says you are in, plus the 26 cubes of side
- * 2^SCAN_MAX_HEIGHT around yours: a line is sealed to the cube its speaker
- * stands in, and two people a gibson apart on either side of a cube's wall
- * would otherwise never hear each other. The neighbors' keys are computed
+ * One live subscription for ephemeral envelopes (kind 23330) filed under the
+ * cube of side 2^SCAN_MAX_HEIGHT the passive scan says you are in (the one
+ * every line is sealed to, chatRegions), plus the 26 cubes of that side
+ * around yours: a line is sealed to the cube its speaker stands in, and two
+ * people a gibson apart on either side of a cube's wall would otherwise never
+ * hear each other. The neighbors' keys are computed
  * here, by the same worker the scan uses, whenever you cross into a new cube
  * of that size; 26 roots at one height is a fraction of a second.
  *
@@ -42,6 +43,25 @@ export function neighborPositions(at: { x: bigint; y: bigint; z: bigint }, h: nu
 function cubeKey(at: { x: bigint; y: bigint; z: bigint }, h: number): string {
   const s = BigInt(h)
   return `${at.x >> s},${at.y >> s},${at.z >> s}`
+}
+
+/**
+ * The regions the chat listens on: the ones a line is sealed to. A line goes
+ * to the tallest cube you stand in that is no taller than SCAN_MAX_HEIGHT
+ * (useChat sendKey), so of the cubes you stand in only that height is
+ * listened on, with the 26 cubes of that size around it (`neighbors`). The
+ * smaller cubes change at nearly every step of a walk, and listening on them
+ * too sent the subscription again at every landing, to every relay, for keys
+ * no line is ever sealed to (owner's walk, 2026-11-21). Every ONOSENDAI
+ * build since chat shipped seals to that height; a client sealing to a
+ * smaller cube would not be heard. Sorted, joined: the subscription is sent
+ * again only when this changes.
+ */
+export function chatRegions(current: Record<string, CurrentKey>, neighbors: Record<string, CurrentKey>): string {
+  let height = -1
+  for (const k of Object.values(current)) if (k.height <= SCAN_MAX_HEIGHT && k.height > height) height = k.height
+  const here = Object.keys(current).filter((id) => current[id].height === height)
+  return [...new Set([...here, ...Object.keys(neighbors)])].sort().join(',')
 }
 
 export function useChatFeed(): void {
@@ -81,7 +101,7 @@ export function useChatFeed(): void {
 
   useEffect(() => () => { worker.current?.terminate(); worker.current = null }, [])
 
-  const regions = [...new Set([...Object.keys(current), ...Object.keys(neighbors)])].sort().join(',')
+  const regions = chatRegions(current, neighbors)
   useEffect(() => {
     if (regions === '') return
     const ids = regions.split(',')

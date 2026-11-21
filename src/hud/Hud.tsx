@@ -24,6 +24,7 @@ import { TvButton } from './TvScreen'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { LoginModal } from './LoginModal'
+import { LogoutButton, SignerStatus } from './SignerControls'
 import { NotificationsButton } from './Notifications'
 import { useProfileView } from '../store/useProfileView'
 import { AvatarsPanel } from './AvatarsPanel'
@@ -134,8 +135,10 @@ function IdentityPanel(): JSX.Element {
         <div className="identity__acts">
           <button className="identity__change" onClick={() => useProfileView.getState().edit()}>PROFILE</button>
           <button className="identity__change" onClick={() => setLoginOpen(true)}>CHANGE</button>
+          <LogoutButton />
         </div>
       </div>
+      <SignerStatus />
       <div className="identity__row">
         <NotificationsButton />
         <button className="identity__change identity__blocked" onClick={() => setMutesOpen(true)} title="Who you blocked and what you muted, on your nostr mute list">
@@ -147,7 +150,11 @@ function IdentityPanel(): JSX.Element {
         Your spawn location is equal to your public key. Use the generated key or
         sign in with your nostr keypair. LIVE indicates your proofs are being
         published so other identities can see your movements. LOCAL means proofs
-        are stored on this device until you switch to LIVE.
+        are stored on this device until you switch to LIVE. LOG OUT leaves the
+        signer in use and goes back to this device's own key; everything stays
+        here, and logging in again picks up where you left off. With a remote
+        signer, SIGNER says when it last answered, TEST SIGNER asks it now, and
+        PAIR AGAIN pairs it with a fresh QR code.
       </Explanation>
 
       {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}

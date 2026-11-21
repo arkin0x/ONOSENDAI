@@ -23,6 +23,8 @@ interface Props {
    */
   busy?: boolean
   confirmLabel: string
+  /** The confirm cannot be pressed (what it would do is refused for now); cancel still can. */
+  confirmDisabled?: boolean
   danger?: boolean
   /** An extra class on the card, for a border that is not the destructive red. */
   cardClassName?: string
@@ -41,7 +43,7 @@ interface Props {
   onCancel: () => void
 }
 
-export function ConfirmModal({ banner, title, body, figure, busy = false, confirmLabel, danger = true, cardClassName, cancelLabel = 'CANCEL', onBackdrop, scroll = false, onConfirm, onCancel }: Props): JSX.Element {
+export function ConfirmModal({ banner, title, body, figure, busy = false, confirmLabel, confirmDisabled = false, danger = true, cardClassName, cancelLabel = 'CANCEL', onBackdrop, scroll = false, onConfirm, onCancel }: Props): JSX.Element {
   // Escape is a tap on the backdrop: it answers nothing, so a held-chain
   // prompt sets itself aside and every other one cancels. Opened over another
   // modal, this is the more recent one, so it closes first (arkinox,
@@ -66,7 +68,7 @@ export function ConfirmModal({ banner, title, body, figure, busy = false, confir
         <div className={`modal__body ${scroll ? 'modal__body--scroll' : ''}`}>{body}</div>
         <div className="modal__row">
           {cancelLabel !== null && <button className="modal__cancel" onClick={onCancel} disabled={busy}>{cancelLabel}</button>}
-          <button className={`modal__confirm ${danger ? 'modal__confirm--danger' : ''} ${busy ? 'is-busy' : ''}`} onClick={onConfirm} disabled={busy}>
+          <button className={`modal__confirm ${danger ? 'modal__confirm--danger' : ''} ${busy ? 'is-busy' : ''}`} onClick={onConfirm} disabled={busy || confirmDisabled}>
             {busy && <span className="spin" aria-hidden="true" />}{confirmLabel}
           </button>
         </div>

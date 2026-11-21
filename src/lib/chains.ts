@@ -176,6 +176,7 @@ async function gatherChain<T>(
   have: NostrEvent[],
   byAuthor: (t: T, pubkey: string) => T,
   since?: number,
+  askBoth?: (fs: Filter[]) => Promise<T>,
 ): Promise<{ got: T; whole: boolean }> {
   // Whatever a relay sends back, only the identity's own events are kept:
   // the filter asks for that author, but a relay that ignores it must not be
@@ -188,8 +189,24 @@ async function gatherChain<T>(
     // With the chain mostly in hand (`have`), only what is newer is asked
     // for; a hole left below it is filled by the loop further down.
     const chainAsk = since !== undefined ? { ...chainFilter(pubkey, knownSpawnId), since } : chainFilter(pubkey, knownSpawnId)
-    const [spawns, chain] = await Promise.all([ask(spawnsFilter(pubkey)), ask(chainAsk)])
-    got = combine(spawns, chain)
+    // `askBoth`: the two in one REQ to each relay, which answers both or
+    // neither (a head confirmation, before every signature: half the REQs
+    // to every relay at every step of a walk, owner's diag of 2026-11-21).
+    if (askBoth) {
+      got = byAuthor(await askBoth([spawnsFilter(pubkey), chainAsk]), pubkey)
+      // A relay may cap the whole REQ rather than each filter (the canonical
+      // relay's nostrdb keeps the newest 500 of the union), and the spawns are
+      // the oldest, so they are what a long run of new moves pushes out. Moves
+      // back with no spawn among them: the spawns are asked on their own, as
+      // before, so the newest spawn is known and the hole below the moves is
+      // filled. Nothing back at all asks nothing more, so a relay that is down
+      // costs no second wait.
+      const back = eventsOf(got)
+      if (back.length > 0 && newestSpawnId(back, pubkey) === null) got = combine(got, await ask(spawnsFilter(pubkey)))
+    } else {
+      const [spawns, chain] = await Promise.all([ask(spawnsFilter(pubkey)), ask(chainAsk)])
+      got = combine(spawns, chain)
+    }
     // The relays' newest spawn, from what the relays hold and nothing else.
     // A chain held on this device has a newer spawn than any on the relays
     // (it was signed before they could answer), and choosing from it here
@@ -353,8 +370,9 @@ export async function confirmChainEvents(
     timer = setTimeout(() => deadline.abort(), maxWait * 2 + 100)
   }
   const ask = async (): Promise<NostrEvent[] | null> => {
-    const { got, whole } = await gatherChain((f) => queryEachSettled(relays, f, maxWait, canonical, waitFor, { onSent: sent, stop: deadline.signal, onLate: (a) => noteHoldersFrom(pubkey, [a]) }), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
-      (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })), opts.since)
+    const settledAsk = (f: Filter | Filter[]): Promise<RelayAnswer[]> => queryEachSettled(relays, f, maxWait, canonical, waitFor, { onSent: sent, stop: deadline.signal, onLate: (a) => noteHoldersFrom(pubkey, [a]) })
+    const { got, whole } = await gatherChain(settledAsk, mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
+      (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })), opts.since, settledAsk)
     noteHoldersFrom(pubkey, got)
     if (!whole) return null
     const merged = mergeAnswers(got)

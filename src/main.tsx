@@ -12,6 +12,7 @@ import { chainReadyToDraw } from './store/useCyberspace'
 import { hydrateHidden } from './store/hiddenStorage'
 import { wireLocalObjects } from './store/localObjects'
 import { diagWanted } from './lib/diagGate'
+import { hudFlags } from './lib/hudFlags'
 import { applyTutorialFlag, applyTutorialRoute, landedPath, noteLanding } from './tutorial/gate'
 import { takeArrivalMode } from './store/arrivalMode'
 import { inject } from '@vercel/analytics'
@@ -70,6 +71,9 @@ function boot(): void {
  */
 let tabStore: Storage | null = null
 try { tabStore = sessionStorage } catch { /* refused: on for this load only */ }
+// ?nochip=1 and ?nosyncwarn=1 (lib/hudFlags.ts), latched before the first render. The
+// rewrites above take out only their own params; the tab's storage covers later ones.
+hudFlags()
 if (diagWanted(location.search, tabStore)) {
   // A chunk that stalls cannot hold the first render: the capture starts late, and says so.
   let booted = false

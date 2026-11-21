@@ -41,6 +41,7 @@ import { useLayers } from '../store/useLayers'
 import { useEventsAhead } from '../store/walkAhead'
 import { walkWarnOpacity } from '../store/walkLimits'
 import { WALK_LIMITS_ROW, openSettingAt } from './settingsLink'
+import { hudFlags } from '../lib/hudFlags'
 
 /**
  * The line was pressed: the warning steps aside until it would have gone
@@ -52,7 +53,12 @@ export const useSyncWarnAside = create<{ aside: boolean }>(() => ({ aside: false
 /** At least this shown before the line takes a tap or the keyboard: a faint box is not a place to tap. */
 export const SYNCWARN_TAP_FROM = 0.5
 
-export function SyncWarning(): JSX.Element {
+/** The warning; not mounted at all with ?nosyncwarn=1 (lib/hudFlags.ts), so none of its hooks run. */
+export function SyncWarning(): JSX.Element | null {
+  return hudFlags().nosyncwarn ? null : <SyncWarningBox />
+}
+
+function SyncWarningBox(): JSX.Element {
   const walking = useCyberspace((s) => s.walking)
   const ahead = useEventsAhead()
   const limits = useLayers((s) => s.walkLimits)

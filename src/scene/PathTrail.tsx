@@ -48,7 +48,7 @@ import type { Plane } from 'cyberspace-core'
 import { useCyberspace } from '../store/useCyberspace'
 import { useV1HopList } from '../hooks/useChainStop'
 import { useBuilder } from '../store/useBuilder'
-import { anchorCentre, placeCentre, type Position, type ViewAxes } from '../lib/space'
+import { CONTINUOUS_SCALE_MIN, anchorCentre, originShift, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import { travelOffset } from '../lib/travel'
 import { alignedOrigin } from '../store/useCyberspace'
 import { GAME, GAME_DIM, TRAIL_DATASPACE_DIM, TRAIL_IDEASPACE_DIM } from '../lib/palette'
@@ -196,6 +196,59 @@ interface Props {
 }
 
 /**
+ * The frame the trail's vertices are laid out in: the render origin of the
+ * landing it was made at (`ref`), with every position's place in it kept
+ * (`centres`), and the trail drawn shifted by how far the render origin has
+ * moved since (trailShift). A landing re-anchors render space by whole
+ * cells, so every vertex would move by the same whole number of cells: each
+ * position's place was worked out again from its BigInt coordinates on every
+ * landing and every change of what is published, the whole chain each time,
+ * and on a 2,600-action chain that was a long task per step of a WALK
+ * (owner's phone, 2026-11-21). Now only a new position is worked out, and a
+ * landing moves one group. Below CONTINUOUS_SCALE_MIN every place is a whole
+ * number of cells, so the shifted vertices are the very numbers the old
+ * layout drew; above it, where places are not whole cells, there is no
+ * reuse and every layout is made afresh, as before.
+ */
+export interface TrailFrame {
+  ref: Position
+  scaleExp: number
+  axes: ViewAxes
+  centres: WeakMap<Position, [number, number, number]>
+}
+
+/** The farthest, in cells, the origin may move from a frame's before a new one is made: far within a float32's whole numbers. */
+export const TRAIL_FRAME_MAX_CELLS = 1 << 20
+
+/** How far the trail is drawn shifted: from its frame's origin to the render origin now, in cells, per screen axis. */
+export function trailShift(frame: TrailFrame, origin: Position): [number, number, number] {
+  return originShift(frame.ref, origin, frame.scaleExp, frame.axes).map((v) => v + 0) as [number, number, number]
+}
+
+/** `prev` while it still fits (same zoom and axes, whole cells, near enough); else a new frame at `origin`. */
+export function trailFrame(prev: TrailFrame | null, origin: Position, scaleExp: number, axes: ViewAxes): TrailFrame {
+  if (prev && scaleExp < CONTINUOUS_SCALE_MIN && prev.scaleExp === scaleExp && prev.axes === axes) {
+    const d = trailShift(prev, origin)
+    if (d.every((v) => Number.isInteger(v) && Math.abs(v) <= TRAIL_FRAME_MAX_CELLS)) return prev
+  }
+  return { ref: origin, scaleExp, axes, centres: new WeakMap() }
+}
+
+/** A position's place in `frame`, worked out once per position object. */
+export function frameCentre(frame: TrailFrame, p: Position): [number, number, number] {
+  let c = frame.centres.get(p)
+  if (!c) { c = placeCentre(p, frame.ref, frame.scaleExp, frame.axes); frame.centres.set(p, c) }
+  return c
+}
+
+/** `next`, or `prev` when every entry is the same: a change of status that flips no position rebuilds nothing. */
+function sameFlags(prev: boolean[] | null, next: boolean[]): boolean[] {
+  if (!prev || prev.length !== next.length) return next
+  for (let i = 0; i < next.length; i++) if (prev[i] !== next[i]) return next
+  return prev
+}
+
+/**
  * Nothing to draw, in the trail's own geometry layout (positions and a color
  * per vertex): what TrailWarmup draws its materials on.
  */
@@ -274,9 +327,12 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   // Which positions are only on this device: your own chain's actions whose
   // events have not been published. The chain is parsed once per change by
   // the store; positionHistory is its positions in the same order.
+  // A status change that publishes nothing new ('queued' to 'sending') keeps the same flags, and the same trail.
+  const lastLocal = useRef<boolean[] | null>(null)
   const local = useMemo(() => {
     if (spectate) return [] as boolean[]
-    return useCyberspace.getState().focusChain().map((a) => published[a.id] !== 'ok')
+    lastLocal.current = sameFlags(lastLocal.current, useCyberspace.getState().focusChain().map((a) => published[a.id] !== 'ok'))
+    return lastLocal.current
   }, [spectate, events, published])
   // The plane each position is in, from the same chain in the same order.
   const planes = useMemo(() => useCyberspace.getState().focusChain().map((a) => a.plane), [spectate, events])
@@ -297,10 +353,22 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     return out
   }, [spectate, events])
 
+  // The render origin, and the frame the trail is laid out in (TrailFrame):
+  // a landing moves the origin by whole cells and keeps the frame.
+  const origin = alignedOrigin(anchor, scaleExp)
+  const frameRef = useRef<TrailFrame | null>(null)
+  const frame = useMemo(() => {
+    frameRef.current = trailFrame(frameRef.current, origin, scaleExp, axes)
+    return frameRef.current
+    // origin.x/y/z stand in for origin, whose identity changes every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [origin.x, origin.y, origin.z, scaleExp, axes])
+  const shift = useMemo(() => trailShift(frame, origin),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [frame, origin.x, origin.y, origin.z])
+
   const trail = useMemo(() => {
     if (positionHistory.length < 2) return null
-
-    const origin = alignedOrigin(anchor, scaleExp)
     // All three axes. The trail used to map right and up only and pin depth to a
     // constant, so it drew a flat shadow of a 3D path: every out-axis hop
     // collapsed to nothing, and rotating the view changed which axis was being
@@ -308,15 +376,14 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     // the cursor and the avatar, so a segment ends where its gibson is drawn:
     // cell centres below the continuous range, true positions in it, where a
     // trail across the whole cube would otherwise fold onto eight corners.
-    const centre = (p: Position): [number, number, number] =>
-      placeCentre(p, origin, scaleExp, axes)
-
-    // Where the avatar stands, for the head-riding vertex below.
-    return {
-      ...buildTrail({ positions: positionHistory, planes, local, split, games: gameSegments, centre }),
-      head: anchorCentre(anchor, scaleExp, axes),
-    }
-  }, [positionHistory, planes, axes, scaleExp, anchor, split, local, gameSegments])
+    // In the trail's frame, each position worked out once (frameCentre).
+    return buildTrail({ positions: positionHistory, planes, local, split, games: gameSegments, centre: (p) => frameCentre(frame, p) })
+  }, [positionHistory, planes, frame, split, local, gameSegments])
+  // Where the avatar stands, for the head-riding vertex below, in the trail's frame.
+  const head = useMemo(() => {
+    const at = anchorCentre(anchor, scaleExp, axes)
+    return [at[0] - shift[0], at[1] - shift[1], at[2] - shift[2]] as [number, number, number]
+  }, [anchor, scaleExp, axes, shift])
   // Rebuilt on every hop and re-anchor; the old buffers go with it.
   useEffect(() => () => {
     if (trail) for (const line of trailLines(trail)) line.geometry.dispose()
@@ -350,8 +417,7 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     if (exploreIndex !== null || spectate || focus !== null) return
     const riding = trail?.lastLocal ? trail.walkedLocal : trail?.walked
     const attr = riding?.geometry.attributes.position
-    const head = trail?.head
-    if (!attr || !head) return
+    if (!attr) return
     const arr = attr.array as Float32Array
     const n = arr.length
     if (n < 3) return
@@ -382,8 +448,9 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   if ((focus !== null && !placed) || !showTrail) return null
 
   // Each line's color is per vertex (paintTrail), so the materials are white.
+  // Laid out in the trail's frame, drawn shifted to the render origin now.
   return (
-    <>
+    <group position={shift}>
       {/* A trail with nothing unpublished yet (a returning player's) has
           not drawn the dashed line this session: its first move would
           compile it in the landing frame. */}
@@ -420,6 +487,6 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
           <lineBasicMaterial vertexColors transparent opacity={0.2} toneMapped={false} />
         </lineSegments>
       )}
-    </>
+    </group>
   )
 }

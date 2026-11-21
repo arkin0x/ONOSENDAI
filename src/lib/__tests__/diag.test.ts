@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { diagWanted, DIAG_FOUND_KEY, DIAG_KEY, DIAG_LAST_KEY } from '../diagGate'
-import { DIAG_COLUMNS, GlLedger, Ring, bytesPerPixel, framePercentiles, frameVerb, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes } from '../diagCore'
+import { DIAG_COLUMNS, GlLedger, LOAF_COLUMNS, LOAF_MIN_MS, LOAF_SCRIPT_COLUMNS, LOAF_TOP, LoafLedger, Ring, scriptFile, bytesPerPixel, framePercentiles, frameVerb, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes } from '../diagCore'
 
 const SRC = path.resolve(__dirname, '../..')
 
@@ -307,5 +307,65 @@ describe('how exact the heap reading is', () => {
     expect(heapReading([])).toBe('absent')
     expect(heapReading([10_000_000, 11_000_000])).toBe('bucketed')
     expect(heapReading([10_000_000, 11_234_567])).toBe('precise')
+  })
+})
+
+describe('long animation frames, by who ran in them (owner walk of 2026-11-21)', () => {
+  const frame = (duration: number, scripts: Array<Record<string, unknown>>, extra: Record<string, number> = {}) => ({ startTime: 1000, duration, ...extra, scripts: scripts as never })
+  const ws = { duration: 70, invokerType: 'event-listener', invoker: 'WebSocket.onmessage', sourceFunctionName: 'h', sourceURL: 'https://onosendai.tech/assets/boot-SKDJhwQn.js?v=1', sourceCharPosition: 1234, forcedStyleAndLayoutDuration: 2 }
+
+  it('counts every frame of 50 ms or more, not only the 200 ms ones, and skips shorter frames', () => {
+    const l = new LoafLedger()
+    l.add(frame(LOAF_MIN_MS - 1, [ws]))
+    expect(l.take(5)).toBeNull()
+    l.add(frame(82, [ws], { blockingDuration: 32, renderStart: 1072 }))
+    l.add(frame(88, [ws, { ...ws, duration: 9, invoker: 'IDBRequest.onsuccess', sourceFunctionName: 'put', sourceCharPosition: 77 }], { blockingDuration: 38 }))
+    const row = l.take(10)!
+    const at = (c: (typeof LOAF_COLUMNS)[number]) => row[LOAF_COLUMNS.indexOf(c)]
+    expect(at('t')).toBe(10)
+    expect(at('frames')).toBe(2)
+    expect(at('ms')).toBe(170)
+    expect(at('maxMs')).toBe(88)
+    expect(at('blockMs')).toBe(70)
+    expect(at('scriptMs')).toBe(149)
+    expect(at('renderMs')).toBe(10)
+    expect(at('otherMs')).toBe(11)
+    const top = at('top') as Array<Array<string | number>>
+    const e = Object.fromEntries(LOAF_SCRIPT_COLUMNS.map((c, i) => [c, top[0][i]]))
+    expect(e).toEqual({ invokerType: 'event-listener', invoker: 'WebSocket.onmessage', fn: 'h', pos: 1234, file: 'boot-SKDJhwQn.js', n: 2, ms: 140, maxMs: 70, forcedMs: 4 })
+    expect(top[1][1]).toBe('IDBRequest.onsuccess')
+    // The window starts over; the whole capture keeps its sums.
+    expect(l.take(15)).toBeNull()
+    expect(l.top()[0][5]).toBe(2)
+  })
+
+  it('keeps no URL, key or content: a file by name only, other schemes by scheme only', () => {
+    expect(scriptFile('https://onosendai.tech/assets/index-r_sQnZEa.js#x')).toBe('index-r_sQnZEa.js')
+    expect(scriptFile('blob:https://onosendai.tech/3f2a9c1e-5b7d-4e8f-a1b2-c3d4e5f6a7b8')).toBe('blob')
+    expect(scriptFile('data:text/javascript;base64,ZXZpbA==')).toBe('data')
+    expect(scriptFile('chrome-extension://abcdefabcdefabcdef/inpage.js')).toBe('chrome-extension')
+    expect(scriptFile(undefined)).toBe('')
+    const l = new LoafLedger()
+    l.add(frame(90, [{ duration: 60, invokerType: 'user-callback', invoker: `IMG#a[src="https://x.example/${'a'.repeat(64)}"].onload`, sourceFunctionName: `f${'ab12'.repeat(16)}`, sourceURL: 'https://h.example/u/npub1qqqqqqqqqqqqqqqqqqqqqqqq/x.js' }]))
+    const s = JSON.stringify(l.top())
+    expect(s).not.toMatch(/https?:|x\.example|npub1|[0-9a-f]{16}/)
+    expect(s).toContain('IMG.onload')
+  })
+
+  it('a window keeps its top few by time, and a full ring stays small', () => {
+    const l = new LoafLedger()
+    for (let i = 0; i < 40; i++) l.add(frame(60, [{ ...ws, duration: 10 + i, sourceFunctionName: `fn_${i}`, sourceCharPosition: 123456 + i }]))
+    const top = l.take(5)![LOAF_COLUMNS.indexOf('top')] as Array<Array<string | number>>
+    expect(top).toHaveLength(LOAF_TOP)
+    expect(top.map((e) => e[2])).toEqual(['fn_39', 'fn_38', 'fn_37', 'fn_36', 'fn_35', 'fn_34', 'fn_33', 'fn_32'])
+    for (let i = 0; i < 40; i++) l.add(frame(60, [{ ...ws, invoker: 'MessagePort.onmessage', sourceFunctionName: `fn_${i}`, sourceCharPosition: 123456 + i }]))
+    expect(JSON.stringify(l.take(10)).length * 180 + JSON.stringify(l.top()).length).toBeLessThan(256 * 1024)
+  })
+
+  it('the report carries the table, fed by every long frame', () => {
+    const text = fs.readFileSync(path.join(SRC, 'lib/diag.ts'), 'utf8')
+    expect(text).toMatch(/loafs\.add\(e as unknown as LoafFrame\)\n\s*if \(e\.duration < SLOW_FRAME_MS\) return/)
+    expect(text).toMatch(/loaf: loaf\.all\(\)/)
+    expect(text).toMatch(/loafTop: loafs\.top\(\)/)
   })
 })

@@ -348,3 +348,111 @@ export type DiagRow = Partial<Record<DiagColumn, number | string>>
 export function toRow(s: DiagRow): Array<number | string | null> {
   return DIAG_COLUMNS.map((c) => s[c] ?? null)
 }
+
+/** One script a long animation frame names (PerformanceScriptTiming): only these fields are read. */
+export interface LoafScript {
+  duration: number
+  invokerType?: string
+  invoker?: string
+  sourceFunctionName?: string
+  sourceURL?: string
+  sourceCharPosition?: number
+  forcedStyleAndLayoutDuration?: number
+}
+
+/** A long animation frame (PerformanceLongAnimationFrameTiming): only these fields are read. */
+export interface LoafFrame {
+  startTime: number
+  duration: number
+  blockingDuration?: number
+  renderStart?: number
+  scripts?: readonly LoafScript[]
+}
+
+/** A frame this long counts. A 60 Hz frame is 16.7 ms, so 50 ms is three missed. */
+export const LOAF_MIN_MS = 50
+/** Scripts kept per window, and for the whole capture. */
+export const LOAF_TOP = 8
+export const LOAF_TOP_ALL = 24
+
+/** One row per window with long frames. ms columns are summed over the window's long frames. */
+export const LOAF_COLUMNS = ['t', 'frames', 'ms', 'maxMs', 'blockMs', 'scriptMs', 'renderMs', 'otherMs', 'top'] as const
+/** One entry of a row's `top`, and of `loafTop`: who ran, and how long, in those frames. */
+export const LOAF_SCRIPT_COLUMNS = ['invokerType', 'invoker', 'fn', 'pos', 'file', 'n', 'ms', 'maxMs', 'forcedMs'] as const
+
+interface LoafAgg { type: string; invoker: string; fn: string; pos: number; file: string; n: number; ms: number; max: number; forced: number }
+
+const r1 = (x: number): number => Math.round(x * 10) / 10
+
+/** A script's file: its name alone for the app's own (http) files; for a blob, data or extension script, only its scheme. */
+export function scriptFile(url: unknown): string {
+  if (typeof url !== 'string' || !url) return ''
+  if (!/^https?:\/\//i.test(url)) return safeLabel(url.split(':')[0], 16)
+  return safeLabel(url.replace(/[?#].*$/, '').split('/').filter(Boolean).pop() ?? '')
+}
+
+/**
+ * Long animation frames, aggregated by who ran in them (2026-11-21).
+ *
+ * arkinox's WALK on #840 had two or three long tasks a second, nearly all 80
+ * to 90 ms, tracking relay traffic; the 200 ms `slow` log never saw them. Each
+ * frame of LOAF_MIN_MS or more is summed here by the script that ran in it:
+ * its invoker type, its invoker, its function's name and position, and its
+ * file's name. All text passes safeLabel and invokerLabel, so no URL, key or
+ * content is kept; a minified function's name is one letter, and its position
+ * in its file finds it in that build.
+ */
+export class LoafLedger {
+  private win = new Map<string, LoafAgg>()
+  private all = new Map<string, LoafAgg>()
+  private frames = 0
+  private ms = 0
+  private max = 0
+  private block = 0
+  private script = 0
+  private render = 0
+
+  add(e: LoafFrame): void {
+    if (!(e.duration >= LOAF_MIN_MS)) return
+    this.frames++
+    this.ms += e.duration
+    this.max = Math.max(this.max, e.duration)
+    this.block += e.blockingDuration ?? 0
+    if (e.renderStart && e.renderStart > 0) this.render += Math.max(0, e.startTime + e.duration - e.renderStart)
+    for (const s of e.scripts ?? []) {
+      this.script += s.duration
+      const type = safeLabel(s.invokerType, 24)
+      const invoker = invokerLabel(s.invoker)
+      const fn = safeLabel(s.sourceFunctionName)
+      const pos = typeof s.sourceCharPosition === 'number' ? s.sourceCharPosition : -1
+      const file = scriptFile(s.sourceURL)
+      const key = `${type}|${invoker}|${fn}|${pos}|${file}`
+      for (const m of [this.win, this.all]) {
+        let a = m.get(key)
+        if (!a) { a = { type, invoker, fn, pos, file, n: 0, ms: 0, max: 0, forced: 0 }; m.set(key, a) }
+        a.n++
+        a.ms += s.duration
+        a.max = Math.max(a.max, s.duration)
+        a.forced += s.forcedStyleAndLayoutDuration ?? 0
+      }
+    }
+  }
+
+  /** The window's row (LOAF_COLUMNS), or null when no long frame came; the window starts over either way. */
+  take(t: number): Array<number | Array<Array<string | number>>> | null {
+    const out = this.frames === 0 ? null : [
+      t, this.frames, Math.round(this.ms), Math.round(this.max), Math.round(this.block), Math.round(this.script), Math.round(this.render),
+      Math.round(Math.max(0, this.ms - this.script - this.render)), LoafLedger.top(this.win, LOAF_TOP),
+    ]
+    this.win.clear()
+    this.frames = 0; this.ms = 0; this.max = 0; this.block = 0; this.script = 0; this.render = 0
+    return out
+  }
+
+  /** The whole capture's biggest, by time. */
+  top(): Array<Array<string | number>> { return LoafLedger.top(this.all, LOAF_TOP_ALL) }
+
+  private static top(m: Map<string, LoafAgg>, n: number): Array<Array<string | number>> {
+    return [...m.values()].sort((a, b) => b.ms - a.ms).slice(0, n).map((a) => [a.type, a.invoker, a.fn, a.pos, a.file, a.n, r1(a.ms), r1(a.max), r1(a.forced)])
+  }
+}

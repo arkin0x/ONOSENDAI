@@ -111,7 +111,7 @@ import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
 import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
 import { openedByHand, restoreOpened } from './useOpenedChests'
-import { closeArriving, closedByMe, closedDoorIds } from './closedDoors'
+import { closeArriving, closedByMe, closedDoorIds, closedSignature } from './closedDoors'
 import { hiderKeys, madeKeys, openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
 import { lookupLock, startKeyring } from './useKeyring'
 import { useInventory } from './useInventory'
@@ -5878,16 +5878,25 @@ export const useShards = create<ShardsState>((set, get) => {
     setCurated: (authors) => { if (get().curated !== authors) set({ curated: authors }) },
 
     worldItems: () => {
-      const curated = get().curated
+      const state = get()
+      const curated = state.curated
       // What the person's mute list hides (store/useMutes): never their own.
       const muted = useMutes.getState().muted
       const me = useCyberspace.getState().identity.pubkey
+      const closed = closedSignature(me)
+      // Built once per change of what it is built from (worldMemo), not on every read.
+      const was = worldMemo
+      if (was && was.mine === state.mine && was.discovered === state.discovered && was.curated === curated && was.muted === muted && was.me === me && was.closed === closed) return was.out
       const shown = (w: WorldItem): boolean => !worldItemHidden(w, muted, me)
-      if (curated) return worldOf(get()).filter((w) => w.author !== undefined && curated.includes(w.author) && shown(w))
-      return worldOf(get()).filter(shown)
+      const out = curated ? worldOf(state).filter((w) => w.author !== undefined && curated.includes(w.author) && shown(w)) : worldOf(state).filter(shown)
+      worldMemo = { mine: state.mine, discovered: state.discovered, curated, muted, me, closed, out, drawn: null }
+      return out
     },
 
     drawnItems: () => {
+      const all = get().worldItems()
+      const memo = worldMemo
+      if (memo && memo.out === all && memo.drawn) return memo.drawn
       const { discovered, mine } = get()
       const parent = (chestId: string): { at: Position; tags?: readonly unknown[] } | undefined => {
         const h = discovered[chestId]
@@ -5895,7 +5904,9 @@ export const useShards = create<ShardsState>((set, get) => {
         const d = mine.find((x) => x.eventId === chestId)
         return d ? { at: positionOf(d), tags: d.inner?.tags } : undefined
       }
-      return get().worldItems().filter((w) => !keptInChest(w, w.chestId ? parent(w.chestId) : undefined))
+      const drawn = all.filter((w) => !keptInChest(w, w.chestId ? parent(w.chestId) : undefined))
+      if (memo && memo.out === all) memo.drawn = drawn
+      return drawn
     },
 
     heardAudio: () => get().worldItems().filter((w) => w.type === 'audio'),
@@ -5925,6 +5936,29 @@ export const useShards = create<ShardsState>((set, get) => {
     return oneVersionEach(out)
   }
 })
+
+/**
+ * The world's items as last built (worldItems, drawnItems), with what they
+ * were built from. WALK asks for the walls many times a frame (store/walkWalls.ts
+ * wallItems, through every step, fall and stand), and each ask built the whole
+ * world again: every hide and every find, its place parsed afresh, at a spot
+ * of a thousand things a few milliseconds a time and megabytes of garbage a
+ * second (arkinox, 2026-11-21: WALK stutters on his phone, the heap climbing
+ * 12 MB a second). Kept until one of them changes: the store replaces
+ * `mine`, `discovered` and `curated` whenever they change, the mute list is
+ * replaced the same way, and the closed doors are compared by closedSignature.
+ * Readers treat the lists as read-only, as they always could.
+ */
+let worldMemo: {
+  mine: MyDeployment[]
+  discovered: Record<string, Hidden>
+  curated: readonly string[] | null
+  muted: unknown
+  me: string
+  closed: string
+  out: WorldItem[]
+  drawn: WorldItem[] | null
+} | null = null
 
 /**
  * Whether a thing stands in a room whose door this identity closed (CLOSE,

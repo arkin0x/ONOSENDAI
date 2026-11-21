@@ -23,7 +23,7 @@
  */
 
 import { takeIntoKeeping, you } from '../lib/carried'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Copy, CopyPlus, GitFork, Move3d, PackagePlus, Pencil, Rotate3d, Target, TvMinimal } from 'lucide-react'
 import type { FeedObject } from 'sno-core/feed'
 import { nip19 } from 'nostr-tools'
@@ -58,7 +58,7 @@ import { ItemFace } from './ItemIcon'
 import { CardSpin } from '../scene/CardSpin'
 import { BloomCard } from './BloomCard'
 import { viewScaleOf } from '../lib/seeds/seedItem'
-import { drawnLook, lookOf } from '../lib/looks'
+import { drawnLook, lookOf, onSealedLooks, sealedLooksVersion } from '../lib/looks'
 import { openedByHand, useOpenedChests } from '../store/useOpenedChests'
 import { EventData } from './EventData'
 import { WireData } from './WireData'
@@ -191,6 +191,8 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
 
   // A chest's or a door's look, open once this identity opened it (R14), for the card's 3D header.
   useOpenedChests((s) => s.opened)
+  // Drawn without a sealed look until it lands (DECK-0004 §3.6), then with it.
+  useSyncExternalStore(onSealedLooks, sealedLooksVersion, sealedLooksVersion)
   const look = item.type === 'chest' ? lookOf(item) : null
 
   const npub = nip19.npubEncode(author)

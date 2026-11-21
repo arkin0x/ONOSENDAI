@@ -17,7 +17,7 @@ import { useFrame } from '@react-three/fiber'
 import type { Group } from 'three'
 import { ACCENT } from '../lib/palette'
 import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
-import { drawnLook, lookFacing, lookOf, lookStand, swapsOnOpen, type Look } from '../lib/looks'
+import { drawnLook, lookFacing, lookOf, lookStand, onSealedLooks, sealedLooksVersion, swapsOnOpen, type Look } from '../lib/looks'
 import { regionBox } from '../lib/clip'
 import type { ShardModel } from 'sno-core/shards'
 import { markShown } from '../lib/worldMarks'
@@ -117,6 +117,8 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const still = useReducedMotion()
   // Whom you follow decides what a look's placed objects may spend.
   const follows = useSyncExternalStore(onFollows, followsVersion)
+  // A sealed look landing (DECK-0004 §3.6): the chest drawn without it until then is drawn with it now.
+  const sealed = useSyncExternalStore(onSealedLooks, sealedLooksVersion)
   const frames = useRef<KeptLookFrames>(new Map())
 
   // As far as the fog's end needs (buildZoom.ts).
@@ -143,7 +145,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
     return out
     // mine, discovered, curated and muted are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, anchorPlane, scaleExp, axes, me, mine, discovered, curated, muted, opened, items, itemsReady, follows, reach])
+  }, [anchor, anchorPlane, scaleExp, axes, me, mine, discovered, curated, muted, opened, items, itemsReady, follows, reach, sealed])
 
   // OPEN asks whether a chest is drawn, to know whether its ceremony can be seen (store/useOpenCeremony).
   useEffect(() => { setDrawnLooks(placed.map((w) => w.key)) }, [placed])

@@ -48,6 +48,7 @@ import { closeScrubber, exitHyperspaceView, firstUnhashedHeight, getBlockHash, m
 import { Explanation } from './Explanation'
 import { useChainUi } from '../store/useChainUi'
 import { setRideDestination } from '../store/destination'
+import { runTutorialEffect } from '../store/useTutorial'
 
 /**
  * Where a stop sits, for the camera. The float64-approximate coordinate is
@@ -580,7 +581,8 @@ export function HyperspacePanel(): JSX.Element {
       <div className="hyper__group">
         <span className="legend__label hyper__kicker hyper__kicker--destination">Destination</span>
         {destination === null ? (
-          <p className="legend__note">None set. Open the Hyperspace overlay (H) to see any block or tap one in the HUD.</p>
+          // How to pick one is BOARD's reason line, with PICK ONE (and SHOW EARTH in the tour), so it is said once.
+          <p className="legend__note">None set.</p>
         ) : (
           <>
             <dl className="stats">
@@ -764,17 +766,12 @@ export function HyperspacePanel(): JSX.Element {
         !ready ? (
           <p className="hyper__why">{boardLoadingLine(sync)}</p>
         ) : destination === null ? (
-          tapPicks > 0 ? (
-            <p className="hyper__why">
-              {BOARD_TAP_A_STOP}
-              <button className="tag tag--tap hyper__whybtn" onClick={showEarthForPick}>SHOW EARTH</button>
-            </p>
-          ) : (
-            <p className="hyper__why">
-              {BOARD_NEEDS_DESTINATION}
-              <button className="tag tag--tap hyper__whybtn" onClick={() => { const hs = useHyperspace.getState(); if (hs.scrubHeight === null) hs.setScrubHeight(hs.viewedStop ?? hs.tipHeight ?? 0) }}>PICK ONE</button>
-            </p>
-          )
+          <p className="hyper__why">
+            {tapPicks > 0 ? BOARD_TAP_A_STOP : BOARD_NEEDS_DESTINATION}
+            {/* The tour's Earth view again, to tap a stop on; and, everywhere, the overlay's list with SET DESTINATION, for when taps miss. */}
+            {tapPicks > 0 && <button className="tag tag--tap hyper__whybtn" onClick={() => runTutorialEffect('view-earth')}>SHOW EARTH</button>}
+            <button className="tag tag--tap hyper__whybtn" onClick={openOverlayToPick}>PICK ONE</button>
+          </p>
         ) : !ownChain ? (
           <p className="hyper__why">BOARD STARTS FROM YOUR OWN CHAIN: STOP SPECTATING OR LEAVE HISTORY FIRST</p>
         ) : null
@@ -808,7 +805,7 @@ const stopTapListeners = new Set<(height: number) => void>()
 /** What BOARD says while no destination is set and a tap on a stop picks one (the tour's Earth route). */
 export const BOARD_TAP_A_STOP = 'PICK A STOP FIRST: TAP A GLOWING DOT ON EARTH'
 /** What BOARD says while no destination is set anywhere else: a tap only views a stop there (arkinox, 2026-11-11), so the overlay's SET DESTINATION is the way. */
-export const BOARD_NEEDS_DESTINATION = 'BOARD NEEDS A DESTINATION: PICK A BLOCK, THEN SET DESTINATION'
+export const BOARD_NEEDS_DESTINATION = 'BOARD NEEDS A DESTINATION: PICK A STOP, THEN SET DESTINATION'
 
 /** What BOARD says while the stops are still loading, with how far along. Pure. */
 export function boardLoadingLine(sync: { status: string; loaded: number; total: number }): string {
@@ -841,13 +838,10 @@ export function pickStopByTap(): () => void {
   }
 }
 
-/**
- * SHOW EARTH on BOARD's reason line: the whole planet, in the plane you are
- * in (the tour's 'view-earth' does the same; Earth is looked at, never lined
- * up for the next move), so a stop can be tapped.
- */
-export function showEarthForPick(): void {
-  viewHyperspace({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', EARTH_SCALE_EXP, null)
+/** PICK ONE on BOARD's reason line: the Hyperspace overlay, where any block can be found and SET DESTINATION picks it. */
+export function openOverlayToPick(): void {
+  const hs = useHyperspace.getState()
+  if (hs.scrubHeight === null) hs.setScrubHeight(hs.viewedStop ?? hs.tipHeight ?? 0)
 }
 
 /**

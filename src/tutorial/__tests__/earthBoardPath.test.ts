@@ -78,7 +78,7 @@ import { BOARD_NEEDS_DESTINATION, BOARD_TAP_A_STOP, HyperspacePanel, boardLoadin
 import { placeSpawn } from '../../store/fixtures/placeSpawn'
 import { writeProgress } from '../gate'
 import { EARTH_BOARD, TUTORIAL_SCRIPT } from '../script'
-import { BOARD_PICK_FIRST_NOTE } from '../earthRoute'
+import { BOARD_PICK_FIRST_GLOW, BOARD_PICK_FIRST_NOTE } from '../earthRoute'
 import '../director'
 
 const id = (): string => useTutorial.getState().script.steps[useTutorial.getState().index].id
@@ -148,11 +148,16 @@ describe('the tips to Earth end at a BOARD a new player can press', () => {
     expect(useTutorial.getState().stepNote).toBe(BOARD_PICK_FIRST_NOTE)
     expect(html()).toContain(BOARD_TAP_A_STOP)
     expect(html()).toContain('SHOW EARTH')
+    // PICK ONE too, for when taps miss: the overlay's SET DESTINATION.
+    expect(html()).toContain('PICK ONE')
+    // The glow is on that line, not on a dark BOARD.
+    expect(useTutorial.getState().stepHighlight).toBe(BOARD_PICK_FIRST_GLOW)
 
     // A tap on a stop here picks it (it used to only view it, and BOARD stayed dark for good).
     selectStopInScene(240)
     expect(useHyperspace.getState().destination).toBe(240)
     expect(useTutorial.getState().stepNote).toBeNull()
+    expect(useTutorial.getState().stepHighlight).toBeNull()
     expect(id()).toBe('earth-board')
     expect(lit(html())).toBe(true)
     // A second tap keeps the stop picked: only views it.
@@ -189,6 +194,9 @@ describe('the tips to Earth end at a BOARD a new player can press', () => {
     expect(page).toContain(BOARD_NEEDS_DESTINATION)
     expect(page).toContain('PICK ONE')
     expect(page).not.toContain(BOARD_TAP_A_STOP)
+    expect(page).not.toContain('SHOW EARTH')
+    // Said once: the Destination group no longer repeats how.
+    expect(page).toContain('None set.</p>')
   })
 
   it('says it plainly: no em dash, no "line" or "sync" jargon in what BOARD says', () => {

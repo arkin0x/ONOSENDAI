@@ -39,6 +39,7 @@ import { usePanelLayout } from '../store/usePanelLayout'
 import { lineStateOf } from '../lib/hyperspace/ride'
 import { pickStopByTap, useRideRun } from '../hud/HyperspacePanel'
 import { jobInProgress } from '../lib/cloud'
+import { MENU_SHUT } from './script'
 
 /**
  * Call `onDone` once `done()` holds, now or after a change in any store
@@ -86,6 +87,8 @@ registerTutorialEffect('hyperspace-first', hyperspaceFirst)
 
 /** What the BOARD step says in place of its hint while no stop is picked. */
 export const BOARD_PICK_FIRST_NOTE = 'Pick a stop first: tap a glowing dot on Earth.'
+/** What glows then: the hamburger while the menu is shut, then BOARD's reason line with its SHOW EARTH and PICK ONE. */
+export const BOARD_PICK_FIRST_GLOW = `${MENU_SHUT}, [data-panel-id="hyperspace"] .hyper__why`
 
 /**
  * The BOARD step (new-user feedback, 2026-11-21: BOARD "was never
@@ -100,7 +103,12 @@ registerTutorialEffect('board-step', () => {
   const index = useTutorial.getState().index
   const unfront = hyperspaceFirst()
   const unpick = pickStopByTap()
-  const note = (): void => useTutorial.getState().noteStep(index, useHyperspace.getState().destination === null ? BOARD_PICK_FIRST_NOTE : null)
+  // While no stop is picked, the note asks for one and the glow is on BOARD's reason line (SHOW EARTH, PICK ONE), not on a dark BOARD.
+  const note = (): void => {
+    const none = useHyperspace.getState().destination === null
+    useTutorial.getState().noteStep(index, none ? BOARD_PICK_FIRST_NOTE : null)
+    useTutorial.getState().highlightStep(index, none ? BOARD_PICK_FIRST_GLOW : null)
+  }
   note()
   const off = useHyperspace.subscribe((s, prev) => { if (s.destination !== prev.destination) note() })
   return () => { off(); unpick(); unfront() }

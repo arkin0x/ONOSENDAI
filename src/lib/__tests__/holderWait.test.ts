@@ -23,6 +23,8 @@ vi.unmock('../relay')
 const net = vi.hoisted(() => ({
   relays: [] as string[],
   behavior: new Map<string, { eoseMs?: number; events?: unknown[]; hung?: boolean; down?: boolean; connectMs?: number }>(),
+  /** Each REQ written, by relay: how many filters it carried. */
+  reqs: new Map<string, number[]>(),
 }))
 vi.mock('../../store/useRelays', () => ({
   DEFAULT_RELAY: 'ws://canonical.test',
@@ -42,6 +44,14 @@ vi.mock('nostr-tools/abstract-pool', async () => {
     // A challenge, so authenticating is one quick signature rather than a wait for a challenge that never comes.
     challenge = 'c'
     authPromise: Promise<string> | undefined
+    // What relay.ts wraps on every relay it dials (countPings, guardSend), as nostr-tools' relay has them.
+    // Without them the first question on each relay failed, and was passed over only because the spawns
+    // and the chain went as two questions and the other one got through.
+    ongoingOperations = 0
+    openSubs = new Map<string, unknown>()
+    scheduleIdleClose(): void {}
+    clearIdleTimeout(): void {}
+    send(): Promise<void> { return Promise.resolve() }
     constructor(url: string) { this.url = url }
     auth(): Promise<string> {
       this.authPromise ??= Promise.resolve('ok')
@@ -49,6 +59,7 @@ vi.mock('nostr-tools/abstract-pool', async () => {
     }
     subscribe(filters: Array<Parameters<typeof matchFilter>[0]>, h: { onevent: (e: Ev) => void; oneose: () => void }): { close: () => void } {
       const b = net.behavior.get(this.url) ?? {}
+      net.reqs.set(this.url, [...(net.reqs.get(this.url) ?? []), filters.length])
       const t = setTimeout(() => {
         for (const e of (b.events ?? []) as Ev[]) if (filters.some((f) => matchFilter(f, e))) h.onevent(e)
         if (!b.hung) h.oneose()
@@ -110,6 +121,20 @@ describe('waiting for the relays that hold the chain (ruling of 2026-10-08 on th
     const { got, ms } = await confirm(c)
     expect(got?.map((e) => e.id)).toContain(c.hop2.id)
     expect(ms).toBeGreaterThanOrEqual(950)
+  })
+
+  it('asks each relay one REQ holding both the spawns and the chain, not two (owner\'s walk, 2026-11-21)', async () => {
+    const c = chainFor('e5')
+    const U = normalizeURL('ws://mine-one-req.test')
+    net.relays = [C, U]
+    noteChainHolders(c.pk, [U])
+    net.behavior.set(C, { eoseMs: 10, events: [c.spawn, c.hop1] })
+    net.behavior.set(U, { eoseMs: 10, events: [c.spawn, c.hop1, c.hop2] })
+    net.reqs.clear()
+    const { got } = await confirm(c)
+    expect(got?.map((e) => e.id)).toContain(c.hop2.id)
+    expect(net.reqs.get(C)).toEqual([2])
+    expect(net.reqs.get(U)).toEqual([2])
   })
 
   it('a slow relay that never held the chain does not delay a pass', async () => {

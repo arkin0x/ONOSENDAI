@@ -32,6 +32,10 @@ describe('the resumed filter', () => {
   it('never moves since backwards', () => {
     expect(resumedFilter({ kinds: [1], since: 2000 }, 1000).since).toBe(2000)
   })
+
+  it('leaves a filter bounded by limit and not since as it was: every new event, whatever its created_at (own-chain watch, 2026-11-21)', () => {
+    expect(resumedFilter({ kinds: [3333], authors: ['ab'], limit: 1 }, 1000)).toEqual({ kinds: [3333], authors: ['ab'], limit: 1 })
+  })
 })
 
 describe('the backoff', () => {

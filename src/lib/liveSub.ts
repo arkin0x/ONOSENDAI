@@ -59,13 +59,14 @@ export interface Live {
 
 /**
  * The filter to reissue with: `since` moved up to just before the last event
- * seen. A filter opened without `since` is reissued as it was: it asks for
- * new events whatever their created_at, as the own-chain watch does
- * (chains.ts watchOwnChain), and a `since` added here would drop the moves
- * another device signed while LOCAL and publishes later.
+ * seen. A filter that bounds its stored answer by `limit` instead of
+ * `since` is reissued as it was: it asks for every new event whatever its
+ * created_at, as the own-chain watch does (chains.ts watchOwnChain), and a
+ * `since` added here would drop the moves another device signed while LOCAL
+ * and publishes later. `limit` already keeps the repeat it costs small.
  */
 export function resumedFilter(filter: Filter, lastSeen: number | null): Filter {
-  if (lastSeen === null || filter.since === undefined) return filter
+  if (lastSeen === null || (filter.since === undefined && filter.limit !== undefined)) return filter
   const since = Math.max(filter.since ?? 0, lastSeen - RESUME_OVERLAP_S)
   return { ...filter, since }
 }

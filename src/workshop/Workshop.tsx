@@ -58,6 +58,7 @@ import { Sheet } from './shell/Sheet'
 import { Strip } from './shell/Strip'
 import { TopBar } from './shell/TopBar'
 import { ViewBall } from './shell/ViewBall'
+import { TutorialTip } from './shell/TutorialTip'
 import { AREA_LABEL, type Area, type SheetKind } from './sheets/areas'
 import { AvatarBody } from './sheets/AvatarSheet'
 import { GridBody } from './sheets/GridSheet'
@@ -80,13 +81,14 @@ const REGION: Record<Area, string> = { menu: 'Menu', shard: 'Shard', grid: 'Grid
  * in what is left (benchAxes BenchInsets). Measured again whenever any of
  * them changes size, the window does, or a sheet comes or goes.
  */
-function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind | null, open: boolean, guiding: boolean, eyeEdit = false): void {
+function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind | null, open: boolean, guiding: boolean, eyeEdit = false, touring = false): void {
   useLayoutEffect(() => {
     const el = root.current
     if (!open || !el || typeof ResizeObserver === 'undefined') return
     const measure = (): void => {
       const box = el.getBoundingClientRect()
-      const top = el.querySelector('.ws__topbar')?.getBoundingClientRect().bottom ?? box.top
+      // The tour's card under the top bar, while the tutorial runs (shell/TutorialTip): the shard is framed below it.
+      const top = Math.max(el.querySelector('.ws__topbar')?.getBoundingClientRect().bottom ?? box.top, el.querySelector('.ws__tuttip')?.getBoundingClientRect().bottom ?? box.top)
       const strip = el.querySelector('.ws__strip')?.getBoundingClientRect().top ?? box.bottom
       // A sheet is a sheet over the bottom, or (landscape phone, desktop:
       // phase 5) a column at the right, which covers the side and not the
@@ -108,11 +110,11 @@ function useBenchInsets(root: React.RefObject<HTMLDivElement>, sheet: SheetKind 
       if (now.top !== insets.top || now.bottom !== insets.bottom || now.rest !== insets.rest || now.right !== insets.right) useBenchView.setState({ insets })
     }
     const ro = new ResizeObserver(measure)
-    for (const sel of ['.ws__topbar', '.ws__bottom', '.ws__sheet', '.ws__guide']) { const n = el.querySelector(sel); if (n) ro.observe(n) }
+    for (const sel of ['.ws__topbar', '.ws__bottom', '.ws__sheet', '.ws__guide', '.ws__tuttip']) { const n = el.querySelector(sel); if (n) ro.observe(n) }
     window.addEventListener('resize', measure)
     measure()
     return () => { ro.disconnect(); window.removeEventListener('resize', measure) }
-  }, [root, sheet, open, guiding, eyeEdit])
+  }, [root, sheet, open, guiding, eyeEdit, touring])
   // Shut, the bench frames nothing: the next opening starts from the middle.
   useEffect(() => { if (!open) useBenchView.setState({ insets: { top: 0, bottom: 0, rest: 0, right: 0 } }) }, [open])
 }
@@ -197,7 +199,7 @@ export function Workshop(): JSX.Element | null {
   const root = useRef<HTMLDivElement>(null)
   // The guide's card stands over the strip too, and the shard is framed above it.
   const guiding = useBeginner((s) => s.step !== null && !s.paused) && !tutorialActive
-  useBenchInsets(root, sheet, open, guiding, eyeEdit)
+  useBenchInsets(root, sheet, open, guiding, eyeEdit, tutorialActive)
   // Every hook above this line, none below it: the early return that follows
   // changes which hooks run, and React counts them. One sat after the
   // return for a day and opening the workshop threw React #310 (2026-09-24).
@@ -285,6 +287,8 @@ export function Workshop(): JSX.Element | null {
       <ZipImport />
 
       <TopBar open={area} onArea={toggle} />
+      {/* The tour's word here while the tutorial runs: what to do first, and the way back (new-user feedback 2026-11-21). */}
+      <TutorialTip sheet={sheet} eyeEdit={eyeEdit} />
       <Rail />
       <ViewBall open={viewOpen} onToggle={toggleView} onClose={() => setViewOpen(false)} />
       {/* SET EYE's WHAT YOU SEE, under the view ball and under the handles too, so a handle is never hidden behind it. */}

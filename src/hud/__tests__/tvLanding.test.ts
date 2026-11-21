@@ -5,7 +5,7 @@
  * and the avatars' recent moves, megabytes queued on the same sockets ahead
  * of TV's first question (2026-11-11: about 5 MB a relay before TUNING could
  * end). The whole App is too heavy to render here, so its source is read, as
- * tvStandby.test.tsx reads main.tsx.
+ * tvStandby.test.tsx reads boot.tsx.
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'

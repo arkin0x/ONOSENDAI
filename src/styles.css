@@ -4176,6 +4176,53 @@ select.avatars__input option:checked {
 .ws__guide-text { margin: 0; font-size: 12px; line-height: 1.45; color: var(--fg); }
 .ws__guide-sub { margin: 4px 0 0; font-size: 9.5px; letter-spacing: 0.1em; color: var(--dim); }
 .ws__guide-skip { flex: none; min-width: 52px; height: 44px; padding: 0 8px; font-family: inherit; font-size: var(--ws-label); letter-spacing: 0.1em; color: var(--dim); background: none; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; }
+/* The tour's word inside the workshop (workshop/shell/TutorialTip): under the
+   top bar, between the rail and the view ball, in one place in every state.
+   Two lines are always kept for its words, so nothing moves when they change. */
+.ws__tuttip {
+  position: absolute;
+  top: calc(var(--ws-top-end) + 10px);
+  left: calc(var(--ws-gutter) + 44px + 8px);
+  right: calc(var(--ws-gutter) + 60px + 8px);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 10px 12px;
+  background: rgba(6, 14, 22, 0.95);
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.22);
+  /* The house chamfer: top-left and bottom-right corners cut. */
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+}
+.ws__tuttip-icon { color: var(--accent); vertical-align: -2px; margin-right: 6px; }
+.ws__tuttip-text { margin: 0; min-height: calc(2 * 1.45em); font-size: 12px; line-height: 1.45; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
+.ws__tuttip-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 12px;
+  font-family: inherit;
+  font-size: var(--ws-label);
+  letter-spacing: 0.12em;
+  color: var(--ws-ink);
+  background: var(--accent);
+  border: 0;
+  cursor: pointer;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.ws__tuttip-back:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* While it is up, the workshop's notices and the unsaved-changes warning stand below it, never under it. */
+.workshop:has(.ws__tuttip) .ws__toast { top: calc(var(--ws-top-end) + 10px + 118px); }
+.workshop:has(.ws__tuttip) .ws__storage { top: calc(var(--ws-top-end) + 10px + 172px); }
+/* A short screen folds the rail to two columns (44 + 6 + 44): the card keeps clear of it. */
+@media (max-height: 700px) {
+  .ws__tuttip { left: calc(var(--ws-gutter) + 94px + 8px); }
+}
 /* What a tap does with the tool in hand: one line over the strip, gone after a few uses. */
 .ws__toolhint {
   position: absolute;
@@ -4477,6 +4524,7 @@ select.avatars__input option:checked {
      room for it beside the column, and only on a narrower window slides left. */
   .workshop:has(.ws__sheet) .ws__bottom { left: max(var(--ws-gutter), calc(100% - var(--ws-col) - 3 * var(--ws-gutter) - 640px)); right: calc(var(--ws-col) + 2 * var(--ws-gutter)); }
   .workshop:has(.ws__sheet) .ws__view { right: calc(var(--ws-col) + 2 * var(--ws-gutter)); }
+  .workshop:has(.ws__sheet) .ws__tuttip { right: calc(var(--ws-col) + 2 * var(--ws-gutter) + 60px + 8px); }
   .ws__strip { border: 1px solid var(--border); border-radius: 12px 12px 0 0; }
   .ws__dock { border: 1px solid var(--border); border-top: 0; border-radius: 0 0 12px 12px; }
   .ws__sheet,
@@ -4527,6 +4575,8 @@ select.avatars__input option:checked {
   .ws__rail { left: max(var(--ws-gutter), var(--ws-safe-l)); }
   .ws__view { right: max(var(--ws-gutter), var(--ws-safe-r)); }
   .workshop:has(.ws__sheet) .ws__view { right: calc(var(--ws-col) + 2 * var(--ws-gutter) + var(--ws-safe-r)); }
+  .ws__tuttip { left: calc(max(var(--ws-gutter), var(--ws-safe-l)) + 104px); }
+  .workshop:has(.ws__sheet) .ws__tuttip { right: calc(var(--ws-col) + 2 * var(--ws-gutter) + var(--ws-safe-r) + 60px + 8px); }
   .ws__bottom { flex-direction: row; padding: 0 var(--ws-safe-r) 0 var(--ws-safe-l); background: rgba(4, 9, 15, 0.97); border-top: 1px solid var(--border); }
   /* The dock as wide as its tools need, from 44px a slot; the strip the
      rest, at least the held bar's eight slots. The dock paints over a

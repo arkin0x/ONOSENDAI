@@ -33,13 +33,13 @@ describe('off costs nothing', () => {
     expect(offenders.map((f) => path.relative(SRC, f))).toEqual([])
   })
 
-  it('main loads it only behind the gate', () => {
-    const main = fs.readFileSync(path.join(SRC, 'main.tsx'), 'utf8')
+  it('the app (boot.tsx) loads it only behind the gate', () => {
+    const main = fs.readFileSync(path.join(SRC, 'boot.tsx'), 'utf8')
     expect(main).toMatch(/if \(diagWanted\(location\.search, tabStore\)\) \{[\s\S]*?import\('\.\/lib\/diag'\)[\s\S]*?\} else boot\(\)/)
   })
 
   it('a chunk that stalls cannot hold the first render', () => {
-    const main = fs.readFileSync(path.join(SRC, 'main.tsx'), 'utf8')
+    const main = fs.readFileSync(path.join(SRC, 'boot.tsx'), 'utf8')
     expect(main).toMatch(/setTimeout\(once, DIAG_WAIT_MS\)/)
     expect(main).toMatch(/\.finally\(once\)/)
   })

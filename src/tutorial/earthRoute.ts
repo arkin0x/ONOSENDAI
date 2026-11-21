@@ -16,6 +16,9 @@
  *   - 'hyperspace-first' (effect): the HYPERSPACE panel first in the menu
  *     while BOARD and RIDE are taught (usePanelLayout front), never written to
  *     the player's saved order, and taken away as the step goes.
+ *   - 'board-step' (effect): 'hyperspace-first', and while no stop is picked
+ *     (the pick step skipped, or its taps missed) the step says to pick one
+ *     and a tap on a stop still picks it (new-user feedback, 2026-11-21).
  *   - 'board' (wait): on the line, as the HYPERSPACE panel judges it: in
  *     transit, or a chain head that has boarded or stands at a stop.
  *   - 'ride' (wait): a ride started, here (its proof computing) or by HOSAKA
@@ -29,14 +32,14 @@
  * Nothing here boards, rides or spends anything: those are the player's taps.
  */
 
-import { registerTutorialEffect, registerTutorialWatcher } from '../store/useTutorial'
+import { registerTutorialEffect, registerTutorialWatcher, useTutorial } from '../store/useTutorial'
 import { useCyberspace } from '../store/useCyberspace'
 import { useHyperspace } from '../store/useHyperspace'
 import { usePanelLayout } from '../store/usePanelLayout'
-import { setRideDestination } from '../store/destination'
 import { lineStateOf } from '../lib/hyperspace/ride'
-import { onSceneStopTap, useRideRun } from '../hud/HyperspacePanel'
+import { pickStopByTap, useRideRun } from '../hud/HyperspacePanel'
 import { jobInProgress } from '../lib/cloud'
+import { MENU_SHUT } from './script'
 
 /**
  * Call `onDone` once `done()` holds, now or after a change in any store
@@ -66,9 +69,7 @@ export function onTheLine(): boolean {
   return cs.transit !== null || lineStateOf(cs.actions()) !== null
 }
 
-registerTutorialEffect('pick-stop', () => onSceneStopTap((height) => {
-  if (useHyperspace.getState().destination === null) setRideDestination(height)
-}))
+registerTutorialEffect('pick-stop', () => pickStopByTap())
 
 registerTutorialWatcher('pick-stop', (onDone) => watchState(
   () => useHyperspace.getState().destination !== null,
@@ -76,9 +77,41 @@ registerTutorialWatcher('pick-stop', (onDone) => watchState(
   [(l) => useHyperspace.subscribe((s, prev) => { if (s.destination !== prev.destination) l() })],
 ))
 
-registerTutorialEffect('hyperspace-first', () => {
+/** HYPERSPACE first in the menu, never written to the saved order; returns what takes it away. */
+function hyperspaceFirst(): () => void {
   usePanelLayout.getState().setFront('hyperspace')
   return () => { if (usePanelLayout.getState().front === 'hyperspace') usePanelLayout.getState().setFront(null) }
+}
+
+registerTutorialEffect('hyperspace-first', hyperspaceFirst)
+
+/** What the BOARD step says in place of its hint while no stop is picked. */
+export const BOARD_PICK_FIRST_NOTE = 'Pick a stop first: tap a glowing dot on Earth.'
+/** What glows then: the hamburger while the menu is shut, then BOARD's reason line with its SHOW EARTH and PICK ONE. */
+export const BOARD_PICK_FIRST_GLOW = `${MENU_SHUT}, [data-panel-id="hyperspace"] .hyper__why`
+
+/**
+ * The BOARD step (new-user feedback, 2026-11-21: BOARD "was never
+ * available, so I couldn't ride"). BOARD needs a destination, and the pick
+ * step before it can be skipped, or its taps can miss every dot; a tap on a
+ * stop then only viewed it, so nothing the player did could ever light
+ * BOARD. Now, as long as no stop is picked, the step says to pick one in
+ * place of its hint, and a tap on a stop still picks it here, as on the pick
+ * step. HYPERSPACE stays first in the menu.
+ */
+registerTutorialEffect('board-step', () => {
+  const index = useTutorial.getState().index
+  const unfront = hyperspaceFirst()
+  const unpick = pickStopByTap()
+  // While no stop is picked, the note asks for one and the glow is on BOARD's reason line (SHOW EARTH, PICK ONE), not on a dark BOARD.
+  const note = (): void => {
+    const none = useHyperspace.getState().destination === null
+    useTutorial.getState().noteStep(index, none ? BOARD_PICK_FIRST_NOTE : null)
+    useTutorial.getState().highlightStep(index, none ? BOARD_PICK_FIRST_GLOW : null)
+  }
+  note()
+  const off = useHyperspace.subscribe((s, prev) => { if (s.destination !== prev.destination) note() })
+  return () => { off(); unpick(); unfront() }
 })
 
 registerTutorialWatcher('board', (onDone) => watchState(onTheLine, onDone, [onChain]))

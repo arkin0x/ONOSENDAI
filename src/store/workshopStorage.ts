@@ -46,6 +46,7 @@ import {
   commit, databaseExists, fingerprint, localEntries, mergeLocal, newGen, noteReconciled, restoreInto, openWorkshopDb, readAll, readMigrated, readSome, verifyAndMark,
   type MigratedMeta, type ShardRecord,
 } from '../lib/workshopDb'
+import { kvGet, kvSet } from '../lib/kvStore'
 
 /** The list as every build before this one kept it, and the backup from now on. */
 export const LOCAL_KEY = 'onosendai:shards'
@@ -126,7 +127,7 @@ export function normalizeOne(s: unknown): ShardModel | null {
 }
 
 function readLocalRaw(): string | null {
-  try { return localStorage.getItem(LOCAL_KEY) } catch { return null }
+  return kvGet(LOCAL_KEY)
 }
 
 /** The localStorage list, each shard on its own: one that cannot be read is one shard left out, not all of them. */
@@ -188,7 +189,7 @@ function writeLocal(list: readonly ShardModel[]): boolean {
   // list there is the backup, and nothing writes it again.
   if (mode !== 'local') return false
   try {
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(list))
+    kvSet(LOCAL_KEY, JSON.stringify(list))
     if (failure) report(null, null)
     return true
   } catch {

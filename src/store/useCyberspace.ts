@@ -204,6 +204,7 @@ import { useSecrets } from './useSecrets'
 import { useToast } from './useToast'
 import { useChainUi } from './useChainUi'
 import type { SelfCrypto } from '../lib/muteList'
+import { kvGet, kvSet } from '../lib/kvStore'
 
 /**
  * The explored chain, parsed once per events change rather than on every
@@ -1640,10 +1641,10 @@ function loadChain(pubkey: string, later = false): LoadedChain | null {
   // What is read now is what this tab knows (foldOtherTabs compares the mark).
   knownMarks.set(pubkey, storedMark(pubkey))
   try {
-    let raw = localStorage.getItem(chainKeyFor(pubkey))
+    let raw = kvGet(chainKeyFor(pubkey))
     if (!raw) {
       // Migrate the single legacy chain, but only for the identity that wrote it.
-      const legacy = localStorage.getItem(CHAIN_KEY)
+      const legacy = kvGet(CHAIN_KEY)
       if (legacy) {
         const d = JSON.parse(legacy) as Partial<PersistedChain>
         if (Array.isArray(d.events) && d.events[0]?.pubkey === pubkey) raw = legacy
@@ -1781,7 +1782,7 @@ function saveChain(events: NostrEvent[], published: Record<string, PublishStatus
   const refused = tooBigForLocal.get(pubkey)
   if (refused === undefined || events.length < refused) {
     try {
-      localStorage.setItem(chainKeyFor(pubkey), JSON.stringify(data))
+      kvSet(chainKeyFor(pubkey), JSON.stringify(data))
       tooBigForLocal.delete(pubkey)
     } catch {
       // Quota exceeded or private mode. The copy there stays at the last

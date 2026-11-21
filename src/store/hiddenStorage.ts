@@ -24,6 +24,7 @@
  */
 
 import type { MyDeployment } from './useShards'
+import { kvGet, kvKeys, kvRemove, kvSet } from '../lib/kvStore'
 import { addMissing, commit, HIDDEN_DB, openHiddenDb, probe, readClosed, readEverything, readSome, type Change, type ClosedRecord, type RowRecord, type SecretRecord } from '../lib/hiddenDb'
 
 export const BARE_KEY = 'onosendai:deployments'
@@ -120,13 +121,13 @@ function parsed(json: string): MyDeployment | null {
 
 function readArray(key: string): MyDeployment[] {
   try {
-    const list = JSON.parse(localStorage.getItem(key) ?? '[]')
+    const list = JSON.parse(kvGet(key) ?? '[]')
     return Array.isArray(list) ? list : []
   } catch { return [] }
 }
 
 function deletedIds(): Set<unknown> {
-  try { return new Set(JSON.parse(localStorage.getItem(DELETED_KEY) ?? '[]') as unknown[]) } catch { return new Set() }
+  try { return new Set(JSON.parse(kvGet(DELETED_KEY) ?? '[]') as unknown[]) } catch { return new Set() }
 }
 
 /** Where a row of the old list belongs. */
@@ -138,12 +139,10 @@ function bareBucket(d: MyDeployment, deleted: Set<unknown>): string {
 function localBuckets(): string[] {
   const out = new Set<string>()
   try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i) ?? ''
-      if (k === UNCLAIMED_KEY) out.add(UNCLAIMED)
-      else if (k.startsWith(`${BARE_KEY}:`)) out.add(k.slice(BARE_KEY.length + 1))
-      else if (k.startsWith('onosendai:deployments-gone:')) out.add(k.slice('onosendai:deployments-gone:'.length))
-    }
+    // In either store (lib/kvStore.ts): the lists moved to IndexedDB, or still in localStorage.
+    if (kvGet(UNCLAIMED_KEY) !== null) out.add(UNCLAIMED)
+    for (const k of kvKeys(`${BARE_KEY}:`)) out.add(k.slice(BARE_KEY.length + 1))
+    for (const k of kvKeys('onosendai:deployments-gone:')) out.add(k.slice('onosendai:deployments-gone:'.length))
   } catch { /* a storage that cannot list holds nothing to overlay */ }
   return [...out]
 }
@@ -245,8 +244,8 @@ function writeLocal(): boolean {
     const own = [...b.values()].sort((x, y) => x.seq - y.seq).filter((e) => bare.get(e.key)?.sig !== e.sig || bare.get(e.key)?.name !== name).map((e) => e.row)
     const gone = [...bare].filter(([k, v]) => v.name === name && !b.has(k)).map(([k]) => k)
     try {
-      localStorage.setItem(localKey(name), JSON.stringify(own))
-      localStorage.setItem(goneKey(name), JSON.stringify(gone))
+      kvSet(localKey(name), JSON.stringify(own))
+      kvSet(goneKey(name), JSON.stringify(gone))
     } catch { ok = false }
   }
   return ok
@@ -482,7 +481,7 @@ async function decide(): Promise<HiddenStorage> {
     const heldClosed = new Set(all.closed.map((r) => `${r.owner}\0${r.doorId}`))
     for (const r of added.closed) if (!heldClosed.has(`${r.owner}\0${r.doorId}`)) throw new Error('a closed door did not read back')
     // Read back: what local mode took off is tombstoned now, so its list need not replay.
-    for (const name of localBuckets()) { try { localStorage.removeItem(goneKey(name)) } catch { /* the next load tries again */ } }
+    for (const name of localBuckets()) { try { kvRemove(goneKey(name)) } catch { /* the next load tries again */ } }
     if (expired) { d.close(); return 'local' }
     const view = new Map<string, Map<string, Entry>>()
     for (const r of all.rows) {

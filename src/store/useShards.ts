@@ -138,6 +138,7 @@ import { hidesThing, type Muted } from '../lib/muteList'
 import { useMutes } from './useMutes'
 import { asShown, hintPrefsOf, loadHintPrefs, saveHintPrefs, withHintPrefs } from './deployHintPrefs'
 import { CONSTRAIN_DEFAULT, authoredConstrain, authoredConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
+import { kvGet, kvSet } from '../lib/kvStore'
 
 /** A workshop model's WALK setting as it publishes, by id; the default for one that never chose or is not there (DECK-0003 §1.12). */
 function constrainOfId(shardId: string): Constrain {
@@ -1905,7 +1906,7 @@ const SEEN_MAX = 5000
 
 function loadSeen(): Set<string> {
   try {
-    const list = JSON.parse(localStorage.getItem(SEEN_KEY) ?? '[]')
+    const list = JSON.parse(kvGet(SEEN_KEY) ?? '[]')
     return new Set(Array.isArray(list) ? list.filter((x) => typeof x === 'string') : [])
   } catch { return new Set() }
 }
@@ -1930,7 +1931,7 @@ function remember(ids: string[]): void {
   if (!added) return
   const list = [...seen].slice(-SEEN_MAX)
   if (list.length < seen.size) { seen.clear(); for (const id of list) seen.add(id) }
-  try { localStorage.setItem(SEEN_KEY, JSON.stringify(list)) } catch { /* quota or private mode */ }
+  try { kvSet(SEEN_KEY, JSON.stringify(list)) } catch { /* quota or private mode */ }
 }
 const DELETED_KEY = 'onosendai:deployments-deleted'
 /** Bags this identity has taken down, by `author:lookupId`, which is a loot row's own key. */
@@ -2062,7 +2063,7 @@ async function claimUnclaimed(owner: string): Promise<void> {
 
 function loadDeleted(): Record<string, true> {
   try {
-    const raw = localStorage.getItem(DELETED_KEY)
+    const raw = kvGet(DELETED_KEY)
     if (!raw) return {}
     const list = JSON.parse(raw)
     const out: Record<string, true> = {}
@@ -2072,7 +2073,7 @@ function loadDeleted(): Record<string, true> {
 }
 
 function saveDeleted(deleted: Record<string, true>): void {
-  try { localStorage.setItem(DELETED_KEY, JSON.stringify(Object.keys(deleted))) } catch { /* quota or private mode */ }
+  try { kvSet(DELETED_KEY, JSON.stringify(Object.keys(deleted))) } catch { /* quota or private mode */ }
 }
 
 /**

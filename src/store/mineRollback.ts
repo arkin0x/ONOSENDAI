@@ -22,6 +22,7 @@
  *   until a build that reads the database is back.
  */
 
+import { kvGet } from '../lib/kvStore'
 import { openHiddenDb, readEverything } from '../lib/hiddenDb'
 
 const BARE = 'onosendai:deployments'
@@ -29,7 +30,7 @@ const SECRETS = 'onosendai:door-secrets'
 
 function readList(key: string): Array<{ eventId?: string }> {
   try {
-    const list = JSON.parse(localStorage.getItem(key) ?? '[]')
+    const list = JSON.parse(kvGet(key) ?? '[]')
     return Array.isArray(list) ? list : []
   } catch { return [] }
 }

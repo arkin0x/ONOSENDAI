@@ -73,8 +73,8 @@ describe('the scene fog', () => {
     expect(ShaderChunk.fog_vertex).not.toMatch(/- mvPosition\.z/)
     // The built-in shaders the world draws with (and the headlamp patches) include that chunk.
     for (const lib of [ShaderLib.basic, ShaderLib.points]) expect(lib.vertexShader).toMatch(/#include <fog_vertex>/)
-    // Installed before anything compiles: main.tsx's first import, and the scene's.
-    const main = readFileSync('src/main.tsx', 'utf8')
+    // Installed before anything compiles: boot.tsx's first import (main.tsx only reads the moved records first), and the scene's.
+    const main = readFileSync('src/boot.tsx', 'utf8')
     expect(main.indexOf("import './scene/radialFog'")).toBeLessThan(main.indexOf("import App from './App'"))
     expect(main.indexOf("import './scene/radialFog'")).toBeGreaterThanOrEqual(0)
     expect(src).toMatch(/import '\.\/radialFog'/)

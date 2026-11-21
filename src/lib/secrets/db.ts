@@ -27,6 +27,7 @@
  * Nothing here knows about zustand; useSecrets and vault own the state.
  */
 
+import { kvStorage } from '../kvStore'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { META_STORE, getAllPaged, openDatabase, request } from '../idb'
 import { bytesToHex } from '../events'
@@ -82,8 +83,9 @@ export interface Totals { bytes: number; places: number; placeKeys: number }
 
 export const NO_TOTALS: Totals = { bytes: 0, places: 0, placeKeys: 0 }
 
+/** The old list, where it is kept now: IndexedDB once it moved (lib/kvStore.ts), else localStorage. */
 function globalStorage(): Pick<Storage, 'getItem'> | null {
-  try { return typeof localStorage === 'undefined' ? null : localStorage } catch { return null }
+  return kvStorage
 }
 
 /**

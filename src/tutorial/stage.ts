@@ -34,6 +34,7 @@
  * is signed twice. RESTART stages again: a new chest to open.
  */
 
+import { kvGet, kvRemove, kvSet } from '../lib/kvStore'
 import { getPublicKey } from 'nostr-tools/pure'
 import type { NostrEvent } from 'nostr-tools'
 import type { EventTemplate } from '../lib/events'
@@ -333,7 +334,7 @@ export function stageKey(layout: TutorialLayout): string {
 /** A player's kept stage, if it is whole, of this version, for this guide and this spawn. */
 export function readStage(player: string, guide: string, at: string): Stage | null {
   try {
-    const raw = localStorage.getItem(STAGE_PREFIX + player)
+    const raw = kvGet(STAGE_PREFIX + player)
     if (!raw) return null
     const s = JSON.parse(raw) as Partial<Stage>
     if (s.v !== STAGE_VERSION || s.player !== player || s.guide !== guide || s.at !== at) return null
@@ -345,8 +346,8 @@ export function readStage(player: string, guide: string, at: string): Stage | nu
 /** Keep a player's stage on this device; false when it could not be kept (it is then this visit's only). */
 export function writeStage(stage: Stage | null, player: string): boolean {
   try {
-    if (stage === null) localStorage.removeItem(STAGE_PREFIX + player)
-    else localStorage.setItem(STAGE_PREFIX + player, JSON.stringify(stage))
+    if (stage === null) kvRemove(STAGE_PREFIX + player)
+    else kvSet(STAGE_PREFIX + player, JSON.stringify(stage))
     return true
   } catch { return false }
 }

@@ -148,7 +148,7 @@ describe('the page and the wiring', () => {
     expect(page.search(REFERRER)).toBeLessThan(page.search(/<script|<link/))
     for (const [, card] of ROUTE_PAGES) expect(withCard(page, card)).toMatch(REFERRER)
   })
-  it('only main.tsx and lib/analytics.ts touch @vercel/analytics, and nothing calls track or pageview', () => {
+  it('only boot.tsx and lib/analytics.ts touch @vercel/analytics, and nothing calls track or pageview', () => {
     const files: string[] = []
     const walk = (dir: string): void => {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -158,13 +158,13 @@ describe('the page and the wiring', () => {
     }
     walk(SRC)
     const users = files.filter((f) => fs.readFileSync(f, 'utf8').includes('@vercel/analytics')).map((f) => path.relative(SRC, f).split(path.sep).join('/')).sort()
-    expect(users).toEqual(['lib/analytics.ts', 'main.tsx'])
+    expect(users).toEqual(['boot.tsx', 'lib/analytics.ts'])
     for (const f of users) {
       const text = fs.readFileSync(path.join(SRC, f), 'utf8')
       expect(text, f).not.toMatch(/\b(track|pageview)\s*\(/)
       expect(text, f).not.toMatch(/import\s*\{[^}]*\b(track|pageview)\b[^}]*\}\s*from\s*'@vercel\/analytics/)
     }
-    const main = fs.readFileSync(path.join(SRC, 'main.tsx'), 'utf8')
+    const main = fs.readFileSync(path.join(SRC, 'boot.tsx'), 'utf8')
     expect(main).toContain('startAnalytics({ prod: import.meta.env.PROD, broadcast: isBroadcast, landed: landedPath(), inject })')
   })
 })

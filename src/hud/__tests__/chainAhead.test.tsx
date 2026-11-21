@@ -478,8 +478,8 @@ describe('the bar in the stylesheet', () => {
     // The red border's fade is a layer over the chip's own border, the same box: out of the layout too.
     expect(rule('.explorer__toggle.has-ahead::after', section)).toMatchObject({ position: 'absolute', inset: '-1px', border: '1px solid var(--limit)', 'border-radius': 'inherit', 'pointer-events': 'none' })
     expect(Object.keys(rule('.explorer__toggle.is-limit', section)).sort()).toEqual(['border-color', 'transition'])
-    // Not an ease: the red is set in one step, once the red layer has faded in over the border.
-    expect(rule('.explorer__toggle.is-limit', section).transition).toBe('border-color 0s 300ms')
+    // Not an ease: the chip's own border steps aside in one step, once the red layer has faded in over it.
+    expect(rule('.explorer__toggle.is-limit', section)).toEqual({ 'border-color': 'transparent', transition: 'border-color 0s 300ms' })
     // The words' span is inline and only lifted above the glow.
     expect(Object.keys(rule('.aheadtxt', section)).sort()).toEqual(['position', 'z-index'])
   })
@@ -496,7 +496,8 @@ describe('the bar in the stylesheet', () => {
     const red = /--limit:\s*(#[0-9a-f]{6})/.exec(css)![1]
     const warning = css.slice(css.indexOf('.syncwarn__panel {'))
     expect(new RegExp(`color: ${red};`).test(warning.slice(0, warning.indexOf('}')))).toBe(true)
-    expect(rule('.explorer__toggle.is-limit', section)['border-color']).toBe('var(--limit)')
+    expect(rule('.explorer__toggle.has-ahead::after', section).border).toBe('1px solid var(--limit)')
+    expect(rule('.explorer__toggle.is-limit::after', section).opacity).toBe('1')
     expect(rule('.explorer__toggle.is-limit .aheadbar i.is-lit', section).background).toContain('var(--limit)')
     expect(rule('.explorer__toggle.is-limit .aheadbrk', section)['--ahead-line']).toBe('var(--limit)')
   })

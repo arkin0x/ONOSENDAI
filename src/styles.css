@@ -6038,15 +6038,16 @@ select.avatars__input option:checked {
 .explorer__toggle.has-ahead {
   position: relative;
 }
-/* At the limit the border is red, set once the red layer below has faded in
-   over it, so at rest it is the chip's own border; leaving the limit, it is
-   put back at once and the layer fades out. */
+/* The border's red at the limit: a layer of its own over the chip's border,
+   the same line on the same box, that fades in and out. Once it has faded
+   in, the chip's own border steps out of the way (transparent, in one step),
+   so at rest the red line is drawn once, with the very edges a red border
+   has; leaving the limit, the chip's border is back at once and the layer
+   fades out over it. */
 .explorer__toggle.is-limit {
-  border-color: var(--limit);
+  border-color: transparent;
   transition: border-color 0s 300ms;
 }
-/* The border's red at the limit, faded in and out on a layer of its own over
-   the chip's border, the same line on the same box. */
 .explorer__toggle.has-ahead::after {
   content: '';
   position: absolute;

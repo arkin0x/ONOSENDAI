@@ -156,7 +156,8 @@ const read = (page) => page.evaluate(() => {
     cls: chip.className,
     label: chip.getAttribute('aria-label'),
     words: chip.textContent,
-    border: getComputedStyle(chip).borderTopColor,
+    // The red at the limit is the layer over the border (styles.css .explorer__toggle.has-ahead::after).
+    border: Number(getComputedStyle(chip, '::after').opacity) === 1 ? getComputedStyle(chip, '::after').borderTopColor : getComputedStyle(chip).borderTopColor,
     drawn: !!bar,
     barOpacity: bar ? Number(getComputedStyle(bar).opacity) : 0,
     barAnimation: bar ? getComputedStyle(bar).animationName : '',

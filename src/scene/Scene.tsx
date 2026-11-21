@@ -357,16 +357,19 @@ function ScreenAxes(): null {
 }
 
 /**
- * Publishes the on-screen size of one cell, in pixels, as `--cell-px`.
+ * Shares the camera, each frame, with what cannot reach this Canvas's: its
+ * orientation for the compass (its own Canvas), and in a dev build the scene,
+ * renderer and camera for the browser harness.
  *
- * The HUD's scale instrument has to be the same size as the cursor cube, and
- * under a perspective camera that is not a constant: it is the projection scale
- * over the distance to what the camera orbits, so it changes as you dolly. A CSS
- * variable rather than store state, because this updates every frame and driving
- * a React render per frame to move one HUD element is not worth it.
+ * Nothing here writes to the page. It used to publish the on-screen size of one
+ * cell as `--cell-px` on the root element for the HUD's scale instrument; that
+ * instrument went in August (e89798eb) and nothing has read the variable since,
+ * but it was still set on every frame the camera moved, and a custom property
+ * changed on the root restyles the whole document: measured during the CHAIN
+ * chip work (#847, 2026-11-21) as most of the HUD's style time in WALK.
+ * scene/__tests__/cameraShare.test.tsx holds it so.
  */
-function CellMetric(): null {
-  const lastCellPx = useRef<string | null>(null)
+export function CameraShare(): null {
   useFrame((state) => {
     // Share the camera's orientation with the compass, which renders in its own
     // Canvas and cannot reach this one's camera.
@@ -382,19 +385,6 @@ function CellMetric(): null {
       // The camera is not a child of the scene in R3F, so traversal cannot find
       // it and the harness has no other route to the view basis.
       w.__camera = state.camera
-    }
-
-    const cam = state.camera as unknown as { fov?: number; position: { distanceTo: (v: never) => number } }
-    if (cam.fov === undefined) return
-    const [tx, ty, tz] = useCyberspace.getState().cursorOffset()
-    const dist = Math.max(0.001, cam.position.distanceTo({ x: tx, y: ty, z: tz } as never))
-    const projScale = state.size.height / (2 * Math.tan((cam.fov * Math.PI) / 360))
-    // Writing the same value re-dirties style on the root element; with the
-    // camera at rest that was a per-frame style pass for nothing.
-    const next = `${(projScale / dist).toFixed(2)}px`
-    if (next !== lastCellPx.current) {
-      lastCellPx.current = next
-      document.documentElement.style.setProperty('--cell-px', next)
     }
   })
   return null
@@ -1443,7 +1433,7 @@ export const Scene = memo(function Scene(): JSX.Element {
       <HeadlampRig />
       <LensShift />
       {isPortraitBroadcast() && <PortraitLens />}
-      <CellMetric />
+      <CameraShare />
       <ScreenAxes />
       {/* Glow halos here keep the bloom's tag, follow the Settings switch, and are strangers' unless a shard is trusted (scene/PointBillboards.tsx). */}
       <GlowWorldCanvas><World /></GlowWorldCanvas>

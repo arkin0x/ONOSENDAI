@@ -206,9 +206,12 @@ interface Props {
  * and on a 2,600-action chain that was a long task per step of a WALK
  * (owner's phone, 2026-11-21). Now only a new position is worked out, and a
  * landing moves one group. Below CONTINUOUS_SCALE_MIN every place is a whole
- * number of cells, so the shifted vertices are the very numbers the old
- * layout drew; above it, where places are not whole cells, there is no
- * reuse and every layout is made afresh, as before.
+ * number of cells, so a vertex plus its shift is exactly the number the old
+ * layout drew, and on screen the same place to within float32 rounding of the
+ * group's move (TRAIL_FRAME_MAX_CELLS); above it, where places are not whole
+ * cells, there is no reuse and every layout is made afresh, as before. A
+ * chain loaded or merged anew, a spectated chain and history hand over new
+ * position objects, which are worked out once each, as they always were.
  */
 export interface TrailFrame {
   ref: Position
@@ -217,8 +220,14 @@ export interface TrailFrame {
   centres: WeakMap<Position, [number, number, number]>
 }
 
-/** The farthest, in cells, the origin may move from a frame's before a new one is made: far within a float32's whole numbers. */
-export const TRAIL_FRAME_MAX_CELLS = 1 << 20
+/**
+ * The farthest, in cells, the origin may move from a frame's before a new one
+ * is made. The group's move and the camera's both reach the GPU as float32,
+ * and near the avatar they cancel to small numbers carrying rounding of about
+ * the move times 2^-24: at 2^12 cells that is under a thousandth of a cell,
+ * and it covers any WALK (review).
+ */
+export const TRAIL_FRAME_MAX_CELLS = 1 << 12
 
 /** How far the trail is drawn shifted: from its frame's origin to the render origin now, in cells, per screen axis. */
 export function trailShift(frame: TrailFrame, origin: Position): [number, number, number] {

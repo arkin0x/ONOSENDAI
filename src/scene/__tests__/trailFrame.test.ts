@@ -91,12 +91,15 @@ describe('the trail laid out in a frame and shifted', () => {
     expect(trailFrame(f, o, 0, AXES[1])).not.toBe(f)
     expect(trailFrame(f, alignedOrigin(at(BigInt(TRAIL_FRAME_MAX_CELLS) + 1n, 0n, 0n), 0), 0, AXES[0])).not.toBe(f)
     expect(trailFrame(f, alignedOrigin(at(BigInt(TRAIL_FRAME_MAX_CELLS), 0n, 0n), 0), 0, AXES[0])).toBe(f)
+    expect(TRAIL_FRAME_MAX_CELLS).toBeLessThanOrEqual(1 << 12)
     const c = trailFrame(null, alignedOrigin(at(0n, 0n, 0n), CONTINUOUS_SCALE_MIN), CONTINUOUS_SCALE_MIN, AXES[0])
     expect(trailFrame(c, c.ref, CONTINUOUS_SCALE_MIN, AXES[0])).not.toBe(c)
   })
 })
 
-vi.mock('@react-three/fiber', async (real) => ({ ...(await real<object>()), useFrame: () => undefined }))
+// The frame loop, run by the test: the head-riding vertex is written there.
+const frames = vi.hoisted(() => ({ cbs: [] as Array<() => void> }))
+vi.mock('@react-three/fiber', async (real) => ({ ...(await real<object>()), useFrame: (cb: () => void) => { frames.cbs.push(cb) } }))
 
 describe('PathTrail on a walk', () => {
   it('works out only the new position at each landing, and draws the trail shifted to the new origin', async () => {
@@ -119,6 +122,16 @@ describe('PathTrail on a walk', () => {
     }
     // One new position a landing, not the whole trail again.
     expect(calls.placeCentre).toBe(20)
+    // The newest vertex rides the avatar: in the trail's frame, plus the group's shift, it is where the avatar is drawn.
+    frames.cbs.at(-1)!()
+    const { anchorCentre } = await import('../../lib/space')
+    const lines = m.all().filter((h) => h.type === 'lineSegments')
+    // The walked line, the longest (the warm-up lines are empty placeholders).
+    const riding = lines.map((h) => (h.props.geometry as { attributes: { position: { array: Float32Array } } }).attributes.position.array).sort((x, y) => y.length - x.length)[0]
+    const n = riding.length
+    const shift = (group().props.position as number[])
+    const want = anchorCentre(path[320], 0, axes)
+    for (let a = 0; a < 3; a++) expect(riding[n - 3 + a] + shift[a] + 0).toBeCloseTo(want[a] + 0, 5)
     await m.unmount()
   })
 })

@@ -40,7 +40,7 @@ vi.mock('../../store/useShards', () => ({
 }))
 vi.mock('../../store/useSecrets', () => ({ useSecrets: { getState: () => ({ setCurrent: () => {}, recordPlace: async () => {}, hold: () => {} }) } }))
 vi.mock('../../store/useCeremony', () => ({ useCeremony: { getState: () => ({ mark: () => {} }) } }))
-vi.mock('../../lib/relay', () => ({ query: async () => [] }))
+vi.mock('../../lib/relay', () => ({ query: async () => [], relaySet: () => [] }))
 
 const posted: number[] = []
 class FakeWorker {

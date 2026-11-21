@@ -46,7 +46,7 @@ vi.mock('../../store/useShards', () => ({
 }))
 vi.mock('../../store/useSecrets', () => ({ useSecrets: { getState: () => ({ setCurrent: () => {}, recordPlace: async () => {}, hold: () => {} }) } }))
 vi.mock('../../store/useCeremony', () => ({ useCeremony: { getState: () => ({ mark: () => {} }) } }))
-vi.mock('../../lib/relay', () => ({ query: async () => [bag(BAD), bag(GOOD)] }))
+vi.mock('../../lib/relay', () => ({ query: async () => [bag(BAD), bag(GOOD)], relaySet: () => [] }))
 vi.mock('../../lib/bagVersions', () => ({ bagsToOpen: async (sent: unknown[]) => ({ bags: sent, deletions: [] }) }))
 vi.mock('../../lib/foundCache', async () => {
   const { BagUnreadable } = await import('../../lib/hidden')

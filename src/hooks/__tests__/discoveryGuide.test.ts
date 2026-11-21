@@ -53,7 +53,7 @@ vi.mock('../../store/useShards', () => ({
 vi.mock('../../store/useSecrets', () => ({ useSecrets: { getState: () => ({ setCurrent: () => {}, recordPlace: async () => {}, hold: () => {} }) } }))
 vi.mock('../../store/useCeremony', () => ({ useCeremony: { getState: () => ({ mark: () => {} }) } }))
 // The relays answer slowly and with nothing: the guide's finds are filed before they do.
-vi.mock('../../lib/relay', () => ({ query: async (f: unknown) => { calls.queries.push(f); calls.order.push('query'); return [] } }))
+vi.mock('../../lib/relay', () => ({ query: async (f: unknown) => { calls.queries.push(f); calls.order.push('query'); return [] }, relaySet: () => [] }))
 vi.mock('../../lib/bagVersions', () => ({ bagsToOpen: async (sent: unknown[]) => { calls.order.push('bagsToOpen'); return { bags: sent, deletions: [] } } }))
 vi.mock('../../lib/foundCache', () => ({ unbagRemembered: async () => { calls.remembered++; return [] } }))
 vi.mock('../../lib/hidden', async (orig) => ({ ...(await orig<typeof import('../../lib/hidden')>()), unbag: async () => { calls.plain++; return found } }))

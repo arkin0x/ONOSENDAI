@@ -21,6 +21,7 @@
  * that opened goes (setFoundSink), so this file imports no store.
  */
 
+import { forgetSealedLooks } from './looks'
 import { verifyEvent } from 'nostr-tools/pure'
 import { forgetSealedItems } from './sealed'
 import { BagUnreadable, HIDDEN_KIND, ciphertextOf, entryKey, forgetParsedObjects, unbag, type Hidden, type Reference, type RegionOrigin, type ResolveReference } from './hidden'
@@ -260,6 +261,8 @@ export function forgetOpened(budget: number = OPENED_KEPT_CHARS): number {
   // What references opened to is plaintext of this identity's too, sealed entries' items with it.
   forgetParsedObjects()
   forgetSealedItems()
+  // A chest's sealed looks were opened with this identity's bag keys too (lib/looks.ts).
+  forgetSealedLooks()
   const n = openedBags.size
   openedBags.clear()
   opening.clear()

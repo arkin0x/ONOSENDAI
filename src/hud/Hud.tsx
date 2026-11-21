@@ -45,6 +45,7 @@ import { ScaleLadder } from './ScaleLadder'
 import { ProofPanel } from './ProofPanel'
 import { CloudPanel } from './CloudPanel'
 import { Explanation } from './Explanation'
+import { LinksPanel } from './LinksPanel'
 import { StarredPlaces } from './StarredPlaces'
 import { PanelSlot } from './PanelSlot'
 import { usePanelLayout, type Column, type PanelId } from '../store/usePanelLayout'
@@ -54,7 +55,6 @@ import { MuteListModal } from './MuteListModal'
 import { useCover } from '../hooks/useCover'
 import { SpeakeasyLine } from './SpeakeasyLine'
 import { appVersion } from '../lib/tv/upgradeAnnounce'
-import { STRAYLIGHT_INVITE } from '../tutorial/straylight'
 import { CopyValue } from './ui/CopyValue'
 import { copyText } from '../lib/copyText'
 import { randomCoordHex } from '../lib/randomCoord'
@@ -485,41 +485,6 @@ function ScalePanel(): JSX.Element {
         Your view can scale up exponentially until 2^85, which is the full size of
         cyberspace (along each axis). The cursor represents a cubic meter at 2^33.
         Earth is visible around 2^50.
-      </Explanation>
-    </section>
-  )
-}
-
-const OFFICIAL: Array<{ href: string; name: string; what: string }> = [
-  { href: 'https://github.com/arkin0x/cyberspace', name: 'Cyberspace v2 Specification', what: 'the core protocol documentation' },
-  { href: STRAYLIGHT_INVITE, name: 'Straylight Cafe', what: 'the cyberspace community on Armada' },
-  { href: 'https://cyberspace.international', name: 'cyberspace.international', what: 'education, proliferation, adoption of cyberspace' },
-  { href: 'https://snocrash.art', name: 'SnoCrash', what: 'SNO format 3D model builder' },
-  { href: 'https://github.com/arkin0x/ONOSENDAI/tree/v2', name: 'ONOSENDAI v2 Codebase', what: 'this client on GitHub' },
-  { href: 'https://www.youtube.com/@onosendaitv', name: 'Cyberspace TV', what: 'the 24/7 live stream' },
-]
-
-function LinksPanel(): JSX.Element {
-  return (
-    <section className="panel panel--links">
-      <header className="panel__head">
-        <h2>Official</h2>
-      </header>
-      {OFFICIAL.map((l) => (
-        <p key={l.href} className="links__row">
-          <a href={l.href} target="_blank" rel="noopener noreferrer">{l.name}</a>
-          <span className="links__what"> - {l.what}</span>
-        </p>
-      ))}
-      <Explanation>
-        These are the official places to read about and build on Cyberspace, and
-        each one opens in a new tab. The Cyberspace v2 Specification is the
-        protocol itself: coordinates, movement and its proofs, region keys,
-        hyperspace and every event kind. Straylight Cafe is the cyberspace community, a
-        chat on Armada where people exploring cyberspace hang out. cyberspace.international is for teaching
-        Cyberspace and bringing more people and apps to it. SnoCrash builds 3D
-        models in the SNO format that Cyberspace objects use. The ONOSENDAI v2
-        Codebase is the source code of this client on GitHub.
       </Explanation>
     </section>
   )

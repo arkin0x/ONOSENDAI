@@ -100,6 +100,7 @@ import { aimedPoint } from '../lib/chests'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
 import { BAG_SAFE_BYTES } from '../lib/bagSize'
+import { lookTagsSize, sealedLookLimit } from '../lib/sealedLooks'
 import { findCashuToken } from '../lib/cashu'
 import { AXIS_BITS, SECTOR_HEIGHT, SECTOR_HINT, isSectorHint, searchExponent } from '../lib/hint'
 import { deployPoint, type Position } from '../lib/space'
@@ -222,16 +223,30 @@ export function lookFitShape(look: LookChoice | null, model: ShardModel | null):
 }
 
 /**
+ * How large a custom look is against the size limit, for the MODEL row: its
+ * bytes, the limit it is held to, and how it goes out (INLINE in its tag, or BY
+ * REFERENCE: sealed as its own event, DECK-0004 §3.6). Null for a built-in, a
+ * FEED placement and a look MOVE keeps as it is, which carry nothing of their own to
+ * measure.
+ */
+export function lookSizeLine(look: LookChoice, tags: readonly string[][]): string | null {
+  if (look.from !== 'mine' && look.from !== 'model') return null
+  const { bytes, sealed } = lookTagsSize(tags)
+  return `${bytes.toLocaleString('en-US')} of ${sealedLookLimit().toLocaleString('en-US')} bytes · ${sealed ? 'BY REFERENCE' : 'INLINE'}`
+}
+
+/**
  * The model row (chest and door design, D2, D3): the built-in looks, then
  * OTHER, any model from MINE or FEED (LookPicker). The chosen OTHER's name
- * is the row's note; a look too large to wear says so there instead.
+ * is the row's note, with its size against the size limit (lookSizeLine); a
+ * look over the size limit says so there instead.
  */
-export function LookRow({ choices, look, refusal }: { choices: readonly (keyof typeof LOOK_LABELS)[]; look: LookChoice; refusal: string | null }): JSX.Element {
+export function LookRow({ choices, look, refusal, size = null }: { choices: readonly (keyof typeof LOOK_LABELS)[]; look: LookChoice; refusal: string | null; size?: string | null }): JSX.Element {
   const [picking, setPicking] = useState(false)
   const pick = (l: LookChoice): void => { useShards.getState().setDeployLook(l); setPicking(false) }
   const other = look.from === 'mine' ? lookModelOf(look)?.name ?? 'model' : look.from === 'feed' ? look.object.shard.name : look.from === 'model' ? look.closed.name : look.from === 'kept' ? 'as it is' : null
   return (
-    <DeployRow kind="model" label="MODEL" hint={refusal ?? other}>
+    <DeployRow kind="model" label="MODEL" hint={refusal ?? (other && size ? <><span>{other}</span> · <span data-testid="look-size">{size}</span></> : other)}>
       <span className="deploybar__choices" role="group" aria-label="Model">
         {choices.map((name) => (
           <button key={name} className={`deploybar__toggle ${look.from === 'builtin' && look.name === name ? 'is-on' : ''}`} aria-pressed={look.from === 'builtin' && look.name === name} onClick={() => pick({ from: 'builtin', name })} {...noCallout}>{LOOK_LABELS[name]}</button>
@@ -342,13 +357,14 @@ function DeployBarOpen({ pad }: { pad: boolean }): JSX.Element | null {
   const bind = useRepeatable({ scrollSafe: true })
   const bag = useShards((s) => s.deployBag)
   const mine = useShards((s) => s.mine)
-  // What a chest wears (the model row), and that model, for the fit and the 16 KB check.
+  // What a chest wears (the model row), and that model, for the fit and the size limit.
   const look = useShards((s) => (s.pending?.type === 'chest' ? s.pending.look ?? null : null))
   const lookModel = useMemo(() => (look ? lookModelOf(look) : null), [look])
   const fitShape = useMemo(() => lookFitShape(look, lookModel), [look, lookModel])
-  const lookRefusal = useMemo(() => {
-    if (!look) return null
-    try { lookTagsFor(look, { unit, turn, constrain }); return null } catch (err) { return err instanceof Error ? err.message : String(err) }
+  // Its size against the size limit, and whether it goes sealed as its own event (lib/sealedLooks.ts), or why it cannot go.
+  const { lookRefusal, lookSize } = useMemo(() => {
+    if (!look) return { lookRefusal: null, lookSize: null }
+    try { return { lookRefusal: null, lookSize: lookSizeLine(look, lookTagsFor(look, { unit, turn, constrain })) } } catch (err) { return { lookRefusal: err instanceof Error ? err.message : String(err), lookSize: null } }
   }, [look, unit, turn, constrain])
   // The region the deploy would land in, as a string, so the bar re-renders
   // when the cursor crosses into another region and not on every step.
@@ -615,7 +631,7 @@ function DeployBarOpen({ pad }: { pad: boolean }): JSX.Element | null {
       {meter && <BagMeterRow meter={meter} others={bagRows.length > 0} room={sealingId !== null} />}
 
       {/* What a chest wears (D2, D3): a built-in or OTHER, from MINE or FEED. */}
-      {pending.type === 'chest' && look && <LookRow choices={door ? DOOR_LOOKS : CHEST_LOOKS} look={look} refusal={lookRefusal} />}
+      {pending.type === 'chest' && look && <LookRow choices={door ? DOOR_LOOKS : CHEST_LOOKS} look={look} refusal={lookRefusal} size={lookSize} />}
 
       {/* Both steppers read the store inside the press rather than the value
           this render closed over: `bind` repeats the very same callback while

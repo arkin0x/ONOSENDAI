@@ -146,7 +146,7 @@ const read = (page) => page.evaluate(() => {
   const box = (el) => { const r = el.getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map((v) => Math.round(v * 100) / 100).join(' ') }
   const chip = [...document.querySelectorAll('.explorer__toggle')].find((el) => /CHAIN/.test(el.textContent))
   if (!chip) throw new Error('no CHAIN chip on the page')
-  const stack = [...document.querySelectorAll('.instruments *')].filter((el) => !el.closest('.aheadbar, .aheadbrk') && !el.classList.contains('aheadtxt'))
+  const stack = [...document.querySelectorAll('.instruments *')].filter((el) => !el.closest('.aheadbar, .aheadbrk') && !el.classList.contains('aheadtxt') && !el.classList.contains('aheadglint'))
   const bar = chip.querySelector('.aheadbar')
   const brk = chip.querySelector('.aheadbrk')
   const ticks = bar ? [...bar.children] : []
@@ -193,7 +193,7 @@ async function landing(page) {
   }
   for (let i = 0; i < 1200; i++) {
     const s = await page.evaluate(() => {
-      const words = document.querySelector('.aheadtxt.is-glint')
+      const words = document.querySelector('.aheadglint.is-glint')
       return { total: window.__store.getState().events.length, glint: words ? getComputedStyle(words).animationName : '', folded: !!document.querySelector('.aheadbar i.is-going'), lit: document.querySelectorAll('.aheadbar i.is-lit').length }
     })
     if (s.total > before && s.glint) return s
@@ -312,7 +312,7 @@ async function walk() {
       behind: w.behind, open: w.open !== null, falling: w.falling,
       lit: bar ? bar.querySelectorAll('.is-lit').length : 0,
       going: bar ? bar.querySelectorAll('.is-going').length : 0,
-      glint: !!chip?.querySelector('.aheadtxt.is-glint'),
+      glint: !!chip?.querySelector('.aheadglint.is-glint'),
       limit: !!chip?.classList.contains('is-limit'),
       box: r ? [r.left, r.top, r.width, r.height].map((v) => Math.round(v * 100) / 100).join(' ') : '',
       total: window.__store.getState().events.length,

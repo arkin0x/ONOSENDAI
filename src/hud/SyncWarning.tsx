@@ -14,7 +14,9 @@
  * (2026-11-14).
  *
  * Dressed as v1's derezz warning: a black panel in a red and black hazard
- * frame, the words in red Krypton (styles.css, .syncwarn).
+ * frame, the words in red Krypton (styles.css, .syncwarn). The frame's
+ * stripes are a layer of their own that crawls by transform, so the
+ * compositor moves them without painting.
  *
  * position: fixed and pointer-events: none from the stylesheet: it sits
  * over the scene and the pad, takes no space in any layout at any opacity,
@@ -34,11 +36,11 @@
  * are.
  */
 
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { create } from 'zustand'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
-import { useEventsAhead } from '../store/walkAhead'
+import { useAheadSelect } from '../store/walkAhead'
 import { walkWarnOpacity } from '../store/walkLimits'
 import { WALK_LIMITS_ROW, openSettingAt } from './settingsLink'
 import { hudFlags } from '../lib/hudFlags'
@@ -60,11 +62,17 @@ export function SyncWarning(): JSX.Element | null {
 
 function SyncWarningBox(): JSX.Element {
   const walking = useCyberspace((s) => s.walking)
-  const ahead = useEventsAhead()
   const limits = useLayers((s) => s.walkLimits)
+  // The count only while it is shown: hidden, the warning keeps the last
+  // count it showed, so a step under 15 renders nothing here.
+  const ahead = useAheadSelect((n) => (walking && walkWarnOpacity(n, limits) > 0 ? n : 0))
   const aside = useSyncWarnAside((s) => s.aside)
   const due = walking ? walkWarnOpacity(ahead, limits) : 0
-  if (aside && due === 0) useSyncWarnAside.setState({ aside: false })
+  // Put back once the warning would have gone anyway: after the commit, not
+  // during the render (hidden either way, so the look is the same).
+  useEffect(() => {
+    if (aside && due === 0) useSyncWarnAside.setState({ aside: false })
+  }, [aside, due])
   const opacity = aside ? 0 : due
   const on = opacity > 0
   const tappable = opacity >= SYNCWARN_TAP_FROM
@@ -76,6 +84,7 @@ function SyncWarningBox(): JSX.Element {
   }
   return (
     <div className={`syncwarn${on ? ' is-on' : ''}${tappable ? ' is-tappable' : ''}`} style={{ opacity }}>
+      <div className="syncwarn__stripes" aria-hidden="true" />
       <div className="syncwarn__panel" role="status" aria-live="polite" aria-hidden={!on}>
         <div className="syncwarn__title">WARNING: LOSING SYNC</div>
         <div className="syncwarn__sub">PROOF CHAIN {shown.current} BEHIND</div>

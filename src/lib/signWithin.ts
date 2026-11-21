@@ -24,13 +24,22 @@ export class SignerTimeout extends Error {
 export const SIGNER_GONE_MESSAGE = 'Signer not answering. Open your signer app, then try again.'
 
 /**
+ * What a move says when a remote signer (NIP-46) ran out of time: the way out
+ * of a pairing that went stale, as when the signer app moved to another
+ * device and this one still asks the old pairing (arkinox, 2026-11-21).
+ * LOG OUT and PAIR AGAIN are in the Identity panel and on the chip it raises.
+ */
+export const SIGNER_STUCK_MESSAGE = 'Your signer is not answering. LOG OUT and pair again.'
+
+/**
  * The words for a signature that failed: a signer that ran out of time gets
- * SIGNER_GONE_MESSAGE, and a request too big for a signer app (never sent,
+ * SIGNER_GONE_MESSAGE (SIGNER_STUCK_MESSAGE for a remote signer, `kind`
+ * nip46), and a request too big for a signer app (never sent,
  * signerRequestSize.ts) its own words, which already say what to do.
  */
-export function signingFailed(err: unknown): string {
+export function signingFailed(err: unknown, kind?: string): string {
   // By name too: a SignerTimeout from another copy of this module (a test's reset) is still one.
-  if (err instanceof SignerTimeout || (err instanceof Error && err.name === 'SignerTimeout')) return SIGNER_GONE_MESSAGE
+  if (err instanceof SignerTimeout || (err instanceof Error && err.name === 'SignerTimeout')) return kind === 'nip46' ? SIGNER_STUCK_MESSAGE : SIGNER_GONE_MESSAGE
   if (err instanceof Error && err.name === 'SignerRequestTooBig') return err.message
   return `Signing failed: ${err instanceof Error ? err.message : String(err)}`
 }

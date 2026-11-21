@@ -45,6 +45,7 @@ import { parseDemoRoute } from './lib/demoRoute'
 import { startWorkshopRoute } from './lib/workshopRoute'
 import { restoreAfterUnfinishedTour, useDemo } from './store/useDemo'
 import { ToastChip } from './hud/ToastChip'
+import { SignerStuckChip, SignerUiHost } from './hud/SignerControls'
 import { TutorialToast } from './hud/TutorialToast'
 import { watchTutorialToast } from './tutorial/toast'
 import { StarNickname } from './hud/StarNickname'
@@ -426,6 +427,8 @@ export default function App(): JSX.Element {
               <NowPlayingChip />
             </>,
             toast: <>
+              {/* A remote signer that let a move run out of time: LOG OUT or PAIR AGAIN from here (SignerControls.tsx). */}
+              <SignerStuckChip />
               <ToastChip />
               {/* Haven't finished the tutorial yet? START or LATER (tutorial/toast.ts). */}
               <TutorialToast />
@@ -489,6 +492,8 @@ export default function App(): JSX.Element {
           shows its error where the modal was, and the scene stays up. */}
       <CrashNote where="a modal" closesCard>
         <StashModals />
+        {/* LOG OUT's confirm and PAIR AGAIN's QR, from the Identity panel or the chip. */}
+        <SignerUiHost />
         <SecretModal />
         <PublicShardModal />
         <ActionModal />

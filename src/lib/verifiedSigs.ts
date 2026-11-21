@@ -157,6 +157,26 @@ export function alreadyChecked(events: readonly NostrEvent[]): string[] {
   return known
 }
 
+/**
+ * An event this page just signed, or a remote signer's answer this page just
+ * checked in full (useCyberspace signEvent, checkedAnswer): remembered with
+ * its fields, so the copies the relays push back (one per relay for every
+ * subscription it matches, a WALK step's own event above all) are compared
+ * with it rather than checked again from scratch: a Schnorr check each on
+ * the main thread (owner's phone walk, 2026-11-21). `ev` must be the object
+ * that was signed or checked, unchanged.
+ */
+export function signedHere(ev: NostrEvent): void {
+  const key = keyOf(ev)
+  if (key === null) return
+  // One hash per signature, not per copy: fields changed since signing are not remembered, and their copies are checked in full.
+  let holds = false
+  try { holds = getEventHash(ev) === ev.id } catch { holds = false }
+  if (!holds) return
+  remember(key)
+  keepBody(key, ev)
+}
+
 /** A check made elsewhere (a worker) came back good: remembered and marked, as verifyEvent would here. */
 export function checkedElsewhere(ev: NostrEvent): void {
   const key = keyOf(ev)

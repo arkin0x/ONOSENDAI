@@ -273,8 +273,10 @@ export function AheadWords({ ahead, words }: { ahead: ChainAhead; words: string 
 
 /** The bar and the corner brackets, inside the chip's button; nothing with nothing drawn. */
 export function AheadMarks({ ahead }: { ahead: ChainAhead }): JSX.Element | null {
-  if (!ahead.drawn) return null
-  const { bar, track } = ahead
+  return ahead.drawn ? <AheadMarksDrawn bar={ahead.bar} track={ahead.track} /> : null
+}
+
+function AheadMarksDrawn({ bar, track }: { bar: AheadBar; track: AheadTrack }): JSX.Element {
   const gap = (BRACKET_NEAR + (BRACKET_FAR - BRACKET_NEAR) * (1 - bar.close)).toFixed(2)
   // Where the brackets were: the frame takes its new place at once and the
   // corners, new for each gap, play the move from there by transform.

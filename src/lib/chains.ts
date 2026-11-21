@@ -192,8 +192,18 @@ async function gatherChain<T>(
     // `askBoth`: the two in one REQ to each relay, which answers both or
     // neither (a head confirmation, before every signature: half the REQs
     // to every relay at every step of a walk, owner's diag of 2026-11-21).
-    if (askBoth) got = byAuthor(await askBoth([spawnsFilter(pubkey), chainAsk]), pubkey)
-    else {
+    if (askBoth) {
+      got = byAuthor(await askBoth([spawnsFilter(pubkey), chainAsk]), pubkey)
+      // A relay may cap the whole REQ rather than each filter (the canonical
+      // relay's nostrdb keeps the newest 500 of the union), and the spawns are
+      // the oldest, so they are what a long run of new moves pushes out. Moves
+      // back with no spawn among them: the spawns are asked on their own, as
+      // before, so the newest spawn is known and the hole below the moves is
+      // filled. Nothing back at all asks nothing more, so a relay that is down
+      // costs no second wait.
+      const back = eventsOf(got)
+      if (back.length > 0 && newestSpawnId(back, pubkey) === null) got = combine(got, await ask(spawnsFilter(pubkey)))
+    } else {
       const [spawns, chain] = await Promise.all([ask(spawnsFilter(pubkey)), ask(chainAsk)])
       got = combine(spawns, chain)
     }

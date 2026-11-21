@@ -241,6 +241,7 @@ export function kvFlush(): Promise<boolean> {
       await writeBatch(d, batch)
       for (const [k, v] of batch) {
         if (dirty.get(k) === v) dirty.delete(k)
+        seen.delete(k)
         if (v === null) mirror.delete(k)
         else mirror.set(k, v)
       }
@@ -286,7 +287,8 @@ function writeBatch(d: IDBDatabase, batch: ReadonlyMap<string, string | null>, s
     const entries = tx.objectStore(ENTRIES)
     for (const [key, value] of batch) {
       if (value === null) { entries.delete(key); continue }
-      const print = seenOf?.get(key) ?? seen.get(key)
+      // Without the fingerprint: it names the text a record was moved from, and this is another.
+      const print = seenOf?.get(key)
       entries.put({ key, value, at: Date.now(), ...(print !== undefined ? { seen: print } : {}) })
     }
     tx.oncomplete = () => resolve()
@@ -340,18 +342,29 @@ export async function moveOne(d: IDBDatabase, key: string, text: string): Promis
     if (!marked) markMoved()
   }
   // The database's record (any row not `pending`): moved and verified, or written there since.
+  let replacing: string | undefined
   if (mirror.has(key)) {
-    if (seen.get(key) !== print) {
-      // Not the text it was moved from: written to localStorage after the move, by a build or a visit that read it empty. The stored record stays, and this text is set aside.
-      console.warn(`[kv] ${key} was written to localStorage after it moved: the stored copy stays, and that text is kept aside`)
-      try { await keepAside(d, key, text, 'written to localStorage after the move') } catch { stayed.add(key); return 'kept' }
+    const stored = mirror.get(key)!
+    if (seen.get(key) === print && stored !== text) {
+      // Fingerprinted from this very text, yet holding another: a copy damaged after it was checked (a later write drops the fingerprint). The text is the record; the damaged copy is set aside.
+      try { await keepAside(d, key, stored, 'did not match the text it was moved from') } catch { return 'kept' }
+      replacing = stored
+      mirror.delete(key)
+      seen.delete(key)
+    } else {
+      if (seen.get(key) !== print) {
+        // Not the text it was moved from: written to localStorage after the move, by a build or a visit that read it empty. The stored record stays, and this text is set aside.
+        console.warn(`[kv] ${key} was written to localStorage after it moved: the stored copy stays, and that text is kept aside`)
+        // Not set aside now: both copies stay and the stored one is read; the next load tries again.
+        try { await keepAside(d, key, text, 'written to localStorage after the move') } catch { return 'kept' }
+      }
+      remove()
+      return 'removed'
     }
-    remove()
-    return 'removed'
   }
   try {
     // 1. Written as `pending`, never taken for the record, unless another tab moved it since this one read the database.
-    const outcome = await putPending(d, key, text)
+    const outcome = await putPending(d, key, text, replacing)
     if (outcome === 'taken') {
       const row = await readOne(d, key)
       if (row && !row.pending) { mirror.set(key, row.value); if (typeof row.seen === 'string') seen.set(key, row.seen); return moveOne(d, key, text) }
@@ -401,10 +414,11 @@ function withRow<T>(d: IDBDatabase, key: string, body: (row: Row | undefined, en
   })
 }
 
-/** Write a record being moved as `pending`; `taken` when a record (a row not pending) is there already. */
-function putPending(d: IDBDatabase, key: string, text: string): Promise<'written' | 'taken'> {
+/** Write a record being moved as `pending`; `taken` when a record (a row not pending) is there already, other than the damaged copy being replaced. */
+function putPending(d: IDBDatabase, key: string, text: string, replacing?: string): Promise<'written' | 'taken'> {
   return withRow(d, key, (row, entries) => {
-    if (row && !row.pending) return 'taken'
+    // A damaged copy being replaced (moveOne) is written over only if it is still that copy.
+    if (row && !row.pending && !(replacing !== undefined && row.value === replacing)) return 'taken'
     entries.put({ key, value: text, pending: true, at: Date.now() })
     return 'written'
   })
@@ -554,6 +568,8 @@ async function heard(keys: string[]): Promise<void> {
     if (row?.pending) continue
     if (newValue === null) mirror.delete(key)
     else mirror.set(key, newValue)
+    if (typeof row?.seen === 'string') seen.set(key, row.seen)
+    else seen.delete(key)
     if (oldValue === newValue) continue
     try { window.dispatchEvent(new StorageEvent('storage', { key, oldValue, newValue })) } catch { /* no StorageEvent */ }
   }

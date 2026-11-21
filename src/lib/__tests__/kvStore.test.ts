@@ -152,6 +152,29 @@ describe('the move', () => {
     expect(store.getItem('onosendai:published')).toBeNull()
   })
 
+  it('a moved copy damaged after it was checked (its fingerprint still that of the text) gives way to the text, and is set aside', async () => {
+    store.setItem('onosendai:published', '{"good":1}')
+    // The removal fails, so localStorage still holds the text next load.
+    const remove = vi.spyOn(store, 'removeItem').mockImplementation(() => { throw new Error('closed') })
+    await hydrateKv()
+    remove.mockRestore()
+    // The stored copy is damaged behind the app's back, its fingerprint left as it was.
+    const db = await new Promise<IDBDatabase>((resolve) => { const r = indexedDB.open(KV_DB); r.onsuccess = () => resolve(r.result) })
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction('entries', 'readwrite')
+      const os = tx.objectStore('entries')
+      const g = os.get('onosendai:published')
+      g.onsuccess = () => { os.put({ ...g.result, value: '{"go' }) }
+      tx.oncomplete = () => resolve()
+    })
+    db.close()
+    resetKvForTests()
+    await hydrateKv()
+    expect(kvGet('onosendai:published')).toBe('{"good":1}')
+    expect(store.getItem('onosendai:published')).toBeNull()
+    expect((await kvSuperseded()).map((r) => r.value)).toEqual(['{"go'])
+  })
+
   it('resumes when interrupted after the copy and before the removal: the next load only removes it', async () => {
     store.setItem('onosendai:published', '{"x":1}')
     // The removal never happens this load (the tab closed at that moment).

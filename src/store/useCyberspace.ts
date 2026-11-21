@@ -121,6 +121,7 @@ import {
   buildChain,
   chainHead,
   extendChain,
+  namedIds,
   firstBreak,
   openBracket,
   hopTemplate,
@@ -213,9 +214,12 @@ import { kvGet, kvSet } from '../lib/kvStore'
  * The explored chain, parsed once per events change rather than on every
  * read. Every explorer selector goes through this.
  */
-let actionsFor: { events: NostrEvent[]; actions: ActionEvent[] } | null = null
+let actionsFor: { events: NostrEvent[]; actions: ActionEvent[]; named: Set<string> | null } | null = null
 function parsedChain(events: NostrEvent[]): ActionEvent[] {
-  if (!actionsFor || actionsFor.events !== events) actionsFor = { events, actions: appendedTo(actionsFor, events) ?? buildChain(events) }
+  if (!actionsFor || actionsFor.events !== events) {
+    const grown = appendedTo(actionsFor, events)
+    actionsFor = grown ?? { events, actions: buildChain(events), named: null }
+  }
   return actionsFor.actions
 }
 
@@ -224,10 +228,19 @@ function parsedChain(events: NostrEvent[]): ActionEvent[] {
  * and one more (an action signed here, an event the feed brought): only the
  * new one is read (lib/events.ts extendChain). Null otherwise.
  */
-function appendedTo(memo: { events: NostrEvent[]; actions: ActionEvent[] } | null, events: NostrEvent[]): ActionEvent[] | null {
+function appendedTo(memo: { events: NostrEvent[]; actions: ActionEvent[]; named: Set<string> | null } | null, events: NostrEvent[]): { events: NostrEvent[]; actions: ActionEvent[]; named: Set<string> } | null {
   if (!memo || events.length !== memo.events.length + 1) return null
   for (let i = 0; i < memo.events.length; i++) if (events[i] !== memo.events[i]) return null
-  return extendChain(memo.actions, memo.events, events[events.length - 1])
+  // The ids the chain's e tags name, gathered once after a full parse and then
+  // grown by each event added: whether the new one is already named is one
+  // lookup (extendChain), not a pass over every tag of the chain.
+  const named = memo.named ?? namedIds(memo.events)
+  const ev = events[events.length - 1]
+  const actions = extendChain(memo.actions, memo.events, ev, named)
+  if (!actions) return null
+  // Handed on to the memo that replaces this one; nothing else holds it.
+  memo.named = null
+  return { events, actions, named: namedIds([ev], named) }
 }
 
 /**

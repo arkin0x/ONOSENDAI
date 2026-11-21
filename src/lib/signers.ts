@@ -23,6 +23,7 @@ import type { AbstractSimplePool, SubscribeManyParams } from 'nostr-tools/abstra
 import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, NostrEvent } from './events'
 import { attributed } from './client'
+import { guardRequestSize } from './signerRequestSize'
 import { DEFAULT_SIGNER_RELAY, normalizeSignerRelay, signerRelays, withoutRetiredSignerRelays } from './loginCredentials'
 export { BACKUP_SIGNER_RELAY, DEFAULT_SIGNER_RELAY, loginCredentialKind, normalizeSignerRelay, signerRelays, withoutRetiredSignerRelays } from './loginCredentials'
 
@@ -342,7 +343,8 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
   const clientSk = clientSecretKey ?? generateSecretKey()
   const bp = await nip46.parseBunkerInput(bunkerUri.trim())
   if (!bp) throw new Error('Not a valid bunker URI')
-  const bunker = nip46.BunkerSigner.fromBunker(clientSk, bp, { pool: answersFirst() as never })
+  // Every request held to what one NIP-44 message carries (signerRequestSize.ts).
+  const bunker = guardRequestSize(nip46.BunkerSigner.fromBunker(clientSk, bp, { pool: answersFirst() as never }))
   onStep?.('connect')
   await said(bunker, bunker.connect())
   onStep?.('get_public_key')
@@ -419,6 +421,8 @@ function wrapBunkerSigner(
   bunkerUri: string,
   nostrConnectSession = false,
 ): Signer {
+  // Every request held to what one NIP-44 message carries (signerRequestSize.ts).
+  guardRequestSize(bunker)
   const signer: Signer = {
     kind: 'nip46',
     pubkey,

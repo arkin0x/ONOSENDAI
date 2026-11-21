@@ -23,10 +23,15 @@ export class SignerTimeout extends Error {
 /** What a move says when its signer ran out of time: what to do, not only what happened. */
 export const SIGNER_GONE_MESSAGE = 'Signer not answering. Open your signer app, then try again.'
 
-/** The words for a signature that failed: a signer that ran out of time gets SIGNER_GONE_MESSAGE. */
+/**
+ * The words for a signature that failed: a signer that ran out of time gets
+ * SIGNER_GONE_MESSAGE, and a request too big for a signer app (never sent,
+ * signerRequestSize.ts) its own words, which already say what to do.
+ */
 export function signingFailed(err: unknown): string {
   // By name too: a SignerTimeout from another copy of this module (a test's reset) is still one.
   if (err instanceof SignerTimeout || (err instanceof Error && err.name === 'SignerTimeout')) return SIGNER_GONE_MESSAGE
+  if (err instanceof Error && err.name === 'SignerRequestTooBig') return err.message
   return `Signing failed: ${err instanceof Error ? err.message : String(err)}`
 }
 

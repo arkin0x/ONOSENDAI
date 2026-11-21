@@ -52,7 +52,7 @@ export function hudFlagsFrom(search: string, store: DiagStore | null): HudFlags 
 
 let latched: HudFlags | null = null
 
-/** This load's flags: read on the first call (main.tsx, before the first render) and kept. */
+/** This load's flags: read on the first call (as the app's modules load, before the first render) and kept. */
 export function hudFlags(): HudFlags {
   if (latched) return latched
   let store: Storage | null = null

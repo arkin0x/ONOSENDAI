@@ -34,7 +34,8 @@ vi.mock('../ChainAhead', async (orig) => {
 })
 vi.mock('../../store/useBuilder', async (orig) => {
   const real = await orig() as typeof import('../../store/useBuilder')
-  return { ...real, useBuilder: vi.fn(real.useBuilder) }
+  // Watched, and still a store: getState, setState and subscribe as before.
+  return { ...real, useBuilder: Object.assign(vi.fn(real.useBuilder), { getState: real.useBuilder.getState, setState: real.useBuilder.setState, subscribe: real.useBuilder.subscribe }) }
 })
 
 import { ChainExplorer } from '../ChainExplorer'

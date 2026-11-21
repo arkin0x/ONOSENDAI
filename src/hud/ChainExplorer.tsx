@@ -75,8 +75,9 @@ import { hudFlags } from '../lib/hudFlags'
 // Spectating opens the chain explorer: the chain is the thing you came to
 // look at. What you had it set to is put back when the spectation ends, and
 // switching from one avatar to another keeps the first setting.
+// Not with ?nochip=1 (lib/hudFlags.ts): there is no chip to open.
 let openBefore: boolean | null = null
-useCyberspace.subscribe((s, prev) => {
+if (!hudFlags().nochip) useCyberspace.subscribe((s, prev) => {
   if ((s.spectate === null) === (prev.spectate === null)) return
   const ui = useChainUi.getState()
   if (s.spectate) {

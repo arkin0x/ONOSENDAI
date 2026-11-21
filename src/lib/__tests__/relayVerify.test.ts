@@ -13,6 +13,7 @@ vi.mock('nostr-tools/pure', async (original) => {
 })
 
 const { verifyRelayEvent } = await import('../relay')
+const { keptBodies } = await import('../verifiedSigs')
 
 /** A fresh copy, as a second subscription's JSON.parse hands it over. */
 const copy = <T>(e: T): T => JSON.parse(JSON.stringify(e)) as T
@@ -93,7 +94,27 @@ describe('a repeat compared with the fields that were checked, not hashed again 
     const spy = vi.spyOn(pure, 'getEventHash')
     for (let i = 0; i < 20; i++) expect(verifyRelayEvent(copy(ev))).toBe(true)
     expect(spy).not.toHaveBeenCalled()
+    // The control: a body too big to keep is hashed at every repeat, so the spy does see a hash.
+    const big = signed('y'.repeat(250_000))
+    expect(verifyRelayEvent(copy(big))).toBe(true)
+    expect(verifyRelayEvent(copy(big))).toBe(true)
+    expect(spy).toHaveBeenCalled()
     spy.mockRestore()
+  })
+
+  it('keeps bodies within their budget, counting every tag, and the count never drifts', () => {
+    const sk = generateSecretKey()
+    // Many empty tags are not free: 5,000 tags of one empty value count at least two each.
+    const before = keptBodies().chars
+    const tagged = copy(finalizeEvent({ kind: 3333, created_at: 1_760_000_002, tags: Array.from({ length: 5_000 }, () => ['']), content: '' }, sk))
+    expect(verifyRelayEvent(tagged)).toBe(true)
+    expect(keptBodies().chars - before).toBeGreaterThanOrEqual(10_000)
+    // About 120,000 counted characters each: a hundred of them pass the 8,000,000 budget, so the oldest go.
+    for (let i = 0; i < 100; i++) expect(verifyRelayEvent(signed(`${i}:${'z'.repeat(120_000)}`, sk))).toBe(true)
+    const { count, chars } = keptBodies()
+    expect(chars).toBeLessThanOrEqual(8_000_000)
+    expect(chars).toBeGreaterThan(7_000_000)
+    expect(count).toBeLessThan(100)
   })
 
   it('a copy that differs in any field, a tag, a tag value, or a type, is refused as before', () => {

@@ -18,11 +18,12 @@ import type { NostrEvent } from './events'
  * by the presence sweep) had its Schnorr check run again each time, about a
  * millisecond apiece on the main thread: 408 of the 1,144 checks at one boot
  * were repeats (arkinox, 2026-10-20: the laptop "still isn't great"; counted
- * spectating on the smoke seed). A repeat still has its id recomputed, which
- * commits to the pubkey and every other field, so only a signature already
- * checked against that exact id and pubkey is taken on trust. Only a string
- * id and sig are ever looked up or kept: an event with no signature must not
- * match an id that was never checked (review of #405).
+ * spectating on the smoke seed). A repeat is still held to its id: its
+ * fields are compared with those that hashed to it (bodies, below) or, with
+ * none kept, its id is recomputed, so only a signature already checked
+ * against that exact id and pubkey is taken on trust. Only a string id and
+ * sig are ever looked up or kept: an event with no signature must not match
+ * an id that was never checked (review of #405).
  */
 const VERIFIED_KEPT = 10_000
 const verifiedSigs = new Set<string>()
@@ -50,12 +51,14 @@ let bodyChars = 0
 
 function bodyOf(ev: NostrEvent): Body | null {
   if (typeof ev.pubkey !== 'string' || typeof ev.created_at !== 'number' || typeof ev.kind !== 'number' || typeof ev.content !== 'string' || !Array.isArray(ev.tags)) return null
-  let chars = ev.content.length
+  // Each tag and each value counts at least one, so a body of many empty tags is not free.
+  let chars = ev.content.length + ev.pubkey.length
   const tags: string[][] = []
   for (const t of ev.tags) {
     if (!Array.isArray(t)) return null
+    chars += 1
     const copy: string[] = []
-    for (const v of t) { if (typeof v !== 'string') return null; copy.push(v); chars += v.length }
+    for (const v of t) { if (typeof v !== 'string') return null; copy.push(v); chars += v.length + 1 }
     tags.push(copy)
   }
   // A copy of the tags: a caller changing the event it was handed cannot change what is remembered.
@@ -185,4 +188,9 @@ export function verifyUnlessDeferred(ev: NostrEvent): boolean {
     return true
   }
   return verifyOnce(ev)
+}
+
+/** For tests: how many bodies are kept, and their counted size. */
+export function keptBodies(): { count: number; chars: number } {
+  return { count: bodies.size, chars: bodyChars }
 }

@@ -319,7 +319,7 @@ describe('long animation frames, by who ran in them (owner walk of 2026-11-21)',
     l.add(frame(LOAF_MIN_MS - 1, [ws]))
     expect(l.take(5)).toBeNull()
     // A frame whose animation frame callback (3 ms of script) ran from 1072 and whose style and layout ran from 1076 to its end at 1082.
-    l.add(frame(82, [ws, { duration: 3, invokerType: 'user-callback', invoker: 'FrameRequestCallback', sourceFunctionName: 'tick', sourceURL: 'https://onosendai.tech/assets/boot-SKDJhwQn.js' }], { blockingDuration: 32, renderStart: 1072, styleAndLayoutStart: 1076 }))
+    l.add(frame(82, [ws, { startTime: 1072, duration: 3, invokerType: 'user-callback', invoker: 'FrameRequestCallback', sourceFunctionName: 'tick', sourceURL: 'https://onosendai.tech/assets/boot-SKDJhwQn.js' }], { blockingDuration: 32, renderStart: 1072, styleAndLayoutStart: 1076 }))
     l.add(frame(88, [ws, { ...ws, duration: 9, invoker: 'IDBRequest.onsuccess', sourceFunctionName: 'put', sourceCharPosition: 77 }], { blockingDuration: 38 }))
     const row = l.take(10)!
     const at = (c: (typeof LOAF_COLUMNS)[number]) => row[LOAF_COLUMNS.indexOf(c)]

@@ -351,6 +351,7 @@ export function toRow(s: DiagRow): Array<number | string | null> {
 
 /** One script a long animation frame names (PerformanceScriptTiming): only these fields are read. */
 export interface LoafScript {
+  startTime?: number
   duration: number
   invokerType?: string
   invoker?: string
@@ -444,7 +445,8 @@ export class LoafLedger {
     for (const s of e.scripts ?? []) {
       const ms = s.duration || 0
       this.script += ms
-      if (s.invokerType === 'user-callback' && /FrameRequestCallback/.test(s.invoker ?? '')) this.rafScript += ms
+      // A callback run in the frame's render phase (animation frames, resize observers) is inside rafMs too.
+      if (render > 0 && s.invokerType === 'user-callback' && (s.startTime || 0) >= render) this.rafScript += ms
       const type = safeLabel(s.invokerType, 24)
       const invoker = invokerLabel(s.invoker)
       const fn = safeLabel(s.sourceFunctionName)

@@ -2325,7 +2325,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     const own = await signer.signEvent(template)
     verifiedSigs.add(`${own.id}:${own.sig}`)
     signedHere(own)
-    if (own.kind === ACTION_KIND) signedThisPage.add(own.id)
+    if (own.kind === ACTION_KIND) { signedThisPage.add(own.id); freshSigned.add(own.id) }
     return own
   }
   // A wake skipped for an AUTH's answer, and this is not an AUTH: drop the
@@ -2374,7 +2374,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     if (late) pendingAuthSigns--
   }
   const answer = checkedAnswer(signed, signer)
-  if (answer.kind === ACTION_KIND) signedThisPage.add(answer.id)
+  if (answer.kind === ACTION_KIND) { signedThisPage.add(answer.id); freshSigned.add(answer.id) }
   return answer
 }
 
@@ -2390,6 +2390,33 @@ const signedThisPage = new Set<string>()
 /** Whether this page signed the chain action `id` (signedThisPage). */
 export function signedOnThisPage(id: string): boolean {
   return signedThisPage.has(id)
+}
+
+/**
+ * Chain actions this page signed that have not yet become the head. What
+ * opens the release gate is the action being taken, once: the same move read
+ * back from storage later (a switch away and back, LIVE flipped on after it
+ * was made LOCAL) is not taken again (lib/release.ts; review, 2026-11-21).
+ */
+const freshSigned = new Set<string>()
+
+/**
+ * Whether `id`, just become the head, is an action this page signed and has
+ * not counted before; counted now, so a second time says no. The publisher
+ * asks on every change of head, LIVE or LOCAL (publisher.ts).
+ */
+export function takeFreshHead(id: string): boolean {
+  return freshSigned.delete(id)
+}
+
+/**
+ * Record `id` as a chain action this page just signed, as signEvent does.
+ * For a test whose fixture event stands for a move taken here: only that
+ * opens the release gate (lib/release.ts).
+ */
+export function noteSignedOnThisPage(id: string): void {
+  signedThisPage.add(id)
+  freshSigned.add(id)
 }
 
 /**

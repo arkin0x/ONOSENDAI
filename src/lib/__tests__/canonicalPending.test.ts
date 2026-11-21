@@ -162,6 +162,7 @@ describe('actions the canonical relay has not taken', () => {
       store.useCyberspace.setState({ live: true })
       await vi.advanceTimersByTimeAsync(10)
       // A new action, taken while Live: published, by the player's relay only.
+      store.noteSignedOnThisPage(chain[2].id)
       store.useCyberspace.setState({ events: chain, prevEventId: chain[2].id, published: { ...store.useCyberspace.getState().published, [chain[2].id]: 'queued' } })
       await vi.advanceTimersByTimeAsync(10)
       expect(JSON.parse(localStorage.getItem(keyOf(pk)) ?? '{}')).toHaveProperty(chain[2].id)
@@ -198,6 +199,7 @@ describe('actions the canonical relay has not taken', () => {
       pub.startPublisher()
       store.useCyberspace.setState({ live: true })
       await vi.advanceTimersByTimeAsync(10)
+      store.noteSignedOnThisPage(chain[2].id)
       store.useCyberspace.setState({ events: chain, prevEventId: chain[2].id, published: { ...store.useCyberspace.getState().published, [chain[2].id]: 'queued' } })
       await vi.advanceTimersByTimeAsync(10)
       await vi.advanceTimersByTimeAsync(59_000)
@@ -219,6 +221,7 @@ describe('actions the canonical relay has not taken', () => {
       pub.startPublisher()
       store.useCyberspace.setState({ live: true })
       await vi.advanceTimersByTimeAsync(10)
+      store.noteSignedOnThisPage(chain[2].id)
       store.useCyberspace.setState({ events: chain, prevEventId: chain[2].id, published: { ...store.useCyberspace.getState().published, [chain[2].id]: 'queued' } })
       await vi.advanceTimersByTimeAsync(10)
       await vi.advanceTimersByTimeAsync(61_000)

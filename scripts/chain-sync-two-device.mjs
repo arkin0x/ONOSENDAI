@@ -17,6 +17,7 @@
  * | press during sync | the tablet reloads and a move is pressed at once; it lands on the true head, never on the stale one |
  * | unreachable | the tablet reloads with the relay silent; it says so and signs nothing |
  * | gap458, gap600 | the tablet reloads after 458, then 600, moves made elsewhere: more than one page of the relay's answer (CAP) |
+ * | kept | moves kept on the phone while LOCAL wait, after a reload on LIVE, for a move there; the chip says so; that move sends them all |
  * | drain | the owner's case: moves signed while LOCAL, published one at a time later, the tablet reloading partway; it gets them all without another reload |
  *
  *   node scripts/chain-sync-two-device.mjs http://localhost:5287 /path/to/out
@@ -182,6 +183,30 @@ if (want('press')) {
   // Either it waited and landed on the true head, or it was refused with nothing signed; never signed on the stale head.
   ok('press during sync: never signed on the stale head', t !== null && prevs.every((p, i) => (i === 0 ? p === target : p === fresh[i - 1].id)), `${t} ms, ${fresh.length} signed, previous ${prevs[0]?.slice(0, 8) ?? 'none'} target ${target?.slice(0, 8)}, msg ${JSON.stringify(s.msg)}`)
   await tablet.close()
+}
+
+if (want('kept')) {
+  // Moves kept on the phone while LOCAL, the phone switched to LIVE and
+  // reloaded: they wait for an action on the phone (owner, 2026-11-21), the
+  // chip says so, and the next move sends them all behind it, with no fork.
+  await phone.page.evaluate(() => window.__store.getState().setLive(false))
+  const before = store.length
+  for (let i = 0; i < 2; i++) {
+    const n0 = (await phone.state()).n
+    await phone.page.evaluate(() => { const s = window.__store.getState(); s.moveCursor({ axis: 'x', dir: 1 }); void s.commit() })
+    await until(phone, (s) => s.n > n0 && s.status !== 'computing', 120_000)
+  }
+  await phone.page.evaluate(() => window.__store.getState().setLive(true))
+  await phone.close()
+  await phone.open()
+  await until(phone, (s) => s.n > 0 && s.check !== 'checking', 60_000)
+  await sleep(8000)
+  const chip = await phone.page.evaluate(() => [...document.querySelectorAll('.explorer__toggle')].map((e) => e.textContent).join(' | '))
+  const quiet = store.length === before
+  const target = await move(phone)
+  const mine = store.filter((e) => e.pubkey === pk && e.kind === 3333)
+  const prevs = mine.map((e) => e.tags.find((t) => t[0] === 'e' && t[3] === 'previous')?.[1]).filter(Boolean)
+  ok('kept: moves kept while LOCAL stay on the phone after a reload on LIVE until a move there, which sends them all', quiet && /KEPT HERE/.test(chip) && store.length === before + 3 && target.head === relayHead() && new Set(prevs).size === prevs.length, `quiet ${quiet}, chip "${chip}", relay +${store.length - before}`)
 }
 
 /**

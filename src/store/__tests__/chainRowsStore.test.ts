@@ -2066,7 +2066,8 @@ describe('follow-ups of #576', () => {
     expect(b.S().events.map((e) => e.id)).toContain(m)
     expect(b.rows.unvouchedAction(pk, m)).toBe(true)
     ;(await import('../../lib/publisher')).startPublisher()
-    b.store.useCyberspace.setState({ live: true })
+    // LIVE through the switch, so it is this identity's own setting and comes back with it (loadLive).
+    b.S().setLive(true)
     b.S().publishNow()
     await tick(300)
     expect(sent.map((x) => x.id)).not.toContain(m)
@@ -2076,15 +2077,23 @@ describe('follow-ups of #576', () => {
     await b.S().useNsec(nip19.nsecEncode(sk))
     await b.store.savedChainLoaded()
     expect(b.rows.unvouchedAction(pk, m)).toBe(false)
+    // Free, but read from storage rather than signed by this page: it goes out
+    // only after the publisher's look at the relays, never with them silent
+    // (publisher.ts; review of the per-identity LIVE switch, 2026-11-21).
     b.S().publishNow()
-    await vi.waitFor(() => expect(sent.map((x) => x.id)).toContain(m), { timeout: 10_000, interval: 20 })
+    await tick(300)
+    expect(sent.map((x) => x.id)).not.toContain(m)
+    relays.confirm = []
+    b.S().publishNow()
+    await vi.waitFor(() => expect(sent.map((x) => x.id)).toContain(m), { timeout: 20_000, interval: 20 })
   })
 
   it('LIVE, a load that brings back held moves asks the relays once by itself: they are free with no press, and PUBLISH NOW sends them', { timeout: 30_000 }, async () => {
     const { m } = await moveOnlyInSpareKey()
     breakRowReads()
     relays.confirm = []
-    localStorage.setItem('onosendai:live', '1')
+    // LIVE is the identity's own setting (useCyberspace loadLive).
+    localStorage.setItem(`onosendai:live:${pk}`, '1')
     const b = await openTab()
     expect(b.S().events.map((e) => e.id)).toContain(m)
     await vi.waitFor(() => expect(b.rows.unvouchedAction(pk, m)).toBe(false), { timeout: 5_000, interval: 20 })
@@ -2097,7 +2106,8 @@ describe('follow-ups of #576', () => {
     const chain = chainOf(6)
     await seedOldStores(chain, { published: chain.map((e) => e.id), localToo: true })
     await openTab()
-    localStorage.setItem('onosendai:live', '1')
+    // LIVE is the identity's own setting (useCyberspace loadLive).
+    localStorage.setItem(`onosendai:live:${pk}`, '1')
     relays.asked = 0
     const b = await openTab()
     await tick(500)
@@ -2114,7 +2124,8 @@ describe('follow-ups of #576', () => {
       prevCoordHex: positionHex(at(5), home.plane), to: { ...at(5), y: home.y + 1n }, plane: home.plane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00',
     }), sk) as NostrEvent
     relays.confirm = [sibling]
-    localStorage.setItem('onosendai:live', '1')
+    // LIVE is the identity's own setting (useCyberspace loadLive).
+    localStorage.setItem(`onosendai:live:${pk}`, '1')
     const b = await openTab()
     expect(b.S().events.map((e) => e.id)).toContain(m)
     ;(await import('../../lib/publisher')).startPublisher()

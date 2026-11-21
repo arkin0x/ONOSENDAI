@@ -5225,6 +5225,14 @@ select.avatars__input option:checked {
   color: var(--dim);
 }
 
+/* The X and nostr marks before arkinox's two profile rows (hud/BrandMarks):
+   the link's color, sized to its type, a small gap before the name. */
+.links__row .brand-mark {
+  display: inline-block;
+  vertical-align: -1px;
+  margin-right: 5px;
+}
+
 .panel--links a:hover {
   color: var(--fg);
   text-decoration: underline;

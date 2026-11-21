@@ -82,11 +82,14 @@ describe('the deploy bar with nothing placed', () => {
     useShards.setState({ mine: rows })
     const bar = await mount(<DeployBar />)
     expect(bar.all().length).toBe(0)
+    const atMount = reads()
     const start = C().cursor
     for (let i = 1; i <= 40; i++) {
       await act(async () => { useCyberspace.setState({ cursor: { x: start.x + BigInt(i) * 64n, y: start.y, z: start.z } }) })
     }
-    expect(reads()).toBe(0)
+    // Not at each step of the walk, and not when it mounted either.
+    expect(reads() - atMount).toBe(0)
+    expect(atMount).toBe(0)
     await bar.unmount()
   })
 

@@ -118,6 +118,23 @@ describe('the world WALK reads', () => {
     expect(wallItems(1).map((w) => w.key)).toContain(doorWallKey(DOOR))
   })
 
+  it('follows CLOSE for what stands in the room: a thing behind a closed door leaves the world, and OPEN brings it back', async () => {
+    const INSIDE = '5'.repeat(64)
+    const thing = { ...block(INSIDE, { x: AT.x + 2n, y: AT.y, z: AT.z }), room: { doorId: DOOR } } as Hidden
+    useShards.setState({ discovered: { ...useShards.getState().discovered, [INSIDE]: thing } })
+    expect(useShards.getState().worldItems().map((w) => w.key)).toContain(INSIDE)
+    await writeClosed([{ owner: ME, doorId: DOOR, lock: LOCK, room: '', shut: true }])
+    expect(useShards.getState().worldItems().map((w) => w.key)).not.toContain(INSIDE)
+    await writeClosed([{ owner: ME, doorId: DOOR, lock: LOCK, room: '' }])
+    expect(useShards.getState().worldItems().map((w) => w.key)).toContain(INSIDE)
+  })
+
+  it('is built again for another identity, with the same hides and finds', () => {
+    const before = useShards.getState().worldItems()
+    useCyberspace.setState({ identity: { ...useCyberspace.getState().identity, pubkey: 'f'.repeat(64) } })
+    expect(useShards.getState().worldItems()).not.toBe(before)
+  })
+
   it('a walker inside the door slab still gets the door marked as holding them, on a copy', () => {
     // Strictly inside the door's slab (doorWalls.test.ts): one gibson up.
     const at = wallItemsAt(1, { x: AT.x, y: AT.y + 1n, z: AT.z })

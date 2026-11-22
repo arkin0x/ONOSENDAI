@@ -34,6 +34,12 @@
  * (D5), and that is applied where an object is read from its event
  * (lib/carried.ts keepOwnTable), which also says whose the model is, so every
  * draw passes that pubkey on (authorOf); a model made here is yours.
+ *
+ * A placed object that is a hidden object (DECK-0003 §3.4) is a SEALED PIECE
+ * of a split build (lib/pieceKeys.ts): opened here with the key of the bag
+ * its parent was read from, when this device opened that bag, and otherwise
+ * a placeholder, as for any reader that cannot open it. Your own pieces
+ * signed while LOCAL are read from here before any relay.
  */
 
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
@@ -45,6 +51,7 @@ import { fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from './contacts'
 import { queryAny, relaySet } from './relay'
 import { onRescan } from './rescanSignal'
+import { localPiece, onPieceKeys, onPiecesForgotten, readSealedPiece, setPieceCache } from './pieceKeys'
 
 const SNO_KIND = 33331
 /** How long one reference waits on the relays before it is drawn as a placeholder. */
@@ -130,10 +137,17 @@ export function fetchRef(ref: Ref): Promise<unknown> {
       if (!a) return null
       filter = { kinds: [a.kind], authors: [a.pubkey], '#d': [a.d] }
     } else filter = { ids: [ref[1]] }
-    const found = await queryAny(relays, filter, FETCH_WAIT_MS)
+    // A piece of yours signed while LOCAL is on no relay yet: read from here.
+    const own = ref[0] === 'a' ? localPiece(ref[1]) : undefined
+    const found = own ? [own] : await queryAny(relays, filter, FETCH_WAIT_MS)
     // Several relays may each hold a different edit; the newest is the object.
     const ev = found.sort((x, y) => y.created_at - x.created_at)[0]
     if (!ev || ev.kind !== SNO_KIND) return null
+    // A hidden object: a sealed piece, opened with its parent's bag key, or nothing (lib/pieceKeys.ts).
+    if (ref[0] === 'a') {
+      const sealed = await readSealedPiece(ev, ref[1])
+      if (sealed !== undefined) return sealed
+    }
     let payload: unknown
     try { payload = JSON.parse(ev.content) } catch { return null }
     // By `e`, whose event it is goes with it, so what it carries counts under
@@ -159,6 +173,10 @@ export function fetchRef(ref: Ref): Promise<unknown> {
 export function fetchSettled(ref: Ref): Promise<unknown> {
   return Promise.resolve(settled.get(refKey(ref)) ?? null)
 }
+
+// Pieces opened with the keys of an identity that signed out are dropped (lib/pieceKeys.ts forgetPieceKeys).
+onPiecesForgotten((addresses) => { for (const a of addresses) forgetRef(['a', a]) })
+setPieceCache({ prime: (a, payload) => primeRef(['a', a], payload), drop: (a) => forgetRef(['a', a]) })
 
 /** Answer a reference from here instead of a relay: for tests and the dev harness. */
 export function primeRef(ref: Ref, payload: unknown): void {
@@ -241,6 +259,18 @@ export function useResolved(shard: ShardModel | null, pool?: ReadPool): Map<stri
     if (!carried) return
     return onRescan(() => { if (missing.current && !pending.current) setAgain((n) => n + 1) })
   }, [carried])
+  // A part missing for want of its key asks again once a bag read here notes
+  // one for it (lib/pieceKeys.ts): a split build's pieces open as its bag is
+  // read. Only a draw that placed that address, at any depth, asks again.
+  const placesAny = refs.length > 0
+  useEffect(() => {
+    if (!placesAny) return
+    return onPieceKeys((noted) => {
+      if (!missing.current) return
+      if (pending.current) { dirty.current = true; return }
+      for (const a of noted) if (touched.current.has(`a:${a}`)) { setAgain((n) => n + 1); return }
+    })
+  }, [placesAny])
   // The read pools this draw was cut short by, for want of reads in them (not
   // by its own share's ceiling): resolved again when reads come back to one.
   const starvedOf = useRef<Set<ReadPool>>(new Set())

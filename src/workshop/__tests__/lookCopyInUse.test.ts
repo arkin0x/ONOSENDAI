@@ -100,6 +100,7 @@ describe('a look copy in use is stored at that moment', () => {
     W().keepCopy(id)
     W().select('other')
     expect(byId(id)).toBeDefined()
+    expect(storedIds()).toContain(id)
     expect(byId('plaza')!.refs).toEqual([LINK])
   })
 

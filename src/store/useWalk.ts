@@ -819,7 +819,7 @@ export const RESCUE_MS = 50
  * while a wall is still on its way: nothing is given up on until it stands.
  */
 function rescueBoxes(at: Position, items: readonly WallItem[], g: AxisDirection): RescueBox[] | null {
-  const { boxes, pending } = wallBoxes(items)
+  const { boxes, pending } = wallBoxes(items, at)
   if (pending) return null
   const across = (['x', 'y', 'z'] as const).filter((a) => a !== g.axis)
   const h0 = heightOf(at, g)
@@ -829,9 +829,9 @@ function rescueBoxes(at: Position, items: readonly WallItem[], g: AxisDirection)
       const gap = at[a] < lo[a] ? lo[a] - at[a] : at[a] > hi[a] ? at[a] - hi[a] : 0n
       if (gap > d) d = gap
     }
-    const a = heightOf(lo, g)
-    const b = heightOf(hi, g)
-    return { d: Number(d), top: Number((a > b ? a : b) - h0) }
+    const a = heightOf(lo, g) - h0
+    const b = heightOf(hi, g) - h0
+    return { d: Number(d), lo: Number(a < b ? a : b), top: Number(a > b ? a : b) }
   })
 }
 
@@ -843,7 +843,28 @@ function rescueBoxes(at: Position, items: readonly WallItem[], g: AxisDirection)
  */
 function rescuable(at: Position, items: readonly WallItem[], g: AxisDirection, h: number, v: number, canDouble: boolean, bottom: bigint): boolean {
   const boxes = rescueBoxes(at, items, g)
-  return boxes === null || canStillLand(h, v, canDouble, Number(bottom), boxes)
+  return boxes === null || canStillLand(h, v, canDouble, Number(bottom), boxes, stepGibsons())
+}
+
+/** A walk step now, in gibsons (lib/space.ts stepFor): how far each steer in the air goes. */
+function stepGibsons(): number {
+  return Number(stepFor(useCyberspace.getState().scaleExp))
+}
+
+/**
+ * A fall whose rest was asked while walls under it were on their way
+ * (Fall `unsure`): asked again, every RESCUE_MS, until they stand, and then
+ * its rest is what they say, so it can be judged.
+ */
+function settleUnsure(f: Fall, now: number): void {
+  f.rescuedAt = now
+  takeWallWait()
+  const limit = limitAt(f.anchor, f.items, f.plane, f.down)
+  if (takeWallWait()) return
+  f.bottom = heightOf(f.anchor, f.down) - f.h0 - limit.drop
+  f.lands = limit.lands
+  f.unsure = false
+  syncFall(f)
 }
 
 /**
@@ -859,7 +880,7 @@ function lostInAir(f: Fall, now: number, r: number, t: number): boolean {
     if (!boxes) { f.rescue = null; return false }
     f.rescue = { from: f.anchor, items: f.items, boxes }
   }
-  return !canStillLand(r - f.base, arcSpeed(f.v0, t), !f.doubled, f.bottomN - f.base, f.rescue.boxes)
+  return !canStillLand(r - f.base, arcSpeed(f.v0, t), !f.doubled, f.bottomN - f.base, f.rescue.boxes, stepGibsons())
 }
 
 /** The fall in the air, for tests and the DEV handle: read only. */
@@ -1010,6 +1031,7 @@ export function tickFall(now: number = nowMs()): boolean {
   meetCeiling(f, now)
   const t = Math.max(0, (now - f.t0) / 1000)
   const r = Math.min(arcHeight(f.v0, t), f.topN)
+  if (f.unsure && now - f.rescuedAt >= RESCUE_MS) settleUnsure(f, now)
   // Nothing below to catch it, and no input left could land it anywhere: it
   // would fall forever, so gravity goes off here (D).
   if (!f.lands && !f.unsure && now - f.rescuedAt >= RESCUE_MS && !useWalk.getState().hardGravity && lostInAir(f, now, r, t) && gravityOffOverVoid()) {
@@ -1357,7 +1379,7 @@ function turnGravity(): void {
   downInAirAt = null
   if (waits) { endFall(at); return }
   // Nothing along the new down to catch you: gravity off, and the fall ends at the bend, as (D).
-  if (nothingCatches(limit) && !rescuable(at, f.items, g, 0, 0, !f.doubled, -limit.drop) && gravityOffOverVoid()) { endFall(at); return }
+  if (limit.drop > 0n && nothingCatches(limit) && !useWalk.getState().hardGravity && !rescuable(at, f.items, g, 0, 0, !f.doubled, -limit.drop) && gravityOffOverVoid()) { endFall(at); return }
   if (limit.drop === 0n) { endFall(at, !limit.lands); return }
   f.h0 = heightOf(at, g)
   f.t0 = now

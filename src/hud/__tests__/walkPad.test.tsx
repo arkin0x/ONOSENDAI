@@ -135,6 +135,7 @@ beforeEach(async () => {
   await placeSpawn()
   S().cancel()
   useWalk.getState().setGravity(false)
+  useWalk.getState().setHardGravity(false)
 })
 
 describe('the WALK pad', () => {
@@ -211,6 +212,8 @@ describe('the WALK pad', () => {
 
   it('under GRAVITY DOWN stays on and says it absorbs a bounce (review of #649), and JUMP says jump', () => {
     useWalk.getState().enter()
+    // Over nothing: Hard Mode Gravity keeps it on (store/useWalk.ts gravityOffOverVoid).
+    useWalk.getState().setHardGravity(true)
     useWalk.getState().setGravity(true)
     expect(find('touchpad__key--down').props.disabled).toBeFalsy()
     expect(find('touchpad__key--down').props.title).toBe('Down: hold to absorb a bounce (C or F)')

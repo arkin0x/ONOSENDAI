@@ -158,6 +158,9 @@ function walk(gravity: boolean): void {
   useCyberspace.setState({ screenAxes: AXES })
 }
 
+/** A small floor, for a shard placed somewhere else entirely. */
+const FLOOR_FAR: [V3, V3] = [[0, -1, 0], [4, 0, 4]]
+
 /** A platform far off to the side, at the walker's height: further than any jump and steering can go. */
 const FAR: [V3, V3] = [[200, -1, -10], [210, 0, 10]]
 
@@ -183,10 +186,22 @@ describe('the rescue check (walkGravity canStillLand)', () => {
   it('a box to the side counts while steering could reach it in that time', () => {
     const t = latestAt(0, 0, 0, true)!
     const reach = t * AIR_REACH_SPEED + 1
-    expect(canStillLand(0, 0, true, -1e9, [{ d: Math.floor(reach), top: 0 }])).toBe(true)
-    expect(canStillLand(0, 0, true, -1e9, [{ d: Math.ceil(reach) + 1, top: 0 }])).toBe(false)
+    expect(canStillLand(0, 0, true, -1e9, [{ d: Math.floor(reach), lo: 0, top: 0 }])).toBe(true)
+    expect(canStillLand(0, 0, true, -1e9, [{ d: Math.ceil(reach) + 1, lo: 0, top: 0 }])).toBe(false)
     // Its top under the boundary: never.
-    expect(canStillLand(0, 0, true, -5, [{ d: 0, top: -6 }])).toBe(false)
+    expect(canStillLand(0, 0, true, -5, [{ d: 0, lo: -8, top: -6 }])).toBe(false)
+  })
+
+  it('any height in a box may be a floor: a platform with a pillar too high to jump over still counts', () => {
+    expect(canStillLand(0, 0, true, -1e9, [{ d: 5, lo: -1, top: 10 }])).toBe(true)
+    // Not if all of it is out of reach above.
+    expect(canStillLand(0, 0, true, -1e9, [{ d: 5, lo: 4, top: 10 }])).toBe(false)
+  })
+
+  it('steering goes a step at a time, and a step is 2^zoom gibsons', () => {
+    const box = { d: 40, lo: 0, top: 0 }
+    expect(canStillLand(0, 0, true, -1e9, [box], 1)).toBe(false)
+    expect(canStillLand(0, 0, true, -1e9, [box], 8)).toBe(true)
   })
 })
 
@@ -250,6 +265,22 @@ describe('gravity goes off once nothing could catch you', () => {
     expect(posted).toHaveLength(0)
   })
 
+  it('a shard in a region you are not in, never built, is not waited for', () => {
+    const plane = useCyberspace.getState().plane as WorldItem['plane']
+    const ledge = boxes('Ledge', 'all', [LEDGE])
+    const far = boxes('Far', 'all', [FLOOR_FAR])
+    const items: WorldItem[] = [
+      { key: 'ledge', type: 'shard', at: { ...start, y: start.y - 1n }, plane, height: 84, mine: false, shard: ledge },
+      { key: 'far', type: 'shard', at: { x: start.x ^ (1n << 30n), y: start.y, z: start.z }, plane, height: 12, mine: false, shard: far },
+    ]
+    useShards.setState({ worldItems: () => items })
+    walk(true)
+    useWalk.getState().press('away')
+    untilOff()
+    expect(useWalk.getState().gravity).toBe(false)
+    expect(useToast.getState().toast).toMatchObject({ label: 'GRAVITY OFF' })
+  })
+
   it('stepping off into the void: off as soon as no double jump could bring you back, and never back on by itself', async () => {
     world(start, [boxes('Ledge', 'all', [LEDGE]), [0, -1, 0]])
     walk(true)
@@ -259,11 +290,13 @@ describe('gravity goes off once nothing could catch you', () => {
     expect(useWalk.getState().gravity).toBe(false)
     expect(useWalk.getState().falling).toBe(false)
     expect(fallState()).toBeNull()
-    // A double jump rises 3: off once more than 3 under the ledge, and no further.
+    // A double jump rises 3: off once more than 3 under the ledge's bottom
+    // (any height in it may be a floor, best case: its box reaches 3 under
+    // you), and no further.
     const [x, y, z] = at(start)
     expect([x, z]).toEqual([0, -1])
-    expect(y).toBeLessThanOrEqual(-3)
-    expect(y).toBeGreaterThanOrEqual(-5)
+    expect(y).toBeLessThanOrEqual(-6)
+    expect(y).toBeGreaterThanOrEqual(-8)
     expect(useToast.getState().toast).toMatchObject({ label: 'GRAVITY OFF' })
     // The step-off and the fall's one hop, where it stopped.
     expect(useWalk.getState().queue).toEqual([{ ...start, z: start.z - 1n }, useCyberspace.getState().cursor])
@@ -285,10 +318,10 @@ describe('gravity goes off once nothing could catch you', () => {
     expect(useWalk.getState().gravity).toBe(true)
     untilOff()
     expect(useWalk.getState().gravity).toBe(false)
-    // With no double jump left, the ledge is lost the moment you are under its top.
+    // With no double jump left, the ledge is lost the moment you are under it (its box reaches 3 under you).
     const y = at(start)[1]
-    expect(y).toBeLessThanOrEqual(0)
-    expect(y).toBeGreaterThanOrEqual(-2)
+    expect(y).toBeLessThanOrEqual(-3)
+    expect(y).toBeGreaterThanOrEqual(-5)
   })
 
   it('a jump that ends over the void: on through the arc, off only once coming down with nothing in reach', () => {
@@ -337,6 +370,8 @@ describe('Hard Mode Gravity', () => {
 })
 
 describe('the fall search is not asked again on every crossing', () => {
+  // With gravity off a walk never asks for a fall (the requirement after it goes
+  // off); the cache itself is what the Hard Mode test below measures.
   it('gravity off over the void: a walk asks no fall search at all', () => {
     world(start, [boxes('Far', 'all', [FAR]), [0, -1, 0]])
     walk(true)

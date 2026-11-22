@@ -224,8 +224,9 @@ export function saveGravity(on: boolean): void {
 }
 
 /**
- * How fast, in gibsons per second across gravity, a walker can best steer in
- * the air, for the rescue check (canStillLand): above both walks' top speeds
+ * How fast, in steps per second across gravity (a step is 2^zoom gibsons,
+ * lib/space.ts stepFor), a walker can best steer in the air, for the rescue
+ * check (canStillLand): above both walks' top speeds
  * (fluid WALK's FLUID_MAX_SPEED, 12.5, which a running jump keeps; the step
  * WALK's held key, one step every 110 ms, about 9.1), with room for quick
  * taps and for a diagonal, so a platform any real input could reach is
@@ -239,7 +240,10 @@ const DOUBLE_TRIES = 24
 /** The later time (s from now) an arc at height `h` moving up at `v` is at height `y` on its way down; null when it never gets that high. */
 function downThrough(h: number, v: number, y: number): number | null {
   const d = v * v + 2 * WALK_GRAVITY * (h - y)
-  return d < 0 ? null : (v + Math.sqrt(d)) / WALK_GRAVITY
+  if (d < 0) return null
+  const t = (v + Math.sqrt(d)) / WALK_GRAVITY
+  // Already under it, and going down: that was in the past.
+  return t < 0 ? null : t
 }
 
 /**
@@ -277,34 +281,36 @@ export function latestAt(h: number, v: number, y: number, canDouble: boolean): n
 /**
  * One wall's box as the rescue check sees it: `d`, the most whole gibsons
  * across gravity between the walker's column and the box (0 over it), and
- * `top`, how high its top is above the walker's anchor (whole gibsons, up
- * against gravity; the box is a gibson wider than the wall all round, so
- * that is about where a walker stands on it).
+ * `lo` and `top`, how high its bottom and its top are above the walker's
+ * anchor (whole gibsons, up against gravity; the box is a gibson bigger than
+ * the wall all round).
  */
-export interface RescueBox { d: number; top: number }
+export interface RescueBox { d: number; lo: number; top: number }
 
 /**
  * Whether any input left could still put the walker on a wall (arkinox,
  * 2026-11-22: "we don't want to turn off gravity if the user jumping or
  * double jumping would save them"): from height `h` (above the anchor)
  * moving up at `v`, with the double jump still to use when `canDouble`,
- * steering at AIR_REACH_SPEED, could it be over some box in `boxes` while
- * still at or above its top, before it falls past it, and never under
- * `bottom`, the boundary no hop can cross.
+ * steering at AIR_REACH_SPEED steps of `step` gibsons a second, could it be
+ * over some box in `boxes` while still at or above a height in it, before it
+ * falls past it, never under `bottom`, the boundary no hop can cross.
  *
- * A box's top is the floor it is measured by: what is straight under you is
- * fallLimit's, exactly, so this is only ever asked about walls off to the
- * side, which you land on from above. Best case otherwise: no ceiling is in
- * the way, the box is taken as wide as its widest, and steering is faster
- * than either walk goes, so it says no only when nothing could land you.
+ * What is straight under you is fallLimit's, exactly; this is about walls
+ * off to the side. Best case throughout, so it says no only when nothing
+ * could land you: any height in a box may be a floor (a platform's floor
+ * under a pillar on it, the bottom stair of a flight), no ceiling is in the
+ * way, the box is taken as wide as its widest, and steering is faster than
+ * either walk goes. The cost of that: beside a deep wall, gravity goes off
+ * only once you are under its bottom.
  */
-export function canStillLand(h: number, v: number, canDouble: boolean, bottom: number, boxes: readonly RescueBox[]): boolean {
+export function canStillLand(h: number, v: number, canDouble: boolean, bottom: number, boxes: readonly RescueBox[], step = 1): boolean {
   for (let i = 0; i < boxes.length; i++) {
     const b = boxes[i]
     // A box whose top is under the boundary: never reached.
     if (b.top < bottom) continue
-    const t = latestAt(h, v, b.top, canDouble)
-    if (t !== null && t * AIR_REACH_SPEED + 1 >= b.d) return true
+    const t = latestAt(h, v, Math.max(b.lo, bottom), canDouble)
+    if (t !== null && (t * AIR_REACH_SPEED + 1) * step >= b.d) return true
   }
   return false
 }

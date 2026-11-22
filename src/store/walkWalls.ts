@@ -1539,16 +1539,20 @@ export function wallItemsAt(plane: number, from: Position): WallItem[] {
  * The boxes the walls of `items` have resolved, in whole gibsons, absolute
  * (each wall's mesh reach from its shard's coordinate, as nearness reads it):
  * what WALK's rescue check measures against (store/useWalk.ts, walkGravity
- * canStillLand). Asks nothing to be built. `pending` when one of them is still
- * on its way, so it cannot yet be said there is nothing there.
+ * canStillLand). Asks nothing to be built. `pending` when a wall whose region
+ * a walker at `at` is in (regionReached) has not been built yet, so it cannot
+ * yet be said there is nothing there; a wall in a region you are not in is
+ * never waited for.
  */
-export function wallBoxes(items: readonly WallItem[]): { boxes: Array<{ lo: Position; hi: Position }>; pending: boolean } {
+export function wallBoxes(items: readonly WallItem[], at: Position): { boxes: Array<{ lo: Position; hi: Position }>; pending: boolean } {
   const boxes: Array<{ lo: Position; hi: Position }> = []
   let pending = false
   for (const w of items) {
     const e = entries.get(w.key)
-    if (!e) { pending = true; continue }
-    if (!e.reach) { if (e.first) pending = true; continue }
+    if (!e || !e.reach) {
+      if ((!e || e.first) && !pending && regionReached(w, at)) pending = true
+      continue
+    }
     const r = e.reach
     boxes.push({ lo: { x: w.at.x + r.lo.x, y: w.at.y + r.lo.y, z: w.at.z + r.lo.z }, hi: { x: w.at.x + r.hi.x, y: w.at.y + r.hi.y, z: w.at.z + r.hi.z } })
   }

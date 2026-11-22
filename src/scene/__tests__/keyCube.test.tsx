@@ -48,7 +48,8 @@ import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { useShards, type WorldItem } from '../../store/useShards'
-import { ItemMark, keyBoxSide, noteBoxSide, NOTE_EDGE_PX, WorldMessages } from '../WorldMessages'
+import { ItemMark, keyBoxSide, markFadeLeft, MARK_FADE_MS, noteBoxSide, NOTE_EDGE_PX, WorldMessages } from '../WorldMessages'
+import { useTakeVanish } from '../../store/useOpenCeremony'
 
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
 const HERE = { x: 1n << 40n, y: 1n << 40n, z: 1n << 40n }
@@ -68,6 +69,7 @@ beforeEach(() => {
   useShards.setState({ pending: null, selectedSecret: null, mine: [], discovered: {}, curated: null } as never)
   useCyberspace.setState({ anchor: HERE, anchorPlane: 0, scaleExp: 0, focus: null })
   useInventory.setState({ owner: useCyberspace.getState().identity.pubkey, items: {}, storage: 'memory' })
+  useTakeVanish.setState({ playing: {} })
 })
 
 function keyItem(model = false): KeyItem {
@@ -201,7 +203,7 @@ describe('a key with no model of its own', () => {
     expect((await measure(r, [10])).edges[0]).toBeCloseTo(0.5, 6)
   })
 
-  it('hangs its name and its credit line just under the cube on screen, clear of its lowest corner, near or far', async () => {
+  it('stands its name and its credit line just over the cube on screen, clear of its highest corner, near or far', async () => {
     r = await scene([worldKey('1'.repeat(64))])
     const scene3 = r.state().scene
     const size = r.state().size
@@ -209,24 +211,52 @@ describe('a key with no model of its own', () => {
     const centre = worldBox(lines).getCenter(new Vector3())
     const texts: Object3D[] = []
     scene3.traverse((o) => { if (o.name === 'text') texts.push(o) })
-    // The name and, under it, who left it.
+    // The name and, under it, who left it (WorldLabel's credit line, at subScale 0.72 of the name).
     expect(texts).toHaveLength(2)
+    const half = (t: Object3D): number => (t.position.y < 0 ? 0.72 / 2 : 0.5)
     for (const back of [1.5, 2.5, 8, 20, 40]) {
       const camera = await lookFrom(r, centre, back)
       const b = worldBox(lines)
-      let lowest = -Infinity
+      let highest = Infinity
       for (let i = 0; i < 8; i++) {
         const v = new Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera)
-        lowest = Math.max(lowest, ((1 - v.y) / 2) * size.height)
+        highest = Math.min(highest, ((1 - v.y) / 2) * size.height)
       }
+      const label = texts[0].parent!.parent!.parent!
+      const depth = camera.position.distanceTo(label.getWorldPosition(new Vector3()))
+      const unitPx = (label.scale.x * size.height) / (2 * Math.tan(((camera as PerspectiveCamera).fov * Math.PI) / 360) * depth)
       for (const text of texts) {
-        // Its centre on screen, less half a line (one local unit of the label is one of its pixels; the credit line is smaller).
+        // Its centre on screen, and its bottom half a line under it (one local unit of the label is one of its pixels).
         const at = text.getWorldPosition(new Vector3()).project(camera)
         const y = ((1 - at.y) / 2) * size.height
-        const label = texts[0].parent!.parent!.parent!
-        const depth = camera.position.distanceTo(label.getWorldPosition(new Vector3()))
-        const unitPx = (label.scale.x * size.height) / (2 * Math.tan(((camera as PerspectiveCamera).fov * Math.PI) / 360) * depth)
-        expect(y - unitPx / 2).toBeGreaterThanOrEqual(lowest)
+        expect(y + half(text) * unitPx).toBeLessThanOrEqual(highest)
+      }
+    }
+  })
+
+  it('resting on the ground, its name and credit line are never behind the ground, from any camera above it', async () => {
+    r = await scene([worldKey('1'.repeat(64))])
+    const lines = markEdges(r.state().scene)
+    const b = worldBox(lines)
+    const centre = b.getCenter(new Vector3())
+    // The ground, its top face the cube's bottom face, added to the same scene.
+    const { Mesh, BoxGeometry, MeshBasicMaterial, Raycaster } = await import('three')
+    const ground = new Mesh(new BoxGeometry(400, 0.1, 400), new MeshBasicMaterial())
+    ground.position.set(centre.x, b.min.y - 0.05, centre.z)
+    r.state().scene.add(ground)
+    ground.updateMatrixWorld()
+    const texts: Object3D[] = []
+    r.state().scene.traverse((o) => { if (o.name === 'text') texts.push(o) })
+    for (const [up, back] of [[0.2, 3], [1.5, 1.5], [6, 2], [0.3, 12], [12, 0.5], [20, 30], [2, 60]]) {
+      const camera = r.state().camera
+      camera.position.set(centre.x, centre.y + up, centre.z + back)
+      camera.lookAt(centre)
+      camera.updateMatrixWorld()
+      await r.frame()
+      for (const text of texts) {
+        const at = text.getWorldPosition(new Vector3())
+        const hit = new Raycaster(camera.position.clone(), at.clone().sub(camera.position).normalize()).intersectObject(ground, false)[0]
+        expect(hit === undefined || hit.distance > camera.position.distanceTo(at)).toBe(true)
       }
     }
   })
@@ -269,6 +299,67 @@ describe('a key with no model of its own', () => {
     const moving = await measure(r, [10])
     expect(moving.edges[0]).toBeCloseTo(still.edges[0], 6)
     expect((markEdges(r.state().scene).material as Material).opacity).toBeLessThan(opaque)
+  })
+})
+
+describe('TAKE on a key with no model', () => {
+  it('fades the cube out over about 200 ms', () => {
+    expect(MARK_FADE_MS).toBe(200)
+    expect(markFadeLeft(0)).toBe(1)
+    expect(markFadeLeft(100)).toBeCloseTo(0.5, 9)
+    expect(markFadeLeft(200)).toBe(0)
+    expect(markFadeLeft(5000)).toBe(0)
+    expect(markFadeLeft(-5)).toBe(1)
+  })
+
+  it('the one-gibson cube fades out where it stood rather than going in one frame; the half box comes in; the name keeps its place', async () => {
+    const id = '1'.repeat(64)
+    const w = worldKey(id)
+    let now = performance.now()
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    try {
+      r = await scene([w])
+      const before = markEdges(r.state().scene)
+      const full = (before.material as Material).opacity
+      const centre = worldBox(before).getCenter(new Vector3())
+      await lookFrom(r, centre, 4)
+      const nameAt = (): number[] => {
+        const ys: number[] = []
+        r!.state().scene.traverse((o) => { if (o.name === 'text') ys.push(o.parent!.position.y) })
+        return ys
+      }
+      const nameBefore = nameAt()
+      expect(nameBefore.length).toBeGreaterThan(0)
+
+      // TAKE: held, and the vanish begins at this moment (store/useOpenCeremony takeAndVanish).
+      const me = useCyberspace.getState().identity.pubkey
+      await act(async () => {
+        useInventory.setState({ owner: me, items: { [id]: { rowKey: `${me}/${id}`, owner: me, id, type: 'key', name: 'Brass Key', event: w.event as NostrEvent, author: OTHER, verified: true, source: 'found', place: null, from: null, at: 1, key: w.keyItem } }, storage: 'memory' } as never)
+        useTakeVanish.getState().begin(me, id, false, now)
+      })
+      const cubes = (): LineSegments[] => (drawn(r!.state().scene).filter((o) => o.type === 'LineSegments') as unknown as LineSegments[])
+        .filter((l) => Math.abs(worldBox(l).getSize(new Vector3()).x - noteBoxSide(0)) < 1e-6)
+      // The first frame: still the whole cube, at full, one gibson where it stood.
+      await r.frame()
+      expect(cubes()).toHaveLength(1)
+      expect((cubes()[0].material as Material).opacity).toBeCloseTo(full, 6)
+      expect(worldBox(cubes()[0]).getCenter(new Vector3()).distanceTo(centre)).toBeLessThan(1e-6)
+      // Its name stands where it stood.
+      expect(nameAt()[0]).toBeCloseTo(nameBefore[0], 6)
+      // Half way: half as bright.
+      now += 100
+      await r.frame()
+      expect((cubes()[0].material as Material).opacity).toBeCloseTo(full / 2, 6)
+      // Past 200 ms: gone. The half box is what marks the place.
+      now += 150
+      await r.frame()
+      expect(cubes()).toHaveLength(0)
+      const half = (drawn(r.state().scene).filter((o) => o.type === 'LineSegments') as unknown as LineSegments[])
+        .filter((l) => Math.abs(worldBox(l).getSize(new Vector3()).x - 0.5) < 1e-6)
+      expect(half).toHaveLength(1)
+    } finally {
+      clock.mockRestore()
+    }
   })
 })
 

@@ -21,7 +21,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createElement, useRef } from 'react'
-import { Box3, Matrix4, ShaderLib, Vector3, Vector4, type Camera, type LineSegments, type Material, type Mesh, type Object3D, type PerspectiveCamera } from 'three'
+import { Box3, Matrix4, Raycaster, ShaderLib, Vector3, Vector4, type Camera, type LineSegments, type Material, type Mesh, type Object3D, type PerspectiveCamera } from 'three'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 
@@ -173,7 +173,7 @@ describe('a message’s box', () => {
     }
   })
 
-  it('carries the name under the box, clear of its lowest corner on screen near or far', async () => {
+  it('carries the name over the box, clear of its highest corner on screen near or far', async () => {
     useCyberspace.setState({ scaleExp: 0 })
     r = await r3fRoot()
     await r.render(createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }))
@@ -186,15 +186,37 @@ describe('a message’s box', () => {
       let text: Object3D | undefined
       scene.traverse((o) => { if (o.name === 'text') text = o })
       const inner = text!.parent!
-      expect(inner.position.y).toBeLessThan(0)
+      expect(inner.position.y).toBeGreaterThan(0)
       // The name's centre on screen, and half its height: one local unit of the label is one of its pixels.
       const at = inner.getWorldPosition(new Vector3()).project(camera)
       const nameY = ((1 - at.y) / 2) * size.height
       const label = inner.parent!.parent!
       const depth = camera.position.distanceTo(label.getWorldPosition(new Vector3()))
       const unitPx = (label.scale.x * size.height) / (2 * Math.tan(((camera as PerspectiveCamera).fov * Math.PI) / 360) * depth)
-      const lowest = Math.max(...screenCorners(edges, camera, size).map((c) => c[1]))
-      expect(nameY - unitPx / 2).toBeGreaterThanOrEqual(lowest)
+      const highest = Math.min(...screenCorners(edges, camera, size).map((c) => c[1]))
+      expect(nameY + unitPx / 2).toBeLessThanOrEqual(highest)
+    }
+  })
+
+  it('a box resting on the ground: the ground never stands between the eye and its name, from any camera above the ground', async () => {
+    useCyberspace.setState({ scaleExp: 0 })
+    r = await r3fRoot()
+    await r.render(createElement('group', null,
+      // The ground: a wide floor whose top face is the box's bottom face.
+      createElement('mesh', { name: 'ground', position: [0, -0.5 - 0.05, 0] }, createElement('boxGeometry', { args: [400, 0.1, 400] }), createElement('meshBasicMaterial')),
+      createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }),
+    ))
+    const scene = r.state().scene
+    let ground: Object3D | undefined
+    scene.traverse((o) => { if (o.name === 'ground') ground = o })
+    for (const eye of [[0, 0.2, 3], [0, 1.5, 1.5], [0, 6, 2], [2, 0.3, 12], [0, 12, 0.5], [5, 20, 30], [0, 2, 60]] as Array<[number, number, number]>) {
+      const camera = await placeCamera(r, eye)
+      let text: Object3D | undefined
+      scene.traverse((o) => { if (o.name === 'text') text = o })
+      const name = text!.getWorldPosition(new Vector3())
+      const ray = new Raycaster(camera.position.clone(), name.clone().sub(camera.position).normalize())
+      const hit = ray.intersectObject(ground!, false)[0]
+      expect(hit === undefined || hit.distance > camera.position.distanceTo(name)).toBe(true)
     }
   })
 

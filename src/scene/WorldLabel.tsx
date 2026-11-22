@@ -114,11 +114,18 @@ interface Props {
    * every zoom (lib/markerSize.ts): the marker's true edge in cells and the
    * pixel size it is never drawn smaller than. The label is centred on the
    * anchor and lifted by the marker's on-screen reach plus a small gap,
-   * recomputed every frame from depth; `offsetPx` is added on top. `below`
-   * hangs it the same distance under the marker instead: a message's name
-   * under its one-gibson box.
+   * recomputed every frame from depth; `offsetPx` is added on top.
+   *
+   * `nearFace`, for a marker that is a box in the world (a message's or a
+   * model-less key's one-gibson cube): the reach is measured where the box
+   * comes nearest the eye, so a box up close never runs into its name, and
+   * the label is lifted a further `sub` line so its credit line clears the
+   * box too. Above, not under: a box resting on the ground has the ground in
+   * front of whatever hangs under it on screen, and the ground hid the name
+   * there (#870, #887), while a name above stands over the ground from any
+   * camera above it. A wall in front still hides it, as it hides any label.
    */
-  clear?: { trueSide: number; minPx: number; below?: boolean }
+  clear?: { trueSide: number; minPx: number; nearFace?: boolean }
   /**
    * Where the label's parent stands from the camera, for a parent that is
    * always at the same offset from it and carries no turn or scale: the
@@ -140,6 +147,16 @@ interface Props {
    * the label holds its pixel height at any depth, as every other label does.
    */
   recede?: 'name' | 'credit' | 'mark'
+}
+
+/** How far under the name's middle its credit line's middle is, in the name's line heights. */
+function subCentre(subScale: number): number {
+  return 0.5 + subScale * 0.85
+}
+
+/** How far under the name's middle its credit line's bottom is, in the name's line heights. */
+export function subBottom(subScale: number): number {
+  return subCentre(subScale) + subScale / 2
 }
 
 export function WorldLabel({
@@ -177,10 +194,12 @@ export function WorldLabel({
     const near = recede && recede !== 'mark' ? mark : 1
     // Lifted clear of its marker: one local unit is `unitPx` pixels.
     if (inner.current && clear) {
-      // Below, it is measured where the marker comes nearest the eye (its near face), so a box up close never runs into it.
-      const at = clear.below ? Math.max(depth - clear.trueSide / 2, depth * 0.05) : depth
+      // A box in the world is measured where it comes nearest the eye (its near face), so up close it never runs into its name.
+      const at = clear.nearFace ? Math.max(depth - clear.trueSide / 2, depth * 0.05) : depth
       const lift = labelLiftPx(clear.trueSide, clear.minPx * mark, at, projScale, unitPx) / unitPx
-      inner.current.position.y = (clear.below ? -lift : lift) + (offsetPx[1] / px) * near
+      // Its credit line hangs under the name (the caption below), so the name stands that much higher.
+      const caption = clear.nearFace && sub !== undefined ? subBottom(subScale) - 0.5 : 0
+      inner.current.position.y = lift + caption + (offsetPx[1] / px) * near
     } else if (inner.current && recede) {
       // Every frame while it recedes: back at full size the prop is never
       // re-applied (R3F skips equal array props), so a jump from far to near
@@ -259,7 +278,7 @@ export function WorldLabel({
             fillOpacity={opacity * subOpacity}
             outlineWidth={0.06}
             outlineColor="#05070d"
-            position={[0, -(0.5 + subScale * 0.85), 0]}
+            position={[0, -subCentre(subScale), 0]}
           >
             {sub}
           </Text>

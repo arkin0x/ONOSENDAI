@@ -220,10 +220,21 @@ let actionsFor: { events: NostrEvent[]; actions: ActionEvent[]; named: Set<strin
 function parsedChain(events: NostrEvent[]): ActionEvent[] {
   if (!actionsFor || actionsFor.events !== events) {
     const grown = appendedTo(actionsFor, events)
-    actionsFor = grown ?? { events, actions: buildChain(events), named: null }
+    actionsFor = grown ?? { events, actions: builtAlready.get(events) ?? buildChain(events), named: null }
   }
   return actionsFor.actions
 }
+
+/**
+ * Chains authenticStretch has just built, by the very array it hands on: a
+ * load reads a chain from storage, keeps it whole, and the store then parses
+ * that same array (derive, parsedChain). On a long chain the second build was
+ * as long as the first, all before the first draw (arkinox, 2026-11-22). Only
+ * an array kept whole, all of one author, is noted: its chain is exactly what
+ * parsedChain would build. A chain is never changed in place (extendChain
+ * concatenates), so the same array always has the same chain.
+ */
+const builtAlready = new WeakMap<NostrEvent[], ActionEvent[]>()
 
 /**
  * The chain of `events` from the one memoized, when `events` are its events
@@ -1706,6 +1717,8 @@ function authenticStretch(pubkey: string, events: NostrEvent[], isAuthentic: (e:
   const forked = resolved[0]?.fork !== undefined
   const out = forked || kept.length === events.length ? kept : kept.filter((e) => onChain.has(e.id))
   if (resolved.length === 0 || (!forked && resolved.length !== out.length) || resolved[0].pubkey !== pubkey) return null
+  // Built from `out` itself, every event of `pubkey`: what parsedChain would build for it (builtAlready).
+  if (out === kept) builtAlready.set(out, resolved)
   return out
 }
 

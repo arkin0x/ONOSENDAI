@@ -208,7 +208,7 @@ describe('the NIP-01 flag describes the bytes beside it', () => {
     expect(await row(m.id)).toMatchObject({ nip01: 2, content: '' })
   })
 
-  it('a row replaced keeps what was known of the row: its verdicts and its place', async () => {
+  it('a row replaced keeps what was known of the row: its place and proof, but not a chain verdict reached on other bytes', async () => {
     const real = sign(alice, 3333, 1000)
     await put([{ ...real, content: 'forged' }], { nip01: 0 })
     await withEventDb((db) => new Promise<void>((resolve) => {
@@ -219,7 +219,9 @@ describe('the NIP-01 flag describes the bytes beside it', () => {
       tx.oncomplete = () => resolve()
     }))
     await put([real], { nip01: 1 })
-    expect(await row(real.id)).toMatchObject({ chainOf: alicePk, chainN: 4, proof: 1, chain: 1, chainEpoch: 2, acked: 1, content: '' })
+    // The chain verdict was reached on the forged bytes: it never vouches for these (lib/events.ts rulesHeld reads it).
+    expect(await row(real.id)).toMatchObject({ chainOf: alicePk, chainN: 4, proof: 1, chain: 0, acked: 1, content: '' })
+    expect((await row(real.id))?.chainEpoch).toBeUndefined()
   })
 })
 
@@ -232,7 +234,7 @@ describe('a flag that rises', () => {
     expect(r.added).toEqual([])
   })
 
-  it('keeps every verdict and mark the row had, and adds the relay', async () => {
+  it('keeps every mark the row had and its proof verdict, drops a chain verdict reached on other bytes, and adds the relay', async () => {
     const real = sign(alice, 3333, 1000)
     await put([{ ...real, content: 'forged' }], { nip01: 0, relay: 'wss://a/' })
     await withEventDb((db) => new Promise<void>((resolve) => {
@@ -243,7 +245,9 @@ describe('a flag that rises', () => {
       tx.oncomplete = () => resolve()
     }))
     await put([real], { nip01: 1, relay: 'wss://b/' })
-    expect(await row(real.id)).toMatchObject({ content: '', nip01: 1, deleted: 1, proof: 1, proofRev: 'rev', chain: -1, chainEpoch: 2, chainRev: 'rules', breakAt: 'why', acked: 1, chainOf: alicePk, chainN: 3, seen: ['wss://a/', 'wss://b/'] })
+    expect(await row(real.id)).toMatchObject({ content: '', nip01: 1, deleted: 1, proof: 1, proofRev: 'rev', chain: 0, acked: 1, chainOf: alicePk, chainN: 3, seen: ['wss://a/', 'wss://b/'] })
+    const r = await row(real.id)
+    expect([r?.chainEpoch, r?.chainRev, r?.breakAt]).toEqual([undefined, undefined, undefined])
   })
 
   it('a row nobody checked, under an id a deletion names, goes when the verified event is refused, and is uncounted', async () => {

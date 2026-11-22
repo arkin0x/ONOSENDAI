@@ -107,8 +107,10 @@ export async function repairSignerPref(waitMs = REPAIR_WAIT_MS, late: () => bool
     // Asked at once; given up on `waitMs` after the kv step, not after the ask (see the header).
     const held = (pubkey: string): Promise<HeldIdentity | null> => {
       let timer: ReturnType<typeof setTimeout> | undefined
-      const out = settled.then(() => new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), waitMs) }))
-      return Promise.race([readHeld(pubkey).catch(() => null), out]).finally(() => clearTimeout(timer))
+      let answered = false
+      // A read that answered before the kv step sets no clock at all.
+      const out = settled.then(() => (answered ? null : new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), waitMs) })))
+      return Promise.race([readHeld(pubkey).catch(() => null), out]).finally(() => { answered = true; clearTimeout(timer) })
     }
     const unchanged = (): boolean => JSON.stringify(readPref()) === JSON.stringify(pref)
     const pref = readPref()

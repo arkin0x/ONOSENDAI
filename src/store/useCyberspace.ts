@@ -209,6 +209,7 @@ import { useToast } from './useToast'
 import { useChainUi } from './useChainUi'
 import type { SelfCrypto } from '../lib/muteList'
 import { forgetUnsent, unsentOf } from '../lib/unsent'
+import { forgetOwnWatchMoves, freshenOwnWatch, ownWatchState, unexplainedMoves } from '../lib/ownWatch'
 import { kvGet, kvSet } from '../lib/kvStore'
 
 /**
@@ -3121,6 +3122,38 @@ export const STALE_CONFIRMATION: unique symbol = Symbol('stale confirmation')
 /** Bumped by a respawn and an identity switch: an older value marks a waiter from a chain that is gone. */
 let chainEpoch = 0
 
+/**
+ * What the standing subscription on each relay (lib/ownWatch.ts) says of the
+ * head in hand, read with no question to any relay (owner's ruling of
+ * 2026-11-22):
+ *
+ * | Answer | When |
+ * |---|---|
+ * | 'holds' | a pinned relay (on every device's list, the canonical relay first) is current: its subscription open, caught up to its EOSE since it last opened, its socket heard from lately; and every move any relay delivered, current or not, is in the chain in hand |
+ * | 'quiet' | all else holds, but no pinned relay is current: after a pause, one round trip for a frame may make one so (freshenOwnWatch) |
+ * | 'ask' | anything else: a move delivered that is not in hand (another device's, to catch up first), the page's first look not answered, a held chain or a conflict, no watch |
+ *
+ * A relay only this device lists vouches for nothing: other devices may never
+ * publish there. Anything but 'holds' sends the move to the relays as before,
+ * which holds it without an answer.
+ */
+export function standingHead(pubkey: string): 'holds' | 'quiet' | 'ask' {
+  const relays = ownWatchState(pubkey)
+  if (!relays) return 'ask'
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey !== pubkey || s.held || s.chainConflict) return 'ask'
+  // The page's first look at the chain (CHECKING YOUR CHAIN) has answered:
+  // until then, or while it could not, the move asks the relays itself.
+  if (s.chainSync?.pubkey !== pubkey || s.chainSync.status !== 'done') return 'ask'
+  const events = s.events
+  const inHand = (id: string): boolean => {
+    for (let i = events.length - 1; i >= 0; i--) if (events[i].id === id) return true
+    return false
+  }
+  if (unexplainedMoves(pubkey, inHand) !== 0) return 'ask'
+  return relays.some((r) => r.current && r.pinned) ? 'holds' : 'quiet'
+}
+
 async function confirmHead(retrying: () => void): Promise<string | null | typeof STALE_CONFIRMATION> {
   const pubkey = useCyberspace.getState().identity.pubkey
   const epoch = chainEpoch
@@ -3136,6 +3169,24 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
   }
   const here = await headCheckedHere()
   if (here) return here
+  // The standing subscriptions first (owner's ruling of 2026-11-22): every
+  // relay that is current has already delivered every move it holds, so when
+  // none of them delivered one this chain does not hold, there is nothing
+  // newer, without asking again. Otherwise (no relay current, a move not in
+  // hand, a catch-up out) the relays are asked as below.
+  // After a pause the pinned relays may only be quiet: one round trip for a frame from each (no events), then read.
+  let standing = standingHead(pubkey)
+  if (standing === 'quiet') {
+    await freshenOwnWatch(pubkey)
+    if (chainEpoch !== epoch) return STALE_CONFIRMATION
+    standing = standingHead(pubkey)
+  }
+  if (standing === 'holds') {
+    relaysConfirmed.add(pubkey)
+    vouch(pubkey)
+    if (rowsWiped.has(pubkey)) void recoverWiped(pubkey)
+    return null
+  }
   // No confirmation is reused, however recent (arkinox, 2026-10-08): another
   // device can move in the second between two looks, and only a fresh answer
   // makes the relay's silence mean "nothing newer".
@@ -6987,6 +7038,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // or on a look at the relays, ends without a word (STALE_CONFIRMATION).
     sigCheck = null
     chainEpoch++
+    // Moves the standing watch held were measured against the chain that is gone.
+    forgetOwnWatchMoves()
     set({
       ...fresh,
       // A choice between two versions of the old chain is about a chain

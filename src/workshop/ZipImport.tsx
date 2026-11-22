@@ -9,7 +9,7 @@
  * reasons only; the rest is behind EXPLAIN.
  */
 
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Checkbox } from '../hud/ui/Checkbox'
 import { Field, Switch } from '../hud/ui/Switch'
@@ -51,6 +51,32 @@ function status(row: ImportRow, mode: DupMode, dup: Dup, needs: string | undefin
   return { label: 'NEW', tone: '' }
 }
 
+interface RowProps { r: ImportRow; dup: Dup; mode: DupMode; needs: string | undefined; noun: string; running: boolean; toggle: (key: string) => void }
+
+/**
+ * One row of the list. Memoized: each step of a run changes one row, and a
+ * list of 180 drawn again for every step cost more than the import's own
+ * work on a slow tablet (a production build at 4x CPU, 2026-11-22).
+ */
+const Row = memo(function Row({ r, dup, mode, needs, noun, running, toggle }: RowProps): JSX.Element {
+  const tag = status(r, mode, dup, needs, noun)
+  const folder = r.folder.join('/')
+  return (
+    <li className={`zipimport__row ${r.picked ? '' : 'is-off'}`}>
+      <Checkbox aria-label={`Import ${r.path}`} checked={r.picked} disabled={running || r.read === 'error' || r.run === 'done'} onCheckedChange={() => toggle(r.key)} />
+      <span className="zipimport__thumb">{r.picture ? <ShardThumb shard={r.picture} size={40} /> : null}</span>
+      <span className="zipimport__text">
+        <span className="zipimport__name">{r.name}</span>
+        <span className="zipimport__meta">
+          {folder ? `${folder} · ` : ''}{size(r.size)}{r.shard ? ` · ${r.shard.vertices.length} v · ${r.shard.faces.length} f` : ''}
+        </span>
+        {(r.read === 'error' || r.run === 'failed') && <span className="zipimport__error">{r.read === 'error' ? r.error : r.failure}</span>}
+      </span>
+      <span className={`tag ${tag.tone}`} title={tag.title}>{tag.label}</span>
+    </li>
+  )
+})
+
 export function ZipImport(): JSX.Element | null {
   const s = useShardImport()
   const me = useCyberspace((c) => c.identity.pubkey)
@@ -80,7 +106,8 @@ export function ZipImport(): JSX.Element | null {
   else if (s.phase === 'opening') line = 'OPENING'
   else if (s.phase === 'reading') line = s.remote === 'checking' ? 'CHECKING YOUR RELAYS' : `READING ${s.rows.length - reading} OF ${s.rows.length}`
   else if (running && s.remote === 'checking') line = 'CHECKING YOUR RELAYS'
-  else if (running) line = `${publish ? 'PUBLISHING' : 'ADDING'} ${Math.min(done + failed + 1, workTotal)} OF ${workTotal}`
+  // Rows in hand count: with PUBLISH off several are added while storage saves them (store/useShardImport UNSAVED_MAX).
+  else if (running) line = `${publish ? 'PUBLISHING' : 'ADDING'} ${Math.min(done + failed + Math.max(1, s.rows.filter((r) => r.run === 'working').length), workTotal)} OF ${workTotal}`
   else if (s.phase === 'done') line = `${done} DONE${failed ? ` · ${failed} FAILED` : ''}`
   else line = [`${ready.length} SHARD${ready.length === 1 ? '' : 'S'}`, yours ? `${yours} ALREADY YOURS` : '', errors ? `${errors} ERROR${errors === 1 ? '' : 'S'}` : '', s.skipped.length ? `${s.skipped.length} SKIPPED` : '', publish && s.remote === 'unknown' ? 'RELAYS NOT CHECKED' : ''].filter(Boolean).join(' · ')
   const fraction = s.phase === 'reading' ? (s.rows.length - reading) / Math.max(1, s.rows.length) : running || s.phase === 'done' ? (done + failed) / Math.max(1, workTotal) : 0
@@ -101,7 +128,8 @@ export function ZipImport(): JSX.Element | null {
           <ModalClose onClose={() => s.close()} disabled={running} />
         </div>
         <div className={`zipimport__line ${s.error || s.stall ? 'is-bad' : ''}`} aria-live="polite">{s.stall ? `${s.stall.toUpperCase()} ${line}` : line}</div>
-        <div className="zipimport__bar" aria-hidden><span style={{ width: `${Math.round(fraction * 100)}%` }} /></div>
+        {/* A sheen runs along the bar while the import works, so a long save never looks like a frozen tab. */}
+        <div className={`zipimport__bar ${running ? 'is-working' : ''}`} aria-hidden><span style={{ width: `${Math.round(fraction * 100)}%` }} /></div>
         {s.rows.length > 0 && (
           <div className="zipimport__controls">
             <Field id="zipimport-all" label="ALL">
@@ -118,25 +146,7 @@ export function ZipImport(): JSX.Element | null {
           </div>
         )}
         <ul className="zipimport__list">
-          {s.rows.map((r) => {
-            const dup = s.dups[r.key] ?? null
-            const tag = status(r, s.dupMode, dup, blocked.get(r.key), s.noun)
-            const folder = r.folder.join('/')
-            return (
-              <li key={r.key} className={`zipimport__row ${r.picked ? '' : 'is-off'}`}>
-                <Checkbox aria-label={`Import ${r.path}`} checked={r.picked} disabled={running || r.read === 'error' || r.run === 'done'} onCheckedChange={() => s.toggle(r.key)} />
-                <span className="zipimport__thumb">{r.picture ? <ShardThumb shard={r.picture} size={40} /> : null}</span>
-                <span className="zipimport__text">
-                  <span className="zipimport__name">{r.name}</span>
-                  <span className="zipimport__meta">
-                    {folder ? `${folder} · ` : ''}{size(r.size)}{r.shard ? ` · ${r.shard.vertices.length} v · ${r.shard.faces.length} f` : ''}
-                  </span>
-                  {(r.read === 'error' || r.run === 'failed') && <span className="zipimport__error">{r.read === 'error' ? r.error : r.failure}</span>}
-                </span>
-                <span className={`tag ${tag.tone}`} title={tag.title}>{tag.label}</span>
-              </li>
-            )
-          })}
+          {s.rows.map((r) => <Row key={r.key} r={r} dup={s.dups[r.key] ?? null} mode={s.dupMode} needs={blocked.get(r.key)} noun={s.noun} running={running} toggle={s.toggle} />)}
         </ul>
         {s.skipped.length > 0 && (
           <div className="zipimport__skipped">

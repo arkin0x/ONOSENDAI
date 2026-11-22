@@ -62,6 +62,10 @@ export const WALK_LIMITS_HINT = 'Fluid WALK turns off 21 moves ahead of your cha
 /** The Fluid WALK row's line while it is paused for the chain. */
 export const FLUID_PAUSED_HINT = 'Paused while your chain catches up.'
 
+/** The Spatial Audio row, in the owner's words (arkinox, 2026-11-22): the title and its gray line, where he wrote a dash between them. */
+export const SPATIAL_AUDIO_TITLE = 'Spatial Audio'
+export const SPATIAL_AUDIO_HINT = 'See spatial audio sources and fade perimeters.'
+
 /** Hard Mode Gravity's row, in the owner's words (arkinox, 2026-11-22): his dash parts the title from its line. */
 export const HARD_GRAVITY_TITLE = 'Hard Mode Gravity'
 export const HARD_GRAVITY_HINT = 'Gravity will not turn off if there is nothing to catch your fall.'
@@ -72,7 +76,7 @@ export function ViewPanel(): JSX.Element {
   const walkAvatarHidden = useLayers((s) => s.walkAvatarHidden)
   const walkLookSphere = useLayers((s) => s.walkLookSphere)
   const headlamp = useLayers((s) => s.headlamp)
-  const audioSpheres = useLayers((s) => s.audioSpheres)
+  const spatialAudio = useLayers((s) => s.spatialAudio)
   const glow = useLayers((s) => s.glow)
   const walkLimits = useLayers((s) => s.walkLimits)
   const gravity = useWalk((s) => s.gravity)
@@ -192,16 +196,16 @@ export function ViewPanel(): JSX.Element {
       on: headlamp,
       set: (v) => useLayers.getState().setLayer('headlamp', v),
     },
-    // The blue rings around each hidden sound in the world, where it plays
-    // at full volume (DECK-0007 `fade`; scene/AudioSpheres.tsx). On by
-    // default (arkinox, 2026-11-01). The rings on audio being placed stay
-    // either way: they are what the FADE stepper sets.
+    // Each hidden sound's box and the blue rings where it plays at full
+    // volume (DECK-0007 `fade`; scene/AudioSpheres.tsx). Sound spheres until
+    // arkinox renamed it, off by default (2026-11-22); drawing only, every
+    // sound still plays. Both show while audio is placed in BUILD.
     {
-      id: 'view-audio-spheres',
-      title: 'Sound spheres',
-      hint: 'Blue rings where a hidden sound plays at full volume.',
-      on: audioSpheres,
-      set: (v) => useLayers.getState().setLayer('audioSpheres', v),
+      id: 'view-spatial-audio',
+      title: SPATIAL_AUDIO_TITLE,
+      hint: SPATIAL_AUDIO_HINT,
+      on: spatialAudio,
+      set: (v) => useLayers.getState().setLayer('spatialAudio', v),
     },
     // The halos round a POINTS object's points, LIGHT or FOG (DECK-0003
     // §1.16; scene/PointBillboards.tsx). On by default; off for a slow phone.
@@ -262,9 +266,12 @@ export function ViewPanel(): JSX.Element {
         each region you hold the key for. Headlamp lights shards from your view,
         as a flashlight would: a face turned away from you, or far off, is
         darker, so shapes of one color show their depth; off, every face is
-        exactly its own color. Sound spheres are blue rings around each hidden
-        sound you have found or placed: inside one it plays at full volume, and
-        it fades to silence at its region's walls.
+        exactly its own color. Spatial Audio shows each hidden sound you have
+        found or placed, its box and the blue rings around it: inside the rings
+        it plays at full volume, and it fades to silence at its region's walls.
+        It is off unless you turn it on, and shows while you place a sound in
+        BUILD; a sound whose card you open, or that you VIEW, shows until you
+        close it or look away. Either way every sound still plays.
         Glow draws the light or fog some objects cast around their points;
         turn it off if a slow phone struggles. The workshop still shows glow
         on the object you are making.

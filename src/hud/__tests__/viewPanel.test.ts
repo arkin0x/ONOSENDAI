@@ -7,7 +7,7 @@
  *
  * Eleven Field rows with a Switch each: Terrain dots, hX boxes, Hide avatar in
  * WALK, Look sphere in WALK, Gravity in WALK, Hard Mode Gravity, Chain trail, Region keys,
- * Headlamp, Sound spheres, Glow and Sync hidden list. Each
+ * Headlamp, Spatial Audio, Glow and Sync hidden list. Each
  * drives the flag its old control drove and is remembered
  * the same way. The old controls are gone: no chips under Movement proof, no
  * trail switch in Proof chain, no checkbox in the Region keys list.
@@ -56,7 +56,7 @@ import { LAYERS_KEY, useLayers } from '../../store/useLayers'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useWalk } from '../../store/useWalk'
 import { GRAVITY_KEY, HARD_GRAVITY_KEY } from '../../store/walkGravity'
-import { HARD_GRAVITY_HINT, HARD_GRAVITY_TITLE } from '../ViewPanel'
+import { HARD_GRAVITY_HINT, HARD_GRAVITY_TITLE, SPATIAL_AUDIO_HINT, SPATIAL_AUDIO_TITLE } from '../ViewPanel'
 import { FLUID_KEY, useFluidWalk } from '../../store/fluidSwitch'
 
 type SwitchEl = ReactElement<{ id: string; checked: boolean; onCheckedChange: (v: boolean) => void }>
@@ -102,7 +102,7 @@ const ROWS: Array<[string, string, string]> = [
   ['view-chain-trail', 'Chain trail', 'The red line of your movement history.'],
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
   ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
-  ['view-audio-spheres', 'Sound spheres', 'Blue rings where a hidden sound plays at full volume.'],
+  ['view-spatial-audio', 'Spatial Audio', 'See spatial audio sources and fade perimeters.'],
   ['view-glow', 'Glow', 'Light and fog that objects cast.'],
   ['view-hides-sync', 'Sync hidden list', 'Your hidden things on every device signed in as you.'],
 ]
@@ -131,14 +131,14 @@ describe('the Settings panel', () => {
 
     viewSwitch('view-terrain-dots').props.onCheckedChange(false)
     expect(useLayers.getState()).toMatchObject({ dots: false, boxes: true })
-    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true, glow: true, walkLimits: true })
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true })
     expect(switchTag(view(), 'view-terrain-dots')).toContain('aria-checked="false"')
     expect(switchTag(view(), 'view-hx-boxes')).toContain('aria-checked="true"')
 
     viewSwitch('view-hx-boxes').props.onCheckedChange(false)
     viewSwitch('view-terrain-dots').props.onCheckedChange(true)
     expect(useLayers.getState()).toMatchObject({ dots: true, boxes: false })
-    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true, glow: true, walkLimits: true })
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true })
     expect(viewSwitch('view-hx-boxes').props.checked).toBe(false)
 
     viewSwitch('view-hx-boxes').props.onCheckedChange(true)
@@ -194,16 +194,22 @@ describe('the Settings panel', () => {
     expect(view()).not.toContain('jump. Z.')
   })
 
-  it('Sound spheres starts on and drives the layer store, remembered on this device', () => {
-    expect(useLayers.getState().audioSpheres).toBe(true)
-    expect(switchTag(view(), 'view-audio-spheres')).toContain('aria-checked="true"')
-    viewSwitch('view-audio-spheres').props.onCheckedChange(false)
-    expect(useLayers.getState().audioSpheres).toBe(false)
-    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ audioSpheres: false })
-    expect(switchTag(view(), 'view-audio-spheres')).toContain('aria-checked="false"')
-    viewSwitch('view-audio-spheres').props.onCheckedChange(true)
-    expect(useLayers.getState().audioSpheres).toBe(true)
-    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ audioSpheres: true })
+  it('Spatial Audio is the owner\'s title and line, no dash, and starts off; it drives the layer store, remembered on this device (arkinox, 2026-11-22)', () => {
+    expect(SPATIAL_AUDIO_TITLE).toBe('Spatial Audio')
+    expect(SPATIAL_AUDIO_HINT).toBe('See spatial audio sources and fade perimeters.')
+    const html = view()
+    expect(html).toContain('<label class="ui-field__text" for="view-spatial-audio"><span class="ui-field__label">Spatial Audio</span><span class="ui-field__hint">See spatial audio sources and fade perimeters.</span></label>')
+    expect(html).not.toContain('Sound spheres')
+    expect(html).not.toMatch(/Spatial Audio\s*[-\u2013\u2014]/)
+    expect(useLayers.getState().spatialAudio).toBe(false)
+    expect(switchTag(html, 'view-spatial-audio')).toContain('aria-checked="false"')
+    viewSwitch('view-spatial-audio').props.onCheckedChange(true)
+    expect(useLayers.getState().spatialAudio).toBe(true)
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ spatialAudio: true })
+    expect(switchTag(view(), 'view-spatial-audio')).toContain('aria-checked="true"')
+    viewSwitch('view-spatial-audio').props.onCheckedChange(false)
+    expect(useLayers.getState().spatialAudio).toBe(false)
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ spatialAudio: false })
   })
 
   it('Fluid WALK drives the switch, remembered on this device', () => {

@@ -245,7 +245,7 @@ async function pump(): Promise<void> {
     lastFailed = false
     // Marked published within the window (flushMarks); the next one is sent in a task of its own, not inside this OK.
     mark(next.id, 'ok')
-    void yieldTask().then(() => { if (maySend(useCyberspace.getState(), released)) void pump() })
+    void yieldTask('publish').then(() => { if (maySend(useCyberspace.getState(), released)) void pump() })
     return
   }
 

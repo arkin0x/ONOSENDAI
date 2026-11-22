@@ -20,7 +20,7 @@ import { nip19 } from 'nostr-tools'
 /** The canonical relay's URL as the pool opens it (useRelays DEFAULT_RELAY). */
 export const CANON = 'wss://relay.onosendai.tech/'
 export const BUNKER_RELAY = 'wss://bunker.example/'
-/** The pinned backup relay (useRelays SECOND_RELAY): with `gatedBackup`, it gates reads as it really does. */
+/** The read-only old relay (useRelays READ_FALLBACK_RELAY): with `gatedBackup`, it gates reads as it really does. */
 export const BACKUP = 'wss://cyberspace.nostr1.com/'
 
 type Ev = { id: string; pubkey: string; kind: number; created_at: number; tags: string[][]; content: string; sig: string }

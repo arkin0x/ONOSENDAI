@@ -1,9 +1,10 @@
 /**
- * relaysPanelPinned.test.tsx: RELAYS after the canonical relay switch
- * (the owner, 2026-11-05). relay.onosendai.tech first, marked DEFAULT;
- * cyberspace.nostr1.com second, marked BACKUP; neither can be removed; a
- * relay of the player's own can. Rendered to a string; a server render reads
- * a zustand store's first state, so the saved list is set before it loads.
+ * relaysPanelPinned.test.tsx: RELAYS in stage 1 of retiring
+ * cyberspace.nostr1.com (the owner, 2026-11-22). relay.onosendai.tech first,
+ * marked DEFAULT, not removable; the player's own after it, removable;
+ * cyberspace.nostr1.com last, marked READ ONLY, not removable (it is read,
+ * never written to). Rendered to a string; a server render reads a zustand
+ * store's first state, so the saved list is set before it loads.
  */
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
@@ -23,8 +24,8 @@ vi.mock('../../lib/relay', () => ({
   getPool: () => ({ listConnectionStatus: () => new Map<string, boolean>() }),
 }))
 
-describe('RELAYS with two pinned relays', () => {
-  it('lists the new canonical relay first as DEFAULT, nostr1 second as BACKUP, and only the player\'s own can be removed', async () => {
+describe('RELAYS with the canonical relay pinned and the old one read only', () => {
+  it('lists the canonical relay first as DEFAULT, the player\'s own next (removable), and nostr1 last as READ ONLY', async () => {
     localStorage.setItem('onosendai:relays', JSON.stringify(['wss://mine.example']))
     vi.resetModules()
     const { RelaysPanel } = await import('../RelaysPanel')
@@ -34,10 +35,12 @@ describe('RELAYS with two pinned relays', () => {
     expect(rows[0]).toContain('relay.onosendai.tech')
     expect(rows[0]).toContain('>DEFAULT<')
     expect(rows[0]).not.toContain('Remove relay')
-    expect(rows[1]).toContain('cyberspace.nostr1.com')
-    expect(rows[1]).toContain('>BACKUP<')
-    expect(rows[1]).not.toContain('Remove relay')
-    expect(rows[2]).toContain('mine.example')
-    expect(rows[2]).toContain('Remove relay')
+    expect(rows[1]).toContain('mine.example')
+    expect(rows[1]).toContain('Remove relay')
+    expect(rows[2]).toContain('cyberspace.nostr1.com')
+    expect(rows[2]).toContain('>READ ONLY<')
+    expect(rows[2]).not.toContain('Remove relay')
+    // The count is the relays published to: the old relay is not one.
+    expect(html).toContain('<span class="tag">2</span>')
   })
 })

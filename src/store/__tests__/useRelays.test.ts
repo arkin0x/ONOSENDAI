@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest'
-import { DEFAULT_RELAY, PINNED_RELAYS, RETIRED_HOSTS, SECOND_RELAY, isRetiredRelay, normalizeRelay } from '../useRelays'
+import { DEFAULT_RELAY, PINNED_RELAYS, READ_FALLBACK_RELAY, RETIRED_HOSTS, isReadFallbackRelay, isRetiredRelay, normalizeRelay } from '../useRelays'
 
 describe('normalizeRelay', () => {
   it('accepts and completes real relay hosts', () => {
@@ -56,7 +56,7 @@ describe('a retired relay', () => {
 
   it('leaves a saved list on load, on disk too, and the other relays stay', async () => {
     const { store, storage } = await loadWith([`${RETIRED}/`, 'wss://mine.example'])
-    expect(store.getState().relays).toEqual([DEFAULT_RELAY, SECOND_RELAY, 'wss://mine.example'])
+    expect(store.getState().relays).toEqual([DEFAULT_RELAY, 'wss://mine.example'])
     expect(JSON.parse(storage.get('onosendai:relays')!)).toEqual(['wss://mine.example'])
     vi.unstubAllGlobals()
   })
@@ -64,7 +64,7 @@ describe('a retired relay', () => {
   it('cannot be added back', async () => {
     const { store } = await loadWith([])
     expect(store.getState().add(RETIRED)).toBeNull()
-    expect(store.getState().relays).toEqual([DEFAULT_RELAY, SECOND_RELAY])
+    expect(store.getState().relays).toEqual([DEFAULT_RELAY])
     vi.unstubAllGlobals()
   })
 })
@@ -78,33 +78,38 @@ describe('the canonical relay switch (the owner, 2026-11-05)', () => {
     return { store: (await import('../useRelays')).useRelays, storage }
   }
 
-  it('is wss://relay.onosendai.tech, with wss://cyberspace.nostr1.com pinned second', () => {
+  it('is wss://relay.onosendai.tech, pinned alone; wss://cyberspace.nostr1.com is read only, never pinned (stage 1 of its retirement)', () => {
     expect(DEFAULT_RELAY).toBe('wss://relay.onosendai.tech')
-    expect(SECOND_RELAY).toBe('wss://cyberspace.nostr1.com')
-    expect(PINNED_RELAYS).toEqual(['wss://relay.onosendai.tech', 'wss://cyberspace.nostr1.com'])
+    expect(PINNED_RELAYS).toEqual(['wss://relay.onosendai.tech'])
+    expect(READ_FALLBACK_RELAY).toBe('wss://cyberspace.nostr1.com')
+    expect(PINNED_RELAYS).not.toContain(READ_FALLBACK_RELAY)
   })
 
-  it('gives a page with nothing saved both, the new relay first', async () => {
+  it('knows the old relay however it is written, and nothing else as it', () => {
+    for (const u of ['wss://cyberspace.nostr1.com', 'wss://cyberspace.nostr1.com/', ' WSS://Cyberspace.Nostr1.com ']) expect(isReadFallbackRelay(u)).toBe(true)
+    for (const u of ['wss://relay.onosendai.tech', 'wss://auth.nostr1.com', 'wss://nostr1.com', 'not a url', '']) expect(isReadFallbackRelay(u)).toBe(false)
+  })
+
+  it('gives a page with nothing saved the canonical relay alone: nothing is published to the old one by default', async () => {
     const { store } = await loadWith(null)
-    expect(store.getState().relays).toEqual(['wss://relay.onosendai.tech', 'wss://cyberspace.nostr1.com'])
+    expect(store.getState().relays).toEqual(['wss://relay.onosendai.tech'])
     vi.unstubAllGlobals()
   })
 
-  it('puts both in front of a list saved before the switch, and never saves either', async () => {
+  it('puts the canonical relay in front of a list saved before the switch, and never saves it', async () => {
     const { store, storage } = await loadWith(['wss://mine.example', 'wss://relay.onosendai.tech/'])
-    expect(store.getState().relays).toEqual(['wss://relay.onosendai.tech', 'wss://cyberspace.nostr1.com', 'wss://mine.example'])
+    expect(store.getState().relays).toEqual(['wss://relay.onosendai.tech', 'wss://mine.example'])
     store.getState().add('wss://other.example')
     expect(JSON.parse(storage.get('onosendai:relays')!)).toEqual(['wss://mine.example', 'wss://other.example'])
     vi.unstubAllGlobals()
   })
 
-  it('cannot remove either pinned relay; reset keeps both', async () => {
+  it('cannot remove the canonical relay; reset keeps it alone', async () => {
     const { store } = await loadWith(['wss://mine.example'])
     store.getState().remove('wss://relay.onosendai.tech')
-    store.getState().remove('wss://cyberspace.nostr1.com')
-    expect(store.getState().relays).toEqual(['wss://relay.onosendai.tech', 'wss://cyberspace.nostr1.com', 'wss://mine.example'])
+    expect(store.getState().relays).toEqual(['wss://relay.onosendai.tech', 'wss://mine.example'])
     store.getState().reset()
-    expect(store.getState().relays).toEqual(['wss://relay.onosendai.tech', 'wss://cyberspace.nostr1.com'])
+    expect(store.getState().relays).toEqual(['wss://relay.onosendai.tech'])
     vi.unstubAllGlobals()
   })
 })

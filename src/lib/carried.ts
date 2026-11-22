@@ -164,3 +164,17 @@ export function withoutCarried(model: ShardModel): ShardModel {
   void _parts
   return { ...rest, ...(kept.length ? { refs: kept.map(([r]) => r) } : {}), ...(parts.length ? { parts } : {}) }
 }
+
+/** A shard that came to you sealed in a bag or a chest (TAKE): local only, never on the wire, like `author`. */
+type CameSealed = ShardModel & { cameSealed?: true }
+
+/** The shard marked as come sealed: PUBLISH asks before it goes out in the clear (owner's rule: kit pieces are never published in the clear). */
+export function markCameSealed(model: ShardModel): ShardModel {
+  return { ...model, cameSealed: true } as CameSealed
+}
+
+/** Whether a shard came to you sealed (markCameSealed). */
+export function cameSealed(model: ShardModel): boolean {
+  return !!(model as CameSealed).cameSealed
+}
+

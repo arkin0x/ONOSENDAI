@@ -7,7 +7,10 @@
  * A shard looks as it will once placed (its own colours and the headlamp's
  * shading, at GHOST_OPACITY), with thin crisp edges (ShardMesh GHOST_EDGES)
  * and no bloom, so it lines up with what stands around it (owner, 2026-11-16:
- * "its hard to line up what we are placing").
+ * "its hard to line up what we are placing"). A shard that is only fog, glow
+ * or points has no faces to edge, so it is outlined instead: its box, thin
+ * and white, drawn over everything, so it shows where it goes from inside or
+ * behind other shards (scene/softPick.tsx; arkinox, 2026-11-22).
  *
  * The unit is the deploy bar's `deployUnit`, not the workshop model's, because
  * the two can differ: SCALE MULTIPLIER changes the size this deployment goes
@@ -53,6 +56,8 @@ import { regionBox } from '../lib/clip'
 import { WorldLabel } from './WorldLabel'
 import { AudioSphereGhost } from './AudioSphereGhost'
 import { turnShard } from '../lib/turn'
+import { GhostGlow } from './PointBillboards'
+import { softModel } from './softPick'
 
 interface Props {
   axes: ViewAxes
@@ -69,6 +74,8 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // What will land: the model turned by the deploy bar's TURN row, the same function the deploy uses.
   const deployTurn = useShards((s) => s.deployTurn)
   const shard = useMemo(() => (model ? turnShard(model, deployTurn) : null), [model, deployTurn])
+  // Only fog, glow or points: its glow drawn whatever the Settings switch says, and its outline over everything (softPick.tsx).
+  const soft = useMemo(() => (shard ? softModel(shard) : false), [shard])
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const unit = useShards((s) => s.deployUnit)
   const group = useRef<Group>(null)
@@ -178,7 +185,10 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
     <>
       <group ref={group}>
         {/* As the world draws what lands: its own colours and shading, see-through, crisp edges, no bloom (shardFaces.ts GHOST_OPACITY). */}
-        <ShardMesh shard={shard} scale={scale} ghost headlamp world noBloom edges clip={clip} pose={pose} />
+        {/* Only fog, glow or points: its glow always drawn, and its outline over everything (ShardMesh SoftOutline). */}
+        <GhostGlow always={soft}>
+          <ShardMesh shard={shard} scale={scale} ghost headlamp world noBloom edges clip={clip} pose={pose} />
+        </GhostGlow>
       </group>
       {sealed}
       {pending.type === 'chest' && pending.name && <WorldLabel text={`▣ ${pending.name}`} color="#ffd27d" follow={landingAt} align="center" px={13} opacity={0.5} />}

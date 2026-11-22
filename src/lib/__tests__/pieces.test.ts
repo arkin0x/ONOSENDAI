@@ -8,7 +8,8 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure
 import { newShard, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { objectTemplateOf } from '../hidden'
 import { bytesToHex, type NostrEvent } from '../events'
-import { NIP44_MAX_PLAINTEXT_BYTES, nip46PlaintextBytes } from '../signerRequestSize'
+import { NIP44_MAX_PLAINTEXT_BYTES, SIGNER_RELAY_EVENT_BYTES, nip46EventBytes, nip46PlaintextBytes } from '../signerRequestSize'
+import { BAG_SAFE_BYTES, signedBytes } from '../bagSize'
 import { attributed } from '../client'
 import { largestRemotePiece, openOnePiece, pieceRefusal, pieceShape, planPieces, sealedPiecesOf, signerBytes } from '../pieces'
 import { forgetPieceKeys, notePieceKey, notePieceKeys, pieceAddresses, pieceKeysFor, readSealedPiece } from '../pieceKeys'
@@ -95,7 +96,7 @@ describe('planning a split build', () => {
   })
 })
 
-describe('the signer limit (65,535 bytes of NIP-44 plaintext, #835)', () => {
+describe('the size of a piece: one event, and what a remote signer\'s relay carries (#865)', () => {
   it('measures a piece exactly as it is signed: the stand-in has the sealed length of the real one', async () => {
     const payload = JSON.stringify(toPayload(piece('Exact', 20_000)))
     const real = await objectTemplateOf(payload, KEY, freshD(), 9_999_999_999)
@@ -104,25 +105,29 @@ describe('the signer limit (65,535 bytes of NIP-44 plaintext, #835)', () => {
     expect(signerBytes(real)).toBe(nip46PlaintextBytes('sign_event', [JSON.stringify(attributed(real))], 'xxxxxxxxxxxx-99999'))
   })
 
-  it('a split of a build too big for one signature: every piece stays under the limit', () => {
-    const limit = largestRemotePiece()
-    // About 48 KB of payload: what a split aims each piece under.
-    expect(limit).toBeGreaterThan(45_000)
-    expect(limit).toBeLessThan(50_000)
-    const whole = JSON.stringify(toPayload(piece('Whole', 2 * limit - 4000)))
-    expect(pieceRefusal({ payload: whole, d: freshD(), name: 'Whole' }, true)).toMatch(/too big for your signer app to sign \(it can take about 65 KB, this needs \d+ KB\)\. Split it smaller/)
-    for (const half of [piece('West', limit - 2000), piece('East', limit - 2000)]) {
-      const payload = JSON.stringify(toPayload(half))
-      expect(pieceRefusal({ payload, d: freshD(), name: half.name }, true)).toBeNull()
-      expect(signerBytes(pieceShape(payload, freshD()))).toBeLessThanOrEqual(NIP44_MAX_PLAINTEXT_BYTES)
-    }
+  it('a request past 65,535 bytes is no reason to refuse a piece: a remote signer takes it', () => {
+    const payload = 'x'.repeat(70_000)
+    expect(signerBytes(pieceShape(payload, freshD()))).toBeGreaterThan(NIP44_MAX_PLAINTEXT_BYTES)
+    expect(pieceRefusal({ payload, d: freshD(), name: 'Wide' }, true)).toBeNull()
   })
 
-  it('a key on this device is not held to the signer limit, only to the size of one event', () => {
-    const big = JSON.stringify(toPayload(piece('Big', 100_000)))
-    expect(pieceRefusal({ payload: big, d: freshD(), name: 'Big' }, false)).toBeNull()
-    const huge = JSON.stringify(toPayload(piece('Huge', 200_000)))
-    expect(pieceRefusal({ payload: huge, d: freshD(), name: 'Huge' }, false)).toMatch(/too large to hide/)
+  it('the largest piece is held by the tighter cap: one event (240,000 bytes as signed), under the signer relay\'s 512 KB', () => {
+    const limit = largestRemotePiece()
+    const d = freshD()
+    const at = pieceShape('x'.repeat(limit), d)
+    expect(signedBytes(at)).toBeLessThanOrEqual(BAG_SAFE_BYTES)
+    expect(signedBytes(pieceShape('x'.repeat(limit + 3), d))).toBeGreaterThan(BAG_SAFE_BYTES)
+    expect(nip46EventBytes(signerBytes(at))).toBeLessThanOrEqual(SIGNER_RELAY_EVENT_BYTES)
+    // About 179 KB of payload: what a split aims each piece under.
+    expect(limit).toBeGreaterThan(170_000)
+    expect(limit).toBeLessThan(181_000)
+    expect(pieceRefusal({ payload: 'x'.repeat(limit), d, name: 'Edge' }, true)).toBeNull()
+    expect(pieceRefusal({ payload: 'x'.repeat(limit + 3), d, name: 'Over' }, true)).toMatch(/^The piece Over is too large to hide: [\d,]+ of 240,000 bytes\. Split it smaller\. Nothing was sent\.$/)
+  })
+
+  it('a key on this device is held to the same size of one event', () => {
+    expect(pieceRefusal({ payload: 'x'.repeat(100_000), d: freshD(), name: 'Big' }, false)).toBeNull()
+    expect(pieceRefusal({ payload: 'x'.repeat(200_000), d: freshD(), name: 'Huge' }, false)).toMatch(/too large to hide/)
   })
 })
 

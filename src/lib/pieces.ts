@@ -3,17 +3,18 @@
  * hidden object of their own (DECK-0003 §1.10 with §3.4, "Sealed parts";
  * reading is lib/pieceKeys.ts).
  *
- * A shard too big for a remote signer (one NIP-44 message, 65,535 bytes,
- * lib/signerRequestSize.ts) cannot be signed whole, and compressing it is off
- * the table. So it is split: two or more piece shards, each under the limit,
- * and a small parent shard that places them by address. Hiding the parent
- * hides the build. Each piece the parent places from your workshop is sealed
- * with the key of the bag the parent goes into, as a kind 33331 hidden object
- * under a fresh random `d`, signed on its own, so every signature stays under
- * the limit; the parent's refs are rewritten to name those objects. Nothing
- * of a piece is ever published in the clear: its event carries the preview,
- * its `d`, `alt` and the sealed payload, and no tag naming what it places
- * (§3.4, "No ref tags in the clear").
+ * A shard too big for one event (a hidden object is held to BAG_SAFE_BYTES,
+ * lib/bagSize.ts) cannot be hidden whole, and compressing it is off the
+ * table. So it is split: two or more piece shards, each under the limit, and
+ * a small parent shard that places them by address. Hiding the parent hides
+ * the build. Each piece the parent places from your workshop is sealed with
+ * the key of the bag the parent goes into, as a kind 33331 hidden object under
+ * a fresh random `d`, signed on its own; the parent's refs are rewritten to
+ * name those objects. A remote signer signs each piece as any request, up to
+ * what its relay carries (lib/signerRequestSize.ts, #865). Nothing of a piece
+ * is ever published in the clear: its event carries the preview, its `d`,
+ * `alt` and the sealed payload, and no tag naming what it places (§3.4, "No
+ * ref tags in the clear").
  *
  * The source decides what is sealed, as for carried parts (DECK-0003 §1.10,
  * ONOSENDAI's rule): a placement by an `a` ref under your key with no relay
@@ -37,7 +38,7 @@ import { attributed } from './client'
 import type { EventTemplate, NostrEvent } from './events'
 import { OBJECT_KIND, OBJECT_PREVIEW, REGION_KEY_DERIVATION } from './hidden'
 import { ALGO } from './shardCrypto'
-import { NIP44_MAX_PLAINTEXT_BYTES, nip46PlaintextBytes } from './signerRequestSize'
+import { SIGNER_RELAY_EVENT_BYTES, nip46EventBytes, nip46PlaintextBytes, signerRequestTooBigMessage } from './signerRequestSize'
 import { withNoBroadcast } from './noBroadcast'
 import { isSealedObject, openPiece, pieceAddresses } from './pieceKeys'
 
@@ -175,8 +176,9 @@ export function signerBytes(template: EventTemplate): number {
 /**
  * Why a piece cannot be hidden, or null: an event of its own larger than a bag
  * may be (BAG_SAFE_BYTES, what every hidden object here is held to), or, for
- * a remote signer (`remote`), a signing request over one NIP-44 message. In
- * the owner's words: what it can take, what this needs, and what to do.
+ * a remote signer (`remote`), a signing request past what the signer relay
+ * carries in one event (SIGNER_RELAY_EVENT_BYTES), in the words every such
+ * request gets (#865). What it can take, what this needs, and what to do.
  */
 export function pieceRefusal(piece: Pick<PlannedPiece, 'payload' | 'd' | 'name'>, remote: boolean): string | null {
   const shape = pieceShape(piece.payload, piece.d)
@@ -184,23 +186,32 @@ export function pieceRefusal(piece: Pick<PlannedPiece, 'payload' | 'd' | 'name'>
   if (bytes > BAG_SAFE_BYTES) return `The piece ${piece.name} is too large to hide: ${bytes.toLocaleString('en-US')} of ${BAG_SAFE_BYTES.toLocaleString('en-US')} bytes. Split it smaller. Nothing was sent.`
   if (!remote) return null
   const need = signerBytes(shape)
-  if (need <= NIP44_MAX_PLAINTEXT_BYTES) return null
-  return `The piece ${piece.name} is too big for your signer app to sign (it can take about ${Math.floor(NIP44_MAX_PLAINTEXT_BYTES / 1000)} KB, this needs ${Math.ceil(need / 1000)} KB). Split it smaller, or sign in with a key on this device.`
+  if (nip46EventBytes(need) <= SIGNER_RELAY_EVENT_BYTES) return null
+  return signerRequestTooBigMessage('sign_event', [JSON.stringify(attributed(withNoBroadcast(shape)))], need)
+}
+
+/** Whether a piece of this payload is hidden as it is: under one event's size, and, for a remote signer, under what its relay carries. */
+function fits(payload: string, d: string, remote: boolean): boolean {
+  const shape = pieceShape(payload, d)
+  if (signedBytes(shape) > BAG_SAFE_BYTES) return false
+  return !remote || nip46EventBytes(signerBytes(shape)) <= SIGNER_RELAY_EVENT_BYTES
 }
 
 /**
  * The largest piece payload, in UTF-8 bytes of plain JSON (no character JSON
- * escapes), whose hidden object a remote signer can still sign: what a split
- * aims each piece under (the kit's shard optimizer). Measured on the template
- * as signed, with a `d` of 32 hex characters, not guessed.
+ * escapes), that a remote signer can still hide: under one event's size
+ * (BAG_SAFE_BYTES) and under what the signer relay carries
+ * (SIGNER_RELAY_EVENT_BYTES), whichever binds. What a split aims each piece
+ * under (the kit's shard optimizer). Measured on the template as signed, with
+ * a `d` of 32 hex characters, not guessed.
  */
 export function largestRemotePiece(): number {
   const d = '0'.repeat(32)
   let lo = 0
-  let hi = NIP44_MAX_PLAINTEXT_BYTES
+  let hi = SIGNER_RELAY_EVENT_BYTES
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2)
-    if (signerBytes(pieceShape('x'.repeat(mid), d)) <= NIP44_MAX_PLAINTEXT_BYTES) lo = mid
+    if (fits('x'.repeat(mid), d, true)) lo = mid
     else hi = mid - 1
   }
   return lo

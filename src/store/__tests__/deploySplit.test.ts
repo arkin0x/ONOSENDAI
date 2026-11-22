@@ -2,7 +2,7 @@
  * deploySplit.test.ts: a SPLIT BUILD through the store (lib/pieces.ts): a small
  * parent shard placing pieces from the workshop is hidden as one build, each
  * piece its own sealed hidden object under the bag's key, signed on its own and
- * under the remote signer limit (#835). Finders with the bag's key draw every
+ * within what a remote signer's relay carries (#865). Finders with the bag's key draw every
  * piece; with the wrong key, nothing. Nothing goes out in the clear. MOVE seals
  * the pieces again under a new key and retracts the old ones; DELETE retracts
  * every piece. Relays are a map in memory: what was published is what a query
@@ -51,7 +51,7 @@ import { forgetReferences, resolveReference } from '../../lib/references'
 import { forgetRef, resolvePartsShared } from '../../lib/parts'
 import { forgetPieceKeys, notePieceKeys, pieceKeysFor, pieceWasOpened } from '../../lib/pieceKeys'
 import { largestRemotePiece, signerBytes } from '../../lib/pieces'
-import { NIP44_MAX_PLAINTEXT_BYTES } from '../../lib/signerRequestSize'
+import { NIP44_MAX_PLAINTEXT_BYTES, SIGNER_RELAY_EVENT_BYTES, nip46EventBytes } from '../../lib/signerRequestSize'
 import { withAuthoredConstrain } from '../../lib/walkConstrain'
 import { decryptForRegion } from '../../lib/shardCrypto'
 import { publishMany } from '../../lib/relay'
@@ -166,9 +166,8 @@ beforeEach(() => {
 
 describe('hiding a split build', () => {
   it('each piece goes first as its own sealed hidden object, then the bag, whose parent names them', { timeout: 30_000 }, async () => {
-    const limit = largestRemotePiece()
-    const north = piece('North half', limit - 3000, NORTH)
-    const south = piece('South half', limit - 3000, SOUTH)
+    const north = piece('North half', 45_000, NORTH)
+    const south = piece('South half', 45_000, SOUTH)
     await hide(parentOf([ref(NORTH), ref(SOUTH)]), [north, south])
     expect(S().deployError).toBeNull()
     expect(S().deployStatus).toBe('done')
@@ -188,25 +187,24 @@ describe('hiding a split build', () => {
     }
   })
 
-  it('every signature stays under the remote signer limit, and a remote signer is asked for nothing too big', { timeout: 30_000 }, async () => {
+  it('a remote signer is asked for each piece, a request past 65,535 bytes included, and each stays under its relay\'s cap', { timeout: 60_000 }, async () => {
     useCyberspace.setState({ signerKind: 'nip46' })
-    const limit = largestRemotePiece()
-    await hide(parentOf([ref(NORTH), ref(SOUTH)]), [piece('North half', limit - 3000, NORTH), piece('South half', limit - 3000, SOUTH)])
+    await hide(parentOf([ref(NORTH), ref(SOUTH)]), [piece('North half', 70_000, NORTH), piece('South half', 3000, SOUTH)])
     expect(S().deployError).toBeNull()
-    for (const e of sent().filter((x) => x.kind !== HIDDEN_KIND)) {
-      const { id: _id, pubkey: _pk, sig: _sig, ...template } = e
-      expect(signerBytes(template)).toBeLessThanOrEqual(NIP44_MAX_PLAINTEXT_BYTES)
-    }
+    const objects = sent().filter((x) => x.kind === OBJECT_KIND)
+    expect(objects).toHaveLength(2)
+    const sizes = objects.map(({ id: _id, pubkey: _pk, sig: _sig, ...template }) => signerBytes(template))
+    expect(Math.max(...sizes)).toBeGreaterThan(NIP44_MAX_PLAINTEXT_BYTES)
+    for (const n of sizes) expect(nip46EventBytes(n)).toBeLessThanOrEqual(SIGNER_RELAY_EVENT_BYTES)
   })
 
-  it('a piece too big for a remote signer is refused in words before anything is signed', { timeout: 30_000 }, async () => {
+  it('a piece too large for one event is refused in words before anything is signed', { timeout: 120_000 }, async () => {
     useCyberspace.setState({ signerKind: 'nip46' })
     const signs = vi.fn(realSign)
     useCyberspace.setState({ signEvent: signs })
-    const limit = largestRemotePiece()
-    await hide(parentOf([ref(NORTH), ref(SOUTH)]), [piece('North half', limit + 4000, NORTH), piece('South half', 2000, SOUTH)])
+    await hide(parentOf([ref(NORTH), ref(SOUTH)]), [piece('North half', largestRemotePiece() + 4000, NORTH), piece('South half', 2000, SOUTH)])
     expect(S().deployStatus).toBe('error')
-    expect(S().deployError).toMatch(/^The piece North half is too big for your signer app to sign \(it can take about 65 KB, this needs \d+ KB\)\. Split it smaller, or sign in with a key on this device\.$/)
+    expect(S().deployError).toMatch(/^The piece North half is too large to hide: [\d,]+ of 240,000 bytes\. Split it smaller\. Nothing was sent\.$/)
     expect(signs).not.toHaveBeenCalled()
     expect(sent()).toEqual([])
   })

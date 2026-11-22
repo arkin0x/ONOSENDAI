@@ -5047,8 +5047,8 @@ export const useShards = create<ShardsState>((set, get) => {
         // A split build (lib/pieces.ts): each piece it places from your workshop
         // goes as its own sealed hidden object, signed on its own, and the
         // parent names those objects. Measured now, before any key is worked
-        // out: a piece (or the parent) too big for a remote signer is refused
-        // in words, and nothing is signed. A move keeps its pieces (below).
+        // out: a piece too big to hide, or past what a remote signer's relay
+        // carries, is refused in words, and nothing is signed. A move keeps its pieces (below).
         if (!was && !object && !intoChest && cs.identity.pubkey) {
           const me = cs.identity.pubkey
           const ledger = loadLedger()
@@ -5057,8 +5057,8 @@ export const useShards = create<ShardsState>((set, get) => {
             const remote = cs.signerKind === 'nip46'
             shard = plan.parent
             innerTemplate = shardInnerTemplate(shard, at, plane, createdAt, credit)
-            // Each piece is held to the limit: splitting is the way under it. The
-            // parent is asked like any request (TRY ANYWAY past it, #861).
+            // Each piece is held to one event's size, and for a remote signer to
+            // what its relay carries, as every request is (#865).
             const tooBig = plan.pieces.map((p) => pieceRefusal(p, remote)).find((r) => r !== null) ?? null
             if (tooBig) {
               set({ deployStatus: 'error', deployError: tooBig })

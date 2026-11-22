@@ -373,6 +373,9 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
   return Promise.race([work, late]).finally(() => clearTimeout(timer))
 }
 
+/** Changes that reached disk, by object: what a late failure checks before saying anything (watchLate). */
+let landed = new WeakSet<Change>()
+
 /** Back in hand, unless something newer is: tried again with the next save, or by itself (retrySoon). */
 function putBack(batch: Map<string, Change>): void {
   for (const [k, c] of batch) if (!dirty.has(k)) dirty.set(k, c)
@@ -385,13 +388,16 @@ function putBack(batch: Map<string, Change>): void {
  */
 function watchLate(work: Promise<void>, batch: Map<string, Change>): Promise<SaveTrouble | null> {
   return withTimeout(work, timing.lateMs).then(() => {
-    for (const [k, c] of batch) if (dirty.get(k) === c) dirty.delete(k)
+    for (const [k, c] of batch) { landed.add(c); if (dirty.get(k) === c) dirty.delete(k) }
     announce(batch)
     retries = 0
     return null
-  }, (err: unknown) => {
-    // A retry, or a newer save, wrote all of it meanwhile: nothing of its own is missing.
-    const missing = [...batch].some(([k, c]) => dirty.get(k) === c)
+  }, async (err: unknown) => {
+    // A retry may hold it in flight: wait for the writes queued so far, then say
+    // something only if a change of its own neither landed nor was replaced by a
+    // newer one (whose own save reports for itself).
+    await chain.catch(() => undefined)
+    const missing = [...batch].some(([k, c]) => !landed.has(c) && dirty.get(k) === c)
     return missing ? troubleOf(err, 'indexeddb') : null
   })
 }
@@ -413,6 +419,7 @@ async function commitDirty(): Promise<SaveResult> {
       const d = db ?? (db = await openDb())
       work = commit(d, [...batch.values()])
       await withTimeout(work, timing.commitMs)
+      for (const c of batch.values()) landed.add(c)
       announce(batch)
       retries = 0
       return SAVED
@@ -715,7 +722,7 @@ export function resetHiddenForTests(): void {
   try { channel?.close() } catch { /* already closed */ }
   try { db?.close() } catch { /* already closed */ }
   if (retryTimer !== null) clearTimeout(retryTimer)
-  retryTimer = null; retries = 0; heardWhileHidden = null
+  retryTimer = null; retries = 0; heardWhileHidden = null; landed = new WeakSet()
   try { if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onShown) } catch { /* no document */ }
   channel = null; db = null; ready = null; expired = false; buckets = null; secrets = {}; closed = {}; dirty = new Map(); mode = 'local'; chain = Promise.resolve(SAVED)
   listeners.clear()

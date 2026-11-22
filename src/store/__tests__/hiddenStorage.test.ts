@@ -619,6 +619,21 @@ describe('why a save did not land: the toast says the real cause', () => {
     expect((await dbRows()).map((x) => x.key)).toEqual(['x1'])
   })
 
+  it('a slow write that fails while its retry is still in flight waits for the retry: told when the retry fails too', async () => {
+    const p = await page()
+    p.signIn(X)
+    p.st.setSaveTimingForTests({ commitMs: 30, lateMs: 60, retryMs: [] })
+    h.state.hangCommit = true
+    const r = await p.st.saveRowsResult(X, [row(X, 'x1') as never], JSON.stringify, () => false)
+    expect(r.trouble).toBe('slow')
+    // A retry in flight that will fail for lack of space.
+    h.state.hangCommit = false
+    h.state.commitErrors = [err('QuotaExceededError')]
+    const retry = p.st.saveRows(X, [row(X, 'x1') as never], JSON.stringify, () => false)
+    expect(await r.late).not.toBeNull()
+    expect(await retry).toBe(false)
+  })
+
   it('a door secret that cannot be written says why, and asks for space only when the device is full', async () => {
     const p = await page()
     const ds = await import('../doorSecrets')

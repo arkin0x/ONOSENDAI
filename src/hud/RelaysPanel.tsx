@@ -5,7 +5,8 @@
  * there, so it cannot be removed. Add your own below it, and movement, hidden
  * content, discovery and everyone else's chains all ride the whole set. The
  * former canonical relay (useRelays READ_FALLBACK_RELAY) is listed last,
- * READ ONLY: still read while it is retired, nothing sent there. A dot per
+ * READ ONLY: still read while it is retired, and sent nothing but your moves
+ * (for your devices still on an older version). A dot per
  * relay shows whether the socket is open right now.
  */
 
@@ -69,7 +70,7 @@ export function RelaysPanel(): JSX.Element {
           <li key={READ_FALLBACK_RELAY} className="relays__row">
             <span className={`relays__dot ${status.get(normalizeURL(READ_FALLBACK_RELAY)) ? 'is-on' : ''}`} title={status.get(normalizeURL(READ_FALLBACK_RELAY)) ? 'connected' : 'not connected'} />
             <span className="relays__url" title={READ_FALLBACK_RELAY}>{READ_FALLBACK_RELAY.replace(/^wss?:\/\//, '')}</span>
-            <span className="relays__default" title="The old default: still read while it is retired, nothing is sent there">READ ONLY</span>
+            <span className="relays__default" title="The old default, being retired: still read, and sent only your moves, for older versions of the app">READ ONLY</span>
           </li>
         )}
       </ul>

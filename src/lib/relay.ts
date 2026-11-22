@@ -19,7 +19,7 @@ import { answerChecks } from './sigCheck'
 import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, VerifiedEvent } from 'nostr-tools/core'
 import type { NostrEvent } from './events'
-import { currentRelays, DEFAULT_RELAY, PINNED_RELAYS, isRetiredRelay, readRelays } from '../store/useRelays'
+import { currentRelays, DEFAULT_RELAY, PINNED_RELAYS, READ_FALLBACK_RELAY, isReadFallbackRelay, isRetiredRelay, readRelays } from '../store/useRelays'
 import { LiveRegistry, type Transport } from './liveSub'
 import { signerHeld } from './authOpen'
 import { AUTH_STALLED, classifyClose, mergeAnswers, type RelayAnswer } from './relayOutcome'
@@ -1178,12 +1178,35 @@ export async function publishLight(event: NostrEvent): Promise<boolean> {
   return result?.status === 'fulfilled' && !String(result.value).startsWith(CONNECTION_FAILURE)
 }
 
+/** A movement chain event (events.ts ACTION_KIND), named here so this module keeps importing only types from events. */
+const MOVEMENT_KIND = 3333
+
+/**
+ * A movement chain event (kind 3333) is also copied to the read-only old
+ * relay (useRelays READ_FALLBACK_RELAY), until stage 2: a device of the same
+ * identity still on a build of before stage 1 pins that relay and lets it
+ * pass a move alone, and were it not sent your moves it could sign on a head
+ * this one already moved past, and fork the chain. A copy on the side, best
+ * effort: its answer is never part of the publish's (never "published", never
+ * a holder, never the canonical retry's business), so a move only the old
+ * relay took is a failed publish, as it is with the old relay out of the
+ * picture (review of stage 1). Nothing reads a head from it. Not when the
+ * player lists the old relay themselves: then the publish itself goes there.
+ */
+export function mirrorToOldRelay(event: NostrEvent): void {
+  if (event.kind !== MOVEMENT_KIND || relaySet().some(isReadFallbackRelay)) return
+  void publishMany([READ_FALLBACK_RELAY], event).catch(() => { /* best effort */ })
+}
+
 /**
  * Send one event to every configured relay. With `first`, answered as soon as
  * one relay took it, with every relay's answer to come in `all` (publishFirst).
+ * A move is also copied to the old relay on the side (mirrorToOldRelay).
  */
 export function publish(event: NostrEvent, opts?: { first?: boolean }): Promise<PublishResult & { all?: Promise<PublishResult> }> {
-  return opts?.first ? publishFirst(event) : publishMany(relaySet(), event)
+  if (opts?.first) return publishFirst(event)
+  mirrorToOldRelay(event)
+  return publishMany(relaySet(), event)
 }
 
 /** publishFirst's answer: published once a relay took it, and `all`, every relay's answer, when they are in. */
@@ -1203,6 +1226,7 @@ export function publishFirst(event: NostrEvent): Promise<FirstResult> {
     let answered = false
     // Never rejects: a throw is a failure every relay shares, said as one.
     let all: Promise<PublishResult> = Promise.resolve({ ok: false, reason: 'not sent' })
+    mirrorToOldRelay(event)
     all = publishMany(relaySet(), event, (url) => {
       if (answered) return
       answered = true

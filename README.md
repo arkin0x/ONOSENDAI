@@ -22,11 +22,13 @@ owner's own relay, holding the full history copied from
 protected (NIP-70) events, and takes events up to 512 KB.
 
 `wss://cyberspace.nostr1.com`, canonical until 2026-11-05, is being retired
-(the owner, 2026-11-22). Stage 1: it is read only (`READ_FALLBACK_RELAY` in
-`src/store/useRelays.ts`). Nothing is published there by default, it never
-vouches for a head or counts as holding a chain, and its answer alone never
-passes a move; it is still read beside your relays, so anything only it holds
-is still seen. It requires auth for reads.
+(the owner, 2026-11-22). Stage 1: `READ_FALLBACK_RELAY` in
+`src/store/useRelays.ts`. Nothing is published there but your own movement
+events, which still go there so a device of yours on an older build (which
+trusts it) never forks your chain. It never vouches for a head or counts as
+holding a chain, and its answer alone never passes a move; it is still read
+beside your relays, so anything only it holds is still seen. It requires auth
+for reads.
 
 ## Running it
 

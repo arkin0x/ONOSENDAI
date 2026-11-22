@@ -34,7 +34,10 @@ export const DEFAULT_RELAY = 'wss://relay.onosendai.tech'
  *
  * Stage 1 of its retirement: it is not in the relay list, so nothing is
  * published there by default (an item published there before keeps its own
- * saved relays, so taking it down still reaches it); it is not pinned, so it
+ * saved relays, so taking it down still reaches it), except your own
+ * movement events (relay.ts mirrorToOldRelay), copied there and never trusted, so
+ * a device of yours still on a build of before stage 1, which trusts it,
+ * never signs on a head you already moved past; it is not pinned, so it
  * never vouches for a head (ownWatch, standingHead); it never counts as
  * holding a chain (chainHolders), so no move waits for it; and in the
  * question before a move, its answer alone never passes the move (chains.ts

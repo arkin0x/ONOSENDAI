@@ -24,7 +24,7 @@
  * | stall | the tablet's socket goes silent (no frames, nothing answered) while the phone moves on; a move pressed on the tablet is never signed on the stale head |
  * | race | both devices press a move at the same moment; whatever lands, neither device signs on top of a fork afterwards; with no fork each is on the relay head or holds its move behind the diverged-branch prompt |
  * | stalefallback | the old relay (useRelays READ_FALLBACK_RELAY, read only) holds the chain as it was; the canonical relay goes silent for the tablet while the phone moves on; a move pressed on the tablet is never signed on the old relay's word |
- * | (always) | nothing is ever published to the old relay |
+ * | (always) | nothing but movement events (kind 3333) is published to the old relay; it still gets those, for devices on older builds that trust it |
  *
  * The old relay (wss://cyberspace.nostr1.com) is its own fake relay here,
  * with its own store: it holds only what is sent to it, or what a case puts
@@ -50,8 +50,8 @@ const nsec = nip19.nsecEncode(sk)
 const store = []
 const subs = new Set()
 const relay = { silent: new Set(), silentCanon: new Set(), reqs: {}, dropEvents: new Set() }
-/** The old relay's own store, and every event any device published to it (none should be). */
-const old = { store: [], published: [] }
+/** The old relay's own store, every event any device published to it (movement events only), and whether it refuses writes now. */
+const old = { store: [], published: [], refuse: false }
 const OLD_RELAY = /^wss:\/\/cyberspace\.nostr1\.com/
 function answer(filters, from = store) {
   // The union of the filters, newest first, capped as a whole (nostrdb).
@@ -83,6 +83,7 @@ async function device(name) {
           ws.send(JSON.stringify(['EOSE', id]))
         } else if (m[0] === 'EVENT') {
           old.published.push({ device: name, kind: m[1].kind, id: m[1].id })
+          if (old.refuse) { ws.send(JSON.stringify(['OK', m[1].id, false, 'restricted: not taking writes'])); return }
           if (!old.store.some((e) => e.id === m[1].id)) old.store.push(m[1])
           ws.send(JSON.stringify(['OK', m[1].id, true, '']))
         } else if (m[0] === 'AUTH') ws.send(JSON.stringify(['OK', m[1].id, true, '']))
@@ -397,17 +398,19 @@ if (want('unreachable')) {
 }
 
 if (want('stalefallback')) {
-  // The old relay holds the chain as it stood (the history copied, and
-  // every move published to both before stage 1); the canonical relay then
+  // The old relay holds the chain as it stood; the canonical relay then
   // goes silent for the tablet, and the phone moves on, which the old relay
-  // never sees. The old relay answering with the tablet's own head must not
-  // pass a move: that is the word of a relay no move reaches any more.
+  // never takes (it refuses writes here: a stalled AUTH, a full disk). The
+  // old relay answering with the tablet's own head must not pass a move: it
+  // is written to, never trusted.
   if (!tablet.page) await tablet.open()
   await until(tablet, (s) => s.head === relayHead() && s.sync?.status === 'done', 30_000)
   for (const ev of store) if (!old.store.some((e) => e.id === ev.id)) old.store.push(ev)
   const stale = relayHead()
   relay.silentCanon.add('tablet')
+  old.refuse = true
   await move(phone)
+  old.refuse = false
   const target = relayHead()
   const before = new Set(store.map((e) => e.id))
   await tablet.page.evaluate(() => { const s = window.__store.getState(); s.moveCursor({ axis: 'z', dir: 1 }); void s.commit() })
@@ -423,7 +426,9 @@ if (want('stalefallback')) {
   await tablet.close()
 }
 
-ok('nothing is published to the old relay (read only)', old.published.length === 0, `${old.published.length} events: ${JSON.stringify(old.published.slice(0, 5))}`)
+const notMoves = old.published.filter((e) => e.kind !== 3333)
+const oldMoves = old.store.filter((e) => e.pubkey === pk && e.kind === 3333).length
+ok('the old relay is sent movement events only, and gets them (for devices on older builds)', notMoves.length === 0 && oldMoves > 0, `${notMoves.length} other events ${JSON.stringify(notMoves.slice(0, 5))}; ${oldMoves} moves of this identity there`)
 
 // The relay never holds two branches.
 const mine = store.filter((e) => e.pubkey === pk && e.kind === 3333)

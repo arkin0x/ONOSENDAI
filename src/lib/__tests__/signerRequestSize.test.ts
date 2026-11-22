@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 // signers imports the relay layer, which imports the store, which reads
 // localStorage as it loads; the test runs where there is none.
@@ -66,6 +66,9 @@ function sized(target: number): EventTemplate {
   const bytes = (n: number) => nip46PlaintextBytes('sign_event', [JSON.stringify(attributed(at(n)))], 'abcdef-1')
   return at(target - bytes(0))
 }
+
+// The store's first import is slow under a full parallel run; taken once here, so no test spends its own time on it.
+beforeAll(async () => { await signers() }, 60_000)
 
 afterEach(() => { vi.restoreAllMocks() })
 

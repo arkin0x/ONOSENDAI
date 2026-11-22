@@ -274,11 +274,13 @@ export function tapRaycast(view: () => TapView, spec: { current: TapSpec }, out:
       // A mark (a message or a coin) held to a fingertip is a deliberate,
       // fixed-size target, and wins over a shard's box when a tap passes
       // through both. A message's box larger than that (`side`) is a thing in
-      // the place like the rest, and takes a tap only where it is the nearest
-      // thing hit: as large as the view up close, it would otherwise take
-      // every tap meant for a chest, a shard or a person in front of it.
-      if (finger >= (side ?? 0)) m.userData.tapPriority = 'mark'
-      else delete m.userData.tapPriority
+      // the place like the rest ('box'): a measured target gives it the tap
+      // only where the box is hit nearer than what that target draws. As
+      // large as the view up close, it would otherwise take every tap meant
+      // for a chest, a shard or a person in front of it; and a room or a
+      // tile it stands in still gives way to it, since their faces under the
+      // tap are behind the box.
+      m.userData.tapPriority = finger >= (side ?? 0) ? 'mark' : 'box'
       m.updateWorldMatrix(false, false)
       return true
     }
@@ -372,14 +374,20 @@ export function TapTarget({ onTap, measure, px, side, at, yields = false, occlud
       // lets the tap through to whatever is behind.
       const drawn = measure.current
       const { around, inner } = measured.current
+      // How far along the tap what this target draws is first met: its exact hit, or its box's.
+      let own = e.distance
       if (drawn && (around || measured.current.across > PRECISE_ABOVE_PX)) {
         const ray = precise.current
         ray.set(around && inner ? inner : e.ray.origin, e.ray.direction)
         const slop = PRECISE_SLOP_PX * measured.current.perPxWorld
         ray.params.Points = { threshold: slop }
         ray.params.Line = { threshold: slop }
-        if (ray.intersectObject(drawn, true).length === 0) return
+        const exact = ray.intersectObject(drawn, true)
+        if (exact.length === 0) return
+        own = exact[0].point.distanceTo(e.ray.origin)
       }
+      // A message's box met before that takes the tap: leave it to travel on to the box.
+      if (e.intersections.some((i) => i.object.userData?.tapPriority === 'box' && i.distance < own)) return
     }
     e.stopPropagation()
     markSceneTapHandled()

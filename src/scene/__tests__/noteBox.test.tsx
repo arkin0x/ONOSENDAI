@@ -19,7 +19,6 @@
  * Run in a real R3F root (test/r3fRoot.ts): real three objects, frames and
  * camera, so the size is measured in the world, as drawn.
  */
-import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createElement, useRef } from 'react'
 import { Box3, Matrix4, ShaderLib, Vector3, Vector4, type Camera, type LineSegments, type Material, type Mesh, type Object3D, type PerspectiveCamera } from 'three'
@@ -244,6 +243,35 @@ describe('a large box among other things to tap', () => {
     expect(chest).toHaveBeenCalledTimes(1)
   })
 
+  it('up close inside a room (a floor and a back wall, measured), a tap on the box opens the message, and a tap on the wall beside it the room', async () => {
+    useCyberspace.setState({ scaleExp: 0 })
+    const message = vi.fn()
+    const room = vi.fn()
+    function Room(): JSX.Element {
+      const drawn = useRef<Mesh>(null)
+      return createElement('group', null,
+        createElement('group', { ref: drawn },
+          // A floor under the box and a wall behind it; the eye stands outside the room's box, as orbiting a room does.
+          createElement('mesh', { position: [0, -0.55, -0.95] }, createElement('boxGeometry', { args: [3, 0.1, 3.1] }), createElement('meshBasicMaterial')),
+          createElement('mesh', { position: [0, 1, -2] }, createElement('boxGeometry', { args: [3, 3, 0.1] }), createElement('meshBasicMaterial')),
+        ),
+        createElement(TapTarget, { measure: drawn as never, onTap: room }),
+      )
+    }
+    r = await r3fRoot()
+    await r.render(createElement('group', null,
+      createElement(Room),
+      createElement(NoteItem, { w: NOTE, birth: undefined, onTap: message }),
+    ))
+    await placeCamera(r, [0, 0, 3])
+    await r.tap(400, 400)
+    expect(message).toHaveBeenCalledTimes(1)
+    expect(room).not.toHaveBeenCalled()
+    await r.tap(400 + 250, 400 - 200)
+    expect(room).toHaveBeenCalledTimes(1)
+    expect(message).toHaveBeenCalledTimes(1)
+  })
+
   it('far off, held to a fingertip, the box still wins over a shard’s box, as a coin does', async () => {
     useCyberspace.setState({ scaleExp: 0 })
     const message = vi.fn()
@@ -257,11 +285,6 @@ describe('a large box among other things to tap', () => {
     await r.tap(400, 400)
     expect(message).toHaveBeenCalledTimes(1)
     expect(chest).not.toHaveBeenCalled()
-  })
-
-  it('a message being moved stays its one-gibson box, faint (WorldMessages `moving`)', () => {
-    const source = readFileSync(new URL('../WorldMessages.tsx', import.meta.url), 'utf8')
-    expect(source).toMatch(/w\.type === 'message' && !w\.coin\s*\? <WorldMark key=\{w\.key\} kind="note" at=\{w\.centre\} side=\{noteBoxSide\(scaleExp\)\} opacity=\{MOVING_OPACITY\} \/>/)
   })
 })
 

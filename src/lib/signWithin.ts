@@ -15,8 +15,8 @@ export const SIGN_PATIENCE_MS = 15_000
 
 export class SignerTimeout extends Error {
   /**
-   * Set when what timed out was waiting on a request bigger than some signer
-   * apps can read, sent anyway (signerRequestSize.ts): what to make smaller
+   * Set when what timed out was waiting on a request past 65,535 bytes
+   * (signerRequestSize.ts), which a signer app may not handle: what to make smaller
    * ("the shard", "it"). Null for an ordinary silence.
    */
   readonly big: string | null
@@ -28,8 +28,8 @@ export class SignerTimeout extends Error {
 }
 
 /**
- * What a move says when a request bigger than some signer apps can read went
- * out (TRY ANYWAY) and nothing came back: the signer is likely there, and the
+ * What a move says when a request past 65,535 bytes went out and nothing
+ * came back: the signer is likely there, and the
  * size the likely reason, so pairing again is not the way out.
  */
 export function bigSilenceWords(noun: string): string {
@@ -57,9 +57,9 @@ export const SIGNER_STUCK_MESSAGE = 'Your signer is not answering. LOG OUT and p
 /**
  * The words for a signature that failed: a signer that ran out of time gets
  * SIGNER_GONE_MESSAGE (SIGNER_STUCK_MESSAGE for a remote signer, `kind`
- * nip46), or bigSilenceWords when it was waiting on a request bigger than
- * some signer apps can read; and a big request that was not sent
- * (signerRequestSize.ts) its own words, which already say what to do.
+ * nip46), or bigSilenceWords when it was waiting on a request past 65,535
+ * bytes; and a request too big for the signer relay, never sent
+ * (signerRequestSize.ts), its own words, which already say what to do.
  */
 export function signingFailed(err: unknown, kind?: string): string {
   const big = bigSilence(err)
@@ -135,7 +135,7 @@ export function askAgain(): void {
 }
 
 /**
- * Big requests sent to a remote signer anyway and not yet answered
+ * Requests past 65,535 bytes sent to a remote signer and not yet answered
  * (signerRequestSize.ts): when each went out, and what to make smaller. A
  * signature that runs out of time with one of these sent after it began
  * says so (SignerTimeout.big). Forgotten after LATE_PATIENCE_MS.
@@ -146,7 +146,7 @@ function pruneBigAsks(now: number): void {
   for (const a of bigAsks) if (now - a.at > LATE_PATIENCE_MS) bigAsks.delete(a)
 }
 
-/** A big request went out to `session`'s signer (TRY ANYWAY). Returns its end: answered, or failed on the way. */
+/** A request past 65,535 bytes went out to `session`'s signer. Returns its end: answered, or failed on the way. */
 export function noteBigAsk(session: string, noun: string): () => void {
   const now = Date.now()
   pruneBigAsks(now)
@@ -163,28 +163,6 @@ function bigAskSince(since: number, session: string | undefined): string | null 
   return null
 }
 
-/** Signature clocks running now; paused while a person is asked something first. */
-const clocks = new Set<{ pause: () => void; resume: () => void }>()
-let clockHolds = 0
-
-/**
- * Stop every signature's clock while the person is asked whether to send a
- * request at all (signerRequestSize.ts, TRY ANYWAY): the time spent reading
- * the question is not the signer's. Returns the release, after which each
- * clock starts its full patience again, since that is when the request goes.
- */
-export function holdSignClocks(): () => void {
-  clockHolds++
-  if (clockHolds === 1) for (const c of clocks) c.pause()
-  let held = true
-  return () => {
-    if (!held) return
-    held = false
-    clockHolds--
-    if (clockHolds === 0) for (const c of [...clocks]) c.resume()
-  }
-}
-
 /**
  * The signature, or a SignerTimeout once SIGN_PATIENCE_MS has passed.
  *
@@ -199,19 +177,13 @@ export async function signWithin(signer: { signEvent: (template: EventTemplate) 
   let timer: ReturnType<typeof setTimeout> | undefined
   let timedOut = false
   let waitingLate: (() => void) | null = null
-  let fire: () => void = () => {}
   const limit = new Promise<never>((_, reject) => {
-    fire = () => {
+    timer = setTimeout(() => {
       timedOut = true
       if (late) waitingLate = awaitLate()
       reject(new SignerTimeout(bigAskSince(startedAt, signer.session)))
-    }
+    }, ms)
   })
-  // Not armed while the person is being asked whether to send it at all (holdSignClocks).
-  const arm = (): void => { clearTimeout(timer); timer = clockHolds > 0 ? undefined : setTimeout(fire, ms) }
-  const clock = { pause: () => { clearTimeout(timer); timer = undefined }, resume: arm }
-  clocks.add(clock)
-  arm()
   void signing.then((signed) => {
     // The late answer first: what is waiting on it is better served by it than by a fresh request.
     if (timedOut) late?.(signed)
@@ -220,7 +192,6 @@ export async function signWithin(signer: { signEvent: (template: EventTemplate) 
   try {
     return await Promise.race([signing, limit])
   } finally {
-    clocks.delete(clock)
     clearTimeout(timer)
   }
 }

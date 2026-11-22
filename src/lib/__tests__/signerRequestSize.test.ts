@@ -72,77 +72,38 @@ beforeAll(async () => { await signers() }, 60_000)
 
 afterEach(() => { vi.restoreAllMocks() })
 
-/** The big-request question open now, once it has had a moment to open. */
-async function question() {
-  const { useBigRequestQuestion } = await import('../signerRequestSize')
-  await settle()
-  return useBigRequestQuestion.getState().question
-}
-
-describe('a remote signer request past 65,535 bytes (arkinox, 2026-11-22: "what if we\'re wrong?")', () => {
-  it('is asked about first, and TRY ANYWAY sends it as before', async () => {
+describe('a remote signer request past 65,535 bytes (Amber reads the extended NIP-44 length)', () => {
+  it('simply goes, with no question: the owner\'s big shard, hidden by reference', async () => {
     const { signer, published } = await sessionSigner()
     try {
-      // The owner's big shard, hidden by reference: about 71,800 bytes of object.
+      // About 71,800 bytes of object; the answer is unasked for here, and only its request counted.
       void signer.signEvent(sized(71_800)).catch(() => undefined)
-      const asked = await question()
-      expect(published).toHaveLength(0)
-      expect(asked).not.toBeNull()
-      expect(asked!.words).toMatch(/^This is bigger than some signer apps can read \(about 65 KB, this needs 7\d KB\)\. TRY ANYWAY, or make the shard smaller\.$/)
-      expect(asked!.words).not.toContain('\u2014')
-      asked!.answer(true)
       await settle()
       expect(published).toHaveLength(1)
-      expect(await question()).toBeNull()
     } finally {
       await signer.close?.()
     }
   })
 
-  it("DON'T SEND sends nothing, and fails in words that name the sizes and what to do", async () => {
-    const { signingFailed } = await import('../signWithin')
+  it('goes just under 65,535 bytes too, as always', async () => {
     const { signer, published } = await sessionSigner()
     try {
-      const failing = signer.signEvent(sized(71_800)).then(() => null, (e: unknown) => e)
-      ;(await question())!.answer(false)
-      const err = await failing
-      await settle()
-      expect(published).toHaveLength(0)
-      expect((err as Error).name).toBe('SignerRequestTooBig')
-      expect((err as { reason?: unknown }).reason).toBe('declined')
-      expect((err as Error).message).toMatch(/^Not sent: this is bigger than some signer apps can read \(about 65 KB, this needs 7\d KB\)\. Make the shard smaller, or sign in with a key on this device\.$/)
-      expect(signingFailed(err, 'nip46')).toBe((err as Error).message)
-    } finally {
-      await signer.close?.()
-    }
-  })
-
-  it('goes out without a question when it is just under 65,535 bytes', async () => {
-    const { signer, published } = await sessionSigner()
-    try {
-      // The answer is unasked for here: the signature is left waiting, and only its request counted.
       void signer.signEvent(sized(NIP44_MAX_PLAINTEXT_BYTES - 40)).catch(() => undefined)
-      expect(await question()).toBeNull()
+      await settle()
       expect(published).toHaveLength(1)
     } finally {
       await signer.close?.()
     }
   })
 
-  it('covers a seal and an open too: every NIP-46 method goes through the one guard', async () => {
+  it('covers a seal and an open too: a big one of each goes', async () => {
     const { signer, published } = await sessionSigner()
     const them = getPublicKey(generateSecretKey())
     try {
       void signer.nip44Encrypt!(them, 'a'.repeat(60_000)).catch(() => undefined)
-      const sealing = await question()
-      expect(sealing!.words).toMatch(/^This is bigger than some signer apps can read .*TRY ANYWAY, or make it smaller\.$/)
-      sealing!.answer(false)
       void signer.nip44Decrypt!(them, 'A'.repeat(70_000)).catch(() => undefined)
-      const opening = await question()
-      expect(opening!.words).toMatch(/^This is bigger than some signer apps can read .*TRY ANYWAY, or sign in with a key on this device to open it\.$/)
-      opening!.answer(true)
       await settle()
-      expect(published).toHaveLength(1)
+      expect(published).toHaveLength(2)
     } finally {
       await signer.close?.()
     }
@@ -172,14 +133,16 @@ describe('a timeout and a big request', () => {
 })
 
 describe('the hard caps, unchanged', () => {
-  it('a request past what the signer relay carries in one kind 24133 event (512 KB) is refused at once, never asked about', async () => {
+  it('a request past what the signer relay carries in one kind 24133 event (512 KB) is refused at once, in words', async () => {
+    const { signingFailed } = await import('../signWithin')
     const { signer, published } = await sessionSigner()
     try {
       const err = await signer.signEvent(sized(400_000)).then(() => null, (e: unknown) => e)
-      expect(await question()).toBeNull()
+      await settle()
       expect(published).toHaveLength(0)
       expect((err as Error).name).toBe('SignerRequestTooBig')
-      expect((err as { reason?: unknown }).reason).toBe('relay')
+      expect(signingFailed(err, 'nip46')).toBe((err as Error).message)
+      expect((err as Error).message).not.toContain('\u2014')
       expect((err as Error).message).toMatch(/^This is too big to send to a signer app \(its relay takes up to 512 KB, this needs \d+ KB\)\. Make the shard smaller, or sign in with a key on this device\.$/)
     } finally {
       await signer.close?.()
@@ -231,19 +194,19 @@ describe('the size a request needs', () => {
 
   it('names the noun only for a shard', () => {
     const note = JSON.stringify({ kind: 30078, created_at: 1, tags: [], content: '' })
-    expect(signerRequestTooBigMessage('sign_event', [note], 80_000, 'declined')).toContain('Make it smaller')
+    expect(signerRequestTooBigMessage('sign_event', [note], 600_000)).toContain('Make it smaller')
     const shard = JSON.stringify({ kind: 33331, created_at: 1, tags: [], content: '' })
-    expect(signerRequestTooBigMessage('sign_event', [shard], 80_000, 'declined')).toContain('Make the shard smaller')
+    expect(signerRequestTooBigMessage('sign_event', [shard], 600_000)).toContain('Make the shard smaller')
+    expect(signerRequestTooBigMessage('nip44_decrypt', ['', ''], 600_000)).toMatch(/Sign in with a key on this device to open it\.$/)
   })
 })
 
 describe('a key on this device', () => {
-  it('signs an event far past the limit, as before, and is never asked about it', async () => {
+  it('signs an event far past the limit, as before', async () => {
     const { localSigner } = await signers()
     const sk = generateSecretKey()
     const signed = await localSigner(sk).signEvent({ kind: 33331, created_at: 1, tags: [], content: 'a'.repeat(200_000) })
     expect(verifyEvent(signed)).toBe(true)
     expect(signed.pubkey).toBe(getPublicKey(sk))
-    expect(await question()).toBeNull()
   })
 })

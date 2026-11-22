@@ -352,7 +352,7 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
   if (!bp) throw new Error('Not a valid bunker URI')
   const session = getPublicKey(clientSk)
   // Every request watched for its answer (signerActivity.ts), then measured:
-  // a big one is asked about first (signerRequestSize.ts).
+  // past what the signer relay carries it is refused (signerRequestSize.ts).
   const bunker = guardRequestSize(trackActivity(nip46.BunkerSigner.fromBunker(clientSk, bp, { pool: answersFirst() as never }), session), session)
   onStep?.('connect')
   await said(bunker, bunker.connect())
@@ -433,7 +433,7 @@ function wrapBunkerSigner(
 ): Signer {
   const session = getPublicKey(clientSecretKey)
   // Every request watched for its answer (signerActivity.ts), then measured:
-  // a big one is asked about first (signerRequestSize.ts).
+  // past what the signer relay carries it is refused (signerRequestSize.ts).
   guardRequestSize(trackActivity(bunker, session), session)
   const signer: Signer = {
     kind: 'nip46',

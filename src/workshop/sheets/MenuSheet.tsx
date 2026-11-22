@@ -15,6 +15,7 @@ import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst, type 
 import { ShardThumb } from '../../hud/ShardThumb'
 import { usePublished } from '../../store/usePublished'
 import { useWorkshop } from '../../store/useWorkshop'
+import { recoverShards } from '../../store/workshopStorage'
 import { BounceChip } from '../shardRows'
 import { copyShardById } from '../shardClipboard'
 import { useBeginner } from '../beginner'
@@ -95,6 +96,7 @@ interface MenuBodyProps {
 /** MENU's body, inside its sheet. */
 export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, setPaste }: MenuBodyProps): JSX.Element {
   const shardCount = useWorkshop((s) => s.shards.length)
+  const storageError = useWorkshop((s) => s.storageError)
   const [query, setQuery] = useState('')
   const tools = useBeginner((b) => b.tools)
   const hasContent = useWorkshop((s) => { const c = s.current(); return c !== null && (c.vertices.length > 0 || (c.parts?.length ?? 0) > 0) })
@@ -108,6 +110,18 @@ export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, s
     const id = w().importText(text)
     if (id) { setPasteOpen(false); say('Pasted as a new object.') }
     else say('That is not an object.')
+  }
+  const [recovering, setRecovering] = useState(false)
+  // RECOVER SHARDS: every copy this browser keeps, put back where the library lacks it; nothing deleted (store/workshopStorage.ts recoverShards).
+  const recover = async (): Promise<void> => {
+    setRecovering(true)
+    try {
+      const r = await recoverShards()
+      const n = r.ok ? `${r.restored} shard${r.restored === 1 ? '' : 's'}` : ''
+      if (!r.ok) say(r.error)
+      else if (r.reload) say(r.restored ? `Put back ${n}. Reload to see your shards.` : 'Your shards are there. Reload to see them.')
+      else say(r.restored ? `Put back ${n}.` : 'Nothing missing: every copy found is already in your shards.')
+    } finally { setRecovering(false) }
   }
   const paste = async (): Promise<void> => {
     try {
@@ -136,6 +150,10 @@ export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, s
       {/* Above the list here, not under it: MENU's sheet scrolls as a whole, and under a library of a hundred shards the box would be out of reach. */}
       {(shardCount > 1 || query !== '') && <SearchField className="workshop__search" value={query} onChange={setQuery} placeholder="Search shards and folders" label="Search your shards and folders" />}
       <ShardList currentId={currentId} onOpen={onOpen} query={query} />
+      {/* Offered when something is wrong: no shards, or a line saying storage did not load or save. */}
+      {(shardCount === 0 || storageError !== null) && <div className="workshop__row">
+        <button className="workshop__btn" disabled={recovering} onClick={() => void recover()} title="Look in every place this browser keeps a copy of your shards and put back any that are missing. Nothing is deleted.">{recovering ? 'LOOKING' : 'RECOVER SHARDS'}</button>
+      </div>}
       {/* The dock's six tools, or a beginner's four with MORE TOOLS (phase 4). */}
       <div className="workshop__row">
         <Field id="ws-all-tools" label="ADD and FACE in the dock">

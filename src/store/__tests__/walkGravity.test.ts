@@ -8,7 +8,9 @@
  * - (A) it lands: one hop from the step-off point to the landing;
  * - (B) a press in mid-air: one hop to that point, and the fall goes on;
  * - (C) it reaches the last gibson a hop can afford: one hop there, hovering,
- *   so a big grid boundary is an invisible floor even with a floor below it;
+ *   so a big grid boundary is an invisible floor even with a floor below it
+ *   (with Hard Mode Gravity on; off, the default, gravity turns off before,
+ *   walkGravityVoid.test.ts);
  * - (D) gravity goes off mid-fall: one hop to where you are.
  *
  * A jump in place publishes nothing; a jump onto a ledge is one hop; the
@@ -155,6 +157,7 @@ beforeEach(async () => {
   ceiling.hopHeight = 40
   useWalk.getState().exit()
   useWalk.getState().setGravity(false)
+  useWalk.getState().setHardGravity(false)
   useShards.setState({ worldItems: worldItemsOriginal })
   useWorkshop.setState({ open: false })
   clearWalls()
@@ -221,6 +224,8 @@ describe('the switch', () => {
 
   it('Z in WALK switches it; Z with a modifier, Z outside WALK and Z on the workshop bench do not', () => {
     const key = (code: string, mods: Partial<KeyboardEvent> = {}) => ({ code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, preventDefault: vi.fn(), ...mods })
+    // A floor under you: switched on over nothing, gravity would go straight off again (walkGravityVoid.test.ts).
+    world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]])
     // Outside WALK: not WALK's key.
     expect(walkKeyDown(key('KeyZ'))).toBe(false)
     expect(useWalk.getState().gravity).toBe(false)
@@ -702,7 +707,9 @@ describe('exactly on a face', () => {
   })
 })
 
-describe('as far as a hop can afford (C)', () => {
+describe('as far as a hop can afford (C), with Hard Mode Gravity (walkGravityVoid.test.ts: without it, gravity goes off first)', () => {
+  beforeEach(() => { useWalk.getState().setHardGravity(true) })
+
   /**
    * A cap low enough that a big boundary is a few dozen gibsons under the
    * step-off point: the walk's own budget is h <= hopHeight - 3 here. The

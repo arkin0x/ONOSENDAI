@@ -210,7 +210,9 @@ class Pool extends AbstractSimplePool {
     const relay = this.relays?.get(norm)
     if (relay) { countPings(relay); guardAuth(relay); guardSend(relay) }
     try {
-      return await pending
+      const ready = await pending
+      stampFrames(norm, ready)
+      return ready
     } catch (err) {
       if (/timed out/.test(String(err))) {
         // nostr-tools detaches its handlers from a socket that timed out and never closes it.
@@ -224,6 +226,50 @@ class Pool extends AbstractSimplePool {
 }
 
 let pool: AbstractSimplePool | null = null
+
+/**
+ * When each relay's socket last sent anything, by normalized URL: the
+ * liveness the head check reads (lib/ownWatch.ts). A socket that has gone
+ * quiet (a phone's half-open connection, a stalled relay) sends nothing, and
+ * a relay whose last frame is old is not trusted to have told us everything.
+ */
+const lastFrame = new Map<string, number>()
+/** The socket each relay's stamp belongs to: an old socket's late close does not wipe a new one's. */
+const framedSocket = new Map<string, WebSocket>()
+
+function stampFrames(url: string, relay: unknown): void {
+  const ws = (relay as { ws?: WebSocket } | undefined)?.ws
+  if (!ws || framedSocket.get(url) === ws || typeof ws.addEventListener !== 'function') return
+  framedSocket.set(url, ws)
+  lastFrame.set(url, Date.now())
+  unanswered.delete(url)
+  // A REQ, an EVENT or an AUTH is owed a frame back (EOSE, OK). The first one
+  // sent since the last frame is when the socket started owing one: a socket
+  // that stalled with nothing coming back is seen as soon as it is asked
+  // something, not only once LIVE_MS has passed in silence.
+  const send = ws.send.bind(ws)
+  ws.send = (data) => {
+    if (framedSocket.get(url) === ws && typeof data === 'string' && /^\["(REQ|EVENT|AUTH)"/.test(data) && !unanswered.has(url)) unanswered.set(url, Date.now())
+    send(data)
+  }
+  ws.addEventListener('message', () => { if (framedSocket.get(url) === ws) { lastFrame.set(url, Date.now()); unanswered.delete(url) } })
+  ws.addEventListener('close', () => { if (framedSocket.get(url) === ws) { framedSocket.delete(url); lastFrame.delete(url); unanswered.delete(url) } })
+}
+
+/** Since when each relay's socket has owed a frame back with none received, by normalized URL. */
+const unanswered = new Map<string, number>()
+
+/** Milliseconds this relay's socket has owed an answer (a REQ, an EVENT or an AUTH sent, no frame since), or 0. */
+export function unansweredFor(url: string): number {
+  const at = unanswered.get(normalizeURL(url))
+  return at === undefined ? 0 : Date.now() - at
+}
+
+/** Milliseconds since this relay's socket last sent anything, or Infinity when no open socket has. */
+export function frameAge(url: string): number {
+  const at = lastFrame.get(normalizeURL(url))
+  return at === undefined ? Infinity : Date.now() - at
+}
 
 /**
  * Sign a relay's NIP-42 challenge with this identity's key, so a relay that
@@ -972,7 +1018,7 @@ type OnceResult = PublishResult & { byRelay?: Map<string, string | null> }
 /** The result as callers see it, without the per-relay detail. */
 const plain = (r: OnceResult): PublishResult => (r.ok ? r : { ok: false, reason: r.reason })
 
-async function publishOnce(listed: string[], event: NostrEvent): Promise<OnceResult> {
+async function publishOnce(listed: string[], event: NostrEvent, onAccept?: (url: string) => void): Promise<OnceResult> {
   const relays = skipHung(listed)
   if (relays.length === 0) return { ok: false, reason: HUNG_REASON }
   // Protected events (the `-` tag) are only accepted from an authenticated
@@ -980,7 +1026,10 @@ async function publishOnce(listed: string[], event: NostrEvent): Promise<OnceRes
   // already be authed before publishing.
   await authAll(relays)
   await paceSends(relays, event.kind)
-  const results = await Promise.allSettled(getPool().publish(relays, event, { maxWait: MAX_WAIT_MS, onauth: authSign }))
+  const sends = getPool().publish(relays, event, { maxWait: MAX_WAIT_MS, onauth: authSign })
+  // Each relay's acceptance told as it comes (publishFirst), not only once every relay has answered.
+  if (onAccept) sends.forEach((p, i) => { p.then((v) => { if (!String(v).startsWith(CONNECTION_FAILURE)) onAccept(normalizeURL(relays[i])) }, (err) => { if (DUPLICATE.test(String(err?.message ?? err))) onAccept(normalizeURL(relays[i])) }) })
+  const results = await Promise.allSettled(sends)
   // nostr-tools does not reject when it cannot connect: that relay's promise
   // RESOLVES with the string "connection failure: ...". Counted as fulfilled,
   // an event sent while offline was marked published and never sent again,
@@ -1015,9 +1064,9 @@ async function publishOnce(listed: string[], event: NostrEvent): Promise<OnceRes
  * socket), the sockets are presumed dead: they are dropped and the event is
  * sent once more over fresh ones.
  */
-export async function publishMany(relays: string[], event: NostrEvent): Promise<PublishResult> {
+export async function publishMany(relays: string[], event: NostrEvent, onAccept?: (url: string) => void): Promise<PublishResult> {
   if (relays.length === 0) return { ok: false, reason: 'no relays configured' }
-  const first = await publishOnce(relays, event)
+  const first = await publishOnce(relays, event, onAccept)
   if (first.ok) return plain(first)
   // Only the others are asked again, over fresh sockets, as on v2, a relay
   // that turned its AUTH down among them. A relay the signer holds up is not:
@@ -1033,7 +1082,7 @@ export async function publishMany(relays: string[], event: NostrEvent): Promise<
   const again = relays.filter((url) => !signerHolds(url) && !kept(url))
   if (again.length === 0) return { ok: false, reason: first.reason, ...(relays.every(kept) ? { refused: true } : {}) }
   dropRelays(again)
-  const second = await publishOnce(again, event)
+  const second = await publishOnce(again, event, onAccept)
   if (second.ok) return plain(second)
   const ownAgain = (url: string): string => second.byRelay?.get(url) ?? (again.length === 1 ? second.reason : '')
   const definite = (url: string): boolean => kept(url) || (again.includes(url) && (refused(ownAgain(url)) || RATE_LIMITED.test(ownAgain(url))))
@@ -1115,9 +1164,36 @@ export async function publishLight(event: NostrEvent): Promise<boolean> {
   return result?.status === 'fulfilled' && !String(result.value).startsWith(CONNECTION_FAILURE)
 }
 
-/** Send one event to every configured relay. */
-export function publish(event: NostrEvent): Promise<PublishResult> {
-  return publishMany(relaySet(), event)
+/**
+ * Send one event to every configured relay. With `first`, answered as soon as
+ * one relay took it, with every relay's answer to come in `all` (publishFirst).
+ */
+export function publish(event: NostrEvent, opts?: { first?: boolean }): Promise<PublishResult & { all?: Promise<PublishResult> }> {
+  return opts?.first ? publishFirst(event) : publishMany(relaySet(), event)
+}
+
+/** publishFirst's answer: published once a relay took it, and `all`, every relay's answer, when they are in. */
+export type FirstResult = PublishResult & { all: Promise<PublishResult> }
+
+/**
+ * Send one event to every configured relay, and answer as soon as one relay
+ * has taken it: published once any relay took it (the ruling of 2026-10-08,
+ * option B), and a relay that is slow, dead or waiting on AUTH no longer
+ * holds the next move back (owner's ruling of 2026-11-22). `all` settles with
+ * every relay's answer, retries included, for what is noted from them (which
+ * relays hold the chain, whether the canonical relay took it). With no relay
+ * taking it, the answer is publish's, as before.
+ */
+export function publishFirst(event: NostrEvent): Promise<FirstResult> {
+  return new Promise((resolve) => {
+    let answered = false
+    const all = publishMany(relaySet(), event, (url) => {
+      if (answered) return
+      answered = true
+      resolve({ ok: true, accepted: [url], all })
+    })
+    void all.then((r) => { if (!answered) { answered = true; resolve({ ...r, all }) } })
+  })
 }
 
 /**

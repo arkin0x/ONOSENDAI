@@ -31,14 +31,17 @@
  * | the tab shown or focused, the network back, a dead socket replaced | the chain from the newest event the relays hold that this device has (the head check's question), paged the same way | one ask, at most every CATCH_UP_GAP_MS |
  * | another device publishes | the live watch delivers it (chains.ts watchOwnChain: no `since`, so moves signed hours ago while LOCAL and published now arrive too); one that does not link to the chain in hand asks the relays for what lies between | nothing per step |
  *
- * None of it ever signs anything. Every signature still asks the relays for
- * the head itself first (confirmHead), so a catch-up that is late or fails
- * costs a moment of a stale view, never a fork.
+ * None of it ever signs anything. Every signature checks the head first
+ * (confirmHead): from the standing subscriptions when a relay is current and
+ * nothing it delivered is missing here (lib/ownWatch.ts, owner's ruling of
+ * 2026-11-22), and otherwise by asking the relays, so a catch-up that is late
+ * or fails costs a moment of a stale view, never a fork.
  */
 
-import { askChainEvents, fetchChainEvents, watchOwnChain } from './chains'
+import { askChainEvents, fetchChainEvents } from './chains'
+import { reopenOwnWatch, retryWaitingOwnWatch, startOwnWatch } from './ownWatch'
 import { decideSelfCheck } from './chainHold'
-import { onResume, retryFailedAuth } from './relay'
+import { onCanonicalSignIn, onResume, retryFailedAuth } from './relay'
 import { chainHolders } from './chainHolders'
 import { signerHeld } from './authOpen'
 import { actionLink, newestSpawn, type NostrEvent } from './events'
@@ -285,13 +288,20 @@ function resync(pubkey: string): void {
   const ifCurrent = (fn: () => void): void => {
     if (useCyberspace.getState().identity.pubkey === pubkey) fn()
   }
-  close = watchOwnChain(
+  // One standing subscription per relay (lib/ownWatch.ts), which the head
+  // check before a signature also reads (owner's ruling of 2026-11-22). Every
+  // relay delivers the same move: it is taken in once.
+  const seen = new Set<string>()
+  close = startOwnWatch(
     pubkey,
     (ev) => ifCurrent(() => {
+      if (seen.has(ev.id)) return
+      seen.add(ev.id)
+      if (seen.size > 512) seen.delete(seen.values().next().value as string)
       useCyberspace.getState().adoptChain([ev])
       if (linkMissing(ev)) catchUp('gap')
     }),
-    // The live subscription reaching EOSE is the relay talking again; if the
+    // A relay's subscription reaching EOSE is the relay talking again; if the
     // check could not get through before, it may now.
     () => ifCurrent(recheckIfUnknown),
   )
@@ -313,6 +323,9 @@ export function startSelfSync(): void {
   onResume(recheckIfUnknown)
   onResume(compareUnpublished)
   onResume(() => catchUp('resume'))
+  // The sockets were dropped: every relay's watch opens again, and is not current until its EOSE.
+  onResume(reopenOwnWatch)
+  onCanonicalSignIn(retryWaitingOwnWatch)
   watchShown(() => catchUp('focus'))
 }
 

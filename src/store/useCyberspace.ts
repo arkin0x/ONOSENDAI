@@ -209,6 +209,7 @@ import { useToast } from './useToast'
 import { useChainUi } from './useChainUi'
 import type { SelfCrypto } from '../lib/muteList'
 import { forgetUnsent, unsentOf } from '../lib/unsent'
+import { freshenOwnWatch, ownWatchState } from '../lib/ownWatch'
 import { kvGet, kvSet } from '../lib/kvStore'
 
 /**
@@ -3116,6 +3117,35 @@ export const STALE_CONFIRMATION: unique symbol = Symbol('stale confirmation')
 /** Bumped by a respawn and an identity switch: an older value marks a waiter from a chain that is gone. */
 let chainEpoch = 0
 
+/**
+ * Whether the standing subscription on each relay (lib/ownWatch.ts) shows the
+ * head in hand is the newest: at least one relay is current (its subscription
+ * open, caught up to its EOSE since it last opened, its socket heard from
+ * within LIVE_MS), and no relay, current or not, has delivered a move of this
+ * identity that is not in the chain in hand. A relay that is not current
+ * holds nothing up and vouches for nothing. Any current relay will do; the
+ * canonical relay is watched first and is one of them whenever it is current.
+ * No relay current, or the page's first look not answered, means no: the
+ * move then asks the relays, and holds without an answer, as before.
+ */
+export function standingHeadHolds(pubkey: string): boolean {
+  const relays = ownWatchState(pubkey)
+  if (!relays || !relays.some((r) => r.current)) return false
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey !== pubkey || s.held || s.chainConflict) return false
+  // The page's first look at the chain (CHECKING YOUR CHAIN) has answered:
+  // until then, or while it could not, the move asks the relays itself.
+  if (s.chainSync?.pubkey !== pubkey || s.chainSync.status !== 'done') return false
+  for (const r of relays) {
+    const ev = r.newest
+    if (!ev) continue
+    let inHand = false
+    for (let i = s.events.length - 1; i >= 0; i--) if (s.events[i].id === ev.id) { inHand = true; break }
+    if (!inHand) return false
+  }
+  return true
+}
+
 async function confirmHead(retrying: () => void): Promise<string | null | typeof STALE_CONFIRMATION> {
   const pubkey = useCyberspace.getState().identity.pubkey
   const epoch = chainEpoch
@@ -3131,6 +3161,22 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
   }
   const here = await headCheckedHere()
   if (here) return here
+  // The standing subscriptions first (owner's ruling of 2026-11-22): every
+  // relay that is current has already delivered every move it holds, so when
+  // none of them delivered one this chain does not hold, there is nothing
+  // newer, without asking again. Otherwise (no relay current, a move not in
+  // hand, a catch-up out) the relays are asked as below.
+  // After a pause every relay may be quiet: one round trip for a frame from each (no events), then read.
+  if (!standingHeadHolds(pubkey) && ownWatchState(pubkey)?.some((r) => !r.current)) {
+    await freshenOwnWatch(pubkey)
+    if (chainEpoch !== epoch) return STALE_CONFIRMATION
+  }
+  if (standingHeadHolds(pubkey)) {
+    relaysConfirmed.add(pubkey)
+    vouch(pubkey)
+    if (rowsWiped.has(pubkey)) void recoverWiped(pubkey)
+    return null
+  }
   // No confirmation is reused, however recent (arkinox, 2026-10-08): another
   // device can move in the second between two looks, and only a fresh answer
   // makes the relay's silence mean "nothing newer".

@@ -20,6 +20,7 @@
  * as the trail's material compiled and the box's bags opened under it.
  */
 
+import { countingTasks, timeRestOfTask } from './taskStats'
 import { AVATAR_LERP_MS, MAX_GLIDE_STEP_MS } from './avatarLerp'
 
 /**
@@ -101,13 +102,15 @@ function flush(): void {
 
 /**
  * Give the thread back for one task: a message to ourselves, which a hidden
- * tab does not hold back as it holds back timers (to a second each).
+ * tab does not hold back as it holds back timers (to a second each). `label`
+ * names what resumes, for the diagnostics (lib/taskStats.ts).
  */
-export function yieldTask(): Promise<void> {
+export function yieldTask(label = 'yield'): Promise<void> {
   if (typeof MessageChannel === 'undefined') return new Promise((resolve) => setTimeout(resolve, 0))
   return new Promise((resolve) => {
     const ch = new MessageChannel()
-    ch.port1.onmessage = () => { ch.port1.close(); resolve() }
+    // What yielded, for a diagnostics capture (lib/taskStats.ts): every yield resumes in this one handler.
+    ch.port1.onmessage = () => { ch.port1.close(); if (countingTasks()) timeRestOfTask(`yield:${label}`); resolve() }
     ch.port2.postMessage(0)
   })
 }

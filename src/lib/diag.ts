@@ -21,6 +21,7 @@
 
 import { getPool, getSignerPool } from './relay'
 import { countVerifies } from './verifiedSigs'
+import { countTasks } from './taskStats'
 import { modalUp } from '../hooks/useEscape'
 import { useCyberspace } from '../store/useCyberspace'
 import { useHyperspace } from '../store/useHyperspace'
@@ -29,7 +30,7 @@ import { useTv } from '../store/useTv'
 import { useWorkshop } from '../store/useWorkshop'
 import { DIAG_FOUND_KEY, DIAG_LAST_KEY, diagForget } from './diagGate'
 import { hudFlags } from './hudFlags'
-import { DIAG_COLUMNS, GlLedger, LOAF_COLUMNS, LOAF_SCRIPT_COLUMNS, LoafLedger, Ring, VERIFY_COLUMNS, VERIFY_KIND_COLUMNS, type LoafFrame, frameVerb, rxVerb, scriptFile, verifyRow, framePercentiles, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
+import { DIAG_COLUMNS, GlLedger, LOAF_COLUMNS, LOAF_SCRIPT_COLUMNS, LoafLedger, Ring, TASK_COLUMNS, TASK_LABEL_COLUMNS, VERIFY_COLUMNS, taskRow, VERIFY_KIND_COLUMNS, type LoafFrame, frameVerb, rxVerb, scriptFile, verifyRow, framePercentiles, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
 
 /** Seconds between samples, and how long each ring reaches back. */
 const SAMPLE_MS = 5_000
@@ -277,6 +278,9 @@ export function startDiag(): void {
   // Each relay event's check, by kind (lib/verifiedSigs countVerifies): counted only while the capture runs.
   const verifies = countVerifies()
   const verify = new Ring<unknown[]>(LOAF_ROWS)
+  // What ran after each IndexedDB answer and each yielded task, by database and store or by what yielded (lib/taskStats.ts).
+  const tasks = countTasks()
+  const task = new Ring<unknown[]>(LOAF_ROWS)
   const loafs = new LoafLedger()
   const loaf = new Ring<unknown[]>(LOAF_ROWS)
   observe('long-animation-frame', (e) => {
@@ -424,6 +428,8 @@ export function startDiag(): void {
     wire.txReq = 0; wire.txClose = 0; wire.txEvent = 0; wire.txAuth = 0; wire.rxN = 0; wire.rxB = 0; wire.rxEv = 0; wire.rxOk = 0; wire.rxEose = 0
     const vr = verifyRow(row.t as number, verifies.take())
     if (vr) verify.push(vr)
+    const tr = taskRow(row.t as number, tasks.take())
+    if (tr) task.push(tr)
     row.workersMade = workers.made; row.workersLive = workers.made - workers.ended
     row.timeouts = timers.timeouts; row.intervals = timers.intervals
     timers.timeouts = 0; timers.intervals = 0
@@ -523,6 +529,10 @@ export function startDiag(): void {
       verifyColumns: VERIFY_COLUMNS,
       verifyKindColumns: VERIFY_KIND_COLUMNS,
       verify: verify.all(),
+      // The work after IndexedDB answers and yielded tasks, per window, by database and store or by what yielded.
+      taskColumns: TASK_COLUMNS,
+      taskLabelColumns: TASK_LABEL_COLUMNS,
+      task: task.all(),
       events: events.all(),
     })
   }

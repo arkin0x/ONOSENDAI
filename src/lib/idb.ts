@@ -17,11 +17,17 @@
  */
 
 /** Every database here keeps its meta records in a store of this name, keyed by `key`. */
+import { countingTasks, idbLabel, timeRestOfTask } from './taskStats'
+
 export const META_STORE = 'meta'
 
 export function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
-    req.onsuccess = () => resolve(req.result)
+    req.onsuccess = () => {
+      // Which read this was, for a diagnostics capture (lib/taskStats.ts): every read resolves here.
+      if (countingTasks()) timeRestOfTask(idbLabel(req))
+      resolve(req.result)
+    }
     req.onerror = () => reject(req.error ?? new Error('IndexedDB request failed'))
   })
 }

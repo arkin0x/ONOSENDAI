@@ -14,15 +14,15 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const rendered = vi.hoisted(() => ({ mesh: 0, hint: 0, tap: 0 }))
+const rendered = vi.hoisted(() => ({ mesh: 0, hint: 0, tap: 0, made: 0, gone: 0 }))
 vi.mock('@react-three/fiber', async (real) => ({
   ...(await real<object>()),
   useFrame: () => undefined,
   useThree: (pick: (s: unknown) => unknown) => pick({ gl: {}, invalidate: () => undefined }),
 }))
 vi.mock('../ShardMesh', async () => {
-  const { createElement } = await import('react')
-  return { CUBE_EDGES: 'outline', ShardMesh: (props: object) => { rendered.mesh++; return createElement('shardmesh', props) } }
+  const { createElement, useEffect } = await import('react')
+  return { CUBE_EDGES: 'outline', ShardMesh: (props: object) => { rendered.mesh++; useEffect(() => { rendered.made++; return () => { rendered.gone++ } }, []); return createElement('shardmesh', props) } }
 })
 vi.mock('../WalkContactHint', () => ({ WalkContactHint: () => { rendered.hint++; return null } }))
 vi.mock('../TapTarget', async (real) => ({ ...(await real<object>()), TapTarget: () => { rendered.tap++; return null } }))
@@ -31,7 +31,7 @@ import { createElement, useState, useSyncExternalStore } from 'react'
 import { followsVersion, onFollows, setFollows } from '../../lib/trust'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { mount, settled, type Host, type Mounted } from '../../test/elementRoot'
-import { PlacedShard, budgetCentre, type PlacedShardDraw } from '../WorldShards'
+import { KEEP_MS, PlacedShard, budgetCentre, keptReach, keptWithin, type PlacedShardDraw } from '../WorldShards'
 
 function cube(name: string): ShardModel {
   return { ...newShard(name), unit: 0, mode: 'solid', vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }, { p: [1, 0, 0], c: [1, 1, 1] }, { p: [0, 1, 0], c: [1, 1, 1] }], faces: [[0, 1, 2]] }
@@ -71,6 +71,8 @@ afterEach(() => {
   rendered.mesh = 0
   rendered.hint = 0
   rendered.tap = 0
+  rendered.made = 0
+  rendered.gone = 0
 })
 
 describe('a landing, for a world shard that places nothing', () => {
@@ -127,5 +129,47 @@ describe('budgetCentre', () => {
     const now: [number, number, number] = [400, 2, 3]
     expect(budgetCentre(was, now, cube('room'))).toBe(was)
     expect(budgetCentre(was, now, placing('arch'))).toBe(now)
+  })
+})
+
+describe('past the reach: hidden, not taken down (owner\'s phone diag, 2026-11-22: 2,477 objects to 959 and back on going into WALK and out)', () => {
+  it('a shard hidden and shown again is never taken down: its group only turns invisible, and takes no taps meanwhile', async () => {
+    const shard = cube('room')
+    let set: (h: boolean) => void = () => undefined
+    function World(): JSX.Element {
+      const [hidden, setH] = useState(false)
+      set = setH
+      return createElement(PlacedShard, { w: at(shard, 10), birth: undefined, occludes: true, hidden })
+    }
+    const m = await mount(createElement(World))
+    expect(group(m).props.visible).toBe(true)
+    set(true)
+    await settled()
+    expect(group(m).props.visible).toBe(false)
+    set(false)
+    await settled()
+    expect(group(m).props.visible).toBe(true)
+    // The mesh was made once and never taken down: its cut and buffers stay (ShardMesh keys them on the same clip and pose).
+    expect(rendered.made).toBe(1)
+    expect(rendered.gone).toBe(0)
+    await m.unmount()
+  })
+
+  it('keeps the largest reach it went out to for KEEP_MS, then follows the reach again', () => {
+    let k = keptReach(null, 1536, 0)
+    k = keptReach(k, 384, 1_000)
+    expect(k.reach).toBe(1536)
+    k = keptReach(k, 384, KEEP_MS + 1)
+    expect(k.reach).toBe(384)
+    k = keptReach(k, 6144, KEEP_MS + 2)
+    expect(k.reach).toBe(6144)
+  })
+
+  it('keeps every shard within the reach and the nearest few past it', () => {
+    const near = at(cube('a'), 10)
+    const far = [500, 900, 700].map((x, i) => at(cube(`f${i}`), x))
+    const kept = keptWithin([near, ...far], 384, 2)
+    expect(kept.map((w) => w.centre[0])).toEqual([10, 500, 700])
+    expect(keptWithin([near], 384, 0)).toEqual([near])
   })
 })

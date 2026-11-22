@@ -43,7 +43,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { BufferGeometry, Color, Float32BufferAttribute, type LineSegments } from 'three'
+import { BufferAttribute, BufferGeometry, Color, Float32BufferAttribute, type LineSegments } from 'three'
 import type { Plane } from 'cyberspace-core'
 import { useCyberspace } from '../store/useCyberspace'
 import { useV1HopList } from '../hooks/useChainStop'
@@ -125,39 +125,56 @@ export interface TrailInput {
  * switching it can never rebuild them: paintTrail colors them for it.
  */
 export function buildTrail({ positions, planes, local, split, games, centre }: TrailInput): Trail {
+  // Filled straight into typed arrays sized first, each position placed once:
+  // the trail is rebuilt at every landing of a walk, and pushing every
+  // segment's numbers into growing arrays, then copying them, made a few
+  // megabytes of garbage a landing on a long chain (owner's phone diag,
+  // 2026-11-22).
+  type Lines = { n: number; v: Float32Array; p: Uint8Array; at: number; ink: TrailInk }
+  const set = (ink: TrailInk): Lines => ({ n: 0, v: new Float32Array(0), p: new Uint8Array(0), at: 0, ink })
   const sets = {
-    walked: { v: [] as number[], p: [] as number[], ink: TRAIL_INK },
-    ahead: { v: [] as number[], p: [] as number[], ink: TRAIL_INK },
-    walkedLocal: { v: [] as number[], p: [] as number[], ink: LOCAL_INK },
-    aheadLocal: { v: [] as number[], p: [] as number[], ink: LOCAL_INK },
-    gameWalked: { v: [] as number[], p: [] as number[], ink: GAME_INK },
-    gameAhead: { v: [] as number[], p: [] as number[], ink: GAME_INK },
+    walked: set(TRAIL_INK), ahead: set(TRAIL_INK), walkedLocal: set(LOCAL_INK), aheadLocal: set(LOCAL_INK),
+    gameWalked: set(GAME_INK), gameAhead: set(GAME_INK),
   }
   // The plane of a position the parsed chain has not caught up with yet is
   // the newest one it has: the store updates both together, so this is a
   // guard, not a case.
   const planeAt = (i: number): Plane => planes[i] ?? planes[planes.length - 1] ?? 0
-
   // A segment belongs to the action it ends on, i + 1.
-  for (let i = 0; i < positions.length - 1; i++) {
+  const segSet = (i: number): Lines => {
     const isLocal = local[i + 1] === true
-    const into = i < split ? (isLocal ? sets.walkedLocal : sets.walked) : (isLocal ? sets.aheadLocal : sets.ahead)
-    into.v.push(...centre(positions[i]), ...centre(positions[i + 1]))
-    into.p.push(planeAt(i), planeAt(i + 1))
+    return i < split ? (isLocal ? sets.walkedLocal : sets.walked) : (isLocal ? sets.aheadLocal : sets.ahead)
   }
-  for (const g of games) {
-    const into = g.end <= split ? sets.gameWalked : sets.gameAhead
-    into.v.push(...centre(g.from.position), ...centre(g.to.position))
-    into.p.push(g.from.plane, g.to.plane)
-  }
+  const gameSet = (g: { end: number }): Lines => (g.end <= split ? sets.gameWalked : sets.gameAhead)
 
-  const make = (s: { v: number[]; p: number[]; ink: TrailInk }): TrailLine | null => {
-    if (s.v.length === 0) return null
+  for (let i = 0; i < positions.length - 1; i++) segSet(i).n++
+  for (const g of games) gameSet(g).n++
+  for (const s of Object.values(sets)) { s.v = new Float32Array(s.n * 6); s.p = new Uint8Array(s.n * 2) }
+
+  const put = (s: Lines, a: readonly number[], b: readonly number[], pa: Plane, pb: Plane): void => {
+    const o = s.at * 6
+    s.v[o] = a[0]; s.v[o + 1] = a[1]; s.v[o + 2] = a[2]
+    s.v[o + 3] = b[0]; s.v[o + 4] = b[1]; s.v[o + 5] = b[2]
+    s.p[s.at * 2] = pa
+    s.p[s.at * 2 + 1] = pb
+    s.at++
+  }
+  let here = positions.length > 0 ? centre(positions[0]) : null
+  for (let i = 0; i < positions.length - 1; i++) {
+    const next = centre(positions[i + 1])
+    put(segSet(i), here!, next, planeAt(i), planeAt(i + 1))
+    here = next
+  }
+  for (const g of games) put(gameSet(g), centre(g.from.position), centre(g.to.position), g.from.plane, g.to.plane)
+
+  const make = (s: Lines): TrailLine | null => {
+    if (s.n === 0) return null
     const geometry = new BufferGeometry()
-    geometry.setAttribute('position', new Float32BufferAttribute(s.v, 3))
+    // The arrays themselves, not copies of them (Float32BufferAttribute copies).
+    geometry.setAttribute('position', new BufferAttribute(s.v, 3))
     // Filled by paintTrail, before the first frame draws it.
-    geometry.setAttribute('color', new Float32BufferAttribute(new Float32Array(s.v.length), 3))
-    return { geometry, planes: Uint8Array.from(s.p), ink: s.ink }
+    geometry.setAttribute('color', new BufferAttribute(new Float32Array(s.v.length), 3))
+    return { geometry, planes: s.p, ink: s.ink }
   }
   return {
     walked: make(sets.walked), ahead: make(sets.ahead), walkedLocal: make(sets.walkedLocal), aheadLocal: make(sets.aheadLocal),

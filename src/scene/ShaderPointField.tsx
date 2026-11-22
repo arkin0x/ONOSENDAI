@@ -43,15 +43,30 @@ interface Props {
 const FADE_IN_S = 0.25
 
 /**
- * When each visible cell first appeared, in performance.now() seconds, keyed
- * by its cell offset from the anchor. Carried across geometry rebuilds so a
- * cell that survives a rebuild keeps its age and stays solid; only genuinely
- * new cells fade in. Rebuilding the map from the cells actually emitted keeps
- * it from outgrowing one volume. A module singleton because the registry has
- * to outlive any single geometry, and rebuilding it is idempotent, which is
- * what StrictMode's doubled render requires.
+ * When each visible cell of the last volume first appeared, in
+ * performance.now() seconds (NaN for a cell not drawn), by its place in that
+ * volume, with where the volume stood relative to birthRef. Carried across
+ * geometry rebuilds so a cell that survives a rebuild keeps its age and stays
+ * solid; only genuinely new cells fade in. A cell of the next volume finds
+ * its age at its own place shifted by how far the volume moved: a number per
+ * cell, where a map keyed by a string per cell made thousands of strings and
+ * map entries at every landing of a walk (owner's phone diag, 2026-11-22). A
+ * module singleton because the registry has to outlive any single geometry,
+ * and rebuilding it is idempotent, which is what StrictMode's doubled render
+ * requires.
  */
-let births = new Map<string, number>()
+interface BirthGrid { at: [number, number, number]; birth: Float32Array }
+let births: BirthGrid | null = null
+
+/** The age of the cell at volume place (col, row, depth), for a volume at `at`, from the last volume's grid; NaN when it was not drawn there. */
+export function bornAt(grid: BirthGrid | null, at: readonly [number, number, number], col: number, row: number, depth: number, n: number): number {
+  if (!grid) return NaN
+  const c = col + at[0] - grid.at[0]
+  const r = row + at[1] - grid.at[1]
+  const d = depth + at[2] - grid.at[2]
+  if (c < 0 || r < 0 || d < 0 || c >= n || r >= n || d >= n) return NaN
+  return grid.birth[(d * n + r) * n + c]
+}
 
 /**
  * Vertex shader: point size in pixels, from K.
@@ -233,14 +248,18 @@ function buildGeometry(volume: TerrainVolume): BufferGeometry {
 
   // On the same clock the uNow uniform runs on, so ages line up exactly.
   const now = performance.now() / 1000
-  const nextBirths = new Map<string, number>()
+  const nextBirth = new Float32Array(N * N * N).fill(NaN)
   if (!birthRef || birthRef.scaleExp !== volume.scaleExp || birthRef.axes !== volume.axes) {
     birthRef = { origin: volume.centre, scaleExp: volume.scaleExp, axes: volume.axes }
+    // Another zoom or view: no cell of the last volume is one of these.
+    births = null
   }
   const step = stepFor(volume.scaleExp)
   const [br, bu, bo] = [volume.axes.right, volume.axes.up, volume.axes.out].map(
     (a) => Number((volume.centre[a.axis] - birthRef!.origin[a.axis]) / step) * a.dir,
   )
+  const at: [number, number, number] = [br, bu, bo]
+  const last = births
 
   let v = 0
   for (let depth = 0; depth < N; depth++) {
@@ -261,15 +280,15 @@ function buildGeometry(volume: TerrainVolume): BufferGeometry {
         kValues[v] = k
 
         // First seen now, or however long ago the registry remembers.
-        const key = `${br + x},${bu + y},${bo + z}`
-        const born = births.get(key) ?? now
-        nextBirths.set(key, born)
+        const was = bornAt(last, at, col, row, depth, N)
+        const born = Number.isNaN(was) ? now : was
+        nextBirth[slice + col] = born
         birthValues[v] = born
         v++
       }
     }
   }
-  births = nextBirths
+  births = { at, birth: nextBirth }
 
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))

@@ -412,12 +412,22 @@ describe('a relay that challenges late', () => {
     expect(decideSelfCheck(answers.value ?? [], CANON, true).status).toBe('unknown')
   })
 
-  it('an open canonical relay with no chain still says none, at 1.4 s: a new identity must not hold forever', async () => {
+  it('a canonical relay that once gated and serves reads now, with no chain, still says none, at 1.4 s: a new identity must not hold forever', async () => {
     const c = aChain()
     net.rules.emptyUntilAuthed.delete(CANON)
     const asking = askChainEvents(c.pubkey)
     expect((await within(1300, asking)).settled).toBe(false)
     const answers = await within(300, asking)
+    expect(answers.settled).toBe(true)
+    expect(decideSelfCheck(answers.value ?? [], CANON, true).status).toBe('none')
+    expect(net.signer.prompts).toBe(0)
+  })
+
+  it('an open canonical relay not known to gate, with no chain, says none at once and asks the signer nothing', async () => {
+    const c = aChain()
+    net.rules.emptyUntilAuthed.delete(CANON)
+    forgetRelayGates()
+    const answers = await within(300, askChainEvents(c.pubkey))
     expect(answers.settled).toBe(true)
     expect(decideSelfCheck(answers.value ?? [], CANON, true).status).toBe('none')
     expect(net.signer.prompts).toBe(0)
@@ -526,6 +536,7 @@ describe('a canonical relay that does not gate, and another relay that does', ()
   it('answers unknown over the real pool while a relay known to hold this chain waits on the signer, and none for one that never held it', async () => {
     const mine = 'wss://mine.mixed.example/'
     const c = aChain()
+    forgetRelayGates()
     gate(mine)
     net.rules.emptyUntilAuthed.delete(CANON)
     useRelays.getState().add(mine)
@@ -535,6 +546,26 @@ describe('a canonical relay that does not gate, and another relay that does', ()
     expect(answers.value?.find((a) => a.url === CANON)?.outcome).toBe('answered')
     expect(decideSelfCheck(answers.value ?? [], CANON, true, new Set([mine])).status).toBe('unknown')
     expect(decideSelfCheck(answers.value ?? [], CANON, true, new Set()).status).toBe('none')
+  })
+})
+
+describe('first contact with a relay of your own that gates without saying so (review of the AUTH churn fix)', () => {
+  it('a plain read takes its empty answer and asks the signer nothing; a chain read signs in, asks again, and finds the chain', async () => {
+    const mine = 'wss://mine.silent.example/'
+    const c = aChain()
+    forgetRelayGates()
+    net.rules.emptyUntilAuthed.delete(CANON)
+    // Gating, and not known to: no "auth-required:" from it this visit.
+    net.rules.emptyUntilAuthed.add(mine)
+    useRelays.getState().add(mine)
+    net.rules.hold.set(mine, [c.spawn, c.hop1])
+    const plain = await within(1000, queryEachAt([mine], FILTER))
+    expect(plain.value?.[0]).toMatchObject({ outcome: 'answered', events: [] })
+    expect(net.signer.prompts).toBe(0)
+    const answers = await within(3000, askChainEvents(c.pubkey))
+    expect(answers.value?.find((a) => a.url === mine)?.events).toHaveLength(2)
+    expect(decideSelfCheck(answers.value ?? [], CANON, true).status).toBe('found')
+    expect(net.signer.prompts).toBe(1)
   })
 })
 

@@ -129,10 +129,24 @@ function countPings(relay: AbstractRelay): void {
     openSubs: Map<string, unknown>
     scheduleIdleClose: () => void
     clearIdleTimeout: () => void
+    idleSince?: number
+    idleTimeout: number
+    idleTimeoutHandle?: ReturnType<typeof setTimeout>
+    close: () => void
   }
+  /**
+   * When the socket went idle before the ping in flight now, if it had: the
+   * ping's close times the idle close from then, not from itself. Restarted
+   * by every ping, a socket kept open past the pings' 29 s (SIGNED_IN_IDLE_MS)
+   * was never closed as idle at all (review of the AUTH churn fix).
+   */
+  let idleBeforePing: number | undefined
+  let pingClosing = false
   const subscribe = r.subscribe.bind(relay)
   r.subscribe = (filters, params) => {
-    if (params.label !== '<forced-ping>') return subscribe(filters, params)
+    // Real work while a ping is out: the idle time starts again once it is done.
+    if (params.label !== '<forced-ping>') { idleBeforePing = undefined; return subscribe(filters, params) }
+    idleBeforePing = r.ongoingOperations === 0 ? r.idleSince : undefined
     r.ongoingOperations++
     const sub = subscribe(filters, {
       ...params,
@@ -141,6 +155,11 @@ function countPings(relay: AbstractRelay): void {
         params.onclose?.(reason)
       },
     })
+    const close = sub.close.bind(sub)
+    sub.close = (reason?: string) => {
+      pingClosing = true
+      try { close(reason) } finally { pingClosing = false }
+    }
     return sub
   }
   let ops = Math.max(0, r.ongoingOperations)
@@ -149,7 +168,14 @@ function countPings(relay: AbstractRelay): void {
   r.scheduleIdleClose = () => {
     // Each subscription's close, and each hold's release, schedules it again.
     if (r.openSubs.size > 0 || (holds.get(relay) ?? 0) > 0) { r.clearIdleTimeout(); return }
-    scheduleIdleClose()
+    const since = pingClosing ? idleBeforePing : undefined
+    if (since === undefined || r.idleTimeout <= 0) { scheduleIdleClose(); return }
+    // A ping ending: the socket has been idle since before it.
+    r.idleSince = since
+    r.clearIdleTimeout()
+    r.idleTimeoutHandle = setTimeout(() => {
+      if (r.ongoingOperations === 0 && r.idleSince) r.close()
+    }, Math.max(0, since + r.idleTimeout - Date.now()))
   }
 }
 
@@ -406,7 +432,8 @@ function isSpeakeasyPath(url: string): boolean {
  * up front, without waiting to be refused.
  */
 function relayGates(url: string): boolean {
-  const key = normalizeURL(url)
+  let key: string
+  try { key = normalizeURL(url) } catch { return false }
   return gatesSeen.has(key) || isReadFallbackRelay(key) || isSpeakeasyPath(key)
 }
 
@@ -633,13 +660,18 @@ export function onAuthChange(fn: (url: string, ok: boolean) => void): () => void
 }
 
 /**
- * Whether this visit's sign-in to a relay failed and stands: the signer
- * refused or ran out of time, or the relay turned the AUTH down. RETRY
+ * Whether this visit's sign-in to a relay failed and stands, at a relay that
+ * gates (relayGates), so its reads wait on the sign-in: the signer refused
+ * or ran out of time, or the relay turned the AUTH down. RETRY
  * (retryFailedAuth) clears it on success. For the old relay's line
- * (hud/RelayTrouble BackupTrouble), whose reads need the sign-in.
+ * (hud/RelayTrouble BackupTrouble) and the own-chain watch's backoff
+ * (ownWatch.ts). A relay that serves reads to anyone is not held back by a
+ * failed sign-in for a protected event.
  */
 export function signInFailed(url: string): boolean {
-  return authFailed.has(normalizeURL(url))
+  let key: string
+  try { key = normalizeURL(url) } catch { return false }
+  return authFailed.has(key) && relayGates(key)
 }
 
 function noteAuth(url: string, ok: boolean, err?: unknown, bySigner: 'timeout' | 'refused' | null = null): void {
@@ -1374,6 +1406,17 @@ interface OpenSub {
 
 /** How askOne times a question; without any, the answer is due by its deadline. */
 interface AskOptions {
+  /**
+   * A read whose empty answer decides something (a chain's holders, "no
+   * chain", the newest version of something of yours): an empty EOSE from a
+   * relay that challenged and is not signed in is not believed, gating or
+   * not, but signed in to and asked again, as every read was before the AUTH
+   * churn fix. A relay that gates without saying "auth-required:" answers a
+   * reader it does not know with nothing, and taken at its word that signs a
+   * spawn or a fork (review of the AUTH churn fix). Not the canonical relay,
+   * whose reads are open to anyone (useRelays DEFAULT_RELAY).
+   */
+  decides?: boolean
   /** The answer is due this long after the REQ is written, not by the deadline (verification of #236, finding 6). */
   answerMs?: number
   /** Called once the REQ is written. */
@@ -1443,7 +1486,7 @@ export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?:
 
 /** `filter` may be several: one REQ, one EOSE, the union of their matches (NIP-01). */
 async function askOne(url: string, filter: Filter | Filter[], deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
-  const { answerMs, onSent, stop, onEvent, deferChecks, quietMs, capAt, shared } = opts
+  const { answerMs, onSent, stop, onEvent, deferChecks, quietMs, capAt, shared, decides } = opts
   const remaining = (): number => Math.max(0, deadline - Date.now())
   const late = (events: NostrEvent[] = []): RelayAnswer => ({ url, outcome: 'unreachable', reason: NO_ANSWER, events })
   if (stop?.aborted) return late()
@@ -1535,8 +1578,9 @@ async function askOne(url: string, filter: Filter | Filter[], deadline: number, 
             // signer the cause it is refused as AUTH_STALLED. A relay that
             // turned the AUTH down itself answers as on v2 (review of #570).
             const challenge = (relay as unknown as AuthRelay).challenge
-            // Only at a relay known to gate (relayGates): every relay challenges, and most serve reads to anyone.
-            if (events.size === 0 && challenge && relayGates(url) && authedFor.get(url) !== challenge && !authTried && !relayTurnedDown(relay as unknown as AuthRelay, url)) {
+            // Only at a relay known to gate (relayGates), or for a read whose empty answer decides something
+            // (`decides`): every relay challenges, and most serve reads to anyone.
+            if (events.size === 0 && challenge && (relayGates(url) || (decides && url !== normalizeURL(CYBERSPACE_RELAY))) && authedFor.get(url) !== challenge && !authTried && !relayTurnedDown(relay as unknown as AuthRelay, url)) {
               authTried = true
               signingIn = true
               current = false
@@ -1611,7 +1655,7 @@ async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_
   // nothing has passed yet when it lands.
   const shared = new Map<string, NostrEvent>()
   const answers = await Promise.all(urls.map((url): Promise<RelayAnswer> => asked.includes(url)
-    ? askOne(url, filter, deadline, { deferChecks: opts.deferChecks, shared: opts.deferChecks || opts.written || opts.perRelay ? undefined : shared, stop: early.signal, ...(opts.stream ? { quietMs: opts.stream.quietMs, capAt: Date.now() + opts.stream.capMs } : {}) }).then((a) => {
+    ? askOne(url, filter, deadline, { decides: !!(opts.perRelay || opts.written), deferChecks: opts.deferChecks, shared: opts.deferChecks || opts.written || opts.perRelay ? undefined : shared, stop: early.signal, ...(opts.stream ? { quietMs: opts.stream.quietMs, capAt: Date.now() + opts.stream.capMs } : {}) }).then((a) => {
       if (opts.graceMs !== undefined && a.outcome === 'answered' && pinned.includes(url)) setTimeout(() => early.abort(), opts.graceMs)
       opts.onAnswer?.(a)
       return a
@@ -1852,7 +1896,7 @@ export function queryEachSettled(
     const enough = (): boolean => answers.size === urls.length || (primaryAnswered && [...held].every((url) => answers.has(url)))
     for (const url of urls) {
       const left = (): number => Math.max(0, deadline - Date.now())
-      const ask: AskOptions = held.has(url) ? { answerMs: maxWait, onSent, stop: done.signal } : { answerMs: maxWait, onSent }
+      const ask: AskOptions = held.has(url) ? { answerMs: maxWait, onSent, stop: done.signal, decides: true } : { answerMs: maxWait, onSent, decides: true }
       // Each relay authenticates inside its own time, so one that is slow to
       // connect or whose signer is slow to answer holds nobody else.
       void Promise.race([authRelay(url), new Promise<void>((r) => setTimeout(r, left()))])
@@ -1968,7 +2012,7 @@ const liveTransport: Transport = {
 
 // While the canonical relay's sign-in has failed, a feed it closed waits for
 // the sign-in (onCanonicalSignIn, below) rather than asking again every 30 s.
-const live = new LiveRegistry(liveTransport, () => authFailed.has(normalizeURL(CYBERSPACE_RELAY)))
+const live = new LiveRegistry(liveTransport, () => signInFailed(CYBERSPACE_RELAY))
 
 // A feed the canonical relay closed for want of AUTH waits out a backoff of up
 // to 30 s. Signed in late, the socket then sat empty, the pool closed it as
@@ -2060,7 +2104,7 @@ export async function probeLiveness(): Promise<'alive' | 'dead' | 'skipped'> {
   // An AUTH the relay itself failed (a slow OK) does not stop the probe: a
   // half-open socket would then go unnoticed for the visit (review of #600).
   const canon = normalizeURL(CYBERSPACE_RELAY)
-  if (authPending(canon) || authFailed.get(canon)?.bySigner) return 'skipped'
+  if (authPending(canon) || (authFailed.get(canon)?.bySigner && relayGates(canon))) return 'skipped'
   return probeNow(PROBE_TIMEOUT_MS)
 }
 

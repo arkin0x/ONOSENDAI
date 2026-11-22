@@ -100,6 +100,18 @@ describe('a relay that gates reads', () => {
     expect(net.canon.sockets).toBe(1)
   })
 
+  it('a socket signed in on still closes once idle for SIGNED_IN_IDLE_MS, however many pings it answered meanwhile', async () => {
+    const { relay, settle } = await visit(() => {})
+    await settle(relay.queryEachAt([CANON], { kinds: [1] }, 2_000))
+    const relays = (relay.getPool() as unknown as { relays: Map<string, { connected: boolean }> }).relays
+    expect(relays.get(CANON)?.connected).toBe(true)
+    // Pings every 29 s all along: none of them is work that keeps it open.
+    await vi.advanceTimersByTimeAsync(relay.SIGNED_IN_IDLE_MS - 60_000)
+    expect(relays.get(CANON)?.connected).toBe(true)
+    await vi.advanceTimersByTimeAsync(2 * 60_000)
+    expect(relays.get(CANON)?.connected ?? false).toBe(false)
+  })
+
   it('once known to gate, a new socket is signed in as its challenge comes, and its read is not refused first', async () => {
     const { net, relay, settle } = await visit(() => {})
     await settle(relay.queryEachAt([CANON], { kinds: [1] }, 2_000))

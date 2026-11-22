@@ -80,8 +80,10 @@ function got(os: IDBObjectStore, key: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const q = os.get(key)
     q.onsuccess = () => {
-      // The biggest read in the app (the stop columns): told apart in a diagnostics capture (lib/taskStats.ts).
-      if (countingTasks()) timeRestOfTask(idbLabel(q))
+      // The biggest read in the app (the stop columns), told apart in a
+      // diagnostics capture (lib/taskStats.ts). Usually read in a worker,
+      // where nothing is counted: this counts the main-thread fallback.
+      if (countingTasks()) timeRestOfTask(`${idbLabel(q)}.snapshot`)
       resolve((q.result as { value?: unknown } | undefined)?.value)
     }
     q.onerror = () => reject(q.error)

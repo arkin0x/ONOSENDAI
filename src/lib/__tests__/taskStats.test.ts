@@ -6,7 +6,7 @@
  */
 import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it } from 'vitest'
-import { countTasks, idbLabel } from '../taskStats'
+import { countTasks, idbLabel, timeRestOfTask } from '../taskStats'
 import { openDatabase, request } from '../idb'
 import { yieldTask } from '../hopStage'
 import { taskRow } from '../diagCore'
@@ -48,6 +48,22 @@ describe('labelled tasks', () => {
     expect(got.n).toBe(6)
     expect(got.ms).toBeLessThanOrEqual(elapsed + 1)
     db.close()
+  })
+
+  it('two handlers in a row: the first window ends where the second begins, so they never both count the same time', async () => {
+    const tasks = countTasks()
+    await nextTask()
+    tasks.take()
+    const t0 = performance.now()
+    timeRestOfTask('a')
+    timeRestOfTask('b')
+    const busy = Date.now() + 20
+    while (Date.now() < busy) { /* the second handler's work */ }
+    await nextTask()
+    const elapsed = performance.now() - t0
+    const got = tasks.take()
+    expect(got.get('a')!.ms + got.get('b')!.ms).toBeLessThanOrEqual(elapsed + 1)
+    expect(got.get('a')!.ms).toBeLessThan(5)
   })
 
   it('a yield is told by what yielded', async () => {

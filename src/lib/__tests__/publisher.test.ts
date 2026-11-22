@@ -77,7 +77,7 @@ if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
 import { MARK_WINDOW_MS, flushPublishMarks, startPublisher } from '../publisher'
 import { mayMove, movementBlocked, resetVersionGateForTests, useVersionGate } from '../versionGate'
 import { CHAIN_RULES_EPOCH, versionFileOf } from '../chainRulesEpoch'
-import { useCyberspace, type PublishStatus } from '../../store/useCyberspace'
+import { adoptMayReadMarks, useCyberspace, type PublishStatus } from '../../store/useCyberspace'
 
 const PUBKEY = 'a'.repeat(64)
 const ev = (id: string): NostrEvent =>
@@ -160,14 +160,24 @@ describe('the publisher and the release gate', () => {
     }
   })
 
-  it('a kept ack is written before a fold from the relays reads the marks, and a late \'sending\' never takes an \'ok\' back', async () => {
+  it('a kept ack is written before a fold that may read the marks, never for an echo of a move in hand, and a late \'sending\' never takes an \'ok\' back', async () => {
     setChain(['a1'], { [ev('a1').id]: 'ok' })
     useCyberspace.setState({ live: true })
     await idle()
     append('b2')
     await until(() => sent.includes(ev('b2').id))
-    // Within the window: a fold from the relays writes the kept marks first.
-    useCyberspace.getState().adoptChain([])
+    // Within the window: a relay pushing back a move already in hand decides nothing with the marks, and leaves them kept.
+    const me = useCyberspace.getState().identity.pubkey
+    const echo = { ...ev('b2'), pubkey: me }
+    const s0 = { chainConflict: null, held: false, identity: { pubkey: me }, events: [...useCyberspace.getState().events, echo] }
+    expect(adoptMayReadMarks(s0, [echo])).toBe(false)
+    // Something new of this identity's, or a choice waiting, may read them: they are written first.
+    expect(adoptMayReadMarks(s0, [{ ...ev('n9'), pubkey: me }])).toBe(true)
+    expect(adoptMayReadMarks({ ...s0, chainConflict: { kind: 'branch' } }, [echo])).toBe(true)
+    // Another identity's events decide nothing here.
+    expect(adoptMayReadMarks(s0, [ev('n9')])).toBe(me === ev('n9').pubkey)
+    // A fold that may read them writes them first.
+    flushPublishMarks()
     expect(useCyberspace.getState().published[ev('b2').id]).toBe('ok')
     useCyberspace.getState().setPublishStatuses([[ev('b2').id, 'sending']])
     expect(useCyberspace.getState().published[ev('b2').id]).toBe('ok')

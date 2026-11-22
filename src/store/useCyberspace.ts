@@ -1818,6 +1818,18 @@ function heldNow(pubkey: string): boolean {
  * sent action as unsent, and no ack is dropped for an identity left.
  */
 let markFlusher: (() => void) | null = null
+
+/** Whether adoptChain may read the publish marks for `incoming`: a choice pending, or an event of this identity's not in hand (looked for from the newest end, where an echo is). */
+export function adoptMayReadMarks(s: { chainConflict: unknown; held: boolean; events: NostrEvent[]; identity: { pubkey: string } }, incoming: readonly NostrEvent[]): boolean {
+  if (s.chainConflict || s.held) return true
+  for (const e of incoming) {
+    if (e.pubkey !== s.identity.pubkey) continue
+    let found = false
+    for (let i = s.events.length - 1; i >= 0; i--) if (s.events[i].id === e.id) { found = true; break }
+    if (!found) return true
+  }
+  return false
+}
 export function setMarkFlusher(fn: (() => void) | null): void { markFlusher = fn }
 function flushPublishMarksNow(): void { markFlusher?.() }
 
@@ -6875,6 +6887,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   clearForkNotice: () => set({ forkNotice: null }),
 
   setLive: (live) => {
+    flushPublishMarksNow()
     if (live === get().live) return
     saveLive(get().identity.pubkey, live)
     if (!live) forgetOutbound(get().identity.pubkey)
@@ -7035,6 +7048,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   resolveHeldConflict: (choice) => {
+    flushPublishMarksNow()
     const { chainConflict: conflict, events: local } = get()
     if (!conflict || conflict.kind !== 'held') return
     if (choice === 'local') {
@@ -7083,6 +7097,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   resolveBranchConflict: (choice) => {
+    flushPublishMarksNow()
     const { chainConflict: conflict, events, published } = get()
     if (!conflict || conflict.kind !== 'branch') return
     const div = findDivergence(events, published, conflict.relayEvents)
@@ -7597,7 +7612,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   adoptChain: (incoming) => {
-    flushPublishMarksNow()
+    // The kept publish marks are written first when this may decide with them:
+    // something new of this identity's, or a choice waiting. A relay pushing
+    // back a move already in hand (every step's own echo) decides nothing with
+    // them, and writing them there would put the publish window back inside
+    // that relay's message.
+    if (adoptMayReadMarks(get(), incoming)) flushPublishMarksNow()
     const cur = get()
     const me = cur.identity.pubkey
     const mine = incoming.filter((e) => e.pubkey === me)

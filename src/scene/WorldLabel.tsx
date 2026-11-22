@@ -197,9 +197,12 @@ export function WorldLabel({
       // A box in the world is measured where it comes nearest the eye (its near face), so up close it never runs into its name.
       const at = clear.nearFace ? Math.max(depth - clear.trueSide / 2, depth * 0.05) : depth
       const lift = labelLiftPx(clear.trueSide, clear.minPx * mark, at, projScale, unitPx) / unitPx
-      // Its credit line hangs under the name (the caption below), so the name stands that much higher.
-      const caption = clear.nearFace && sub !== undefined ? subBottom(subScale) - 0.5 : 0
-      inner.current.position.y = lift + caption + (offsetPx[1] / px) * near
+      // Its credit line hangs under the name (the caption below), so the name
+      // stands that much higher; far off, as the credit line fades out
+      // (CREDIT_FADE, below), the name settles down over the box with it.
+      const credit = recede === 'name' || recede === 'credit' ? fadeShare(depth, reach, CREDIT_FADE[0], CREDIT_FADE[1]) : 1
+      const creditLift = clear.nearFace && sub !== undefined ? (subBottom(subScale) - 0.5) * credit : 0
+      inner.current.position.y = lift + creditLift + (offsetPx[1] / px) * near
     } else if (inner.current && recede) {
       // Every frame while it recedes: back at full size the prop is never
       // re-applied (R3F skips equal array props), so a jump from far to near

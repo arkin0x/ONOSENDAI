@@ -27,7 +27,8 @@ vi.mock('../../lib/relay', () => ({ publishMany: vi.fn(async () => ({ ok: true }
 // Words are troika's, which fetches a font: a plain group stands in, so the label's own frame still runs.
 vi.mock('@react-three/drei', async () => {
   const { createElement: h, forwardRef } = await import('react')
-  return { Text: forwardRef((_props, ref) => h('group', { name: 'text', ref })) }
+  // Its place is kept, so a credit line sits under its name as drawn.
+  return { Text: forwardRef((props: { position?: unknown }, ref) => h('group', { name: 'text', ref, position: props.position })) }
 })
 // The mint is never asked: a coin here is one not yet spent.
 vi.mock('../../hud/useCashu', () => ({ useCashu: () => ({ state: 'unspent' }) }))

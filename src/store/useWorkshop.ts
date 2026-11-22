@@ -750,6 +750,12 @@ export interface WorkshopState {
   /** Up one level, to the shard that placed this one. A copy nobody edited goes. */
   back: () => void
   /**
+   * A shard about to be used somewhere outside the workshop's own refs (put in
+   * a chest draft): a look copy among them is stored now, so what holds its id
+   * never names a shard that is in no stored list. Anything else: nothing.
+   */
+  keepCopy: (id: string) => void
+  /**
    * TAKE (MOVE INTO WORKSHOP, COPY) of a shard read from a bag or a chest: the
    * shard into your workshop with what it carries keyed under you
    * (lib/carried.ts takeIntoKeeping), and each SEALED PIECE of a split build
@@ -856,6 +862,28 @@ export function untouchedLookCopy(s: ShardModel): boolean {
   const mark = (s as ShardModel & { lookCopy?: string }).lookCopy
   // Published meanwhile, it went public: stored like any shard (as settle counts it).
   return typeof mark === 'string' && mark === bornOf(s) && !loadLedger()[s.id]
+}
+
+type Marked = ShardModel & { lookCopy?: string }
+
+/** The shard without its look-copy mark: stored like any shard of yours from now on. */
+function unmarked(s: ShardModel): ShardModel {
+  if ((s as Marked).lookCopy === undefined) return s
+  const { lookCopy: _mark, ...plain } = s as Marked
+  void _mark
+  return plain
+}
+
+/**
+ * The list with every look copy that `used` places un-marked: a copy only
+ * looked at that is placed inside another shard (a stamp, a paste, any edit
+ * that writes a ref to it) is stored at that moment, so the ref never names
+ * a shard that is in no stored list. `me` is the pubkey the refs name it under.
+ */
+export function keepPlacedCopies(list: ShardModel[], used: ShardModel, me: string | null): ShardModel[] {
+  if (!me || !used.refs?.length || !list.some((s) => (s as Marked).lookCopy !== undefined)) return list
+  const named = new Set(used.refs.flatMap((r) => (r[0] === 'a' && r[1].startsWith(`33331:${me}:`) ? [r[1].slice(`33331:${me}:`.length)] : [])))
+  return list.some((s) => named.has(s.id) && (s as Marked).lookCopy !== undefined) ? list.map((s) => (named.has(s.id) ? unmarked(s) : s)) : list
 }
 
 /** The list as it is stored: without copies only looked at. */
@@ -1049,8 +1077,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     if (i < 0) return false
     const next = fn(shards[i])
     if (!next) return false
-    const list = shards.slice()
+    let list = shards.slice()
     list[i] = { ...next, updatedAt: Date.now() }
+    // A look copy this edit places is stored now (keepPlacedCopies).
+    list = keepPlacedCopies(list, list[i], you())
     const partSel = get().partSel.filter((k) => k < (next.parts?.length ?? 0))
     // A copy opened in place of a link or a table entry: its first edit points
     // its parent at it, one edit of the parent that the parent's UNDO takes back.
@@ -1101,11 +1131,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     list[j] = next
     // The copy is the parent's now: stored like any shard of yours.
     const c = list.findIndex((s) => s.id === p.copyId)
-    if (c >= 0 && (list[c] as ShardModel & { lookCopy?: string }).lookCopy !== undefined) {
-      const { lookCopy: _mark, ...plain } = list[c] as ShardModel & { lookCopy?: string }
-      void _mark
-      list[c] = plain
-    }
+    if (c >= 0) list[c] = unmarked(list[c])
     return { ...frame, past: [...frame.past.slice(-(HISTORY - 1)), parent], future: [], pending: { ...p, done: true } }
   }
 
@@ -1125,6 +1151,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     if (k < 0) return frame
     const touched = bornOf(list[k]) !== p.born || !!loadLedger()[p.copyId]
     if (touched) return pointParent(list, frame) ?? frame
+    // Unchanged but in use elsewhere (placed, or put in a chest): it stays, stored, and the parent keeps its link.
+    if ((list[k] as Marked).lookCopy === undefined) return frame
     if (p.copyId !== keep && list.some((s) => s.id === frame.id)) list.splice(k, 1)
     return frame
   }
@@ -1477,7 +1505,13 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     setStampMode: (stampMode) => set({ stampMode }),
-    setStampObject: (stampObject) => set({ stampObject, stampMode: 'object' }),
+    setStampObject: (stampObject) => {
+      // A look copy picked to stamp is stored now: whatever it is stamped into names a shard that stays.
+      const me = you()
+      const ref = stampObject?.ref
+      if (me && ref && ref[0] === 'a' && ref[1].startsWith(`33331:${me}:`)) get().keepCopy(ref[1].slice(`33331:${me}:`.length))
+      set({ stampObject, stampMode: 'object' })
+    },
 
     placeObject: (at, self) => {
       const { stampObject, stampFacing } = get()
@@ -2317,6 +2351,16 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const id = get().importShard(markCameSealed(takeIntoKeeping(parent, me)))
       if (missing > 0) useToast.getState().show({ label: 'PART OF IT STAYED BEHIND', meta: `${missing === 1 ? 'One part' : `${missing} parts`} of this shard could not be opened here, so your copy shows ${missing === 1 ? 'a placeholder' : 'placeholders'} there.`, mark: 'build' })
       return { id, pieces: pieces.length, missing }
+    },
+
+    keepCopy: (id) => {
+      const list = get().shards
+      const i = list.findIndex((s) => s.id === id)
+      if (i < 0 || (list[i] as Marked).lookCopy === undefined) return
+      const next = list.slice()
+      next[i] = unmarked(list[i])
+      set({ shards: next })
+      save(next)
     },
 
     back: () => {

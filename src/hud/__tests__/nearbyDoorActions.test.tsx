@@ -4,7 +4,7 @@
  * CLOSE button here as well for convenience"), the door card's own buttons
  * (ItemRows ChestBlock), pressed for real. With nothing held to open it, OPEN
  * is there and disabled, what it requires as its title. A chest row is as it
- * was. The relay is a mock that answers by `d`. No network.
+ * was. Every row has INFO before VIEW, its card (nearbyInfo.test.tsx). The relay is a mock that answers by `d`. No network.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -119,7 +119,7 @@ beforeEach(() => {
 describe('a door row in DISCOVERED NEARBY', () => {
   it('without the key: OPEN beside VIEW, disabled, what it requires as its title', async () => {
     const r = await row(await found({ door: true, held: false }))
-    expect(actions(r)).toEqual(['OPEN', 'VIEW'])
+    expect(actions(r)).toEqual(['OPEN', 'INFO', 'VIEW'])
     const open = button(r, /^OPEN$/)
     expect(open.props.disabled).toBe(true)
     expect(open.props.title).toBe('Requires the Silver Key')
@@ -132,20 +132,20 @@ describe('a door row in DISCOVERED NEARBY', () => {
   it('with the key: OPEN beside VIEW opens it, then CLOSE there shuts it, then OPEN again needs no key', async () => {
     const d = await found({ door: true, held: true })
     const r = await row(d)
-    expect(actions(r)).toEqual(['OPEN', 'VIEW'])
+    expect(actions(r)).toEqual(['OPEN', 'INFO', 'VIEW'])
     expect(button(r, /^OPEN$/).props.disabled).toBeFalsy()
     await r.press(/^OPEN$/)
-    await vi.waitFor(() => expect(actions(r)).toEqual(['CLOSE', 'VIEW']))
+    await vi.waitFor(() => expect(actions(r)).toEqual(['CLOSE', 'INFO', 'VIEW']))
     expect(r.says('OPEN · hidden by')).toBe(true)
     await r.press(/^CLOSE$/)
-    await vi.waitFor(() => expect(actions(r)).toEqual(['OPEN', 'VIEW']))
+    await vi.waitFor(() => expect(actions(r)).toEqual(['OPEN', 'INFO', 'VIEW']))
     expect(r.says('CLOSED · hidden by')).toBe(true)
     // Closed with CLOSE: its secret is kept, so OPEN works with the key gone.
     useInventory.setState({ items: {} })
     await vi.waitFor(() => expect(button(r, /^OPEN$/).props.disabled).toBeFalsy())
     expect(button(r, /^OPEN$/).props.title).toBe('Open it again here. Its secret is kept on this device.')
     await r.press(/^OPEN$/)
-    await vi.waitFor(() => expect(actions(r)).toEqual(['CLOSE', 'VIEW']))
+    await vi.waitFor(() => expect(actions(r)).toEqual(['CLOSE', 'INFO', 'VIEW']))
     await r.unmount()
   })
 
@@ -153,7 +153,7 @@ describe('a door row in DISCOVERED NEARBY', () => {
     const d = await found({ door: true, held: true })
     const r = await row(d)
     await r.press(/^OPEN$/)
-    await vi.waitFor(() => expect(actions(r)).toEqual(['CLOSE', 'VIEW']))
+    await vi.waitFor(() => expect(actions(r)).toEqual(['CLOSE', 'INFO', 'VIEW']))
     await r.press(/^CLOSE$/)
     await vi.waitFor(() => expect(r.says('CLOSED · hidden by')).toBe(true))
     await r.unmount()
@@ -161,7 +161,7 @@ describe('a door row in DISCOVERED NEARBY', () => {
     resetDoorSecrets()
     useInventory.setState({ items: {} })
     const again = await row(d)
-    expect(actions(again)).toEqual(['OPEN', 'VIEW'])
+    expect(actions(again)).toEqual(['OPEN', 'INFO', 'VIEW'])
     expect(button(again, /^OPEN$/).props.disabled).toBe(true)
     expect(button(again, /^OPEN$/).props.title).toBe('Requires the Silver Key')
     await again.unmount()
@@ -169,14 +169,14 @@ describe('a door row in DISCOVERED NEARBY', () => {
 })
 
 describe('a chest row in DISCOVERED NEARBY', () => {
-  it('has OPEN beside VIEW, VIEW on the right, when something held opens it, and VIEW alone when nothing does (tutorial feedback 2026-11-12, item 2)', async () => {
+  it('has OPEN beside INFO and VIEW, VIEW on the right, when something held opens it, and INFO and VIEW when nothing does (tutorial feedback 2026-11-12, item 2; INFO 2026-11-22)', async () => {
     const held = await row(await found({ door: false, held: true }))
-    expect(actions(held)).toEqual(['OPEN', 'VIEW'])
+    expect(actions(held)).toEqual(['OPEN', 'INFO', 'VIEW'])
     expect(held.buttons(/^OPEN$/)).toHaveLength(1)
     await held.unmount()
     useInventory.setState({ items: {} })
     const none = await row(await found({ door: false, held: false }))
-    expect(actions(none)).toEqual(['VIEW'])
+    expect(actions(none)).toEqual(['INFO', 'VIEW'])
     expect(none.buttons(/^OPEN$/)).toHaveLength(0)
     await none.unmount()
   })

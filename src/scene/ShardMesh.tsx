@@ -53,6 +53,7 @@ import { animOf, type Motion } from '../lib/anim'
 import { AnimClock, AnimGroups, clipWalls } from './animMotion'
 import { benchFaintDots, drawPlan, haloFade, pointLookOf } from '../lib/pointLook'
 import { GlowHalos, GlowTrust, PointCores, useGlowAllowed } from './PointBillboards'
+import { PickVolume, SoftOutline, pickRadius, softPicked } from './softPick'
 
 export { FACE_TAG_STENCIL } from './shardFaces'
 
@@ -569,6 +570,15 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
   }, [wantsBillboards, given.vertices, given.facecolors, clip, pose])
   useEffect(() => () => { ownPoints?.dispose() }, [ownPoints])
   const pointsPlain = ownPoints ?? plain
+  // Nothing solid to tap, only points, fog or glow (scene/softPick.tsx): in
+  // the world, a pick volume that is raycast and never drawn; while placing,
+  // its outline over everything. The outline reads the glow whatever the
+  // Settings switch says, so a glow being placed is always outlined.
+  const softTaps = world && !ghost && softPicked(plan, cull)
+  const outlinePlan = edges ? drawPlan(given.mode, look, { cull }) : null
+  const softSeen = outlinePlan !== null && softPicked(outlinePlan, cull)
+  const pickPoints = ownPoints ? (ownPoints.getAttribute('position').array as ArrayLike<number>) : positions
+  const softRadius = softSeen && outlinePlan ? pickRadius(outlinePlan, look) : softTaps ? pickRadius(plan, look) : 0
 
   // Made with the buffer at its final positions: a birth's scramble writes them only from the next frame (settleBounds).
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -816,8 +826,11 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
           units, carried by the model's own scale, so the canvas's dot scale (scene/dotScale.ts, LOOK) never applies. */}
       {/* Nothing of its own drawn (opacity 0, or POINTS at point size 0): an invisible copy still answers taps and picks, and is never drawn, so it hides and occludes nothing. */}
       {!cull && (look.hidden || plan.points === 'none') && (given.mode === 'solid' && index.length > 0 && look.hidden
-        ? <mesh name="shard-hit" visible={false} geometry={indexed} material={HIT_MATERIAL} frustumCulled={false} {...pick} />
-        : !faintMaterial && <points name="shard-hit" visible={false} geometry={plain} material={pointMaterial} frustumCulled={false} />)}
+        ? <mesh name="shard-hit" visible={false} geometry={indexed} material={HIT_MATERIAL} frustumCulled={false} {...pick} userData={{ ...pick.userData, softPick: true }} />
+        : !faintMaterial && <points name="shard-hit" visible={false} geometry={plain} material={pointMaterial} frustumCulled={false} userData={{ softPick: true }} />)}
+      {/* Invisible, so soft: it takes a tap only when nothing solid is hit nearer (softPick.tsx). */}
+      {softTaps && <PickVolume points={pickPoints} radius={softRadius} />}
+      {softSeen && <SoftOutline points={pickPoints} radius={softRadius} dim={dim} />}
       {faintMaterial && <points name="shard-faint" geometry={plain} material={faintMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} />}
       {plan.points === 'billboard' && look.pointSize !== undefined && (
         <PointCores plain={pointsPlain} size={look.pointSize} opacity={opacity} glow={SHARD_POINTS.glow} headlamp={headlamp && !lit} clipPlanes={clipPlanes} walls={clip} noBloom={noBloom} />

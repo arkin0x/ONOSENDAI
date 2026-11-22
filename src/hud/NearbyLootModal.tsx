@@ -12,6 +12,13 @@
  * row names its DNA, how far it has grown and who planted it; its name opens
  * its card (BloomCard) and its VIEW frames the bloom at the seed's scale
  * (arkinox, 2026-11-13: "we need to add seeds to this modal").
+ * Every row has INFO beside VIEW, the owner's word for an item's card
+ * (KeyItemInfo, 2026-11-16): it opens the same card a tap on the thing in
+ * the world opens (SecretModal), so a thing that cannot be tapped there, a
+ * shard that is only fog, glow or points, still has its card, its reactions,
+ * its comments and its owner's actions (arkinox, 2026-11-22: "I can't tap on
+ * a shard when it's only fog. I should be able to trigger its modal from the
+ * Nearby modal"). A key row's INFO is its key card, as before.
  * Tabs sort the list by kind, ITEMS first (lib/nearbyTabs.ts); every opening
  * starts on the first tab, left to right, with anything in it (arkinox,
  * 2026-11-01), and RETURN from a VIEW comes back to the tab it left.
@@ -42,6 +49,18 @@ import { useBlooms, wantSeeds } from '../store/useBlooms'
 import { seedOfEvent, viewScaleOf, type SeedItem } from '../lib/seeds/seedItem'
 import { bloomGrowthWords } from '../lib/seeds/bloomWords'
 import { ModalClose } from './ui/ModalClose'
+import { INFO } from './KeyItemInfo'
+
+/** INFO on a row: the list gives way to the thing's own card, the one a tap on it in the world opens (SecretModal). */
+export function openCard(item: Pick<NearbyItem, 'key'>): void {
+  useShards.getState().setNearbyOpen(false)
+  useShards.getState().selectSecret(item.key)
+}
+
+/** A row's INFO, beside VIEW and the same size: the thing's card (openCard). */
+function CardButton({ item }: { item: NearbyItem }): JSX.Element {
+  return <button className="chest__act nearby__info" onClick={() => openCard(item)} title="Who left it, reactions and comments">{INFO}</button>
+}
 
 /** Where a nearby item was found, for what is taken out of a chest here. */
 function placeOf(item: NearbyItem): HeldPlace {
@@ -124,7 +143,7 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
       </div>
       <span className="nearby__acts">
         {(chest || key) && <span className="nearby__door" ref={setActs} />}
-        {info && <KeyInfo info={info} />}
+        {info ? <KeyInfo info={info} /> : <CardButton item={item} />}
         <button className="avatars__go nearby__view" onClick={() => onView(item)} title="Fly to it">VIEW<GoArrow /></button>
       </span>
       {chest && <div className="nearby__contents" ref={setContents} />}
@@ -145,10 +164,7 @@ export function SeedRow({ item, me, onView }: { item: NearbyItem; me: string; on
   const planter = seed?.planter ?? item.author ?? ''
   const profile = useProfile(planter || null)
   const name = planter === me ? 'you' : profileLabel(profile, safeNpub(planter))
-  const card = (): void => {
-    useShards.getState().setNearbyOpen(false)
-    useShards.getState().selectSecret(item.key)
-  }
+  const card = (): void => openCard(item)
   return (
     <li className="secrets__row nearby__row">
       <ItemThumb type="seed" shard={view?.shard} />
@@ -163,6 +179,7 @@ export function SeedRow({ item, me, onView }: { item: NearbyItem; me: string; on
         </span>
       </button>
       <span className="nearby__acts">
+        <CardButton item={item} />
         <button className="avatars__go nearby__view" onClick={() => onView(item)} title="Fly to it">VIEW<GoArrow /></button>
       </span>
     </li>

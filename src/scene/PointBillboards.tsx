@@ -64,6 +64,22 @@ export function GlowWorldCanvas({ children }: { children: ReactNode }): JSX.Elem
 }
 
 /**
+ * The placing ghost's halos (ShardGhost): yours, so trusted for the budget,
+ * and with `always`, drawn whatever the Settings switch says. A shard that is
+ * only fog or glow is nothing but its halos, so with the switch off its ghost
+ * would show nothing of itself (arkinox, 2026-11-22: "the fog shard is
+ * invisible while I'm trying to place it in BUILD").
+ */
+export function GhostGlow({ always, children }: { always: boolean; children: ReactNode }): JSX.Element {
+  const gated = useContext(GlowGate)
+  return (
+    <GlowGate.Provider value={gated && !always}>
+      <GlowTrust.Provider value={true}>{children}</GlowTrust.Provider>
+    </GlowGate.Provider>
+  )
+}
+
+/**
  * Whether halos keep the world bloom's face tag (glowHalos haloBlend): in the
  * world's canvas, whatever the shard (the placing ghost, an item's model), and
  * wherever a shard is drawn as the world draws it under a world bloom (the

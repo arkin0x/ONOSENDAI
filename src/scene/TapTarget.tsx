@@ -43,6 +43,12 @@
  * through glass. Asked at each tap (BuildOccluders tapsPassThrough), so the
  * target never holds a state of its own that could outlive the dim.
  *
+ * A shard with no solid surface, only fog, glow or points, is hit on its
+ * pick volume (scene/softPick.tsx), and a hit there is soft: it takes the tap
+ * only when no other target under the same tap would take it with a solid
+ * hit nearer (softYields), so a solid shard in front of a fog, or standing
+ * in it, still wins, and nothing invisible ever blocks what is seen.
+ *
  * farCullDoublings below is the guaranteed form of the same idea for shards
  * zoomed far out: past that many doublings no shard of its own geometry can
  * show MIN_VISIBLE_PX at any camera distance, so it is not drawn at all.
@@ -50,11 +56,12 @@
 
 import { useLayoutEffect, useMemo, useRef, type RefObject } from 'react'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
-import { BackSide, Box3, FrontSide, Mesh, PerspectiveCamera, Raycaster, Vector3, type Camera, type Intersection, type Material, type Object3D } from 'three'
+import { BackSide, Box3, FrontSide, Mesh, PerspectiveCamera, Raycaster, Vector3, type Camera, type Intersection, type Material, type Object3D, type Ray } from 'three'
 import { MAX_EXTENT } from 'sno-core/shards'
 import { CAMERA_NEAR, FOV } from './camera'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import { tapsPassThrough } from './BuildOccluders'
+import { hitDepth, isSoftHit } from './softPick'
 
 /** Below this many pixels across, an object is a speck and takes no taps. */
 export const MIN_VISIBLE_PX = 4
@@ -188,6 +195,35 @@ interface Props {
 export function yieldsTap(intersections: ReadonlyArray<{ object: unknown }>, self: unknown): boolean {
   return intersections.some((i) => i.object !== self)
 }
+
+/** What a target would take a tap at: how far along the ray (for a soft hit, how deep the fog's body lies there), and whether only on something soft (a pick volume, softPick.tsx). */
+export interface TapClaim {
+  distance: number
+  soft: boolean
+}
+
+/** How a target judges a ray it was hit by, `boxDistance` being where the ray met its box: its claim, or null when it would let the tap through. Kept on the target mesh's userData as `tapJudge`. */
+export type TapJudge = (ray: Ray, boxDistance: number) => TapClaim | null
+
+/**
+ * Whether a soft claim at `distance` gives way: another target under the same
+ * tap (`intersections`, R3F's, nearest first) would take it with a solid hit
+ * nearer. R3F calls the handlers nearest box first, so the one that gives way
+ * leaves the event travelling, and that target, further along, takes it.
+ */
+export function softYields(intersections: ReadonlyArray<{ object: Object3D; distance: number }>, self: unknown, ray: Ray, distance: number): boolean {
+  for (const i of intersections) {
+    if (i.object === self) continue
+    const judge = i.object.userData?.tapJudge as TapJudge | undefined
+    if (!judge) continue
+    const other = judge(ray, i.distance)
+    if (other && !other.soft && other.distance < distance) return true
+  }
+  return false
+}
+
+/** A yielding target's claim to another target: none. */
+function noClaim(): null { return null }
 
 /** The view a target is placed for: R3F's store, as `get()` hands it over. */
 export interface TapView {
@@ -346,28 +382,49 @@ export function TapTarget({ onTap, measure, px, at, yields = false, occluder, up
   const measured = useRef<TapMeasure>({ across: 0, perPxWorld: 0 })
   const raycast = useMemo(() => tapRaycast(get as () => TapView, spec, measured.current), [get])
 
+  /**
+   * Where along `ray` this target would take a tap, as last placed for it,
+   * and whether only on something soft; null when it lets the tap through.
+   * A large shard is hit only where it draws, so the air inside its box lets
+   * the tap through to whatever is behind; a small one is hit on its box,
+   * soft only when what the ray meets inside it first is soft.
+   */
+  const judge = (ray: Ray, boxDistance: number): TapClaim | null => {
+    if (yields || !measure) return { distance: boxDistance, soft: false }
+    const drawn = measure.current
+    if (!drawn) return { distance: boxDistance, soft: false }
+    const { around, inner } = measured.current
+    const exact = around || measured.current.across > PRECISE_ABOVE_PX
+    const r = precise.current
+    r.set(around && inner ? inner : ray.origin, ray.direction)
+    const slop = PRECISE_SLOP_PX * measured.current.perPxWorld
+    r.params.Points = { threshold: slop }
+    r.params.Line = { threshold: slop }
+    const hits = r.intersectObject(drawn, true)
+    if (hits.length === 0) return exact ? null : { distance: boxDistance, soft: false }
+    const first = hits[0]
+    if (!exact && !isSoftHit(first.object)) return { distance: boxDistance, soft: false }
+    // From `inner` (a chest stood in), the hit's distance is from there: measured again from the eye.
+    const shift = around && inner ? inner.distanceTo(ray.origin) : 0
+    return isSoftHit(first.object) ? { distance: hitDepth(first) + shift, soft: true } : { distance: first.distance + shift, soft: false }
+  }
+  // What another target under the same tap reads (softYields). One that yields never takes a tap from another, so it claims nothing there.
+  useLayoutEffect(() => {
+    if (hit.current) hit.current.userData.tapJudge = yields ? noClaim : judge
+  })
+
   const tap = (e: ThreeEvent<MouseEvent>): void => {
     if (e.delta > TAP_SLOP_PX) return
     // Not stopping propagation is how R3F lets the tap travel on to the
     // next thing the ray hit, nearer or farther.
     if (yields && yieldsTap(e.intersections, hit.current)) return
-    if (measure) {
-      // A coin or message under the same tap takes it: leave the event to
-      // travel on to it (not stopping propagation is how R3F does that).
-      if (e.intersections.some((i) => i.object.userData?.tapPriority === 'mark')) return
-      // A large shard is hit only where it draws, so the air inside its box
-      // lets the tap through to whatever is behind.
-      const drawn = measure.current
-      const { around, inner } = measured.current
-      if (drawn && (around || measured.current.across > PRECISE_ABOVE_PX)) {
-        const ray = precise.current
-        ray.set(around && inner ? inner : e.ray.origin, e.ray.direction)
-        const slop = PRECISE_SLOP_PX * measured.current.perPxWorld
-        ray.params.Points = { threshold: slop }
-        ray.params.Line = { threshold: slop }
-        if (ray.intersectObject(drawn, true).length === 0) return
-      }
-    }
+    // A coin or message under the same tap takes it: leave the event to
+    // travel on to it (not stopping propagation is how R3F does that).
+    if (measure && e.intersections.some((i) => i.object.userData?.tapPriority === 'mark')) return
+    const claim = judge(e.ray, e.distance)
+    if (!claim) return
+    // Fog, glow or points: a solid thing hit nearer under the same tap takes it.
+    if (claim.soft && softYields(e.intersections, hit.current, e.ray, claim.distance)) return
     e.stopPropagation()
     markSceneTapHandled()
     onTap()

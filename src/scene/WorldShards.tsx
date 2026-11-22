@@ -236,21 +236,89 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
 
   // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => Math.max(REACH, s.reach))
+  // Kept as far as the reach went lately (keptReach): a shard past the reach
+  // now is hidden, not taken down, so coming back into reach shows it again
+  // with nothing built.
+  const keep = useKeptReach(reach)
   const fresh = useMemo(() => {
-    return drawableShards(useShards.getState().drawnItems(), anchor, anchorPlane, scaleExp, axes, reach)
+    return drawableShards(useShards.getState().drawnItems(), anchor, anchorPlane, scaleExp, axes, keep)
     // mine and discovered are what worldShards reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted, reach])
+  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted, keep])
+  // Past the reach, only what is mounted already stays: nothing new is built
+  // where it cannot be seen (review: new shards out to the kept reach would
+  // be built hidden, and the edge where shards are built and taken down
+  // would only move outwards).
+  const mounted = useRef<ReadonlySet<string>>(new Set())
   // A move keeps each shard's cut and GPU buffers: only its place changes (steadied).
-  const placed = useSteadied(fresh)
+  const placed = useSteadied(useMemo(() => keptWithin(fresh, reach, KEEP_HIDDEN_MAX, mounted.current), [fresh, reach]))
+  useEffect(() => { mounted.current = new Set(placed.map((w) => w.key)) }, [placed])
 
   if (placed.length === 0) return null
 
   return (
     <>
-      {placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} moving={w.key === moving} occludes />)}
+      {placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} moving={w.key === moving} occludes hidden={Math.hypot(...w.centre) > reach} />)}
     </>
   )
+}
+
+/**
+ * How long a reach the draw went out to is kept for: shards out to it stay
+ * mounted, hidden, while the reach is smaller.
+ *
+ * The reach follows the camera (Scene.tsx SceneFog): out in an orbit, in at
+ * the eye in WALK. Going into WALK took every shard past WALK's reach down,
+ * and coming out built them all again; on the owner's phone that was the
+ * scene going from 2,477 objects to 959 and back, megabytes of buffers sent
+ * to the GPU again and long frames each time (diag of 2026-11-22). Walking,
+ * a shard at the edge of the reach was taken down and built again at every
+ * crossing of it.
+ */
+export const KEEP_MS = 300_000
+/** The most shards kept hidden past the reach, nearest first: the GPU memory they hold is bounded. */
+export const KEEP_HIDDEN_MAX = 400
+
+/**
+ * The reach to keep shards mounted to: the largest one this went out to, held
+ * for KEEP_MS from the moment the reach first fell below it (`since`), never
+ * less than `reach`. From the fall, not from the last render: the scene does
+ * not render while you sit still, and five idle minutes in an orbit would
+ * otherwise let it go at WALK's first render.
+ */
+export interface KeptReach { reach: number; since: number | null }
+export function keptReach(was: KeptReach | null, reach: number, now: number): KeptReach {
+  if (!was || reach >= was.reach) return { reach, since: null }
+  if (was.since === null) return { reach: was.reach, since: now }
+  return now - was.since > KEEP_MS ? { reach, since: null } : was
+}
+
+function useKeptReach(reach: number): number {
+  const kept = useRef<KeptReach | null>(null)
+  kept.current = keptReach(kept.current, reach, Date.now())
+  return kept.current.reach
+}
+
+/**
+ * Every shard within `reach`, and up to `max` more past it, nearest first,
+ * of those already mounted (`mounted`, by key). A shard past the reach keeps
+ * its place in the scene's budget (meshBudget, nearest first): it is further
+ * than every shard on show, so it is served after them.
+ */
+export function keptWithin(placed: PlacedShardDraw[], reach: number, max: number, mounted: ReadonlySet<string>): PlacedShardDraw[] {
+  const near: PlacedShardDraw[] = []
+  const far: Array<{ w: PlacedShardDraw; d: number }> = []
+  for (const w of placed) {
+    const d = Math.hypot(...w.centre)
+    if (d <= reach) near.push(w)
+    else if (mounted.has(w.key)) far.push({ w, d })
+  }
+  if (far.length === 0 && near.length === placed.length) return placed
+  if (far.length === 0) return near
+  if (far.length > max) far.sort((a, b) => a.d - b.d).length = max
+  const keep = new Set<PlacedShardDraw>(near)
+  for (const f of far) keep.add(f.w)
+  return placed.filter((w) => keep.has(w))
 }
 
 /**
@@ -262,7 +330,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
  * (BuildOccluders), except the one EDIT is moving, and take no taps while
  * dimmed, so a tap reaches what is behind them.
  */
-export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef, occludes = false }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void; occludes?: boolean }): JSX.Element {
+export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef, occludes = false, hidden = false }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void; occludes?: boolean; hidden?: boolean }): JSX.Element {
   // A landing moves the anchor, and with it every shard's centre: only this
   // group's position follows it. What the shard draws keeps its props, so
   // React skips it (PlacedShardBody), as it skips its GPU buffers (steadied).
@@ -271,8 +339,9 @@ export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRe
   const told = useRef(w.centre)
   told.current = budgetCentre(told.current, w.centre, w.shard)
   return (
-    <group position={w.centre}>
-      <PlacedShardBody shardKey={w.key} shard={w.shard} trusted={trustedPlacement(w.container, w.author)} scale={w.scale} clip={w.clip} pose={w.pose} centre={told.current} birth={birth} moving={moving} tappable={tappable && !passesTaps(w.key)} drawnRef={drawnRef} occludes={occludes} />
+    // Hidden: past the reach, kept mounted (WorldShards keptReach) and drawn nowhere, taking no taps.
+    <group position={w.centre} visible={!hidden}>
+      <PlacedShardBody shardKey={w.key} shard={w.shard} trusted={trustedPlacement(w.container, w.author)} scale={w.scale} clip={w.clip} pose={w.pose} centre={told.current} birth={birth} moving={moving} tappable={tappable && !hidden && !passesTaps(w.key)} drawnRef={drawnRef} occludes={occludes && !hidden} />
     </group>
   )
 }

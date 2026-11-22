@@ -47,7 +47,8 @@ import { OVERLAY_ORDER } from '../scene/shardFaces'
 import { ShardLights } from '../scene/shardLight'
 import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { partMatrix } from 'sno-core/parts'
-import { OwnPartsContext, useResolved } from '../lib/parts'
+import { OwnPartsContext, fetchRef, useResolved } from '../lib/parts'
+import { PartBadges } from './PartBadges'
 import { BASE_FAR, BASE_NEAR, MIN_DISTANCE, clipPlanes, fitDistance, nextMaxDistance, reachFor, reachRadius, shardSphere, type Sphere } from './benchReach'
 import { useCyberspace } from '../store/useCyberspace'
 import { Hold, multiPress, noteGesture, noteMultiTouch, slopFor, tapSlop } from './deadZone'
@@ -1155,6 +1156,9 @@ function AxesReporter(): null {
   return null
 }
 
+/** How soon a second tap on a placed object must follow the first to open it, ms. */
+export const DOUBLE_TAP_MS = 400
+
 /**
  * Memoized: Bench takes no props, so its only legitimate reason to redraw is
  * its own store reads (useWorkshop, useBenchView, useThree). Workshop.tsx is
@@ -1189,18 +1193,28 @@ function BenchImpl(): JSX.Element {
 
   // A tap on a drawn face in FACE mode selects it. Corners still win: their hit
   // spheres stand proud of the face, so the raycast meets them first.
-  // A placed object is one whole thing (DECK-0003 §1.10). In SELECT and in
-  // VIEW a tap puts it in or out of the selection, so the pad can move, turn
-  // and delete a stamped object with the tool put down (arkinox, 2026-10-10);
-  // in FACE it is caught here, so a tap on it never selects a face of this
-  // object hidden behind it. In the placing tools it lets the tap through, to
-  // the grid it stands on.
+  // A placed object is one whole thing (DECK-0003 §1.10). In SELECT with
+  // OBJECTS a tap puts it in or out of the selection, so the pad can move,
+  // turn and delete it; in PAINT and FACE it is caught here, so a tap on it
+  // never paints or selects a face hidden behind it; in VIEW it is only caught.
+  // In the placing tools it lets the tap through, to the grid it stands on.
+  // A second tap on the same placed object, soon after the first, opens it to
+  // edit in place (useWorkshop enterPart); BACK goes up again (owner, 2026-11-22).
+  const lastTap = useRef<{ part: number; at: number; shard: string | null; sel: number[] } | null>(null)
   const onPart = (e: ThreeEvent<MouseEvent>, part: number): void => {
     if (e.delta > tapSlop() || multiPress()) return
     e.stopPropagation()
     const w = useWorkshop.getState()
-    // OBJECTS in SELECT takes it (workshop redesign, phase 3). In PAINT and
-    // FACE the tap stops here, so it never paints or picks through it.
+    const now = performance.now()
+    const prev = lastTap.current
+    if (prev && prev.part === part && prev.shard === w.currentId && now - prev.at < DOUBLE_TAP_MS) {
+      lastTap.current = null
+      // The selection as it was before the first tap: the double-tap opens, it does not select.
+      if (w.tool === 'select' && w.selectKind === 'objects') w.setPartSelection(prev.sel)
+      void w.enterPart(part, fetchRef)
+      return
+    }
+    lastTap.current = { part, at: now, shard: w.currentId, sel: [...w.partSel] }
     if (w.tool === 'select' && w.selectKind === 'objects') w.togglePart(part)
   }
 
@@ -1264,6 +1278,8 @@ function BenchImpl(): JSX.Element {
       {/* While the AVATAR sheet is open, turned as FACING would turn it on a move up and to the right (FacingPreview). */}
       <FacingPreviewGroup><AnimClock.Provider value={benchClock}><BenchShard onFace={onFace} onPart={onPart} /></AnimClock.Provider></FacingPreviewGroup>
       <FacingArrow />
+      {/* LINK or COPY, in a corner of every placed object (lib/partForm.ts). */}
+      {!facingShown && <PartBadges />}
       {look && <BenchLookRig />}
       {look && <BenchBloom />}
       <PathMarks show={previewing} />

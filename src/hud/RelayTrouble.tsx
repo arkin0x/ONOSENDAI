@@ -4,17 +4,17 @@
  * that signs in again and reads again. Whatever the list already had stays
  * on screen under it.
  *
- * BackupTrouble: the same for the pinned backup relay (useRelays
- * SECOND_RELAY) while the 2026-11-05 switch settles. Its reads need a
- * sign-in, so a signer that refused or never answered left it reading
- * nothing, unseen (review of #606). One short line under the list's own,
- * only while that sign-in stands failed.
+ * BackupTrouble: the same for the old relay, read only while it is retired
+ * (useRelays READ_FALLBACK_RELAY). Its reads need a sign-in, so a signer
+ * that refused or never answered left it reading nothing, unseen (review of
+ * #606). One short line under the list's own, only while that sign-in
+ * stands failed.
  */
 
 import { useSyncExternalStore } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { CYBERSPACE_RELAY, onAuthChange, retryFailedAuth, signInFailed, type ReadTrouble } from '../lib/relay'
-import { SECOND_RELAY } from '../store/useRelays'
+import { READ_FALLBACK_RELAY } from '../store/useRelays'
 
 /** What the line says: the words a list's tests look for too. */
 export function troubleWords(trouble: ReadTrouble): string {
@@ -39,28 +39,28 @@ export function RelayTrouble({ trouble, onRetry }: { trouble: ReadTrouble; onRet
   )
 }
 
-/** What the backup's line says. */
+/** What the old relay's line says. */
 export function backupTroubleWords(): string {
-  return `Could not sign in to backup ${SECOND_RELAY.replace('wss://', '')}.`
+  return `Could not sign in to the old relay ${READ_FALLBACK_RELAY.replace('wss://', '')}.`
 }
 
-/** RETRY on the backup's line: ask the signer again there, then read again. */
+/** RETRY on the old relay's line: ask the signer again there, then read again. */
 export function retryBackup(read: () => void): void {
-  retryFailedAuth(SECOND_RELAY)
+  retryFailedAuth(READ_FALLBACK_RELAY)
   read()
 }
 
 export function BackupTrouble({ onRetry }: { onRetry: () => void }): JSX.Element | null {
   const failed = useSyncExternalStore(
     (changed) => onAuthChange(() => changed()),
-    () => signInFailed(SECOND_RELAY),
-    () => signInFailed(SECOND_RELAY),
+    () => signInFailed(READ_FALLBACK_RELAY),
+    () => signInFailed(READ_FALLBACK_RELAY),
   )
   if (!failed) return null
   return (
     <p className="notice relay-trouble relay-trouble--backup">
       {backupTroubleWords()}
-      <button className="identity__change" onClick={() => retryBackup(onRetry)} title="Ask your signer to sign in to the backup relay again, then read again">
+      <button className="identity__change" onClick={() => retryBackup(onRetry)} title="Ask your signer to sign in to the old relay again, then read again">
         <RefreshCw size={10} strokeWidth={2.25} aria-hidden /> RETRY
       </button>
     </p>

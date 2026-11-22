@@ -14,6 +14,7 @@ import { create } from 'zustand'
 import { nip19, type Event as NostrEvent } from 'nostr-tools'
 import { hexAt, parsePaletteEvent, type Palette } from 'sno-core/snoPalette'
 import { publishMany, queryAny, relaySet } from '../lib/relay'
+import { readRelays } from './useRelays'
 import { useCyberspace } from './useCyberspace'
 import type { PublishedPalette } from './useWorkshop'
 import { CLIENT_TAG } from '../lib/client'
@@ -87,7 +88,7 @@ export function paletteNevent(event: PublishedPalette): string {
 }
 
 function withHints(hints: string[] | undefined): string[] {
-  return [...new Set([...(hints ?? []), ...relaySet()])]
+  return [...new Set([...(hints ?? []), ...readRelays()])]
 }
 
 interface PaletteNetState {

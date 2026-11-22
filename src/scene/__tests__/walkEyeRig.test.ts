@@ -1,7 +1,8 @@
 /**
  * walkEyeRig.test.ts - the rig's eye: turned with the body's heading about up
  * only, never tipped by a look up or down, kept when the look is straight
- * down, and the icosahedron's 0.875 over its origin for no avatar.
+ * down, the icosahedron's 0.875 over its origin for no avatar, and a stair's
+ * trail lowering it no nearer the feet than EYE_ROOM.
  */
 import { describe, expect, it, vi } from 'vitest'
 
@@ -20,7 +21,7 @@ vi.mock('../../lib/contacts', () => ({ GENERAL_RELAYS: [], followsOf: async () =
 
 import { Vector3 } from 'three'
 import { newShard, type ShardModel } from 'sno-core/shards'
-import { WalkEyeRig, type EyeFrame } from '../walkEyeRig'
+import { EYE_ROOM, WalkEyeRig, type EyeFrame } from '../walkEyeRig'
 import { WALL_AXES } from '../../store/walkWalls'
 import { canonicalQuaternion, rotateView, viewAxes } from '../../lib/space'
 
@@ -62,5 +63,18 @@ describe('WalkEyeRig', () => {
     rig.offset(frame(tall, { x: 1, y: 0, z: 0 }), new Vector3())
     const v = rig.offset(frame(tall, { x: 0, y: -1, z: 0 }), new Vector3())
     expect(v.distanceTo(new Vector3(1, 1, 0))).toBeLessThan(1e-9)
+  })
+
+  it('lowers the eye by a stair\u2019s trail, never nearer the feet than EYE_ROOM, and keeps the last answer once the trail is gone', () => {
+    const rig = new WalkEyeRig()
+    const up = { offset: -0.4, axis: 'y' as const, dir: 1 as const }
+    expect(rig.offset({ ...frame(tall, { x: 0, y: 0, z: -1 }), rise: up }, new Vector3()).distanceTo(new Vector3(0, 0.6, -1))).toBeLessThan(1e-9)
+    // A trail longer than the eye is high: down to EYE_ROOM over the feet, no further.
+    expect(rig.offset({ ...frame(tall, { x: 0, y: 0, z: -1 }), rise: { ...up, offset: -3 } }, new Vector3()).distanceTo(new Vector3(0, EYE_ROOM, -1))).toBeLessThan(1e-9)
+    // Along a turned view's up: the trail follows the axis it is given.
+    const axes = viewAxes(rotateView(canonicalQuaternion(), 'up'))
+    const f: EyeFrame = { ...frame(tall, { x: 0, y: 0, z: -1 }), axes, up: { axis: axes.up.axis, dir: axes.up.dir }, rise: { offset: -0.4, axis: axes.up.axis, dir: axes.up.dir } }
+    expect(rig.offset(f, new Vector3()).distanceTo(new Vector3(0, 0.6, -1))).toBeLessThan(1e-9)
+    expect(rig.offset(frame(tall, { x: 0, y: 0, z: -1 }), new Vector3()).distanceTo(new Vector3(0, 1, -1))).toBeLessThan(1e-9)
   })
 })

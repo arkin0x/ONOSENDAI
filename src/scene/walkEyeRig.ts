@@ -3,10 +3,11 @@
  *
  * Each frame of WALK, and of the glide into and out of it, the rig asks where
  * the camera sits relative to the walker's point: the avatar's eye
- * (lib/avatarEye.ts walkEyeLocal), turned with the body about up only, and
- * pulled back along the line from the walker so it never looks from the far
- * side of a wall or a ceiling (store/walkWalls.ts eyeReach). The answer is in
- * render cells, ready to add to the orbit's target.
+ * (lib/avatarEye.ts walkEyeLocal), turned with the body about up only,
+ * lowered by a stair's trail (lib/walkEye.ts walkRise), and placed where it
+ * never looks from the far side of a wall or a ceiling and never has a face
+ * inside the near plane's room (store/walkWalls.ts eyePlace). The answer is
+ * in render cells, ready to add to the orbit's target.
  *
  * The walls are asked from where the camera's line really starts, the eased
  * walker point the rig draws, measured from the centre of the walker's own
@@ -22,8 +23,8 @@ import type { ShardModel } from 'sno-core/shards'
 import { walkEyeLocal, yawFromForward } from '../lib/avatarEye'
 import { spectatorScale } from '../lib/avatar'
 import { csDirection } from '../lib/pose'
-import type { AxisDirection, Position, ViewAxes } from '../lib/space'
-import { eyeReach, wallItemsAt, type WallItem } from '../store/walkWalls'
+import { renderDirection, type AxisDirection, type Position, type ViewAxes } from '../lib/space'
+import { eyePlace, wallItemsAt, type WallItem } from '../store/walkWalls'
 import { CAMERA_NEAR } from './camera'
 
 /**
@@ -58,6 +59,14 @@ export interface EyeFrame {
   walls: boolean
   /** Fluid WALK: the walker is drawn standing on the surface, between gibsons (store/walkFluid.ts groundFluid), and reached the way it stands there (eyeReach `stand`): the most the ground climbs, in gibsons. */
   stand?: number
+  /**
+   * Fluid WALK up a stair (lib/walkEye.ts walkRise): the camera trails the
+   * feet up by `offset` gibsons (negative) along cyberspace `axis` and `dir`,
+   * never nearer their height than EYE_ROOM. Part of the eye, so the walls
+   * are asked of the camera where it really is: a trail below the next
+   * step's top is kept out of that step.
+   */
+  rise?: { offset: number; axis: AxisDirection['axis']; dir: 1 | -1 }
   now: number
 }
 
@@ -68,8 +77,13 @@ export class WalkEyeRig {
   private itemsKey = ''
   private itemsAt = -Infinity
   private askKey = ''
-  private share = 1
+  /** What the walls do to the eye, render cells: where eyePlace put it less where it was asked about. Zero in the open. */
+  private readonly fix = new Vector3()
+  private readonly lower = new Vector3()
+  /** Whether this WALK has had an answer yet: until then a shard still being built holds the eye at the walker, as it always did. */
+  private answered = false
   private pending = { pending: false }
+  private place: [number, number, number] = [0, 0, 0]
 
   /** The eye's offset from the walker's point this frame, render cells, into `out`; the body's heading is updated too. */
   offset(f: EyeFrame, out: Vector3): Vector3 {
@@ -78,8 +92,15 @@ export class WalkEyeRig {
     out.set(e[0], e[1], e[2])
     if (out.lengthSq() === 0) return out
     out.applyQuaternion(this.body)
-    if (f.walls) this.share = this.ask(f, out)
-    return out.multiplyScalar(this.share)
+    // A stair's trail (walkRise): down along its up, never nearer the feet's height than EYE_ROOM.
+    if (f.rise && f.rise.offset < 0) {
+      const r = renderDirection(f.axes, f.rise.axis)
+      this.lower.set(r[0] * f.rise.dir, r[1] * f.rise.dir, r[2] * f.rise.dir)
+      const above = out.dot(this.lower)
+      out.addScaledVector(this.lower, Math.max(f.rise.offset / 2 ** f.scaleExp, -Math.max(0, above - EYE_ROOM)))
+    }
+    if (f.walls) this.ask(f, out)
+    return out.add(this.fix)
   }
 
   /** Forget the walls and the answer: a new WALK starts afresh. */
@@ -88,10 +109,11 @@ export class WalkEyeRig {
     this.itemsKey = ''
     this.itemsAt = -Infinity
     this.askKey = ''
-    this.share = 1
+    this.fix.set(0, 0, 0)
+    this.answered = false
   }
 
-  private ask(f: EyeFrame, eye: Vector3): number {
+  private ask(f: EyeFrame, eye: Vector3): void {
     const g = 2 ** f.scaleExp
     const c = f.cursor
     const cell = `${f.plane}|${c.x},${c.y},${c.z}`
@@ -107,10 +129,24 @@ export class WalkEyeRig {
     const step = EYE_ROOM * g * KEY_STEP
     const q = (v: number): number => Math.round(v / step)
     const key = `${cell}|${f.scaleExp}|${f.up.axis}${f.up.dir}|${f.stand ?? ''}|${lead.map(q).join(',')}|${off.map(q).join(',')}`
-    if (key === this.askKey) return this.share
-    const share = eyeReach(c, lead, off, EYE_ROOM * g, this.items, f.up, this.pending, f.stand ?? false)
-    // A shard still being built is asked about again next frame; until then the eye stays at the walker.
-    this.askKey = this.pending.pending ? '' : key
-    return share
+    if (key === this.askKey) return
+    const p = eyePlace(c, lead, off, EYE_ROOM * g, this.items, f.up, this.pending, f.stand ?? false, this.place)
+    // A shard still being built is asked about again next frame; until then
+    // the last answer stands, as when gliding out: the camera is not dropped
+    // to the walker's feet for the frame it takes. With no answer yet this
+    // WALK, the eye waits at the walker.
+    if (this.pending.pending) {
+      this.askKey = ''
+      if (!this.answered) this.fix.copy(eye).negate()
+      return
+    }
+    this.askKey = key
+    this.answered = true
+    // Back into render cells: each render axis carries one cyberspace axis, with a sign.
+    const back = (a: { axis: 'x' | 'y' | 'z'; dir: 1 | -1 }): number => {
+      const i = a.axis === 'x' ? 0 : a.axis === 'y' ? 1 : 2
+      return ((p[i] - off[i]) * a.dir) / g
+    }
+    this.fix.set(back(f.axes.right), back(f.axes.up), back(f.axes.out))
   }
 }

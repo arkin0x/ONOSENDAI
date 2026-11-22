@@ -20,7 +20,7 @@ const scratchBox = new Box3()
 import { placeCentre, type Position, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
-interface Trace { t: number; frame: number; rel: [number, number, number]; cam: [number, number, number]; q: [number, number, number, number]; view: [number, number, number, number]; events: number; walking: boolean; behind: number; links: number; scans: number; near: Array<[number, number, number, string]> }
+interface Trace { t: number; frame: number; base: [string, string, string]; rel: [number, number, number]; cam: [number, number, number]; q: [number, number, number, number]; view: [number, number, number, number]; events: number; walking: boolean; behind: number; links: number; scans: number; near: Array<[number, number, number, string]> }
 
 export function WalkProbe({ axes }: { axes: ViewAxes }): JSX.Element {
   const anchor = useCyberspace((s) => s.anchor)
@@ -63,6 +63,8 @@ export function WalkProbe({ axes }: { axes: ViewAxes }): JSX.Element {
     const s = useCyberspace.getState()
     trace.push({
       t: performance.now(), frame,
+      // The fixed point `rel` is measured from: the centre of this gibson, in cyberspace.
+      base: [String(base.current.x), String(base.current.y), String(base.current.z)],
       rel: [camera.position.x - p.x, camera.position.y - p.y, camera.position.z - p.z],
       cam: [camera.position.x, camera.position.y, camera.position.z],
       q: [camera.quaternion.x, camera.quaternion.y, camera.quaternion.z, camera.quaternion.w],

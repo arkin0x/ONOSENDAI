@@ -64,7 +64,7 @@ import { WALK_CUT_MARGIN, regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
 import type { AxisDirection, AxisName, Position, ViewAxes } from '../lib/space'
 import { WORLD_DOWN, upOf } from '../lib/walkDown'
-import { constrainOf, enclosed, firstHit, segmentHit, triangleDistance, triangleNormal, trianglesNear, wallMesh, type WallMesh } from '../lib/walkConstrain'
+import { constrainOf, enclosed, firstHit, segmentHit, triangleClosest, triangleDistance, triangleNormal, trianglesNear, wallMesh, type WallMesh } from '../lib/walkConstrain'
 import type { Bounce } from '../lib/walkBounce'
 import { useShards, type WorldItem } from './useShards'
 import { useCyberspace } from './useCyberspace'
@@ -947,6 +947,24 @@ function regionMeets(w: WallItem, lo: Position, hi: Position): boolean {
  * straight, as it always was.
  */
 export function eyeReach(from: Position, lead: readonly [number, number, number], eye: readonly [number, number, number], margin: number, items: readonly WallItem[], up: AxisDirection = UP_Y, out?: { pending: boolean }, stand: boolean | number = false): number {
+  const core = eyeCore(from, lead, eye, margin, items, up, out, stand, 0)
+  return typeof core === 'number' ? core : core.reach / core.len
+}
+
+/** One shard's faces near the eye's lines (eyeCore): its triangles, each one's distance from the walker, the walker's point in its render frame, its unit and tolerance. */
+interface EyeNear { tris: Float64Array; walker: Float64Array; o: [number, number, number]; g: number; tol: number }
+
+/** What eyeCore found: the faces near, and how far along the straight line to the eye (`len` gibsons) the eye may go, the step back included. */
+interface EyeCore { near: EyeNear[]; reach: number; len: number }
+
+/**
+ * eyeReach's work, shared with eyePlace: a number when the answer is settled
+ * before any line is asked (0 held at the walker, 1 nothing to ask), else the
+ * faces near and the straight line's reach. `extra` widens the box the faces
+ * are gathered in, in gibsons, for eyePlace's moves beside the line; what
+ * eyeReach answers is the same with or without it.
+ */
+function eyeCore(from: Position, lead: readonly [number, number, number], eye: readonly [number, number, number], margin: number, items: readonly WallItem[], up: AxisDirection, out: { pending: boolean } | undefined, stand: boolean | number, extra: number): number | EyeCore {
   if (out) out.pending = false
   const len = Math.hypot(eye[0], eye[1], eye[2])
   if (!(len > 0)) return 1
@@ -960,10 +978,10 @@ export function eyeReach(from: Position, lead: readonly [number, number, number]
   const uM = [u[0], u[1], -u[2]]
   const lo = { x: 0n, y: 0n, z: 0n }, hi = { x: 0n, y: 0n, z: 0n }
   ;(['x', 'y', 'z'] as const).forEach((a, q) => {
-    lo[a] = from[a] + BigInt(Math.floor(Math.min(lead[q], lead[q] + ext[q]) - margin)) - 1n
-    hi[a] = from[a] + BigInt(Math.ceil(Math.max(lead[q], lead[q] + ext[q]) + margin)) + 1n
+    lo[a] = from[a] + BigInt(Math.floor(Math.min(lead[q], lead[q] + ext[q]) - margin - extra)) - 1n
+    hi[a] = from[a] + BigInt(Math.ceil(Math.max(lead[q], lead[q] + ext[q]) + margin + extra)) + 1n
   })
-  const near: Array<{ tris: Float64Array; walker: Float64Array; o: [number, number, number]; g: number }> = []
+  const near: EyeNear[] = []
   const nrm = [0, 0, 0]
   let reach = len
   for (const w of items) {
@@ -980,7 +998,7 @@ export function eyeReach(from: Position, lead: readonly [number, number, number]
     const wlo = [Number(r.lo.x), Number(r.lo.y), Number(r.lo.z)], whi = [Number(r.hi.x), Number(r.hi.y), Number(r.hi.z)]
     let apart = false
     for (let q = 0; q < 3; q++) {
-      const a = Math.min(off[q], off[q] + ext[q], off[q] - lead[q]) - margin - tol - 1, b = Math.max(off[q], off[q] + ext[q], off[q] - lead[q]) + margin + tol + 1
+      const a = Math.min(off[q], off[q] + ext[q], off[q] - lead[q]) - margin - extra - tol - 1, b = Math.max(off[q], off[q] + ext[q], off[q] - lead[q]) + margin + extra + tol + 1
       if (b < wlo[q] || a > whi[q]) apart = true
     }
     if (apart) continue
@@ -995,7 +1013,7 @@ export function eyeReach(from: Position, lead: readonly [number, number, number]
     // The gibson's centre, lifted the same, and the way from it to the walker's point as drawn.
     const leadM: [number, number, number] = [lead[0] / g, lead[1] / g, -lead[2] / g]
     const o0: [number, number, number] = [o[0] - leadM[0], o[1] - leadM[1], o[2] - leadM[2]]
-    const pad = (margin + tol) / g
+    const pad = (margin + extra + tol) / g
     const boxLo = [0, 1, 2].map((q) => Math.min(o[q], o[q] + d[q], o0[q]) - pad)
     const boxHi = [0, 1, 2].map((q) => Math.max(o[q], o[q] + d[q], o0[q]) + pad)
     const tris = trianglesNear(e.mesh, boxLo, boxHi, e.clip)
@@ -1016,7 +1034,7 @@ export function eyeReach(from: Position, lead: readonly [number, number, number]
     // The walker's point as drawn must be on the gibson's own side of every face.
     const leadLen = Math.hypot(leadM[0], leadM[1], leadM[2])
     if (leadLen * g > tol && (stand !== false && stand !== 0 ? standPathHit(tris, o0, leadM, upM, tol / g, (stand === true ? 2 : stand) / g, 1 / g) : segmentHit(tris, o0, leadM, tol / (leadLen * g)) !== null)) return 0
-    near.push({ tris, walker, o, g })
+    near.push({ tris, walker, o, g, tol })
     const hit = segmentHit(tris, o, d, tol / span)
     if (hit !== null) reach = Math.min(reach, hit.s * span - margin / Math.max(hit.square, EYE_SQUARE_MIN))
   }
@@ -1033,7 +1051,106 @@ export function eyeReach(from: Position, lead: readonly [number, number, number]
     if (!close) break
     reach = n === EYE_BACK_STEPS - 1 ? 0 : Math.max(0, reach - margin / 2)
   }
-  return reach / len
+  return { near, reach, len }
+}
+
+/** The most times eyePlace moves the eye off a face nearer it than the near plane's room. */
+const EYE_PUSH_STEPS = 4
+
+/**
+ * Where the WALK camera sits (scene/walkEyeRig.ts), as a point: `out` (and
+ * the return) is the eye's offset from the walker as drawn, cyberspace
+ * gibsons, as `eye` is. The same faces and rules as eyeReach, which pulls the
+ * eye back along the straight line from the walker; that line is where this
+ * starts, and two things are added (arkinox, 2026-11-22: "walking up stairs,
+ * i get these full-screen glitches where it looks like my avatar falls down
+ * under the stairs or something for just a frame"; "when i look forward the
+ * screen glitches out"):
+ *
+ * - Up, then over. An eye above the walker and ahead of it (his operative's
+ *   is 2.8 up and 0.27 forward) on a step just short of the next riser has a
+ *   straight line that runs into the riser low down, and eyeReach pulls the
+ *   eye all the way back to the feet: the camera on the step for that frame,
+ *   or for as long as he faces the riser. The eye is also reached the way a
+ *   body would reach it: straight up to its height, then level out to it,
+ *   each leg held short of the first face it meets by `margin` (eyeReach's
+ *   rule). Whichever way keeps the eye higher is taken (the eye height is the
+ *   avatar's; arkinox, 2026-11-16), so the level part gives way first.
+ * - Room in front. A face nearer the eye than `margin` moves the eye
+ *   straight off it, on a clear line, until it has the room: back from a
+ *   riser or a wall in front, up off the next step's top that a stair's
+ *   trail (lib/walkEye.ts walkRise) would have lowered it onto. The near
+ *   plane never cuts the riser in front of a walker stopped at its foot.
+ *   eyeReach lets the eye be as near a face as the walker is, which on a
+ *   stair is anywhere down to touching.
+ *
+ * A walker held (eyeReach's 0: a wall through it, inside a solid, a door's
+ * slab, a shard still being built, which `out.pending` says) keeps the eye at
+ * the walker, as eyeReach does.
+ */
+export function eyePlace(from: Position, lead: readonly [number, number, number], eye: readonly [number, number, number], margin: number, items: readonly WallItem[], up: AxisDirection = UP_Y, out?: { pending: boolean }, stand: boolean | number = false, place: [number, number, number] = [0, 0, 0]): [number, number, number] {
+  const core = eyeCore(from, lead, eye, margin, items, up, out, stand, margin * (EYE_PUSH_STEPS + 1))
+  if (typeof core === 'number') { place[0] = eye[0] * core; place[1] = eye[1] * core; place[2] = eye[2] * core; return place }
+  const { near, len } = core
+  const s = core.reach / len
+  const upC = [0, 0, 0]
+  upC[up.axis === 'x' ? 0 : up.axis === 'y' ? 1 : 2] = up.dir
+  // A cyberspace offset from the walker (lifted, as eyeCore's lines start) in a shard's render frame: Z flips.
+  const toM = (c: EyeNear, q: readonly number[]): [number, number, number] => [c.o[0] + q[0] / c.g, c.o[1] + q[1] / c.g, c.o[2] - q[2] / c.g]
+  // The first face the segment from `q` along `d` crosses, over every shard near.
+  const cross = (q: readonly number[], d: readonly number[]): { s: number; square: number } | null => {
+    const l = Math.hypot(d[0], d[1], d[2])
+    if (!(l > 0)) return null
+    let best: { s: number; square: number } | null = null
+    for (const c of near) {
+      const hit = segmentHit(c.tris, toM(c, q), [d[0] / c.g, d[1] / c.g, -d[2] / c.g], c.tol / l)
+      if (hit !== null && (best === null || hit.s < best.s)) best = hit
+    }
+    return best
+  }
+  // How far from `q` along the unit way `w` the eye may go, up to `length`, held `margin` short of the first face.
+  const along = (q: readonly number[], w: readonly number[], length: number): number => {
+    const span = length + margin
+    const hit = cross(q, [w[0] * span, w[1] * span, w[2] * span])
+    return hit === null ? length : Math.min(length, Math.max(0, hit.s * span - margin / Math.max(hit.square, EYE_SQUARE_MIN)))
+  }
+  let p = [eye[0] * s, eye[1] * s, eye[2] * s]
+  const ev = eye[0] * upC[0] + eye[1] * upC[1] + eye[2] * upC[2]
+  if (s < 1 && ev > 0) {
+    const rv = along([0, 0, 0], upC, ev)
+    if (rv > s * ev + 1e-9) {
+      const flat = [eye[0] - upC[0] * ev, eye[1] - upC[1] * ev, eye[2] - upC[2] * ev]
+      const fl = Math.hypot(flat[0], flat[1], flat[2])
+      const top = [upC[0] * rv, upC[1] * rv, upC[2] * rv]
+      const w = fl > 0 ? [flat[0] / fl, flat[1] / fl, flat[2] / fl] : [0, 0, 0]
+      const rl = fl > 0 ? along(top, w, fl) : 0
+      p = [top[0] + w[0] * rl, top[1] + w[1] * rl, top[2] + w[2] * rl]
+    }
+  }
+  // Room in front: straight off the nearest face, while one is nearer than the margin.
+  const cm = [0, 0, 0]
+  for (let n = 0; n < EYE_PUSH_STEPS; n++) {
+    let dist = Infinity
+    const away = [0, 0, 0]
+    for (const c of near) {
+      const pm = toM(c, p)
+      for (let t = 0; t < c.walker.length; t++) {
+        const dm = triangleClosest(c.tris, t * 9, pm, cm) * c.g
+        if (dm >= dist) continue
+        dist = dm
+        // From the face's nearest point out to the eye, in cyberspace.
+        away[0] = (pm[0] - cm[0]) * c.g; away[1] = (pm[1] - cm[1]) * c.g; away[2] = -(pm[2] - cm[2]) * c.g
+      }
+    }
+    // Clear, or on the face itself, with no way off it to tell.
+    if (!(dist < margin) || !(dist > 1e-9)) break
+    const k = (margin - dist + margin / 64) / dist
+    const d = [away[0] * k, away[1] * k, away[2] * k]
+    if (cross(p, d) !== null) break
+    p = [p[0] + d[0], p[1] + d[1], p[2] + d[2]]
+  }
+  place[0] = p[0] + 0; place[1] = p[1] + 0; place[2] = p[2] + 0
+  return place
 }
 
 /**

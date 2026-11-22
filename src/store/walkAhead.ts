@@ -1,8 +1,10 @@
 /**
  * walkAhead.ts: how many events WALK is ahead of the chain, the one number
- * the fluid WALK slowdown (lib/fluidWalk.ts syncSpeedFactor) and the LOSING
- * SYNC warning (hud/SyncWarning.tsx) go by, and the number anything else
- * showing how far ahead the walk is should read.
+ * the fluid pause (store/fluidSwitch.ts fluidPauseCheck: off at 21, back on
+ * at 15), the CHAIN chip's edge bar (hud/ChainAhead.tsx), and the parked
+ * slowdown and LOSING SYNC warning (store/walkLimits.ts SYNC_SLOWDOWN_ON) go
+ * by, and the number anything else showing how far ahead the walk is should
+ * read.
  *
  * It is the moves made here that are not yet on your chain: what the walk
  * will have proved and put on the chain once everything in hand closes and
@@ -37,9 +39,9 @@ export function eventsAhead(): number {
  * only when what `pick` returns changes, so a piece that shows the count only
  * some of the time (the LOSING SYNC warning from 15, the CHAIN chip's bar in
  * WALK) renders nothing for a count it does not show. A fall's mid-air hops
- * are module state, not the store's, so in the air this can lag the slowdown
- * (which reads eventsAhead every frame) until the store next changes; the
- * landing is counted on time.
+ * are module state, not the store's, so in the air this can lag the fluid
+ * frame (which reads eventsAhead every frame) until the store next changes;
+ * the landing is counted on time.
  */
 export function useAheadSelect<T>(pick: (ahead: number) => T): T {
   return useWalk((s) => pick(aheadOfState(s)))

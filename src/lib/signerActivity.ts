@@ -8,9 +8,9 @@
  * old one says nothing about the new one (arkinox, 2026-11-21: his phone kept
  * asking a signer that had moved to a tablet, and nothing on screen said so).
  *
- * A request counts as asked once nostr-tools has it; the size guard
- * (signerRequestSize.ts) refuses an oversized one before that, and it is not
- * counted. An answer is anything the signer sent back for a request, a
+ * A request counts as asked once nostr-tools has it; one the size guard
+ * (signerRequestSize.ts) refuses, past what the signer relay carries, is
+ * never counted. An answer is anything the signer sent back for a request, a
  * refusal included: a signer that says no is still there. A request that
  * failed on the way (no relay took it) is no answer.
  */
@@ -31,9 +31,16 @@ export interface SignerActivity {
    * on, until the signer answers again.
    */
   stuckAt: number | null
+  /**
+   * When a signature waiting on a request past 65,535 bytes
+   * (signerRequestSize.ts) ran out of time (ms): what the "may not handle
+   * messages this big" chip keys on, until a big request is answered or the
+   * chip is put away.
+   */
+  bigSilentAt: number | null
 }
 
-const EMPTY: SignerActivity = { askedAt: null, answeredAt: null, waitingSince: null, stuckAt: null }
+const EMPTY: SignerActivity = { askedAt: null, answeredAt: null, waitingSince: null, stuckAt: null, bigSilentAt: null }
 
 interface ActivityState {
   bySession: Record<string, SignerActivity>
@@ -127,7 +134,20 @@ export function trackActivity<T extends Requester>(bunker: T, session: string): 
 /** A signature this device needed ran out of time with `session`'s signer. */
 export function noteSignerStuck(session: string | null | undefined): void {
   if (!session) return
-  update(session, (a) => ({ ...a, stuckAt: Date.now() }))
+  // The latest silence is the one said: an ordinary one puts away the big-message chip.
+  update(session, (a) => ({ ...a, stuckAt: Date.now(), bigSilentAt: null }))
+}
+
+/** `session`'s signer answered a request past 65,535 bytes: it reads big messages, so the big-message chip goes. */
+export function noteBigAnswered(session: string): void {
+  if (activityOf(session).bigSilentAt === null) return
+  update(session, (a) => ({ ...a, bigSilentAt: null }))
+}
+
+/** A signature waiting on a request past 65,535 bytes ran out of time with `session`'s signer. */
+export function noteBigSilent(session: string | null | undefined): void {
+  if (!session) return
+  update(session, (a) => ({ ...a, bigSilentAt: Date.now(), stuckAt: null }))
 }
 
 /** Forget a session: LOG OUT, or a test starting afresh. */

@@ -36,7 +36,7 @@ import { nip19 } from 'nostr-tools'
 import { exportNcryptsec, exportNsec } from '../lib/keyExport'
 import { lockedSigner, ncryptsecLogN, openKey, paintFirst, sealKey, type KeyLockHandle } from '../lib/keyAtRest'
 import { forgetHeldSession, generatedKeyOf, heldFromPref, heldSettled, heldWay, listHeld, readHeld, readHeldWithin, recordHeld, seedHeld } from '../lib/identitiesDb'
-import { forgetActivity, noteSignerStuck } from '../lib/signerActivity'
+import { forgetActivity, noteBigSilent, noteSignerStuck } from '../lib/signerActivity'
 import { LOG_N } from '../lib/keyExport'
 import * as nip49 from 'nostr-tools/nip49'
 import {
@@ -66,7 +66,7 @@ import {
   bunkerRelaysOf,
   dropSignerSockets,
 } from '../lib/signers'
-import { SIGN_PATIENCE_MS, onAskAgain, onSignerAnswered, signingFailed } from '../lib/signWithin'
+import { SIGN_PATIENCE_MS, bigSilence, onAskAgain, onSignerAnswered, signingFailed } from '../lib/signWithin'
 import {
   coordToXyz,
   estimateHopCost,
@@ -2408,8 +2408,13 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     if (err instanceof SignerAccountMismatch) otherAccount(signer.pubkey)
     // A signature this device needed (not a relay's AUTH, which is asked
     // again by itself) ran out of time with a remote signer, over fresh
-    // sockets too: the chip offering LOG OUT and PAIR AGAIN comes up.
-    else if (!late && signer.kind === 'nip46' && lostInTransit(err)) noteSignerStuck(signer.session)
+    // sockets too: the chip offering LOG OUT and PAIR AGAIN comes up. Unless
+    // it was waiting on a request past 65,535 bytes (signerRequestSize.ts): the
+    // signer may only not handle messages that big, and its chip says so.
+    else if (!late && signer.kind === 'nip46' && lostInTransit(err)) {
+      if (bigSilence(err) !== null) noteBigSilent(signer.session)
+      else noteSignerStuck(signer.session)
+    }
     throw err
   } finally {
     pendingSigns--

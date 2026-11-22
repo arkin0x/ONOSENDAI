@@ -55,7 +55,7 @@ import { queryEach } from '../lib/relay'
 import { isRateLimited } from '../lib/rateLimit'
 import { SNO_KIND } from 'sno-core/feed'
 import { shardFromText, useWorkshop } from './useWorkshop'
-import { saveFailure } from './workshopStorage'
+import { saveFailure, storageMode } from './workshopStorage'
 import { refreshFeed, usePublished, type SendOutcome } from './usePublished'
 import { useCyberspace } from './useCyberspace'
 
@@ -158,6 +158,16 @@ let zip: { noun: Noun; read: (entry: ZipEntry, cap: number) => Uint8Array; entri
 let current: { stopped: Promise<void>; stop: () => void } | null = null
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+/**
+ * Why nothing can be imported now, or null: your shards have not loaded
+ * (store/workshopStorage.ts), so what is yours is not known, and nothing
+ * would be saved. Matched against an empty list, every piece would look new.
+ */
+export function notLoaded(): string | null {
+  const m = storageMode()
+  return m === 'pending' || m === 'unavailable' ? 'Your shards have not loaded yet. Import works once they have.' : null
+}
+
 /** UTF-8, a leading BOM dropped (TextDecoder's default). */
 const text = new TextDecoder('utf-8')
 const baseName = (path: string): string => path.split('/').pop() ?? path
@@ -541,6 +551,8 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       // because the import has 'publish' ON by default").
       set({ ...blank, open: true, fileName: file.name, foldersOn: !!folderApi() })
       if (file.size > ZIP_MAX_BYTES) { set({ error: `That zip is ${Math.round(file.size / 1048576)} MB. Import reads zips of up to ${ZIP_MAX_BYTES / 1048576} MB.`, phase: 'review' }); return }
+      const waiting = notLoaded()
+      if (waiting) { set({ error: waiting, phase: 'review' }); return }
       let bytes: Uint8Array
       try { bytes = new Uint8Array(await file.arrayBuffer()) } catch { if (g === generation) set({ error: 'That zip could not be opened.', phase: 'review' }); return }
       if (g !== generation) return
@@ -559,6 +571,8 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       zip = null
       const files = [...list]
       set({ ...blank, open: true, noun: 'import', fileName: files.length === 1 ? files[0].name : `${files.length} files`, foldersOn: !!folderApi() })
+      const waiting = notLoaded()
+      if (waiting) { set({ error: waiting, phase: 'review' }); return }
       // Everything picked is read at once, so all of it under a zip's own ceiling.
       const total = files.reduce((t, f) => t + f.size, 0)
       if (total > ZIP_MAX_BYTES) { set({ error: `Those files are ${Math.round(total / 1048576)} MB. Import reads up to ${ZIP_MAX_BYTES / 1048576} MB at once.`, phase: 'review' }); return }

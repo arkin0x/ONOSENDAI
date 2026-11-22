@@ -14,10 +14,33 @@ import type { EventTemplate, NostrEvent } from './events'
 export const SIGN_PATIENCE_MS = 15_000
 
 export class SignerTimeout extends Error {
-  constructor() {
+  /**
+   * Set when what timed out was waiting on a request past 65,535 bytes
+   * (signerRequestSize.ts), which a signer app may not handle: what to make smaller
+   * ("the shard", "it"). Null for an ordinary silence.
+   */
+  readonly big: string | null
+  constructor(big: string | null = null) {
     super('the signer did not answer in time')
     this.name = 'SignerTimeout'
+    this.big = big
   }
+}
+
+/**
+ * What a move says when a request past 65,535 bytes went out and nothing
+ * came back: the signer is likely there, and the size the likely reason, so
+ * pairing again is not the way out.
+ */
+export function bigSilenceWords(noun: string): string {
+  return `Your signer did not answer. It may not handle messages this big. Make ${noun} smaller, or sign in with a key on this device.`
+}
+
+/** What to make smaller, when `err` is a timeout waiting on a big request; null otherwise. */
+export function bigSilence(err: unknown): string | null {
+  if (!(err instanceof Error) || err.name !== 'SignerTimeout') return null
+  const big = (err as { big?: unknown }).big
+  return typeof big === 'string' ? big : null
 }
 
 /** What a move says when its signer ran out of time: what to do, not only what happened. */
@@ -34,10 +57,13 @@ export const SIGNER_STUCK_MESSAGE = 'Your signer is not answering. LOG OUT and p
 /**
  * The words for a signature that failed: a signer that ran out of time gets
  * SIGNER_GONE_MESSAGE (SIGNER_STUCK_MESSAGE for a remote signer, `kind`
- * nip46), and a request too big for a signer app (never sent,
- * signerRequestSize.ts) its own words, which already say what to do.
+ * nip46), or bigSilenceWords when it was waiting on a request past 65,535
+ * bytes; and a request too big for the signer relay, never sent
+ * (signerRequestSize.ts), its own words, which already say what to do.
  */
 export function signingFailed(err: unknown, kind?: string): string {
+  const big = bigSilence(err)
+  if (big !== null) return bigSilenceWords(big)
   // By name too: a SignerTimeout from another copy of this module (a test's reset) is still one.
   if (err instanceof SignerTimeout || (err instanceof Error && err.name === 'SignerTimeout')) return kind === 'nip46' ? SIGNER_STUCK_MESSAGE : SIGNER_GONE_MESSAGE
   if (err instanceof Error && err.name === 'SignerRequestTooBig') return err.message
@@ -109,13 +135,43 @@ export function askAgain(): void {
 }
 
 /**
+ * Requests past 65,535 bytes sent to a remote signer and not yet answered
+ * (signerRequestSize.ts): when each went out, and what to make smaller. A
+ * signature that runs out of time with one of these sent after it began
+ * says so (SignerTimeout.big). Forgotten after LATE_PATIENCE_MS.
+ */
+const bigAsks = new Set<{ at: number; session: string; noun: string }>()
+
+function pruneBigAsks(now: number): void {
+  for (const a of bigAsks) if (now - a.at > LATE_PATIENCE_MS) bigAsks.delete(a)
+}
+
+/** A request past 65,535 bytes went out to `session`'s signer. Returns its end: answered, or failed on the way. */
+export function noteBigAsk(session: string, noun: string): () => void {
+  const now = Date.now()
+  pruneBigAsks(now)
+  const ask = { at: now, session, noun }
+  bigAsks.add(ask)
+  return () => { bigAsks.delete(ask) }
+}
+
+/** What to make smaller, if a big request to `session`'s signer sent at or after `since` is still unanswered. */
+function bigAskSince(since: number, session: string | undefined): string | null {
+  if (!session) return null
+  pruneBigAsks(Date.now())
+  for (const a of bigAsks) if (a.session === session && a.at >= since) return a.noun
+  return null
+}
+
+/**
  * The signature, or a SignerTimeout once SIGN_PATIENCE_MS has passed.
  *
  * `late`, when given, is handed the signature if it still comes after the
  * timeout. A move never takes one (its caller has moved on); a relay's AUTH
  * does, since signing in late beats not signing in (relay.ts authSign).
  */
-export async function signWithin(signer: { signEvent: (template: EventTemplate) => Promise<NostrEvent> }, template: EventTemplate, ms: number = SIGN_PATIENCE_MS, late?: (signed: NostrEvent) => void): Promise<NostrEvent> {
+export async function signWithin(signer: { signEvent: (template: EventTemplate) => Promise<NostrEvent>; session?: string }, template: EventTemplate, ms: number = SIGN_PATIENCE_MS, late?: (signed: NostrEvent) => void): Promise<NostrEvent> {
+  const startedAt = Date.now()
   // Asked before the timer is set: a signer that throws at once leaves no timer behind.
   const signing = signer.signEvent(template)
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -125,7 +181,7 @@ export async function signWithin(signer: { signEvent: (template: EventTemplate) 
     timer = setTimeout(() => {
       timedOut = true
       if (late) waitingLate = awaitLate()
-      reject(new SignerTimeout())
+      reject(new SignerTimeout(bigAskSince(startedAt, signer.session)))
     }, ms)
   })
   void signing.then((signed) => {

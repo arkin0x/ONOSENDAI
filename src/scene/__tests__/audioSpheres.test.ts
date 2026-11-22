@@ -33,7 +33,8 @@ function sound(key: string, fade: number | undefined, extra: Partial<WorldItem> 
 }
 
 describe('the sound spheres', () => {
-  it('ring each sound where its note is, with the radius the ears use, in scene units', async () => {
+  // The first to import the scene module, whole store graph and all, which under a loaded run can pass the default 5 s.
+  it('ring each sound where its note is, with the radius the ears use, in scene units', { timeout: 30_000 }, async () => {
     const { audioSpheres } = await import('../AudioSpheres')
     const auto = fadeRadius(undefined, sourceLocal(AT, 4), 4)
     expect(auto).toBeGreaterThan(0)

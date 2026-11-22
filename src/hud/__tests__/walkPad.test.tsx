@@ -135,6 +135,7 @@ beforeEach(async () => {
   await placeSpawn()
   S().cancel()
   useWalk.getState().setGravity(false)
+  useWalk.getState().setHardGravity(false)
 })
 
 describe('the WALK pad', () => {
@@ -211,6 +212,8 @@ describe('the WALK pad', () => {
 
   it('under GRAVITY DOWN stays on and says it absorbs a bounce (review of #649), and JUMP says jump', () => {
     useWalk.getState().enter()
+    // Over nothing: Hard Mode Gravity keeps it on (store/useWalk.ts gravityOffOverVoid).
+    useWalk.getState().setHardGravity(true)
     useWalk.getState().setGravity(true)
     expect(find('touchpad__key--down').props.disabled).toBeFalsy()
     expect(find('touchpad__key--down').props.title).toBe('Down: hold to absorb a bounce (C or F)')
@@ -286,7 +289,7 @@ describe('JUMP and DOWN in their own row, on the right since the swap (arkinox, 
     expect(rule('.app:has(.walkside) .orbsquare.walklook')).toContain('bottom: calc(var(--walkside-bottom) + var(--walkside-key) + var(--routeov-gap));')
     expect(css).not.toContain('.app:has(.hosaka-pulse) .walklook')
     // The open chat (from 641px wide) starts past the walk pad.
-    expect(css).toContain('.app:has(.touchpad--mode-walk) .chatdock {\n    left: calc(var(--walkpad-left) + var(--controls-width) + var(--routeov-gap));')
+    expect(css).toContain('.app:has(.touchpad--mode-walk) .chatdock {\n    left: calc(var(--walkpad-left) + var(--controls-width) + var(--routeov-gap) + var(--hud-mid));')
     expect(css).not.toContain('.app:has(.walkside) .chatdock')
     // The pad lifted for the chain status strip: the row, and the ball on it, go up with it.
     expect(rule('.app:has(.touchpad.is-lifted)')).toContain('--walkside-bottom: 116px;')

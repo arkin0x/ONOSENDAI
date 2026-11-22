@@ -103,15 +103,38 @@ export async function readMigrated(db: IDBDatabase): Promise<MigratedMeta | null
   return v && typeof v === 'object' && typeof v.at === 'number' ? v : null
 }
 
-/** Every record, in seq order (ties by id). A record without an id string or a json string is left out here and counted. */
-export async function readAll(db: IDBDatabase): Promise<{ records: ShardRecord[]; malformed: number }> {
+/** How many records one request of readAll brings back. */
+export const READ_PAGE = 40
+
+/**
+ * Every record, in seq order (ties by id). A record without an id string or a
+ * json string is left out here and counted.
+ *
+ * Read a page at a time, all in one transaction, so it is one snapshot as a
+ * single getAll was, but each page is its own task: a library of a thousand
+ * shards (tens of megabytes of JSON) no longer arrives as one long block on
+ * the page's thread, and the page draws between pages. `onPage` sees each
+ * page's well-formed records as it lands (workshopStorage parses them there),
+ * in key order, before the sort.
+ */
+export async function readAll(db: IDBDatabase, onPage?: (records: ShardRecord[]) => void, pageSize = READ_PAGE): Promise<{ records: ShardRecord[]; malformed: number }> {
   const os = db.transaction(SHARDS_STORE, 'readonly').objectStore(SHARDS_STORE)
-  const rows = await request(os.getAll()) as unknown[]
   const records: ShardRecord[] = []
   let malformed = 0
-  for (const r of rows) {
-    if (isRecord(r)) records.push(r)
-    else malformed++
+  let after: IDBValidKey | null = null
+  for (;;) {
+    // Asked inside the last page's answer, so the transaction is still active.
+    const rows = await request(os.getAll(after === null ? null : IDBKeyRange.lowerBound(after, true), pageSize)) as unknown[]
+    const page: ShardRecord[] = []
+    for (const r of rows) {
+      if (isRecord(r)) page.push(r)
+      else malformed++
+    }
+    records.push(...page)
+    if (page.length) onPage?.(page)
+    if (rows.length < pageSize) break
+    // Every row has its key at `id` (the store's key path), well formed or not.
+    after = (rows[rows.length - 1] as { id: IDBValidKey }).id
   }
   records.sort((a, b) => a.seq - b.seq || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   return { records, malformed }

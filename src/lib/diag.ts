@@ -29,6 +29,7 @@ import { useThumbs } from '../store/useThumbs'
 import { useTv } from '../store/useTv'
 import { useWorkshop } from '../store/useWorkshop'
 import { DIAG_FOUND_KEY, DIAG_LAST_KEY, diagForget } from './diagGate'
+import { bootTimes } from './bootMarks'
 import { hudFlags } from './hudFlags'
 import { DIAG_COLUMNS, GlLedger, LOAF_COLUMNS, LOAF_SCRIPT_COLUMNS, LoafLedger, Ring, TASK_COLUMNS, TASK_LABEL_COLUMNS, VERIFY_COLUMNS, taskRow, VERIFY_KIND_COLUMNS, type LoafFrame, frameVerb, rxVerb, scriptFile, verifyRow, framePercentiles, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
 
@@ -505,6 +506,9 @@ export function startDiag(): void {
         gpu: gpuInfo?.gpu ?? null, maxSamples: gpuInfo?.maxSamples ?? null, lateStart, route: safeLabel(location.pathname.split('/')[1] ?? '', 12), isolated: window.crossOriginIsolated,
         heapLimit: (performance as unknown as { memory?: { jsHeapSizeLimit: number } }).memory?.jsHeapSizeLimit ?? null,
       },
+      // The load, in ms since the page started: first paint and first contentful paint (the wordmark index.html draws),
+      // then each step the app waited on before its first render, the render, its frame on screen, and the workshop's read (lib/bootMarks.ts).
+      boot: bootTimes(),
       // The test conditions: HUD pieces taken off the page (?nochip=1, ?nosyncwarn=1).
       hud: hudFlags(),
       contexts: { made: contextsMade, lostEver: contextsLostEver },

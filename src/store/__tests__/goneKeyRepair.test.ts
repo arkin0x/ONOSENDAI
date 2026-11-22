@@ -1,5 +1,5 @@
 /**
- * goneKeyRepair.test.ts - "Log in again: KEY NOT SAVED ON THIS DEVICE" only when
+ * goneKeyRepair.test.ts: "Log in again: KEY NOT SAVED ON THIS DEVICE" only when
  * the device really holds no way back to the identity (lib/signerPrefRepair.ts).
  *
  * The owner signs with Amber over NIP-46 and saw the lock (2026-11-22). The one
@@ -124,6 +124,26 @@ describe('a pref with no key beside it, while the device holds a way back', () =
     const { repaired, S } = await load()
     expect(repaired).toBe('kept')
     expect(S.getState().keyLock).toEqual({ mode: 'gone', pubkey: pk })
+  }, 60_000)
+})
+
+describe('LOG OUT from behind the lock', () => {
+  it('takes the bunker session the row still holds, so the list does not offer it back', async () => {
+    const pk = getPublicKey(generateSecretKey())
+    await held([{ pubkey: pk, kind: 'local', bunker: { bunkerUri: BUNKER } }])
+    localStorage.setItem(PREF, JSON.stringify({ kind: 'local', pubkey: pk }))
+    // A load whose repair did not run (the store too slow): locked as 'gone'.
+    vi.resetModules()
+    const store = await import('../useCyberspace')
+    await store.savedChainLoaded()
+    const S = store.useCyberspace
+    expect(S.getState().keyLock).toEqual({ mode: 'gone', pubkey: pk })
+    expect(await S.getState().logOut()).toBeNull()
+    expect(S.getState().identity.pubkey).not.toBe(pk)
+    const db = await import('../../lib/identitiesDb')
+    await db.heldSettled()
+    await vi.waitFor(async () => expect((await db.readHeld(pk))?.bunker).toBeUndefined())
+    expect((await db.listHeld()).some((e) => e.pubkey === pk)).toBe(false)
   }, 60_000)
 })
 

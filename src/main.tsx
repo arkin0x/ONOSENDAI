@@ -10,13 +10,12 @@
  * pref would lock the identity.
  */
 import { hydrateKv } from './lib/kvStore'
-import { repairSignerPref } from './lib/signerPrefRepair'
 
 void hydrateKv()
   .catch(() => undefined)
   // Before the store reads the signer pref: a pref that would lock the identity
   // as "key not saved" while the device holds a way back to it is put right.
-  .then(() => repairSignerPref())
+  .then(() => import('./lib/signerPrefRepair').then((m) => m.repairSignerPref()))
   .catch(() => undefined)
   .then(() => import('./boot'))
   .catch((err) => console.error('[boot] the app could not load:', err))

@@ -2085,9 +2085,9 @@ const SCAN_BRINGS_IT_BACK = 'If it went LIVE, a scan where you hid it brings it 
  */
 export const NOT_SAVED_WHY: Record<SaveTrouble, string> = {
   full: `This device has no room left for the record of what you hid. ${SCAN_BRINGS_IT_BACK}`,
-  fallback: `Storage was slow to open when this page loaded, and the small backup used instead is full. Reload the page to keep the record of what you hid. ${SCAN_BRINGS_IT_BACK}`,
-  slow: `This device's storage did not answer in time, so the record of what you hid is not kept yet. It keeps trying. ${SCAN_BRINGS_IT_BACK}`,
-  refused: `The browser would not keep the record of what you hid. It keeps trying. ${SCAN_BRINGS_IT_BACK}`,
+  fallback: `Storage did not open when this page loaded, and the small backup used instead is full. Reload the page to try storage again. ${SCAN_BRINGS_IT_BACK}`,
+  slow: `This device's storage did not answer in time, so the record of what you hid is not kept yet. This page tries again with your next change. ${SCAN_BRINGS_IT_BACK}`,
+  refused: `The browser would not keep the record of what you hid. This page tries again with your next change. ${SCAN_BRINGS_IT_BACK}`,
 }
 
 /**
@@ -2096,11 +2096,13 @@ export const NOT_SAVED_WHY: Record<SaveTrouble, string> = {
  * LIVE, but this device forgets it on a reload: say so, rather than lose your
  * own record in silence. It shows whatever is open.
  */
-async function sayNotSaved(r: SaveResult): Promise<void> {
+async function sayNotSaved(r: SaveResult, owner: string): Promise<void> {
   let trouble = r.trouble ?? 'refused'
   if (r.late) {
     const late = await r.late
     if (late === null) return
+    // Up to a minute later: not over another identity's screen.
+    if (useCyberspace.getState().identity.pubkey !== owner) return
     trouble = late
   }
   useToast.getState().show({ label: 'NOT SAVED ON THIS DEVICE', meta: NOT_SAVED_WHY[trouble], mark: 'build' })
@@ -2109,7 +2111,7 @@ async function sayNotSaved(r: SaveResult): Promise<void> {
 /** Whether the list reached disk. Only what changed is written. When it did not, a toast says why (sayNotSaved). */
 function saveMine(mine: MyDeployment[], owner = useCyberspace.getState().identity.pubkey): Promise<boolean> {
   return saveRowsResult(owner, sealedStateOf(mine), storedRow, notShown).then((r) => {
-    if (!r.ok) void sayNotSaved(r)
+    if (!r.ok) void sayNotSaved(r, owner)
     return r.ok
   })
 }

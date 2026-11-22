@@ -52,7 +52,8 @@ vi.mock('../../lib/hiddenDb', async (orig) => {
       if (h.state.failCommit) return Promise.reject(new Error('quota'))
       if (h.state.commitErrors.length > 0) return Promise.reject(h.state.commitErrors.shift())
       if (h.state.hangCommit) return new Promise<void>(() => {})
-      if (h.state.slowCommitMs > 0) return new Promise((r) => setTimeout(r, h.state.slowCommitMs)).then(() => real.commit(...a))
+      // Begun at once, in order, and answered late: as a busy browser does.
+      if (h.state.slowCommitMs > 0) { const ms = h.state.slowCommitMs; return real.commit(...a).then(() => new Promise<void>((r) => setTimeout(r, ms))) }
       return real.commit(...a)
     },
     probe: (...a: Parameters<typeof real.probe>) => (h.state.hangProbe ? new Promise<void>(() => {}) : h.state.failProbe ? Promise.reject(new Error('private mode')) : real.probe(...a)),
@@ -586,6 +587,52 @@ describe('why a save did not land: the toast says the real cause', () => {
     h.state.commits = 0
     expect(await p.st.saveRows(X, [row(X, 'x1') as never], JSON.stringify, () => false)).toBe(true)
     expect(h.state.commits).toBe(0)
+  })
+
+  it('a newer save of the same row while a slow write runs is kept, and written after the slow one lands', async () => {
+    const p = await page()
+    p.signIn(X)
+    p.st.setSaveTimingForTests({ commitMs: 30, lateMs: 2_000, retryMs: [] })
+    h.state.slowCommitMs = 200
+    const first = await p.st.saveRowsResult(X, [row(X, 'x1', { text: 'first' }) as never], JSON.stringify, () => false)
+    expect(first.trouble).toBe('slow')
+    h.state.slowCommitMs = 0
+    // The newer one waits behind the slow transaction, and is a change of its own.
+    const second = p.st.saveRows(X, [row(X, 'x1', { text: 'second' }) as never], JSON.stringify, () => false)
+    expect(await first.late).toBeNull()
+    expect(await second).toBe(true)
+    const rows = await dbRows()
+    expect(rows.map((r) => (JSON.parse(r.json) as { text: string }).text)).toEqual(['second'])
+  })
+
+  it('a slow write that then fails says nothing when a retry already wrote all of it', async () => {
+    const p = await page()
+    p.signIn(X)
+    p.st.setSaveTimingForTests({ commitMs: 30, lateMs: 400, retryMs: [] })
+    h.state.hangCommit = true
+    const r = await p.st.saveRowsResult(X, [row(X, 'x1') as never], JSON.stringify, () => false)
+    expect(r.trouble).toBe('slow')
+    h.state.hangCommit = false
+    // The next save writes what was in hand, the slow one's change with it.
+    expect(await p.st.saveRows(X, [row(X, 'x1') as never], JSON.stringify, () => false)).toBe(true)
+    expect(await r.late).toBeNull()
+    expect((await dbRows()).map((x) => x.key)).toEqual(['x1'])
+  })
+
+  it('a door secret that cannot be written says why, and asks for space only when the device is full', async () => {
+    const p = await page()
+    const ds = await import('../doorSecrets')
+    h.state.commitErrors = [err('UnknownError'), err('UnknownError')]
+    await expect(ds.commitDoorSecret(X, 'door-a', 'c'.repeat(64))).rejects.toThrow(ds.SECRET_NOT_SENT.refused)
+    h.state.commitErrors = [err('QuotaExceededError')]
+    await expect(ds.commitDoorSecret(X, 'door-b', 'c'.repeat(64))).rejects.toThrow(ds.SECRET_NOT_SENT.full)
+    h.state.commitErrors = [err('UnknownError'), err('UnknownError')]
+    ds.keepDoorSecret(X, 'door-c', 'd'.repeat(64))
+    await vi.waitFor(() => expect(meta(p)).toBe(ds.SECRET_NOT_KEPT.refused))
+    for (const [why, words] of [...Object.entries(ds.SECRET_NOT_KEPT), ...Object.entries(ds.SECRET_NOT_SENT)]) {
+      expect(words).not.toMatch(/\u2014/)
+      expect(/free some space/i.test(words)).toBe(why === 'full')
+    }
   })
 
   it('a write that never lands says the storage did not answer, not that it is full', async () => {

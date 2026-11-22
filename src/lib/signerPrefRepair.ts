@@ -105,9 +105,9 @@ export async function repairSignerPref(waitMs = REPAIR_WAIT_MS): Promise<PrefRep
     const row = await readHeldWithin(pubkey, waitMs)
     if (!row) return 'kept'
     if (generatedKeyOf(row)) {
-      if (!write(PREF_KEY, JSON.stringify({ kind: 'local', pubkey, nsec: row.nsec }))) return 'kept'
-      markGenerated(pubkey)
-      return 'generated'
+      // Marked first: a pref with the key and no mark would ask a password for it.
+      if (!markGenerated(pubkey)) return 'kept'
+      return write(PREF_KEY, JSON.stringify({ kind: 'local', pubkey, nsec: row.nsec })) ? 'generated' : 'kept'
     }
     const bunker = row.bunker
     if (bunker && typeof bunker.bunkerUri === 'string' && bunker.bunkerUri) {

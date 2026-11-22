@@ -387,8 +387,13 @@ function watchLate(work: Promise<void>, batch: Map<string, Change>): Promise<Sav
   return withTimeout(work, timing.lateMs).then(() => {
     for (const [k, c] of batch) if (dirty.get(k) === c) dirty.delete(k)
     announce(batch)
+    retries = 0
     return null
-  }, (err: unknown) => troubleOf(err, 'indexeddb'))
+  }, (err: unknown) => {
+    // A retry, or a newer save, wrote all of it meanwhile: nothing of its own is missing.
+    const missing = [...batch].some(([k, c]) => dirty.get(k) === c)
+    return missing ? troubleOf(err, 'indexeddb') : null
+  })
 }
 
 /**
@@ -419,9 +424,9 @@ async function commitDirty(): Promise<SaveResult> {
         retrySoon()
         return { ok: false, trouble: 'slow', late: watchLate(work, batch) }
       }
-      const stale = db
+      // Let go of it, as before: the next try opens afresh. Not closed here, so a
+      // read of another tab's change about to run on it is not cut short.
       db = null
-      try { stale?.close() } catch { /* closed already */ }
       if (isQuotaError(e) || isTimeout(e)) break
     }
   }
@@ -462,13 +467,16 @@ function listen(): void {
       }
       void heard(e.data)
     }
-    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => {
-      if (hiddenTab() || !heardWhileHidden) return
-      const m = heardWhileHidden
-      heardWhileHidden = null
-      void heard(m)
-    })
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onShown)
   } catch { channel = null }
+}
+
+/** Shown again: read what other tabs wrote while this one was hidden. */
+function onShown(): void {
+  if (hiddenTab() || !heardWhileHidden) return
+  const m = heardWhileHidden
+  heardWhileHidden = null
+  void heard(m)
 }
 
 function hiddenTab(): boolean {
@@ -503,9 +511,14 @@ export function secretRecord(owner: string, doorId: string): SecretRecord | unde
 
 /** Keep a secret in the database. Resolves true once committed on disk. */
 export function putSecret(rec: SecretRecord): Promise<boolean> {
+  return putSecretResult(rec).then((r) => r.ok)
+}
+
+/** putSecret, saying why when it did not reach disk (SaveTrouble). */
+export function putSecretResult(rec: SecretRecord): Promise<SaveResult> {
   (secrets[rec.owner] ??= {})[rec.doorId] = rec
   dirty.set(`s\0${rec.owner}\0${rec.doorId}`, { secret: rec })
-  return flushed()
+  return flush()
 }
 
 // -- doors closed with CLOSE (store/closedDoors.ts) -----------------------------
@@ -703,6 +716,7 @@ export function resetHiddenForTests(): void {
   try { db?.close() } catch { /* already closed */ }
   if (retryTimer !== null) clearTimeout(retryTimer)
   retryTimer = null; retries = 0; heardWhileHidden = null
+  try { if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onShown) } catch { /* no document */ }
   channel = null; db = null; ready = null; expired = false; buckets = null; secrets = {}; closed = {}; dirty = new Map(); mode = 'local'; chain = Promise.resolve(SAVED)
   listeners.clear()
 }

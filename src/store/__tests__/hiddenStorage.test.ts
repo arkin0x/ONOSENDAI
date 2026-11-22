@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const h = vi.hoisted(() => {
   const mem = new Map<string, string>()
-  const state = { full: false, failCommit: false, failProbe: false, failAdd: false, hangProbe: false }
+  const state = { full: false, failCommit: false, failProbe: false, failAdd: false, hangProbe: false, commitErrors: [] as unknown[], hangCommit: false, slowCommitMs: 0, commits: 0 }
   ;(globalThis as { localStorage?: unknown }).localStorage = {
     get length() { return mem.size },
     key: (i: number) => [...mem.keys()][i] ?? null,
@@ -47,7 +47,14 @@ vi.mock('../../lib/hiddenDb', async (orig) => {
   const real = await orig<typeof import('../../lib/hiddenDb')>()
   return {
     ...real,
-    commit: (...a: Parameters<typeof real.commit>) => (h.state.failCommit ? Promise.reject(new Error('quota')) : real.commit(...a)),
+    commit: (...a: Parameters<typeof real.commit>) => {
+      h.state.commits++
+      if (h.state.failCommit) return Promise.reject(new Error('quota'))
+      if (h.state.commitErrors.length > 0) return Promise.reject(h.state.commitErrors.shift())
+      if (h.state.hangCommit) return new Promise<void>(() => {})
+      if (h.state.slowCommitMs > 0) return new Promise((r) => setTimeout(r, h.state.slowCommitMs)).then(() => real.commit(...a))
+      return real.commit(...a)
+    },
     probe: (...a: Parameters<typeof real.probe>) => (h.state.hangProbe ? new Promise<void>(() => {}) : h.state.failProbe ? Promise.reject(new Error('private mode')) : real.probe(...a)),
     addMissing: (...a: Parameters<typeof real.addMissing>) => (h.state.failAdd ? Promise.reject(new Error('crash')) : real.addMissing(...a)),
   }
@@ -118,7 +125,8 @@ beforeEach(() => {
   h.mem.clear()
   h.events = []
   h.sent = []
-  Object.assign(h.state, { full: false, failCommit: false, failProbe: false, failAdd: false, hangProbe: false })
+  Object.assign(h.state, { full: false, failCommit: false, failProbe: false, failAdd: false, hangProbe: false, commitErrors: [], hangCommit: false, slowCommitMs: 0, commits: 0 })
+  vi.unstubAllGlobals()
 })
 
 describe('the case he hit: localStorage full, a live door placed', () => {
@@ -518,5 +526,137 @@ describe('recovery: a LIVE door whose row was lost', () => {
     const after = await page()
     expect(after.secrets.doorSecret(me, door.eventId)).toBe(secret)
     expect(after.ids()).toEqual([door.eventId])
+  })
+})
+
+/**
+ * The owner saw NOT SAVED ON THIS DEVICE, "no room left", on a phone using 327 MB
+ * of a 2 GB quota (2026-11-22). Every way a save can fail, and what it says.
+ */
+describe('why a save did not land: the toast says the real cause', () => {
+  const err = (name: string): DOMException => new DOMException(`the browser said ${name}`, name)
+  const meta = (p: Page): string | undefined => p.useToast.getState().toast?.meta
+  async function failedDelete(p: Page, arrange: () => void): Promise<void> {
+    const { door } = await sealDoor(p)
+    arrange()
+    await p.useShards.getState().deleteInstance(door.eventId).catch(() => {})
+  }
+
+  it('says no room only for a real QuotaExceededError', async () => {
+    const p = await page()
+    const { NOT_SAVED_WHY } = await import('../useShards')
+    await failedDelete(p, () => { h.state.commitErrors = [err('QuotaExceededError'), err('QuotaExceededError')] })
+    await vi.waitFor(() => expect(meta(p)).toBe(NOT_SAVED_WHY.full))
+  })
+
+  it('never says no room for any other refusal, and tries it once more at once', async () => {
+    const p = await page()
+    const { NOT_SAVED_WHY } = await import('../useShards')
+    await failedDelete(p, () => { h.state.commits = 0; h.state.commitErrors = [err('UnknownError'), err('UnknownError')] })
+    await vi.waitFor(() => expect(meta(p)).toBe(NOT_SAVED_WHY.refused))
+    expect(meta(p)).not.toMatch(/no room/)
+    expect(h.state.commits).toBeGreaterThanOrEqual(2)
+  })
+
+  it('a connection the browser closed is opened again and the write lands, with nothing said', async () => {
+    const p = await page()
+    p.signIn(X)
+    h.state.commitErrors = [err('InvalidStateError')]
+    expect(await p.st.saveRows(X, [row(X, 'x1') as never], JSON.stringify, () => false)).toBe(true)
+    expect((await dbRows()).map((r) => r.key)).toEqual(['x1'])
+    await failedDelete(p, () => { h.state.commitErrors = [err('AbortError')] })
+    await tick(50)
+    expect(p.toast()).not.toBe('NOT SAVED ON THIS DEVICE')
+  })
+
+  it('a write that is only slow, and lands, says nothing', async () => {
+    const p = await page()
+    p.st.setSaveTimingForTests({ commitMs: 30, lateMs: 2_000, retryMs: [] })
+    // Through a delete: no toast.
+    await failedDelete(p, () => { h.state.slowCommitMs = 150 })
+    await tick(400)
+    expect(p.toast()).not.toBe('NOT SAVED ON THIS DEVICE')
+    p.signIn(X)
+    h.state.slowCommitMs = 150
+    const r = await p.st.saveRowsResult(X, [row(X, 'x1') as never], JSON.stringify, () => false)
+    expect(r).toMatchObject({ ok: false, trouble: 'slow' })
+    expect(await r.late).toBeNull()
+    expect((await dbRows()).map((x) => x.key)).toEqual(['x1'])
+    // Landed late: nothing is left in hand to write again.
+    h.state.commits = 0
+    expect(await p.st.saveRows(X, [row(X, 'x1') as never], JSON.stringify, () => false)).toBe(true)
+    expect(h.state.commits).toBe(0)
+  })
+
+  it('a write that never lands says the storage did not answer, not that it is full', async () => {
+    const p = await page()
+    const { NOT_SAVED_WHY } = await import('../useShards')
+    await failedDelete(p, () => { p.st.setSaveTimingForTests({ commitMs: 30, lateMs: 60, retryMs: [] }); h.state.hangCommit = true })
+    await vi.waitFor(() => expect(meta(p)).toBe(NOT_SAVED_WHY.slow))
+  })
+
+  it('a database that did not open in time is slow, not full', async () => {
+    const p = await page()
+    expect(await p.st.troubleOf(new Error('IndexedDB did not open in time'), 'indexeddb')).toBe('slow')
+    expect(await p.st.troubleOf(new Error('IndexedDB did not answer in time'), 'indexeddb')).toBe('slow')
+  })
+
+  it('a failed write is tried again by itself, without another save', async () => {
+    const p = await page()
+    p.signIn(X)
+    p.st.setSaveTimingForTests({ retryMs: [40] })
+    h.state.commitErrors = [err('UnknownError'), err('UnknownError')]
+    expect(await p.st.saveRows(X, [row(X, 'x1') as never], JSON.stringify, () => false)).toBe(false)
+    await vi.waitFor(async () => expect((await dbRows()).map((r) => r.key)).toEqual(['x1']))
+  })
+
+  describe('on localStorage, because the database did not open at load', () => {
+    async function localFull(estimate?: { usage: number; quota: number }): Promise<string | undefined> {
+      vi.stubGlobal('navigator', estimate ? { storage: { estimate: async () => estimate } } : {})
+      h.state.failProbe = true
+      const p = await page()
+      expect(p.st.storageMode()).toBe('local')
+      p.signIn(X)
+      h.state.full = true
+      const r = await p.st.saveRowsResult(X, [row(X, 'x1') as never], JSON.stringify, () => false)
+      expect(r.ok).toBe(false)
+      return r.trouble
+    }
+    it('localStorage full while the device has room: a reload fixes it, not "no room"', async () => {
+      expect(await localFull({ usage: 327e6, quota: 2e9 })).toBe('fallback')
+    })
+    it('localStorage full and the device nearly full too: no room', async () => {
+      expect(await localFull({ usage: 1_999e6, quota: 2e9 })).toBe('full')
+    })
+    it('localStorage full and no estimate to ask: no room, as before', async () => {
+      expect(await localFull()).toBe('full')
+    })
+  })
+
+  it('every reason is plain words: no em dashes, and only a full device says no room', async () => {
+    await page()
+    const { NOT_SAVED_WHY } = await import('../useShards')
+    for (const [why, words] of Object.entries(NOT_SAVED_WHY)) {
+      expect(words).not.toMatch(/—/)
+      expect(/no room/.test(words)).toBe(why === 'full')
+    }
+  })
+})
+
+describe('a hidden tab does not read what another tab wrote until it is shown', () => {
+  it('holds no read open while hidden (a frozen tab would hold the other tab\'s write), and reads it once shown', async () => {
+    const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' as 'visible' | 'hidden' })
+    vi.stubGlobal('document', doc)
+    const a = await page()
+    const b = await page({ keepLast: true })
+    a.signIn(X); b.signIn(X)
+    doc.visibilityState = 'hidden'
+    await a.st.saveRows(X, [row(X, 'from-a') as never], JSON.stringify, () => false)
+    await tick(100)
+    expect(b.st.entriesIn(X).map((e) => e.row?.eventId)).not.toContain('from-a')
+    doc.visibilityState = 'visible'
+    doc.dispatchEvent(new Event('visibilitychange'))
+    await vi.waitFor(() => expect(b.st.entriesIn(X).map((e) => e.row?.eventId)).toContain('from-a'))
+    a.st.resetHiddenForTests()
   })
 })

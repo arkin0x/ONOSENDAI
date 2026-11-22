@@ -124,7 +124,7 @@ import { BAG_SAFE_BYTES, bagSizeRefusal, signedBytes } from '../lib/bagSize'
 import { addsEntries, bagBytes, heldBy, planUnderCap, referenceFor, sealFor, withReferences, type FitCandidate } from '../lib/bagFit'
 import { ROOM_BAG_SETTINGS, inRoom, innermostRoomAt, newDoorSecret, roomDoorAt, roomEntries, roomKey, roomLookupId, roomOf, type OwnDoor } from '../lib/doors'
 import { commitDoorSecret, doorSecret, keepDoorSecret } from './doorSecrets'
-import { entriesIn, isListed, noteStored, onHiddenChange, reloadLocalView, saveRows, UNCLAIMED } from './hiddenStorage'
+import { entriesIn, isListed, noteStored, onHiddenChange, reloadLocalView, saveRows, saveRowsResult, UNCLAIMED, type SaveResult, type SaveTrouble } from './hiddenStorage'
 import { builtInLook, builtInLookTags, doorHeightOf, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedWrapper, setSealedLookFetch, wireLook, wireOpenLook, type LookName, type LookPose } from '../lib/looks'
 import { openSealedLookPayload, sealLookTags, sealedLookAddresses, sealedLookLimit } from '../lib/sealedLooks'
 import { dropPiece, forgetPieceKeys, notePieceKey, primePiece, notePieceKeys, pieceAddresses, setLocalPieces } from '../lib/pieceKeys'
@@ -2076,13 +2076,41 @@ let deployWaiting: DeployPending | null = null
 /** What this list leaves out but must stay stored: rows no list shows. */
 const notShown = (d: MyDeployment | null): boolean => !isListed(d) || unreadable(d)
 
-/** Whether the list reached disk. Only what changed is written. When it did not, a toast says so: it shows whatever is open. */
+/** What a scan brings back, said after every reason a record was not kept. */
+const SCAN_BRINGS_IT_BACK = 'If it went LIVE, a scan where you hid it brings it back.'
+/**
+ * Why the record of what you hid was not kept, in plain words (hiddenStorage
+ * SaveTrouble). "No room" only when the browser said so: the owner was told his
+ * phone had no room while it used 327 MB of 2 GB (2026-11-22).
+ */
+export const NOT_SAVED_WHY: Record<SaveTrouble, string> = {
+  full: `This device has no room left for the record of what you hid. ${SCAN_BRINGS_IT_BACK}`,
+  fallback: `Storage was slow to open when this page loaded, and the small backup used instead is full. Reload the page to keep the record of what you hid. ${SCAN_BRINGS_IT_BACK}`,
+  slow: `This device's storage did not answer in time, so the record of what you hid is not kept yet. It keeps trying. ${SCAN_BRINGS_IT_BACK}`,
+  refused: `The browser would not keep the record of what you hid. It keeps trying. ${SCAN_BRINGS_IT_BACK}`,
+}
+
+/**
+ * A save that did not land, told once it is known not to: a write that was only
+ * slow and then landed says nothing. What you hid is on the relays if it went
+ * LIVE, but this device forgets it on a reload: say so, rather than lose your
+ * own record in silence. It shows whatever is open.
+ */
+async function sayNotSaved(r: SaveResult): Promise<void> {
+  let trouble = r.trouble ?? 'refused'
+  if (r.late) {
+    const late = await r.late
+    if (late === null) return
+    trouble = late
+  }
+  useToast.getState().show({ label: 'NOT SAVED ON THIS DEVICE', meta: NOT_SAVED_WHY[trouble], mark: 'build' })
+}
+
+/** Whether the list reached disk. Only what changed is written. When it did not, a toast says why (sayNotSaved). */
 function saveMine(mine: MyDeployment[], owner = useCyberspace.getState().identity.pubkey): Promise<boolean> {
-  return saveRows(owner, sealedStateOf(mine), storedRow, notShown).then((ok) => {
-    // What you hid is on the relays if it went LIVE, but this device forgets it
-    // on a reload: say so, rather than lose your own record in silence.
-    if (!ok) useToast.getState().show({ label: 'NOT SAVED ON THIS DEVICE', meta: 'This device has no room left for the record of what you hid. If it went LIVE, a scan where you hid it brings it back.', mark: 'build' })
-    return ok
+  return saveRowsResult(owner, sealedStateOf(mine), storedRow, notShown).then((r) => {
+    if (!r.ok) void sayNotSaved(r)
+    return r.ok
   })
 }
 

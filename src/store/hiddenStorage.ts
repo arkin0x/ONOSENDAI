@@ -43,6 +43,27 @@ const UNCLAIMED_KEY = 'onosendai:deployments-unclaimed'
 const CHANNEL = 'onosendai:hidden'
 
 export type HiddenStorage = 'pending' | 'indexeddb' | 'local'
+
+/**
+ * Why a save did not reach disk, as the toast tells it (store/useShards.ts saveMine).
+ * The toast used to say "no room left" for every failure, and the owner saw it on a
+ * phone using 327 MB of a 2 GB quota (2026-11-22). Only a real QuotaExceededError is
+ * `full` now:
+ *   full      the browser refused for lack of space (QuotaExceededError)
+ *   fallback  this session runs on localStorage, because the database did not
+ *             open when the page loaded, and localStorage is full while the
+ *             storage estimate shows the device has room: a reload fixes it
+ *   slow      the database did not answer in time, and the write never landed
+ *   refused   any other refusal: a connection the browser closed, an aborted
+ *             write, an error inside the browser's store
+ */
+export type SaveTrouble = 'full' | 'fallback' | 'slow' | 'refused'
+/**
+ * What a save came to. `late`: a write that ran out of time is still running, and
+ * this says how it ended: null once it lands (nothing to tell anyone), or why not.
+ */
+export interface SaveResult { ok: boolean; trouble?: SaveTrouble; late?: Promise<SaveTrouble | null> }
+const SAVED: SaveResult = { ok: true }
 export const localKey = (bucket: string): string => (bucket === UNCLAIMED ? UNCLAIMED_KEY : `${BARE_KEY}:${bucket}`)
 const goneKey = (bucket: string): string => `onosendai:deployments-gone:${bucket}`
 
@@ -98,7 +119,7 @@ let closed: Record<string, Record<string, ClosedRecord>> = {}
 /** Bumped on every change heard or decided, for a component that reads synchronously (useSyncExternalStore). */
 let version = 0
 let dirty = new Map<string, Change>()
-let chain: Promise<boolean> = Promise.resolve(true)
+let chain: Promise<SaveResult> = Promise.resolve(SAVED)
 let db: IDBDatabase | null = null
 let channel: BroadcastChannel | null = null
 let ready: Promise<HiddenStorage> | null = null
@@ -106,6 +127,15 @@ let ready: Promise<HiddenStorage> | null = null
 let expired = false
 const DECIDE_TIMEOUT_MS = 15_000
 const COMMIT_TIMEOUT_MS = 10_000
+/** How long a write that ran out of time is still watched for: one that lands in this time was only slow. */
+const LATE_COMMIT_MS = 60_000
+/** Waits before a failed write is tried again by itself, without waiting for the next save. */
+const RETRY_AFTER_MS = [3_000, 15_000, 60_000]
+let timing = { commitMs: COMMIT_TIMEOUT_MS, lateMs: LATE_COMMIT_MS, retryMs: RETRY_AFTER_MS }
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+let retries = 0
+/** Messages from other tabs heard while this one was hidden: read once it is shown (heardWhileHidden). */
+let heardWhileHidden: { rows: Array<[string, string]>; secrets: Array<[string, string]>; closed: Array<[string, string]> } | null = null
 const listeners = new Set<() => void>()
 /** The signature (sigOf) of the JSON each row object was stored as, so a save knows what did not change without serializing it. */
 const storedAs = new WeakMap<object, string>()
@@ -198,6 +228,11 @@ function seqFor(rows: readonly MyDeployment[], i: number, b: Map<string, Entry>)
  * save. `keep` is what stays although the list leaves it out: rows never listed.
  */
 export function saveRows(name: string, rows: readonly MyDeployment[], stored: (d: MyDeployment) => string, keep: (d: MyDeployment | null) => boolean): Promise<boolean> {
+  return saveRowsResult(name, rows, stored, keep).then((r) => r.ok)
+}
+
+/** saveRows, saying why when it did not reach disk (SaveTrouble). */
+export function saveRowsResult(name: string, rows: readonly MyDeployment[], stored: (d: MyDeployment) => string, keep: (d: MyDeployment | null) => boolean): Promise<SaveResult> {
   const b = bucketOf(name)
   const present = new Set<string>()
   let any = false
@@ -227,12 +262,54 @@ export function saveRows(name: string, rows: readonly MyDeployment[], stored: (d
     dirty.set(`r\0${name}\0${e.key}`, { del: { bucket: name, key: e.key } })
     any = true
   }
-  if (!any && dirty.size === 0) return Promise.resolve(true)
-  return afterDecided(() => (mode === 'indexeddb' ? flush() : Promise.resolve(writeLocal())))
+  if (!any && dirty.size === 0) return Promise.resolve(SAVED)
+  return afterDecided(() => (mode === 'indexeddb' ? flush() : writeLocalResult()))
+}
+
+/** writeLocal, with why it failed: localStorage full is `full` only when the device's storage is short too. */
+async function writeLocalResult(): Promise<SaveResult> {
+  let err: unknown
+  if (writeLocal((e) => { err = e })) return SAVED
+  return { ok: false, trouble: await troubleOf(err, 'local') }
+}
+
+/** Whether the browser refused for lack of space. */
+export function isQuotaError(err: unknown): boolean {
+  const e = err as { name?: unknown; code?: unknown } | null
+  return !!e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22)
+}
+
+/** A database that did not answer in time (withTimeout, openHiddenDb). */
+function isTimeout(err: unknown): boolean {
+  return err instanceof Error && /in time$/.test(err.message)
+}
+
+/** Room under which the device counts as out of space although localStorage alone refused. */
+const ROOMY_BYTES = 50 * 1024 * 1024
+
+/** Whether the storage estimate says this origin still has room, or null when it cannot say. */
+async function deviceHasRoom(): Promise<boolean | null> {
+  try {
+    const sm = (navigator as Navigator & { storage?: StorageManager }).storage
+    if (!sm?.estimate) return null
+    const { usage, quota } = await sm.estimate()
+    if (typeof usage !== 'number' || typeof quota !== 'number' || quota <= 0) return null
+    return quota - usage > ROOMY_BYTES
+  } catch { return null }
+}
+
+/**
+ * Why a write failed, for the toast. A database's QuotaExceededError is the
+ * browser out of space. localStorage's is too, unless the estimate shows room:
+ * then only the small fallback is full, and a reload brings the database back.
+ */
+export async function troubleOf(err: unknown, where: 'indexeddb' | 'local'): Promise<SaveTrouble> {
+  if (isQuotaError(err)) return where === 'local' && (await deviceHasRoom()) === true ? 'fallback' : 'full'
+  return isTimeout(err) ? 'slow' : 'refused'
 }
 
 /** The rows that differ from the frozen list, and the frozen rows taken off: enough to rebuild each list, and small. */
-function writeLocal(): boolean {
+function writeLocal(onError?: (err: unknown) => void): boolean {
   const names = new Set([...dirty.values()].map((c) => ('put' in c ? c.put.bucket : 'del' in c ? c.del.bucket : '')).filter(Boolean))
   dirty = new Map([...dirty].filter(([, c]) => 'secret' in c || 'closed' in c || 'unclosed' in c))
   const deleted = deletedIds()
@@ -246,7 +323,7 @@ function writeLocal(): boolean {
     try {
       kvSet(localKey(name), JSON.stringify(own))
       kvSet(goneKey(name), JSON.stringify(gone))
-    } catch { ok = false }
+    } catch (err) { ok = false; onError?.(err) }
   }
   return ok
 }
@@ -259,17 +336,34 @@ function writeLocal(): boolean {
 async function openDb(): Promise<IDBDatabase> {
   const d = await openHiddenDb()
   d.addEventListener('versionchange', () => { if (db === d) db = null })
+  // Closed by the browser (the store cleared, an error inside it): the next write opens afresh.
+  d.addEventListener('close', () => { if (db === d) db = null })
   return d
 }
 
-function afterDecided(then: () => Promise<boolean>): Promise<boolean> {
+function afterDecided<T>(then: () => Promise<T>): Promise<T> {
   return mode === 'pending' && ready ? ready.then(then, then) : then()
 }
 
-function flush(): Promise<boolean> {
-  const run = (): Promise<boolean> => commitDirty()
+function flush(): Promise<SaveResult> {
+  const run = (): Promise<SaveResult> => commitDirty()
   chain = chain.then(run, run)
   return chain
+}
+
+/** flush, as the callers that only need to know whether it landed see it. */
+function flushed(): Promise<boolean> {
+  return flush().then((r) => r.ok)
+}
+
+/** A failed write tried again by itself, a little later each time, so it does not wait for the next change to be kept. */
+function retrySoon(): void {
+  if (retryTimer !== null || retries >= timing.retryMs.length) return
+  retryTimer = setTimeout(() => {
+    retryTimer = null
+    retries++
+    if (mode === 'indexeddb' && dirty.size > 0) void flush()
+  }, timing.retryMs[retries])
 }
 
 /** A database that never answers is a failed write: the batch stays in hand, and the save says so. */
@@ -279,21 +373,62 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
   return Promise.race([work, late]).finally(() => clearTimeout(timer))
 }
 
-async function commitDirty(): Promise<boolean> {
-  if (dirty.size === 0) return true
+/** Back in hand, unless something newer is: tried again with the next save, or by itself (retrySoon). */
+function putBack(batch: Map<string, Change>): void {
+  for (const [k, c] of batch) if (!dirty.has(k)) dirty.set(k, c)
+}
+
+/**
+ * A write that ran out of time is still running. If it lands, what it wrote
+ * leaves the queue (unless something newer stands in its place) and nothing is
+ * said: it was only slow. Resolves null then, or why it did not land.
+ */
+function watchLate(work: Promise<void>, batch: Map<string, Change>): Promise<SaveTrouble | null> {
+  return withTimeout(work, timing.lateMs).then(() => {
+    for (const [k, c] of batch) if (dirty.get(k) === c) dirty.delete(k)
+    announce(batch)
+    return null
+  }, (err: unknown) => troubleOf(err, 'indexeddb'))
+}
+
+/**
+ * Write what is in hand, in one transaction. A write is a put or a delete by
+ * key, so trying it again is safe: a failure other than lack of space is tried
+ * once more at once on a fresh connection (the browser may have closed the old
+ * one under this tab), and then again a little later (retrySoon).
+ */
+async function commitDirty(): Promise<SaveResult> {
+  if (dirty.size === 0) return SAVED
   const batch = dirty
   dirty = new Map()
-  try {
-    const d = db ?? (db = await openDb())
-    await withTimeout(commit(d, [...batch.values()]), COMMIT_TIMEOUT_MS)
-    announce(batch)
-    return true
-  } catch {
-    // Still in hand, unless something newer is, and tried again with the next save.
-    db = null
-    for (const [k, c] of batch) if (!dirty.has(k)) dirty.set(k, c)
-    return false
+  let err: unknown
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let work: Promise<void> | null = null
+    try {
+      const d = db ?? (db = await openDb())
+      work = commit(d, [...batch.values()])
+      await withTimeout(work, timing.commitMs)
+      announce(batch)
+      retries = 0
+      return SAVED
+    } catch (e) {
+      err = e
+      if (work && isTimeout(e)) {
+        // Slow, not failed: the transaction is still running on this connection, which is kept.
+        putBack(batch)
+        retrySoon()
+        return { ok: false, trouble: 'slow', late: watchLate(work, batch) }
+      }
+      const stale = db
+      db = null
+      try { stale?.close() } catch { /* closed already */ }
+      if (isQuotaError(e) || isTimeout(e)) break
+    }
   }
+  putBack(batch)
+  const trouble = await troubleOf(err, 'indexeddb')
+  if (trouble !== 'full') retrySoon()
+  return { ok: false, trouble }
 }
 
 function announce(batch: Map<string, Change>): void {
@@ -314,8 +449,30 @@ function listen(): void {
   if (channel || typeof BroadcastChannel === 'undefined') return
   try {
     channel = new BroadcastChannel(CHANNEL)
-    channel.onmessage = (e: MessageEvent<{ rows: Array<[string, string]>; secrets: Array<[string, string]>; closed?: Array<[string, string]> }>) => { void heard(e.data) }
+    channel.onmessage = (e: MessageEvent<{ rows: Array<[string, string]>; secrets: Array<[string, string]>; closed?: Array<[string, string]> }>) => {
+      // Not while hidden: a hidden tab may be frozen mid-read, and its open read
+      // holds the stores from the tab writing them, whose write then runs out of
+      // time (as lib/kvStore.ts listen). Read once shown.
+      if (hiddenTab()) {
+        const w = (heardWhileHidden ??= { rows: [], secrets: [], closed: [] })
+        w.rows.push(...(e.data.rows ?? []))
+        w.secrets.push(...(e.data.secrets ?? []))
+        w.closed.push(...(e.data.closed ?? []))
+        return
+      }
+      void heard(e.data)
+    }
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => {
+      if (hiddenTab() || !heardWhileHidden) return
+      const m = heardWhileHidden
+      heardWhileHidden = null
+      void heard(m)
+    })
   } catch { channel = null }
+}
+
+function hiddenTab(): boolean {
+  try { return typeof document !== 'undefined' && document.visibilityState === 'hidden' } catch { return false }
 }
 
 async function heard(m: { rows: Array<[string, string]>; secrets: Array<[string, string]>; closed?: Array<[string, string]> }): Promise<void> {
@@ -348,7 +505,7 @@ export function secretRecord(owner: string, doorId: string): SecretRecord | unde
 export function putSecret(rec: SecretRecord): Promise<boolean> {
   (secrets[rec.owner] ??= {})[rec.doorId] = rec
   dirty.set(`s\0${rec.owner}\0${rec.doorId}`, { secret: rec })
-  return flush()
+  return flushed()
 }
 
 // -- doors closed with CLOSE (store/closedDoors.ts) -----------------------------
@@ -360,14 +517,14 @@ export function closedOf(owner: string): Readonly<Record<string, ClosedRecord>> 
 export function putClosed(rec: ClosedRecord): Promise<boolean> {
   (closed[rec.owner] ??= {})[rec.doorId] = rec
   dirty.set(`c\0${rec.owner}\0${rec.doorId}`, { closed: rec })
-  return flush()
+  return flushed()
 }
 
 /** Take a closed door's record off, that one record. Resolves true once committed. */
 export function dropClosed(owner: string, doorId: string): Promise<boolean> {
   if (closed[owner]) delete closed[owner][doorId]
   dirty.set(`c\0${owner}\0${doorId}`, { unclosed: { owner, doorId } })
-  return flush()
+  return flushed()
 }
 
 /**
@@ -536,10 +693,16 @@ export function reloadLocalView(): void {
 
 export { HIDDEN_DB }
 
+/** For tests: shorter waits than a phone needs. Reset by resetHiddenForTests. */
+export function setSaveTimingForTests(t: Partial<typeof timing>): void { timing = { ...timing, ...t } }
+
 /** For tests: this page gone, as a reload leaves it. Nothing on disk is touched. */
 export function resetHiddenForTests(): void {
+  timing = { commitMs: COMMIT_TIMEOUT_MS, lateMs: LATE_COMMIT_MS, retryMs: RETRY_AFTER_MS }
   try { channel?.close() } catch { /* already closed */ }
   try { db?.close() } catch { /* already closed */ }
-  channel = null; db = null; ready = null; expired = false; buckets = null; secrets = {}; closed = {}; dirty = new Map(); mode = 'local'; chain = Promise.resolve(true)
+  if (retryTimer !== null) clearTimeout(retryTimer)
+  retryTimer = null; retries = 0; heardWhileHidden = null
+  channel = null; db = null; ready = null; expired = false; buckets = null; secrets = {}; closed = {}; dirty = new Map(); mode = 'local'; chain = Promise.resolve(SAVED)
   listeners.clear()
 }

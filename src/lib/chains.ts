@@ -31,7 +31,7 @@
 import type { Filter } from 'nostr-tools/filter'
 import { RECOGNIZED_ACTIONS, actionLink, buildChain, chainGap, newestSpawn, parseAction, type ActionEvent, type NostrEvent } from './events'
 import { nip19 } from 'nostr-tools'
-import { CYBERSPACE_RELAY, signedIn, authPending, dropRelays, query, queryEach, queryEachSettled, relaySet, subscribe } from './relay'
+import { CYBERSPACE_RELAY, signedIn, authPending, dropRelays, query, queryEach, queryEachSettled, relaySet, subscribe, type SettledBy } from './relay'
 import { normalizeURL } from 'nostr-tools/utils'
 import { PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer, AUTH_STALLED } from './relayOutcome'
 import { chainHolders, noteHoldersFrom } from './chainHolders'
@@ -342,6 +342,31 @@ export const HEAD_CONFIRM_MS = 2500
  * the signer a second time, and the second try rides on the first AUTH
  * instead (verification of #236, finding 4).
  */
+/**
+ * How each head confirmation's questions ended, while ?diag=1 counts
+ * (lib/diag.ts): a confirmation that runs out its wait on a relay holding the
+ * chain costs every move HEAD_CONFIRM_MS (owner's phone walk of 2026-11-22: a
+ * 160 ms task on a timer about every 2.5 s, and a chain slow to clear). Numbers only.
+ */
+export interface HeadCheckStats { n: number; answers: number; cap: number; backstop: number; stop: number; heldLate: number; ms: number; maxMs: number }
+let headStats: HeadCheckStats | null = null
+const emptyHeadStats = (): HeadCheckStats => ({ n: 0, answers: 0, cap: 0, backstop: 0, stop: 0, heldLate: 0, ms: 0, maxMs: 0 })
+
+/** Start counting (the capture behind ?diag=1); `take` hands over the window's counts and starts a new one. */
+export function countHeadChecks(): { take: () => HeadCheckStats } {
+  headStats ??= emptyHeadStats()
+  return { take: () => { const out = headStats ?? emptyHeadStats(); headStats = emptyHeadStats(); return out } }
+}
+
+function headSettled(how: SettledBy, heldLate: number, ms: number): void {
+  if (!headStats) return
+  headStats.n++
+  headStats[how]++
+  headStats.heldLate += heldLate
+  headStats.ms += ms
+  headStats.maxMs = Math.max(headStats.maxMs, ms)
+}
+
 export async function confirmChainEvents(
   pubkey: string,
   knownSpawnId: string | undefined,
@@ -370,7 +395,7 @@ export async function confirmChainEvents(
     timer = setTimeout(() => deadline.abort(), maxWait * 2 + 100)
   }
   const ask = async (): Promise<NostrEvent[] | null> => {
-    const settledAsk = (f: Filter | Filter[]): Promise<RelayAnswer[]> => queryEachSettled(relays, f, maxWait, canonical, waitFor, { onSent: sent, stop: deadline.signal, onLate: (a) => noteHoldersFrom(pubkey, [a]) })
+    const settledAsk = (f: Filter | Filter[]): Promise<RelayAnswer[]> => queryEachSettled(relays, f, maxWait, canonical, waitFor, { onSent: sent, stop: deadline.signal, onLate: (a) => noteHoldersFrom(pubkey, [a]), onSettled: headSettled })
     const { got, whole } = await gatherChain(settledAsk, mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
       (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })), opts.since, settledAsk)
     noteHoldersFrom(pubkey, got)

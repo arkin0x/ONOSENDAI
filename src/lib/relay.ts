@@ -1527,13 +1527,20 @@ export function subscribeOne(url: string, filter: Filter, handlers: { onevent: (
  * Several filters are asked in one REQ per relay, answered by one EOSE: a
  * relay has answered all of them or none.
  */
+/**
+ * How a settled question ended: every answer that matters came in, the wait
+ * after the primary's answer ran out with a relay of `waitFor` still silent
+ * (`cap`), the outer bound (`backstop`), or the caller's stop.
+ */
+export type SettledBy = 'answers' | 'cap' | 'backstop' | 'stop'
+
 export function queryEachSettled(
   relays: string[],
   filter: Filter | Filter[],
   maxWait: number,
   primary: string,
   waitFor: string[],
-  opts: { onSent?: () => void; stop?: AbortSignal; onLate?: (answer: RelayAnswer) => void } = {},
+  opts: { onSent?: () => void; stop?: AbortSignal; onLate?: (answer: RelayAnswer) => void; onSettled?: (how: SettledBy, heldLate: number, ms: number) => void } = {},
 ): Promise<RelayAnswer[]> {
   const urls = [...new Set(relays.map((r) => normalizeURL(r)))]
   const main = normalizeURL(primary)
@@ -1545,6 +1552,7 @@ export function queryEachSettled(
   if (opts.stop?.aborted) return Promise.resolve(urls.map(unanswered))
   // `maxWait` to connect and authenticate, then `maxWait` from the moment
   // the REQ goes out (askOne answerMs).
+  const started = Date.now()
   const deadline = Date.now() + maxWait
   const answers = new Map<string, RelayAnswer>()
   // Closes the questions of `waitFor` still open once this has settled.
@@ -1557,20 +1565,23 @@ export function queryEachSettled(
   let cap: ReturnType<typeof setTimeout> | undefined
   return new Promise((resolve) => {
     let settled = false
-    const settle = (): void => {
+    const settle = (how: SettledBy = 'answers'): void => {
       if (settled) return
       settled = true
+      // Held relays that gave no answer: still silent, or ended by their own timer, connect or AUTH.
+      opts.onSettled?.(how, [...held].filter((url) => answers.get(url)?.outcome !== 'answered').length, Date.now() - started)
       clearTimeout(backstop)
       clearTimeout(cap)
-      opts.stop?.removeEventListener('abort', settle)
+      opts.stop?.removeEventListener('abort', onStop)
       done.abort()
       resolve(urls.map((url) => answers.get(url) ?? unanswered(url)))
     }
-    opts.stop?.addEventListener('abort', settle, { once: true })
+    const onStop = (): void => settle('stop')
+    opts.stop?.addEventListener('abort', onStop, { once: true })
     // Only an outer bound: every relay ends on its own timers (its connect,
     // then its answer, timed from its REQ), and a busy main thread before the
     // REQ must not spend this.
-    const backstop = setTimeout(settle, 4 * maxWait + 50)
+    const backstop = setTimeout(() => settle('backstop'), 4 * maxWait + 50)
     const enough = (): boolean => answers.size === urls.length || (primaryAnswered && [...held].every((url) => answers.has(url)))
     for (const url of urls) {
       const left = (): number => Math.max(0, deadline - Date.now())
@@ -1584,7 +1595,7 @@ export function queryEachSettled(
           answers.set(url, answer)
           if (url === main && answer.outcome === 'answered') {
             primaryAnswered = true
-            cap = setTimeout(settle, Math.max(0, (firstSent ?? Date.now()) + maxWait - Date.now()))
+            cap = setTimeout(() => settle('cap'), Math.max(0, (firstSent ?? Date.now()) + maxWait - Date.now()))
           }
           if (enough()) settle()
         })

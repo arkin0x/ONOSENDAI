@@ -62,7 +62,7 @@ export const WALK_LIMITS_HINT = 'Fluid WALK turns off 21 moves ahead of your cha
 /** The Fluid WALK row's line while it is paused for the chain. */
 export const FLUID_PAUSED_HINT = 'Paused while your chain catches up.'
 
-/** The Spatial Audio row, in the owner's words (arkinox, 2026-11-22): his dash parts the title from its line. */
+/** The Spatial Audio row, in the owner's words (arkinox, 2026-11-22): the title and its gray line, where he wrote a dash between them. */
 export const SPATIAL_AUDIO_TITLE = 'Spatial Audio'
 export const SPATIAL_AUDIO_HINT = 'See spatial audio sources and fade perimeters.'
 

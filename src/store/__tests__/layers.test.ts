@@ -150,7 +150,7 @@ describe('scene layer switches', () => {
     }
   })
 
-  it('carry the old Sound spheres flag over as the new default, off: a stored audioSpheres cannot say who chose it', async () => {
+  it('do not carry the old Sound spheres flag over: a stored audioSpheres cannot say who chose it, so it reads as the new default, off', async () => {
     const { LAYERS_KEY, spatialAudioStored } = await freshStore(memoryStorage())
     // What a device that touched any switch before holds: every flag, audioSpheres on by default.
     const before = { dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true, glow: true, walkLimits: true }

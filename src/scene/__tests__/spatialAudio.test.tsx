@@ -56,7 +56,7 @@ vi.mock('../../store/useHiddenAudio', () => ({
 
 import { createElement } from 'react'
 import type { ViewAxes } from '../../lib/space'
-import { mount, type Host, type Mounted } from '../../test/elementRoot'
+import { mount, settled, type Host, type Mounted } from '../../test/elementRoot'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useLayers } from '../../store/useLayers'
 import { useShards } from '../../store/useShards'
@@ -122,6 +122,18 @@ describe('Spatial Audio', () => {
     expect(boxes(again)).toBe(0)
     expect(rings(again)).toBe(0)
     await again.unmount()
+  })
+
+  it('follows the switch live, on a world already mounted', async () => {
+    const m = await world()
+    expect([boxes(m), rings(m)]).toEqual([0, 0])
+    useLayers.getState().setLayer('spatialAudio', true)
+    await settled()
+    expect([boxes(m), rings(m)]).toEqual([1, 4])
+    useLayers.getState().setLayer('spatialAudio', false)
+    await settled()
+    expect([boxes(m), rings(m)]).toEqual([0, 0])
+    await m.unmount()
   })
 
   it('shows both while audio is being placed in BUILD, whatever the switch says', async () => {

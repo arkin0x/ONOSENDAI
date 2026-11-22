@@ -119,7 +119,8 @@ describe('the relays that hold a chain', () => {
       // The hop stands for a move taken here: only that opens the release gate.
       store.noteSignedOnThisPage(hop.id)
       store.useCyberspace.setState({ events: [spawn, hop], prevEventId: hop.id, published: { [spawn.id]: 'ok', [hop.id]: 'queued' } })
-      await vi.advanceTimersByTimeAsync(10)
+      // Marked published within the publisher's window after the relay took it (publisher.ts MARK_WINDOW_MS).
+      await vi.advanceTimersByTimeAsync(pub.MARK_WINDOW_MS + 10)
       expect(store.useCyberspace.getState().published[hop.id]).toBe('ok')
       expect(holders.chainHolders(pk).has(normalizeURL('wss://mine.example'))).toBe(true)
       expect(JSON.parse(localStorage.getItem(`onosendai:chain-holders:${pk}`) ?? '[]')).toContain(normalizeURL('wss://mine.example'))

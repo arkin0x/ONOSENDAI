@@ -1,5 +1,5 @@
 import { signerWaiting } from '../lib/authOpen'
-import { hopLanding } from '../lib/hopStage'
+import { hopLanding, yieldTask } from '../lib/hopStage'
 import { flyLanding } from '../lib/viewFly'
 import { chainHolders } from '../lib/chainHolders'
 import { bigintBitLimit, movementCapabilityIssue } from '../lib/proofCapability'
@@ -1068,6 +1068,8 @@ export interface CyberspaceState {
   /** Put the fork notice away once it has been read. */
   clearForkNotice: () => void
   setPublishStatus: (id: string, status: PublishStatus, reason?: string) => void
+  /** Several at once, in one store update and one save. */
+  setPublishStatuses: (updates: ReadonlyArray<readonly [string, PublishStatus]>) => void
   /**
    * §3.2: a new spawn event, which by being newer retires every prior action.
    * The avatar is back at its pubkey with nothing behind it. Cannot be undone,
@@ -1807,6 +1809,29 @@ function heldNow(pubkey: string): boolean {
     return false
   }
 }
+
+/**
+ * Writes the publish marks the publisher keeps for its window (lib/publisher.ts
+ * flushMarks), registered by it. Called before anything that reads which
+ * actions went out decides with them (another tab's commit taken in, a fold
+ * from the relays) and before a switch of identity, so none of them reads a
+ * sent action as unsent, and no ack is dropped for an identity left.
+ */
+let markFlusher: (() => void) | null = null
+
+/** Whether adoptChain may read the publish marks for `incoming`: a choice pending, or an event of this identity's not in hand (looked for from the newest end, where an echo is). */
+export function adoptMayReadMarks(s: { chainConflict: unknown; held: boolean; events: NostrEvent[]; identity: { pubkey: string } }, incoming: readonly NostrEvent[]): boolean {
+  if (s.chainConflict || s.held) return true
+  for (const e of incoming) {
+    if (e.pubkey !== s.identity.pubkey) continue
+    let found = false
+    for (let i = s.events.length - 1; i >= 0; i--) if (s.events[i].id === e.id) { found = true; break }
+    if (!found) return true
+  }
+  return false
+}
+export function setMarkFlusher(fn: (() => void) | null): void { markFlusher = fn }
+function flushPublishMarksNow(): void { markFlusher?.() }
 
 function saveChain(events: NostrEvent[], published: Record<string, PublishStatus>, stats: ChainStats, held?: boolean): void {
   const pubkey = events[0]?.pubkey
@@ -2906,6 +2931,7 @@ export const OTHER_TAB_FIRST_MESSAGE = 'Another tab of yours moved first. This m
  * nothing of this tab's was taken back.
  */
 function reconcileWithRows(pubkey: string, read: ChainRead): { taken: boolean; message: string | null } {
+  flushPublishMarksNow()
   noteCommitted(pubkey, read.events.map((e) => e.id), read.published)
   const s = useCyberspace.getState()
   if (s.identity.pubkey !== pubkey) return { taken: false, message: null }
@@ -5614,6 +5640,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   }
 
   const switchTo = async (signer: Signer): Promise<void> => {
+    // The old identity's acks kept for the window are written to its chain first.
+    flushPublishMarksNow()
     switchCount++
     // The rows a check covered were the old identity's.
     if (coveredFor !== signer.pubkey) { coveredByRows.clear(); coveredFor = null }
@@ -6126,6 +6154,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         if (live()) failLanes(signingFailed(err, currentSigner.kind))
         return
       }
+      // A remote signer's answer arrives in its relay's message (a kind 24133
+      // reply): the hop's own check and the landing (a store update, its
+      // renders and the save) go in a task of their own, not inside it
+      // (owner, 2026-11-21: "smooth until I'm getting movements back from
+      // the signer"). A local key signs at once, and has no such message.
+      if (currentSigner.kind !== 'local') await yieldTask()
       if (!live()) return
       // The steps after it were proved from this very id.
       if (event.id !== lane.id) { failLanes(WALK_SIGNED_OTHER_MESSAGE); return }
@@ -6853,6 +6887,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   clearForkNotice: () => set({ forkNotice: null }),
 
   setLive: (live) => {
+    flushPublishMarksNow()
     if (live === get().live) return
     saveLive(get().identity.pubkey, live)
     if (!live) forgetOutbound(get().identity.pubkey)
@@ -7013,6 +7048,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   resolveHeldConflict: (choice) => {
+    flushPublishMarksNow()
     const { chainConflict: conflict, events: local } = get()
     if (!conflict || conflict.kind !== 'held') return
     if (choice === 'local') {
@@ -7061,6 +7097,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   resolveBranchConflict: (choice) => {
+    flushPublishMarksNow()
     const { chainConflict: conflict, events, published } = get()
     if (!conflict || conflict.kind !== 'branch') return
     const div = findDivergence(events, published, conflict.relayEvents)
@@ -7575,6 +7612,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   adoptChain: (incoming) => {
+    // The kept publish marks are written first when this may decide with them:
+    // something new of this identity's, or a choice waiting. A relay pushing
+    // back a move already in hand (every step's own echo) decides nothing with
+    // them, and writing them there would put the publish window back inside
+    // that relay's message.
+    if (adoptMayReadMarks(get(), incoming)) flushPublishMarksNow()
     const cur = get()
     const me = cur.identity.pubkey
     const mine = incoming.filter((e) => e.pubkey === me)
@@ -8584,6 +8627,19 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const next = { ...published, [id]: status }
     set({ published: next, publishError: status === 'failed' ? reason ?? 'relay refused' : null })
     if (status === 'ok') saveChain(events, next, chain)
+  },
+
+  setPublishStatuses: (updates) => {
+    const { published } = get()
+    // Never back from 'ok' (a relay's own echo may have marked it first), and only ids still in the chain.
+    const known = updates.filter(([id, status]) => id in published && !(published[id] === 'ok' && status !== 'ok'))
+    if (known.length === 0) return
+    const next = { ...published }
+    for (const [id, status] of known) next[id] = status
+    // A send or a take clears an earlier failure's words, as one status at a time did.
+    set({ published: next, ...(known.some(([, status]) => status !== 'failed') ? { publishError: null } : {}) })
+    // Saved at once, as one status was: a commit that later loses must know these went out (lib/chainStore.ts run).
+    if (known.some(([, status]) => status === 'ok')) saveChain(get().events, next, get().chain)
   },
 
   screenAxes: null,

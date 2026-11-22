@@ -413,3 +413,16 @@ describe('fluid WALK with a bunker (arkinox, 2026-11-18: "I can\'t explore for m
     chainHolds()
   }, 60_000)
 })
+
+describe('a remote signer\'s answer and the landing (owner, 2026-11-21: "smooth until I\'m getting movements back from the signer")', () => {
+  it('the hop\'s own check and the landing run in a task of their own after a remote signer answers, not inside its message', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const text = fs.readFileSync(path.resolve(__dirname, '../useCyberspace.ts'), 'utf8')
+    const at = text.indexOf('event = await get().signEvent(lane.template!)')
+    expect(at).toBeGreaterThan(0)
+    const after = text.slice(at, at + 1_200)
+    expect(after).toMatch(/if \(currentSigner\.kind !== 'local'\) await yieldTask\(\)\n\s*if \(!live\(\)\) return/)
+    expect(after.indexOf('yieldTask()')).toBeLessThan(after.indexOf('localHopFailures('))
+  })
+})

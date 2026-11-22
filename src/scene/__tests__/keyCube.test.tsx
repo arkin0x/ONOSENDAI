@@ -40,7 +40,7 @@ vi.mock('../ItemModel', async (real) => ({
 
 import { createElement } from 'react'
 import { act } from '@react-three/fiber'
-import { Box3, Vector3, type Camera, type LineSegments, type Material, type Object3D } from 'three'
+import { Box3, Vector3, type Camera, type LineSegments, type Material, type Object3D, type PerspectiveCamera } from 'three'
 import type { NostrEvent } from '../../lib/events'
 import type { KeyItem } from '../../lib/hidden'
 import type { ViewAxes } from '../../lib/space'
@@ -201,14 +201,34 @@ describe('a key with no model of its own', () => {
     expect((await measure(r, [10])).edges[0]).toBeCloseTo(0.5, 6)
   })
 
-  it('hangs its name just under the cube, not through it', async () => {
+  it('hangs its name and its credit line just under the cube on screen, clear of its lowest corner, near or far', async () => {
     r = await scene([worldKey('1'.repeat(64))])
-    const { centre } = await measure(r, [3])
-    let text: Object3D | undefined
-    r.state().scene.traverse((o) => { if (o.name === 'text' && !text) text = o })
-    const inner = text!.parent!
-    expect(inner.position.y).toBeLessThan(0)
-    expect(inner.getWorldPosition(new Vector3()).y).toBeLessThan(centre.y - noteBoxSide(0) / 2)
+    const scene3 = r.state().scene
+    const size = r.state().size
+    const lines = markEdges(scene3)
+    const centre = worldBox(lines).getCenter(new Vector3())
+    const texts: Object3D[] = []
+    scene3.traverse((o) => { if (o.name === 'text') texts.push(o) })
+    // The name and, under it, who left it.
+    expect(texts).toHaveLength(2)
+    for (const back of [1.5, 2.5, 8, 20, 40]) {
+      const camera = await lookFrom(r, centre, back)
+      const b = worldBox(lines)
+      let lowest = -Infinity
+      for (let i = 0; i < 8; i++) {
+        const v = new Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera)
+        lowest = Math.max(lowest, ((1 - v.y) / 2) * size.height)
+      }
+      for (const text of texts) {
+        // Its centre on screen, less half a line (one local unit of the label is one of its pixels; the credit line is smaller).
+        const at = text.getWorldPosition(new Vector3()).project(camera)
+        const y = ((1 - at.y) / 2) * size.height
+        const label = texts[0].parent!.parent!.parent!
+        const depth = camera.position.distanceTo(label.getWorldPosition(new Vector3()))
+        const unitPx = (label.scale.x * size.height) / (2 * Math.tan(((camera as PerspectiveCamera).fov * Math.PI) / 360) * depth)
+        expect(y - unitPx / 2).toBeGreaterThanOrEqual(lowest)
+      }
+    }
   })
 
   it('takes a tap anywhere over the cube up close, and a fingertip’s worth off it far away', async () => {
@@ -219,7 +239,8 @@ describe('a key with no model of its own', () => {
     const camera = r.state().camera
     const tapAt = async (dx: number): Promise<void> => {
       const v = centre.clone().project(camera)
-      await r!.tap(((v.x + 1) / 2) * 800 + dx, ((1 - v.y) / 2) * 800)
+      const { width, height } = r!.state().size
+      await r!.tap(((v.x + 1) / 2) * width + dx, ((1 - v.y) / 2) * height)
     }
     // Straight on, 2 units out: the cube is hundreds of pixels across; 150 px off its middle is still on it.
     camera.position.set(centre.x, centre.y, centre.z + 2); camera.lookAt(centre); camera.updateMatrixWorld()
@@ -286,15 +307,44 @@ describe('what keeps its look', () => {
     expect(edges[1]).toBeGreaterThan(edges[0])
   })
 
-  it('a held key with no model keeps its half box', async () => {
-    const w = worldKey('1'.repeat(64))
+  /** Holds `w` in ITEMS. */
+  function hold(w: WorldItem): void {
     const me = useCyberspace.getState().identity.pubkey
     useInventory.setState({ owner: me, items: { [w.key]: { rowKey: `${me}/${w.key}`, owner: me, id: w.key, type: 'key', name: 'Brass Key', event: w.event as NostrEvent, author: OTHER, verified: true, source: 'found', place: null, from: null, at: 1, key: w.keyItem } }, storage: 'memory' } as never)
+  }
+
+  it('a held key with no model keeps its half box, and its tap stays a fingertip', async () => {
+    const w = worldKey('1'.repeat(64))
+    hold(w)
     r = await scene([w])
     // The half box (PlacedBox): its faces and edges, half a gibson on a side at 2^0, at half; no one-gibson cube.
     const faces = drawn(r.state().scene).filter((o) => o.type === 'Mesh')
     expect(faces).toHaveLength(1)
     const size = (await measure(r, [10, 40])).edges
     for (const e of size) expect(e).toBeCloseTo(0.5, 6)
+    // Up close, 2 units out: a tap 150 px off its middle is past the half box and past a fingertip, and opens nothing.
+    const centre = worldBox(markEdges(r.state().scene)).getCenter(new Vector3())
+    const camera = r.state().camera
+    camera.position.set(centre.x, centre.y, centre.z + 2); camera.lookAt(centre); camera.updateMatrixWorld()
+    await r.frame()
+    const v = centre.clone().project(camera)
+    const { width, height } = r.state().size
+    await r.tap(((v.x + 1) / 2) * width + 150, ((1 - v.y) / 2) * height)
+    expect(useShards.getState().selectedSecret).toBeNull()
+    // On it, it opens.
+    await r.tap(((v.x + 1) / 2) * width, ((1 - v.y) / 2) * height)
+    expect(useShards.getState().selectedSecret).toBe(w.key)
+  })
+
+  it('a held key with no model, being moved, keeps its half box, faint', async () => {
+    const id = '1'.repeat(64)
+    const w = worldKey(id)
+    hold(w)
+    r = await scene([w])
+    await act(async () => {
+      useShards.setState({ pending: { type: 'key', key: w.keyItem, move: { eventId: id } } } as never)
+      useCyberspace.setState({ anchor: HERE, anchorPlane: 0, scaleExp: 0 })
+    })
+    for (const e of (await measure(r, [10])).edges) expect(e).toBeCloseTo(0.5, 6)
   })
 })

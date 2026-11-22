@@ -9,10 +9,11 @@
  * world label so they stay readable, and fade out far off, the credit line
  * first (fadeShare). A key that wears no model of its own is the same
  * one-gibson cube, its name under it (owner, 2026-11-22; keyBoxSide). The
- * other marks (a coin, a key's cube while its model loads, Cyberspace TV's
- * finds) are still sized on screen, and past the headlamp's reach recede with depth to
- * a floor (lib/markerSize.ts recedeShare), so a chest at the far end of a
- * hall in WALK is smaller than one at your feet (arkinox, 2026-10-25).
+ * other marks (a coin, a key's cube while its model loads, Cyberspace
+ * TV's finds) are still sized on screen, and past the headlamp's reach
+ * recede with depth to a floor (lib/markerSize.ts recedeShare), so a chest
+ * at the far end of a hall in WALK is smaller than one at your feet
+ * (arkinox, 2026-10-25).
  * Culled past the same reach as everything else.
  *
  * Placed with markerCentre, not cellCentre, and the difference is the whole of
@@ -348,8 +349,12 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     <>
       {placed.map((w) => {
         const open = (): void => useShards.getState().selectSecret(w.key)
-        // Being moved, a message or a key with no model keeps its one-gibson box, faint; anything else its PlacedBox.
-        if (w.key === moving) return worldCube(w)
+        // A key: drawn whole, or at half while it is held (lib/worldMarks itemDrawAs).
+        const draw = w.type === 'key' ? itemDrawAs(holdsItem(held, w.key, w.lineage, w.itemAuthor, heldLin, w.keypair), itemsRead, madeBy(w.itemAuthor, me)) : 'item'
+        // Being moved, a message, or a key with no model that is not held,
+        // keeps its one-gibson box, faint; anything else (a held key's half
+        // box among them) its PlacedBox.
+        if (w.key === moving) return worldCube(w) && draw === 'item'
           ? <WorldMark key={w.key} kind="note" at={w.centre} side={noteBoxSide(scaleExp)} opacity={MOVING_OPACITY} />
           : <PlacedBox key={w.key} at={w.centre} opacity={MOVING_OPACITY} />
         if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
@@ -360,7 +365,6 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         // box is (owner, 2026-11-22; keyBoxSide); with one, as before.
         const play = vanishing[openedKey(me, w.key)]
         const side = keyBoxSide(w.wears, scaleExp)
-        const draw = itemDrawAs(holdsItem(held, w.key, w.lineage, w.itemAuthor, heldLin, w.keypair), itemsRead, madeBy(w.itemAuthor, me))
         return (
           <group key={w.key}>
             {draw === 'item'
@@ -391,7 +395,7 @@ export function keyBoxSide(wears: ItemWears | undefined, scaleExp: number): numb
 
 /** Whether a placed thing's box is one gibson in the world: a message's (not a coin's), or a key's with no model (keyBoxSide). */
 function worldCube(w: { type: string; coin: boolean; wears?: ItemWears }): boolean {
-  return (w.type === 'message' && !w.coin) || (w.type === 'key' && !w.wears)
+  return (w.type === 'message' && !w.coin) || (w.type === 'key' && keyBoxSide(w.wears, 0) !== undefined)
 }
 
 /** What a key or a chest is called in the world: its glyph and its name. */
@@ -441,8 +445,8 @@ export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null,
 }): JSX.Element {
   const model = useItemModel(wears?.model)
   // A model's faces would hide a label at its middle, so its label stands
-  // just above its box instead (ItemModelMark `label`); the cube's is
-  // drawn through, as before.
+  // just above its box instead (ItemModelMark `label`). The cube's is
+  // drawn through, as before, or hung just under a one-gibson cube (`side`).
   const label = { text, color: NOTE, sub, subColor: ACCENT }
   if (model && axes && itemMarkShape(model, axes) === 'model') {
     return <ItemModelMark id={id ?? text} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} minPx={NOTE_EDGE_PX} opacity={opacity} onTap={onTap} label={FLOATING_NAME.item ? label : undefined} />

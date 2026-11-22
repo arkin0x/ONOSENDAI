@@ -529,7 +529,7 @@ export function startDiag(): void {
       verifyColumns: VERIFY_COLUMNS,
       verifyKindColumns: VERIFY_KIND_COLUMNS,
       verify: verify.all(),
-      // Head confirmations per window: how their questions ended (a relay holding the chain still silent when the wait ran out is a 'cap').
+      // Head confirmation questions per window, by how they ended; heldLate counts relays holding the chain that gave no answer, whichever timer ended the wait.
       headColumns: HEAD_COLUMNS,
       head: head.all(),
       events: events.all(),

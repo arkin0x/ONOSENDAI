@@ -1506,6 +1506,15 @@ export function subscribeOne(url: string, filter: Filter, handlers: { onevent: (
 }
 
 /**
+ * How a settled question ended: the answers that matter were in (`answers`,
+ * which includes a relay of `waitFor` ended by its own timer as unreachable),
+ * the wait after the primary's answer ran out first (`cap`), the outer bound
+ * (`backstop`), or the caller's stop. A relay of `waitFor` without an answer
+ * either way is counted apart (onSettled `heldLate`): that is the signal.
+ */
+export type SettledBy = 'answers' | 'cap' | 'backstop' | 'stop'
+
+/**
  * Ask several relays at once, each on its own (its own connection, its own
  * auth, its own deadline), and settle as soon as the answers that matter are
  * in: when `primary` has answered and every relay of `waitFor` has answered
@@ -1527,13 +1536,6 @@ export function subscribeOne(url: string, filter: Filter, handlers: { onevent: (
  * Several filters are asked in one REQ per relay, answered by one EOSE: a
  * relay has answered all of them or none.
  */
-/**
- * How a settled question ended: every answer that matters came in, the wait
- * after the primary's answer ran out with a relay of `waitFor` still silent
- * (`cap`), the outer bound (`backstop`), or the caller's stop.
- */
-export type SettledBy = 'answers' | 'cap' | 'backstop' | 'stop'
-
 export function queryEachSettled(
   relays: string[],
   filter: Filter | Filter[],
@@ -1569,12 +1571,13 @@ export function queryEachSettled(
       if (settled) return
       settled = true
       // Held relays that gave no answer: still silent, or ended by their own timer, connect or AUTH.
-      opts.onSettled?.(how, [...held].filter((url) => answers.get(url)?.outcome !== 'answered').length, Date.now() - started)
+      const heldLate = [...held].filter((url) => answers.get(url)?.outcome !== 'answered').length
       clearTimeout(backstop)
       clearTimeout(cap)
       opts.stop?.removeEventListener('abort', onStop)
       done.abort()
       resolve(urls.map((url) => answers.get(url) ?? unanswered(url)))
+      opts.onSettled?.(how, heldLate, Date.now() - started)
     }
     const onStop = (): void => settle('stop')
     opts.stop?.addEventListener('abort', onStop, { once: true })

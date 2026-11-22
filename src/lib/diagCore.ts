@@ -518,7 +518,7 @@ export class LoafLedger {
   }
 }
 
-/** One row per window with head confirmations (lib/chains.ts countHeadChecks): how their questions ended, relays holding the chain that gave no answer (silent, or ended by their own timer, connect or AUTH), and time. */
+/** One row per window with head confirmation questions (lib/chains.ts countHeadChecks): how their questions ended, relays holding the chain that gave no answer (silent, or ended by their own timer, connect or AUTH), and time. */
 export const HEAD_COLUMNS = ['t', 'n', 'answers', 'cap', 'backstop', 'stop', 'heldLate', 'ms', 'maxMs'] as const
 
 export function headRow(t: number, h: { n: number; answers: number; cap: number; backstop: number; stop: number; heldLate: number; ms: number; maxMs: number }): number[] | null {

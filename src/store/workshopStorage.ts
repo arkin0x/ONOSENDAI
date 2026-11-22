@@ -548,15 +548,32 @@ function parseRecord(r: ShardRecord): ShardModel | null {
   return m && m.id === r.id ? m : null
 }
 
-/** The list now: what was stored, with this session's own changes made before the load answered on top. */
+/**
+ * The list now: what was stored, with this session's own changes made before
+ * the load answered on top.
+ *
+ * Except a shard the library already holds. The list starts empty while the
+ * read is out, so every change made meanwhile is a shard added then (or one
+ * added and taken off again), and one under an id the library has is a copy
+ * of a shard you already keep: OPEN IN WORKSHOP on your own published object
+ * (hud/stash.ts), the tutorial's pieces (tutorial/director.ts), a TAKE's
+ * pieces. The library's copy may be newer than that one (edited here since it
+ * was published), and it stays: the copy is dropped, never written over it.
+ * The read now starts after the first frame (boot.tsx), so such a tap can
+ * come before it lands.
+ */
 function withPending(stored: ShardModel[]): ShardModel[] {
   let list = stored.slice()
-  for (const [id, m] of pending) {
+  const kept = new Set(stored.map((s) => s.id))
+  let dropped = 0
+  for (const [id, m] of [...pending]) {
+    if (kept.has(id)) { pending.delete(id); dropped++; continue }
     if (m === null) { list = list.filter((s) => s.id !== id); continue }
     const at = list.findIndex((s) => s.id === id)
     if (at >= 0) list[at] = m
     else list.push(m)
   }
+  if (dropped) console.warn(`[workshop] ${dropped} shard(s) added while the library was reading are already in it; the stored copies stay`)
   return list
 }
 
@@ -648,13 +665,31 @@ async function rescue(d: IDBDatabase, raw: string, meta: MigratedMeta): Promise<
 }
 
 /**
- * Decide where the library is, and load it. Called once at startup, before
- * the app draws (main.tsx); a second call returns the first one's answer.
+ * Decide where the library is, and load it. Called once at startup, after the
+ * app's first frame (boot.tsx; before it on /workshop); a second call returns
+ * the first one's answer.
  */
 export function hydrateWorkshop(): Promise<ShardStorage> {
   if (!hydrating) hydrating = mode === 'pending' ? decide() : Promise.resolve(mode)
   return hydrating
 }
+
+/**
+ * The load while it is reading: started and not yet decided. Null before it
+ * starts (a test that never loads) and once it has decided. OPEN WORKSHOP
+ * waits on it (useWorkshop openWorkshop), so a tap in the moment after the
+ * first frame never opens an empty library or makes a new model in it.
+ */
+export function workshopReading(): Promise<ShardStorage> | null {
+  if (mode !== 'pending') return null
+  if (hydrating) return hydrating
+  // The app has drawn and its read is about to start (expectWorkshopRead): start it now.
+  return readExpected ? hydrateWorkshop() : null
+}
+
+let readExpected = false
+/** boot.tsx, at the first draw: the read will start in a frame or two, and anything that needs the library before then starts it. */
+export function expectWorkshopRead(): void { readExpected = true }
 
 async function decide(): Promise<ShardStorage> {
   listen()
@@ -711,14 +746,16 @@ async function decideNow(): Promise<ShardStorage> {
     // The database this tab's list comes from: a later reopen is checked against it.
     gen = typeof meta.gen === 'string' ? meta.gen : ''
     if (!movedFlag()) flagMoved()
-    const { records, malformed } = await readAll(d)
+    // Each page parsed as it lands (lib/workshopDb.ts readAll), so a big library is many short tasks, not one long one.
+    const parsedAs = new Map<ShardRecord, ShardModel | null>()
+    const { records, malformed } = await readAll(d, (page) => { for (const r of page) parsedAs.set(r, parseRecord(r)) })
     const stored: ShardModel[] = []
     skipped = malformed
     seqs.clear()
     nextSeq = 0
     for (const r of records) {
       nextSeq = Math.max(nextSeq, r.seq + 1)
-      const m = parseRecord(r)
+      const m = parsedAs.has(r) ? parsedAs.get(r)! : parseRecord(r)
       // One record that does not read is one shard skipped, and left in the database as it is.
       if (!m) { skipped++; continue }
       seqs.set(r.id, r.seq)

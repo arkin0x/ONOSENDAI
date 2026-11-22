@@ -730,6 +730,45 @@ function marked(ev: NostrEvent, marker: string): string | undefined {
 }
 
 /**
+ * A hop's `mp` already known to be lowercase hex, per event object, as the very
+ * string that was checked (arkinox, 2026-11-22: "its like 8 seconds til
+ * something is painted"). A v2 hop's `mp` is 8,192 characters, so on a long
+ * chain the check is tens of megabytes of text, and a load builds the chain
+ * more than once (authenticStretch, then the explorer's parse): it was about
+ * half the time the first draw waited on the chain. Checked once per event,
+ * and not at all for a row whose structural verdict under today's rules is
+ * already valid (lib/eventDb/chainRows.ts readChain `ruled`, rulesHeld): a
+ * malformed `mp` breaks its action, so such a row cannot carry one. Kept by
+ * the string itself, so a tag changed after the check is checked again.
+ *
+ * A verdict carries this rule from build to build: a change to what a
+ * well-formed `mp` is must raise CHAIN_RULES_REVISION, or rows judged under
+ * the old rule would pass the new one unchecked.
+ */
+const mpChecked = new WeakMap<NostrEvent, string>()
+
+/** Whether `ev`'s `mp` is lowercase hex: once per event and string (above). */
+function mpFormHeld(ev: NostrEvent, mp: string): boolean {
+  if (mpChecked.get(ev) === mp) return true
+  if (!/^[0-9a-f]+$/.test(mp)) return false
+  mpChecked.set(ev, mp)
+  return true
+}
+
+/**
+ * Events read from rows whose structural verdict under the running rules is
+ * valid (lib/eventDb/chainVerdicts.ts): their `mp` form held when the verdict
+ * was reached, on these very bytes, so it is not checked again (mpFormHeld).
+ */
+export function rulesHeld(events: readonly NostrEvent[]): void {
+  for (const ev of events) {
+    if (ev.kind !== ACTION_KIND) continue
+    const mp = tag(ev, 'mp')
+    if (mp !== undefined) mpChecked.set(ev, mp)
+  }
+}
+
+/**
  * Read a kind:3333 event as a recognized action, or refuse it.
  *
  * Strict about shape and silent about everything else: a malformed event is
@@ -866,7 +905,7 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
     // never the parser's, so it parses exactly as before. An `mp` with any
     // character outside 0-9 and a-f is malformed at any width (§8.4).
     const mp = tag(ev, 'mp')
-    if (mp !== undefined && !/^[0-9a-f]+$/.test(mp)) return null
+    if (mp !== undefined && !mpFormHeld(ev, mp)) return null
     return { ...base, type, ...links, proofHash, ...(mn !== undefined ? { mn } : {}), ...(mp !== undefined ? { mp } : {}) }
   }
   return { ...base, type, ...links, proofHash }

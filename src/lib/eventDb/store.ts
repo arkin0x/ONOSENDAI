@@ -162,15 +162,23 @@ async function struck(event: NostrEvent, deletions: IDBObjectStore): Promise<boo
   return tomb !== undefined && tomb.created_at >= event.created_at
 }
 
-/** What a row replacing a lower-ranked one of the same id keeps of it: everything but the event and what is read from the event. */
-export function carried(had: EventRow): Partial<EventRow> {
+/**
+ * What a row replacing a lower-ranked one of the same id keeps of it:
+ * everything but the event and what is read from the event. The chain verdict
+ * (chainVerdicts.ts) is read from the bytes, so it stays only when the bytes
+ * are the same (`sameBytes`): a load takes a row valid under the rules as it
+ * is, without parsing its form again (lib/events.ts rulesHeld), and a verdict
+ * must never vouch for bytes it was not reached on.
+ */
+export function carried(had: EventRow, sameBytes: boolean): Partial<EventRow> {
   const { seen, pin, usedAt, savedAt, proof, proofRev, chain, chainEpoch, chainRev, breakAt, acked, deleted, chainOf, chainN } = had
   return {
-    seen, pin, usedAt, savedAt, proof, chain,
+    seen, pin, usedAt, savedAt, proof,
     ...(proofRev !== undefined ? { proofRev } : {}),
-    ...(chainEpoch !== undefined ? { chainEpoch } : {}),
-    ...(chainRev !== undefined ? { chainRev } : {}),
-    ...(breakAt !== undefined ? { breakAt } : {}),
+    ...(sameBytes ? { chain } : {}),
+    ...(sameBytes && chainEpoch !== undefined ? { chainEpoch } : {}),
+    ...(sameBytes && chainRev !== undefined ? { chainRev } : {}),
+    ...(sameBytes && breakAt !== undefined ? { breakAt } : {}),
     ...(acked !== undefined ? { acked } : {}),
     ...(deleted !== undefined ? { deleted } : {}),
     ...(chainOf !== undefined ? { chainOf } : {}),
@@ -218,7 +226,7 @@ export async function ingest(db: IDBDatabase, items: IngestItem[], now = Date.no
         result.refused.push(event.id)
         continue
       }
-      const row: EventRow = { ...rowOf(event, { nip01: item.nip01, pin: pinned, relay }, now), ...(had ? carried(had) : {}) }
+      const row: EventRow = { ...rowOf(event, { nip01: item.nip01, pin: pinned, relay }, now), ...(had ? carried(had, JSON.stringify(eventOf(had)) === JSON.stringify(eventOf(event as EventRow))) : {}) }
       if (had) row.pin = pinned ? 1 : 0
       if (had && relay && !row.seen.includes(relay)) row.seen = [...row.seen, relay]
       if (isStruck) { row.deleted = 1; delete row.addr }

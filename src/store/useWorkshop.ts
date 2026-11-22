@@ -68,7 +68,16 @@ import { cornerAverage, weld } from '../lib/weld'
 import { subdivide, subdivideNotice } from '../lib/subdivide'
 import { withCredit, type Credit } from 'sno-core/feed'
 import { newestFirst } from '../lib/shardFolders'
-import { attach, initialShards, persist, saveNow as saveStored } from './workshopStorage'
+import { attach, initialShards, persist, saveNow as saveStored, workshopReading } from './workshopStorage'
+
+/**
+ * OPEN WORKSHOP asked while the library was still reading: opened once it has
+ * read, as asked last, and only when that is soon after the tap, so a read
+ * that took long never opens it over whatever came next (see openWorkshop).
+ */
+let openAsked: { id?: string; panel?: 'menu'; at: number } | null = null
+/** How long a tap made while the library reads still opens it once read. */
+const OPEN_ASKED_MS = 8_000
 
 export { hydrateWorkshop, storageMode } from './workshopStorage'
 
@@ -1305,6 +1314,24 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     backStack: [],
 
     openWorkshop: (id, panel) => {
+      // The library still reading (it starts after the first frame, boot.tsx): open once it has, never on an empty list.
+      // One open waits, the last asked; it opens only soon after the tap.
+      const reading = workshopReading()
+      if (reading) {
+        const waiting = openAsked !== null
+        openAsked = { id, panel, at: Date.now() }
+        if (!waiting) {
+          useToast.getState().show({ label: 'OPENING WORKSHOP', meta: 'Your shards are still loading.', mark: 'build' })
+          void reading.then(() => {
+            const asked = openAsked
+            openAsked = null
+            if (!asked || workshopReading() || get().open || Date.now() - asked.at > OPEN_ASKED_MS) return
+            get().openWorkshop(asked.id, asked.panel)
+          })
+        }
+        return
+      }
+      openAsked = null
       const left = leaveAll(id ?? get().currentId)
       if (left) { set({ shards: left }); save(left) }
       if (get().backStack.length) set({ backStack: [] })

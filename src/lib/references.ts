@@ -15,7 +15,8 @@
  * full bag (some 850 references) is not 850 round trips.
  */
 
-import { queryAny, relaySet } from './relay'
+import { queryAny } from './relay'
+import { readRelays } from '../store/useRelays'
 import { entryKey, type Reference } from './hidden'
 import type { NostrEvent } from './events'
 
@@ -64,7 +65,7 @@ export const REFERENCE_BATCH = 100
  */
 function relaysFor(ref: Reference): string[] {
   const hint = ref[2]
-  const all = relaySet()
+  const all = readRelays()
   return hint && all.includes(hint) ? [hint, ...all.filter((r) => r !== hint)] : all
 }
 

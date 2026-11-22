@@ -28,9 +28,12 @@ const net = vi.hoisted(() => ({
 }))
 vi.mock('../../store/useRelays', () => ({
   DEFAULT_RELAY: 'ws://canonical.test',
-  // Pinned second after the 2026-11-05 switch; not in these tests' relay set, so never waited for.
-  SECOND_RELAY: 'ws://second.test',
+  PINNED_RELAYS: ['ws://canonical.test'],
+  // The read-only old relay: read beside the relay set, never a holder, so never waited for.
+  READ_FALLBACK_RELAY: 'ws://second.test',
+  isReadFallbackRelay: (url: string) => url.replace(/\/$/, '') === 'ws://second.test',
   currentRelays: () => net.relays,
+  readRelays: () => [...net.relays, 'ws://second.test'],
   isRetiredRelay: () => false,
 }))
 vi.mock('../../store/useCyberspace', () => ({

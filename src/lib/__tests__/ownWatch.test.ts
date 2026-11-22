@@ -7,10 +7,12 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { forgetOwnWatchMoves, DROP_AFTER_MS, EOSE_WAIT_MS, FRESHEN_WAIT_MS, LIVE_MS, STALL_MS, freshenOwnWatch, ownWatchDeps, unexplainedMoves, ownWatchState, startOwnWatch, stopOwnWatch } from '../ownWatch'
+import { outsideChain, forgetOwnWatchMoves, DROP_AFTER_MS, EOSE_WAIT_MS, FRESHEN_WAIT_MS, LIVE_MS, STALL_MS, freshenOwnWatch, ownWatchDeps, unexplainedMoves, ownWatchState, startOwnWatch, stopOwnWatch } from '../ownWatch'
 import type { NostrEvent } from '../events'
 
 type H = Parameters<typeof ownWatchDeps.subscribeOne>[2]
+/** The real relays to watch and the real pinned set, before install() replaces them. */
+const defaults = { relays: ownWatchDeps.relays, pinned: ownWatchDeps.pinned }
 const net = { subs: [] as Array<{ url: string; filter: Record<string, unknown>; filters: Array<Record<string, unknown>>; h: H; closed: boolean }>, age: new Map<string, number>(), owed: new Map<string, number>(), dropped: [] as string[], failed: new Set<string>() }
 
 const PK = 'ab'.repeat(32)
@@ -30,6 +32,34 @@ const own = (url: string) => net.subs.filter((s) => s.url === url && s.filter.au
 const state = (url: string) => ownWatchState(PK)!.find((r) => r.url === url)!
 
 afterEach(() => { stopOwnWatch(); net.subs.length = 0; net.age.clear(); net.owed.clear(); net.dropped.length = 0; net.failed.clear(); vi.useRealTimers() })
+
+describe('which relays are watched, and which vouch (stage 1 of retiring wss://cyberspace.nostr1.com)', () => {
+  it('the canonical relay alone is pinned; the read-only old relay is watched, so a move only it holds is still heard, but never pinned', () => {
+    expect([...defaults.pinned()]).toEqual(['wss://relay.onosendai.tech'])
+    const watched = defaults.relays()
+    expect(watched[0]).toBe('wss://relay.onosendai.tech')
+    expect(watched).toContain('wss://cyberspace.nostr1.com')
+  })
+})
+
+describe('a delivered move outside the chain in hand (outsideChain)', () => {
+  const G = 'a'.repeat(64)
+  const OLD_G = 'b'.repeat(64)
+  const hop = (n: number, genesis: string): NostrEvent => ({ ...ev(n), tags: [['A', 'hop'], ['e', genesis, '', 'genesis'], ['e', 'c'.repeat(64), '', 'previous']] })
+  const spawn = (n: number): NostrEvent => ({ ...ev(n), tags: [['A', 'spawn']] })
+  it('an older chain\'s move or an older spawn, dated before this spawn, cannot touch the chain: never held (the old relay after a respawn)', () => {
+    expect(outsideChain(hop(90, OLD_G), G, 100)).toBe(true)
+    expect(outsideChain(spawn(50), G, 100)).toBe(true)
+  })
+  it('a newer spawn, a move dated at or after this spawn, a move on this chain, or no chain in hand: held as before', () => {
+    expect(outsideChain(spawn(150), G, 100)).toBe(false)
+    expect(outsideChain(hop(120, OLD_G), G, 100)).toBe(false)
+    expect(outsideChain(hop(100, OLD_G), G, 100)).toBe(false)
+    expect(outsideChain(hop(90, G), G, 100)).toBe(false)
+    expect(outsideChain(hop(90, OLD_G), '', undefined)).toBe(false)
+    expect(outsideChain({ ...ev(90), tags: [] }, G, 100)).toBe(false)
+  })
+})
 
 describe('the standing watch', () => {
   it("one subscription per relay, for this identity's moves; current only after its EOSE; every move delivered is held until found in hand", () => {
@@ -186,7 +216,7 @@ describe('the standing watch', () => {
   it('a move this page signed, or one in hand, is never held: an old chain\'s last echo after a respawn does not turn the check off', () => {
     install()
     const mine = new Set([ev(7).id])
-    startOwnWatch(PK, () => {}, () => {}, () => undefined, (id) => mine.has(id))
+    startOwnWatch(PK, () => {}, () => {}, () => undefined, (e) => mine.has(e.id))
     own(A).h.oneose()
     own(A).h.onevent(ev(7))
     expect(unexplainedMoves(PK, () => false)).toBe(0)

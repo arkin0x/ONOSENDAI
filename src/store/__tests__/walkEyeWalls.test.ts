@@ -5,6 +5,10 @@
  * the avatar with a wall behind it, a wall beside the eye, a glancing plane,
  * a fall between gibsons, and (the rule that matters) that whatever comes
  * back, the line from the walker to the eye crosses nothing.
+ *
+ * eyePlace, where the rig puts the camera: an eye ahead of the walker at the
+ * foot of a riser keeps its height (up, then over), and the eye keeps the
+ * near plane's room from a riser in front and from a step's top below it.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -25,7 +29,7 @@ import { newShard, toPayload, type ShardModel } from 'sno-core/shards'
 import { withConstrain } from '../../lib/walkConstrain'
 import { setLocalAuthor } from '../../lib/carried'
 import type { AxisName, Position } from '../../lib/space'
-import { clearWalls, eyeReach, wallsBuilt, type WallItem } from '../walkWalls'
+import { clearWalls, eyePlace, eyeReach, wallsBuilt, type WallItem } from '../walkWalls'
 
 const AXES: AxisName[] = ['x', 'y', 'z']
 const AT: Position = { x: 1n << 60n, y: 3n << 58n, z: 5n << 57n }
@@ -288,3 +292,94 @@ describe('eyeReach', () => {
     }
   })
 })
+
+describe('eyePlace', () => {
+  /** A floor through the walker's point and a riser `gap` ahead along +X, its top `top` up. */
+  const riser = (gap: number, top: number): WallItem[] => [
+    item(box([-480, -240, -480], [480, 0, 480])),
+    item(box([Math.round(gap * 120), -240, -480], [720, Math.round(top * 120), 480])),
+  ]
+  /** How far `p` is from the box `lo`..`hi` (ticks), in gibsons. */
+  const away = (p: number[], lo: number[], hi: number[]): number => Math.hypot(...p.map((v, q) => Math.max(lo[q] / 120 - v, 0, v - hi[q] / 120)))
+
+  it('is the eye itself with nothing in the way, and eyeReach\u2019s share of it when that is the whole answer', () => {
+    expect(eyePlace(AT, [0, 0, 0], [0.27, 2.8, 0], ROOM, [])).toEqual([0.27, 2.8, 0])
+    // A ceiling straight over the walker: the eye comes down under it as eyeReach has it.
+    const ceiling = [item(slab('y', 1, 1))]
+    const k = eyeReach(AT, [0, 0, 0], [0, 1.325, 0], ROOM, ceiling)
+    expect(eyePlace(AT, [0, 0, 0], [0, 1.325, 0], ROOM, ceiling)[1]).toBeCloseTo(1.325 * k, 12)
+    // A walker standing in a wall's plane: held at the walker, as eyeReach holds it.
+    expect(eyePlace(AT, [0, 0, 0], [2, 0.5, 0], ROOM, [item(slab('x', 1, 0))])).toEqual([0, 0, 0])
+  })
+
+  it('keeps an eye ahead of the walker at its height at the foot of a riser: up, then over', () => {
+    // His operative's eye, 2.8 up and 0.27 ahead, the walker 0.05 short of a riser 1 tall.
+    const items = riser(0.05, 1)
+    // The straight line runs into the riser low down, and takes the eye back to the feet.
+    expect(eyeReach(AT, [0, 0, 0], [0.27, 2.8, 0], ROOM, items)).toBeLessThan(0.05)
+    const p = eyePlace(AT, [0, 0, 0], [0.27, 2.8, 0], ROOM, items)
+    expect(p[0]).toBeCloseTo(0.27, 9)
+    expect(p[1]).toBeCloseTo(2.8, 9)
+  })
+
+  it('holds the near plane\u2019s room from a riser in front of the eye, keeping its height', () => {
+    // An eye straight up, 1.33, the walker 0.05 short of a riser 2 tall: the eye is as near it as the walker.
+    const items = riser(0.05, 2)
+    expect(eyeReach(AT, [0, 0, 0], [0, 1.33, 0], ROOM, items)).toBe(1)
+    const p = eyePlace(AT, [0, 0, 0], [0, 1.33, 0], ROOM, items)
+    expect(p[1]).toBeCloseTo(1.33, 9)
+    expect(0.05 - p[0]).toBeGreaterThanOrEqual(ROOM - 1e-9)
+    // Forward toward it, it is held short and stepped back the same.
+    const q = eyePlace(AT, [0, 0, 0], [0.5, 1.33, 0], ROOM, items)
+    expect(q[1]).toBeCloseTo(1.33, 9)
+    expect(0.05 - q[0]).toBeGreaterThanOrEqual(ROOM - 1e-9)
+  })
+
+  it('lifts an eye off the top of the next step a stair\u2019s trail lowered it onto', () => {
+    // The walker 0.1 short of a riser 1 tall; the eye 0.3 ahead and 1.03 up, 0.03 over that step's top.
+    const p = eyePlace(AT, [0, 0, 0], [0.3, 1.03, 0], ROOM, riser(0.1, 1))
+    expect(p[0]).toBeCloseTo(0.3, 9)
+    expect(p[1] - 1).toBeGreaterThanOrEqual(ROOM - 1e-9)
+  })
+
+  it('slides a third-person eye far behind down its line short of a wall, as eyeReach does', () => {
+    // 3 behind and 0.5 up, a wall 1 behind: up-then-over is only for an eye mostly above the walker.
+    const items = [item(slab('z', 1, 1))]
+    const k = eyeReach(AT, [0, 0, 0], [0, 0.5, 3], ROOM, items)
+    const p = eyePlace(AT, [0, 0, 0], [0, 0.5, 3], ROOM, items)
+    expect(p[1]).toBeCloseTo(0.5 * k, 9)
+    expect(p[2]).toBeCloseTo(3 * k, 9)
+  })
+
+  it('keeps the near plane\u2019s room in pseudo-random rooms, wherever the walker is not itself nearer', () => {
+    let seed = 23
+    const rnd = (): number => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 }
+    let kept = 0
+    for (let trial = 0; trial < 120; trial++) {
+      clearWalls()
+      const items: WallItem[] = [item(box([-720, -240, -720], [720, 0, 720]))]
+      const solids: Array<{ lo: number[]; hi: number[] }> = [{ lo: [-720, -240, -720], hi: [720, 0, 720] }]
+      for (let w = 0; w < 3; w++) {
+        // A step or a pillar beside the walker, never over its point.
+        const x = Math.round((0.02 + rnd() * 1.5) * 120) * (rnd() < 0.5 ? 1 : -1)
+        const z = Math.round((rnd() - 0.5) * 2 * 120)
+        const lo = [x > 0 ? x : x - 240, 0, z - 120], hi = [x > 0 ? x + 240 : x, Math.round((0.3 + rnd() * 3) * 120), z + 120]
+        items.push(item(box(lo, hi)))
+        solids.push({ lo, hi })
+      }
+      const eye: [number, number, number] = [(rnd() - 0.5) * 1.2, 0.5 + rnd() * 2.5, (rnd() - 0.5) * 1.2]
+      const p = eyePlace(AT, [0, 0, 0], eye, ROOM, items)
+      for (const b of solids) {
+        const d = away(p, b.lo, b.hi)
+        // At least the room from every solid, unless boxed in tighter than the room on both sides.
+        if (d >= ROOM - 1e-6) kept++
+        else expect(away([0, 0, 0], b.lo, b.hi), JSON.stringify({ eye, p, b, d })).toBeLessThan(2 * ROOM)
+      }
+      // Never through a face from the walker: up its line (asked with no room), and never inside a solid.
+      expect(eyeReach(AT, [0, 0, 0], [0, p[1], 0], 0, items)).toBe(1)
+      for (const b of solids) expect(away(p, b.lo, b.hi), JSON.stringify({ eye, p, b })).toBeGreaterThan(0)
+    }
+    expect(kept).toBeGreaterThan(400)
+  })
+})
+

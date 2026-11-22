@@ -56,7 +56,7 @@ import { isLook } from './lookTool'
 import { Rail } from './shell/Rail'
 import { Sheet } from './shell/Sheet'
 import { Strip } from './shell/Strip'
-import { TopBar } from './shell/TopBar'
+import { TopBar, backToName } from './shell/TopBar'
 import { ViewBall } from './shell/ViewBall'
 import { TutorialTip } from './shell/TutorialTip'
 import { AREA_LABEL, type Area, type SheetKind } from './sheets/areas'
@@ -221,6 +221,8 @@ export function Workshop(): JSX.Element | null {
     else if (ws.eyeEdit) ws.setEyeEdit(false)
     // Not in LOOK, where what is held is out of sight and stays held (benchLook.tsx): Esc goes on to close.
     else if (!isLook(ws.tool) && (ws.selection.length || ws.partSel.length || ws.selectedFaces.length > 0 || ws.facePick.length)) { ws.selectVertex(null); ws.clearFacePick() }
+    // Inside a placed object: up one level, as BACK does. The workshop closes only from the top.
+    else if (backToName(ws) !== null) ws.back()
     else ws.closeWorkshop()
   })
 

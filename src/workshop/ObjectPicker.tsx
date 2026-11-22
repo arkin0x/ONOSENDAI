@@ -18,7 +18,8 @@ import { GENERAL_RELAYS } from '../lib/contacts'
 import type { NostrEvent } from '../lib/events'
 import { fetchRef } from '../lib/parts'
 import { keepOwnTable } from '../lib/carried'
-import { queryAny, relaySet } from '../lib/relay'
+import { queryAny } from '../lib/relay'
+import { readRelays } from '../store/useRelays'
 import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop, type StampObject } from '../store/useWorkshop'
 import { usePublished } from '../store/usePublished'
@@ -89,7 +90,7 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
   useEffect(() => {
     let live = true
     setMine(null)
-    void queryAny([...new Set([...relaySet(), ...GENERAL_RELAYS])], { kinds: [OBJECT_KIND], authors: [me] }, WAIT_MS)
+    void queryAny([...new Set([...readRelays(), ...GENERAL_RELAYS])], { kinds: [OBJECT_KIND], authors: [me] }, WAIT_MS)
       .then((events) => {
         // What the relays hold under this key is what SHARD's PUBLISH tag
         // reports (store/usePublished.ts): an object published from another

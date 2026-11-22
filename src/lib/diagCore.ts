@@ -356,6 +356,21 @@ export function verifyRow(t: number, byKind: ReadonlyMap<number, { n: number; sc
   return [t, n, schnorr, hashed, compared, deferred, Math.round(ms * 10) / 10, top]
 }
 
+/** One row per window with labelled tasks timed (lib/taskStats.ts): the top labels by time. */
+export const TASK_COLUMNS = ['t', 'top'] as const
+/** One entry of a task row's `top`: an IndexedDB read's database and store, or what yielded. */
+export const TASK_LABEL_COLUMNS = ['label', 'n', 'ms', 'maxMs'] as const
+/** Labels kept per window. */
+export const TASK_TOP = 8
+
+/** A window's labelled tasks as a row (TASK_COLUMNS), or null when none ran. */
+export function taskRow(t: number, byLabel: ReadonlyMap<string, { n: number; ms: number; max: number }>): Array<number | Array<Array<string | number>>> | null {
+  if (byLabel.size === 0) return null
+  const top = [...byLabel.entries()].sort((a, b) => b[1].ms - a[1].ms).slice(0, TASK_TOP)
+    .map(([label, k]) => [safeLabel(label), k.n, Math.round(k.ms * 10) / 10, Math.round(k.max * 10) / 10])
+  return [t, top]
+}
+
 /** The columns of one sample row. Counts over the window unless the name says otherwise. */
 export const DIAG_COLUMNS = [
   't', 'hidden', 'focused', 'frames', 'ftP50', 'ftP95', 'ftP99', 'ftMax',

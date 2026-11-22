@@ -114,6 +114,9 @@ export function rekeyCarried(model: ShardModel, me: string | null): ShardModel {
     return { ...x, refs: x.refs.map((r: unknown) => (Array.isArray(r) && r[0] === 'a' && typeof r[1] === 'string' && renamed.has(r[1]) ? ['a', renamed.get(r[1]), ...r.slice(2)] : r)) }
   }
   // The keys go back in code point order (DECK-0003 §1.2): plain string comparison.
+  // Only the renamed ones: a key under anyone but the event's author counted for
+  // nobody where it was read, and one under your name in someone else's event is
+  // a forgery that would count once the copy is yours (review of the edit view).
   const rewritten: Array<[string, unknown]> = []
   for (const [key, payload] of Object.entries(model.objects)) {
     const next = renamed.get(key)

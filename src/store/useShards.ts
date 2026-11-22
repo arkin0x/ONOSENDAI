@@ -107,7 +107,8 @@ import { dnaResolver } from '../lib/seeds/seedSources'
 import { seedSnapOffered } from '../lib/seeds/orientation'
 import { seedItemOf } from '../lib/seeds/seedItem'
 import { SEALED_KIND, freshSealedD, isSealedRef, refOf, rememberSealed, utf8Bytes, retractSealed, sealedChanges, sealedEventOf, sealedItemOf, sealedRefParts, sealedTemplate, sendBagWithSealed, type OutgoingSealed } from '../lib/sealed'
-import { loadLedger, publishState, retractionTemplate, shardFingerprint, type Ledger } from '../lib/published'
+import { loadLedger, retractionTemplate, type Ledger } from '../lib/published'
+import { sealedAsPiece } from '../lib/partForm'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
 import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
@@ -383,13 +384,11 @@ function workshopPiece(address: string, me: string, ledger: Ledger): Record<stri
   const a = parseAddress(address)
   if (!a || a.kind !== OBJECT_KIND || a.pubkey !== me) return undefined
   const s = useWorkshop.getState().shards.find((x) => x.id === a.d)
-  if (!s || (s.vertices.length === 0 && (s.parts?.length ?? 0) === 0)) return undefined
-  const rec = ledger[s.id]
-  if (rec && rec.pubkey !== me) return undefined
-  // Published under your key and unedited since: it stays a plain link to the
-  // public object, which every finder fetches (owner, 2026-11-22). Edited
-  // since, the public one is stale: the hide seals the workshop's.
-  if (rec && publishState(rec, shardFingerprint(s), me) === 'published') return undefined
+  // Published under your key and unedited since, it stays a plain link to the
+  // public object, which every finder fetches (owner, 2026-11-22); edited since,
+  // the public one is stale and the hide seals the workshop's. The rule the
+  // workshop's LINK and COPY marks show (lib/partForm.ts sealedAsPiece).
+  if (!s || !sealedAsPiece(s, ledger, me)) return undefined
   return toPayload(withAuthoredConstrain(s)) as unknown as Record<string, unknown>
 }
 
@@ -2519,7 +2518,7 @@ export const useShards = create<ShardsState>((set, get) => {
    */
   async function addressStillThis(object: NostrEvent): Promise<'this' | 'newer' | 'silent'> {
     try {
-      const answers = (await queryEach({ kinds: [object.kind], authors: [object.pubkey], '#d': [dOf(object)] })).filter((a) => a.outcome === 'answered')
+      const answers = (await queryEach({ kinds: [object.kind], authors: [object.pubkey], '#d': [dOf(object)] }, undefined, { written: true })).filter((a) => a.outcome === 'answered')
       if (answers.length === 0) return 'silent'
       return answers.some((a) => a.events.some((e) => e.id !== object.id && e.created_at >= object.created_at)) ? 'newer' : 'this'
     } catch {
@@ -2887,7 +2886,7 @@ export const useShards = create<ShardsState>((set, get) => {
     let settingsFrom: NostrEvent | null = null
     let heard = false
     try {
-      const answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [owner], '#d': [lookupId] })
+      const answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [owner], '#d': [lookupId] }, undefined, { written: true })
       still()
       const events = answers.flatMap((a) => a.events)
       heard = answers.some((a) => a.outcome === 'answered')
@@ -3152,7 +3151,7 @@ export const useShards = create<ShardsState>((set, get) => {
   async function stillInItsBag(d: MyDeployment): Promise<'this' | 'gone' | 'silent'> {
     const me = cyber().identity.pubkey
     let answers: Awaited<ReturnType<typeof queryEach>>
-    try { answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [me], '#d': [d.lookupId] }) } catch { return 'silent' }
+    try { answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [me], '#d': [d.lookupId] }, undefined, { written: true }) } catch { return 'silent' }
     if (!answers.some((a) => a.outcome === 'answered')) return 'silent'
     const newest = answers.flatMap((a) => a.events).filter((e) => e.pubkey === me).sort((a, b) => b.created_at - a.created_at)[0]
     if (!newest) return 'gone'
@@ -3442,7 +3441,7 @@ export const useShards = create<ShardsState>((set, get) => {
       return held.filter(inItsBag)
     }
     if (!live) return rows()
-    const asked = await queryEach({ kinds: [HIDDEN_KIND], authors: [d.inner.pubkey], '#d': [lookupId] })
+    const asked = await queryEach({ kinds: [HIDDEN_KIND], authors: [d.inner.pubkey], '#d': [lookupId] }, undefined, { written: true })
     if (cyber().identity.pubkey !== owner) return SWITCHED
     const answers = asked.filter((a) => a.outcome === 'answered')
     if (answers.length === 0) return 'No relay answered, so this cannot tell what is behind the door. Nothing has changed. Try again when one is reachable.'

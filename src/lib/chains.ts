@@ -31,10 +31,11 @@
 import type { Filter } from 'nostr-tools/filter'
 import { RECOGNIZED_ACTIONS, actionLink, buildChain, chainGap, newestSpawn, parseAction, type ActionEvent, type NostrEvent } from './events'
 import { nip19 } from 'nostr-tools'
-import { CYBERSPACE_RELAY, signedIn, authPending, dropRelays, query, queryEach, queryEachSettled, relaySet, subscribe } from './relay'
+import { CYBERSPACE_RELAY, signedIn, authPending, dropRelays, query, queryEach, queryEachSettled, readRelaySet, subscribe } from './relay'
 import { normalizeURL } from 'nostr-tools/utils'
 import { PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer, AUTH_STALLED } from './relayOutcome'
 import { chainHolders, noteHoldersFrom } from './chainHolders'
+import { isReadFallbackRelay } from '../store/useRelays'
 
 export { PARTIAL_CHAIN_REASON }
 
@@ -298,7 +299,7 @@ export const HEAD_CONFIRM_MS = 2500
  * | Canonical relay | Other configured relays | Result |
  * |---|---|---|
  * | answered | every chain-holding relay answered, or HEAD_CONFIRM_MS passed since the requests went out | the events (pass, unless they move the head) |
- * | no answer by the deadline | at least one answered holding `anchorId` | the events (degraded pass) |
+ * | no answer by the deadline | at least one answered holding `anchorId`, not the read-only former canonical relay | the events (degraded pass) |
  * | no answer | none answered holding `anchorId`, none sent a newer move | null (refuse) |
  * | any | one sent a newer move | the events, which the caller adopts and refuses on |
  *
@@ -349,7 +350,7 @@ export async function confirmChainEvents(
   opts: { since?: number; anchorId?: string; reconnect?: boolean; maxWait?: number } = {},
 ): Promise<NostrEvent[] | null> {
   const canonical = normalizeURL(CYBERSPACE_RELAY)
-  const relays = [...new Set([canonical, ...relaySet().map((r) => normalizeURL(r))])]
+  const relays = [...new Set([canonical, ...readRelaySet().map((r) => normalizeURL(r))])]
   const holders = chainHolders(pubkey)
   const waitFor = relays.filter((url) => holders.has(url))
   const maxWait = opts.maxWait ?? HEAD_CONFIRM_MS
@@ -378,7 +379,9 @@ export async function confirmChainEvents(
     const merged = mergeAnswers(got)
     if (got.some((a) => a.url === canonical && a.outcome === 'answered')) return merged
     const holdsChain = (a: RelayAnswer): boolean => opts.anchorId === undefined || a.events.some((e) => e.id === opts.anchorId)
-    if (got.some((a) => a.url !== canonical && a.outcome === 'answered' && holdsChain(a))) return merged
+    // Never the read-only former canonical relay: no move of this version
+    // reaches it, so holding an older anchor says nothing of what came since.
+    if (got.some((a) => a.url !== canonical && !isReadFallbackRelay(a.url) && a.outcome === 'answered' && holdsChain(a))) return merged
     // No answer counts, but a newer move any relay sent still refuses the
     // move: handed back, the caller adopts it and the head moves.
     return extendsChain(merged, have) ? merged : null

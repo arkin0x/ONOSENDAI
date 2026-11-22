@@ -6215,7 +6215,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // renders and the save) go in a task of their own, not inside it
       // (owner, 2026-11-21: "smooth until I'm getting movements back from
       // the signer"). A local key signs at once, and has no such message.
-      if (currentSigner.kind !== 'local') await yieldTask()
+      if (currentSigner.kind !== 'local') await yieldTask('land')
       if (!live()) return
       // The steps after it were proved from this very id.
       if (event.id !== lane.id) { failLanes(WALK_SIGNED_OTHER_MESSAGE); return }
@@ -8682,6 +8682,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   setPublishStatus: (id, status, reason) => {
     const { published, events, chain } = get()
     if (!(id in published)) return
+    // Never back from 'ok', as setPublishStatuses: a relay's echo or another send may have marked it first, and the backlog (lib/unsent.ts) counts on an 'ok' staying so.
+    if (published[id] === 'ok' && status !== 'ok') return
     const next = { ...published, [id]: status }
     set({ published: next, publishError: status === 'failed' ? reason ?? 'relay refused' : null })
     if (status === 'ok') saveChain(events, next, chain)

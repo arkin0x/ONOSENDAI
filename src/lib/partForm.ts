@@ -30,9 +30,22 @@ export function stillPublished(shard: ShardModel, ledger: Ledger, me: string | n
   return !!rec && rec.pubkey === me && publishState(rec, shardFingerprint(shard), me) === 'published'
 }
 
-/** What a shard of yours is when placed from the workshop: a link while published and unedited, else a copy. */
+/**
+ * Whether a hide seals this shard of yours as a piece (lib/pieces.ts) when a
+ * shard places it from the workshop: it draws something, it is not one this
+ * browser knows was published under another key, and it is not published
+ * under yours and unedited. The one test store/useShards.ts and the badges share.
+ */
+export function sealedAsPiece(shard: ShardModel, ledger: Ledger, me: string | null | undefined): boolean {
+  if (!me || (shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0)) return false
+  const rec = ledger[shard.id]
+  if (rec && rec.pubkey !== me) return false
+  return !stillPublished(shard, ledger, me)
+}
+
+/** What a shard of yours is when placed from the workshop: a copy when a hide seals it, else a link. */
 export function shardForm(shard: ShardModel, ledger: Ledger, me: string | null | undefined): PartForm {
-  return stillPublished(shard, ledger, me) ? 'link' : 'copy'
+  return sealedAsPiece(shard, ledger, me) ? 'copy' : 'link'
 }
 
 const holds = (table: unknown, key: string): boolean =>

@@ -20,8 +20,12 @@ import { FORM_LABEL, type PartForm } from '../lib/partForm'
 export function PartFormBadge({ form, size = 'small' }: { form: PartForm; size?: 'small' | 'inline' }): JSX.Element {
   const Icon = form === 'link' ? Link : Copy
   return (
-    <span className={`partform partform--${form} partform--${size}`} role="img" aria-label={FORM_LABEL[form]} title={FORM_LABEL[form]}>
-      <Icon size={size === 'inline' ? 12 : 13} strokeWidth={2.5} aria-hidden />
+    <span className={`partform-wrap partform-wrap--${size}`} role="img" aria-label={FORM_LABEL[form]} title={FORM_LABEL[form]}>
+      <span className={`partform partform--${form} partform--${size}`}>
+        <Icon size={size === 'inline' ? 12 : 13} strokeWidth={2.5} aria-hidden />
+      </span>
+      {/* Beside the publish status, the word too: a phone shows no hover. */}
+      {size === 'inline' && <span className={`partform-word partform-word--${form}`} aria-hidden>{form === 'link' ? 'LINK' : 'COPY'}</span>}
     </span>
   )
 }

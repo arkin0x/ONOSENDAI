@@ -1193,15 +1193,14 @@ function BenchImpl(): JSX.Element {
 
   // A tap on a drawn face in FACE mode selects it. Corners still win: their hit
   // spheres stand proud of the face, so the raycast meets them first.
-  // A placed object is one whole thing (DECK-0003 §1.10). In SELECT and in
-  // VIEW a tap puts it in or out of the selection, so the pad can move, turn
-  // and delete a stamped object with the tool put down (arkinox, 2026-10-10);
-  // in FACE it is caught here, so a tap on it never selects a face of this
-  // object hidden behind it. In the placing tools it lets the tap through, to
-  // the grid it stands on.
+  // A placed object is one whole thing (DECK-0003 §1.10). In SELECT with
+  // OBJECTS a tap puts it in or out of the selection, so the pad can move,
+  // turn and delete it; in PAINT and FACE it is caught here, so a tap on it
+  // never paints or selects a face hidden behind it; in VIEW it is only caught.
+  // In the placing tools it lets the tap through, to the grid it stands on.
   // A second tap on the same placed object, soon after the first, opens it to
   // edit in place (useWorkshop enterPart); BACK goes up again (owner, 2026-11-22).
-  const lastTap = useRef<{ part: number; at: number; shard: string | null } | null>(null)
+  const lastTap = useRef<{ part: number; at: number; shard: string | null; sel: number[] } | null>(null)
   const onPart = (e: ThreeEvent<MouseEvent>, part: number): void => {
     if (e.delta > tapSlop() || multiPress()) return
     e.stopPropagation()
@@ -1210,14 +1209,12 @@ function BenchImpl(): JSX.Element {
     const prev = lastTap.current
     if (prev && prev.part === part && prev.shard === w.currentId && now - prev.at < DOUBLE_TAP_MS) {
       lastTap.current = null
-      // The first tap's toggle is put back: the double-tap opens, it does not select.
-      if (w.tool === 'select' && w.selectKind === 'objects') w.togglePart(part)
+      // The selection as it was before the first tap: the double-tap opens, it does not select.
+      if (w.tool === 'select' && w.selectKind === 'objects') w.setPartSelection(prev.sel)
       void w.enterPart(part, fetchRef)
       return
     }
-    lastTap.current = { part, at: now, shard: w.currentId }
-    // OBJECTS in SELECT takes it (workshop redesign, phase 3). In PAINT and
-    // FACE the tap stops here, so it never paints or picks through it.
+    lastTap.current = { part, at: now, shard: w.currentId, sel: [...w.partSel] }
     if (w.tool === 'select' && w.selectKind === 'objects') w.togglePart(part)
   }
 

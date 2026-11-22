@@ -43,12 +43,13 @@ import {
   validPoint,
   type ShardMode,
   type ShardModel,
-  type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
+  type ShardVertex, type Part, type Ref, addressesIn, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
 import { readGlow, withGlow, withPointSize, type Glow } from 'sno-core/glow'
 import { drawnFace, withFace, type FaceMode } from 'sno-core/face'
 import { GLOW_START, suggestedGlowStyle } from '../lib/pointGlow'
-import { noTable, signedTableOnly, you } from '../lib/carried'
+import { noTable, rekeyCarried, signedTableOnly, you } from '../lib/carried'
+import { fingerprint, loadLedger } from '../lib/published'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 import { bounceOf, springboardOf, withBounce, type Bounce } from '../lib/walkBounce'
 import { withAnim } from '../lib/anim'
@@ -753,10 +754,18 @@ export interface WorkshopState {
  * entry, what its first edit points at the copy.
  */
 export interface PartFrame {
+  /** The shard that placed the one opened. */
   id: string
+  /** The shard opened from it: BACK means this level only while it is still on the bench. */
+  child: string
   past: ShardModel[]
   future: ShardModel[]
-  pending?: { ref: number; address: string; copyId: string; fromTable: boolean; done?: true }
+  /**
+   * A copy opened in place of a link or a table entry: the ref it takes the
+   * place of, the address that ref named, and the copy as it was made
+   * (`born`, its fingerprint), so any change to it, however made, is seen.
+   */
+  pending?: { ref: number; address: string; copyId: string; fromTable: boolean; born: string; done?: true }
 }
 
 /** A shard from wire form (DECK-0003 §1), as PASTE and bulk import read it; null if it is not one. */
@@ -1008,50 +1017,80 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     const partSel = get().partSel.filter((k) => k < (next.parts?.length ?? 0))
     // A copy opened in place of a link or a table entry: its first edit points
     // its parent at it, one edit of the parent that the parent's UNDO takes back.
-    const backStack = pointParentAtCopy(list, get().backStack, shards[i].id)
+    const stack = get().backStack
+    const top = stack[stack.length - 1]
+    const pointed = top?.pending && !top.pending.done && top.pending.copyId === shards[i].id ? pointParent(list, top) : null
+    const backStack = pointed ? [...stack.slice(0, -1), pointed] : null
     set({ shards: list, past: [...past.slice(-(HISTORY - 1)), shards[i]], future: [], notice, turnPivot: null, partSel, ...(backStack ? { backStack } : {}) })
     save(list)
     return true
   }
 
   /**
-   * The way in, with the top copy's parent pointed at it in `list` (changed in
-   * place), or null when there is nothing to point: not a copy, or done already.
+   * Point a level's parent at its copy, in `list` (changed in place): its ref
+   * names the copy, a table entry nothing places any more goes, and the parent
+   * as it was joins the level's UNDO. The level as it now stands, or null when
+   * the parent is gone or nobody is signed in (the copy then stays as it is).
    */
-  const pointParentAtCopy = (list: ShardModel[], stack: PartFrame[], editedId: string): PartFrame[] | null => {
-    const top = stack[stack.length - 1]
-    const p = top?.pending
-    if (!p || p.done || p.copyId !== editedId) return null
-    const j = list.findIndex((s) => s.id === top.id)
+  const pointParent = (list: ShardModel[], frame: PartFrame): PartFrame | null => {
+    const p = frame.pending
     const me = you()
-    if (j < 0 || !me) return null
+    const j = list.findIndex((s) => s.id === frame.id)
+    if (!p || p.done || j < 0 || !me) return null
     const parent = list[j]
     const refs = (parent.refs ?? []).map((r, k) => (k === p.ref ? (['a', `33331:${me}:${p.copyId}`] as Ref) : r))
     let next: ShardModel = { ...parent, refs, updatedAt: Date.now() }
-    // A table entry no ref names any more goes with it (DECK-0003 §1.10: a key no placement names is not written).
-    if (p.fromTable && next.objects && !refs.some((r) => r[0] === 'a' && r[1] === p.address)) {
-      const { [p.address]: _gone, ...kept } = next.objects as Record<string, unknown>
-      void _gone
-      const { objects: _all, ...rest } = next
-      void _all
-      next = Object.keys(kept).length ? { ...rest, objects: kept as ShardModel['objects'] } : rest
+    // A table entry nothing places any more goes (DECK-0003 §1.10: a key no
+    // placement names is not written); one another entry places stays.
+    const table = next.objects as Record<string, unknown> | undefined
+    if (p.fromTable && table && !refs.some((r) => r[0] === 'a' && r[1] === p.address)) {
+      const placedByEntry = Object.entries(table).some(([k, v]) => k !== p.address && addressesIn(v).includes(p.address))
+      if (!placedByEntry) {
+        const { [p.address]: _gone, ...kept } = table
+        void _gone
+        const { objects: _all, ...rest } = next
+        void _all
+        next = Object.keys(kept).length ? { ...rest, objects: kept as ShardModel['objects'] } : rest
+      }
     }
     list[j] = next
-    return [...stack.slice(0, -1), { ...top, past: [...top.past.slice(-(HISTORY - 1)), parent], future: [], pending: { ...p, done: true } }]
+    return { ...frame, past: [...frame.past.slice(-(HISTORY - 1)), parent], future: [], pending: { ...p, done: true } }
   }
 
-  /** The list without every copy on the way in that nobody edited: a look leaves nothing behind. */
-  const dropUneditedCopies = (list: ShardModel[], frames: PartFrame[]): ShardModel[] => {
-    const gone = new Set(frames.flatMap((f) => (f.pending && !f.pending.done ? [f.pending.copyId] : [])))
-    return gone.size ? list.filter((s) => !gone.has(s.id)) : list
+  /** A copy's fingerprint: its whole payload, name included, so any change to it shows. */
+  const bornOf = (s: ShardModel): string => fingerprint(JSON.stringify(toPayload(s)))
+
+  /**
+   * Leave one level of the way in, in `list` (changed in place). A copy that
+   * changed in any way (an edit, a rename, an import, a copy inside it pointed
+   * at), or that went public, points its parent at it now; one nobody touched
+   * goes, unless it is `keep` (the shard about to be shown), and a look leaves
+   * nothing behind. Never drops a copy whose parent cannot be pointed at it.
+   * The level as it now stands.
+   */
+  const settle = (list: ShardModel[], frame: PartFrame, keep?: string | null): PartFrame => {
+    const p = frame.pending
+    if (!p || p.done) return frame
+    const k = list.findIndex((s) => s.id === p.copyId)
+    if (k < 0) return frame
+    const touched = bornOf(list[k]) !== p.born || !!loadLedger()[p.copyId]
+    if (touched) return pointParent(list, frame) ?? frame
+    if (p.copyId !== keep && list.some((s) => s.id === frame.id)) list.splice(k, 1)
+    return frame
   }
 
-  /** Leave every level of the way in at once (another shard picked, the workshop opened afresh): copies nobody edited go. */
-  const leaveAll = (): ShardModel[] | null => {
+  /**
+   * Leave every level of the way in at once (another shard picked, a new one,
+   * the workshop opened afresh), innermost first, so a copy inside a copy
+   * counts as a change to the outer one. The list as it now stands, or null
+   * when there was no way in.
+   */
+  const leaveAll = (keep?: string | null): ShardModel[] | null => {
     const stack = get().backStack
     if (stack.length === 0) return null
-    const list = dropUneditedCopies(get().shards, stack)
-    return list === get().shards ? null : list
+    const list = get().shards.slice()
+    for (let i = stack.length - 1; i >= 0; i--) settle(list, stack[i], keep)
+    return list
   }
 
   /** Faces show only in SOLID: a shard's first faces switch it there. */
@@ -1188,7 +1227,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     backStack: [],
 
     openWorkshop: (id, panel) => {
-      const left = leaveAll()
+      const left = leaveAll(id ?? get().currentId)
       if (left) { set({ shards: left }); save(left) }
       if (get().backStack.length) set({ backStack: [] })
       const { shards } = get()
@@ -1207,8 +1246,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     select: (id) => {
-      // Picked from the list: the way in is left, its unedited copies with it.
-      const left = leaveAll()
+      // Picked from the list: the way in is left, its untouched copies with it (never the one picked).
+      const left = leaveAll(id)
       if (left) save(left)
       set({ ...(left ? { shards: left } : {}), backStack: [], currentId: id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null })
     },
@@ -2131,7 +2170,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const me = you()
       const open = (id: string, notice: string | null, pending?: PartFrame['pending']): void => {
         const { past, future, backStack } = get()
-        set({ backStack: [...backStack, { id: parent.id, past, future, ...(pending ? { pending } : {}) }], currentId: id, past: [], future: [], selection: [], partSel: [], selectedFaces: [], facePick: [], turnPivot: null, notice })
+        set({ backStack: [...backStack, { id: parent.id, child: id, past, future, ...(pending ? { pending } : {}) }], currentId: id, past: [], future: [], selection: [], partSel: [], selectedFaces: [], facePick: [], turnPivot: null, notice })
       }
       const table = parent.objects as Record<string, unknown> | undefined
       const inTable = !!table && Object.prototype.hasOwnProperty.call(table, ref[1])
@@ -2143,13 +2182,32 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       }
       // Otherwise your copy: of the table's entry, or of the public object.
       let model: ShardModel | null = null
-      if (inTable) model = fromPayload(table![ref[1]], ref[1])
-      else {
+      if (inTable) {
+        // An entry places what the same table holds (DECK-0003 §1.10, one table at
+        // the root): the copy carries those entries in a table of its own.
+        const read = fromPayload(table![ref[1]], ref[1])
+        if (read) {
+          const carried: Record<string, unknown> = {}
+          const queue = addressesIn(table![ref[1]])
+          while (queue.length) {
+            const k = queue.shift()!
+            if (k === ref[1] || carried[k] !== undefined || !Object.prototype.hasOwnProperty.call(table, k)) continue
+            carried[k] = table![k]
+            queue.push(...addressesIn(table![k]))
+          }
+          const { objects: _none, ...bare } = read
+          void _none
+          model = { ...bare, ...(Object.keys(carried).length ? { objects: carried as ShardModel['objects'] } : {}), author: me ?? undefined }
+        }
+      } else {
         const answer = fetch ? await fetch(ref).catch(() => null) : null
         const payload = answer instanceof Fetched ? answer.payload : answer
-        model = payload == null ? null : fromPayload(payload, ref[1])
+        const read = payload == null ? null : fromPayload(payload, ref[1])
         // The bench moved on while the relays answered: nothing is opened.
         if (get().current() !== parent) return
+        // What it carries comes along, keyed under you (as a copy taken from a chest is).
+        const author = answer instanceof Fetched ? answer.pubkey : a?.pubkey ?? null
+        model = read ? rekeyCarried({ ...read, author: author ?? undefined }, me) : null
       }
       if (!model) {
         set({ notice: inTable ? 'That part is carried here, but it is not one the format can read.' : 'That object did not come back from the relays, so there is nothing to open.' })
@@ -2157,18 +2215,22 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       }
       const credit: Credit | undefined = !inTable && a && a.pubkey !== me ? { address: ref[1], ...(ref[2] ? { relay: ref[2] } : {}) } : undefined
       const copyId = get().importShard(model, credit)
-      open(copyId, inTable ? 'Editing this part here. Your first change makes it its own shard.' : 'Your copy, to edit here. The public object stays as it is; your first change points this shard at your copy.', { ref: part.ref, address: ref[1], copyId, fromTable: inTable })
+      const copy = get().shards.find((s) => s.id === copyId)!
+      open(copyId, `Your copy of ${copy.name}. ${parent.name} uses it once you change it${inTable ? '' : '; the public object stays as it is'}.`, { ref: part.ref, address: ref[1], copyId, fromTable: inTable, born: bornOf(copy) })
     },
 
     back: () => {
       const stack = get().backStack
       const top = stack[stack.length - 1]
       if (!top) return
-      const list = dropUneditedCopies(get().shards, [top])
-      if (list !== get().shards) save(list)
-      // The shard to go back to was deleted meanwhile: the way in ends here.
-      if (!list.some((s) => s.id === top.id)) { set({ shards: list, backStack: [] }); return }
-      set({ shards: list, backStack: stack.slice(0, -1), currentId: top.id, past: top.past, future: top.future, selection: [], partSel: [], selectedFaces: [], facePick: [], turnPivot: null, notice: null })
+      // Another shard came onto the bench some other way: there is no level to go back up.
+      if (get().currentId !== top.child) { set({ backStack: [] }); return }
+      const list = get().shards.slice()
+      const frame = settle(list, top, null)
+      // The shard to go back to was deleted meanwhile: the way in ends here, on what is shown.
+      if (!list.some((s) => s.id === top.id)) { save(list); set({ shards: list, backStack: [] }); return }
+      if (list.length !== get().shards.length || list.some((s, i) => s !== get().shards[i])) save(list)
+      set({ shards: list, backStack: stack.slice(0, -1), currentId: frame.id, past: frame.past, future: frame.future, selection: [], partSel: [], selectedFaces: [], facePick: [], turnPivot: null, notice: null })
     },
   }
 })

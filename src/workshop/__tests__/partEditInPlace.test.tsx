@@ -21,7 +21,7 @@ if (typeof localStorage === 'undefined') {
 import { newShard, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { useWorkshop } from '../../store/useWorkshop'
 import { useCyberspace } from '../../store/useCyberspace'
-import { FORM_LABEL, partForm, shardForm, stillPublished } from '../../lib/partForm'
+import { FORM_LABEL, partForm, sealedAsPiece, shardForm, stillPublished } from '../../lib/partForm'
 import { shardFingerprint, type Ledger } from '../../lib/published'
 import { PartFormBadge } from '../PartFormBadge'
 import { MAX_BADGES, badgeSpots } from '../PartBadges'
@@ -57,7 +57,7 @@ describe('the LINK or COPY rule (lib/partForm.ts)', () => {
     expect(shardForm(tile, published, me())).toBe('link')
     expect(shardForm({ ...tile, name: 'Tile, edited' }, published, me())).toBe('copy')
     expect(shardForm(tile, {}, me())).toBe('copy')
-    expect(shardForm(tile, { tile: { at: 1, fp: shardFingerprint(tile), pubkey: THEM } }, me())).toBe('copy')
+    expect(shardForm(tile, { tile: { at: 1, fp: shardFingerprint(tile), pubkey: THEM } }, me())).toBe('link')
   })
 
   it('a relay hint and anyone else\'s object are links; a table entry and an unpublished piece are copies', () => {
@@ -82,6 +82,25 @@ describe('the LINK or COPY rule (lib/partForm.ts)', () => {
     expect(copy).toContain('partform--copy')
     expect(copy).toContain(`aria-label="${FORM_LABEL.copy}"`)
     expect(copy).toContain('lucide-copy')
+    // Beside the publish status the word shows too: a phone has no hover.
+    expect(copy).toContain('>COPY<')
+    expect(link).not.toContain('>LINK<')
+  })
+
+  it('the badge and the hide read one rule: what is sealed is a COPY, what is not is a LINK', () => {
+    const tile = tri('Tile', 'tile')
+    const empty: ShardModel = { ...newShard('Empty'), id: 'empty' }
+    const cases: Array<[ShardModel, Ledger, boolean]> = [
+      [tile, {}, true],
+      [tile, { tile: { at: 1, fp: shardFingerprint(tile), pubkey: me() } }, false],
+      [tile, { tile: { at: 1, fp: 'stale', pubkey: me() } }, true],
+      [tile, { tile: { at: 1, fp: shardFingerprint(tile), pubkey: THEM } }, false],
+      [empty, {}, false],
+    ]
+    for (const [s, ledger, sealed] of cases) {
+      expect(sealedAsPiece(s, ledger, me())).toBe(sealed)
+      expect(shardForm(s, ledger, me())).toBe(sealed ? 'copy' : 'link')
+    }
   })
 
   it('a mark stands on the top corner of every placed object, and none on a floor of very many', () => {
@@ -92,6 +111,7 @@ describe('the LINK or COPY rule (lib/partForm.ts)', () => {
     expect(spots[0].at).toEqual([0.5, 0.5, 0.5])
     expect(spots[1].at[0]).toBeCloseTo(2.5)
     const floor = placing('Floor', 'floor', Array.from({ length: MAX_BADGES + 1 }, (_, i) => own(`t${i}`)))
+    expect(MAX_BADGES).toBeLessThanOrEqual(32)
     expect(badgeSpots(floor, new Map(), () => 'link')).toEqual([])
   })
 })
@@ -192,6 +212,85 @@ describe('double-tap opens a placed object to edit in place; BACK goes up', () =
     editHere()
     W().back()
     expect(partForm(own('tile'), byId('floor')!, me(), byId, ledger)).toBe('copy')
+  })
+})
+
+describe('what a reviewer tried', () => {
+  it('a link inside a link: an edit to the inner copy reaches the outer build', async () => {
+    const inner: Ref = ['a', `33331:${THEM}:inner`, 'wss://relay.test']
+    const outer: Ref = ['a', `33331:${THEM}:outer`, 'wss://relay.test']
+    const payloads: Record<string, unknown> = { [outer[1]]: toPayload(placing('Outer', 'outer', [inner])), [inner[1]]: toPayload(tri('Inner', 'inner')) }
+    const fetch = async (r: Ref) => payloads[r[1]]
+    useWorkshop.setState({ shards: [placing('Plaza', 'plaza', [outer])], currentId: 'plaza' })
+    await W().enterPart(0, fetch)
+    const c1 = W().currentId!
+    await W().enterPart(0, fetch)
+    const c2 = W().currentId!
+    editHere()
+    expect(byId(c1)!.refs).toEqual([own(c2)])
+    W().back()
+    W().back()
+    expect(W().currentId).toBe('plaza')
+    expect(byId('plaza')!.refs).toEqual([own(c1)])
+    expect(byId(c1)).toBeDefined()
+    expect(byId(c2)!.vertices).toHaveLength(4)
+  })
+
+  it('a table entry another entry places stays in the table when it is opened and edited', async () => {
+    const a = `33331:${me()}:a`
+    const b = `33331:${me()}:b`
+    const objects = { [a]: toPayload(tri('A', 'a')), [b]: toPayload(placing('B', 'b', [['a', a]])) } as ShardModel['objects']
+    useWorkshop.setState({ shards: [placing('Pond', 'pond', [['a', a], ['a', b]], { objects })], currentId: 'pond' })
+    await W().enterPart(0)
+    editHere()
+    expect(Object.keys(byId('pond')!.objects ?? {}).sort()).toEqual([a, b].sort())
+  })
+
+  it('a table entry\'s copy carries what it places from the same table', async () => {
+    const a = `33331:${me()}:a`
+    const b = `33331:${me()}:b`
+    const objects = { [a]: toPayload(tri('A', 'a')), [b]: toPayload(placing('B', 'b', [['a', a]])) } as ShardModel['objects']
+    useWorkshop.setState({ shards: [placing('Pond', 'pond', [['a', b]], { objects })], currentId: 'pond' })
+    await W().enterPart(0)
+    expect(Object.keys(byId(W().currentId!)!.objects ?? {})).toEqual([a])
+  })
+
+  it('a copy renamed and nothing else counts as changed: BACK keeps it and points the parent at it', async () => {
+    useWorkshop.setState({ shards: [placing('Plaza', 'plaza', [['a', `33331:${THEM}:statue`]])], currentId: 'plaza' })
+    await W().enterPart(0, async () => toPayload(tri('Statue', 'statue')))
+    const copyId = W().currentId!
+    W().rename(copyId, 'My statue')
+    W().back()
+    expect(byId(copyId)!.name).toBe('My statue')
+    expect(byId('plaza')!.refs).toEqual([own(copyId)])
+  })
+
+  it('the parent deleted while inside: the copy stays, with its edits, and is what the bench shows', async () => {
+    useWorkshop.setState({ shards: [placing('Plaza', 'plaza', [['a', `33331:${THEM}:statue`]])], currentId: 'plaza' })
+    await W().enterPart(0, async () => toPayload(tri('Statue', 'statue')))
+    const copyId = W().currentId!
+    useWorkshop.setState({ shards: W().shards.filter((s) => s.id !== 'plaza') })
+    editHere()
+    W().back()
+    expect(W().currentId).toBe(copyId)
+    expect(byId(copyId)!.vertices).toHaveLength(4)
+    expect(W().backStack).toEqual([])
+  })
+
+  it('picking the copy itself from the list keeps it', async () => {
+    useWorkshop.setState({ shards: [placing('Plaza', 'plaza', [['a', `33331:${THEM}:statue`]])], currentId: 'plaza' })
+    await W().enterPart(0, async () => toPayload(tri('Statue', 'statue')))
+    const copyId = W().currentId!
+    W().select(copyId)
+    expect(byId(copyId)).toBeDefined()
+    expect(W().currentId).toBe(copyId)
+  })
+
+  it('another shard put on the bench some other way: no BACK, and Esc goes on to close', async () => {
+    useWorkshop.setState({ shards: [tri('Column', 'column'), tri('Other', 'other'), placing('Hall', 'hall', [own('column')])], currentId: 'hall' })
+    await W().enterPart(0)
+    W().duplicate('other')
+    expect(backToName(W())).toBeNull()
   })
 })
 

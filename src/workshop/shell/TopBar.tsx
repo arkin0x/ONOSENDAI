@@ -29,9 +29,11 @@ export const AREAS: Array<{ area: Area; label: string; icon: LucideIcon }> = [
 ]
 
 /** The shard a double-tap came in from (useWorkshop backStack), by name, or null at the top. */
-export function backToName(s: Pick<WorkshopState, 'backStack' | 'shards'>): string | null {
+export function backToName(s: Pick<WorkshopState, 'backStack' | 'shards' | 'currentId'>): string | null {
   const top = s.backStack[s.backStack.length - 1]
-  return top ? (s.shards.find((x) => x.id === top.id)?.name ?? 'the shard') : null
+  // Only while what was opened is still on the bench: another shard picked some other way has no level above it.
+  if (!top || top.child !== s.currentId) return null
+  return s.shards.find((x) => x.id === top.id)?.name ?? 'the shard'
 }
 
 /**

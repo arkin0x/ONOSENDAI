@@ -16,14 +16,13 @@ import { useMemo } from 'react'
 import { placedBounds, refKey, type Placed } from 'sno-core/parts'
 import type { ShardModel } from 'sno-core/shards'
 import { useResolved } from '../lib/parts'
-import { partForm, type PartForm } from '../lib/partForm'
-import { useCyberspace } from '../store/useCyberspace'
-import { usePublished } from '../store/usePublished'
+import type { PartForm } from '../lib/partForm'
 import { useWorkshop } from '../store/useWorkshop'
 import { PartFormBadge } from './PartFormBadge'
+import { usePartForms } from './partForms'
 
-/** Past this many placements, no marks: a floor of tiles would be all marks. */
-export const MAX_BADGES = 96
+/** Past this many placements, no marks: a floor of tiles would be all marks, and each is a page element moved every frame. */
+export const MAX_BADGES = 32
 
 /** Where each placed object's mark stands, in the bench's render units, and what it is. */
 export function badgeSpots(shard: ShardModel, resolved: ReadonlyMap<string, { model: ShardModel | null; children: Placed['children'] }>, form: (refIndex: number) => PartForm): Array<{ index: number; at: [number, number, number]; form: PartForm }> {
@@ -45,21 +44,15 @@ export function badgeSpots(shard: ShardModel, resolved: ReadonlyMap<string, { mo
 
 export function PartBadges(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
-  const shards = useWorkshop((s) => s.shards)
-  const ledger = usePublished((s) => s.ledger)
-  const me = useCyberspace((s) => s.identity.pubkey)
   const resolved = useResolved(shard ?? null)
-  const spots = useMemo(() => {
-    if (!shard) return []
-    const byId = new Map(shards.map((s) => [s.id, s]))
-    return badgeSpots(shard, resolved, (i) => partForm(shard.refs?.[i], shard, me, (id) => byId.get(id), ledger))
-  }, [shard, shards, ledger, me, resolved])
+  const form = usePartForms(shard)
+  const spots = useMemo(() => (shard ? badgeSpots(shard, resolved, form) : []), [shard, resolved, form])
   if (spots.length === 0) return null
   return (
     <>
       {spots.map((s) => (
-        <Html key={s.index} position={s.at} wrapperClass="partform-pin" zIndexRange={[4, 0]} pointerEvents="none">
-          <PartFormBadge form={s.form} />
+        <Html key={s.index} position={s.at} zIndexRange={[4, 0]} pointerEvents="none">
+          <div className="partform-pin"><PartFormBadge form={s.form} /></div>
         </Html>
       ))}
     </>

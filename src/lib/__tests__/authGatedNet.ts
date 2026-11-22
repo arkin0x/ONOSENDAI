@@ -84,6 +84,8 @@ export interface AuthGatedNet {
     sockets: number
     /** The pubkey of every AUTH the relay was sent, in order, accepted or not. */
     authBy: string[]
+    /** Ids of the events it took. */
+    taken: string[]
   }
   /** How many of the next connections to the canonical relay fail. */
   failConnects: number
@@ -95,6 +97,8 @@ export interface AuthGatedNet {
   rejectAuth: boolean
   /** The canonical relay serves REQs before AUTH (it still sends its challenge), as grain does. */
   openReads: boolean
+  /** The canonical relay refuses a protected (NIP-70, `-` tag) event from a socket not signed in, with "auth-required:", as grain does. */
+  protectedNeedsAuth: boolean
   /**
    * The backup relay is served too, gating reads as cyberspace.nostr1.com
    * does (a challenge on every socket, REQs refused until AUTH), from the
@@ -137,12 +141,13 @@ export function authGatedNet(): AuthGatedNet {
     pref: { kind: 'nip46', pubkey: userPk, bunkerUri: `bunker://${bunkerPk}?relay=${encodeURIComponent(BUNKER_RELAY.replace(/\/$/, ''))}`, clientNsec: nip19.nsecEncode(clientSk) },
     hold: [],
     bunker: { authDelay: 0, refuseAuth: 0, authPlan: [], connectPlan: [], connects: 0, pubkeyDelay: 0, refuseSigns: 0, signAsked: 0, onAuthAsked: null, authAsked: 0, authSigned: 0 },
-    canon: { refusedReqs: 0, authOk: 0, sockets: 0, authBy: [] },
+    canon: { refusedReqs: 0, authOk: 0, sockets: 0, authBy: [], taken: [] },
     failConnects: 0,
     challengeDelay: 0,
     authOkDelay: 0,
     rejectAuth: false,
     openReads: false,
+    protectedNeedsAuth: false,
     gatedBackup: false,
     streamMs: 0,
     dropCanon() { for (const s of [...canonSockets]) s.drop() },
@@ -302,7 +307,15 @@ export function authGatedNet(): AuthGatedNet {
         next()
         return
       }
-      if (msg[0] === 'EVENT') this.deliver(['OK', (msg[1] as Ev).id, true, ''])
+      if (msg[0] === 'EVENT') {
+        const e = msg[1] as Ev
+        if (net.protectedNeedsAuth && !this.authed && e.tags.some((t) => t[0] === '-')) {
+          this.deliver(['OK', e.id, false, 'auth-required: this event is protected and requires authentication'])
+          return
+        }
+        net.canon.taken.push(e.id)
+        this.deliver(['OK', e.id, true, ''])
+      }
     }
     private bunkerRelay(msg: unknown[]): void {
       if (msg[0] === 'REQ') {

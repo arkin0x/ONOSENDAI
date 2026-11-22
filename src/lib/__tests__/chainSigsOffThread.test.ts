@@ -119,11 +119,11 @@ describe('where it is used', () => {
     expect(relay.match(/deferChecks: true/g)).toHaveLength(1)
     // Checked in the worker, still asking a relay that hung (relayHang.test.ts), and
     // not also as they land: askOne is told, or every event is checked twice.
-    expect(relay).toMatch(/return mergeAnswers\(await checks\.kept\(await queryRelays\(readRelaySet\(\), filter, MAX_WAIT_MS, \{ evenHung: opts\.evenHung, deferChecks: true, onAnswer: checks\.onAnswer \}\)\)\)/)
+    expect(relay).toMatch(/return mergeAnswers\(await checks\.kept\(await queryRelays\(readRelaySet\(\), filter, MAX_WAIT_MS, \{ evenHung: opts\.evenHung, perRelay: opts\.perRelay, written: opts\.written, deferChecks: true, onAnswer: checks\.onAnswer \}\)\)\)/)
     // A list read's `stream` rides along (ReadOptions.stream), and a tape read's `graceMs` stop
     // (relayGrace.test.ts); the checks are still only deferred when asked.
     // One relay's checked copies are shared with the rest of the question (relayShared.test.ts), never where the checks are deferred.
-    expect(relay).toMatch(/\? askOne\(url, filter, deadline, \{ deferChecks: opts\.deferChecks, shared: opts\.deferChecks \|\| opts\.written \|\| opts\.perRelay \? undefined : shared, stop: early\.signal, \.\.\.\(opts\.stream \? \{ quietMs: opts\.stream\.quietMs, capAt: Date\.now\(\) \+ opts\.stream\.capMs \} : \{\}\) \}\)\.then\(\(a\) => \{/)
+    expect(relay).toMatch(/\? askOne\(url, filter, deadline, \{ decides: !!\(opts\.perRelay \|\| opts\.written\), deferChecks: opts\.deferChecks, shared: opts\.deferChecks \|\| opts\.written \|\| opts\.perRelay \? undefined : shared, stop: early\.signal, \.\.\.\(opts\.stream \? \{ quietMs: opts\.stream\.quietMs, capAt: Date\.now\(\) \+ opts\.stream\.capMs \} : \{\}\) \}\)\.then\(\(a\) => \{/)
     expect(relay).toMatch(/opts\.onAnswer\?\.\(a\)\n\s*return a\n/)
     expect(relay).toMatch(/if \(!opts\.offThread\) return collect\(readRelaySet\(\), filter, MAX_WAIT_MS, opts\)/)
     const chains = fs.readFileSync(path.join(SRC, 'lib/chains.ts'), 'utf8')

@@ -44,6 +44,7 @@ export const offlineRelay = {
   },
   probeLiveness: async (): Promise<'alive' | 'dead' | 'skipped'> => 'skipped',
   signedIn: (_url: string): boolean => true,
+  signInOwed: (_url: string): boolean => false,
   retryFailedAuth: (_only?: string): void => {},
   resumeLive: (): void => {},
   watchConnectivity: (): (() => void) => () => {},

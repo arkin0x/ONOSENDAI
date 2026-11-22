@@ -55,6 +55,7 @@ vi.mock('../relay', async (importOriginal) => {
   return {
     ...actual,
     signedIn: () => true,
+    signInOwed: () => false,
     relaySet: () => [actual.CYBERSPACE_RELAY],
     dropRelays: () => {},
     authPending: () => false,

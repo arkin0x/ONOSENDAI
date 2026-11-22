@@ -16,9 +16,12 @@
  * `alt` and the sealed payload, and no tag naming what it places (§3.4, "No
  * ref tags in the clear").
  *
- * The source decides what is sealed, as for carried parts (DECK-0003 §1.10,
- * ONOSENDAI's rule): a placement by an `a` ref under your key with no relay
- * hint, naming a shard in your workshop, is a piece. A ref with a relay hint
+ * Only what needs it is sealed (owner, 2026-11-22): a placement by an `a` ref
+ * under your key with no relay hint, naming a shard in your workshop that is
+ * unpublished or edited since it was published, is a piece. One published
+ * under your key and unedited stays a plain link to the public object (the
+ * store's lookup leaves it out); kit pieces are never published, so they are
+ * always sealed. A ref with a relay hint
  * is a live link (the feed, an address) and stays as it is, as does anyone
  * else's object and whatever the root's table carries. A piece placed by a
  * piece is sealed too, to the depth a reader follows (§1.10's four).

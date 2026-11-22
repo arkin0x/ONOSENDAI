@@ -53,6 +53,7 @@ import { forgetPieceKeys, notePieceKeys, pieceKeysFor, pieceWasOpened } from '..
 import { largestRemotePiece, signerBytes } from '../../lib/pieces'
 import { NIP44_MAX_PLAINTEXT_BYTES, SIGNER_RELAY_EVENT_BYTES, nip46EventBytes } from '../../lib/signerRequestSize'
 import { withAuthoredConstrain } from '../../lib/walkConstrain'
+import { saveLedger, shardFingerprint } from '../../lib/published'
 import { decryptForRegion } from '../../lib/shardCrypto'
 import { publishMany } from '../../lib/relay'
 import { bytesToHex, hexToBytes, type NostrEvent } from '../../lib/events'
@@ -153,6 +154,7 @@ function freshReader(addresses: string[]): void {
 const realSign = useCyberspace.getState().signEvent
 
 beforeEach(() => {
+  saveLedger({})
   relay.length = 0
   vi.mocked(publishMany).mockClear()
   forgetPieceKeys()
@@ -230,6 +232,28 @@ describe('hiding a split build', () => {
     expect(sent().filter((e) => e.kind === OBJECT_KIND)).toHaveLength(1)
     const parent = await parentInBag()
     expect(parent.refs[0]).toEqual(ref('public-tile', 'wss://relay.test'))
+  })
+})
+
+describe('what is sealed: only what needs it', () => {
+  it('a piece published under your key and unedited stays a plain link; an unpublished one is sealed', async () => {
+    const tile = piece('Tile', 500, 'public-tile')
+    saveLedger({ 'public-tile': { at: 1, fp: shardFingerprint(tile), pubkey: me() } })
+    await hide(parentOf([ref('public-tile'), ref(NORTH)]), [tile, piece('North half', 2000, NORTH)])
+    expect(S().deployError).toBeNull()
+    expect(sent().filter((e) => e.kind === OBJECT_KIND)).toHaveLength(1)
+    const parent = await parentInBag()
+    expect(parent.refs[0]).toEqual(ref('public-tile'))
+    expect(splitRow().pieces).toHaveLength(1)
+  })
+
+  it('a published piece edited since is sealed: the public one is stale', async () => {
+    const tile = piece('Tile', 500, 'public-tile')
+    saveLedger({ 'public-tile': { at: 1, fp: shardFingerprint({ ...tile, name: 'Tile before the edit' }), pubkey: me() } })
+    await hide(parentOf([ref('public-tile')]), [tile])
+    expect(S().deployError).toBeNull()
+    expect(sent().filter((e) => e.kind === OBJECT_KIND)).toHaveLength(1)
+    expect((await parentInBag()).refs[0][1]).not.toBe(`33331:${me()}:public-tile`)
   })
 })
 

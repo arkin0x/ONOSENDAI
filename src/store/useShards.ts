@@ -107,7 +107,7 @@ import { dnaResolver } from '../lib/seeds/seedSources'
 import { seedSnapOffered } from '../lib/seeds/orientation'
 import { seedItemOf } from '../lib/seeds/seedItem'
 import { SEALED_KIND, freshSealedD, isSealedRef, refOf, rememberSealed, utf8Bytes, retractSealed, sealedChanges, sealedEventOf, sealedItemOf, sealedRefParts, sealedTemplate, sendBagWithSealed, type OutgoingSealed } from '../lib/sealed'
-import { loadLedger, retractionTemplate, type Ledger } from '../lib/published'
+import { loadLedger, publishState, retractionTemplate, shardFingerprint, type Ledger } from '../lib/published'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
 import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
@@ -376,7 +376,7 @@ setSealedLookFetch(fetchLookObject)
 /**
  * Your workshop's shard at an address of yours, as a hide seals it (OPAQUE where
  * its author never chose, DECK-0003 §1.12), or undefined: not yours, not here,
- * empty, or published under another key (store/localObjects.ts localObject, the
+ * empty, published under your key and unedited (a link), or published under another key (store/localObjects.ts localObject, the
  * same rules; read here so the store does not load the drawing code).
  */
 function workshopPiece(address: string, me: string, ledger: Ledger): Record<string, unknown> | undefined {
@@ -386,6 +386,10 @@ function workshopPiece(address: string, me: string, ledger: Ledger): Record<stri
   if (!s || (s.vertices.length === 0 && (s.parts?.length ?? 0) === 0)) return undefined
   const rec = ledger[s.id]
   if (rec && rec.pubkey !== me) return undefined
+  // Published under your key and unedited since: it stays a plain link to the
+  // public object, which every finder fetches (owner, 2026-11-22). Edited
+  // since, the public one is stale: the hide seals the workshop's.
+  if (rec && publishState(rec, shardFingerprint(s), me) === 'published') return undefined
   return toPayload(withAuthoredConstrain(s)) as unknown as Record<string, unknown>
 }
 

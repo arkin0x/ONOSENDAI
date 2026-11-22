@@ -87,6 +87,8 @@ export const timing = {
  * committed, and the run waits when this many are still unsaved.
  */
 export const UNSAVED_MAX = 32
+/** With PUBLISH off, how long the run works before it lets the page paint and hear STOP. */
+export const SLICE_MS = 50
 /** What a row says when its save had not committed by the time the run ended: RETRY saves it. */
 export const NOT_SAVED = 'Not saved yet'
 /** What the run says when storage stops answering. */
@@ -479,6 +481,7 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       return 'ok'
     }
     const endBulk = bulkWrites()
+    let sliceFrom = performance.now()
     try {
       const folders = folderApi()
       const made = new Map<string, string | null>()
@@ -536,8 +539,13 @@ export const useShardImport = create<ShardImportState>((set, get) => {
           patch(key, { shardId: id, outcome: action.act === 'new' ? (action.copyName ? 'copy' : 'new') : action.act })
           const settled = track(key, saved, !publish)
           // PUBLISH off: on to the next shard while this one is written; a
-          // breath first, so the list paints and STOP is heard.
-          if (!publish) { inHand = null; await sleep(0); if (g !== generation) return; continue }
+          // breath every SLICE_MS of work, so the list paints and STOP is
+          // heard without a repaint for every shard.
+          if (!publish) {
+            inHand = null
+            if (performance.now() - sliceFrom >= SLICE_MS) { await sleep(0); sliceFrom = performance.now(); if (g !== generation) return }
+            continue
+          }
           // Nothing goes out that a reload would lose here: saved means committed (store/workshopStorage.ts).
           const ok = await Promise.race([settled, stopped.then(() => null), sleep(timing.saveStallMs).then(() => undefined)])
           if (g !== generation) return

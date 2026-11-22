@@ -82,7 +82,17 @@ interface Watch {
 let watch: Watch | null = null
 
 /** Injected for tests: how a relay is subscribed to, its socket's age, and the relays to watch. */
-export const ownWatchDeps = { subscribeOne, frameAge, unansweredFor, signInFailed, drop: (url: string): void => dropRelays([url]), relays: (): string[] => [CYBERSPACE_RELAY, ...relaySet()], pinned: (): readonly string[] => PINNED_RELAYS }
+// Each read at call time, not at import: a test that mocks lib/relay without
+// these exports must still be able to import the store, which imports this.
+export const ownWatchDeps = {
+  subscribeOne: (...a: Parameters<typeof subscribeOne>): ReturnType<typeof subscribeOne> => subscribeOne(...a),
+  frameAge: (url: string): number => frameAge(url),
+  unansweredFor: (url: string): number => unansweredFor(url),
+  signInFailed: (url: string): boolean => signInFailed(url),
+  drop: (url: string): void => dropRelays([url]),
+  relays: (): string[] => [CYBERSPACE_RELAY, ...relaySet()],
+  pinned: (): readonly string[] => PINNED_RELAYS,
+}
 
 /** Moves kept in `pending` at most; past it, they are let go and the relays asked again (overflowed). */
 const PENDING_MAX = 2048

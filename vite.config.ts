@@ -46,7 +46,7 @@ function routeCards(): Plugin {
  * asks for a dynamic import's files only when the import runs: on a phone
  * after a deploy that put the download of the whole app behind the database.
  * A modulepreload link fetches and compiles a module without running it, so
- * nothing in it reads a record early. Its CSS is preloaded too, without
+ * nothing in it reads a record early. Its CSS is preloaded too, with
  * crossorigin, as Vite's own loader asks for it (a mismatch fetches it twice).
  */
 function bootPreload(): Plugin {
@@ -76,7 +76,7 @@ function bootPreload(): Plugin {
         const has = (f: string): boolean => html.includes(`/${f}"`)
         return [
           ...[...js].filter((f) => !has(f)).map((f) => ({ tag: 'link', attrs: { rel: 'modulepreload', crossorigin: true, href: `/${f}` }, injectTo: 'head' as const })),
-          ...[...css].filter((f) => !has(f)).map((f) => ({ tag: 'link', attrs: { rel: 'preload', as: 'style', href: `/${f}` }, injectTo: 'head' as const })),
+          ...[...css].filter((f) => !has(f)).map((f) => ({ tag: 'link', attrs: { rel: 'preload', as: 'style', crossorigin: true, href: `/${f}` }, injectTo: 'head' as const })),
         ]
       },
     },

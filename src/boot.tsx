@@ -8,6 +8,7 @@ import { installTapGuard } from './lib/tapGuard'
 import { isBroadcast, markBroadcastPage } from './lib/tv/broadcast'
 import { TvStandby } from './hud/TvStandby'
 import { hydrateWorkshop } from './store/useWorkshop'
+import { expectWorkshopRead } from './store/workshopStorage'
 import { chainReadyToDraw } from './store/useCyberspace'
 import { hydrateHidden } from './store/hiddenStorage'
 import { wireLocalObjects } from './store/localObjects'
@@ -76,6 +77,8 @@ function draw(): void {
   if (drawn) return
   drawn = true
   markBoot('draw')
+  // From here a tap can ask for the library before its read starts: it starts the read then (workshopStorage workshopReading).
+  if (!isWorkshopPath(location.pathname)) expectWorkshopRead()
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       {/* The stream never goes black: it stands by and reloads (hud/TvStandby, lib/tv/standby). */}

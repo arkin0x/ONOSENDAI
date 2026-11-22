@@ -38,8 +38,8 @@ export interface BootSteps {
   loadApp: () => Promise<unknown>
 }
 
-/** The most the repair may hold the app past the kv step (it starts with it, and reads for at most signerPrefRepair REPAIR_WAIT_MS). */
-export const REPAIR_CAP_MS = 2_000
+/** The most the repair may hold the app past the kv step: its read is given signerPrefRepair REPAIR_WAIT_MS from there, and its chunk may still be arriving on a cold load. */
+export const REPAIR_CAP_MS = 3_000
 
 export function runBoot(steps: BootSteps, repairCapMs = REPAIR_CAP_MS): Promise<void> {
   let late = false

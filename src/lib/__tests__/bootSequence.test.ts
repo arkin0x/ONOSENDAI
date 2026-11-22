@@ -182,6 +182,39 @@ describe('the repair beside the kv read (lib/signerPrefRepair.ts)', () => {
     expect(mem.get('onosendai:signer')).toBe(before)
   })
 
+  it('a repair still waiting when the app loads without it writes nothing after', async () => {
+    vi.useRealTimers()
+    await bunkerCase()
+    const before = mem.get('onosendai:signer')
+    const { repairSignerPref } = await import('../signerPrefRepair')
+    const kv = deferred()
+    let late = false
+    const done = repairSignerPref(1500, () => late, kv.promise)
+    await new Promise((r) => setTimeout(r, 50))
+    // runBoot's cap fired: the app loaded and the store read the pref.
+    late = true
+    kv.resolve()
+    expect(await done).toBe('kept')
+    expect(mem.get('onosendai:signer')).toBe(before)
+  })
+
+  it("gives the identities read its time from the kv step, not from the ask (one database queue on a phone)", async () => {
+    vi.useRealTimers()
+    const pubkey = await bunkerCase()
+    const row = { pubkey, kind: 'nip46', bunker: { bunkerUri: `bunker://${'b'.repeat(64)}?relay=wss://relay.test` }, firstHeld: 1, lastUsed: 2 }
+    // The read is queued behind the kv one: it answers at 300 ms.
+    vi.doMock('../identitiesDb', async (orig) => ({
+      ...(await orig<typeof import('../identitiesDb')>()),
+      readHeld: () => new Promise((r) => setTimeout(() => r(row), 300)),
+    }))
+    const { repairSignerPref } = await import('../signerPrefRepair')
+    const kv = deferred()
+    setTimeout(() => kv.resolve(), 150)
+    // 200 ms from the ask would give up at 200; from the kv step, at 350.
+    expect(await repairSignerPref(200, () => false, kv.promise)).toBe('bunker')
+    vi.doUnmock('../identitiesDb')
+  })
+
   it('leaves a pref that changed while it waited', async () => {
     vi.useRealTimers()
     await bunkerCase()

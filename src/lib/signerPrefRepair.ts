@@ -27,20 +27,25 @@
  *   markGeneratedBack), so the load does not ask for a password for it, and
  *   NOT NOW never ends in the lock above.
  *
- * It waits at most `waitMs` for the store, and only when the pref is one of
- * those two; any other pref is left alone at once. Never throws.
+ * It waits for the store at most `waitMs` past `writable`, and only when the
+ * pref is one of those two; any other pref is left alone at once. Never
+ * throws.
  *
  * It runs beside the kv read (lib/bootSequence.ts), not after it: the read of
  * the identities store overlaps the kv one. Its writes still wait for
  * `writable` (the kv read and move), because a localStorage left full by
  * older builds has room only once the move has freed it, and a write refused
- * for room is a repair lost. Once `late()` says the app has loaded without
- * it, it writes nothing: the store has already read the pref.
+ * for room is a repair lost. Its time on the identities store counts from
+ * `writable` too: every database of a site answers from one queue, so on a
+ * phone the identities read waits behind the kv one, and a clock started
+ * beside it would run out on a read that was only queued. Once `late()` says
+ * the app has loaded without it, it writes nothing: the store has already
+ * read the pref.
  */
 
 import { nip19 } from 'nostr-tools'
 import { getPublicKey } from 'nostr-tools/pure'
-import { generatedKeyOf, readHeldWithin } from './identitiesDb'
+import { generatedKeyOf, readHeld, type HeldIdentity } from './identitiesDb'
 
 /** The signer pref slot (lib/signers.ts PREF_KEY), read here without loading the signers. */
 export const PREF_KEY = 'onosendai:signer'
@@ -96,8 +101,16 @@ function markGenerated(pubkey: string): boolean {
 /** Check the signer pref against the identities store, and say what was done (see the header). */
 export async function repairSignerPref(waitMs = REPAIR_WAIT_MS, late: () => boolean = () => false, writable: Promise<unknown> = Promise.resolve()): Promise<PrefRepair> {
   try {
+    const settled = writable.catch(() => undefined)
     // Every write waits for room (the kv move), and none happens once the app has loaded without this.
-    const mayWrite = async (): Promise<boolean> => { await writable.catch(() => undefined); return !late() }
+    const mayWrite = async (): Promise<boolean> => { await settled; return !late() }
+    // Asked at once; given up on `waitMs` after the kv step, not after the ask (see the header).
+    const held = (pubkey: string): Promise<HeldIdentity | null> => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const out = settled.then(() => new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), waitMs) }))
+      return Promise.race([readHeld(pubkey).catch(() => null), out]).finally(() => clearTimeout(timer))
+    }
+    const unchanged = (): boolean => JSON.stringify(readPref()) === JSON.stringify(pref)
     const pref = readPref()
     if (!pref || pref.kind !== 'local' || typeof pref.pubkey !== 'string' || !HEX64.test(pref.pubkey)) return 'kept'
     const pubkey = pref.pubkey
@@ -105,18 +118,18 @@ export async function repairSignerPref(waitMs = REPAIR_WAIT_MS, late: () => bool
 
     if (typeof pref.nsec === 'string' && pref.nsec) {
       if (markedGenerated(pubkey)) return 'kept'
-      const row = await readHeldWithin(pubkey, waitMs)
+      const row = await held(pubkey)
       // The store holds a plain key only for a key this app generated (identitiesDb heldFromPref).
-      return row && generatedKeyOf(row) && row.nsec === pref.nsec && await mayWrite() && markGenerated(pubkey) ? 'marked' : 'kept'
+      return row && generatedKeyOf(row) && row.nsec === pref.nsec && await mayWrite() && unchanged() && markGenerated(pubkey) ? 'marked' : 'kept'
     }
 
     // No key beside it: what pickInitialSigner would lock as 'gone'.
-    const row = await readHeldWithin(pubkey, waitMs)
+    const row = await held(pubkey)
     if (!row) return 'kept'
     const wantsWrite = !!generatedKeyOf(row) || !!row.bunker?.bunkerUri || (typeof row.ncryptsec === 'string' && row.ncryptsec.startsWith('ncryptsec1'))
     if (!wantsWrite || !(await mayWrite())) return 'kept'
     // The pref may have changed while this waited (another tab, a login): only the pref read above is repaired.
-    if (JSON.stringify(readPref()) !== JSON.stringify(pref)) return 'kept'
+    if (!unchanged()) return 'kept'
     if (generatedKeyOf(row)) {
       // Marked first: a pref with the key and no mark would ask a password for it.
       if (!markGenerated(pubkey)) return 'kept'

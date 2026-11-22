@@ -12,9 +12,15 @@
  * (lib/audioWorld hearSource: lib/audioItem fadeRadius), in scene units at
  * the zoom on screen.
  *
- * The Settings panel's "Sound spheres" switch turns them off (store/useLayers
- * audioSpheres). The rings on audio being placed stay either way: they are
- * what the FADE stepper sets.
+ * The Settings panel's "Spatial Audio" switch shows them (store/useLayers
+ * spatialAudio; arkinox, 2026-11-22), off by default, and with them the
+ * sound's own box in the world (WorldMessages AudioMark). Off is drawing
+ * only: HiddenAudio plays and fades every sound exactly as it did. While
+ * audio is being placed in BUILD (a new sound, a re-hide or a MOVE: useShards
+ * pending of type audio) both are drawn whatever the switch says, so the
+ * sound going in is placed among the ones already there
+ * (spatialAudioShown). The rings on audio being placed stay either way: they
+ * are what the FADE stepper sets.
  */
 
 import { useMemo } from 'react'
@@ -24,9 +30,23 @@ import { markShown } from '../lib/worldMarks'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
 import { useMutes } from '../store/useMutes'
-import { useShards, type WorldItem } from '../store/useShards'
+import { useShards, type DeployPending, type WorldItem } from '../store/useShards'
 import { FadeRings } from './AudioSphereGhost'
 import { useDrawReach } from './buildZoom'
+
+/**
+ * Whether the world draws its sounds (their boxes and their rings): with the
+ * Spatial Audio switch on, or while audio is being placed in BUILD.
+ */
+export function spatialAudioShown(on: boolean, pending: DeployPending | null): boolean {
+  return on || pending?.type === 'audio'
+}
+
+/** spatialAudioShown, live: the Settings switch and what BUILD has in hand. */
+export function useSpatialAudioShown(): boolean {
+  const on = useLayers((s) => s.spatialAudio)
+  return useShards((s) => spatialAudioShown(on, s.pending))
+}
 
 /** As far out as the notes are drawn (WorldMessages REACH). */
 const REACH = GRID_RADIUS * 8
@@ -61,7 +81,8 @@ export function audioSpheres(items: readonly WorldItem[], plane: number, origin:
 }
 
 /**
- * The spheres the world draws now: none with the Sound spheres switch off;
+ * The spheres the world draws now: none with Spatial Audio off (and no audio
+ * being placed: spatialAudioShown);
  * otherwise one for every sound HiddenAudio would play (heardAudio, with
  * AUTOPLAY on, as it filters them), chest-held audio included.
  */
@@ -72,7 +93,7 @@ export function worldSpheres(on: boolean, anchor: Position, plane: number, scale
 }
 
 export function AudioSpheres({ axes }: { axes: ViewAxes }): JSX.Element | null {
-  const on = useLayers((s) => s.audioSpheres)
+  const on = useSpatialAudioShown()
   const anchor = useCyberspace((s) => s.anchor)
   const plane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)

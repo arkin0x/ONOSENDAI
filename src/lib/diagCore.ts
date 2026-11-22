@@ -517,3 +517,11 @@ export class LoafLedger {
     return [...m.values()].sort((a, b) => b.ms - a.ms).slice(0, n).map((a) => [a.type, a.invoker, a.fn, a.pos, a.file, a.n, r1(a.ms), r1(a.max), r1(a.forced)])
   }
 }
+
+/** One row per window with head confirmation questions (lib/chains.ts countHeadChecks): how their questions ended, relays holding the chain that gave no answer (silent, or ended by their own timer, connect or AUTH), and time. */
+export const HEAD_COLUMNS = ['t', 'n', 'answers', 'cap', 'backstop', 'stop', 'heldLate', 'ms', 'maxMs'] as const
+
+export function headRow(t: number, h: { n: number; answers: number; cap: number; backstop: number; stop: number; heldLate: number; ms: number; maxMs: number }): number[] | null {
+  if (h.n === 0) return null
+  return [t, h.n, h.answers, h.cap, h.backstop, h.stop, h.heldLate, Math.round(h.ms), Math.round(h.maxMs)]
+}

@@ -86,7 +86,7 @@ vi.mock('nostr-tools/abstract-pool', async () => {
 })
 
 import { normalizeURL } from 'nostr-tools/utils'
-import { confirmChainEvents } from '../chains'
+import { confirmChainEvents, countHeadChecks } from '../chains'
 import { noteChainHolders } from '../chainHolders'
 import { hopTemplate, spawnTemplate, type NostrEvent } from '../events'
 
@@ -184,6 +184,26 @@ describe('waiting for the relays that hold the chain (ruling of 2026-10-08 on th
     expect(got).not.toBeNull()
     expect(ms).toBeGreaterThanOrEqual(570)
     expect(ms).toBeLessThan(800)
+  })
+
+  it('the diag hears how each confirmation ended: by the answers, or by the wait running out on a silent relay that holds the chain (owner, 2026-11-22)', async () => {
+    const counter = countHeadChecks()
+    counter.take()
+    const c = chainFor('c9')
+    const H = normalizeURL('ws://mine-hung-2.test')
+    net.relays = [C, H]
+    noteChainHolders(c.pk, [H])
+    net.behavior.set(C, { eoseMs: 20, events: [c.spawn, c.hop1] })
+    net.behavior.set(H, { hung: true })
+    await confirm(c, 300)
+    let h = counter.take()
+    // Ended by the wait on it (its own timer or the cap, whichever fires first), with one relay holding the chain not heard.
+    expect({ n: h.n, heldLate: h.heldLate, quick: h.answers + h.cap }).toEqual({ n: 1, heldLate: 1, quick: 1 })
+    expect(h.maxMs).toBeGreaterThanOrEqual(250)
+    net.behavior.set(H, { eoseMs: 20, events: [c.spawn, c.hop1] })
+    await confirm(c, 300)
+    h = counter.take()
+    expect({ n: h.n, cap: h.cap, answers: h.answers, heldLate: h.heldLate }).toEqual({ n: 1, cap: 0, answers: 1, heldLate: 0 })
   })
 
   it('a chain-holding relay slow to connect, then silent, is still waited for only until the per-question wait after the first REQ', async () => {

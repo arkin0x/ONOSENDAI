@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { diagWanted, DIAG_FOUND_KEY, DIAG_KEY, DIAG_LAST_KEY } from '../diagGate'
-import { DIAG_COLUMNS, GlLedger, VERIFY_COLUMNS, rxVerb, verifyRow, LOAF_COLUMNS, LOAF_MIN_MS, LOAF_SCRIPT_COLUMNS, LOAF_TOP, LoafLedger, Ring, scriptFile, bytesPerPixel, framePercentiles, frameVerb, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes } from '../diagCore'
+import { DIAG_COLUMNS, GlLedger, HEAD_COLUMNS, headRow, VERIFY_COLUMNS, rxVerb, verifyRow, LOAF_COLUMNS, LOAF_MIN_MS, LOAF_SCRIPT_COLUMNS, LOAF_TOP, LoafLedger, Ring, scriptFile, bytesPerPixel, framePercentiles, frameVerb, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes } from '../diagCore'
 
 const SRC = path.resolve(__dirname, '../..')
 
@@ -416,5 +416,19 @@ describe('columns added later', () => {
   it('come after every column a report already had, so a reader by position still reads those', () => {
     expect(DIAG_COLUMNS.slice(-3)).toEqual(['rxEv', 'rxOk', 'rxEose'])
     expect(DIAG_COLUMNS.indexOf('ui')).toBe(DIAG_COLUMNS.length - 4)
+  })
+})
+
+describe('head confirmations, by how they ended (owner, 2026-11-22)', () => {
+  it('a window\'s confirmations as a row of numbers, or nothing', () => {
+    expect(headRow(5, { n: 0, answers: 0, cap: 0, backstop: 0, stop: 0, heldLate: 0, ms: 0, maxMs: 0 })).toBeNull()
+    const row = headRow(10, { n: 3, answers: 1, cap: 2, backstop: 0, stop: 0, heldLate: 2, ms: 5_123.4, maxMs: 2_510.7 })!
+    expect(row).toEqual([10, 3, 1, 2, 0, 0, 2, 5123, 2511])
+    expect(row).toHaveLength(HEAD_COLUMNS.length)
+  })
+  it('the report carries them', () => {
+    const text = fs.readFileSync(path.join(SRC, 'lib/diag.ts'), 'utf8')
+    expect(text).toMatch(/const heads = countHeadChecks\(\)/)
+    expect(text).toMatch(/head: head\.all\(\)/)
   })
 })

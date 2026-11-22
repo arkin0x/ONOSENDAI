@@ -1338,7 +1338,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     duplicate: (id) => {
       const src = get().shards.find((s) => s.id === id)
       if (!src) return id
-      const copy: ShardModel = { ...src, id: uuid(), name: `${src.name} copy`, vertices: src.vertices.map(cloneVertex), faces: src.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
+      // A duplicate is a shard of its own, stored: never a look copy (untouchedLookCopy).
+      const copy: ShardModel = { ...unmarked(src), id: uuid(), name: `${src.name} copy`, vertices: src.vertices.map(cloneVertex), faces: src.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       // Beside its source, in the same folder; a source at the top keeps the copy there.
       // Filing is a nicety: a fault in it never costs the copy itself.
       try { fileCopy(copy.id, src.id) } catch (err) { console.warn('[workshop] could not file the copy in its folder', err) }

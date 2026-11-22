@@ -21,6 +21,7 @@ import { newShard, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { setLocalAuthor } from '../../lib/carried'
 import { useCyberspace } from '../../store/useCyberspace'
 import { keepPlacedCopies, kept, untouchedLookCopy, useWorkshop } from '../../store/useWorkshop'
+import { useShards } from '../../store/useShards'
 
 const W = () => useWorkshop.getState()
 const me = (): string => useCyberspace.getState().identity.pubkey
@@ -87,6 +88,35 @@ describe('a look copy in use is stored at that moment', () => {
     expect(byId(id)).toBeUndefined()
   })
 
+  it('deployed (DEPLOY, PLACE OBJECT): stored, so the deploy reads it back by id', async () => {
+    const id = await lookAtStatue()
+    useShards.getState().startDeployShard(id, 'workshop')
+    expect(storedIds()).toContain(id)
+    useShards.setState({ pending: null })
+  })
+
+  it('kept, then picked away from the list: it stays', async () => {
+    const id = await lookAtStatue()
+    W().keepCopy(id)
+    W().select('other')
+    expect(byId(id)).toBeDefined()
+    expect(byId('plaza')!.refs).toEqual([LINK])
+  })
+
+  it('kept, then edited while still inside: its first edit still points the parent at it', async () => {
+    const id = await lookAtStatue()
+    W().keepCopy(id)
+    W().addVertex([5, 5, 5])
+    expect(byId('plaza')!.refs).toEqual([['a', `33331:${me()}:${id}`]])
+  })
+
+  it('a duplicate of a look copy is a shard of its own, stored', async () => {
+    const id = await lookAtStatue()
+    const dup = W().duplicate(id)
+    W().rename(dup, 'Statue')
+    expect(storedIds()).toContain(dup)
+  })
+
   it('keepPlacedCopies only un-marks what the edited shard places under your key', () => {
     const marked = { ...tri('Look', 'look'), lookCopy: 'x' } as ShardModel
     const other = { ...tri('Look 2', 'look2'), lookCopy: 'y' } as ShardModel
@@ -94,5 +124,7 @@ describe('a look copy in use is stored at that moment', () => {
     const out = keepPlacedCopies([marked, other, user], user, me())
     expect((out[0] as { lookCopy?: string }).lookCopy).toBeUndefined()
     expect((out[1] as { lookCopy?: string }).lookCopy).toBe('y')
+    // Nobody signed in: nothing is un-marked.
+    expect(keepPlacedCopies([marked, other, user], user, null)).toEqual([marked, other, user])
   })
 })

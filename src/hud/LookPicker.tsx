@@ -77,7 +77,7 @@ export function LookPicker({ onPick, onClose }: { onPick: (look: LookChoice) => 
                   const held = unpublishedPieces(s, me, (d) => !!ledger[d])
                   return (
                     <li key={s.id} {...f.drag}>
-                      <button className="objpick__row" disabled={empty || !!held} onClick={() => onPick({ from: 'mine', shardId: s.id })} title={empty ? 'Nothing in it to place yet' : held ?? `Wear "${s.name}"`}>
+                      <button className="objpick__row" disabled={empty || !!held} onClick={() => { useWorkshop.getState().keepCopy(s.id); onPick({ from: 'mine', shardId: s.id }) }} title={empty ? 'Nothing in it to place yet' : held ?? `Wear "${s.name}"`}>
                         <ShardThumb shard={s} />
                         <span className="objpick__name">{f.mark(s.name)}</span>
                         <span className="objpick__meta">{empty ? 'EMPTY' : `${s.vertices.length} v · ${s.faces.length} f${s.parts?.length ? ` · ${s.parts.length} obj` : ''}`}</span>

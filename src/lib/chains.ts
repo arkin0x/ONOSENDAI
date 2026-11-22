@@ -238,7 +238,8 @@ async function gatherChain<T>(
 }
 
 /** A chain is read from every configured relay, even one that hung: it may hold a newer move (relay.ts skipHung). */
-const CHAIN_READ = { evenHung: true }
+// Each relay's answer its own (perRelay): the self-check decides which relays hold the chain from them.
+const CHAIN_READ = { evenHung: true, perRelay: true }
 
 /**
  * Everything the relays have for one pubkey's current chain, raw: every

@@ -80,6 +80,17 @@ describe('one question to several relays', () => {
     expect(net.checks).toBe(3)
   }, 30_000)
 
+  it('a relay sending a forged copy after the good one has come counts as holding it, unless the read asks for each relay\'s own copies (perRelay)', async () => {
+    net.events = bags
+    net.bad = 'r4'
+    net.checks = 0
+    const shared = await queryEachAt(relays, { kinds: [33330], '#d': ['region'] })
+    expect(shared.find((a) => a.url.includes('r4'))!.events).toHaveLength(3)
+    const own = await queryEachAt(relays, { kinds: [33330], '#d': ['region'] }, undefined, { perRelay: true })
+    expect(own.find((a) => a.url.includes('r4'))!.events).toHaveLength(0)
+    expect(own.find((a) => a.url.includes('r1'))!.events).toHaveLength(3)
+  }, 30_000)
+
   it('a relay that sends a forged copy first does not stop the good copy from being checked and kept', async () => {
     net.events = bags.map((b) => ({ ...b, created_at: b.created_at }))
     net.bad = 'r1'

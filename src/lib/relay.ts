@@ -1388,8 +1388,8 @@ async function askOne(url: string, filter: Filter | Filter[], deadline: number, 
           // nostr-tools reads the id before parsing: one another relay of
           // this question sent and that passed is taken from `shared` here
           // (receivedEvent) and not parsed or checked again.
-          ...(shared ? { receivedEvent: (_r: unknown, id: string) => { const had = shared.get(id); if (had) take(had) } } : {}),
-          ...(deferChecks || shared ? { alreadyHaveEvent: (id: string) => (shared?.has(id) ? true : deferChecks ? deferCheck(id) : false) } : {}),
+          ...(deferChecks ? { alreadyHaveEvent: deferCheck } : {}),
+          ...(shared && !deferChecks ? { alreadyHaveEvent: (id: string) => shared.has(id), receivedEvent: (_r: unknown, id: string) => { const had = shared.get(id); if (had) take(had) } } : {}),
           onevent: (e) => {
             // Checked as it landed (the pool's verifyEvent): the others may take it.
             shared?.set(e.id, e as NostrEvent)

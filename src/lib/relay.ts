@@ -133,6 +133,9 @@ function countPings(relay: AbstractRelay): void {
     idleTimeout: number
     idleTimeoutHandle?: ReturnType<typeof setTimeout>
     close: () => void
+    publish: AbstractRelay['publish']
+    countWithHLL: (...args: unknown[]) => Promise<unknown>
+    readonly connected: boolean
   }
   /**
    * When the socket went idle before the ping in flight now, if it had: the
@@ -162,12 +165,26 @@ function countPings(relay: AbstractRelay): void {
     }
     return sub
   }
+  // A publish or a count while a ping is out is real work too: the idle time
+  // starts again once it is done, never from before the ping (a socket closed
+  // under a publish's OK; second review of the AUTH churn fix).
+  const publish = r.publish.bind(relay)
+  r.publish = (event) => { idleBeforePing = undefined; return publish(event) }
+  if (typeof r.countWithHLL === 'function') {
+    const countWithHLL = r.countWithHLL.bind(relay)
+    r.countWithHLL = (...args) => { idleBeforePing = undefined; return countWithHLL(...args) }
+  }
   let ops = Math.max(0, r.ongoingOperations)
   Object.defineProperty(relay, 'ongoingOperations', { configurable: true, enumerable: true, get: () => ops, set: (v: number) => { ops = Math.max(0, v) } })
   const scheduleIdleClose = r.scheduleIdleClose.bind(relay)
   r.scheduleIdleClose = () => {
     // Each subscription's close, and each hold's release, schedules it again.
     if (r.openSubs.size > 0 || (holds.get(relay) ?? 0) > 0) { r.clearIdleTimeout(); return }
+    // Never on a socket already closed: its subscriptions, closed with it,
+    // each schedule one, and its close when it fired took the newer socket to
+    // the same relay out of the pool by URL, so the next read dialled a third
+    // (and signed in again where the relay gates).
+    if (r.connected === false) { r.clearIdleTimeout(); return }
     const since = pingClosing ? idleBeforePing : undefined
     if (since === undefined || r.idleTimeout <= 0) { scheduleIdleClose(); return }
     // A ping ending: the socket has been idle since before it.
@@ -214,6 +231,25 @@ function guardSend(relay: AbstractRelay): void {
   }
 }
 
+const forgetGuarded = new WeakSet<object>()
+
+/**
+ * nostr-tools forgets a relay in the pool by its URL when it closes
+ * (relay.onclose), whichever socket is filed there by then. A socket that
+ * closed late, after a newer one to the same relay had taken its place (an
+ * idle close timer left on it, a close after dropRelays), took the newer one
+ * out of the pool: its live subscriptions were orphaned, and the next read
+ * dialled another socket, one more AUTH where the relay gates (second review
+ * of the AUTH churn fix). Each socket forgets only itself.
+ */
+function guardForget(relays: Map<string, AbstractRelay> | undefined, url: string, relay: AbstractRelay): void {
+  if (!relays || forgetGuarded.has(relay)) return
+  forgetGuarded.add(relay)
+  const r = relay as unknown as { onclose: (() => void) | null }
+  const forget = r.onclose
+  r.onclose = () => { if (relays.get(url) === relay) forget?.() }
+}
+
 /** AUTHs holding each socket open (holdOpen), apart from nostr-tools' own count. */
 const holds = new WeakMap<object, number>()
 
@@ -234,7 +270,7 @@ class Pool extends AbstractSimplePool {
     const pending = super.ensureRelay(url, { ...params, connectionTimeout: params?.connectionTimeout ?? (norm === normalizeURL(CYBERSPACE_RELAY) ? MAX_WAIT_MS : CONNECT_MS) })
     // Registered before the connect's first await, and gone from the pool by the time it fails.
     const relay = this.relays?.get(norm)
-    if (relay) { countPings(relay); guardAuth(relay); guardSend(relay); if (this.tracksHung) hearAuthDemands(norm, relay) }
+    if (relay) { countPings(relay); guardAuth(relay); guardSend(relay); guardForget(this.relays, norm, relay); if (this.tracksHung) hearAuthDemands(norm, relay) }
     try {
       const ready = await pending
       // The app's own pool only: the signer's pool (getSignerPool) has sockets
@@ -1688,7 +1724,7 @@ export async function query(filter: Filter, opts: ReadOptions = {}): Promise<Nos
   if (!opts.offThread) return collect(readRelaySet(), filter, MAX_WAIT_MS, opts)
   // Each relay's answer is checked the moment it is in, not after the slowest one.
   const checks = answerChecks<RelayAnswer>()
-  return mergeAnswers(await checks.kept(await queryRelays(readRelaySet(), filter, MAX_WAIT_MS, { evenHung: opts.evenHung, deferChecks: true, onAnswer: checks.onAnswer })))
+  return mergeAnswers(await checks.kept(await queryRelays(readRelaySet(), filter, MAX_WAIT_MS, { evenHung: opts.evenHung, perRelay: opts.perRelay, written: opts.written, deferChecks: true, onAnswer: checks.onAnswer })))
 }
 
 /**

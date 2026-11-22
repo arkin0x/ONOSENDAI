@@ -119,7 +119,7 @@ describe('where it is used', () => {
     expect(relay.match(/deferChecks: true/g)).toHaveLength(1)
     // Checked in the worker, still asking a relay that hung (relayHang.test.ts), and
     // not also as they land: askOne is told, or every event is checked twice.
-    expect(relay).toMatch(/return mergeAnswers\(await checks\.kept\(await queryRelays\(readRelaySet\(\), filter, MAX_WAIT_MS, \{ evenHung: opts\.evenHung, deferChecks: true, onAnswer: checks\.onAnswer \}\)\)\)/)
+    expect(relay).toMatch(/return mergeAnswers\(await checks\.kept\(await queryRelays\(readRelaySet\(\), filter, MAX_WAIT_MS, \{ evenHung: opts\.evenHung, perRelay: opts\.perRelay, written: opts\.written, deferChecks: true, onAnswer: checks\.onAnswer \}\)\)\)/)
     // A list read's `stream` rides along (ReadOptions.stream), and a tape read's `graceMs` stop
     // (relayGrace.test.ts); the checks are still only deferred when asked.
     // One relay's checked copies are shared with the rest of the question (relayShared.test.ts), never where the checks are deferred.

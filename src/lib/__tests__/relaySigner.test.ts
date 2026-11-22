@@ -567,6 +567,36 @@ describe('first contact with a relay of your own that gates without saying so (r
     expect(decideSelfCheck(answers.value ?? [], CANON, true).status).toBe('found')
     expect(net.signer.prompts).toBe(1)
   })
+
+  it('head confirmation signs in at a holder that gates without saying so, and finds the newer move there', async () => {
+    const holder = 'wss://holder.silent.example/'
+    const c = aChain()
+    forgetRelayGates()
+    net.rules.emptyUntilAuthed.delete(CANON)
+    net.rules.emptyUntilAuthed.add(holder)
+    useRelays.getState().add(holder)
+    noteChainHolders(c.pubkey, [holder])
+    net.rules.hold.set(CANON, [c.spawn, c.hop1])
+    net.rules.hold.set(holder, [c.spawn, c.hop1, c.hop2])
+    const got = await within(5300, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }))
+    expect(got.settled).toBe(true)
+    expect(got.value?.map((e) => e.id)).toContain(c.hop2.id)
+    expect(net.signer.prompts).toBe(1)
+  })
+
+  it('a whole chain\'s fetch signs in at a relay of your own that gates without saying so, and gets the move only it holds', async () => {
+    const mine = 'wss://mine.silentfetch.example/'
+    const c = aChain()
+    forgetRelayGates()
+    net.rules.emptyUntilAuthed.delete(CANON)
+    net.rules.emptyUntilAuthed.add(mine)
+    useRelays.getState().add(mine)
+    net.rules.hold.set(CANON, [c.spawn, c.hop1])
+    net.rules.hold.set(mine, [c.spawn, c.hop1, c.hop2])
+    const fetched = await within(10_000, fetchChainEvents(c.pubkey))
+    expect(fetched.value?.map((e) => e.id)).toContain(c.hop2.id)
+    expect(net.signer.prompts).toBe(1)
+  })
 })
 
 describe('review of #570 (2026-11-04): each as on v2, or safer for the canonical relay', () => {

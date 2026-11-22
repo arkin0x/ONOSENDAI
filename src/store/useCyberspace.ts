@@ -8682,6 +8682,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   setPublishStatus: (id, status, reason) => {
     const { published, events, chain } = get()
     if (!(id in published)) return
+    // Never back from 'ok', as setPublishStatuses: a relay's echo or another send may have marked it first, and the backlog (lib/unsent.ts) counts on an 'ok' staying so.
+    if (published[id] === 'ok' && status !== 'ok') return
     const next = { ...published, [id]: status }
     set({ published: next, publishError: status === 'failed' ? reason ?? 'relay refused' : null })
     if (status === 'ok') saveChain(events, next, chain)

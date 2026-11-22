@@ -13,10 +13,10 @@
  * is a ring on AVATAR.
  */
 
-import { Box, Grid3x3, Menu, Orbit, Play, VenetianMask, X, type LucideIcon } from 'lucide-react'
+import { Box, ChevronLeft, Grid3x3, Menu, Orbit, Play, VenetianMask, X, type LucideIcon } from 'lucide-react'
 import { useAvatars } from '../../store/useAvatars'
 import { useShards } from '../../store/useShards'
-import { useWorkshop } from '../../store/useWorkshop'
+import { useWorkshop, type WorkshopState } from '../../store/useWorkshop'
 import { useBeginner } from '../beginner'
 import { MOTION_READY, type Area } from '../sheets/areas'
 
@@ -28,18 +28,41 @@ export const AREAS: Array<{ area: Area; label: string; icon: LucideIcon }> = [
   { area: 'grid', label: 'GRID', icon: Grid3x3 },
 ]
 
+/** The shard a double-tap came in from (useWorkshop backStack), by name, or null at the top. */
+export function backToName(s: Pick<WorkshopState, 'backStack' | 'shards'>): string | null {
+  const top = s.backStack[s.backStack.length - 1]
+  return top ? (s.shards.find((x) => x.id === top.id)?.name ?? 'the shard') : null
+}
+
+/**
+ * The way out, first on the bar: ✕ closes the workshop at the top; inside a
+ * placed object (a double-tap, enterPart) it is BACK, in the same place and
+ * size, up one level (owner, 2026-11-22).
+ */
+export function WayOut({ backTo }: { backTo: string | null }): JSX.Element {
+  const w = useWorkshop.getState
+  return backTo !== null ? (
+    <button className="ws__topbtn ws__topbtn--close ws__topbtn--back" onClick={() => w().back()} title={`Back to ${backTo} (Esc)`} aria-label={`Back to ${backTo}`}>
+      <ChevronLeft size={22} strokeWidth={2.5} aria-hidden />
+    </button>
+  ) : (
+    <button className="ws__topbtn ws__topbtn--close" onClick={() => w().closeWorkshop()} title="Close the workshop (Esc)" aria-label="Close the workshop">
+      <X size={20} strokeWidth={2.25} aria-hidden />
+    </button>
+  )
+}
+
 export function TopBar({ open, onArea }: { open: Area | null; onArea: (a: Area) => void }): JSX.Element {
   const hasContent = useWorkshop((s) => { const c = s.current(); return c !== null && (c.vertices.length > 0 || (c.parts?.length ?? 0) > 0) })
   const phase = useAvatars((s) => s.phase)
   // The first-visit guide, done: DEPLOY lights up for a moment (shell/Guide).
   const deployGlow = useBeginner((b) => b.glow === 'deploy')
+  const backTo = useWorkshop(backToName)
   const w = useWorkshop.getState
   const work = phase === 'signing' ? 'SIGN IT' : phase === 'publishing' ? 'PUBLISHING' : null
   return (
     <header className="ws__topbar" role="toolbar" aria-label="Workshop">
-      <button className="ws__topbtn ws__topbtn--close" onClick={() => w().closeWorkshop()} title="Close the workshop (Esc)" aria-label="Close the workshop">
-        <X size={20} strokeWidth={2.25} aria-hidden />
-      </button>
+      <WayOut backTo={backTo} />
       {AREAS.map(({ area, label, icon: Icon }) => {
         const off = area === 'motion' && !MOTION_READY
         const busy = area === 'avatar' && work !== null

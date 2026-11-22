@@ -107,7 +107,8 @@ import { dnaResolver } from '../lib/seeds/seedSources'
 import { seedSnapOffered } from '../lib/seeds/orientation'
 import { seedItemOf } from '../lib/seeds/seedItem'
 import { SEALED_KIND, freshSealedD, isSealedRef, refOf, rememberSealed, utf8Bytes, retractSealed, sealedChanges, sealedEventOf, sealedItemOf, sealedRefParts, sealedTemplate, sendBagWithSealed, type OutgoingSealed } from '../lib/sealed'
-import { loadLedger, publishState, retractionTemplate, shardFingerprint, type Ledger } from '../lib/published'
+import { loadLedger, retractionTemplate, type Ledger } from '../lib/published'
+import { stillPublished } from '../lib/partForm'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
 import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
@@ -389,7 +390,7 @@ function workshopPiece(address: string, me: string, ledger: Ledger): Record<stri
   // Published under your key and unedited since: it stays a plain link to the
   // public object, which every finder fetches (owner, 2026-11-22). Edited
   // since, the public one is stale: the hide seals the workshop's.
-  if (rec && publishState(rec, shardFingerprint(s), me) === 'published') return undefined
+  if (stillPublished(s, ledger, me)) return undefined
   return toPayload(withAuthoredConstrain(s)) as unknown as Record<string, unknown>
 }
 

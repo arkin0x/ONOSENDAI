@@ -221,6 +221,8 @@ export function Workshop(): JSX.Element | null {
     else if (ws.eyeEdit) ws.setEyeEdit(false)
     // Not in LOOK, where what is held is out of sight and stays held (benchLook.tsx): Esc goes on to close.
     else if (!isLook(ws.tool) && (ws.selection.length || ws.partSel.length || ws.selectedFaces.length > 0 || ws.facePick.length)) { ws.selectVertex(null); ws.clearFacePick() }
+    // Inside a placed object: up one level, as BACK does. The workshop closes only from the top.
+    else if (ws.backStack.length > 0) ws.back()
     else ws.closeWorkshop()
   })
 

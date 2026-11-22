@@ -13058,3 +13058,52 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 @media (prefers-reduced-motion: reduce) {
   :root { --hud-slide: translate 0s; }
 }
+
+/* PartFormBadge: a placed object's LINK (green) or COPY (orange) mark, on the
+   bench and beside the publish status (lib/partForm.ts). A chamfered tile on
+   near-black ink with a lit edge: legible over a bright bench or a dark one. */
+.partform {
+  --pf: var(--ok);
+  --pf-cut: 5px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--pf);
+  background: var(--pf);
+  clip-path: polygon(var(--pf-cut) 0, 100% 0, 100% calc(100% - var(--pf-cut)), calc(100% - var(--pf-cut)) 100%, 0 100%, 0 var(--pf-cut));
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.9)) drop-shadow(0 0 4px color-mix(in srgb, var(--pf) 45%, transparent));
+  pointer-events: auto;
+}
+.partform::before {
+  content: '';
+  position: absolute;
+  inset: 1.5px;
+  background: rgba(5, 7, 13, 0.9);
+  clip-path: polygon(calc(var(--pf-cut) - 0.6px) 0, 100% 0, 100% calc(100% - var(--pf-cut) + 0.6px), calc(100% - var(--pf-cut) + 0.6px) 100%, 0 100%, 0 calc(var(--pf-cut) - 0.6px));
+}
+.partform > svg {
+  position: relative;
+}
+.partform--copy {
+  --pf: var(--warn);
+}
+.partform--inline {
+  width: 18px;
+  height: 18px;
+  --pf-cut: 4px;
+  vertical-align: middle;
+  filter: none;
+}
+/* On the bench: pinned to a corner of the placed object, never in the way of a tap. */
+.partform-pin {
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+}
+.partform-pin .partform {
+  pointer-events: none;
+}
+.ws__topbtn--back { color: var(--accent); border-color: var(--accent); }

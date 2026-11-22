@@ -2484,6 +2484,8 @@ function noteOutbound(pubkey: string, id: string): void {
  * LIVE switched off for `pubkey`: nothing it signed is meant to go out any
  * more. A move whose send failed, then kept on purpose by the flip to LOCAL,
  * waits for an action or PUBLISH like any LOCAL move, after a reload too.
+ * The record is the identity's, so another tab's labels go with it: its
+ * blip-retried move then waits for an action after a reload, the safe way.
  */
 function forgetOutbound(pubkey: string): void {
   outbound.set(pubkey, new Set())

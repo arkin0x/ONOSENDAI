@@ -23,9 +23,9 @@
  */
 import type { Filter } from 'nostr-tools/filter'
 import { normalizeURL } from 'nostr-tools/utils'
-import { CYBERSPACE_RELAY, dropRelays, frameAge, relaySet, signInFailed, subscribeOne, unansweredFor } from './relay'
+import { CYBERSPACE_RELAY, dropRelays, frameAge, signInFailed, subscribeOne, unansweredFor } from './relay'
 import { HELD_BACKOFF_MS } from './liveSub'
-import { PINNED_RELAYS } from '../store/useRelays'
+import { PINNED_RELAYS, readRelays } from '../store/useRelays'
 import type { NostrEvent } from './events'
 
 /**
@@ -90,7 +90,10 @@ export const ownWatchDeps = {
   unansweredFor: (url: string): number => unansweredFor(url),
   signInFailed: (url: string): boolean => signInFailed(url),
   drop: (url: string): void => dropRelays([url]),
-  relays: (): string[] => [CYBERSPACE_RELAY, ...relaySet()],
+  // Every relay read, the read-only former canonical relay too: a move of yours
+  // that reaches only it still stops the next one. It is not pinned, so it
+  // never vouches (useRelays READ_FALLBACK_RELAY).
+  relays: (): string[] => [CYBERSPACE_RELAY, ...readRelays()],
   pinned: (): readonly string[] => PINNED_RELAYS,
 }
 

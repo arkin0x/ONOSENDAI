@@ -2518,7 +2518,7 @@ export const useShards = create<ShardsState>((set, get) => {
    */
   async function addressStillThis(object: NostrEvent): Promise<'this' | 'newer' | 'silent'> {
     try {
-      const answers = (await queryEach({ kinds: [object.kind], authors: [object.pubkey], '#d': [dOf(object)] })).filter((a) => a.outcome === 'answered')
+      const answers = (await queryEach({ kinds: [object.kind], authors: [object.pubkey], '#d': [dOf(object)] }, undefined, { written: true })).filter((a) => a.outcome === 'answered')
       if (answers.length === 0) return 'silent'
       return answers.some((a) => a.events.some((e) => e.id !== object.id && e.created_at >= object.created_at)) ? 'newer' : 'this'
     } catch {
@@ -2886,7 +2886,7 @@ export const useShards = create<ShardsState>((set, get) => {
     let settingsFrom: NostrEvent | null = null
     let heard = false
     try {
-      const answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [owner], '#d': [lookupId] })
+      const answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [owner], '#d': [lookupId] }, undefined, { written: true })
       still()
       const events = answers.flatMap((a) => a.events)
       heard = answers.some((a) => a.outcome === 'answered')
@@ -3151,7 +3151,7 @@ export const useShards = create<ShardsState>((set, get) => {
   async function stillInItsBag(d: MyDeployment): Promise<'this' | 'gone' | 'silent'> {
     const me = cyber().identity.pubkey
     let answers: Awaited<ReturnType<typeof queryEach>>
-    try { answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [me], '#d': [d.lookupId] }) } catch { return 'silent' }
+    try { answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [me], '#d': [d.lookupId] }, undefined, { written: true }) } catch { return 'silent' }
     if (!answers.some((a) => a.outcome === 'answered')) return 'silent'
     const newest = answers.flatMap((a) => a.events).filter((e) => e.pubkey === me).sort((a, b) => b.created_at - a.created_at)[0]
     if (!newest) return 'gone'
@@ -3441,7 +3441,7 @@ export const useShards = create<ShardsState>((set, get) => {
       return held.filter(inItsBag)
     }
     if (!live) return rows()
-    const asked = await queryEach({ kinds: [HIDDEN_KIND], authors: [d.inner.pubkey], '#d': [lookupId] })
+    const asked = await queryEach({ kinds: [HIDDEN_KIND], authors: [d.inner.pubkey], '#d': [lookupId] }, undefined, { written: true })
     if (cyber().identity.pubkey !== owner) return SWITCHED
     const answers = asked.filter((a) => a.outcome === 'answered')
     if (answers.length === 0) return 'No relay answered, so this cannot tell what is behind the door. Nothing has changed. Try again when one is reachable.'

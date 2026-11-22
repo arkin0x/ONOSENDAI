@@ -2,16 +2,18 @@
  * RelaysPanel.tsx — the relays this client fans out across.
  *
  * The canonical relay (useRelays DEFAULT_RELAY) is the shared default and is pinned: everyone meets
- * there, so it cannot be removed. The former canonical relay (SECOND_RELAY) is
- * pinned after it while the 2026-11-05 switch settles. Add your own below them, and movement, hidden
- * content, discovery and everyone else's chains all ride the whole set. A dot
- * per relay shows whether the socket is open right now.
+ * there, so it cannot be removed. Add your own below it, and movement, hidden
+ * content, discovery and everyone else's chains all ride the whole set. The
+ * former canonical relay (useRelays READ_FALLBACK_RELAY) is listed last,
+ * READ ONLY: still read while it is retired, nothing sent there. A dot per
+ * relay shows whether the socket is open right now.
  */
 
 import { useEffect, useState } from 'react'
+import { normalizeURL } from 'nostr-tools/utils'
 import { connected } from '../lib/relay'
 import { getPool } from '../lib/relay'
-import { DEFAULT_RELAY, SECOND_RELAY, isRetiredRelay, useRelays } from '../store/useRelays'
+import { DEFAULT_RELAY, READ_FALLBACK_RELAY, isRetiredRelay, useRelays } from '../store/useRelays'
 import { Explanation } from './Explanation'
 
 export function RelaysPanel(): JSX.Element {
@@ -49,22 +51,27 @@ export function RelaysPanel(): JSX.Element {
 
       <ul className="relays__list">
         {relays.map((r) => {
-          const open = status.get(r)
-          const pinned = r === DEFAULT_RELAY || r === SECOND_RELAY
+          // The pool keys its sockets by normalized URL (a trailing slash).
+          const open = status.get(normalizeURL(r))
           return (
             <li key={r} className="relays__row">
               <span className={`relays__dot ${open ? 'is-on' : ''}`} title={open ? 'connected' : 'not connected'} />
               <span className="relays__url" title={r}>{r.replace(/^wss?:\/\//, '')}</span>
-              {pinned ? (
-                r === DEFAULT_RELAY
-                  ? <span className="relays__default" title="The shared default, always present">DEFAULT</span>
-                  : <span className="relays__default" title="The old default, kept while the move settles">BACKUP</span>
+              {r === DEFAULT_RELAY ? (
+                <span className="relays__default" title="The shared default, always present">DEFAULT</span>
               ) : (
                 <button className="targets__remove" onClick={() => useRelays.getState().remove(r)} aria-label="Remove relay" title="Remove relay">✕</button>
               )}
             </li>
           )
         })}
+        {!relays.includes(READ_FALLBACK_RELAY) && (
+          <li key={READ_FALLBACK_RELAY} className="relays__row">
+            <span className={`relays__dot ${status.get(normalizeURL(READ_FALLBACK_RELAY)) ? 'is-on' : ''}`} title={status.get(normalizeURL(READ_FALLBACK_RELAY)) ? 'connected' : 'not connected'} />
+            <span className="relays__url" title={READ_FALLBACK_RELAY}>{READ_FALLBACK_RELAY.replace(/^wss?:\/\//, '')}</span>
+            <span className="relays__default" title="The old default: still read while it is retired, nothing is sent there">READ ONLY</span>
+          </li>
+        )}
       </ul>
 
       <form className="avatars__find" onSubmit={submit}>

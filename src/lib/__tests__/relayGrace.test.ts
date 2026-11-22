@@ -38,7 +38,7 @@ vi.mock('nostr-tools/abstract-pool', () => {
 })
 
 import { queryEach } from '../relay'
-import { DEFAULT_RELAY, SECOND_RELAY, useRelays } from '../../store/useRelays'
+import { DEFAULT_RELAY, READ_FALLBACK_RELAY as SECOND_RELAY, useRelays } from '../../store/useRelays'
 
 const CANON = normalizeURL(DEFAULT_RELAY)
 const SECOND = normalizeURL(SECOND_RELAY)

@@ -19,7 +19,7 @@ import { answerChecks } from './sigCheck'
 import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, VerifiedEvent } from 'nostr-tools/core'
 import type { NostrEvent } from './events'
-import { currentRelays, DEFAULT_RELAY, PINNED_RELAYS, isRetiredRelay } from '../store/useRelays'
+import { currentRelays, DEFAULT_RELAY, PINNED_RELAYS, isRetiredRelay, readRelays } from '../store/useRelays'
 import { LiveRegistry, type Transport } from './liveSub'
 import { signerHeld } from './authOpen'
 import { AUTH_STALLED, classifyClose, mergeAnswers, type RelayAnswer } from './relayOutcome'
@@ -541,7 +541,7 @@ export function onAuthChange(fn: (url: string, ok: boolean) => void): () => void
 /**
  * Whether this visit's sign-in to a relay failed and stands: the signer
  * refused or ran out of time, or the relay turned the AUTH down. RETRY
- * (retryFailedAuth) clears it on success. For the pinned backup relay's line
+ * (retryFailedAuth) clears it on success. For the old relay's line
  * (hud/RelayTrouble BackupTrouble), whose reads need the sign-in.
  */
 export function signInFailed(url: string): boolean {
@@ -709,7 +709,7 @@ async function signInLate(url: string, ws: unknown, ev: NostrEvent): Promise<voi
  * socket has gone is dialled again, and its new challenge answered.
  */
 export function retryFailedAuth(only?: string, when: 'back' | 'signer' | 'answered' = 'back'): void {
-  const inUse = new Set(relaySet().map((r) => normalizeURL(r)))
+  const inUse = new Set(readRelaySet().map((r) => normalizeURL(r)))
   let asked = false
   for (const [url, why] of [...authFailed]) {
     const wanted = only
@@ -914,9 +914,18 @@ export function signedIn(url: string): boolean {
   return authedFor.has(normalizeURL(url))
 }
 
-/** The relays every cyberspace read and write fans out across, right now. */
+/** The relays every cyberspace write fans out across, right now: the canonical relay and the player's own. */
 export function relaySet(): string[] {
   return currentRelays()
+}
+
+/**
+ * The relays a cyberspace read fans out across: relaySet, then the former
+ * canonical relay, read only while it is retired (useRelays
+ * READ_FALLBACK_RELAY). Never a place to publish to.
+ */
+export function readRelaySet(): string[] {
+  return readRelays()
 }
 
 /**
@@ -1259,7 +1268,14 @@ const NO_ANSWER = 'no answer in time'
  * the rest have this long more, not the whole deadline (TV's tape). A relay
  * a viewer added answering first starts nothing: it may hold none of it.
  */
-export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?: { quietMs: number; capMs: number }; graceMs?: number }
+/**
+ * `written`: ask only the relays this client publishes to (relaySet), never
+ * the read-only former canonical relay (useRelays READ_FALLBACK_RELAY). For
+ * a decision about the newest version of something of yours (a bag, an
+ * object): the moves and edits of this version never reach that relay, so
+ * its answer alone could pass for the relays' word on a version it never got.
+ */
+export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?: { quietMs: number; capMs: number }; graceMs?: number; written?: boolean }
 
 /** `filter` may be several: one REQ, one EOSE, the union of their matches (NIP-01). */
 async function askOne(url: string, filter: Filter | Filter[], deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
@@ -1446,10 +1462,10 @@ async function collect(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, 
  * `evenHung` asks a hung relay too, either way.
  */
 export async function query(filter: Filter, opts: ReadOptions = {}): Promise<NostrEvent[]> {
-  if (!opts.offThread) return collect(relaySet(), filter, MAX_WAIT_MS, opts)
+  if (!opts.offThread) return collect(readRelaySet(), filter, MAX_WAIT_MS, opts)
   // Each relay's answer is checked the moment it is in, not after the slowest one.
   const checks = answerChecks<RelayAnswer>()
-  return mergeAnswers(await checks.kept(await queryRelays(relaySet(), filter, MAX_WAIT_MS, { evenHung: opts.evenHung, deferChecks: true, onAnswer: checks.onAnswer })))
+  return mergeAnswers(await checks.kept(await queryRelays(readRelaySet(), filter, MAX_WAIT_MS, { evenHung: opts.evenHung, deferChecks: true, onAnswer: checks.onAnswer })))
 }
 
 /**
@@ -1458,7 +1474,7 @@ export async function query(filter: Filter, opts: ReadOptions = {}): Promise<Nos
  * answer" lead to different actions.
  */
 export function queryEach(filter: Filter, maxWait = MAX_WAIT_MS, opts: ReadOptions = {}): Promise<RelayAnswer[]> {
-  return queryRelays(relaySet(), filter, maxWait, opts)
+  return queryRelays(opts.written ? relaySet() : readRelaySet(), filter, maxWait, opts)
 }
 
 /**
@@ -1753,7 +1769,7 @@ export async function queryAny(relays: string[], filter: Filter, maxWait?: numbe
  */
 const liveTransport: Transport = {
   open: async (filter, handlers, onClose) => {
-    const relays = relaySet()
+    const relays = readRelaySet()
     // Authenticate first; a live subscription opened on an unauthed socket is
     // closed by the relay before it delivers anything.
     await authAll(skipHung(relays))
@@ -1798,7 +1814,7 @@ export function subscribe(
  * an alt-tab on a desktop is not an absence, so the caller says how long.
  */
 export function resumeLive(): void {
-  live.resumeAll(() => dropRelays(relaySet()))
+  live.resumeAll(() => dropRelays(readRelaySet()))
   notifyResume()
 }
 

@@ -23,6 +23,12 @@
  * | standing | an open, caught-up tablet's move asks the relay nothing before it is signed: the head check reads the standing subscription (owner's ruling of 2026-11-22) |
  * | stall | the tablet's socket goes silent (no frames, nothing answered) while the phone moves on; a move pressed on the tablet is never signed on the stale head |
  * | race | both devices press a move at the same moment; whatever lands, neither device signs on top of a fork afterwards; with no fork each is on the relay head or holds its move behind the diverged-branch prompt |
+ * | stalefallback | the old relay (useRelays READ_FALLBACK_RELAY, read only) holds the chain as it was; the canonical relay goes silent for the tablet while the phone moves on; a move pressed on the tablet is never signed on the old relay's word |
+ * | (always) | nothing is ever published to the old relay |
+ *
+ * The old relay (wss://cyberspace.nostr1.com) is its own fake relay here,
+ * with its own store: it holds only what is sent to it, or what a case puts
+ * in it, as the real one now does.
  *
  *   node scripts/chain-sync-two-device.mjs http://localhost:5287 /path/to/out
  */
@@ -43,10 +49,13 @@ const nsec = nip19.nsecEncode(sk)
 // ---- the relay ----
 const store = []
 const subs = new Set()
-const relay = { silent: new Set(), reqs: {}, dropEvents: new Set() }
-function answer(filters) {
+const relay = { silent: new Set(), silentCanon: new Set(), reqs: {}, dropEvents: new Set() }
+/** The old relay's own store, and every event any device published to it (none should be). */
+const old = { store: [], published: [] }
+const OLD_RELAY = /^wss:\/\/cyberspace\.nostr1\.com/
+function answer(filters, from = store) {
   // The union of the filters, newest first, capped as a whole (nostrdb).
-  const hit = store.filter((e) => filters.some((f) => matchFilter(f, e)))
+  const hit = from.filter((e) => filters.some((f) => matchFilter(f, e)))
   hit.sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : 1))
   const limit = Math.min(CAP, ...filters.map((f) => f.limit ?? Infinity))
   return hit.slice(0, limit)
@@ -63,8 +72,26 @@ async function device(name) {
     if (/^wss?:\/\/(localhost|127\.0\.0\.1)/.test(ws.url())) { ws.connectToServer(); return }
     const mine = new Map()
     ws.onClose(() => { for (const s of mine.values()) subs.delete(s) })
+    if (OLD_RELAY.test(ws.url())) {
+      // The old relay: answers from its own store, keeps (and counts) whatever is sent to it.
+      ws.onMessage((raw) => {
+        if (relay.silent.has(name)) return
+        let m; try { m = JSON.parse(String(raw)) } catch { return }
+        if (m[0] === 'REQ') {
+          const [, id, ...filters] = m
+          for (const ev of answer(filters, old.store)) ws.send(JSON.stringify(['EVENT', id, ev]))
+          ws.send(JSON.stringify(['EOSE', id]))
+        } else if (m[0] === 'EVENT') {
+          old.published.push({ device: name, kind: m[1].kind, id: m[1].id })
+          if (!old.store.some((e) => e.id === m[1].id)) old.store.push(m[1])
+          ws.send(JSON.stringify(['OK', m[1].id, true, '']))
+        } else if (m[0] === 'AUTH') ws.send(JSON.stringify(['OK', m[1].id, true, '']))
+        else if (m[0] === 'COUNT') ws.send(JSON.stringify(['COUNT', m[1], { count: old.store.filter((e) => m.slice(2).some((f) => matchFilter(f, e))).length }]))
+      })
+      return
+    }
     ws.onMessage((raw) => {
-      if (relay.silent.has(name)) return
+      if (relay.silent.has(name) || relay.silentCanon.has(name)) return
       let m; try { m = JSON.parse(String(raw)) } catch { return }
       if (m[0] === 'REQ') {
         const [, id, ...filters] = m
@@ -80,7 +107,7 @@ async function device(name) {
         const ev = m[1]
         if (!store.some((e) => e.id === ev.id)) store.push(ev)
         ws.send(JSON.stringify(['OK', ev.id, true, '']))
-        for (const s of subs) if (!relay.silent.has(s.name) && s.filters.some((f) => matchFilter(f, ev))) s.ws.send(JSON.stringify(['EVENT', s.id, ev]))
+        for (const s of subs) if (!relay.silent.has(s.name) && !relay.silentCanon.has(s.name) && s.filters.some((f) => matchFilter(f, ev))) s.ws.send(JSON.stringify(['EVENT', s.id, ev]))
       } else if (m[0] === 'AUTH') ws.send(JSON.stringify(['OK', m[1].id, true, '']))
       else if (m[0] === 'COUNT') ws.send(JSON.stringify(['COUNT', m[1], { count: store.filter((e) => m.slice(2).some((f) => matchFilter(f, e))).length }]))
     })
@@ -313,7 +340,7 @@ async function signedOffline(n) {
 function arrive(ev) {
   if (store.some((e) => e.id === ev.id)) return
   store.push(ev)
-  for (const s of subs) if (!relay.silent.has(s.name) && s.filters.some((f) => matchFilter(f, ev))) s.ws.send(JSON.stringify(['EVENT', s.id, ev]))
+  for (const s of subs) if (!relay.silent.has(s.name) && !relay.silentCanon.has(s.name) && s.filters.some((f) => matchFilter(f, ev))) s.ws.send(JSON.stringify(['EVENT', s.id, ev]))
 }
 
 for (const [c, n] of [['gap458', 458], ['gap600', Number(process.env.BIG_GAP ?? 600)]]) {
@@ -368,6 +395,35 @@ if (want('unreachable')) {
   relay.silent.delete('tablet')
   await tablet.close()
 }
+
+if (want('stalefallback')) {
+  // The old relay holds the chain as it stood (the history copied, and
+  // every move published to both before stage 1); the canonical relay then
+  // goes silent for the tablet, and the phone moves on, which the old relay
+  // never sees. The old relay answering with the tablet's own head must not
+  // pass a move: that is the word of a relay no move reaches any more.
+  if (!tablet.page) await tablet.open()
+  await until(tablet, (s) => s.head === relayHead() && s.sync?.status === 'done', 30_000)
+  for (const ev of store) if (!old.store.some((e) => e.id === ev.id)) old.store.push(ev)
+  const stale = relayHead()
+  relay.silentCanon.add('tablet')
+  await move(phone)
+  const target = relayHead()
+  const before = new Set(store.map((e) => e.id))
+  await tablet.page.evaluate(() => { const s = window.__store.getState(); s.moveCursor({ axis: 'z', dir: 1 }); void s.commit() })
+  const msgs = new Set()
+  await until(tablet, (s) => { msgs.add(s.msg); return s.msg === "Can't confirm your latest move. Try again." }, 60_000)
+  const st = await tablet.state()
+  const previousOf = (h) => tablet.page.evaluate((h) => { const s = window.__store.getState(); const e = s.events.find((x) => x.id === h); return e?.tags.find((t) => t[0] === 'e' && t[3] === 'previous')?.[1] ?? null }, h)
+  const signedStale = st.head !== stale && !before.has(st.head) && (await previousOf(st.head)) === stale
+  relay.silentCanon.delete('tablet')
+  const back = await until(tablet, (s) => s.head === target || store.some((e) => e.id === s.head && !before.has(e.id)), 90_000)
+  const st2 = await tablet.state()
+  ok('stalefallback: with the canonical relay silent, the old relay\'s stale answer never passes a move; once the canonical relay talks again the tablet catches up', !signedStale && back !== null, `messages ${JSON.stringify([...msgs])}, back in ${back} ms, tablet ${JSON.stringify({ n: st2.n, head: st2.head?.slice(0, 8), msg: st2.msg, conflict: st2.conflict })} relay ${target?.slice(0, 8)} old relay head ${stale?.slice(0, 8)}`)
+  await tablet.close()
+}
+
+ok('nothing is published to the old relay (read only)', old.published.length === 0, `${old.published.length} events: ${JSON.stringify(old.published.slice(0, 5))}`)
 
 // The relay never holds two branches.
 const mine = store.filter((e) => e.pubkey === pk && e.kind === 3333)

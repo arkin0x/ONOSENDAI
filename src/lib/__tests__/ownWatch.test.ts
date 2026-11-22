@@ -11,6 +11,8 @@ import { forgetOwnWatchMoves, DROP_AFTER_MS, EOSE_WAIT_MS, FRESHEN_WAIT_MS, LIVE
 import type { NostrEvent } from '../events'
 
 type H = Parameters<typeof ownWatchDeps.subscribeOne>[2]
+/** The real relays to watch and the real pinned set, before install() replaces them. */
+const defaults = { relays: ownWatchDeps.relays, pinned: ownWatchDeps.pinned }
 const net = { subs: [] as Array<{ url: string; filter: Record<string, unknown>; filters: Array<Record<string, unknown>>; h: H; closed: boolean }>, age: new Map<string, number>(), owed: new Map<string, number>(), dropped: [] as string[], failed: new Set<string>() }
 
 const PK = 'ab'.repeat(32)
@@ -30,6 +32,15 @@ const own = (url: string) => net.subs.filter((s) => s.url === url && s.filter.au
 const state = (url: string) => ownWatchState(PK)!.find((r) => r.url === url)!
 
 afterEach(() => { stopOwnWatch(); net.subs.length = 0; net.age.clear(); net.owed.clear(); net.dropped.length = 0; net.failed.clear(); vi.useRealTimers() })
+
+describe('which relays are watched, and which vouch (stage 1 of retiring wss://cyberspace.nostr1.com)', () => {
+  it('the canonical relay alone is pinned; the read-only old relay is watched, so a move only it holds is still heard, but never pinned', () => {
+    expect([...defaults.pinned()]).toEqual(['wss://relay.onosendai.tech'])
+    const watched = defaults.relays()
+    expect(watched[0]).toBe('wss://relay.onosendai.tech')
+    expect(watched).toContain('wss://cyberspace.nostr1.com')
+  })
+})
 
 describe('the standing watch', () => {
   it("one subscription per relay, for this identity's moves; current only after its EOSE; every move delivered is held until found in hand", () => {

@@ -7,8 +7,9 @@
  * slow-relay grace). A relay holds the chain once
  * it has taken one of this identity's chain events (OK true on a publish) or
  * sent one back in a fetch, in this session or an earlier one. The canonical
- * relay always does, and so does the former canonical relay while it is
- * pinned (useRelays SECOND_RELAY).
+ * relay always does. The former canonical relay, read only while it is
+ * retired (useRelays READ_FALLBACK_RELAY), never does: the moves of this
+ * version are not sent there, so a move does not wait for it.
  *
  * Kept per identity beside the saved chain, as the publisher keeps the
  * actions still owed to the canonical relay, so a reload still knows which
@@ -22,7 +23,7 @@
 import { normalizeURL } from 'nostr-tools/utils'
 import type { NostrEvent } from './events'
 import type { RelayAnswer } from './relayOutcome'
-import { DEFAULT_RELAY, SECOND_RELAY, isRetiredRelay } from '../store/useRelays'
+import { DEFAULT_RELAY, isReadFallbackRelay, isRetiredRelay } from '../store/useRelays'
 
 /** Where an identity's set is saved: normalized relay URLs, the canonical relay left implicit. */
 const holdersKeyFor = (pubkey: string): string => `onosendai:chain-holders:${pubkey}`
@@ -49,13 +50,16 @@ function load(pubkey: string): Set<string> {
 
 /**
  * The relays that hold `pubkey`'s chain (normalized URLs), the canonical relay
- * always among them. So is the former canonical relay while it is pinned
- * (useRelays SECOND_RELAY): every chain was published there until 2026-11-05,
- * and a move made on another device may have reached only it before the
- * history catch-up, so a head is not confirmed without waiting for it.
+ * always among them. The read-only former canonical relay (useRelays
+ * READ_FALLBACK_RELAY) never is, though a set saved while it was pinned names
+ * it: nothing of this version publishes there, so what it holds is no newer
+ * than the canonical relay, and waiting for it (and for its AUTH) would only
+ * slow a move. It is still asked, and a newer move it sends in time still
+ * stops the move, as any relay's does; the standing subscription on it
+ * (ownWatch) hears one that comes later.
  */
 export function chainHolders(pubkey: string): Set<string> {
-  return new Set([normalizeURL(DEFAULT_RELAY), normalizeURL(SECOND_RELAY), ...load(pubkey)])
+  return new Set([normalizeURL(DEFAULT_RELAY), ...[...load(pubkey)].filter((url) => !isReadFallbackRelay(url))])
 }
 
 /** These relays hold `pubkey`'s chain: one took a chain event, or sent one back. Saved at once. */

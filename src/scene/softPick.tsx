@@ -84,7 +84,7 @@ export function pickBox(points: ArrayLike<number>, radius: number): Box3 | null 
 }
 
 /** Never drawn, and if it ever were, it would write nothing: no colour, no depth. */
-export const PICK_MATERIAL = new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, colorWrite: false, side: DoubleSide })
+export const PICK_MATERIAL = new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, colorWrite: false, side: DoubleSide, forceSinglePass: true })
 
 const inverse = new Matrix4()
 const local = new Ray()

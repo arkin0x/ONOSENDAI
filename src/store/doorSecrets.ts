@@ -9,8 +9,9 @@
  * knowledge, as an item is, and never leaves this device.
  */
 
-import { hiddenDecided, ONLY_SAID_KEY, putSecret, secretRecord, SECRETS_KEY, storageMode } from './hiddenStorage'
+import { hiddenDecided, ONLY_SAID_KEY, putSecretResult, secretRecord, SECRETS_KEY, storageMode, troubleOf, type SaveResult, type SaveTrouble } from './hiddenStorage'
 import { useToast } from './useToast'
+import { useCyberspace } from './useCyberspace'
 
 /** In local mode only (store/hiddenStorage.ts): the database has no such limit. The oldest fall off past it. */
 const SECRETS_MAX = 2000
@@ -53,10 +54,42 @@ export function doorSecret(me: string, doorId: string): string | null {
   return typeof s === 'string' && /^[0-9a-f]{64}$/.test(s) ? s : null
 }
 
-const NOT_KEPT = 'This device could not save a door secret. It is known until you reload: free some space, then open or seal the door again.'
+/**
+ * Why a door secret was not kept, in plain words (hiddenStorage SaveTrouble).
+ * "Free some space" only when the browser said it was out of space.
+ */
+export const SECRET_NOT_KEPT: Record<SaveTrouble, string> = {
+  full: 'This device could not save a door secret. It is known until you reload: free some space, then open or seal the door again.',
+  fallback: 'This device could not save a door secret: storage did not open when this page loaded, and the small backup is full. It is known until you reload: reload, then open or seal the door again.',
+  slow: 'This device\'s storage did not answer in time, so a door secret is not saved. It is known until you reload: open or seal the door again later.',
+  refused: 'The browser would not save a door secret. It is known until you reload: open or seal the door again later.',
+}
+/** Why the secret of a door about to go out was not kept, so nothing was sent. */
+export const SECRET_NOT_SENT: Record<SaveTrouble, string> = {
+  full: 'This device could not save the door\'s secret, so nothing was sent. Free some space and try again.',
+  fallback: 'This device could not save the door\'s secret, so nothing was sent: storage did not open when this page loaded. Reload the page and try again.',
+  slow: 'This device could not save the door\'s secret, so nothing was sent: its storage did not answer in time. Try again.',
+  refused: 'This device could not save the door\'s secret, so nothing was sent: the browser refused it. Try again.',
+}
 
-function saidNotKept(): void {
-  useToast.getState().show({ label: 'SECRET NOT SAVED', meta: NOT_KEPT, mark: 'build' })
+/** localStorage refused (local mode): the lack of space it says, unless the device has room (troubleOf). */
+const localTrouble = (): Promise<SaveTrouble> => troubleOf(new DOMException('localStorage is full', 'QuotaExceededError'), 'local')
+
+/** Say a secret was not kept, once known: a write that was only slow and then landed says nothing. */
+async function saidNotKept(r: SaveResult | Promise<SaveTrouble>, me: string): Promise<void> {
+  let trouble: SaveTrouble
+  if (r instanceof Promise) trouble = await r
+  else {
+    trouble = r.trouble ?? 'refused'
+    if (r.late) {
+      const late = await r.late
+      if (late === null) return
+      // Up to a minute later: not over another identity's screen.
+      if (useCyberspace.getState().identity.pubkey !== me) return
+      trouble = late
+    }
+  }
+  useToast.getState().show({ label: 'SECRET NOT SAVED', meta: SECRET_NOT_KEPT[trouble], mark: 'build' })
 }
 
 /** As it always was, for local mode: whether it reached localStorage. */
@@ -87,10 +120,10 @@ function record(me: string, doorId: string, secretHex: string, how?: { onlySaid:
  * commitDoorSecret.
  */
 export function keepDoorSecret(me: string, doorId: string, secretHex: string, how?: { onlySaid: true }): void {
-  if (storageMode() === 'local') { if (!keepLocally(me, doorId, secretHex, how)) saidNotKept(); return }
+  if (storageMode() === 'local') { if (!keepLocally(me, doorId, secretHex, how)) void saidNotKept(localTrouble(), me); return }
   void hiddenDecided().then(() => {
-    if (storageMode() === 'local') { if (!keepLocally(me, doorId, secretHex, how)) saidNotKept(); return }
-    return putSecret(record(me, doorId, secretHex, how)).then((ok) => { if (!ok) saidNotKept() })
+    if (storageMode() === 'local') { if (!keepLocally(me, doorId, secretHex, how)) void saidNotKept(localTrouble(), me); return }
+    return putSecretResult(record(me, doorId, secretHex, how)).then((r) => { if (!r.ok) void saidNotKept(r, me) })
   })
 }
 
@@ -101,8 +134,13 @@ export function keepDoorSecret(me: string, doorId: string, secretHex: string, ho
  */
 export async function commitDoorSecret(me: string, doorId: string, secretHex: string): Promise<void> {
   await hiddenDecided()
-  const kept = storageMode() === 'local' ? keepLocally(me, doorId, secretHex) : await putSecret(record(me, doorId, secretHex))
-  if (!kept) throw new Error('This device could not save the door\'s secret, so nothing was sent. Free some space and try again.')
+  if (storageMode() === 'local') {
+    if (!keepLocally(me, doorId, secretHex)) throw new Error(SECRET_NOT_SENT[await localTrouble()])
+    return
+  }
+  const r = await putSecretResult(record(me, doorId, secretHex))
+  // Not sent on a slow write either: a door must not go out before its secret is on disk.
+  if (!r.ok) throw new Error(SECRET_NOT_SENT[r.trouble ?? 'refused'])
 }
 
 /** For tests: forget what is kept, so the next read is from localStorage. */

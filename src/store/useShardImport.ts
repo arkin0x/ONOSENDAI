@@ -438,6 +438,8 @@ export const useShardImport = create<ShardImportState>((set, get) => {
     const pause = (ms: number): Promise<void> => Promise.race([sleep(ms), stopped])
     let inHand: string | null = null
     let sent = 0
+    /** When a save last settled, for what counts as storage gone silent. */
+    let lastProgress = 0
     /** Rows added whose save has not committed yet, each with what settles it. */
     const unsaved = new Map<string, { since: number; settled: Promise<boolean> }>()
     /** Storage refused a save: nothing more comes in. */
@@ -446,7 +448,9 @@ export const useShardImport = create<ShardImportState>((set, get) => {
     const track = (key: string, saved: Promise<boolean>, thenDone: boolean): Promise<boolean> => {
       const settled = saved.catch(() => false).then((ok) => {
         unsaved.delete(key)
-        if (g !== generation) return ok
+        lastProgress = Date.now()
+        // A save left from a run that ended says nothing about the run going now (a RETRY).
+        if (g !== generation || (current !== null && current !== mineRun)) return ok
         const r = row(key)
         if (ok) {
           // A row the run gave up waiting on is DONE once its save lands after all.
@@ -473,14 +477,16 @@ export const useShardImport = create<ShardImportState>((set, get) => {
           await Promise.race([Promise.all([...unsaved.values()].map((u) => u.settled)), sleep(timing.stopGraceMs)])
           return unsaved.size ? 'stopped' : 'ok'
         }
+        // Silent: nothing settled for saveStallMs (a slow disk still settling one batch after another is not silent).
         const oldest = Math.min(...[...unsaved.values()].map((u) => u.since))
-        const left = oldest + timing.saveStallMs - Date.now()
+        const left = Math.max(oldest, lastProgress) + timing.saveStallMs - Date.now()
         if (left <= 0) return 'silent'
         await Promise.race([...[...unsaved.values()].map((u) => u.settled), sleep(left), stopped])
       }
       return 'ok'
     }
-    const endBulk = bulkWrites()
+    // Broadcasts held either way; relaxed durability only when no save gates a publish.
+    const endBulk = bulkWrites({ relaxed: !publish })
     let sliceFrom = performance.now()
     try {
       const folders = folderApi()

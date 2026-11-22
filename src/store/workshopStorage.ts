@@ -124,8 +124,10 @@ let offline = { message: UNAVAILABLE, reason: 'Workshop storage could not be ope
 let decided: () => void = () => {}
 const ready = new Promise<void>((resolve) => { decided = resolve })
 
-/** Bulk imports running now: while any is, commits ask for relaxed durability (lib/workshopDb.ts RELAXED). */
+/** Bulk imports running now: while any is, nothing is broadcast until the last ends. */
 let bulk = 0
+/** Of those, the ones whose saves gate nothing (PUBLISH off): while any is, commits ask for relaxed durability (lib/workshopDb.ts RELAXED). */
+let relaxedBulk = 0
 
 /**
  * A bulk import starts: until the returned function is called, each commit
@@ -133,13 +135,15 @@ let bulk = 0
  * the one queue, one transaction at a time, and saveNow() still resolves
  * only once its commit has completed. Calling the end twice ends it once.
  */
-export function bulkWrites(): () => void {
+export function bulkWrites(opts: { relaxed?: boolean } = {}): () => void {
   bulk++
+  if (opts.relaxed) relaxedBulk++
   let ended = false
   return () => {
     if (ended) return
     ended = true
     bulk--
+    if (opts.relaxed) relaxedBulk--
     // What was held while it ran goes to the other tabs once, now.
     if (bulk === 0 && (held.put.size || held.del.size)) {
       const put = [...held.put]
@@ -375,7 +379,7 @@ async function commitPending(): Promise<boolean> {
           if (m) puts.push(recordOf(id, m))
           else deletes.push(id)
         }
-        if (batch.size) await commit(d, puts, deletes, Date.now(), bulk > 0 ? 'relaxed' : 'strict')
+        if (batch.size) await commit(d, puts, deletes, Date.now(), relaxedBulk > 0 ? 'relaxed' : 'strict')
       } catch (e) {
         if (attempt === 0 && !isQuota(e)) {
           console.warn(`[workshop] write failed, opening the database again for one more try: ${describe(e)}`)

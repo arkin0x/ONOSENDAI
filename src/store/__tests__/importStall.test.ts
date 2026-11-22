@@ -194,10 +194,20 @@ describe('storage that never answers', () => {
     expect(Date.now() - stopAt).toBeLessThan(1500)
     expect(t.imp.useShardImport.getState().phase).toBe('done')
     hold = false
+    // Broadcasts are not held after a run cut short: the next save is told at once.
+    const heard: unknown[] = []
+    const bc = new BroadcastChannel('onosendai:shards')
+    bc.onmessage = (ev) => { heard.push(ev.data) }
+    try {
+      t.ws.useWorkshop.getState().rename(`${KIT}/piece-0`, 'renamed after')
+      expect(await t.ws.useWorkshop.getState().saveNow()).toBe(true)
+      await vi.waitFor(() => expect(heard.some((m) => ((m as { put?: string[] }).put ?? []).includes(`${KIT}/piece-0`))).toBe(true))
+    } finally { bc.close() }
   }, 30_000)
 })
 
 describe('a tab closed in the middle of an import', () => {
+  // All or nothing per commit (fake-indexeddb does not model durability: a closed tab keeps relaxed commits in a browser).
   it('keeps every shard whose save committed, each whole', async () => {
     const lib = Array.from({ length: 10 }, (_, i) => piece(i, 12, 1000))
     const t = await library(lib)
@@ -240,4 +250,41 @@ describe('the cost of one shard', () => {
     // Ten shards, ten records, for a library of 30 and of 410: never the library.
     expect(writes).toEqual([10, 10])
   }, 60_000)
+})
+
+describe('durability', () => {
+  it('relaxed only while no save gates a publish: PUBLISH on keeps every commit strict', async () => {
+    const seen: Record<string, string[]> = { off: [], on: [] }
+    for (const publish of [false, true]) {
+      ;(globalThis as { indexedDB: IDBFactory }).indexedDB = new IDBFactory()
+      mem.clear()
+      const t = await library(Array.from({ length: 4 }, (_, i) => piece(i)))
+      const realTx = IDBDatabase.prototype.transaction
+      const spy = vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(function (this: IDBDatabase, ...args: Parameters<IDBDatabase['transaction']>) {
+        const stores = Array.isArray(args[0]) ? args[0] : [args[0]]
+        if (args[1] === 'readwrite' && stores.includes('shards')) seen[publish ? 'on' : 'off'].push((args[2] as { durability?: string } | undefined)?.durability ?? 'default')
+        return realTx.apply(this, args)
+      })
+      await t.imp.useShardImport.getState().openZip(kitZip(4))
+      t.imp.useShardImport.getState().setDupMode('update')
+      t.imp.useShardImport.getState().setPublish(publish)
+      await t.imp.useShardImport.getState().start()
+      spy.mockRestore()
+      // After the run, an edit commits strict again.
+      t.ws.useWorkshop.getState().rename(`${KIT}/piece-0`, 'after')
+      const realTx2 = IDBDatabase.prototype.transaction
+      const after: string[] = []
+      const spy2 = vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(function (this: IDBDatabase, ...args: Parameters<IDBDatabase['transaction']>) {
+        if (args[1] === 'readwrite') after.push((args[2] as { durability?: string } | undefined)?.durability ?? 'default')
+        return realTx2.apply(this, args)
+      })
+      expect(await t.ws.useWorkshop.getState().saveNow()).toBe(true)
+      spy2.mockRestore()
+      expect(after).toContain('strict')
+    }
+    expect(seen.off.length).toBeGreaterThan(0)
+    expect(seen.off.every((d) => d === 'relaxed')).toBe(true)
+    expect(seen.on.length).toBeGreaterThan(0)
+    expect(seen.on.every((d) => d === 'strict')).toBe(true)
+  }, 30_000)
 })

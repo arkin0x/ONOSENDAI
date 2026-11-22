@@ -3,22 +3,27 @@
  * seen while it is being placed.
  *
  * A shard can be nothing but fog, glow or points (DECK-0003 §1.15, §1.16):
- * POINTS at point size 0 with a FOG or LIGHT glow, a solid shard at opacity 0
- * whose glow still shows, or a cloud of dots. None of those has a face for a
- * tap to land on: the halos take no rays (glowHalos noRaycast) and the dots
- * only answer within a few pixels of a vertex, so a tap on the fog did
- * nothing (arkinox, 2026-11-22: "I can't tap on a shard when it's only fog").
+ * POINTS at point size 0 with a FOG or LIGHT glow, POINTS at opacity 0 whose
+ * glow still shows (glow is read in POINTS mode only), points drawn at a
+ * POINT SIZE, or a cloud of the client's own dots. None of those has a face
+ * for a tap to land on: the halos take no rays (glowHalos noRaycast), so a
+ * tap on the fog did nothing (arkinox, 2026-11-22: "I can't tap on a shard
+ * when it's only fog").
  *
  * Such a shard gets a pick volume: a mesh that is only ever raycast, never
  * drawn (`visible` false, and a material that writes neither colour nor
  * depth even if it were), so like every invisible thing it occludes nothing.
  * Its box is the points' box widened by the glow's radius, which is what the
  * tap target measures (TapTarget, Box3.setFromObject reads invisible
- * children too). With a glow, a ray hits it only within a halo's radius of a
- * point, the fog as drawn; without one, anywhere in that box.
+ * children too). A ray hits it only where the shard draws: within a halo's
+ * radius of a point, or a drawn point's half width; for the client's own
+ * dots, which are a few pixels across at any distance, within a fingertip of
+ * one (the tap's own slop, as the dots were tapped before). So the empty air
+ * in a sparse cloud lets a tap through to what stands inside it.
  *
- * A hit on it is soft (`userData.softPick`), and so is a hit on the invisible
- * copy a shard at opacity 0 keeps (ShardMesh `shard-hit`): it takes the tap
+ * A hit on it is soft (`userData.softPick`), and so is a hit on such a
+ * shard's own dots and points, or on the invisible copy a shard at opacity 0
+ * keeps (ShardMesh `shard-hit`): it takes the tap
  * only when nothing solid under the same tap is hit nearer than the fog's
  * body (TapTarget softYields), so a solid shard in front of a fog, or
  * standing in its front half, still wins, and a wall behind it does not.
@@ -55,7 +60,7 @@ export function softModel(shard: ShardModel): boolean {
 /**
  * The radius a ray must pass within of a point to hit a soft shard, in model
  * units: its halo's, or its drawn point's half width when that is larger; 0
- * with neither, which means the whole box.
+ * with neither (the client's own dots), which means the tap's own slop.
  */
 export function pickRadius(plan: DrawPlan, look: { glowRadius: number; pointSize: number | undefined }): number {
   const halo = plan.halos ? look.glowRadius : 0
@@ -63,7 +68,7 @@ export function pickRadius(plan: DrawPlan, look: { glowRadius: number; pointSize
   return Math.max(halo, core)
 }
 
-/** Without a radius, the box is widened by this share of its longest side, so a flat sheet of dots still has some depth to hit. */
+/** Without a radius, the measured box is widened by this share of its longest side, so a flat sheet of dots is not a box of no depth. */
 const BOX_PAD = 0.02
 
 /** The points' box widened by `radius` (or by BOX_PAD of its size with none); null with no points. */
@@ -86,64 +91,66 @@ const local = new Ray()
 const hitAt = new Vector3()
 const centre = new Vector3()
 
-/** A soft hit: where the ray enters the fog (`distance`, as three reports any hit) and how deep its body lies along the ray (`softDepth`). */
-export type SoftIntersection = Intersection & { softDepth: number }
-
-/** World distance from the ray's origin to the point `t` along the local ray. */
-function worldDistance(mesh: Mesh, raycaster: Raycaster, t: number, out: Vector3): number {
-  local.at(t, out).applyMatrix4(mesh.matrixWorld)
-  return raycaster.ray.origin.distanceTo(out)
-}
+/** A soft hit: where the ray enters the fog (`distance` and `point`, as three reports any hit) and where its body lies along the ray (`softPoint`). */
+export type SoftIntersection = Intersection & { softPoint: Vector3 }
 
 /**
  * The pick volume's raycast: one hit for the whole shard, or none.
  *
- * With a radius, the ray must pass within it of a point: the hit is where it
- * enters the nearest such halo, and its depth is where it passes closest to
- * that point, the middle of what is drawn there. Without, the ray must cross
- * the box: the hit is where it enters, the depth halfway through. A solid
- * thing is weighed against the depth (TapTarget softYields), so one standing
- * in the front of a fog wins its taps, and a wall behind the fog does not.
- * Read at the tap from the final positions, never a birth's scramble.
+ * The ray must pass within a radius of a point: the halo's or the drawn
+ * point's (`radius`), and never less than the raycaster's Points threshold,
+ * which a tap target sets to its fingertip slop (TapTarget): all a dot of the
+ * client's own has, being a few pixels across at any distance. The
+ * hit is where it enters the nearest such sphere, and its body is where the
+ * ray passes closest to that point, the middle of what is drawn there. A
+ * solid thing is weighed against the body (TapTarget softYields), so one
+ * standing in the front of a fog wins its taps, and a wall behind the fog
+ * does not. Read at the tap from the final positions, never a birth's
+ * scramble.
  */
 export function softRaycast(points: ArrayLike<number>, radius: number): (this: Mesh, raycaster: Raycaster, intersects: Intersection[]) => void {
   return function raycast(this: Mesh, raycaster: Raycaster, intersects: Intersection[]): void {
-    const g = this.geometry
-    if (!g.boundingBox) g.computeBoundingBox()
+    // A threshold is in world units; the points are in the shard's own, under its scale (as three's Points.raycast works it).
+    // Never less than a fingertip: a halo or a point drawn smaller than that is still a thing to tap.
+    const r = Math.max(radius, (raycaster.params.Points?.threshold ?? 0) / Math.max(this.matrixWorld.getMaxScaleOnAxis(), 1e-30))
+    if (!(r > 0)) return
     inverse.copy(this.matrixWorld).invert()
     local.copy(raycaster.ray).applyMatrix4(inverse)
-    const span = slab(g.boundingBox!)
-    if (!span) return
-    let enter: number
-    let deep: number
-    if (radius <= 0) {
-      enter = Math.max(0, span[0])
-      deep = (enter + span[1]) / 2
-    } else {
-      enter = Infinity
-      deep = Infinity
-      const r2 = radius * radius
-      for (let i = 0; i + 2 < points.length; i += 3) {
-        centre.set(points[i], points[i + 1], points[i + 2])
-        if (local.distanceSqToPoint(centre) > r2) continue
-        // Along the ray to its closest approach, then back by half the chord: where it enters this halo (0 from inside).
-        const along = hitAt.copy(centre).sub(local.origin).dot(local.direction)
-        const half = Math.sqrt(Math.max(0, r2 - local.distanceSqToPoint(centre)))
-        if (along + half < 0) continue
-        const t = Math.max(0, along - half)
-        if (t >= enter) continue
-        enter = t
-        deep = Math.max(t, along)
-      }
-      if (enter === Infinity) return
+    // Quick refusal on the points' box widened by the radius.
+    if (!slab(pickBoxCached(this, points, r))) return
+    let enter = Infinity
+    let deep = Infinity
+    const r2 = r * r
+    for (let i = 0; i + 2 < points.length; i += 3) {
+      centre.set(points[i], points[i + 1], points[i + 2])
+      const off = local.distanceSqToPoint(centre)
+      if (off > r2) continue
+      // Along the ray to its closest approach, then back by half the chord: where it enters this sphere (0 from inside).
+      const along = hitAt.copy(centre).sub(local.origin).dot(local.direction)
+      const half = Math.sqrt(Math.max(0, r2 - off))
+      if (along + half < 0) continue
+      const t = Math.max(0, along - half)
+      if (t >= enter) continue
+      enter = t
+      deep = Math.max(t, along)
     }
-    const point = new Vector3()
-    const distance = worldDistance(this, raycaster, enter, point)
+    if (enter === Infinity) return
+    const point = local.at(enter, new Vector3()).applyMatrix4(this.matrixWorld)
+    const distance = raycaster.ray.origin.distanceTo(point)
     if (distance < raycaster.near || distance > raycaster.far) return
-    const softDepth = worldDistance(this, raycaster, deep, hitAt)
-    const hit: SoftIntersection = { distance, point, object: this as Object3D, softDepth }
+    const softPoint = local.at(deep, new Vector3()).applyMatrix4(this.matrixWorld)
+    const hit: SoftIntersection = { distance, point, object: this as Object3D, softPoint }
     intersects.push(hit)
   }
+}
+
+/** The points' box widened by `r`, kept on the mesh while `r` stays the same. */
+function pickBoxCached(mesh: Mesh, points: ArrayLike<number>, r: number): Box3 {
+  const kept = mesh.userData.pickBox as { r: number; box: Box3; points: ArrayLike<number> } | undefined
+  if (kept && kept.r === r && kept.points === points) return kept.box
+  const box = pickBox(points, r) ?? new Box3()
+  mesh.userData.pickBox = { r, box, points }
+  return box
 }
 
 /** Where the local ray crosses `box`, as [enter, leave] along it; null when it misses or the box is behind. */
@@ -163,9 +170,9 @@ function slab(box: Box3): [number, number] | null {
   return hi < 0 ? null : [lo, hi]
 }
 
-/** How deep a hit lies for weighing against solid things: a soft hit's depth, else where it was hit. */
-export function hitDepth(hit: Intersection): number {
-  return (hit as Partial<SoftIntersection>).softDepth ?? hit.distance
+/** How far from `origin` a hit lies for weighing against other things: a soft hit's body, else where it was hit. */
+export function hitDepth(hit: Intersection, origin: Vector3): number {
+  return ((hit as Partial<SoftIntersection>).softPoint ?? hit.point).distanceTo(origin)
 }
 
 /** Whether a hit is on a soft pick (the pick volume, or the invisible copy of a shard at opacity 0). */

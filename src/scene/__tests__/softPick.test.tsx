@@ -10,9 +10,12 @@
  *
  * - A fog shard (POINTS, point size 0, a FOG glow), a glow shard (POINTS at
  *   opacity 0, a LIGHT glow) and a cloud of dots each take a tap on what they
- *   draw; a fog only within its halos, never in the empty corners of its box.
+ *   draw; a fog only within its halos, never in the empty corners of its box;
+ *   dots within a fingertip of one.
  * - A solid shard in front of the fog, or standing in the front of it, wins
- *   the tap; a wall behind the fog does not.
+ *   the tap, and so does one standing among a cloud's dots, and anything else
+ *   that takes a click; a wall behind the fog does not, even when the wall's
+ *   box (a courtyard round the fog) is met first.
  * - The pick volume is never drawn and writes neither depth nor colour.
  * - The placing ghost of a fog, a glow or a dot cloud is outlined over
  *   everything (depthTest off for the outline only), its glow drawn whatever
@@ -68,6 +71,20 @@ function cube(side: number): ShardModel {
   return { ...newShard('Cube'), unit: 0, mode: 'solid', vertices, faces }
 }
 
+/**
+ * A courtyard: a back wall 8 wide, 3 behind its middle, and a post far out
+ * in front, 3 before it and off to the side, so its box holds the fog and is
+ * met first. A model's +z is into the screen here (the render mapping flips
+ * it), so the wall is at +3 and the post at -3.
+ */
+function courtyard(): ShardModel {
+  const vertices: ShardModel['vertices'] = [
+    { p: [-4, -4, 3], c: [0, 1, 0] }, { p: [4, -4, 3], c: [0, 1, 0] }, { p: [4, 4, 3], c: [0, 1, 0] }, { p: [-4, 4, 3], c: [0, 1, 0] },
+    { p: [3.8, 3.8, -3], c: [0, 1, 0] }, { p: [4, 3.8, -3], c: [0, 1, 0] }, { p: [4, 4, -3], c: [0, 1, 0] },
+  ]
+  return { ...newShard('Courtyard'), unit: 0, mode: 'solid', vertices, faces: [[0, 1, 2], [0, 2, 3], [4, 5, 6]] }
+}
+
 /** One shard as the world draws it: at `z`, its drawn group measured by its own TapTarget. */
 function Placed({ shard, z, onTap }: { shard: ShardModel; z: number; onTap: () => void }): JSX.Element {
   const drawn = useRef<Group>(null)
@@ -121,12 +138,43 @@ describe('a shard that is only fog, glow or points, tapped', () => {
     expect(tapped).toHaveBeenCalledTimes(1)
   })
 
-  it('a cloud of dots takes a tap between its dots', async () => {
+  it('a cloud of dots takes a tap within a fingertip of a dot', async () => {
     const tapped = vi.fn()
     // Close enough that it is large on screen, where a tap must land on what it draws.
     const root = await scene([{ shard: dots(), z: 6, onTap: tapped }])
-    await root.tap(...onScreen(root, [0.5, 0.5, 6]))
+    await root.tap(...onScreen(root, [1.03, 0, 6]))
     expect(tapped).toHaveBeenCalledTimes(1)
+  })
+
+  it('a solid shard standing among a cloud\'s dots wins a tap on it: the air between the dots lets it through', async () => {
+    const dotsTap = vi.fn()
+    const solidTap = vi.fn()
+    const root = await scene([{ shard: dots(), z: -6, onTap: dotsTap }, { shard: cube(0.5), z: -6.2, onTap: solidTap }])
+    await root.tap(...onScreen(root, [0, 0, -6]))
+    expect(solidTap).toHaveBeenCalledTimes(1)
+    expect(dotsTap).not.toHaveBeenCalled()
+  })
+
+  it('a courtyard round the fog, its box met first, leaves a tap on the fog to the fog', async () => {
+    const fogTap = vi.fn()
+    const yardTap = vi.fn()
+    const root = await scene([{ shard: fog(), z: -6, onTap: fogTap }, { shard: courtyard(), z: -6, onTap: yardTap }])
+    await root.tap(...onScreen(root, [0, 0, -6]))
+    expect(fogTap).toHaveBeenCalledTimes(1)
+    expect(yardTap).not.toHaveBeenCalled()
+  })
+
+  it('anything else that takes a click, standing in the front of the fog, wins the tap', async () => {
+    const fogTap = vi.fn()
+    const stopTap = vi.fn()
+    r = await r3fRoot({ width: SIZE, height: SIZE })
+    await r.render(createElement('group', null,
+      createElement(Placed, { shard: fog(), z: -6, onTap: fogTap }),
+      // A transit stop's cube, say: a click handler and no tap target.
+      createElement('mesh', { position: [0, 0, -5], onClick: (e: { stopPropagation: () => void }) => { e.stopPropagation(); stopTap() } }, createElement('boxGeometry', { args: [0.5, 0.5, 0.5] }), createElement('meshBasicMaterial'))))
+    await r.tap(...onScreen(r, [0, 0, -5]))
+    expect(stopTap).toHaveBeenCalledTimes(1)
+    expect(fogTap).not.toHaveBeenCalled()
   })
 
   it('a solid shard in front of the fog wins the tap', async () => {
@@ -199,6 +247,16 @@ describe('the placing ghost of a shard that is only fog, glow or points', () => 
       expect(lines[0].geometry.getAttribute('position').count).toBe(24)
       await root.unmount(); r = null
     }
+  })
+
+  it('a fog EDIT is moving is outlined too (softOutline), its outline drawn over everything', async () => {
+    r = await r3fRoot({ width: SIZE, height: SIZE })
+    await r.render(createElement(GhostGlow, { always: true }, createElement(ShardMesh, { shard: fog(), ghost: true, world: true, noBloom: true, softOutline: true })))
+    const lines = find(r.state().scene, 'soft-outline') as LineSegments[]
+    expect(lines).toHaveLength(1)
+    expect((lines[0].material as LineBasicMaterial).depthTest).toBe(false)
+    // Not a world shard you can tap while it moves: no pick volume.
+    expect(find(r.state().scene, 'shard-pick')).toHaveLength(0)
   })
 
   it('its glow is drawn with the Settings switch off, and a solid ghost is not outlined', async () => {

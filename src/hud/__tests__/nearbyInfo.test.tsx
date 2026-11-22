@@ -8,7 +8,7 @@
  * A tap in the world selects the thing by its key (WorldShards, ChestLooks,
  * WorldMessages, AudioSpheres: selectSecret(w.key)), and the card
  * (SecretModal) draws whatever is selected. INFO makes the same selection,
- * the list giving way to the card, for a shard (fog, glow and solid alike), a
+ * the card stacked over the list, which is there again when it closes, for a shard (fog, glow and solid alike), a
  * message, hidden audio, a chest, a door and a seed. A key's INFO is its key
  * card, as the owner named it (KeyItemInfo). Mounted for real
  * (test/elementRoot.ts), the buttons pressed. No network.
@@ -41,10 +41,12 @@ vi.mock('../../lib/relay', () => ({
 }))
 vi.mock('../../scene/CardSpin', () => ({ CardSpin: () => null }))
 vi.mock('../../scene/ShardSpin', () => ({ ShardSpin: () => null }))
+vi.mock('../../hooks/useNearbyLoot', () => ({ useNearbyLoot: () => [] }))
 
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { mount, textOf, type Host, type Mounted } from '../../test/elementRoot'
-import { Row, SeedRow } from '../NearbyLootModal'
+import { NearbyLootModal, Row, SeedRow } from '../NearbyLootModal'
+import { leaveModals, stackedOpen } from '../modalStack'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { useShards } from '../../store/useShards'
@@ -80,6 +82,16 @@ beforeEach(() => {
   useInventory.setState({ owner: ME, items: {}, storage: 'memory' })
 })
 
+describe('DISCOVERED NEARBY among the stacked modals', () => {
+  it('an action that leaves for the world (leaveModals) closes the list under the card too', async () => {
+    const r = await mount(<NearbyLootModal />)
+    expect(stackedOpen()).toBe(1)
+    leaveModals()
+    expect(useShards.getState().nearbyOpen).toBe(false)
+    await r.unmount()
+  })
+})
+
 describe('INFO on a DISCOVERED NEARBY row', () => {
   for (const [what, item] of ROWS) {
     it(`${what}: INFO beside VIEW opens its own card, as a tap on it in the world does`, async () => {
@@ -90,7 +102,8 @@ describe('INFO on a DISCOVERED NEARBY row', () => {
       expect(r.buttons(/^INFO$/)).toHaveLength(1)
       await r.press(/^INFO$/)
       expect(useShards.getState().selectedSecret).toBe(item.key)
-      expect(useShards.getState().nearbyOpen).toBe(false)
+      // The list stays under the card, as a key's INFO card stacks over it.
+      expect(useShards.getState().nearbyOpen).toBe(true)
       await r.unmount()
     })
   }
@@ -101,7 +114,7 @@ describe('INFO on a DISCOVERED NEARBY row', () => {
     expect(actions(r)).toEqual(['INFO', 'VIEW'])
     await r.press(/^INFO$/)
     expect(useShards.getState().selectedSecret).toBe(seed.key)
-    expect(useShards.getState().nearbyOpen).toBe(false)
+    expect(useShards.getState().nearbyOpen).toBe(true)
     await r.unmount()
   })
 

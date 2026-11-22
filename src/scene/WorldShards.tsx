@@ -29,6 +29,8 @@ import { passesTaps } from '../tutorial/guideBags'
 import { useMutes } from '../store/useMutes'
 import { useBuildDimmed } from './BuildOccluders'
 import { useDrawReach } from './buildZoom'
+import { GhostGlow } from './PointBillboards'
+import { softModel } from './softPick'
 
 const REACH = GRID_RADIUS * 8
 /** Past this many doublings out from its unit, a shard with no placed objects can never be seen (TapTarget farCullDoublings). */
@@ -319,6 +321,7 @@ const PlacedShardBody = memo(function PlacedShardBody({ shardKey, shard, trusted
   // Its placed objects are drawn within the scene's budget, by trust and nearest first (scene/meshBudget.ts).
   const budget = useMemo(() => ({ key: shardKey, trusted, centre, scale }), [shardKey, trusted, centre, scale])
   const tap = useCallback(() => useShards.getState().selectSecret(shardKey), [shardKey])
+  const softMoving = useMemo(() => moving && softModel(shard), [moving, shard])
   // Moving (EDIT): drawn as a ghost is, with ordinary blending, since a world
   // face writes its colour opaque whatever its opacity (ShardMesh TAG_BLEND),
   // and every material's opacity follows the breath each frame.
@@ -330,7 +333,10 @@ const PlacedShardBody = memo(function PlacedShardBody({ shardKey, shard, trusted
   return (
     <>
       <group ref={setDrawn}>
-        <ShardMesh shard={shard} scale={scale} birth={birth} world ghost={moving} noBloom={moving} clip={clip} pose={pose} budget={budget} dim={moving ? 1 : dim} />
+        {/* Moving a shard that is only points, fog or glow: its glow always drawn and its box outlined over everything, as the placing ghost's (softPick.tsx). */}
+        <GhostGlow always={moving && softMoving}>
+          <ShardMesh shard={shard} scale={scale} birth={birth} world ghost={moving} noBloom={moving} softOutline={moving} clip={clip} pose={pose} budget={budget} dim={moving ? 1 : dim} />
+        </GhostGlow>
       </group>
       {/* A wall you cannot see, outlined for a moment after it stopped your walk (store/wallHint.ts). */}
       <WalkContactHint shardKey={shardKey} shard={shard} scale={scale} clip={clip} pose={pose} />

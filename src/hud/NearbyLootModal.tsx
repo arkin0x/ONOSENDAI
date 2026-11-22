@@ -10,7 +10,7 @@
  * is held, and INFO (KeyItemInfo); a chest row has its OPEN, and a door row its OPEN or CLOSE, beside
  * VIEW and the same size, VIEW on the right (arkinox, 2026-11-12). A seed's
  * row names its DNA, how far it has grown and who planted it; its name opens
- * its card (BloomCard) and its VIEW frames the bloom at the seed's scale
+ * its card (BloomCard) over the list and its VIEW frames the bloom at the seed's scale
  * (arkinox, 2026-11-13: "we need to add seeds to this modal").
  * Every row has INFO beside VIEW, the owner's word for an item's card
  * (KeyItemInfo, 2026-11-16): it opens the same card a tap on the thing in
@@ -41,7 +41,7 @@ import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { ChestBlock, KeyLine, listedOnce, useChestOpen } from './ItemRows'
 import { isGuideKey, subjectOfWorldItem } from '../lib/commentSubjects'
 import { KeyInfo, type KeyInfoSource } from './KeyItemInfo'
-import { useEscape } from '../hooks/useEscape'
+import { useModalStack } from './modalStack'
 import { NEARBY_TABS, byTab, firstFilledTab, type NearbyTab } from '../lib/nearbyTabs'
 import { lockWord, useOpenedChests } from '../store/useOpenedChests'
 import { GoArrow } from './ui/GoArrow'
@@ -51,9 +51,13 @@ import { bloomGrowthWords } from '../lib/seeds/bloomWords'
 import { ModalClose } from './ui/ModalClose'
 import { INFO } from './KeyItemInfo'
 
-/** INFO on a row: the list gives way to the thing's own card, the one a tap on it in the world opens (SecretModal). */
+/**
+ * INFO on a row: the thing's own card, the one a tap on it in the world opens
+ * (SecretModal), over this list, which is there again when the card closes,
+ * as a key's INFO card is (modalStack.tsx). An action on the card that goes
+ * out into the world (VIEW, SPECTATE) closes both.
+ */
 export function openCard(item: Pick<NearbyItem, 'key'>): void {
-  useShards.getState().setNearbyOpen(false)
   useShards.getState().selectSecret(item.key)
 }
 
@@ -153,7 +157,7 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
 
 /**
  * A seed's row: its DNA's name, which opens the seed's card (BloomCard, in
- * the hidden-thing card) in place of this list; where it is and how far it
+ * the hidden-thing card) over this list; where it is and how far it
  * has grown, on the clock the card reads; who planted it (the seed's signer)
  * and how far; and VIEW. Its picture is the bloom as grown here, the seed's
  * glyph until then.
@@ -205,8 +209,10 @@ export function NearbyTabs({ tab, counts, onTab }: { tab: NearbyTab; counts: Rec
 
 export function NearbyLootModal(): JSX.Element | null {
   const open = useShards((s) => s.nearbyOpen)
-  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
-  useEscape('modal', open, () => useShards.getState().setNearbyOpen(false))
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01); a card
+  // opened from it (INFO) stacks over it, so Escape closes that first, and an
+  // action that leaves for the world closes the list too (modalStack.tsx).
+  useModalStack(open, () => useShards.getState().setNearbyOpen(false))
   return open ? <NearbyList /> : null
 }
 

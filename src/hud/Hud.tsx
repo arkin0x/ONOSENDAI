@@ -22,6 +22,7 @@ import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { AskBubble } from './AskBubble'
 import { TvButton } from './TvScreen'
 import { useProfile } from '../hooks/useProfile'
+import { useMenuInset } from '../hooks/useMenuInset'
 import { profileLabel } from '../store/useProfiles'
 import { LoginModal } from './LoginModal'
 import { LogoutButton, SignerStatus } from './SignerControls'
@@ -717,6 +718,10 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // which covers the whole scene while it is open.
   const leftRef = useCover('left', !menuOpen)
   const rightRef = useCover('right', !menuOpen)
+  // Beside the scene the columns also cover the screen's edges, where the
+  // controls stand on a wide screen: the controls slide inboard of them
+  // while they are open (hooks/useMenuInset; owner, 2026-11-22).
+  useMenuInset(hudRef, !menuOpen)
 
   // The tutorial's front panel (usePanelLayout front) outranks them all while
   // it asks: the Earth route's HYPERSPACE, BOARD and RIDE at the very top.

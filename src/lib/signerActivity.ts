@@ -33,8 +33,9 @@ export interface SignerActivity {
   stuckAt: number | null
   /**
    * When a signature waiting on a request past 65,535 bytes
-   * (signerRequestSize.ts) ran out of time (ms): what the "may not handle messages this big" chip keys on,
-   * until a big request is answered or the chip is put away.
+   * (signerRequestSize.ts) ran out of time (ms): what the "may not handle
+   * messages this big" chip keys on, until a big request is answered or the
+   * chip is put away.
    */
   bigSilentAt: number | null
 }

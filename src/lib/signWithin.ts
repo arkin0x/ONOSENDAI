@@ -29,8 +29,8 @@ export class SignerTimeout extends Error {
 
 /**
  * What a move says when a request past 65,535 bytes went out and nothing
- * came back: the signer is likely there, and the
- * size the likely reason, so pairing again is not the way out.
+ * came back: the signer is likely there, and the size the likely reason, so
+ * pairing again is not the way out.
  */
 export function bigSilenceWords(noun: string): string {
   return `Your signer did not answer. It may not handle messages this big. Make ${noun} smaller, or sign in with a key on this device.`

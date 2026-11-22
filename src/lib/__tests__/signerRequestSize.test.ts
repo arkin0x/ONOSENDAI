@@ -130,6 +130,15 @@ describe('a timeout and a big request', () => {
       settledA()
     }
   })
+
+  it('once the big request is answered, a later timeout is an ordinary one again', async () => {
+    const { signWithin, noteBigAsk, bigSilence } = await import('../signWithin')
+    const never = () => new Promise<never>(() => {})
+    const sig = signWithin({ signEvent: never, session: 'session-c' }, { kind: 1, created_at: 1, tags: [], content: '' }, 30).catch((e: unknown) => e)
+    const answered = noteBigAsk('session-c', 'the shard')
+    answered()
+    expect(bigSilence(await sig)).toBeNull()
+  })
 })
 
 describe('the hard caps, unchanged', () => {

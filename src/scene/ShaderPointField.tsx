@@ -57,6 +57,8 @@ const FADE_IN_S = 0.25
  */
 interface BirthGrid { at: [number, number, number]; birth: Float32Array }
 let births: BirthGrid | null = null
+/** The grid before `births`, reused for the next one. */
+let spareBirths: Float32Array | null = null
 
 /** The age of the cell at volume place (col, row, depth), for a volume at `at`, from the last volume's grid; NaN when it was not drawn there. */
 export function bornAt(grid: BirthGrid | null, at: readonly [number, number, number], col: number, row: number, depth: number, n: number): number {
@@ -248,11 +250,8 @@ function buildGeometry(volume: TerrainVolume): BufferGeometry {
 
   // On the same clock the uNow uniform runs on, so ages line up exactly.
   const now = performance.now() / 1000
-  const nextBirth = new Float32Array(N * N * N).fill(NaN)
   if (!birthRef || birthRef.scaleExp !== volume.scaleExp || birthRef.axes !== volume.axes) {
     birthRef = { origin: volume.centre, scaleExp: volume.scaleExp, axes: volume.axes }
-    // Another zoom or view: no cell of the last volume is one of these.
-    births = null
   }
   const step = stepFor(volume.scaleExp)
   const [br, bu, bo] = [volume.axes.right, volume.axes.up, volume.axes.out].map(
@@ -260,6 +259,9 @@ function buildGeometry(volume: TerrainVolume): BufferGeometry {
   )
   const at: [number, number, number] = [br, bu, bo]
   const last = births
+  // The grid before the last one, written over: two in turn, so a landing makes no new one.
+  const nextBirth = spareBirths && spareBirths.length === N * N * N && spareBirths !== last?.birth ? spareBirths : new Float32Array(N * N * N)
+  nextBirth.fill(NaN)
 
   let v = 0
   for (let depth = 0; depth < N; depth++) {
@@ -288,6 +290,7 @@ function buildGeometry(volume: TerrainVolume): BufferGeometry {
       }
     }
   }
+  spareBirths = last?.birth ?? null
   births = { at, birth: nextBirth }
 
   const geometry = new BufferGeometry()

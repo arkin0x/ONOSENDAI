@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { bottomChip, placeInput, starSpot, type StarSource } from '../starred'
+import { shortAxis } from '../viewAt'
 
 const P = (x: bigint, y: bigint, z: bigint) => ({ x, y, z })
 const src = (over: Partial<StarSource> = {}): StarSource => ({
@@ -22,7 +23,7 @@ describe('the star spot', () => {
     const big = (1n << 84n) + 12345n
     const a = starSpot(src({ cursor: P(big, 2n, 3n) }))!
     expect(a.input).toBe(placeInput(P(big, 2n, 3n)))
-    expect(a.label.split(', ')).toHaveLength(3)
+    expect(a.label).toBe([big, 2n, 3n].map(shortAxis).join(', '))
     expect(bottomChip(src({ cursor: P(big, 2n, 3n) }))).toBe('star')
     // The same place again, a new object: the same text.
     const again = starSpot(src({ cursor: P(big, 2n, 3n) }))!

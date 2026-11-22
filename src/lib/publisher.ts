@@ -195,7 +195,7 @@ async function pump(): Promise<void> {
     backlogChecked = who
     lookOwed = false
   }
-  const next = waiting(s)[0]
+  const next = unsentOf(s.events, s.published).find((e) => !acked(e.id))
   if (!next) { backlogChecked = null; return }
   // Never a hop in the old proof format (hop proof version 2): the store
   // cuts it away as it lands, and this is the last place it could slip out.

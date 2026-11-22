@@ -3,7 +3,7 @@
  * "maybe sync loss warning should be a setting ... maybe below the red chain
  * sync warning box it can say 'turn off this warning in settings'"), the
  * fluid pause's switch since 2026-11-22 ("Pause fluid walk when your chain
- * falls behind").
+ * falls behind", renamed Optimize chain when Settings was grouped that day).
  *
  * - on by default; the slowdown and the LOSING SYNC warning are parked
  *   (store/walkLimits.ts SYNC_SLOWDOWN_ON): nothing slows, nothing warns,
@@ -136,8 +136,8 @@ describe('the setting', () => {
   })
 
   it('is named for what it does now, says it plainly, with no em dash; the menu explanation has the risk in full', () => {
-    expect(WALK_LIMITS_TITLE).toBe('Pause fluid walk when your chain falls behind')
-    expect(WALK_LIMITS_HINT).toBe('Fluid WALK turns off 21 moves ahead of your chain and comes back on at 15.')
+    expect(WALK_LIMITS_TITLE).toBe('Optimize chain')
+    expect(WALK_LIMITS_HINT).toBe('Pauses fluid walk when your chain falls behind. Step walking makes fewer new chain events, so your chain catches up.')
     const panelSource = readFileSync(new URL('../ViewPanel.tsx', import.meta.url), 'utf8').replace(/\s+/g, ' ')
     expect(panelSource).toContain('If your chain falls far behind and something interrupts it, like closing the tab or losing connection, moves that have not reached your chain can be lost.')
     expect(panelSource).not.toContain('Chain sync limit keeps')

@@ -1,30 +1,39 @@
 /**
- * ViewPanel.tsx - SETTINGS: what the scene draws, one switch to a row.
+ * ViewPanel.tsx - SETTINGS: what the scene draws and how WALK moves, one
+ * switch to a row, in five groups.
  *
  * Titled View until arkinox renamed it Settings (2026-11-02); its layout id
  * is still `view` (store/usePanelLayout.ts), so a saved menu order keeps it
  * where it was.
  *
- * Four things drawn in the scene can be turned off: the terrain dots, the hX
- * boxes, the chain trail and the region key cages. Another switch shades the
- * shards as if lit from your view, the headlamp (scene/headlamp.ts; arkinox,
- * 2026-10-23: "add the toggle to the View panel in the menu"). Their switches were in
- * three places (two chips under Movement proof, a switch in Proof chain, a
- * checkbox inside the Region keys list) and are here only now, just above
- * the Legend that says what each one means (arkinox, 2026-10-09). Each row
- * is a title and a gray line under it, in the style the trail switch had.
+ * The rows sit under five subheadings with a thin rule between them, in the
+ * owner's order (arkinox, 2026-11-22: "let's group the settings in the
+ * Settings panel with subheadings and HRs"; SETTINGS_GROUPS below):
+ * Protocol visualization (chain trail, terrain dots, hX boxes, region keys,
+ * spatial audio), Movement (gravity, hard mode gravity, fluid walk, optimize
+ * chain), Interface (look sphere), Effects (headlamp, glow, hide avatar) and
+ * Sync (sync hidden list). Each row is a title and a gray line under it, in
+ * the style the trail switch had; its switch keeps the id it always had, so a
+ * link that opens Settings at a row (hud/settingsLink.ts) still finds it.
+ *
+ * The scene's switches were in three places (two chips under Movement proof,
+ * a switch in Proof chain, a checkbox inside the Region keys list) and are
+ * here only now (arkinox, 2026-10-09). The headlamp shades the shards as if
+ * lit from your view (scene/headlamp.ts; arkinox, 2026-10-23).
  *
  * Every switch writes the same store flag its old control did, kept on this
  * device as before (store/useLayers.ts for the dots, boxes and headlamp, useCyberspace
- * showTrail and showSecrets for the other two). It is a view preference
- * only: nothing here changes a proof, a move, the cursor or the chain.
+ * showTrail and showSecrets for the trail and region keys). The view rows
+ * change only what this device draws: nothing here changes a proof, a move,
+ * the cursor or the chain.
  *
- * "Pause fluid walk when your chain falls behind" (store/walkLimits.ts; the
- * Chain sync limit of 2026-11-18, relabeled 2026-11-22) is the one row that
- * changes what WALK does far ahead of your chain: on, fluid WALK switches
- * itself off 21 moves ahead and back on at 15 (store/fluidSwitch.ts); off, it
- * never does. While fluid is paused, the Fluid WALK row keeps your choice
- * and says it is paused. The slowdown and the LOSING SYNC warning it also turned on are parked
+ * Optimize chain (store/walkLimits.ts; the Chain sync limit of 2026-11-18,
+ * named "Pause fluid walk when your chain falls behind" on 2026-11-22 and
+ * Optimize chain later that day) is the one row that changes what WALK does
+ * far ahead of your chain: on, fluid WALK switches itself off 21 moves ahead
+ * and back on at 15 (store/fluidSwitch.ts); off, it never does. While fluid is
+ * paused, the Fluid WALK row keeps your choice and says it is paused. The
+ * slowdown and the LOSING SYNC warning it also turned on are parked
  * (store/walkLimits.ts SYNC_SLOWDOWN_ON).
  *
  * One row reaches the relay: Sync hidden list, your list of hidden things
@@ -35,7 +44,7 @@
  * hud/TutorialPanel.tsx).
  */
 
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
 import { useWalk } from '../store/useWalk'
@@ -53,11 +62,11 @@ interface ViewRow {
   set: (on: boolean) => void
 }
 
-/** The sync limit's title since the slowdown and warning were parked (arkinox, 2026-11-22). */
-export const WALK_LIMITS_TITLE = 'Pause fluid walk when your chain falls behind'
+/** The sync limit's title (arkinox, 2026-11-22: "optimize chain (pause fluid walk)"). */
+export const WALK_LIMITS_TITLE = 'Optimize chain'
 
-/** The sync limit's line: what it does (arkinox, 2026-11-22). */
-export const WALK_LIMITS_HINT = 'Fluid WALK turns off 21 moves ahead of your chain and comes back on at 15.'
+/** The sync limit's line: what it does and why ("explain that this reduces new chain events to help your chain catch up"). */
+export const WALK_LIMITS_HINT = 'Pauses fluid walk when your chain falls behind. Step walking makes fewer new chain events, so your chain catches up.'
 
 /** The Fluid WALK row's line while it is paused for the chain. */
 export const FLUID_PAUSED_HINT = 'Paused while your chain catches up.'
@@ -69,6 +78,19 @@ export const SPATIAL_AUDIO_HINT = 'See spatial audio sources and fade perimeters
 /** Hard Mode Gravity's row, in the owner's words (arkinox, 2026-11-22): his dash parts the title from its line. */
 export const HARD_GRAVITY_TITLE = 'Hard Mode Gravity'
 export const HARD_GRAVITY_HINT = 'Gravity will not turn off if there is nothing to catch your fall.'
+
+/**
+ * The panel's groups, in order, each a subheading and its rows' switch ids in
+ * order (arkinox, 2026-11-22; Hide avatar moved from Movement to Effects the
+ * same day). Every row in the panel is in exactly one group.
+ */
+export const SETTINGS_GROUPS: ReadonlyArray<{ id: string; title: string; rows: readonly string[] }> = [
+  { id: 'protocol', title: 'Protocol visualization', rows: ['view-chain-trail', 'view-terrain-dots', 'view-hx-boxes', 'view-region-keys', 'view-spatial-audio'] },
+  { id: 'movement', title: 'Movement', rows: ['view-walk-gravity', 'view-walk-gravity-hard', 'view-walk-fluid', WALK_LIMITS_ROW] },
+  { id: 'interface', title: 'Interface', rows: ['view-walk-look'] },
+  { id: 'effects', title: 'Effects', rows: ['view-headlamp', 'view-glow', 'view-walk-avatar'] },
+  { id: 'sync', title: 'Sync', rows: ['view-hides-sync'] },
+]
 
 export function ViewPanel(): JSX.Element {
   const dots = useLayers((s) => s.dots)
@@ -129,7 +151,7 @@ export function ViewPanel(): JSX.Element {
       set: (v) => useLayers.getState().setLayer('walkLookSphere', v),
     },
     // GRAVITY in WALK (store/useWalk.ts), kept on this device; also Z and
-    // the WALK pad's chip. Unlike the rows around it, it changes how a walk
+    // the WALK pad's chip. Like the rest of Movement, it changes how a walk
     // moves (falls and jumps), never what a proof is.
     {
       id: 'view-walk-gravity',
@@ -229,58 +251,73 @@ export function ViewPanel(): JSX.Element {
     },
   ]
 
+  const byId = new Map(rows.map((r) => [r.id, r]))
+
   return (
     <section className="panel panel--view">
       <header className="panel__head">
         <h2>Settings</h2>
       </header>
-      {rows.map((r) => (
-        <Field key={r.id} id={r.id} label={r.title} hint={r.hint}>
-          <Switch id={r.id} checked={r.on} onCheckedChange={r.set} />
-        </Field>
+      {SETTINGS_GROUPS.map((g, i) => (
+        <Fragment key={g.id}>
+          {i > 0 && <hr className="view__rule" />}
+          <div className="view__group" role="group" aria-labelledby={`view-group-${g.id}`}>
+            <h3 className="view__subhead" id={`view-group-${g.id}`}>{g.title}</h3>
+            {g.rows.map((id) => byId.get(id)).filter((r): r is ViewRow => r !== undefined).map((r) => (
+              <Field key={r.id} id={r.id} label={r.title} hint={r.hint}>
+                <Switch id={r.id} checked={r.on} onCheckedChange={r.set} />
+              </Field>
+            ))}
+          </div>
+        </Fragment>
       ))}
       <Explanation>
-        Each switch turns one thing in the scene on or off. It changes only what
-        this device draws, and the choice is kept on this device: nothing here
-        moves you or your cursor, or changes a proof or your chain. Terrain dots
-        color each cell by its terrain K, how much work a hop there has to
-        compute, from navy for the least through teal, green and amber to hot
-        pink for the most; turning them off also stops the terrain scan. hX boxes
-        are the nested power-of-two boundaries around you, named by their heights
-        (h3, h4, h5 and up); a move that crosses a higher one costs more work.
-        Pause fluid walk when your chain falls behind turns Fluid WALK off
-        for you when you get 21 moves ahead of your chain, and back on once
-        you are 15 or fewer ahead, if you had it on. You keep walking the
-        whole time: without fluid, WALK takes straighter paths, so it makes
-        fewer moves and your chain catches up. Turning Fluid WALK off
-        yourself while it is paused keeps it off. Turned off, Fluid WALK
-        never pauses, and the CHAIN chip still shows how far ahead you are.
-        If your chain falls far behind and something interrupts it, like
-        closing the tab or losing connection, moves that have not reached
-        your chain can be lost.
-        Hide avatar in WALK takes your own avatar out of the way while you walk in
-        first person, where the camera sits inside it. Look sphere in WALK puts a
-        ball in the bottom right while you walk: drag it to look around, as a
-        drag on the scene does. Chain trail draws your
-        movement history as a red line. Region keys draws a green cage around
-        each region you hold the key for. Headlamp lights shards from your view,
-        as a flashlight would: a face turned away from you, or far off, is
-        darker, so shapes of one color show their depth; off, every face is
-        exactly its own color. Spatial Audio shows each hidden sound you have
-        found or placed, its box and the blue rings around it: inside the rings
-        it plays at full volume, and it fades to silence at its region's walls.
-        It is off unless you turn it on, and shows while you place a sound in
-        BUILD; a sound whose card you open, or that you VIEW, shows until you
-        close it or look away. Either way every sound still plays.
+        Each switch turns one thing on or off, and the choice is kept on this
+        device. Protocol visualization draws what the protocol is doing around
+        you. It changes only what this device draws: nothing there moves you
+        or your cursor, or changes a proof or your chain. Chain trail draws
+        your movement history as a red line. Terrain dots color each cell by
+        its terrain K, how much work a hop there has to compute, from navy for
+        the least through teal, green and amber to hot pink for the most;
+        turning them off also stops the terrain scan. hX boxes are the nested
+        power-of-two boundaries around you, named by their heights (h3, h4, h5
+        and up); a move that crosses a higher one costs more work. Region keys
+        draws a green cage around each region you hold the key for. Spatial
+        Audio shows each hidden sound you have found or placed, its box and
+        the blue rings around it: inside the rings it plays at full volume,
+        and it fades to silence at its region's walls. It is off unless you
+        turn it on, and shows while you place a sound in BUILD; a sound whose
+        card you open, or that you VIEW, shows until you close it or look
+        away. Either way every sound still plays.
+        Movement changes how WALK moves, never what a proof is. Gravity in
+        WALK makes you fall, land and jump. Hard Mode Gravity keeps gravity on
+        even when there is nothing below to catch your fall. Fluid WALK lets
+        you hold to glide; moves still land on whole gibsons.
+        Optimize chain turns Fluid WALK off for you when you get 21 moves
+        ahead of your chain, and back on once you are 15 or fewer ahead, if
+        you had it on. You keep walking the whole time: without fluid, WALK
+        takes straighter paths, so it makes fewer moves and your chain catches
+        up. Turning Fluid WALK off yourself while it is paused keeps it off.
+        Turned off, Fluid WALK never pauses, and the CHAIN chip still shows
+        how far ahead you are. If your chain falls far behind and something
+        interrupts it, like closing the tab or losing connection, moves that
+        have not reached your chain can be lost.
+        Interface: Look sphere in WALK puts a ball in the bottom right while
+        you walk: drag it to look around, as a drag on the scene does.
+        Effects: Headlamp lights shards from your view, as a flashlight would:
+        a face turned away from you, or far off, is darker, so shapes of one
+        color show their depth; off, every face is exactly its own color.
         Glow draws the light or fog some objects cast around their points;
         turn it off if a slow phone struggles. The workshop still shows glow
-        on the object you are making.
-        Sync hidden list is the one switch here that reaches the relay. Your
-        list of hidden things is saved to the relay, encrypted so only you can
-        read it. Any device signed in as you shows the same list and can open
-        what is in it. Nothing is saved while you are LOCAL. If your signer
-        cannot encrypt for you (it has no NIP-44), the list stays on this
-        device. Turn it off to keep the list on this device only.
+        on the object you are making. Hide avatar in WALK takes your own
+        avatar out of the way while you walk in first person, where the
+        camera sits inside it.
+        Sync: Sync hidden list is the one switch here that reaches the relay.
+        Your list of hidden things is saved to the relay, encrypted so only
+        you can read it. Any device signed in as you shows the same list and
+        can open what is in it. Nothing is saved while you are LOCAL. If your
+        signer cannot encrypt for you (it has no NIP-44), the list stays on
+        this device. Turn it off to keep the list on this device only.
       </Explanation>
     </section>
   )

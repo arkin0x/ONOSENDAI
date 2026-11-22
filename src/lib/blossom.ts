@@ -61,6 +61,23 @@ export function sha256Hex(bytes: Uint8Array): string {
   return bytesToHex(sha256(bytes))
 }
 
+/**
+ * sha256Hex, by the browser's own digest where there is one: it runs off the
+ * page's thread and resolves later, where hashing a file of a few megabytes in
+ * script held the thread for 320 to 358 ms on the owner's phone (diag of
+ * 2026-11-22, a hidden audio file opened while walking). The same answer as
+ * sha256Hex, which stands in where there is no digest (an insecure page).
+ */
+export async function sha256HexAsync(bytes: Uint8Array): Promise<string> {
+  const subtle = typeof crypto !== 'undefined' ? crypto.subtle : undefined
+  if (!subtle) return sha256Hex(bytes)
+  try {
+    return bytesToHex(new Uint8Array(await subtle.digest('SHA-256', bytes as BufferSource)))
+  } catch {
+    return sha256Hex(bytes)
+  }
+}
+
 /** The event a server wants signed before it takes a blob: what, which bytes, until when. */
 export function uploadAuthTemplate(hash: string, createdAt: number, reason = 'Upload a profile image from ONOSENDAI'): EventTemplate {
   return {

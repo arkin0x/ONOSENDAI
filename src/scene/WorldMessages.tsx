@@ -7,8 +7,10 @@
  * message box to be 1 gibson cubed, always, while it is normally visible";
  * NOTE_BOX_GIBSONS). Its words are labels, sized on screen like every other
  * world label so they stay readable, and fade out far off, the credit line
- * first (fadeShare). The other marks (a coin, a key's stand-in cube) are
- * still sized on screen, and past the headlamp's reach recede with depth to
+ * first (fadeShare). A key that wears no model of its own is the same
+ * one-gibson cube, its name under it (owner, 2026-11-22; keyBoxSide). The
+ * other marks (a coin, a key's cube while its model loads, Cyberspace TV's
+ * finds) are still sized on screen, and past the headlamp's reach recede with depth to
  * a floor (lib/markerSize.ts recedeShare), so a chest at the far end of a
  * hall in WALK is smaller than one at your feet (arkinox, 2026-10-25).
  * Culled past the same reach as everything else.
@@ -312,7 +314,8 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     // CoinItem asks for, and a spent coin drops out there.
     const notesShown = markShown('note', scaleExp)
     // A key is drawn as a note is: a cube and a short label with the item's
-    // name, so VIEW and GO TO IT have something to arrive at. What it is and
+    // name, so VIEW and GO TO IT have something to arrive at; with no model,
+    // the same one-gibson cube (keyBoxSide). What it is and
     // what it opens is in the lists (ItemRows), one tap away. A chest or a
     // door is drawn as the look it wears (ChestLooks), at the same zooms.
     return useShards.getState().drawnItems()
@@ -345,30 +348,50 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     <>
       {placed.map((w) => {
         const open = (): void => useShards.getState().selectSecret(w.key)
-        // Being moved, a message keeps its one-gibson box, faint; anything else its PlacedBox.
-        if (w.key === moving) return w.type === 'message' && !w.coin
+        // Being moved, a message or a key with no model keeps its one-gibson box, faint; anything else its PlacedBox.
+        if (w.key === moving) return worldCube(w)
           ? <WorldMark key={w.key} kind="note" at={w.centre} side={noteBoxSide(scaleExp)} opacity={MOVING_OPACITY} />
           : <PlacedBox key={w.key} at={w.centre} opacity={MOVING_OPACITY} />
         if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
         if (w.type === 'audio') return <AudioMark key={w.key} title={w.text} at={w.centre} onTap={open} />
         // A key: the cube and its short name, or at half while it is held.
+        // With no model of its own, the cube is one gibson, as a message's
+        // box is (owner, 2026-11-22; keyBoxSide); with one, as before.
         const play = vanishing[openedKey(me, w.key)]
+        const side = keyBoxSide(w.wears, scaleExp)
         const draw = itemDrawAs(holdsItem(held, w.key, w.lineage, w.itemAuthor, heldLin, w.keypair), itemsRead, madeBy(w.itemAuthor, me))
         return (
           <group key={w.key}>
             {draw === 'item'
-              ? <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} onTap={open} />
+              ? <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} side={side} onTap={open} />
               : <HeldItemMark id={w.key} own={draw === 'own'} at={w.centre} wears={w.wears} region={w.region} axes={axes} appear={play} />}
             {draw !== 'item' && play && <ItemVanish id={w.key} label={{ text: w.text, color: NOTE, sub: author(w), subColor: ACCENT }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={{ trueSide: placedBoxSide(scaleExp), minPx: 0 }} />}
-            {/* The mark is a fixed size on screen at any zoom, so its target is
-                too: a fingertip over the mark (TapTarget). */}
-            <TapTarget px={TAP_PX} at={w.centre} onTap={open} />
+            {/* A fingertip over the mark at any distance, and over a one-gibson
+                cube the whole cube once it is larger (TapTarget `side`). A
+                held key keeps its fingertip: its box is the half one. */}
+            <TapTarget px={TAP_PX} side={draw === 'item' ? side : undefined} at={w.centre} onTap={open} />
           </group>
         )
       })}
     </>
   )
+}
+
+/**
+ * A key's cube's edge in scene units when it is one gibson, as a message's
+ * box is (noteBoxSide): a key that wears no model of its own (owner,
+ * 2026-11-22: a model-less key draws in the world as a real 1-gibson cube,
+ * exactly like message boxes). Undefined for a key that wears one: its model,
+ * and the screen-sized cube while that loads or if it never does, as before.
+ */
+export function keyBoxSide(wears: ItemWears | undefined, scaleExp: number): number | undefined {
+  return wears ? undefined : noteBoxSide(scaleExp)
+}
+
+/** Whether a placed thing's box is one gibson in the world: a message's (not a coin's), or a key's with no model (keyBoxSide). */
+function worldCube(w: { type: string; coin: boolean; wears?: ItemWears }): boolean {
+  return (w.type === 'message' && !w.coin) || (w.type === 'key' && !w.wears)
 }
 
 /** What a key or a chest is called in the world: its glyph and its name. */
@@ -396,8 +419,13 @@ const NO_MOTION: readonly ItemAnimation[] = []
  * who left it. Cyberspace TV's fade (TvFinds). A key that wears a SNO is
  * drawn as that model in its blue box instead of the cube (ItemModel), once
  * the model is in hand; while it loads, and if it never does, the cube.
+ *
+ * Given a `side` (a key with no model in the scene: keyBoxSide), the cube is
+ * that size in the world, one gibson, as a message's box is, and its name
+ * hangs just under it rather than through it. Without one (Cyberspace TV's
+ * finds, a key whose model has not come) the cube is sized on screen.
  */
-export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null, axes, onTap }: {
+export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null, axes, side, onTap }: {
   id?: string
   text: string
   sub: string
@@ -407,6 +435,8 @@ export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null,
   /** The region's cut about the item, half a gibson outside its walls, gibsons, render frame (regionBox at unit 0). */
   region?: Box | null
   axes?: ViewAxes
+  /** The cube's edge in scene units, a size in the world (keyBoxSide); absent, a size on screen. */
+  side?: number
   onTap?: () => void
 }): JSX.Element {
   const model = useItemModel(wears?.model)
@@ -419,8 +449,8 @@ export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null,
   }
   return (
     <>
-      <WorldMark kind="note" at={at} opacity={opacity} />
-      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} recede="name" />}
+      <WorldMark kind="note" at={at} opacity={opacity} side={side} />
+      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} clear={side === undefined ? undefined : { trueSide: side, minPx: 0, below: true }} recede="name" />}
     </>
   )
 }
@@ -756,7 +786,7 @@ const MARK_LOOK: Record<MarkKind, { color: string; opacity: number }> = {
  * eye anywhere within the headlamp's reach, smaller past it: markRecede),
  * unless given a `side`: then the cube is that size in the world, in scene
  * units, at any distance, and its edges are pulled a hair toward the camera
- * (NOTE_EDGE_DEPTH). A message's box is (noteBoxSide).
+ * (NOTE_EDGE_DEPTH). A message's box is (noteBoxSide), and a model-less key's (keyBoxSide).
  */
 function WorldMark({ kind, at, opacity = 1, side }: { kind: MarkKind; at: [number, number, number]; opacity?: number; side?: number }): JSX.Element {
   const group = useRef<Group>(null)

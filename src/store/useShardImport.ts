@@ -55,7 +55,7 @@ import { queryEach } from '../lib/relay'
 import { isRateLimited } from '../lib/rateLimit'
 import { SNO_KIND } from 'sno-core/feed'
 import { shardFromText, useWorkshop } from './useWorkshop'
-import { saveFailure, storageMode } from './workshopStorage'
+import { bulkWrites, saveFailure, storageMode } from './workshopStorage'
 import { refreshFeed, usePublished, type SendOutcome } from './usePublished'
 import { useCyberspace } from './useCyberspace'
 
@@ -71,7 +71,26 @@ export const timing = {
   sendDeadlineMs: 90_000,
   /** A relay that said it was sent to too fast is asked again after this, times the attempt. */
   rateBackoffMs: 3000,
+  /**
+   * How long a shard may wait for storage to say it is saved before the run
+   * pauses and says so, rather than waiting on a database that has stopped
+   * answering (arkinox, 2026-11-22, on his tablet: "still stopping").
+   */
+  saveStallMs: 20_000,
+  /** After STOP, how long the run waits for what it added to be saved before it ends anyway. */
+  stopGraceMs: 1000,
 }
+/**
+ * With PUBLISH off, shards are added without waiting for each one's save:
+ * storage writes what changed in one transaction while the next shard comes
+ * in (store/workshopStorage.ts). A row is DONE only once its save has
+ * committed, and the run waits when this many are still unsaved.
+ */
+export const UNSAVED_MAX = 32
+/** What a row says when its save had not committed by the time the run ended: RETRY saves it. */
+export const NOT_SAVED = 'Not saved yet'
+/** What the run says when storage stops answering. */
+export const STORAGE_SILENT = 'Your shards\' storage is not answering. What came in is kept in this tab and saved when it answers.'
 /** Sends of one shard while a relay says rate-limited. */
 export const RATE_TRIES = 3
 /** Sends in a row with no answer before the run pauses. */
@@ -417,12 +436,60 @@ export const useShardImport = create<ShardImportState>((set, get) => {
     const pause = (ms: number): Promise<void> => Promise.race([sleep(ms), stopped])
     let inHand: string | null = null
     let sent = 0
+    /** Rows added whose save has not committed yet, each with what settles it. */
+    const unsaved = new Map<string, { since: number; settled: Promise<boolean> }>()
+    /** Storage refused a save: nothing more comes in. */
+    let refusedSave = false
+    /** A row's save, followed: DONE once committed (unless it still has to be published), failed when storage refused it. */
+    const track = (key: string, saved: Promise<boolean>, thenDone: boolean): Promise<boolean> => {
+      const settled = saved.catch(() => false).then((ok) => {
+        unsaved.delete(key)
+        if (g !== generation) return ok
+        const r = row(key)
+        if (ok) {
+          // A row the run gave up waiting on is DONE once its save lands after all.
+          if (thenDone && r && (r.run === 'working' || (r.run === 'failed' && r.failure === NOT_SAVED))) patch(key, { run: 'done', failure: null })
+        } else if (!refusedSave) {
+          refusedSave = true
+          refused(key)
+        } else if (r && r.run === 'working') {
+          patch(key, { run: 'failed', failure: saveFailure() ?? 'Workshop storage is full' })
+        }
+        return ok
+      })
+      unsaved.set(key, { since: Date.now(), settled })
+      return settled
+    }
+    /**
+     * Wait for saves: every one when `all`, otherwise until fewer than
+     * UNSAVED_MAX are waiting. Never past STOP's grace, nor past
+     * timing.saveStallMs from the oldest: 'silent' then, and the run pauses.
+     */
+    const waitSaves = async (all: boolean): Promise<'ok' | 'silent' | 'stopped'> => {
+      while (unsaved.size > 0 && (all || unsaved.size >= UNSAVED_MAX)) {
+        if (halted()) {
+          await Promise.race([Promise.all([...unsaved.values()].map((u) => u.settled)), sleep(timing.stopGraceMs)])
+          return unsaved.size ? 'stopped' : 'ok'
+        }
+        const oldest = Math.min(...[...unsaved.values()].map((u) => u.since))
+        const left = oldest + timing.saveStallMs - Date.now()
+        if (left <= 0) return 'silent'
+        await Promise.race([...[...unsaved.values()].map((u) => u.settled), sleep(left), stopped])
+      }
+      return 'ok'
+    }
+    const endBulk = bulkWrites()
     try {
       const folders = folderApi()
       const made = new Map<string, string | null>()
       let silent = 0
       for (const { key } of get().rows) {
-        if (halted()) break
+        if (halted() || refusedSave) break
+        // Too many still unsaved: wait for storage before adding more.
+        const waited = await waitSaves(false)
+        if (g !== generation) return
+        if (waited === 'silent') { set({ stall: STORAGE_SILENT }); break }
+        if (halted() || refusedSave) break
         const r = row(key)
         if (!r || !r.picked || r.read !== 'ok' || !r.shard || r.run === 'done' || r.run === 'skipped') continue
         inHand = key
@@ -433,8 +500,13 @@ export const useShardImport = create<ShardImportState>((set, get) => {
         // Made once: a retry publishes the shard the first try made.
         let id = r.shardId && ws.shards.some((s) => s.id === r.shardId) ? r.shardId : null
         // Reused: it must be in storage before it goes out (a first try may have been refused).
-        if (id && !(await ws.saveNow())) { refused(key); inHand = null; break }
-        if (g !== generation) return
+        if (id) {
+          const saved = await Promise.race([track(key, ws.saveNow(), !publish), stopped.then(() => null), sleep(timing.saveStallMs).then(() => undefined)])
+          if (g !== generation) return
+          if (saved === false) { inHand = null; break }
+          if (saved !== true) { patch(key, { run: 'failed', failure: NOT_SAVED }); if (saved === undefined) set({ stall: STORAGE_SILENT }); inHand = null; break }
+          if (!publish) { inHand = null; continue }
+        }
         if (!id) {
           const missing = blocked.get(key)
           // Left out, not failed: a retry cannot help, a change of picks or answer can (setDupMode, toggle).
@@ -444,12 +516,12 @@ export const useShardImport = create<ShardImportState>((set, get) => {
           const model: ShardModel = r.shard.refs && me ? { ...r.shard, refs: resolveRefs(r.shard.refs, targets, me) } : r.shard
           const action = dupAction(dups[key] ?? null, mode)
           if (action.act === 'skip') { patch(key, { run: 'skipped', failure: dups[key]?.in === 'zip' ? `Same name in this ${get().noun}` : 'In your shards' }); inHand = null; continue }
-          let saved: boolean
+          let saved: Promise<boolean>
           if (action.act === 'update') {
-            const res = await ws.replaceShard(action.id, model)
-            if (res === 'missing') { patch(key, { run: 'failed', failure: 'Its namesake is gone' }); inHand = null; continue }
+            // Gone since the list was matched: replaceShard would say 'missing'.
+            if (!ws.shards.some((s) => s.id === action.id)) { patch(key, { run: 'failed', failure: 'Its namesake is gone' }); inHand = null; continue }
+            saved = ws.replaceShard(action.id, model).then((res) => res === 'saved')
             id = action.id
-            saved = res === 'saved'
           } else {
             const fresh = action.act === 'copy'
             // A new address goes out only once your relays said nothing of yours is there.
@@ -457,16 +529,21 @@ export const useShardImport = create<ShardImportState>((set, get) => {
             const added = ws.addShard(model, fresh || action.copyName ? copyName(r.name) : r.name, fresh ? undefined : r.id)
             if (!added) { patch(key, { run: 'failed', failure: 'Its id is taken' }); inHand = null; continue }
             id = added.id
-            saved = await added.saved
+            saved = added.saved
             // An update keeps the folder it is in; a new shard goes in its own.
             placeInFolders(folders, [{ shardId: id, folder: r.folder }], made)
           }
           patch(key, { shardId: id, outcome: action.act === 'new' ? (action.copyName ? 'copy' : 'new') : action.act })
+          const settled = track(key, saved, !publish)
+          // PUBLISH off: on to the next shard while this one is written; a
+          // breath first, so the list paints and STOP is heard.
+          if (!publish) { inHand = null; await sleep(0); if (g !== generation) return; continue }
           // Nothing goes out that a reload would lose here: saved means committed (store/workshopStorage.ts).
-          if (!saved) { refused(key); inHand = null; break }
+          const ok = await Promise.race([settled, stopped.then(() => null), sleep(timing.saveStallMs).then(() => undefined)])
           if (g !== generation) return
+          if (ok === false) { inHand = null; break }
+          if (ok !== true) { patch(key, { run: 'failed', failure: NOT_SAVED }); if (ok === undefined) set({ stall: STORAGE_SILENT }); inHand = null; break }
         }
-        if (!publish) { patch(key, { run: 'done' }); inHand = null; continue }
         const shard = useWorkshop.getState().shards.find((s) => s.id === id)
         if (!shard) { patch(key, { run: 'failed', failure: 'Gone from your shards' }); inHand = null; continue }
         // Sent already, this very version (a send that timed out here and landed anyway).
@@ -492,11 +569,22 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       // Whatever went wrong, the row in hand says so and the modal can be closed.
       if (inHand && g === generation) patch(inHand, { run: 'failed', failure: e instanceof Error ? e.message : String(e) })
     } finally {
+      // What was added is saved before DONE shows: within STOP's grace when
+      // stopped, or until storage has been silent too long. A row still
+      // waiting says so, and turns DONE if its save lands after all.
+      try {
+        const waited = await waitSaves(true)
+        if (g === generation) {
+          if (waited === 'silent') set({ stall: STORAGE_SILENT })
+          for (const key of unsaved.keys()) if (row(key)?.run === 'working') patch(key, { run: 'failed', failure: NOT_SAVED })
+        }
+      } catch { /* the rows say what they can */ }
+      endBulk()
       if (current === mineRun) current = null
-      // The folders' filing, saved before DONE shows; never waited on past a few seconds.
+      // The folders' filing, saved before DONE shows; never waited on past a few seconds, nor past STOP's grace.
       try {
         const flush = folderApi()?.flush
-        if (flush) await Promise.race([flush().catch(() => undefined), sleep(5000)])
+        if (flush) await Promise.race([flush().catch(() => undefined), sleep(halted() ? timing.stopGraceMs : 5000)])
       } catch { /* the filing is the folders store's to report */ }
       if (g === generation) {
         if (sent > 0) refreshFeed()

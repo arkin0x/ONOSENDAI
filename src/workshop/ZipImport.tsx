@@ -80,7 +80,8 @@ export function ZipImport(): JSX.Element | null {
   else if (s.phase === 'opening') line = 'OPENING'
   else if (s.phase === 'reading') line = s.remote === 'checking' ? 'CHECKING YOUR RELAYS' : `READING ${s.rows.length - reading} OF ${s.rows.length}`
   else if (running && s.remote === 'checking') line = 'CHECKING YOUR RELAYS'
-  else if (running) line = `${publish ? 'PUBLISHING' : 'ADDING'} ${Math.min(done + failed + 1, workTotal)} OF ${workTotal}`
+  // Rows in hand count: with PUBLISH off several are added while storage saves them (store/useShardImport UNSAVED_MAX).
+  else if (running) line = `${publish ? 'PUBLISHING' : 'ADDING'} ${Math.min(done + failed + Math.max(1, s.rows.filter((r) => r.run === 'working').length), workTotal)} OF ${workTotal}`
   else if (s.phase === 'done') line = `${done} DONE${failed ? ` · ${failed} FAILED` : ''}`
   else line = [`${ready.length} SHARD${ready.length === 1 ? '' : 'S'}`, yours ? `${yours} ALREADY YOURS` : '', errors ? `${errors} ERROR${errors === 1 ? '' : 'S'}` : '', s.skipped.length ? `${s.skipped.length} SKIPPED` : '', publish && s.remote === 'unknown' ? 'RELAYS NOT CHECKED' : ''].filter(Boolean).join(' · ')
   const fraction = s.phase === 'reading' ? (s.rows.length - reading) / Math.max(1, s.rows.length) : running || s.phase === 'done' ? (done + failed) / Math.max(1, workTotal) : 0
@@ -101,7 +102,8 @@ export function ZipImport(): JSX.Element | null {
           <ModalClose onClose={() => s.close()} disabled={running} />
         </div>
         <div className={`zipimport__line ${s.error || s.stall ? 'is-bad' : ''}`} aria-live="polite">{s.stall ? `${s.stall.toUpperCase()} ${line}` : line}</div>
-        <div className="zipimport__bar" aria-hidden><span style={{ width: `${Math.round(fraction * 100)}%` }} /></div>
+        {/* A sheen runs along the bar while the import works, so a long save never looks like a frozen tab. */}
+        <div className={`zipimport__bar ${running ? 'is-working' : ''}`} aria-hidden><span style={{ width: `${Math.round(fraction * 100)}%` }} /></div>
         {s.rows.length > 0 && (
           <div className="zipimport__controls">
             <Field id="zipimport-all" label="ALL">

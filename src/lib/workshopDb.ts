@@ -66,6 +66,13 @@ export interface MigratedMeta {
 
 /** Readwrite transactions for shards ask for strict durability: committed means on disk, not in a cache. */
 const STRICT = { durability: 'strict' } as IDBTransactionOptions
+/**
+ * Bulk import's writes (store/workshopStorage.ts bulkWrites): committed to
+ * the database, which a closed tab keeps, without waiting for the disk to
+ * sync on every transaction. On a busy Android tablet each strict commit
+ * waited on its own disk sync, one shard at a time (arkinox, 2026-11-22).
+ */
+const RELAXED = { durability: 'relaxed' } as IDBTransactionOptions
 
 export function openWorkshopDb(timeoutMs: number = OPEN_TIMEOUT_MS): Promise<IDBDatabase> {
   const opening = openDatabase(WORKSHOP_DB, DB_VERSION, [[SHARDS_STORE, 'id'], [TOMBSTONES_STORE, 'id'], [META_STORE, 'key']])
@@ -129,14 +136,15 @@ function isRecord(r: unknown): r is ShardRecord {
 
 /**
  * Write these records and delete these ids, in ONE transaction: all of it
- * lands or none of it does. A delete leaves a tombstone; a put clears one.
+ * lands or none of it does. Strict durability unless a bulk import asks for
+ * relaxed (RELAXED). A delete leaves a tombstone; a put clears one.
  * Rejects with the transaction's error (QuotaExceededError when the disk
  * share is used up), never swallows it.
  */
-export function commit(db: IDBDatabase, puts: readonly ShardRecord[], deletes: readonly string[], now: number = Date.now()): Promise<void> {
+export function commit(db: IDBDatabase, puts: readonly ShardRecord[], deletes: readonly string[], now: number = Date.now(), durability: 'strict' | 'relaxed' = 'strict'): Promise<void> {
   return new Promise((resolve, reject) => {
     let tx: IDBTransaction
-    try { tx = db.transaction([SHARDS_STORE, TOMBSTONES_STORE], 'readwrite', STRICT) } catch (e) { reject(e); return }
+    try { tx = db.transaction([SHARDS_STORE, TOMBSTONES_STORE], 'readwrite', durability === 'strict' ? STRICT : RELAXED) } catch (e) { reject(e); return }
     const shards = tx.objectStore(SHARDS_STORE)
     const tombs = tx.objectStore(TOMBSTONES_STORE)
     try {

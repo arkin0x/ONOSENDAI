@@ -124,6 +124,35 @@ let offline = { message: UNAVAILABLE, reason: 'Workshop storage could not be ope
 let decided: () => void = () => {}
 const ready = new Promise<void>((resolve) => { decided = resolve })
 
+/** Bulk imports running now: while any is, commits ask for relaxed durability (lib/workshopDb.ts RELAXED). */
+let bulk = 0
+
+/**
+ * A bulk import starts: until the returned function is called, each commit
+ * is written without a disk sync of its own. Every change still goes through
+ * the one queue, one transaction at a time, and saveNow() still resolves
+ * only once its commit has completed. Calling the end twice ends it once.
+ */
+export function bulkWrites(): () => void {
+  bulk++
+  let ended = false
+  return () => {
+    if (ended) return
+    ended = true
+    bulk--
+    // What was held while it ran goes to the other tabs once, now.
+    if (bulk === 0 && (held.put.size || held.del.size)) {
+      const put = [...held.put]
+      const del = [...held.del]
+      held.put.clear()
+      held.del.clear()
+      announce(put, del)
+    }
+  }
+}
+/** What committed during a bulk import, told to the other tabs when it ends: the latest word per id. */
+const held = { put: new Set<string>(), del: new Set<string>() }
+
 /** Which storage the library is in now. */
 export function storageMode(): ShardStorage { return mode }
 /** Records in the database that could not be read at load, and were left as they are. */
@@ -346,7 +375,7 @@ async function commitPending(): Promise<boolean> {
           if (m) puts.push(recordOf(id, m))
           else deletes.push(id)
         }
-        if (batch.size) await commit(d, puts, deletes)
+        if (batch.size) await commit(d, puts, deletes, Date.now(), bulk > 0 ? 'relaxed' : 'strict')
       } catch (e) {
         if (attempt === 0 && !isQuota(e)) {
           console.warn(`[workshop] write failed, opening the database again for one more try: ${describe(e)}`)
@@ -391,6 +420,15 @@ function askToPersist(): void {
 
 function announce(put: string[], del: string[]): void {
   if (!put.length && !del.length) return
+  // During a bulk import, held and told once at its end: every word wakes
+  // each other tab to read, and a tab frozen mid-read holds the store from
+  // the import's next commit (arkinox, 2026-11-22: "copied 4 instantly, then
+  // got stuck", his tablet).
+  if (bulk > 0) {
+    for (const id of del) { held.del.add(id); held.put.delete(id) }
+    for (const id of put) { held.put.add(id); held.del.delete(id) }
+    return
+  }
   try { channel?.postMessage({ put, del }) } catch { /* closed */ }
 }
 

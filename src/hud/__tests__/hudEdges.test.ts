@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { measureMenuCover } from '../../hooks/useMenuInset'
+import { measureMenuCover, setPaintedForTest, SLIDE_ATTR, SLIDE_MS, watchMenuInset, type InsetHost } from '../../hooks/useMenuInset'
 
 const CSS = readFileSync(join(__dirname, '..', '..', 'styles.css'), 'utf8')
 const HUD = readFileSync(join(__dirname, '..', 'Hud.tsx'), 'utf8')
@@ -131,7 +131,11 @@ describe('every control slides with its side', () => {
   })
 
   it('the right side: the pad in HOP, VIEW, BUILD and SCAN, the commit block, JUMP and DOWN, the LOOK ball, the compass and its menu', () => {
-    for (const s of ['.touchpad:not(.touchpad--mode-walk)', '.touchops', '.walkside', '.orbsquare.walklook', '.compass-3d', '.viewmenu', '.touchhint', '.spectate']) expect(right, s).toContain(s)
+    for (const s of ['.touchpad:not(.touchpad--mode-walk)', '.touchops', '.walkside', '.orbsquare.walklook', '.compass-3d:not(.compass-3d--bench)', '.viewmenu', '.touchhint', '.spectate']) expect(right, s).toContain(s)
+  })
+
+  it('the workshop\'s compass stays in its view ball', () => {
+    expect([...left, ...right, ...centre].some((s) => s.includes('.compass-3d') && !s.includes(':not(.compass-3d--bench)'))).toBe(false)
   })
 
   it('the chat between them moves its centre by half the difference and gives up half the sum on each side', () => {
@@ -147,12 +151,16 @@ describe('every control slides with its side', () => {
     expect(CSS).toContain('max-width: calc(100vw - var(--instruments-left) - var(--compass-reserve) - var(--hud-shift-l) - var(--hud-shift-r));')
   })
 
-  it('the slide is a transition of `translate` only, composited, with no layout property animated, and none under reduced motion', () => {
+  it('the slide is a transition of `translate` only, composited, only while the root allows it, and none under reduced motion', () => {
     expect(baseVar('--hud-slide')).toMatch(/^translate \d+ms /)
-    for (const s of ['.instruments', '.touchops', '.compass-3d', '.chatdock__chip', '.orbsquare.walklook']) expect(selectorsWith('transition: var(--hud-slide);'), s).toContain(s)
+    // Never on the bare controls: a mode change swaps the pad's side, and a page load starts it inside the columns.
+    const unGated = [...CSS.matchAll(/\n([^{}\n@][^{}]*)\{([^{}]*)\}/g)].filter((m) => m[2].includes('var(--hud-slide)') && !m[1].replace(/\/\*[\s\S]*?\*\//g, '').trim().startsWith(':root[data-hud-slide]'))
+    expect(unGated.map((m) => m[1].trim())).toEqual([])
+    const gated = CSS.slice(CSS.indexOf(':root[data-hud-slide] :is('), CSS.indexOf('transition: var(--hud-slide);'))
+    for (const s of ['.instruments', '.touchops', '.compass-3d:not(.compass-3d--bench)', '.chatdock__chip', '.orbsquare.walklook']) expect(gated, s).toContain(`  ${s},`)
     // The three that already eased something keep it and add the slide.
-    expect(CSS).toContain('.hamburger-menu { transition: background 0.2s ease, transform 0.2s ease, var(--hud-slide); }')
-    expect(CSS).toContain('.touchpad,\n.walkside { transition: bottom 160ms ease, var(--hud-slide); }')
+    expect(CSS).toContain(':root[data-hud-slide] .hamburger-menu { transition: background 0.2s ease, transform 0.2s ease, var(--hud-slide); }')
+    expect(CSS).toContain(':root[data-hud-slide] :is(.touchpad, .walkside) { transition: bottom 160ms ease, var(--hud-slide); }')
     expect(CSS).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*:root \{ --hud-slide: translate 0s; \}/)
   })
 })
@@ -174,5 +182,116 @@ describe('the columns\' reach', () => {
 
   it('is measured only while the menu stands beside the scene, not while it covers a phone', () => {
     expect(HUD).toContain('useMenuInset(hudRef, !menuOpen)')
+  })
+})
+
+describe('the watch', () => {
+  /** A root, a window and a ResizeObserver that record what is done to them. */
+  function host() {
+    const props = new Map<string, string>()
+    const attrs = new Set<string>()
+    const listeners = new Set<() => void>()
+    const timers = new Map<number, () => void>()
+    const frames: (() => void)[] = []
+    const observed: unknown[] = []
+    let disconnected = 0
+    let nextTimer = 1
+    let width = 2000
+    const root = {
+      get clientWidth() { return width },
+      style: { setProperty: (k: string, v: string) => { props.set(k, v) }, removeProperty: (k: string) => { props.delete(k) } },
+      setAttribute: (k: string) => { attrs.add(k) },
+      removeAttribute: (k: string) => { attrs.delete(k) },
+    }
+    const win = {
+      addEventListener: (_: string, f: () => void) => { listeners.add(f) },
+      removeEventListener: (_: string, f: () => void) => { listeners.delete(f) },
+      setTimeout: (f: () => void) => { const id = nextTimer++; timers.set(id, f); return id },
+      clearTimeout: (id: number) => { timers.delete(id) },
+      requestAnimationFrame: (f: () => void) => { frames.push(f); return frames.length },
+    }
+    class Observer { constructor(public cb: () => void) {} observe(el: unknown) { observed.push(el) } disconnect() { disconnected++ } }
+    const h = { root, win, Observer } as unknown as InsetHost
+    return {
+      h, props, attrs, listeners, observed, timers,
+      disconnected: () => disconnected,
+      resize: (w: number) => { width = w; for (const f of listeners) f() },
+      frame: () => { for (const f of frames.splice(0)) f() },
+      flush: () => { for (const [id, f] of [...timers]) { timers.delete(id); f() } },
+    }
+  }
+  const cols = { left: { offsetLeft: 16, offsetWidth: 320 }, right: { offsetLeft: 1684, offsetWidth: 300 } }
+  const hudEl = (right: { offsetLeft: number; offsetWidth: number }) => ({
+    getBoundingClientRect: () => ({ left: 0 }),
+    querySelector: (sel: string) => (sel.endsWith('left') ? cols.left : right),
+    querySelectorAll: () => [cols.left, right],
+  }) as unknown as HTMLElement
+
+  it('writes both reaches on open, follows a resize, and takes everything away on close', () => {
+    setPaintedForTest(true)
+    const t = host()
+    const right = { ...cols.right }
+    const stop = watchMenuInset(hudEl(right), t.h)
+    expect(Object.fromEntries(t.props)).toEqual({ '--hud-cover-l': '336px', '--hud-cover-r': '316px' })
+    expect(t.observed).toHaveLength(2)
+    expect(t.listeners.size).toBe(1)
+    // The window narrows and the right column moves with it.
+    right.offsetLeft = 1124
+    t.resize(1440)
+    expect(t.props.get('--hud-cover-r')).toBe('316px')
+    expect(t.props.get('--hud-cover-l')).toBe('336px')
+    stop()
+    expect(t.props.size).toBe(0)
+    expect(t.listeners.size).toBe(0)
+    expect(t.disconnected()).toBe(1)
+  })
+
+  it('lets the slide run for a moment as the menu opens and as it closes, and not for a resize', () => {
+    setPaintedForTest(true)
+    const t = host()
+    const stop = watchMenuInset(hudEl({ ...cols.right }), t.h)
+    expect(t.attrs.has(SLIDE_ATTR)).toBe(true)
+    // Nothing counts down until two frames have passed: the slide has begun by then.
+    expect(t.timers.size).toBe(0)
+    t.frame()
+    expect(t.timers.size).toBe(0)
+    t.frame()
+    expect(t.timers.size).toBe(1)
+    t.flush()
+    expect(t.attrs.has(SLIDE_ATTR)).toBe(false)
+    t.resize(1999)
+    expect(t.attrs.has(SLIDE_ATTR)).toBe(false)
+    stop()
+    expect(t.attrs.has(SLIDE_ATTR)).toBe(true)
+    t.frame(); t.frame(); t.flush()
+    expect(t.attrs.has(SLIDE_ATTR)).toBe(false)
+    expect(SLIDE_MS).toBeGreaterThan(240)
+  })
+
+  it('a close straight after an open keeps the slide allowed for the close', () => {
+    setPaintedForTest(true)
+    const t = host()
+    const stop = watchMenuInset(hudEl({ ...cols.right }), t.h)
+    t.frame(); t.frame()
+    stop()
+    // The open's countdown ends; the close's has not started.
+    t.flush()
+    expect(t.attrs.has(SLIDE_ATTR)).toBe(true)
+    t.frame(); t.frame(); t.flush()
+    expect(t.attrs.has(SLIDE_ATTR)).toBe(false)
+  })
+
+  it('a menu open as the page loads starts the controls inside the columns without a slide', () => {
+    setPaintedForTest(false)
+    const t = host()
+    const stop = watchMenuInset(hudEl({ ...cols.right }), t.h)
+    expect(t.props.get('--hud-cover-l')).toBe('336px')
+    expect(t.attrs.has(SLIDE_ATTR)).toBe(false)
+    stop()
+    setPaintedForTest(true)
+  })
+
+  it('App arms the slide after its first commit', () => {
+    expect(readFileSync(join(__dirname, '..', '..', 'App.tsx'), 'utf8')).toContain('useEffect(armMenuSlide, [])')
   })
 })

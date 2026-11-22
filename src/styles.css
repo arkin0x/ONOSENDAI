@@ -940,7 +940,7 @@ body {
 }
 
 /*
- * Three columns abreast is 71 cells, about 400px, and the compass is centred, so
+ * Three columns abreast is 71 cells, about 400px, and the compass was centred, so
  * they only fit beside it on a genuinely wide screen. Below that they stay
  * stacked: one column of 20 bits is 26 cells, which fits the narrowest phone at
  * full size, where shrinking the type to keep them abreast would not have.
@@ -4748,7 +4748,7 @@ select.avatars__input option:checked {
   .app:has(.hosaka-pulse) .flyorbs { bottom: var(--menu-bottom); }
 }
 /* That row runs along the bottom where the open chat starts (84px in from
-   641px wide, the desktop's 424px from 1101px), and the chat stands over it
+   641px wide, past the menu button from 1101px), and the chat stands over it
    (z-index 101): with the buttons up, the chat starts past the row instead
    (review of #592). */
 @media (max-height: 520px) and (min-width: 641px) {
@@ -6259,7 +6259,7 @@ select.avatars__input option:checked {
     right: var(--controls-right);
   }
 
-  /* The instrument stack stays at the top, at the scene's left edge, and
+  /* The instrument stack stays at the top, at the screen's left edge, and
    * the compass at the top right (the chat took the bottom centre), at its
    * full 120px on a desktop; the view menu hangs off it, directly beneath. */
   :root {
@@ -8067,8 +8067,8 @@ select.avatars__input option:checked {
  *
  * Just above the menu button, on the instrument stack's left edge (the
  * hyperspace, chain and XOR chips), so it reads as one more instrument and
- * never covers a panel. The desktop block below moves both to the scene's
- * left edge, as it does the stack and the button. */
+ * never covers a panel. The desktop block below keeps it on the button's
+ * axis at the desktop button's size. */
 .hosaka-pulse {
   position: fixed;
   left: 12px; /* the menu button's left, so the two share one axis */
@@ -12866,8 +12866,24 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
  * button's press). What spans the two sides (the chat dock, the route
  * overlay and deploy bar, the bars in the instrument stack) moves the same
  * way and gives up the width the columns take (the --hud-shift terms in
- * their own rules). On a phone the menu covers the whole scene instead, the
- * shifts stay 0, and nothing here moves.
+ * their own rules). Those widths change at once rather than easing: a box
+ * narrower than its cap (the chat dock on a narrow desktop, the BUILD bar)
+ * gives up its width in one step as the slide starts. On a phone the menu
+ * covers the whole scene instead, the shifts stay 0, and nothing here moves.
+ *
+ * The slide runs only as the menu opens or closes: the hook sets
+ * data-hud-slide on the root for that moment. Not on a page load with the
+ * menu already open (the controls start inside the columns), not on a
+ * window resize, and not on a mode change, when the pad changes sides
+ * (WALK's on the left, the rest on the right) and would otherwise sweep
+ * across the screen between its two shifts.
+ *
+ * A `translate` other than none makes each of these the containing block
+ * of any position: fixed element inside it. Nothing is drawn that way today
+ * (their modals render outside them); a new one has to be, too.
+ *
+ * The workshop's compass (.compass-3d--bench) sits inside its view ball and
+ * never moves with the HUD.
  */
 :root {
   --hud-edge-l: calc(16px + env(safe-area-inset-left, 0px));
@@ -12900,7 +12916,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .touchops,
 .walkside,
 .orbsquare.walklook,
-.compass-3d,
+.compass-3d:not(.compass-3d--bench),
 .viewmenu,
 .touchhint,
 .spectate {
@@ -12913,26 +12929,27 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 /* The chips inside the star and GOAL group ride with the group. */
 .goalgroup > .chatdock__chip { translate: none; }
-.instruments,
-.hosaka-pulse,
-.flyorbs,
-.routeov,
-.deploybar,
-.touchops,
-.orbsquare.walklook,
-.compass-3d,
-.viewmenu,
-.touchhint,
-.spectate,
-.chatdock,
-.chatdock__chip,
-.starname {
+:root[data-hud-slide] :is(
+  .instruments,
+  .hosaka-pulse,
+  .flyorbs,
+  .routeov,
+  .deploybar,
+  .touchops,
+  .orbsquare.walklook,
+  .compass-3d:not(.compass-3d--bench),
+  .viewmenu,
+  .touchhint,
+  .spectate,
+  .chatdock,
+  .chatdock__chip,
+  .starname
+) {
   transition: var(--hud-slide);
 }
 /* These already ease something of their own; the slide joins it. */
-.hamburger-menu { transition: background 0.2s ease, transform 0.2s ease, var(--hud-slide); }
-.touchpad,
-.walkside { transition: bottom 160ms ease, var(--hud-slide); }
+:root[data-hud-slide] .hamburger-menu { transition: background 0.2s ease, transform 0.2s ease, var(--hud-slide); }
+:root[data-hud-slide] :is(.touchpad, .walkside) { transition: bottom 160ms ease, var(--hud-slide); }
 @media (prefers-reduced-motion: reduce) {
   :root { --hud-slide: translate 0s; }
 }

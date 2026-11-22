@@ -54,9 +54,10 @@ function load(pubkey: string): Set<string> {
  * READ_FALLBACK_RELAY) never is, though a set saved while it was pinned names
  * it: nothing of this version publishes there, so what it holds is no newer
  * than the canonical relay, and waiting for it (and for its AUTH) would only
- * slow a move. It is still asked, and a newer move it sends in time still
- * stops the move, as any relay's does; the standing subscription on it
- * (ownWatch) hears one that comes later.
+ * slow a move. It is still asked, and a newer move it sends before the
+ * question settles (which may be as soon as the canonical relay answers)
+ * stops the move, as any relay's does; one that comes later is heard by the
+ * standing subscription on it (ownWatch), not by this question.
  */
 export function chainHolders(pubkey: string): Set<string> {
   return new Set([normalizeURL(DEFAULT_RELAY), ...[...load(pubkey)].filter((url) => !isReadFallbackRelay(url))])

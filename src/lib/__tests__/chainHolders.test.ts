@@ -64,6 +64,7 @@ async function page(): Promise<{ holders: Holders; store: typeof import('../../s
 const event = (pubkey: string): NostrEvent => ({ ...spawnTemplate(pubkey, 1_000), id: nextId(), pubkey, sig: '0'.repeat(128) })
 
 describe('the relays that hold a chain', () => {
+  // 30 s: its first page() imports the store cold, about 5 s when this file runs alone (as on origin/v2).
   it('the canonical relay always; another only once it sent back one of the identity\'s events; saved per identity, and a reload still knows it', async () => {
     localStorage.clear()
     let { holders } = await page()
@@ -83,7 +84,7 @@ describe('the relays that hold a chain', () => {
     ;({ holders } = await page())
     expect([...holders.chainHolders(pk)].sort()).toEqual(want)
     expect([...holders.chainHolders(other)]).toEqual(BASE)
-  })
+  }, 30_000)
 
   it('a retired relay leaves a saved set on the next page, on disk too, and the others stay', async () => {
     localStorage.clear()
@@ -104,6 +105,21 @@ describe('the relays that hold a chain', () => {
     holders.noteHoldersFrom(pk, [{ url: 'wss://cyberspace.nostr1.com', outcome: 'answered', events: [event(pk)] }])
     expect(holders.chainHolders(pk).has(SECOND)).toBe(false)
   })
+
+  it('the self-check still waits on the old relay\'s AUTH: a chain only it holds is never read as none (a new live chain would start over it)', async () => {
+    localStorage.clear()
+    await page()
+    const { checkHolders } = await import('../selfSync')
+    const { decideSelfCheck } = await import('../chainHold')
+    const { AUTH_STALLED } = await import('../relayOutcome')
+    const pk = 'f3'.repeat(32)
+    expect(checkHolders(pk).has(SECOND)).toBe(true)
+    const verdict = decideSelfCheck([
+      { url: CANONICAL, outcome: 'answered', events: [] },
+      { url: SECOND, outcome: 'refused', reason: AUTH_STALLED, events: [] },
+    ], 'wss://relay.onosendai.tech', true, checkHolders(pk))
+    expect(verdict.status).toBe('unknown')
+  }, 30_000)
 
   it('a bad string in a saved set does not hide the holders after it', async () => {
     localStorage.clear()

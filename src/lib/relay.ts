@@ -1269,8 +1269,9 @@ const NO_ANSWER = 'no answer in time'
  * a viewer added answering first starts nothing: it may hold none of it.
  */
 /**
- * `written`: ask only the relays this client publishes to (relaySet), never
- * the read-only former canonical relay (useRelays READ_FALLBACK_RELAY). For
+ * `written`: ask only the relays this client publishes to (relaySet), not
+ * the read-only former canonical relay (useRelays READ_FALLBACK_RELAY), unless
+ * the player listed it themselves. For
  * a decision about the newest version of something of yours (a bag, an
  * object): the moves and edits of this version never reach that relay, so
  * its answer alone could pass for the relays' word on a version it never got.

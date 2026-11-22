@@ -26,7 +26,7 @@ import { normalizeURL } from 'nostr-tools/utils'
 import { CYBERSPACE_RELAY, dropRelays, frameAge, signInFailed, subscribeOne, unansweredFor } from './relay'
 import { HELD_BACKOFF_MS } from './liveSub'
 import { PINNED_RELAYS, readRelays } from '../store/useRelays'
-import type { NostrEvent } from './events'
+import { actionLink, type NostrEvent } from './events'
 
 /**
  * A relay whose socket has sent nothing for this long is not current until it
@@ -70,8 +70,8 @@ interface Watch {
   since: () => number | undefined
   /** Every own move any relay delivered that the head check has not yet found in the chain in hand. */
   pending: Map<string, NostrEvent>
-  /** Whether a delivered move is this page's own or already in hand (never held). */
-  known: (id: string) => boolean
+  /** Whether a delivered move is this page's own, already in hand, or outside the chain in hand (never held). */
+  known: (ev: NostrEvent) => boolean
   onEvent: (ev: NostrEvent, url: string) => void
   onEose: () => void
   relays: Map<string, RelayWatch>
@@ -95,6 +95,24 @@ export const ownWatchDeps = {
   // never vouches (useRelays READ_FALLBACK_RELAY).
   relays: (): string[] => [CYBERSPACE_RELAY, ...readRelays()],
   pinned: (): readonly string[] => PINNED_RELAYS,
+}
+
+/**
+ * Whether a delivered move cannot touch the chain in hand, whose spawn is
+ * `genesisId`, signed at `spawnAt`: a spawn older than it, or an action on
+ * another chain dated before it (an older chain's: every action of a newer
+ * chain is dated at or after that chain's spawn, so after this one's). Such
+ * a move is never held. The relay that missed the respawn still hands back
+ * the old chain's last move to every `limit: 1` (re)subscription (the
+ * read-only old relay, after a respawn this page published elsewhere), and
+ * held, it sent every move of the identity to the slow path for good. The
+ * same second as the spawn is held, to be safe.
+ */
+export function outsideChain(ev: NostrEvent, genesisId: string, spawnAt: number | undefined): boolean {
+  if (!genesisId || spawnAt === undefined || ev.created_at >= spawnAt || ev.id === genesisId) return false
+  if (ev.tags.some((t) => t[0] === 'A' && t[1] === 'spawn')) return true
+  const link = actionLink(ev)
+  return link !== null && link.genesisId !== genesisId
 }
 
 /** Moves kept in `pending` at most; past it, they are let go and the relays asked again (overflowed). */
@@ -125,7 +143,7 @@ function openRelay(w: Watch, r: RelayWatch): void {
       // A move this page signed, or one already in hand, cannot be another
       // device's: never held (the echo of every move of ours, and the echo of
       // an old chain's last move landing after a respawn).
-      if (!w.pending.has(ev.id) && !w.known(ev.id)) {
+      if (!w.pending.has(ev.id) && !w.known(ev)) {
         if (w.pending.size < PENDING_MAX) w.pending.set(ev.id, ev)
         else overflowed(w)
       }
@@ -239,7 +257,7 @@ export function startOwnWatch(
   onEvent: (ev: NostrEvent, url: string) => void,
   onEose: () => void = () => {},
   since: () => number | undefined = () => undefined,
-  known: (id: string) => boolean = () => false,
+  known: (ev: NostrEvent) => boolean = () => false,
 ): () => void {
   stopOwnWatch()
   const w: Watch = { pubkey, since, known, pending: new Map(), onEvent, onEose, relays: new Map(), tick: null, stopped: false }

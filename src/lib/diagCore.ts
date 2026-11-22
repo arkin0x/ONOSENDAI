@@ -329,6 +329,33 @@ export function frameVerb(data: unknown): 'req' | 'close' | 'event' | 'auth' | '
   return 'other'
 }
 
+/** A frame a relay sent, by its verb, from its first bytes only, as frameVerb reads what is sent. */
+export function rxVerb(data: unknown): 'event' | 'ok' | 'eose' | 'closed' | 'other' {
+  if (typeof data !== 'string') return 'other'
+  if (data.startsWith('["EVENT"')) return 'event'
+  if (data.startsWith('["OK"')) return 'ok'
+  if (data.startsWith('["EOSE"')) return 'eose'
+  if (data.startsWith('["CLOSED"')) return 'closed'
+  return 'other'
+}
+
+/** One row per window with relay events checked (lib/verifiedSigs countVerifies): totals, then the top kinds by time. */
+export const VERIFY_COLUMNS = ['t', 'n', 'schnorr', 'hashed', 'compared', 'deferred', 'ms', 'top'] as const
+/** One entry of a verify row's `top`. */
+export const VERIFY_KIND_COLUMNS = ['kind', 'n', 'schnorr', 'hashed', 'compared', 'deferred', 'ms'] as const
+/** Kinds kept per window. */
+export const VERIFY_TOP = 8
+
+/** A window's checks as a row (VERIFY_COLUMNS), or null when none were made. Numbers only: a kind is a number. */
+export function verifyRow(t: number, byKind: ReadonlyMap<number, { n: number; schnorr: number; hashed: number; compared: number; deferred: number; ms: number }>): Array<number | number[][]> | null {
+  if (byKind.size === 0) return null
+  let n = 0, schnorr = 0, hashed = 0, compared = 0, deferred = 0, ms = 0
+  for (const k of byKind.values()) { n += k.n; schnorr += k.schnorr; hashed += k.hashed; compared += k.compared; deferred += k.deferred; ms += k.ms }
+  const top = [...byKind.entries()].sort((a, b) => b[1].ms - a[1].ms).slice(0, VERIFY_TOP)
+    .map(([kind, k]) => [kind, k.n, k.schnorr, k.hashed, k.compared, k.deferred, Math.round(k.ms * 10) / 10])
+  return [t, n, schnorr, hashed, compared, deferred, Math.round(ms * 10) / 10, top]
+}
+
 /** The columns of one sample row. Counts over the window unless the name says otherwise. */
 export const DIAG_COLUMNS = [
   't', 'hidden', 'focused', 'frames', 'ftP50', 'ftP95', 'ftP99', 'ftMax',
@@ -339,6 +366,8 @@ export const DIAG_COLUMNS = [
   'objects', 'meshes', 'visibleMeshes', 'shardFaces', 'points', 'lines', 'instanced', 'geoms', 'sceneVerts',
   'wsOpen', 'relays', 'relaysUp', 'subs', 'txReq', 'txClose', 'txEvent', 'txAuth', 'rxN', 'rxB',
   'workersMade', 'workersLive', 'timeouts', 'intervals', 'resN', 'resB', 'dom', 'canvases', 'idbB', 'storeB', 'thumbs', 'thumbQueue', 'selfMs', 'ui',
+  // Added 2026-11-21, at the end so a reader by position still reads the columns before them.
+  'rxEv', 'rxOk', 'rxEose',
 ] as const
 
 export type DiagColumn = (typeof DIAG_COLUMNS)[number]

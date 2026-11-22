@@ -48,7 +48,10 @@ import { withOpacity } from '../lib/opacityStep'
 import { readGlow, withGlow, withPointSize, type Glow } from 'sno-core/glow'
 import { drawnFace, withFace, type FaceMode } from 'sno-core/face'
 import { GLOW_START, suggestedGlowStyle } from '../lib/pointGlow'
-import { noTable, rekeyCarried, signedTableOnly, you } from '../lib/carried'
+import { markCameSealed, noTable, rekeyCarried, signedTableOnly, takeIntoKeeping, you } from '../lib/carried'
+import { planPieces } from '../lib/piecePlan'
+import { useToast } from './useToast'
+import { pieceKeysFor, pieceWasOpened } from '../lib/pieceKeys'
 import { fingerprint, loadLedger } from '../lib/published'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 import { bounceOf, springboardOf, withBounce, type Bounce } from '../lib/walkBounce'
@@ -746,6 +749,18 @@ export interface WorkshopState {
   enterPart: (index: number, fetch?: (ref: Ref) => Promise<unknown>) => Promise<void>
   /** Up one level, to the shard that placed this one. A copy nobody edited goes. */
   back: () => void
+  /**
+   * TAKE (MOVE INTO WORKSHOP, COPY) of a shard read from a bag or a chest: the
+   * shard into your workshop with what it carries keyed under you
+   * (lib/carried.ts takeIntoKeeping), and each SEALED PIECE of a split build
+   * it places (lib/pieces.ts) as a shard of your own beside it, its refs
+   * pointed at them, so the copy draws whole and a hide of it seals each piece
+   * again. A piece is opened with the key of the bag it was read from, through
+   * `fetch` (lib/parts.ts fetchRef, passed in: this store is imported by what
+   * lib/parts.ts imports). Its id, and how many pieces came and how many could
+   * not be opened (those stay placeholders).
+   */
+  takeShard: (model: ShardModel, fetch: (ref: Ref) => Promise<unknown>) => Promise<{ id: string; pieces: number; missing: number }>
 }
 
 /**
@@ -823,7 +838,29 @@ export function newestId(shards: ShardModel[], used: Readonly<Record<string, num
  * write fails. Whoever needs to know it landed awaits saveNow().
  */
 function save(shards: ShardModel[]): void {
-  persist(shards)
+  persist(kept(shards))
+}
+
+/** A copy's fingerprint: its whole payload, name included, so any change to it shows. */
+export function bornOf(s: ShardModel): string {
+  return fingerprint(JSON.stringify(toPayload(s)))
+}
+
+/**
+ * A copy opened in place of a link or a table entry (enterPart) that nobody has
+ * changed: it is kept out of storage, so a reload or a crash while you only
+ * looked leaves no stray copy in the list. Its first change (any change: its
+ * fingerprint no longer what it was made with) lets it in.
+ */
+export function untouchedLookCopy(s: ShardModel): boolean {
+  const mark = (s as ShardModel & { lookCopy?: string }).lookCopy
+  // Published meanwhile, it went public: stored like any shard (as settle counts it).
+  return typeof mark === 'string' && mark === bornOf(s) && !loadLedger()[s.id]
+}
+
+/** The list as it is stored: without copies only looked at. */
+export function kept(list: ShardModel[]): ShardModel[] {
+  return list.some(untouchedLookCopy) ? list.filter((s) => !untouchedLookCopy(s)) : list
 }
 
 /**
@@ -1062,11 +1099,16 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       }
     }
     list[j] = next
+    // The copy is the parent's now: stored like any shard of yours.
+    const c = list.findIndex((s) => s.id === p.copyId)
+    if (c >= 0 && (list[c] as ShardModel & { lookCopy?: string }).lookCopy !== undefined) {
+      const { lookCopy: _mark, ...plain } = list[c] as ShardModel & { lookCopy?: string }
+      void _mark
+      list[c] = plain
+    }
     return { ...frame, past: [...frame.past.slice(-(HISTORY - 1)), parent], future: [], pending: { ...p, done: true } }
   }
 
-  /** A copy's fingerprint: its whole payload, name included, so any change to it shows. */
-  const bornOf = (s: ShardModel): string => fingerprint(JSON.stringify(toPayload(s)))
 
   /**
    * Leave one level of the way in, in `list` (changed in place). A copy that
@@ -2222,9 +2264,59 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         return
       }
       const credit: Credit | undefined = !inTable && a && a.pubkey !== me ? { address: ref[1], ...(ref[2] ? { relay: ref[2] } : {}) } : undefined
-      const copyId = get().importShard(model, credit)
-      const copy = get().shards.find((s) => s.id === copyId)!
+      const made = get().importShard(model, credit)
+      // Marked as only looked at, so it is not stored until it changes (untouchedLookCopy).
+      const copy = { ...get().shards.find((s) => s.id === made)! }
+      ;(copy as ShardModel & { lookCopy?: string }).lookCopy = bornOf(copy)
+      const marked = get().shards.map((s) => (s.id === made ? copy : s))
+      set({ shards: marked })
+      save(marked)
+      const copyId = made
       open(copyId, `Your copy of ${copy.name}. ${parent.name} uses it once you change it${inTable ? '' : '; the public object stays as it is'}.`, { ref: part.ref, address: ref[1], copyId, fromTable: inTable, born: bornOf(copy) })
+    },
+
+    takeShard: async (model, fetch) => {
+      const me = you()
+      const author = model.author ?? null
+      let parent: ShardModel = model
+      const pieces: ShardModel[] = []
+      let missing = 0
+      try {
+        if (me && author) {
+          const plan = await planPieces(model, author, async (address) => {
+            const payload = await fetch(['a', address]).catch(() => null)
+            // Only a sealed piece of this build (opened with its bag's key); a public object stays a link.
+            if (!pieceWasOpened(address)) { if (payload == null && pieceKeysFor(address).length > 0) missing++; return undefined }
+            return payload && typeof payload === 'object' && !Array.isArray(payload) ? (payload as Record<string, unknown>) : undefined
+          }, () => uuid(), false)
+          // Another identity signed in while the relays answered: the copy goes in without the pieces, never under the old key.
+          if (you() !== me) throw new Error('switched')
+          if (plan.pieces.length > 0) {
+            // Each piece a shard of yours, under the id its address now names.
+            const names = new Map(plan.pieces.map((p) => [p.address, `33331:${me}:${p.d}`]))
+            const point = (refs: unknown): Ref[] | undefined => (Array.isArray(refs) ? (refs as Ref[]).map((r) => (r[0] === 'a' && names.has(r[1]) ? (['a', names.get(r[1])!] as Ref) : r)) : undefined)
+            parent = { ...plan.parent, refs: point(plan.parent.refs) }
+            for (const p of plan.pieces) {
+              const read = fromPayload(JSON.parse(p.payload), p.d)
+              if (!read) { missing++; continue }
+              const refs = point(read.refs)
+              // Marked as come sealed: PUBLISH asks before it goes out in the clear (lib/carried.ts cameSealed).
+              pieces.push(markCameSealed(takeIntoKeeping({ ...read, ...(refs ? { refs } : {}), id: p.d, author }, me)))
+            }
+          }
+        }
+      } catch {
+        // The copy alone, as TAKE always made it: nothing half done.
+        parent = model
+        pieces.length = 0
+        missing = 0
+      }
+      // Taken by whoever tapped: one signed in since gets nothing in their workshop from it.
+      if (you() !== me) return { id: '', pieces: 0, missing: 0 }
+      for (const piece of pieces) get().importShard(piece, undefined, piece.id)
+      const id = get().importShard(markCameSealed(takeIntoKeeping(parent, me)))
+      if (missing > 0) useToast.getState().show({ label: 'PART OF IT STAYED BEHIND', meta: `${missing === 1 ? 'One part' : `${missing} parts`} of this shard could not be opened here, so your copy shows ${missing === 1 ? 'a placeholder' : 'placeholders'} there.`, mark: 'build' })
+      return { id, pieces: pieces.length, missing }
     },
 
     back: () => {
@@ -2250,12 +2342,17 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 })
 
 attach({
-  shards: () => useWorkshop.getState().shards,
-  replace: (list) => useWorkshop.setState((s) => ({
-    shards: list,
-    // A shard that is gone cannot stay the one on the bench.
-    currentId: s.currentId !== null && !list.some((x) => x.id === s.currentId) ? null : s.currentId,
-  })),
+  shards: () => kept(useWorkshop.getState().shards),
+  replace: (given) => useWorkshop.setState((s) => {
+    // A copy only looked at is in no stored list: it stays, as it was (untouchedLookCopy).
+    const looks = s.shards.filter((x) => untouchedLookCopy(x) && !given.some((g) => g.id === x.id))
+    const list = looks.length ? [...given, ...looks] : given
+    return {
+      shards: list,
+      // A shard that is gone cannot stay the one on the bench.
+      currentId: s.currentId !== null && !list.some((x) => x.id === s.currentId) ? null : s.currentId,
+    }
+  }),
   report: (message) => { if (useWorkshop.getState().storageError !== message) useWorkshop.setState({ storageError: message }) },
   protect: () => (useWorkshop.getState().open ? useWorkshop.getState().currentId : null),
   notice: (message) => useWorkshop.setState({ notice: message }),

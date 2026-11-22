@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { MODES, toPayload, type ShardMode } from 'sno-core/shards'
 import { formatCellSize } from 'sno-core/scale'
 import { ConfirmModal } from '../../hud/ConfirmModal'
-import { carriesSealedParts } from '../../lib/carried'
+import { cameSealed, carriesSealedParts } from '../../lib/carried'
 import { STATE_HELP, STATE_LABEL, STATE_TAG, publishState, shardFingerprint } from '../../lib/published'
 import { shardForm } from '../../lib/partForm'
 import { PartFormBadge } from '../PartFormBadge'
@@ -49,6 +49,8 @@ export function ShardBody(): JSX.Element | null {
   const wireBytes = useMemo(() => (shard ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(shard)))).length : 0), [shard])
   // Something to publish: its own vertices, or objects it places (DECK-0003 §1.9 rule 13).
   const hasContent = shard !== null && (shard.vertices.length > 0 || (shard.parts?.length ?? 0) > 0)
+  // A shard that came to you sealed (TAKE, a split build's piece among them) goes public only if you say so.
+  const [sealedAsk, setSealedAsk] = useState<string | null>(null)
   const w = useWorkshop.getState
   if (!shard) return null
   return (
@@ -73,7 +75,7 @@ export function ShardBody(): JSX.Element | null {
           <button
             className="workshop__btn workshop__btn--warn"
             disabled={!hasContent || publishing || retracting || !me}
-            onClick={() => { if (carriesSealedParts(shard)) setPublishAsk(shard.id); else void usePublished.getState().publish(shard) }}
+            onClick={() => { if (carriesSealedParts(shard)) setPublishAsk(shard.id); else if (cameSealed(shard)) setSealedAsk(shard.id); else void usePublished.getState().publish(shard) }}
             title={!hasContent
               ? 'Nothing to publish yet: add points, or place objects'
               : pubState === 'other-key'
@@ -101,6 +103,18 @@ export function ShardBody(): JSX.Element | null {
           onBackdrop={() => setPublishAsk(null)}
           onConfirm={() => { setPublishAsk(null); void usePublished.getState().publish(shard, true) }}
           onCancel={() => { setPublishAsk(null); void usePublished.getState().publish(shard) }}
+        />
+      )}
+      {sealedAsk === shard.id && (
+        <ConfirmModal
+          title={`Publish "${shard.name}"?`}
+          body={<>It came to you sealed in a bag or a chest. Published, anyone can read it.</>}
+          confirmLabel="PUBLISH IT"
+          cancelLabel="KEEP IT PRIVATE"
+          danger={false}
+          onBackdrop={() => setSealedAsk(null)}
+          onConfirm={() => { setSealedAsk(null); void usePublished.getState().publish(shard) }}
+          onCancel={() => setSealedAsk(null)}
         />
       )}
       {retractAsk === shard.id && (

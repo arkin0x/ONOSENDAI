@@ -270,7 +270,8 @@ export function ViewPanel(): JSX.Element {
         found or placed, its box and the blue rings around it: inside the rings
         it plays at full volume, and it fades to silence at its region's walls.
         It is off unless you turn it on, and shows while you place a sound in
-        BUILD; either way every sound still plays.
+        BUILD; a sound whose card you open, or that you VIEW, shows until you
+        close it or look away. Either way every sound still plays.
         Glow draws the light or fog some objects cast around their points;
         turn it off if a slow phone struggles. The workshop still shows glow
         on the object you are making.

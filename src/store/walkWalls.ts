@@ -962,7 +962,9 @@ interface EyeCore { near: EyeNear[]; reach: number; len: number }
  * before any line is asked (0 held at the walker, 1 nothing to ask), else the
  * faces near and the straight line's reach. `extra` widens the box the faces
  * are gathered in, in gibsons, for eyePlace's moves beside the line; what
- * eyeReach answers is the same with or without it.
+ * eyeReach answers is the same with or without it. A shard still being
+ * built is waited for only when it meets the line's own box: one only in the
+ * wider band is left out until it is built, as it was before the band.
  */
 function eyeCore(from: Position, lead: readonly [number, number, number], eye: readonly [number, number, number], margin: number, items: readonly WallItem[], up: AxisDirection, out: { pending: boolean } | undefined, stand: boolean | number, extra: number): number | EyeCore {
   if (out) out.pending = false
@@ -976,19 +978,29 @@ function eyeCore(from: Position, lead: readonly [number, number, number], eye: r
   // In a shard's render frame Z flips (stepLimit): up and the line's way, as unit vectors there.
   const upM = [upC[0], upC[1], -upC[2]]
   const uM = [u[0], u[1], -u[2]]
-  const lo = { x: 0n, y: 0n, z: 0n }, hi = { x: 0n, y: 0n, z: 0n }
-  ;(['x', 'y', 'z'] as const).forEach((a, q) => {
-    lo[a] = from[a] + BigInt(Math.floor(Math.min(lead[q], lead[q] + ext[q]) - margin - extra)) - 1n
-    hi[a] = from[a] + BigInt(Math.ceil(Math.max(lead[q], lead[q] + ext[q]) + margin + extra)) + 1n
-  })
+  // The box the line reaches, widened by `by` gibsons.
+  const box = (by: number): { lo: Position; hi: Position } => {
+    const lo = { x: 0n, y: 0n, z: 0n }, hi = { x: 0n, y: 0n, z: 0n }
+    ;(['x', 'y', 'z'] as const).forEach((a, q) => {
+      lo[a] = from[a] + BigInt(Math.floor(Math.min(lead[q], lead[q] + ext[q]) - margin - by)) - 1n
+      hi[a] = from[a] + BigInt(Math.ceil(Math.max(lead[q], lead[q] + ext[q]) + margin + by)) + 1n
+    })
+    return { lo, hi }
+  }
+  const wide = box(extra)
+  const line = extra > 0 ? box(0) : wide
   const near: EyeNear[] = []
   const nrm = [0, 0, 0]
   let reach = len
   for (const w of items) {
-    if (!regionMeets(w, lo, hi)) continue
+    if (!regionMeets(w, wide.lo, wide.hi)) continue
     const e = entryFor(w)
-    // Its first build is on its way: the eye waits at the walker, as a step waits (stepLimit).
-    if (e.first && !e.reach) { if (out) out.pending = true; return 0 }
+    // Its first build is on its way: the eye waits at the walker, as a step waits (stepLimit), if it meets the line.
+    if (e.first && !e.reach) {
+      if (!regionMeets(w, line.lo, line.hi)) continue
+      if (out) out.pending = true
+      return 0
+    }
     if (!e.reach) continue
     const g = 2 ** w.shard.unit
     const tol = tolerance(e, g, 0n)
@@ -996,13 +1008,19 @@ function eyeCore(from: Position, lead: readonly [number, number, number], eye: r
     const off = [Number(from.x - w.at.x) + lead[0], Number(from.y - w.at.y) + lead[1], Number(from.z - w.at.z) + lead[2]]
     const r = e.reach
     const wlo = [Number(r.lo.x), Number(r.lo.y), Number(r.lo.z)], whi = [Number(r.hi.x), Number(r.hi.y), Number(r.hi.z)]
-    let apart = false
-    for (let q = 0; q < 3; q++) {
-      const a = Math.min(off[q], off[q] + ext[q], off[q] - lead[q]) - margin - extra - tol - 1, b = Math.max(off[q], off[q] + ext[q], off[q] - lead[q]) + margin + extra + tol + 1
-      if (b < wlo[q] || a > whi[q]) apart = true
+    const apartBy = (by: number): boolean => {
+      for (let q = 0; q < 3; q++) {
+        const a = Math.min(off[q], off[q] + ext[q], off[q] - lead[q]) - margin - by - tol - 1, b = Math.max(off[q], off[q] + ext[q], off[q] - lead[q]) + margin + by + tol + 1
+        if (b < wlo[q] || a > whi[q]) return true
+      }
+      return false
     }
-    if (apart) continue
-    if (e.first) { if (out) out.pending = true; return 0 }
+    if (apartBy(extra)) continue
+    if (e.first) {
+      if (extra > 0 && apartBy(0)) continue
+      if (out) out.pending = true
+      return 0
+    }
     // A closed door's slab that holds the walker (wallItemsAt): the walker is inside a wall.
     if (w.inside) return 0
     // The shard's render frame, in its own model units: Z flips, as stepLimit has it.
@@ -1067,8 +1085,8 @@ const EYE_PUSH_STEPS = 4
  * under the stairs or something for just a frame"; "when i look forward the
  * screen glitches out"):
  *
- * - Up, then over. An eye above the walker and ahead of it (his operative's
- *   is 2.8 up and 0.27 forward) on a step just short of the next riser has a
+ * - Up, then over. An eye mostly above the walker (no farther out than it
+ *   is up) and ahead of it (his operative's is 2.8 up and 0.27 forward) on a step just short of the next riser has a
  *   straight line that runs into the riser low down, and eyeReach pulls the
  *   eye all the way back to the feet: the camera on the step for that frame,
  *   or for as long as he faces the riser. The eye is also reached the way a
@@ -1116,7 +1134,9 @@ export function eyePlace(from: Position, lead: readonly [number, number, number]
   }
   let p = [eye[0] * s, eye[1] * s, eye[2] * s]
   const ev = eye[0] * upC[0] + eye[1] * upC[1] + eye[2] * upC[2]
-  if (s < 1 && ev > 0) {
+  const flatLen = Math.hypot(eye[0] - upC[0] * ev, eye[1] - upC[1] * ev, eye[2] - upC[2] * ev)
+  // Only an eye mostly above the walker (a head over the feet): a third-person eye far behind still slides down its line.
+  if (s < 1 && ev > 0 && flatLen <= ev) {
     const rv = along([0, 0, 0], upC, ev)
     if (rv > s * ev + 1e-9) {
       const flat = [eye[0] - upC[0] * ev, eye[1] - upC[1] * ev, eye[2] - upC[2] * ev]

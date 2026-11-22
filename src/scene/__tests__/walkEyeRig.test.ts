@@ -77,4 +77,29 @@ describe('WalkEyeRig', () => {
     expect(rig.offset(f, new Vector3()).distanceTo(new Vector3(0, 0.6, -1))).toBeLessThan(1e-9)
     expect(rig.offset(frame(tall, { x: 0, y: 0, z: -1 }), new Vector3()).distanceTo(new Vector3(0, 1, -1))).toBeLessThan(1e-9)
   })
+
+  it('with walls on its way, keeps its last answer only for about the same eye, else waits at the walker', async () => {
+    const walls = await import('../../store/walkWalls')
+    const place = vi.spyOn(walls, 'eyePlace')
+    const items = vi.spyOn(walls, 'wallItemsAt').mockReturnValue([])
+    try {
+      const rig = new WalkEyeRig()
+      const f = (forward: { x: number; y: number; z: number }): EyeFrame => ({ ...frame(tall, forward), walls: true })
+      // Before any answer: a shard building holds the eye at the walker.
+      place.mockImplementation((_c, _l, _o, _m, _i, _u, out) => { if (out) out.pending = true; return [0, 0, 0] })
+      expect(rig.offset(f({ x: 0, y: 0, z: -1 }), new Vector3()).length()).toBeLessThan(1e-9)
+      // An answer: the eye pulled in to half.
+      place.mockImplementation((_c, _l, o, _m, _i, _u, out) => { if (out) out.pending = false; return [o[0] / 2, o[1] / 2, o[2] / 2] })
+      const half = rig.offset(f({ x: 0, y: 0, z: -1 }), new Vector3())
+      expect(half.distanceTo(new Vector3(0, 0.5, -0.5))).toBeLessThan(1e-9)
+      // Building again, the same eye: the answer stands (no drop to the feet).
+      place.mockImplementation((_c, _l, _o, _m, _i, _u, out) => { if (out) out.pending = true; return [0, 0, 0] })
+      expect(rig.offset(f({ x: 0, y: 0, z: -1 }), new Vector3()).distanceTo(half)).toBeLessThan(1e-9)
+      // Turned right round: that answer is not this eye's, so it waits at the walker.
+      expect(rig.offset(f({ x: 0, y: 0, z: 1 }), new Vector3()).length()).toBeLessThan(1e-9)
+    } finally {
+      place.mockRestore()
+      items.mockRestore()
+    }
+  })
 })

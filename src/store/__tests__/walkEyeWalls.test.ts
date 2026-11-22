@@ -342,6 +342,15 @@ describe('eyePlace', () => {
     expect(p[1] - 1).toBeGreaterThanOrEqual(ROOM - 1e-9)
   })
 
+  it('slides a third-person eye far behind down its line short of a wall, as eyeReach does', () => {
+    // 3 behind and 0.5 up, a wall 1 behind: up-then-over is only for an eye mostly above the walker.
+    const items = [item(slab('z', 1, 1))]
+    const k = eyeReach(AT, [0, 0, 0], [0, 0.5, 3], ROOM, items)
+    const p = eyePlace(AT, [0, 0, 0], [0, 0.5, 3], ROOM, items)
+    expect(p[1]).toBeCloseTo(0.5 * k, 9)
+    expect(p[2]).toBeCloseTo(3 * k, 9)
+  })
+
   it('keeps the near plane\u2019s room in pseudo-random rooms, wherever the walker is not itself nearer', () => {
     let seed = 23
     const rnd = (): number => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 }
@@ -366,8 +375,9 @@ describe('eyePlace', () => {
         if (d >= ROOM - 1e-6) kept++
         else expect(away([0, 0, 0], b.lo, b.hi), JSON.stringify({ eye, p, b, d })).toBeLessThan(2 * ROOM)
       }
-      // Never through a face from the walker: up its line, then over (each leg asked with no room).
+      // Never through a face from the walker: up its line (asked with no room), and never inside a solid.
       expect(eyeReach(AT, [0, 0, 0], [0, p[1], 0], 0, items)).toBe(1)
+      for (const b of solids) expect(away(p, b.lo, b.hi), JSON.stringify({ eye, p, b })).toBeGreaterThan(0)
     }
     expect(kept).toBeGreaterThan(400)
   })

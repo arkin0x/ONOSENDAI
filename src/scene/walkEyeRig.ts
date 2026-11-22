@@ -5,8 +5,9 @@
  * the camera sits relative to the walker's point: the avatar's eye
  * (lib/avatarEye.ts walkEyeLocal), turned with the body about up only,
  * lowered by a stair's trail (lib/walkEye.ts walkRise), and placed where it
- * never looks from the far side of a wall or a ceiling and never has a face
- * inside the near plane's room (store/walkWalls.ts eyePlace). The answer is
+ * never looks from the far side of a wall or a ceiling, kept out of the near
+ * plane's room of every face it can be moved off (store/walkWalls.ts
+ * eyePlace). The answer is
  * in render cells, ready to add to the orbit's target.
  *
  * The walls are asked from where the camera's line really starts, the eased
@@ -80,8 +81,8 @@ export class WalkEyeRig {
   /** What the walls do to the eye, render cells: where eyePlace put it less where it was asked about. Zero in the open. */
   private readonly fix = new Vector3()
   private readonly lower = new Vector3()
-  /** Whether this WALK has had an answer yet: until then a shard still being built holds the eye at the walker, as it always did. */
-  private answered = false
+  /** The last answer's gibson and eye (cyberspace gibsons), or null before one this WALK: a shard still being built keeps the answer only for about the same eye. */
+  private answered: { cell: string; off: [number, number, number] } | null = null
   private pending = { pending: false }
   private place: [number, number, number] = [0, 0, 0]
 
@@ -110,7 +111,7 @@ export class WalkEyeRig {
     this.itemsAt = -Infinity
     this.askKey = ''
     this.fix.set(0, 0, 0)
-    this.answered = false
+    this.answered = null
   }
 
   private ask(f: EyeFrame, eye: Vector3): void {
@@ -132,16 +133,19 @@ export class WalkEyeRig {
     if (key === this.askKey) return
     const p = eyePlace(c, lead, off, EYE_ROOM * g, this.items, f.up, this.pending, f.stand ?? false, this.place)
     // A shard still being built is asked about again next frame; until then
-    // the last answer stands, as when gliding out: the camera is not dropped
-    // to the walker's feet for the frame it takes. With no answer yet this
-    // WALK, the eye waits at the walker.
+    // the last answer stands while the eye is about where it was asked (the
+    // same gibson, within EYE_ROOM): the camera is not dropped to the
+    // walker's feet for the frame it takes. Otherwise, or with no answer yet
+    // this WALK, the eye waits at the walker, as it always did.
     if (this.pending.pending) {
       this.askKey = ''
-      if (!this.answered) this.fix.copy(eye).negate()
+      const a = this.answered
+      const same = a !== null && a.cell === cell && Math.hypot(off[0] - a.off[0], off[1] - a.off[1], off[2] - a.off[2]) <= EYE_ROOM * g
+      if (!same) this.fix.copy(eye).negate()
       return
     }
     this.askKey = key
-    this.answered = true
+    this.answered = { cell, off }
     // Back into render cells: each render axis carries one cyberspace axis, with a sign.
     const back = (a: { axis: 'x' | 'y' | 'z'; dir: 1 | -1 }): number => {
       const i = a.axis === 'x' ? 0 : a.axis === 'y' ? 1 : 2

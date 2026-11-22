@@ -71,6 +71,7 @@ import { useChainUi } from '../store/useChainUi'
 import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
 import { everyWhileVisible } from '../lib/whileVisible'
 import { AheadChip } from './ChainAhead'
+import { FluidPauseNotice } from './FluidPauseNotice'
 import { hudFlags } from '../lib/hudFlags'
 
 // Spectating opens the chain explorer: the chain is the thing you came to
@@ -271,6 +272,9 @@ function ChainExplorerChip(): JSX.Element {
 
   return (
     <div className="explorer">
+      {/* The chip and, beside it, the fluid pause's word (hud/FluidPauseNotice.tsx):
+          a row the chip's own size, the word absolutely placed, so nothing moves. */}
+      <div className="explorer__chiprow">
       {/* The chain is the thing that forks, so the chain's own chip is where a
           fork is reported: what another device added, and what it cost. */}
       {fork && fork.replaced ? (
@@ -351,6 +355,8 @@ function ChainExplorerChip(): JSX.Element {
           words={['CHAIN ', index + 1, '/', actions.length, atHead || building ? '' : ' HISTORY']}
         />
       )}
+      <FluidPauseNotice own={own} />
+      </div>
 
       {showFork && fork && (fork.replaced ? (
         <ConfirmModal

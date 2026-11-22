@@ -6,7 +6,7 @@
  * short subtitle in gray", then moved together into a View panel).
  *
  * Eleven Field rows with a Switch each: Terrain dots, hX boxes, Hide avatar in
- * WALK, Look sphere in WALK, Gravity in WALK, Chain trail, Region keys,
+ * WALK, Look sphere in WALK, Gravity in WALK, Hard Mode Gravity, Chain trail, Region keys,
  * Headlamp, Sound spheres, Glow and Sync hidden list. Each
  * drives the flag its old control drove and is remembered
  * the same way. The old controls are gone: no chips under Movement proof, no
@@ -47,7 +47,7 @@ vi.mock('zustand', async (importOriginal) => {
   return { ...real, create: (init?: Parameters<typeof real.create>[0]) => (init === undefined ? live : live(init)) }
 })
 
-import { ViewPanel, WALK_LIMITS_HINT } from '../ViewPanel'
+import { FLUID_PAUSED_HINT, ViewPanel, WALK_LIMITS_HINT } from '../ViewPanel'
 import { ProofPanel } from '../ProofPanel'
 import { ChainPanel } from '../ChainPanel'
 import { SecretsModal } from '../SecretsModal'
@@ -55,7 +55,8 @@ import { Switch } from '../ui/Switch'
 import { LAYERS_KEY, useLayers } from '../../store/useLayers'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useWalk } from '../../store/useWalk'
-import { GRAVITY_KEY } from '../../store/walkGravity'
+import { GRAVITY_KEY, HARD_GRAVITY_KEY } from '../../store/walkGravity'
+import { HARD_GRAVITY_HINT, HARD_GRAVITY_TITLE } from '../ViewPanel'
 import { FLUID_KEY, useFluidWalk } from '../../store/fluidSwitch'
 
 type SwitchEl = ReactElement<{ id: string; checked: boolean; onCheckedChange: (v: boolean) => void }>
@@ -95,8 +96,9 @@ const ROWS: Array<[string, string, string]> = [
   ['view-walk-avatar', 'Hide avatar in WALK', 'Walk without your own avatar around the camera.'],
   ['view-walk-look', 'Look sphere in WALK', 'A ball in the bottom right to drag and look around.'],
   ['view-walk-gravity', 'Gravity in WALK', 'Fall, land and jump.'],
+  ['view-walk-gravity-hard', 'Hard Mode Gravity', 'Gravity will not turn off if there is nothing to catch your fall.'],
   ['view-walk-fluid', 'Fluid WALK', 'Hold to glide. Moves still land on whole gibsons.'],
-  ['view-walk-limits', 'Chain sync limit', WALK_LIMITS_HINT],
+  ['view-walk-limits', 'Pause fluid walk when your chain falls behind', WALK_LIMITS_HINT],
   ['view-chain-trail', 'Chain trail', 'The red line of your movement history.'],
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
   ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
@@ -106,7 +108,7 @@ const ROWS: Array<[string, string, string]> = [
 ]
 
 describe('the Settings panel', () => {
-  it('is a panel titled Settings with thirteen switches, one to a row, each a title and a gray subtitle, in order', () => {
+  it('is a panel titled Settings with fourteen switches, one to a row, each a title and a gray subtitle, in order', () => {
     const html = view()
     expect(html).toMatch(/^<section class="panel panel--view">/)
     expect(html).toContain('<h2>Settings</h2>')
@@ -216,6 +218,20 @@ describe('the Settings panel', () => {
     expect(localStorage.getItem(FLUID_KEY)).toBe('off')
   })
 
+  it('Fluid WALK paused for the chain keeps your choice on the switch and says it is paused; a tap turns it off, ends the pause and keeps it off (arkinox, 2026-11-22)', () => {
+    useFluidWalk.setState({ on: true, paused: true, resumedAt: 0 })
+    const html = view()
+    expect(switchTag(html, 'view-walk-fluid')).toContain('aria-checked="true"')
+    expect(html).toContain(`<span class="ui-field__hint">${FLUID_PAUSED_HINT}</span>`)
+    expect(FLUID_PAUSED_HINT).not.toMatch(/\u2014/)
+    viewSwitch('view-walk-fluid').props.onCheckedChange(false)
+    expect(useFluidWalk.getState()).toMatchObject({ on: false, paused: false, resumedAt: 0 })
+    expect(localStorage.getItem(FLUID_KEY)).toBe('off')
+    const after = view()
+    expect(switchTag(after, 'view-walk-fluid')).toContain('aria-checked="false"')
+    expect(after).not.toContain(FLUID_PAUSED_HINT)
+  })
+
   it('Gravity in WALK starts off and drives the walk, remembered on this device', () => {
     expect(useWalk.getState().gravity).toBe(false)
     expect(switchTag(view(), 'view-walk-gravity')).toContain('aria-checked="false"')
@@ -226,6 +242,21 @@ describe('the Settings panel', () => {
     viewSwitch('view-walk-gravity').props.onCheckedChange(false)
     expect(useWalk.getState().gravity).toBe(false)
     expect(localStorage.getItem(GRAVITY_KEY)).toBe('off')
+  })
+
+  it('Hard Mode Gravity, in the owner\'s words with no dash, starts off and drives the walk, remembered on this device (arkinox, 2026-11-22)', () => {
+    expect(HARD_GRAVITY_TITLE).toBe('Hard Mode Gravity')
+    expect(HARD_GRAVITY_HINT).toBe('Gravity will not turn off if there is nothing to catch your fall.')
+    expect(HARD_GRAVITY_TITLE + HARD_GRAVITY_HINT).not.toMatch(/[\u2013\u2014]/)
+    expect(useWalk.getState().hardGravity).toBe(false)
+    expect(switchTag(view(), 'view-walk-gravity-hard')).toContain('aria-checked="false"')
+    viewSwitch('view-walk-gravity-hard').props.onCheckedChange(true)
+    expect(useWalk.getState().hardGravity).toBe(true)
+    expect(localStorage.getItem(HARD_GRAVITY_KEY)).toBe('on')
+    expect(switchTag(view(), 'view-walk-gravity-hard')).toContain('aria-checked="true"')
+    viewSwitch('view-walk-gravity-hard').props.onCheckedChange(false)
+    expect(useWalk.getState().hardGravity).toBe(false)
+    expect(localStorage.getItem(HARD_GRAVITY_KEY)).toBe('off')
   })
 
   it('Chain trail drives showTrail, remembered on this device', () => {

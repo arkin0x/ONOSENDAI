@@ -107,7 +107,7 @@ import { dnaResolver } from '../lib/seeds/seedSources'
 import { seedSnapOffered } from '../lib/seeds/orientation'
 import { seedItemOf } from '../lib/seeds/seedItem'
 import { SEALED_KIND, freshSealedD, isSealedRef, refOf, rememberSealed, utf8Bytes, retractSealed, sealedChanges, sealedEventOf, sealedItemOf, sealedRefParts, sealedTemplate, sendBagWithSealed, type OutgoingSealed } from '../lib/sealed'
-import { retractionTemplate } from '../lib/published'
+import { loadLedger, retractionTemplate, type Ledger } from '../lib/published'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
 import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
@@ -126,10 +126,8 @@ import { commitDoorSecret, doorSecret, keepDoorSecret } from './doorSecrets'
 import { entriesIn, isListed, noteStored, onHiddenChange, reloadLocalView, saveRows, UNCLAIMED } from './hiddenStorage'
 import { builtInLook, builtInLookTags, doorHeightOf, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedWrapper, setSealedLookFetch, wireLook, wireOpenLook, type LookName, type LookPose } from '../lib/looks'
 import { openSealedLookPayload, sealLookTags, sealedLookAddresses, sealedLookLimit } from '../lib/sealedLooks'
-import { forgetPieceKeys, markPieceOpened, notePieceKey, notePieceKeys, pieceAddresses, pieceWasOpened, setLocalPieces } from '../lib/pieceKeys'
+import { dropPiece, forgetPieceKeys, notePieceKey, primePiece, notePieceKeys, pieceAddresses, pieceWasOpened, setLocalPieces } from '../lib/pieceKeys'
 import { openOnePiece, pieceRefusal, planPieces, planPiecesNow, pieceShape, sealedPiecesOf, signerRefusal, type PlannedPiece } from '../lib/pieces'
-import { localObject } from './localObjects'
-import { primeRef, forgetRef } from '../lib/parts'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -374,6 +372,22 @@ async function fetchLookObject(ref: string[]): Promise<NostrEvent | null> {
   return resolveReference(ref)
 }
 setSealedLookFetch(fetchLookObject)
+
+/**
+ * Your workshop's shard at an address of yours, as a hide seals it (OPAQUE where
+ * its author never chose, DECK-0003 §1.12), or undefined: not yours, not here,
+ * empty, or published under another key (store/localObjects.ts localObject, the
+ * same rules; read here so the store does not load the drawing code).
+ */
+function workshopPiece(address: string, me: string, ledger: Ledger): Record<string, unknown> | undefined {
+  const a = parseAddress(address)
+  if (!a || a.kind !== OBJECT_KIND || a.pubkey !== me) return undefined
+  const s = useWorkshop.getState().shards.find((x) => x.id === a.d)
+  if (!s || (s.vertices.length === 0 && (s.parts?.length ?? 0) === 0)) return undefined
+  const rec = ledger[s.id]
+  if (rec && rec.pubkey !== me) return undefined
+  return toPayload(withAuthoredConstrain(s)) as unknown as Record<string, unknown>
+}
 
 /** A piece of a split build signed here and not sent yet (a row's pieceObjects), by its address. */
 function unsentPiece(address: string): NostrEvent | undefined {
@@ -2486,7 +2500,7 @@ export const useShards = create<ShardsState>((set, get) => {
         const del = await cyber().signEvent(retractionTemplate(owner, dOf(p.event), p.event.id, Math.floor(Date.now() / 1000), 'hidden object removed'))
         await publishMany(relays, del)
       } catch { /* best effort, as a removed shard's object */ }
-      forgetRef(['a', p.address])
+      dropPiece(p.address)
       forgetReference(['a', p.address, ''])
     }
   }
@@ -3630,8 +3644,7 @@ export const useShards = create<ShardsState>((set, get) => {
       for (const p of plan.pieces) signed.push(await guarded(await objectTemplateOf(p.payload, to.key, p.d, now)))
       for (const p of plan.pieces) {
         notePieceKey(p.address, bytesToHex(to.key))
-        primeRef(['a', p.address], JSON.parse(p.payload) as unknown)
-        markPieceOpened(p.address)
+        primePiece(p.address, JSON.parse(p.payload) as unknown)
       }
       for (const next of signed) pieces.push({ next })
       lookDropped.push(...plan.pieces.map((p) => p.from))
@@ -5038,11 +5051,8 @@ export const useShards = create<ShardsState>((set, get) => {
         // in words, and nothing is signed. A move keeps its pieces (below).
         if (!was && !object && !intoChest && cs.identity.pubkey) {
           const me = cs.identity.pubkey
-          const plan = planPiecesNow(shard, me, (address) => {
-            const a = parseAddress(address)
-            const payload = a ? localObject(a) : undefined
-            return payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : undefined
-          }, placementId)
+          const ledger = loadLedger()
+          const plan = planPiecesNow(shard, me, (address) => workshopPiece(address, me, ledger), placementId)
           if (plan.pieces.length > 0) {
             const remote = cs.signerKind === 'nip46'
             shard = plan.parent
@@ -5286,10 +5296,11 @@ export const useShards = create<ShardsState>((set, get) => {
           const signed: NostrEvent[] = []
           for (const p of pieces) signed.push(await signAsOwner(await objectTemplateOf(p.payload, rk.key, p.d, createdAt)))
           // This device draws them at once, from what it sealed; a finder opens them with the bag's key.
+          // Never for an identity signed in during the last signature: nothing of this one's is kept for it.
+          still()
           for (const p of pieces) {
             notePieceKey(p.address, keyHex)
-            primeRef(['a', p.address], JSON.parse(p.payload) as unknown)
-            markPieceOpened(p.address)
+            primePiece(p.address, JSON.parse(p.payload) as unknown)
           }
           piecesToSend = live ? signed : []
           pieceObjects = live ? [] : signed

@@ -51,7 +51,7 @@ import { fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from './contacts'
 import { queryAny, relaySet } from './relay'
 import { onRescan } from './rescanSignal'
-import { localPiece, onPieceKeys, onPiecesForgotten, readSealedPiece } from './pieceKeys'
+import { localPiece, onPieceKeys, onPiecesForgotten, readSealedPiece, setPieceCache } from './pieceKeys'
 
 const SNO_KIND = 33331
 /** How long one reference waits on the relays before it is drawn as a placeholder. */
@@ -176,6 +176,7 @@ export function fetchSettled(ref: Ref): Promise<unknown> {
 
 // Pieces opened with the keys of an identity that signed out are dropped (lib/pieceKeys.ts forgetPieceKeys).
 onPiecesForgotten((addresses) => { for (const a of addresses) forgetRef(['a', a]) })
+setPieceCache({ prime: (a, payload) => primeRef(['a', a], payload), drop: (a) => forgetRef(['a', a]) })
 
 /** Answer a reference from here instead of a relay: for tests and the dev harness. */
 export function primeRef(ref: Ref, payload: unknown): void {

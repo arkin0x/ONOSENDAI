@@ -177,6 +177,25 @@ export async function readSealedPiece(ev: NostrEvent, address: string): Promise<
   return null
 }
 
+/** How a piece's payload is put in, and taken out of, the cache placed objects are read from (lib/parts.ts wires it). */
+let cache: { prime: (address: string, payload: unknown) => void; drop: (address: string) => void } | null = null
+
+/** Wire the placed objects' cache (lib/parts.ts), so the store never needs to import it. */
+export function setPieceCache(c: typeof cache): void {
+  cache = c
+}
+
+/** A piece this device sealed, drawn at once from what it sealed: kept in the cache, and dropped with the rest on a change of identity. */
+export function primePiece(address: string, payload: unknown): void {
+  cache?.prime(address, payload)
+  opened.add(address)
+}
+
+/** A piece retracted: whatever the cache holds for it goes. */
+export function dropPiece(address: string): void {
+  cache?.drop(address)
+}
+
 /** Your own pieces signed here and not sent yet (a hide while LOCAL): fetchRef reads them before any relay. */
 let localPieces: ((address: string) => NostrEvent | undefined) | null = null
 

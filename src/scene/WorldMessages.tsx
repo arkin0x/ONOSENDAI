@@ -1,14 +1,17 @@
 /**
  * WorldMessages.tsx — hidden messages, found and read.
  *
- * A discovered kind:1 renders as a billboarded note at its coordinate: the
- * text, and a short marker of who left it. Sized on screen like every other
- * world label, so a message stays readable at any zoom rather than shrinking
- * to nothing. Past the headlamp's reach a mark recedes with depth to a
- * floor (lib/markerSize.ts recedeShare), so a chest at the far end of a hall
- * in WALK is smaller than one at your feet (arkinox, 2026-10-25), and its
- * words keep their size and fade out further on, the credit line first
- * (fadeShare). Culled past the same reach as everything else.
+ * A discovered kind:1 renders as a box at its coordinate and a short marker
+ * of who left it. The box is one gibson on a side, a thing in the place: it
+ * grows as you come close and shrinks as you go (owner, 2026-11-22: "I want a
+ * message box to be 1 gibson cubed, always, while it is normally visible";
+ * NOTE_BOX_GIBSONS). Its words are labels, sized on screen like every other
+ * world label so they stay readable, and fade out far off, the credit line
+ * first (fadeShare). The other marks (a coin, a key's stand-in cube) are
+ * still sized on screen, and past the headlamp's reach recede with depth to
+ * a floor (lib/markerSize.ts recedeShare), so a chest at the far end of a
+ * hall in WALK is smaller than one at your feet (arkinox, 2026-10-25).
+ * Culled past the same reach as everything else.
  *
  * Placed with markerCentre, not cellCentre, and the difference is the whole of
  * a bug worth naming. GO TO IT focuses the camera on the item, and a plain
@@ -104,6 +107,57 @@ const SPENT = '#7f8891'
 const MARK_PX = { coin: 40, spent: 40, note: 34 } as const
 /** The note's cube's edge (0.72 of its mark), CSS pixels: the smallest an item's model box is drawn (ItemModel). */
 export const NOTE_EDGE_PX = 0.72 * MARK_PX.note
+/** The note's cube in its own geometry: an edge of 0.72, so a screen-sized mark of MARK_PX.note draws NOTE_EDGE_PX. */
+const NOTE_GEOMETRY_EDGE = 0.72
+
+/**
+ * A message's box, in gibsons: one on a side, at every zoom it is drawn at
+ * (owner, 2026-11-22: "I want a message box to be 1 gibson cubed, always,
+ * while it is normally visible"). It is centred where the message is
+ * (itemCentre, its gibson's centre), so it fills exactly that gibson, the
+ * cube the build cursor draws at 2^0.
+ *
+ * It was held to a size on screen, 24 CSS pixels at any distance, and so
+ * from a little way off it was larger than its gibson: its bottom reached
+ * under the landscape tile it stood on, and the tile, which writes depth as
+ * any opaque face does, hid the box's bottom edges with nothing to show where
+ * ("why is this message box being partially hidden? It's being occluded by
+ * something invisible").
+ *
+ * Far off it is small on screen, as anything in the world is: at 2^0 on a
+ * phone it is about 9 pixels across 40 gibsons away (half that at 2^1). Its tap target never
+ * gets smaller than a fingertip (TAP_PX), and its name stays readable.
+ */
+export const NOTE_BOX_GIBSONS = 1
+
+/** A message's box's edge in scene units: a scene unit is 2^scaleExp gibsons. */
+export function noteBoxSide(scaleExp: number): number {
+  return NOTE_BOX_GIBSONS / 2 ** scaleExp
+}
+
+/**
+ * How far a message box's edges are drawn toward the camera, as a share of
+ * their distance from it. A box resting on a floor has its bottom face in
+ * the floor's plane, and a line drawn exactly on a face fights it for the
+ * depth buffer, so the bottom edges came and went in dashes. Each vertex is
+ * moved along its own sight line (its view-space position scaled toward the
+ * eye), so where it lands on screen is exactly where it was; only its depth
+ * comes nearer, by a thousandth of the distance, which is far more than the
+ * depth buffer's step at any distance the box is drawn at and far less than
+ * anything one could see in front of it.
+ */
+export const NOTE_DEPTH_PULL = 0.001
+
+/** The box's edge material's patch: three's projection, then the point pulled toward the eye (NOTE_DEPTH_PULL). */
+const NOTE_EDGE_DEPTH = {
+  onBeforeCompile: (shader: { vertexShader: string }) => {
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <project_vertex>',
+      `#include <project_vertex>\ngl_Position = projectionMatrix * vec4( mvPosition.xyz * ( 1.0 - ${NOTE_DEPTH_PULL.toFixed(4)} ), mvPosition.w );`,
+    )
+  },
+  customProgramCacheKey: () => 'note-depth-pull-1',
+} as const
 /** The ₿ on a coin, in CSS pixels. */
 const COIN_PX = 31
 /** The note's own color: the box's blue, lit. */
@@ -384,8 +438,12 @@ const FLOURISH_HOLD_MS = 2600
  * just found keeps its flourish: the words resolve out of glyphs
  * (DecodingLabel), hold for a moment, then give way to the cube and the name.
  * The name is the profile's where one is known, "you" for your own.
+ *
+ * The box is one gibson (NOTE_BOX_GIBSONS), so the name sits just under it,
+ * clear of its reach on screen at any distance (WorldLabel `clear`, below),
+ * and the tap target covers the box once it is larger than a fingertip.
  */
-function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; mine: boolean; author: string; centre: [number, number, number] }; birth: number | undefined; onTap: () => void }): JSX.Element {
+export function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; mine: boolean; author: string; centre: [number, number, number] }; birth: number | undefined; onTap: () => void }): JSX.Element {
   const profile = useProfile(w.author || null)
   const until = birth === undefined ? 0 : birth + TEXT_DECODE_MS + FLOURISH_HOLD_MS
   const [flourish, setFlourish] = useState(() => performance.now() < until)
@@ -395,15 +453,15 @@ function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; mine: b
     return () => window.clearTimeout(t)
   }, [flourish, until])
   const name = w.mine ? 'you' : profileLabel(profile, shortAuthor(w.author, false))
+  const side = noteBoxSide(useCyberspace((s) => s.scaleExp))
   return (
     <group>
-      <WorldMark kind="note" at={w.centre} />
+      <WorldMark kind="note" at={w.centre} side={side} />
       {flourish && birth !== undefined
         ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={birth} at={w.centre} />
-        : <WorldLabel text={name} color={ACCENT} at={w.centre} align="center" px={10} offsetPx={[0, -26]} recede="credit" />}
-      {/* The mark is a fixed size on screen at any zoom, so its target is
-          too: a fingertip over the mark (TapTarget). */}
-      <TapTarget px={TAP_PX} at={w.centre} onTap={onTap} />
+        : <WorldLabel text={name} color={ACCENT} at={w.centre} align="center" px={10} clear={{ trueSide: side, minPx: 0, below: true }} recede="credit" />}
+      {/* A fingertip over the box at any distance, and the whole box once it is larger (TapTarget `side`). */}
+      <TapTarget px={TAP_PX} side={side} at={w.centre} onTap={onTap} />
     </group>
   )
 }
@@ -663,20 +721,24 @@ const MARK_LOOK: Record<MarkKind, { color: string; opacity: number }> = {
  * The shape behind a hidden thing: a turning diamond for a coin, the same
  * diamond still and gray once the mint says the coin was redeemed, a still
  * cube for a message. Outlines rather than solids, so they read as drawn light
- * like everything else in the scene, and sized on screen: the same size to
- * the eye anywhere within the headlamp's reach, smaller past it (markRecede).
+ * like everything else in the scene. Sized on screen (the same size to the
+ * eye anywhere within the headlamp's reach, smaller past it: markRecede),
+ * unless given a `side`: then the cube is that size in the world, in scene
+ * units, at any distance, and its edges are pulled a hair toward the camera
+ * (NOTE_EDGE_DEPTH). A message's box is (noteBoxSide).
  */
-function WorldMark({ kind, at, opacity = 1 }: { kind: MarkKind; at: [number, number, number]; opacity?: number }): JSX.Element {
+function WorldMark({ kind, at, opacity = 1, side }: { kind: MarkKind; at: [number, number, number]; opacity?: number; side?: number }): JSX.Element {
   const group = useRef<Group>(null)
   const geometry = useMemo(
-    () => new EdgesGeometry(kind === 'note' ? new BoxGeometry(0.72, 0.72, 0.72) : new OctahedronGeometry(0.5)),
+    () => new EdgesGeometry(kind === 'note' ? new BoxGeometry(NOTE_GEOMETRY_EDGE, NOTE_GEOMETRY_EDGE, NOTE_GEOMETRY_EDGE) : new OctahedronGeometry(0.5)),
     [kind],
   )
   useEffect(() => () => geometry.dispose(), [geometry])
 
   useFrame((state) => {
     const g = group.current
-    if (!g) return
+    // A size in the world is set once, below, not read from the camera.
+    if (!g || side !== undefined) return
     const cam = state.camera as PerspectiveCamera
     const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
     const depth = cam.position.distanceTo(g.position)
@@ -694,10 +756,12 @@ function WorldMark({ kind, at, opacity = 1 }: { kind: MarkKind; at: [number, num
   }, LABEL_PRIORITY)
 
   const look = MARK_LOOK[kind]
+  // A cube of `side` in the world: its geometry's edge scaled up to it. Only the note's cube is sized so.
+  const world = side !== undefined && kind === 'note' ? side / NOTE_GEOMETRY_EDGE : undefined
   return (
-    <group key={kind} ref={group} position={at}>
+    <group key={kind} ref={group} position={at} scale={world}>
       <lineSegments geometry={geometry} frustumCulled={false}>
-        <lineBasicMaterial color={look.color} toneMapped={false} transparent opacity={look.opacity * opacity} depthWrite={false} />
+        <lineBasicMaterial color={look.color} toneMapped={false} transparent opacity={look.opacity * opacity} depthWrite={false} {...(world !== undefined ? NOTE_EDGE_DEPTH : {})} />
       </lineSegments>
     </group>
   )

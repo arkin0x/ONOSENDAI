@@ -14,8 +14,10 @@
  * seen but is small is given a finger-sized target, MIN_TARGET_PX across,
  * so it is easy to hit without being invisible-yet-hittable.
  *
- * A message's mark is drawn at a fixed pixel size and so is always visible;
- * its target is a fixed pixel size too (`px`).
+ * A coin's mark is drawn at a fixed pixel size and so is always visible; its
+ * target is a fixed pixel size too (`px`). A message's box is one gibson in
+ * the world (WorldMessages NOTE_BOX_GIBSONS): its target is a fingertip, or
+ * the box itself once the box is larger (`side`).
  *
  * The other end has a limit too (arkinox, 2026-10-01). Zoomed far in, a
  * shard is larger than the screen, and a target the size of what it draws
@@ -155,6 +157,8 @@ interface Props {
   measure?: RefObject<Object3D>
   /** A fixed on-screen size instead, in pixels, centred at `at` (a message's mark). */
   px?: number
+  /** With `px`: never smaller than this, in render units, so a mark that is a size in the world (a message's box) takes a tap anywhere over it up close. */
+  side?: number
   at?: [number, number, number]
   /**
    * Take the tap only when nothing else under it wants it: your own avatar
@@ -200,6 +204,8 @@ export interface TapView {
 export interface TapSpec {
   measure?: RefObject<Object3D>
   px?: number
+  /** With `px`, the least it is in render units (Props `side`). */
+  side?: number
   at?: [number, number, number]
   /** Its key among what may block the build cursor: dimmed, it takes no rays. */
   occluder?: string
@@ -249,7 +255,7 @@ export function tapRaycast(view: () => TapView, spec: { current: TapSpec }, out:
   /** Places and sizes the target `m`; false when it takes no taps. */
   const place = (m: Mesh): boolean => {
     if (!m.parent) return false
-    const { measure, px, at, occluder, upClose } = spec.current
+    const { measure, px, side, at, occluder, upClose } = spec.current
     // Dimmed in build mode: see-through, and so tapped through. Left out of
     // the ray's hits altogether, so nothing else under the tap (a yielding
     // avatar, a large shard's exact test) counts it either.
@@ -263,7 +269,7 @@ export function tapRaycast(view: () => TapView, spec: { current: TapSpec }, out:
       m.parent.localToWorld(centre)
       const perPx = 1 / pxPerUnit(fov, screen.height, cam.position.distanceTo(centre))
       if (at) m.position.set(at[0], at[1], at[2]); else m.position.set(0, 0, 0)
-      m.scale.setScalar(px * perPx)
+      m.scale.setScalar(Math.max(px * perPx, side ?? 0))
       // A mark (a message or a coin) is a deliberate, fixed-size target, and
       // wins over a shard's box when a tap passes through both.
       m.userData.tapPriority = 'mark'
@@ -329,16 +335,17 @@ export function tapRaycast(view: () => TapView, spec: { current: TapSpec }, out:
   }
 }
 
-export function TapTarget({ onTap, measure, px, at, yields = false, occluder, upClose }: Props): JSX.Element {
+export function TapTarget({ onTap, measure, px, side, at, yields = false, occluder, upClose }: Props): JSX.Element {
   const hit = useRef<Mesh>(null)
   const get = useThree((s) => s.get)
   const precise = useRef(new Raycaster())
   // What the measurement reads, kept to the committed props: the raycast
   // below is made once, and a render React throws away must not move it.
-  const spec = useRef<TapSpec>({ measure, px, at, occluder, upClose })
+  const spec = useRef<TapSpec>({ measure, px, side, at, occluder, upClose })
   useLayoutEffect(() => {
     spec.current.measure = measure
     spec.current.px = px
+    spec.current.side = side
     spec.current.at = at
     spec.current.occluder = occluder
     spec.current.upClose = upClose

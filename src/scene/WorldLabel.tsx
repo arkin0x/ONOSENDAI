@@ -114,9 +114,11 @@ interface Props {
    * every zoom (lib/markerSize.ts): the marker's true edge in cells and the
    * pixel size it is never drawn smaller than. The label is centred on the
    * anchor and lifted by the marker's on-screen reach plus a small gap,
-   * recomputed every frame from depth; `offsetPx` is added on top.
+   * recomputed every frame from depth; `offsetPx` is added on top. `below`
+   * hangs it the same distance under the marker instead: a message's name
+   * under its one-gibson box.
    */
-  clear?: { trueSide: number; minPx: number }
+  clear?: { trueSide: number; minPx: number; below?: boolean }
   /**
    * Where the label's parent stands from the camera, for a parent that is
    * always at the same offset from it and carries no turn or scale: the
@@ -175,7 +177,8 @@ export function WorldLabel({
     const near = recede && recede !== 'mark' ? mark : 1
     // Lifted clear of its marker: one local unit is `unitPx` pixels.
     if (inner.current && clear) {
-      inner.current.position.y = labelLiftPx(clear.trueSide, clear.minPx * mark, depth, projScale, unitPx) / unitPx + (offsetPx[1] / px) * near
+      const lift = labelLiftPx(clear.trueSide, clear.minPx * mark, depth, projScale, unitPx) / unitPx
+      inner.current.position.y = (clear.below ? -lift : lift) + (offsetPx[1] / px) * near
     } else if (inner.current && recede) {
       // Every frame while it recedes: back at full size the prop is never
       // re-applied (R3F skips equal array props), so a jump from far to near

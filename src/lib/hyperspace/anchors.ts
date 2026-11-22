@@ -38,6 +38,7 @@
  * driver below them is the impure part.
  */
 
+import { yieldTask } from '../hopStage'
 import { query, queryChecked, subscribe } from '../relay'
 import { stopFromAnchor, type Stop, type StopKind } from './stops'
 import {
@@ -289,11 +290,11 @@ const SYNC_BUMP_MS = 2500
 const MERGE_SLICE_MS = 12
 /**
  * Stops read back from the cache per IndexedDB read. A read's rows are made on
- * this thread when its answer comes (structured clone), in one task. 50,000
- * was the biggest read any part of the app asks for, and the owner's phone
- * spent 229 to 1,896 ms at a time in IndexedDB answers (diag of 2026-11-22).
- * 5,000 is a tenth of that per task, with the loop handed back between reads
- * as before.
+ * this thread when its answer comes (structured clone), in one task, so a
+ * page of 50,000 rows held the thread for all of them. A precaution against
+ * the long IndexedDB answers on the owner's phone (229 to 1,896 ms, diag of
+ * 2026-11-22), which no diag has yet tied to a store: a tenth per task, the
+ * loop handed back between pages.
  */
 export const CACHE_CHUNK = 5_000
 const COVERED_KEY = 'covered'
@@ -534,8 +535,10 @@ async function loadCache(cb: SyncCallbacks): Promise<void> {
       cb.onLoaded(anchorIndex.size)
       scheduleBump(cb)
       pumpMerge(cb)
-      // A cold bulk load must not starve rendering: hand back the loop.
-      await delay(0)
+      // A cold bulk load must not starve rendering: hand back the loop, as a
+      // message to ourselves (a hidden tab holds timers to a second each, and
+      // the replay is ten times as many pages as it was).
+      await yieldTask()
     })
   }
   announceSource(cb)

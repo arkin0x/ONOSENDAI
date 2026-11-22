@@ -39,7 +39,9 @@
  * Hidden audio (DECK-0007) is a small music note on the note's blue box
  * (arkinox, 2026-10-23), drawn when notes are; a tap opens its card, with
  * PLAY and DOWNLOAD. Its name is on that card, not floating in the world
- * (FLOATING_NAME).
+ * (FLOATING_NAME). Only with Spatial Audio on in Settings, or while audio is
+ * being placed (AudioSpheres spatialAudioShown; arkinox, 2026-11-22); hidden,
+ * it still plays (HiddenAudio) and its card still opens from the lists.
  *
  * An item this identity holds is drawn at half: its model at half opacity, in
  * motion as ever, and, for one you made yourself, the note's blue box round
@@ -78,6 +80,7 @@ import type { ItemAnimation, ItemModelRef } from '../lib/itemModel'
 import { ItemModelMark } from './ItemModel'
 import { ItemVanish } from './ItemVanish'
 import { useMutes } from '../store/useMutes'
+import { useSpatialAudioShown } from './AudioSpheres'
 import { MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
 import { headlampUniforms } from './headlamp'
 import { basicFaceProps, TRANSLUCENT_ORDER } from './shardFaces'
@@ -220,6 +223,8 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
   // Whose ITEMS these are, and whether read: until then nothing held is shown by mistake.
   const itemsRead = useInventory((s) => s.owner === me && s.storage !== 'loading')
   const vanishing = useTakeVanish((s) => s.playing)
+  // A sound's box is drawn with Spatial Audio on, or while audio is placed in BUILD (AudioSpheres spatialAudioShown).
+  const sounds = useSpatialAudioShown()
 
   // As far as the fog's end needs (buildZoom.ts).
   const reach = useDrawReach((s) => Math.max(REACH, s.reach))
@@ -234,7 +239,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     // what it opens is in the lists (ItemRows), one tap away. A chest or a
     // door is drawn as the look it wears (ChestLooks), at the same zooms.
     return useShards.getState().drawnItems()
-      .filter((w) => ((w.type === 'message' && w.text) || w.type === 'key' || (w.type === 'audio' && w.audio)) && w.plane === anchorPlane)
+      .filter((w) => ((w.type === 'message' && w.text) || w.type === 'key' || (w.type === 'audio' && w.audio && sounds)) && w.plane === anchorPlane)
       .map((w) => ({
         key: w.key,
         type: w.type,
@@ -255,7 +260,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
       .filter((w) => (w.coin || notesShown) && Math.hypot(...w.centre) <= reach)
     // mine and discovered are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted, reach])
+  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted, reach, sounds])
 
   if (placed.length === 0) return null
 

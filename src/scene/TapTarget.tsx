@@ -218,7 +218,13 @@ export interface TapHit {
   eventObject?: Object3D
 }
 
-/** Whether something without a tap target of its own (a transit stop, the Earth) takes a click where it was hit. */
+/**
+ * Whether something without a tap target of its own (a transit stop, the
+ * Earth) takes a click where it was hit: it has an onClick (R3F keeps an
+ * object's handlers on its instance, `__r3f.handlers`). Its handler may still
+ * decline (a stop answers only when its own dots are the first thing under
+ * the tap), and then the tap is lost, as it already is behind a shard's box.
+ */
 function clickable(i: TapHit): boolean {
   const handlers = ((i.eventObject ?? i.object) as { __r3f?: { handlers?: Record<string, unknown> } }).__r3f?.handlers
   return typeof handlers?.onClick === 'function'
@@ -360,10 +366,6 @@ export function tapRaycast(view: () => TapView, spec: { current: TapSpec }, out:
     // one cached bounding box per child geometry.
     box.setFromObject(drawn)
     if (box.isEmpty()) return false
-    found = false
-    drawn.traverse(findSoft)
-    out.soft = found
-    m.userData.tapSoft = found
     box.getCenter(centre)
     box.getSize(size)
     // A chest or a door up close is still a thing to tap (`upClose`); a shard is not.
@@ -397,6 +399,11 @@ export function tapRaycast(view: () => TapView, spec: { current: TapSpec }, out:
     // (2026-10-14); it now runs for every target at every tap.
     const largest = Math.max(size.x, size.y, size.z) * perWorld
     if ((across > MAX_SCREENS * viewport && !near) || !(largest >= MIN_VISIBLE_PX)) return false
+    // Whether what it draws holds anything soft, asked only of a target that takes the ray.
+    found = false
+    drawn.traverse(findSoft)
+    out.soft = found
+    m.userData.tapSoft = found
     // From inside its box a ray meets only the box's back faces.
     ;(m.material as Material).side = inside ? BackSide : FrontSide
     const floor = MIN_TARGET_PX / perWorld

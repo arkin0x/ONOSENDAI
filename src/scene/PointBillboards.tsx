@@ -184,7 +184,7 @@ export function PointCores({ plain, size, opacity, glow, headlamp, clipPlanes, w
     u.uMinPx.value = limits.pointMinPx
     u.uMaxPx.value = limits.pointMaxPx
   })
-  return <mesh ref={mesh} geometry={geometry} material={material} frustumCulled={false} renderOrder={DOTS_ORDER} raycast={raycast} userData={{ softPick: soft }} />
+  return <mesh ref={mesh} geometry={geometry} material={material} frustumCulled={false} renderOrder={DOTS_ORDER} raycast={raycast} userData-softPick={soft} />
 }
 
 interface HaloProps {

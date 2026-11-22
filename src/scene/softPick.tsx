@@ -200,7 +200,7 @@ export function PickVolume({ points, radius }: { points: ArrayLike<number>; radi
   useEffect(() => () => { geometry?.dispose() }, [geometry])
   const raycast = useMemo(() => softRaycast(points, radius), [points, radius])
   if (!geometry) return null
-  return <mesh name="shard-pick" visible={false} geometry={geometry} material={PICK_MATERIAL} raycast={raycast} frustumCulled={false} userData={{ softPick: true }} />
+  return <mesh name="shard-pick" visible={false} geometry={geometry} material={PICK_MATERIAL} raycast={raycast} frustumCulled={false} userData-softPick />
 }
 
 /** The placing ghost's outline of a soft shard: BUILD's white, faint, drawn over everything, never in the bloom. */
@@ -226,7 +226,8 @@ export function SoftOutline({ points, radius, dim = 1 }: { points: ArrayLike<num
   if (!geometry) return null
   return (
     <lineSegments name="soft-outline" geometry={geometry} frustumCulled={false} renderOrder={SOFT_OUTLINE_ORDER} raycast={noPick}>
-      <lineBasicMaterial color={SOFT_OUTLINE.color} toneMapped={false} transparent opacity={SOFT_OUTLINE.opacity * dim} depthTest={false} depthWrite={false} {...NO_BLOOM_BLEND} />
+      {/* Its own share (userData-share), so EDIT's breath fades it from there, as it fades faces (WorldShards breatheMaterial). */}
+      <lineBasicMaterial color={SOFT_OUTLINE.color} toneMapped={false} transparent opacity={SOFT_OUTLINE.opacity * dim} depthTest={false} depthWrite={false} userData-share={SOFT_OUTLINE.opacity * dim} {...NO_BLOOM_BLEND} />
     </lineSegments>
   )
 }

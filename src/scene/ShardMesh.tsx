@@ -826,14 +826,14 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
       {plan.lines && !outline && given.vertices.length > 1 && <primitive object={line} />}
       {/* The client's own points, as always, unless a POINT SIZE says otherwise (always absent under SOLID and LINES). */}
       {plan.points === 'disc' && (given.mode === 'points' || given.mode === 'solid' || given.mode === 'lines') && (
-        <points geometry={plain} material={pointMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} userData={{ softPick: softTaps }} />
+        <points geometry={plain} material={pointMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} userData-softPick={softTaps} />
       )}
       {/* At a POINT SIZE: billboards, since a GPU caps a GL point's size. 0 draws no points. Sized in model
           units, carried by the model's own scale, so the canvas's dot scale (scene/dotScale.ts, LOOK) never applies. */}
       {/* Nothing of its own drawn (opacity 0, or POINTS at point size 0): an invisible copy still answers taps and picks, and is never drawn, so it hides and occludes nothing. */}
       {!cull && (look.hidden || plan.points === 'none') && (given.mode === 'solid' && index.length > 0 && look.hidden
-        ? <mesh name="shard-hit" visible={false} geometry={indexed} material={HIT_MATERIAL} frustumCulled={false} {...pick} userData={{ ...pick.userData, softPick: true }} />
-        : !faintMaterial && <points name="shard-hit" visible={false} geometry={plain} material={pointMaterial} frustumCulled={false} userData={{ softPick: true }} />)}
+        ? <mesh name="shard-hit" visible={false} geometry={indexed} material={HIT_MATERIAL} frustumCulled={false} onClick={pick.onClick} userData-faceOf={drawn} userData-softPick />
+        : !faintMaterial && <points name="shard-hit" visible={false} geometry={plain} material={pointMaterial} frustumCulled={false} userData-softPick />)}
       {/* Soft, as the dots and points above are on such a shard: it takes a tap only when nothing solid is hit nearer (softPick.tsx). */}
       {softTaps && <PickVolume points={pickPoints} radius={softRadius} />}
       {softSeen && <SoftOutline points={pickPoints} radius={softRadius} dim={dim} />}

@@ -166,6 +166,8 @@ await ctx.routeWebSocket(/.*/, (ws) => {
 const page = await ctx.newPage()
 await page.addInitScript(() => {
   try { localStorage.setItem('onosendai:live', '0') } catch {}
+  // Spatial Audio on (off by default since 2026-11-22), so the soak's sounds draw their boxes and rings as well as play.
+  try { localStorage.setItem('onosendai:layers', JSON.stringify({ ...JSON.parse(localStorage.getItem('onosendai:layers') ?? '{}'), spatialAudio: true })) } catch {}
   const lt = { n: 0, ms: 0, max: 0, list: [] }
   window.__lt = lt
   try {

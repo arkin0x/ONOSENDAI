@@ -29,14 +29,25 @@ const net = vi.hoisted(() => ({
 vi.mock('../relay', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../relay')>()),
   subscribe: (f: Filter) => { net.filters.push(f); return () => {} },
+  // The standing subscription on each relay (lib/ownWatch.ts).
+  subscribeOne: (_url: string, f: Filter | Filter[]) => { net.filters.push(...(Array.isArray(f) ? f : [f])); return { close: () => {} } },
 }))
+vi.mock('../ownWatch', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../ownWatch')>()
+  return {
+    ...actual,
+    startOwnWatch: (pk: string, onEvent: (ev: unknown, url: string) => void, onEose?: () => void) => {
+      net.onEvent = (ev: unknown) => onEvent(ev, 'wss://relay.onosendai.tech/')
+      return actual.startOwnWatch(pk, () => {}, onEose)
+    },
+  }
+})
 vi.mock('../chains', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../chains')>()
   return {
     ...actual,
     askChainEvents: async () => (net.check ? net.check() : []),
     fetchChainEvents: async (_pk: string, _g: string, _have: unknown[], since?: number) => { net.fetches.push({ since }); return net.fetchAnswer },
-    watchOwnChain: (pk: string, onEvent: (ev: unknown) => void) => { net.onEvent = onEvent; return actual.watchOwnChain(pk, () => {}) },
   }
 })
 

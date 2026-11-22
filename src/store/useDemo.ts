@@ -34,7 +34,7 @@ import { exitHyperspaceView, useHyperspace } from './useHyperspace'
 import { useToast } from './useToast'
 import { useChat } from './useChat'
 import { appMinted, keyMintedOnLoad, useCyberspace } from './useCyberspace'
-import { useLayers, type SceneLayer } from './useLayers'
+import { DEFAULT_LAYERS, useLayers, type SceneLayer } from './useLayers'
 import { useShards } from './useShards'
 import { useWalk } from './useWalk'
 import { usePad } from './usePad'
@@ -139,7 +139,7 @@ function takeSession(): TourSession {
   const l = useLayers.getState()
   return {
     scaleExp: cs.scaleExp,
-    layers: { dots: l.dots, boxes: l.boxes, walkAvatarHidden: l.walkAvatarHidden, walkLookSphere: l.walkLookSphere, headlamp: l.headlamp, audioSpheres: l.audioSpheres, glow: l.glow, walkLimits: l.walkLimits },
+    layers: { dots: l.dots, boxes: l.boxes, walkAvatarHidden: l.walkAvatarHidden, walkLookSphere: l.walkLookSphere, headlamp: l.headlamp, spatialAudio: l.spatialAudio, glow: l.glow, walkLimits: l.walkLimits },
     chatOpen: useChat.getState().open,
     hadHops: hasHop(cs.events),
     spectate: cs.spectate?.pubkey ?? null,
@@ -149,6 +149,8 @@ function takeSession(): TourSession {
 /** Put back what the tour changed in the view (TourSession), zoom last. */
 function restoreSession(v: TourSession): void {
   for (const [layer, on] of Object.entries(v.layers) as Array<[SceneLayer, boolean]>) {
+    // A tour saved by an older build can name a layer since renamed (audioSpheres, now spatialAudio): skip it.
+    if (!(layer in DEFAULT_LAYERS)) continue
     if (useLayers.getState()[layer] !== on) useLayers.getState().setLayer(layer, on)
   }
   if (useChat.getState().open !== v.chatOpen) useChat.getState().setOpen(v.chatOpen)

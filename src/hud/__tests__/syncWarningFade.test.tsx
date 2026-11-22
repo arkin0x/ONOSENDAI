@@ -3,10 +3,12 @@
  * WALK's slowdown (arkinox, 2026-11-17: "fade in the sync warning relative
  * to the slowdown amount with 14=0% and 20=100% opacity"): its opacity by
  * the events ahead, hidden while not walking, and the same box (fixed, no
- * space taken) at every opacity.
+ * space taken) at every opacity. Parked since 2026-11-22: it draws nothing
+ * unless switched back on (store/walkLimits.ts SYNC_SLOWDOWN_ON), as these
+ * tests do.
  */
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const st = vi.hoisted(() => ({ walking: true, ahead: 0 }))
 vi.mock('../../store/useCyberspace', () => ({
@@ -15,6 +17,10 @@ vi.mock('../../store/useCyberspace', () => ({
 vi.mock('../../store/walkAhead', () => ({ useAheadSelect: <T,>(pick: (ahead: number) => T): T => pick(st.ahead) }))
 
 import { SyncWarning } from '../SyncWarning'
+
+// Parked since 2026-11-22 (store/walkLimits.ts SYNC_SLOWDOWN_ON): switched back on for this file, so the parked code stays tested.
+beforeEach(() => { (globalThis as { __ONOSENDAI_SYNC_SLOWDOWN__?: boolean }).__ONOSENDAI_SYNC_SLOWDOWN__ = true })
+afterEach(() => { delete (globalThis as { __ONOSENDAI_SYNC_SLOWDOWN__?: boolean }).__ONOSENDAI_SYNC_SLOWDOWN__ })
 
 function draw(ahead: number, walking = true): string {
   st.ahead = ahead
@@ -25,6 +31,11 @@ function draw(ahead: number, walking = true): string {
 const opacityOf = (html: string): number => Number(/opacity:\s*([\d.]+)/.exec(html)![1])
 
 describe('the LOSING SYNC warning', () => {
+  it('parked (the flag as it is), draws nothing at all, however far ahead', () => {
+    delete (globalThis as { __ONOSENDAI_SYNC_SLOWDOWN__?: boolean }).__ONOSENDAI_SYNC_SLOWDOWN__
+    for (const n of [0, 17, 20, 40]) expect(draw(n)).toBe('')
+  })
+
   it('is hidden at 14 events ahead and fewer', () => {
     for (const n of [0, 5, 14]) {
       const html = draw(n)

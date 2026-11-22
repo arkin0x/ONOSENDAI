@@ -12,6 +12,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NostrEvent } from '../events'
+import { chainHolders } from '../chainHolders'
 
 const sent: string[] = []
 /**
@@ -19,10 +20,21 @@ const sent: string[] = []
  * (as publish reports them); `canonicalFailsLeft` is how many more times the
  * canonical relay refuses a retry of its own; `toCanonical` logs each retry.
  */
-const pub = vi.hoisted(() => ({ acceptedBy: null as string[] | null, canonicalFailsLeft: 0, toCanonical: [] as string[], hold: null as Promise<void> | null }))
+const pub = vi.hoisted(() => ({ acceptedBy: null as string[] | null, canonicalFailsLeft: 0, toCanonical: [] as string[], hold: null as Promise<void> | null, rest: null as null | { slow: Promise<void>; late: string[] }, firstAsked: 0 }))
 vi.mock('../relay', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../relay')>()),
-  publish: async (e: NostrEvent) => { sent.push(e.id); if (pub.hold) await pub.hold; return pub.acceptedBy ? { ok: true as const, accepted: pub.acceptedBy } : { ok: true as const } },
+  publish: async (e: NostrEvent, opts?: { first?: boolean }) => {
+    sent.push(e.id)
+    if (opts?.first) pub.firstAsked++
+    if (pub.hold) await pub.hold
+    // `rest`: the first relay took it now, the others (`late`) only once `slow` settles.
+    if (pub.rest) {
+      const rest = pub.rest
+      const first = pub.acceptedBy ?? ['wss://relay.onosendai.tech/']
+      return { ok: true as const, accepted: first, all: rest.slow.then(() => ({ ok: true as const, accepted: [...first, ...rest.late] })) }
+    }
+    return pub.acceptedBy ? { ok: true as const, accepted: pub.acceptedBy } : { ok: true as const }
+  },
   // The canonical relay's background check by id (publisher.ts
   // reconcileCanonical): it answers, holding none of them.
   countRelay: () => Promise.resolve(null),
@@ -442,6 +454,30 @@ describe('the publisher and the release gate', () => {
       vi.useRealTimers()
       pub.acceptedBy = null
       pub.canonicalFailsLeft = 0
+      useCyberspace.setState({ live: false })
+      await idle()
+    }
+  })
+
+  it('sends the next move once one relay took the last, while the others have still not answered; their late answers are kept (owner, 2026-11-22)', async () => {
+    let answer!: () => void
+    pub.rest = { slow: new Promise<void>((r) => { answer = r }), late: ['wss://slow.example/'] }
+    pub.firstAsked = 0
+    try {
+      setChain(['a1'], { [ev('a1').id]: 'ok' })
+      useCyberspace.setState({ live: true })
+      append('b2')
+      await until(() => sent.length === 1)
+      append('c3')
+      // c3 goes out with the slow relay's answer to b2 still out.
+      await until(() => sent.length === 2)
+      expect(sent).toEqual([ev('b2').id, ev('c3').id])
+      expect(pub.firstAsked).toBe(2)
+      expect(chainHolders(ev('b2').pubkey).has('wss://slow.example/')).toBe(false)
+      answer()
+      await until(() => chainHolders(ev('b2').pubkey).has('wss://slow.example/'))
+    } finally {
+      pub.rest = null
       useCyberspace.setState({ live: false })
       await idle()
     }

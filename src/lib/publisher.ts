@@ -213,7 +213,10 @@ async function pump(): Promise<void> {
 
   inFlight = true
   mark(next.id, 'sending')
-  const result = await publish(next)
+  // Answered once a relay took it (owner's ruling of 2026-11-22): a slow,
+  // dead or AUTH-held relay no longer holds the next move back. What every
+  // relay said comes in later (result.all), below.
+  const result = await publish(next, { first: true })
   inFlight = false
 
   // Re-read: Live may have been switched off, which also shuts the gate, or
@@ -224,10 +227,14 @@ async function pump(): Promise<void> {
     // Published once any relay took it (arkinox's ruling of 2026-10-08,
     // option B). The canonical relay is where every other device looks, so
     // when it was not among them it is asked again in the background.
-    if (result.accepted && !result.accepted.includes(CANONICAL)) awaitCanonical(next)
-    // Every relay that took it now holds this chain, and a move's
-    // confirmation waits for it from now on (chainHolders.ts).
+    // Every relay that took it now holds this chain (chainHolders.ts). Both
+    // read every relay's answer, which comes in after the first acceptance.
     if (result.accepted) noteChainHolders(next.pubkey, result.accepted)
+    void (result.all ?? Promise.resolve(result)).then((all) => {
+      const accepted = all.ok ? all.accepted ?? result.accepted : result.accepted
+      if (accepted && !accepted.includes(CANONICAL)) awaitCanonical(next)
+      if (accepted) noteChainHolders(next.pubkey, accepted)
+    })
     backoff = RETRY_MS
     lastFailed = false
     // Marked published within the window (flushMarks); the next one is sent in a task of its own, not inside this OK.

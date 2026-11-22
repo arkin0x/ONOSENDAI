@@ -6,7 +6,7 @@
  * how far it has grown on the card's clock ("day 12 of 41", "fully grown"),
  * who planted it (the seed's signer, "you" for your own) and how far, and
  * VIEW, which flies to it framed at the seed's scale as the card's GO TO
- * does. Its name opens the seed's card. The listed seeds are asked to grow
+ * does. Its name opens the seed's card, over the list. The listed seeds are asked to grow
  * only while SEEDS is showing. The tabs keep their size on a phone and wrap,
  * four and three. No network: the blooms store is a stand-in.
  */
@@ -178,7 +178,8 @@ describe('SEEDS in the list', () => {
       expect(textOf(again.all().find((h) => h.props['aria-selected'] === true)!)).toBe('SEEDS1')
       await again.press('fiddlehead')
       expect(useShards.getState().selectedSecret).toBe(big.id)
-      expect(useShards.getState().nearbyOpen).toBe(false)
+      // The card opens over the list, which is there again when it closes (INFO, 2026-11-22).
+      expect(useShards.getState().nearbyOpen).toBe(true)
       await again.unmount()
     } finally {
       useCyberspace.setState({ viewAt: realViewAt })

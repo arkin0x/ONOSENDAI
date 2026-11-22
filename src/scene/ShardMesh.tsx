@@ -53,6 +53,7 @@ import { animOf, type Motion } from '../lib/anim'
 import { AnimClock, AnimGroups, clipWalls } from './animMotion'
 import { benchFaintDots, drawPlan, haloFade, pointLookOf } from '../lib/pointLook'
 import { GlowHalos, GlowTrust, PointCores, useGlowAllowed } from './PointBillboards'
+import { PickVolume, SoftOutline, pickRadius, softPicked } from './softPick'
 
 export { FACE_TAG_STENCIL } from './shardFaces'
 
@@ -71,6 +72,12 @@ interface Props {
   noBloom?: boolean
   /** Thin crisp edges where its faces turn (GHOST_EDGES): the placing ghost's, to line it up by. */
   edges?: boolean
+  /**
+   * A shard with nothing solid of its own (only points, fog or glow) outlined
+   * by its box over everything (scene/softPick.tsx SoftOutline): the placing
+   * ghost's (with `edges`) and a shard EDIT is moving.
+   */
+  softOutline?: boolean
   /**
    * Lit, as on the bench: faces shaded flat by the canvas's ShardLights
    * (shardLight.tsx, anchored at the world's full color), each one's
@@ -423,7 +430,7 @@ function segmentsGeometry(seg: Float32Array): BufferGeometry {
   return g
 }
 
-export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom = false, edges = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip: regionClip, clipPlanes: givenPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, dim = 1, budget, still = false }: Props): JSX.Element | null {
+export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom = false, edges = false, softOutline = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip: regionClip, clipPlanes: givenPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, dim = 1, budget, still = false }: Props): JSX.Element | null {
   // Its own motion on the world clock (lib/anim.ts, scene/animMotion.ts): a
   // group above everything it draws, its placed objects included (a parent's
   // motion carries what it places). A moving object is cut at its region
@@ -569,6 +576,15 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
   }, [wantsBillboards, given.vertices, given.facecolors, clip, pose])
   useEffect(() => () => { ownPoints?.dispose() }, [ownPoints])
   const pointsPlain = ownPoints ?? plain
+  // Nothing solid to tap, only points, fog or glow (scene/softPick.tsx): in
+  // the world, a pick volume that is raycast and never drawn; while placing,
+  // its outline over everything. The outline reads the glow whatever the
+  // Settings switch says, so a glow being placed is always outlined.
+  const softTaps = world && !ghost && softPicked(plan, cull)
+  const outlinePlan = edges || softOutline ? drawPlan(given.mode, look, { cull }) : null
+  const softSeen = outlinePlan !== null && softPicked(outlinePlan, cull)
+  const pickPoints = ownPoints ? (ownPoints.getAttribute('position').array as ArrayLike<number>) : positions
+  const softRadius = softSeen && outlinePlan ? pickRadius(outlinePlan, look) : softTaps ? pickRadius(plan, look) : 0
 
   // Made with the buffer at its final positions: a birth's scramble writes them only from the next frame (settleBounds).
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -747,7 +763,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
   })
 
   const placed$ = (given.parts?.length ?? 0) > 0
-    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} noBloom={noBloom} edges={edges} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} dim={dim} allowance={allowance} near={near} rootTrusted={trusted} still={still} />
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} noBloom={noBloom} edges={edges} softOutline={softOutline} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} dim={dim} allowance={allowance} near={near} rootTrusted={trusted} still={still} />
     : null
   // What a world shard places is its trust's to budget, glow included.
   const placements = placed$ && budget ? <GlowTrust.Provider value={budget.trusted}>{placed$}</GlowTrust.Provider> : placed$
@@ -810,17 +826,20 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
       {plan.lines && !outline && given.vertices.length > 1 && <primitive object={line} />}
       {/* The client's own points, as always, unless a POINT SIZE says otherwise (always absent under SOLID and LINES). */}
       {plan.points === 'disc' && (given.mode === 'points' || given.mode === 'solid' || given.mode === 'lines') && (
-        <points geometry={plain} material={pointMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} />
+        <points geometry={plain} material={pointMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} userData-softPick={softTaps} />
       )}
       {/* At a POINT SIZE: billboards, since a GPU caps a GL point's size. 0 draws no points. Sized in model
           units, carried by the model's own scale, so the canvas's dot scale (scene/dotScale.ts, LOOK) never applies. */}
       {/* Nothing of its own drawn (opacity 0, or POINTS at point size 0): an invisible copy still answers taps and picks, and is never drawn, so it hides and occludes nothing. */}
       {!cull && (look.hidden || plan.points === 'none') && (given.mode === 'solid' && index.length > 0 && look.hidden
-        ? <mesh name="shard-hit" visible={false} geometry={indexed} material={HIT_MATERIAL} frustumCulled={false} {...pick} />
-        : !faintMaterial && <points name="shard-hit" visible={false} geometry={plain} material={pointMaterial} frustumCulled={false} />)}
+        ? <mesh name="shard-hit" visible={false} geometry={indexed} material={HIT_MATERIAL} frustumCulled={false} onClick={pick.onClick} userData-faceOf={drawn} userData-softPick />
+        : !faintMaterial && <points name="shard-hit" visible={false} geometry={plain} material={pointMaterial} frustumCulled={false} userData-softPick />)}
+      {/* Soft, as the dots and points above are on such a shard: it takes a tap only when nothing solid is hit nearer (softPick.tsx). */}
+      {softTaps && <PickVolume points={pickPoints} radius={softRadius} />}
+      {softSeen && <SoftOutline points={pickPoints} radius={softRadius} dim={dim} />}
       {faintMaterial && <points name="shard-faint" geometry={plain} material={faintMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} />}
       {plan.points === 'billboard' && look.pointSize !== undefined && (
-        <PointCores plain={pointsPlain} size={look.pointSize} opacity={opacity} glow={SHARD_POINTS.glow} headlamp={headlamp && !lit} clipPlanes={clipPlanes} walls={clip} noBloom={noBloom} />
+        <PointCores plain={pointsPlain} size={look.pointSize} opacity={opacity} glow={SHARD_POINTS.glow} headlamp={headlamp && !lit} clipPlanes={clipPlanes} walls={clip} noBloom={noBloom} soft={softTaps} />
       )}
       {plan.halos && look.glow && (
         <GlowHalos plain={pointsPlain} glow={look.glow} radius={look.glowRadius} strength={look.glowStrength} drawnWorld={world} core={plan.points === 'billboard' ? look.pointSize : 0} fade={haloFade({ ghostShare: ghost ? GHOST_OPACITY : 1, dim })} trusted={glowTrusted} clipPlanes={clipPlanes} walls={clip} birth={birth} dissolve={dissolve} />
@@ -833,8 +852,14 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
 /** How strong the bench's dots for an object no one can see are drawn: faint, but there. */
 export const BENCH_FAINT_OPACITY = 0.35
 
-/** The material of an invisible hit copy (never drawn: it only lets a ray find the faces). */
-const HIT_MATERIAL = new MeshBasicMaterial()
+/**
+ * The material of the copy of an unseen object (opacity 0, or POINTS at size
+ * 0) that only answers taps and picks. The copy is never drawn (visible
+ * false; three and R3F raycast it anyway), and should it ever be, it writes
+ * neither colour nor depth: an invisible wall stops a walker and hides
+ * nothing (owner's ruling on 0% with constrain).
+ */
+const HIT_MATERIAL = new MeshBasicMaterial({ colorWrite: false, depthWrite: false })
 
 /** A unit cube's twelve edges, centred on the origin: the placeholder (§1.10). */
 export const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
@@ -990,7 +1015,7 @@ function cutBox(shard: ShardModel, list: readonly Listed[], cut: readonly number
   return min[0] === Infinity ? null : { min, max }
 }
 
-function Placements({ shard, byRef, nested, lit, ghost, noBloom, edges, world, headlamp, pose, onPartClick, selected, cull, ignoreOpacity, dim, allowance, near, rootTrusted = false, still = false }: {
+function Placements({ shard, byRef, nested, lit, ghost, noBloom, edges, softOutline, world, headlamp, pose, onPartClick, selected, cull, ignoreOpacity, dim, allowance, near, rootTrusted = false, still = false }: {
   shard: ShardModel
   byRef: Map<string, Resolved>
   nested?: Placed[]
@@ -998,6 +1023,7 @@ function Placements({ shard, byRef, nested, lit, ghost, noBloom, edges, world, h
   ghost: boolean
   noBloom: boolean
   edges: boolean
+  softOutline: boolean
   world: boolean
   headlamp: boolean
   pose?: Pose
@@ -1036,7 +1062,7 @@ function Placements({ shard, byRef, nested, lit, ghost, noBloom, edges, world, h
     // Its own share (without a ghost's), as every face and line keeps one, so the EDIT breath and the build dim's fade scale it rather than skip it.
     let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={(ghost ? 0.45 : 0.8) * dim} userData-share={0.8 * dim} {...(noBloom ? NO_BLOOM_BLEND : {})} /></lineSegments>
     // The part's own model, so its own opacity, never the parent's (§1.10).
-    if (model) body = <ShardMesh shard={model} placed nested={r.children} lit={lit} ghost={ghost} noBloom={noBloom} edges={edges} world={world} headlamp={headlamp} cull={cull} dim={dim} still={still} ignoreOpacity={ignoreOpacity} />
+    if (model) body = <ShardMesh shard={model} placed nested={r.children} lit={lit} ghost={ghost} noBloom={noBloom} edges={edges} softOutline={softOutline} world={world} headlamp={headlamp} cull={cull} dim={dim} still={still} ignoreOpacity={ignoreOpacity} />
     // Selected: an amber box around what the placement draws, in its own frame so it turns with it.
     const box = selected?.includes(i) ? (model ? placedBounds(model, r.children) : null) ?? { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] } : null
     return (

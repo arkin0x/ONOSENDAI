@@ -20,6 +20,9 @@
  * | kept | moves kept on the phone while LOCAL wait, after a reload on LIVE, for a move there; the chip says so; that move sends them all |
  * | blip | a move signed while LIVE whose send was lost goes out after a reload, with no action |
  * | drain | the owner's case: moves signed while LOCAL, published one at a time later, the tablet reloading partway; it gets them all without another reload |
+ * | standing | an open, caught-up tablet's move asks the relay nothing before it is signed: the head check reads the standing subscription (owner's ruling of 2026-11-22) |
+ * | stall | the tablet's socket goes silent (no frames, nothing answered) while the phone moves on; a move pressed on the tablet is never signed on the stale head |
+ * | race | both devices press a move at the same moment; whatever lands, neither device signs on top of a fork afterwards; with no fork each is on the relay head or holds its move behind the diverged-branch prompt |
  *
  *   node scripts/chain-sync-two-device.mjs http://localhost:5287 /path/to/out
  */
@@ -168,6 +171,49 @@ if (want('live')) {
   await move(phone)
   await until(tablet, (s) => s.head === relayHead(), 20_000)
   ok('live: no chain REQ churn on the tablet per phone move', (relay.reqs.tablet ?? 0) - reqs0 === 0, `${(relay.reqs.tablet ?? 0) - reqs0} chain REQs over two phone moves`)
+  await tablet.close()
+}
+
+if (want('standing')) {
+  // The tablet open and caught up; its next move is signed from what its
+  // standing subscription has delivered, with no chain REQ before it.
+  if (!tablet.page) await tablet.open()
+  await until(tablet, (s) => s.head === relayHead() && s.sync?.status === 'done', 30_000)
+  await sleep(3000)
+  const reqs0 = relay.reqs.tablet ?? 0
+  const t0 = Date.now()
+  const s = await move(tablet, 'y')
+  const t = Date.now() - t0
+  const reqs = (relay.reqs.tablet ?? 0) - reqs0
+  ok('standing: an open, caught-up tablet signs its move with no chain REQ first', reqs === 0 && s.head === relayHead(), `${reqs} chain REQs, landed in ${t} ms`)
+  // And the phone, open all along, gets it from its own subscription.
+  const tp = await until(phone, (p) => p.head === s.head, 20_000)
+  ok('standing: the other open device follows it', tp !== null, `${tp} ms`)
+  await tablet.close()
+}
+
+if (want('stall')) {
+  // The tablet's socket stalls: open, but nothing comes back from the relay
+  // and nothing it sends is answered. The phone moves on meanwhile. A move
+  // pressed on the tablet after that must not be signed on the old head.
+  if (!tablet.page) await tablet.open()
+  await until(tablet, (s) => s.head === relayHead() && s.sync?.status === 'done', 30_000)
+  relay.silent.add('tablet')
+  await move(phone)
+  const target = relayHead()
+  const before = new Set(store.map((e) => e.id))
+  // The tablet sends something (its move's proof takes a moment), and the
+  // stalled socket owes it an answer; it drops out of "current" then.
+  await tablet.page.evaluate(() => { const s = window.__store.getState(); s.moveCursor({ axis: 'z', dir: 1 }); void s.commit() })
+  const msgs = new Set()
+  await until(tablet, (s) => { msgs.add(s.msg); return s.msg === "Can't confirm your latest move. Try again." }, 60_000)
+  const st = await tablet.state()
+  const signedStale = st.head !== target && st.n > 0 && !before.has(st.head) && (await tablet.page.evaluate((h) => { const s = window.__store.getState(); const e = s.events.find((x) => x.id === h); return e?.tags.find((t) => t[0] === 'e' && t[3] === 'previous')?.[1] ?? null }, st.head)) !== target
+  relay.silent.delete('tablet')
+  // Back: the relay's moves are taken in and nothing was signed on the old head.
+  const back = await until(tablet, (s) => s.head === target || store.some((e) => e.id === s.head && !before.has(e.id)), 90_000)
+  const st2 = await tablet.state()
+  ok('stall: a silently stalled socket is not trusted; nothing is signed on the stale head; once the relay talks again the tablet catches up by itself', !signedStale && back !== null, `messages ${JSON.stringify([...msgs])}, back in step ${back} ms, tablet ${JSON.stringify({ n: st2.n, head: st2.head?.slice(0, 8), status: st2.status, msg: st2.msg, conflict: st2.conflict })} relay ${target?.slice(0, 8)}`)
   await tablet.close()
 }
 
@@ -327,6 +373,44 @@ if (want('unreachable')) {
 const mine = store.filter((e) => e.pubkey === pk && e.kind === 3333)
 const prevs = mine.map((e) => e.tags.find((t) => t[0] === 'e' && t[3] === 'previous')?.[1]).filter(Boolean)
 ok('no fork on the relay', new Set(prevs).size === prevs.length, `${mine.length} events`)
+
+if (want('race')) {
+  // Both devices open and caught up, a move pressed on each at the same
+  // moment. Two moves from one head would fork the chain, and the relays
+  // cannot be asked faster than one of them publishes; what is checked is
+  // that the devices never build on a fork afterwards, and that with no
+  // fork they end on one head.
+  if (!phone.page) await phone.open()
+  if (!tablet.page) await tablet.open()
+  await until(tablet, (s) => s.head === relayHead() && s.sync?.status === 'done', 30_000)
+  await until(phone, (s) => s.head === relayHead(), 30_000)
+  await sleep(2000)
+  const before = new Set(store.map((e) => e.id))
+  const press = (d, axis) => d.page.evaluate((axis) => { const s = window.__store.getState(); s.moveCursor({ axis, dir: 1 }); void s.commit() }, axis)
+  await Promise.all([press(phone, 'x'), press(tablet, 'y')])
+  await sleep(12_000)
+  const branchPoints = () => {
+    const evs = store.filter((e) => e.pubkey === pk && e.kind === 3333)
+    const count = new Map()
+    for (const e of evs) { const p = e.tags.find((t) => t[0] === 'e' && t[3] === 'previous')?.[1]; if (p) count.set(p, (count.get(p) ?? 0) + 1) }
+    return [...count.values()].filter((c) => c > 1).length
+  }
+  const forked = branchPoints()
+  const [ps, ts] = [await phone.state(), await tablet.state()]
+  // A move more on each: on a fork it must not be signed on either branch; with none, both continue one chain.
+  await press(phone, 'x')
+  await sleep(6000)
+  await press(tablet, 'y')
+  await sleep(12_000)
+  const after = branchPoints()
+  const fresh = store.filter((e) => !before.has(e.id) && e.pubkey === pk)
+  const [ps2, ts2] = [await phone.state(), await tablet.state()]
+  // With no fork, each device is on the relay's head, or holds its unpublished move behind the diverged-branch prompt (it saw the other's first).
+  const settled = (st) => st.head === relayHead() || st.conflict === 'branch'
+  const oneChain = settled(ps2) && settled(ts2)
+  ok('race: two devices pressing at the same moment never build on a fork; with no fork each is on the relay head or holds behind the branch prompt', forked === 0 ? after === 0 && oneChain : after === forked && fresh.length === 2,
+    `fork from the simultaneous presses: ${forked > 0}; ${fresh.length} new events on the relay; heads phone ${ps2.head?.slice(0, 8)} tablet ${ts2.head?.slice(0, 8)} relay ${relayHead()?.slice(0, 8)}; after the presses phone ${JSON.stringify({ c: ps.conflict, msg: ps.msg })} tablet ${JSON.stringify({ c: ts.conflict, msg: ts.msg })}; after one more each phone ${JSON.stringify({ c: ps2.conflict, msg: ps2.msg })} tablet ${JSON.stringify({ c: ts2.conflict, msg: ts2.msg })}`)
+}
 console.log('errors', phone.errors.slice(0, 3), tablet.errors.slice(0, 3))
 fs.writeFileSync(`${out}/results.json`, JSON.stringify(results, null, 2))
 await browser.close()

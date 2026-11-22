@@ -64,6 +64,26 @@ export function GlowWorldCanvas({ children }: { children: ReactNode }): JSX.Elem
 }
 
 /**
+ * The halos of a shard being placed (ShardGhost) or moved (EDIT): with
+ * `always`, for one that is only points, fog or glow, drawn whatever the
+ * Settings switch says, and yours, so trusted for the budget; otherwise as
+ * they were. A shard that is
+ * only fog or glow is nothing but its halos, so with the switch off its ghost
+ * would show nothing of itself (arkinox, 2026-11-22: "the fog shard is
+ * invisible while I'm trying to place it in BUILD").
+ */
+export function GhostGlow({ always, children }: { always: boolean; children?: ReactNode }): JSX.Element {
+  const gated = useContext(GlowGate)
+  const trusted = useContext(GlowTrust)
+  // The same two providers either way, so a change of `always` never remounts what is under them.
+  return (
+    <GlowGate.Provider value={gated && !always}>
+      <GlowTrust.Provider value={trusted || always}>{children}</GlowTrust.Provider>
+    </GlowGate.Provider>
+  )
+}
+
+/**
  * Whether halos keep the world bloom's face tag (glowHalos haloBlend): in the
  * world's canvas, whatever the shard (the placing ghost, an item's model), and
  * wherever a shard is drawn as the world draws it under a world bloom (the
@@ -126,10 +146,12 @@ interface CoreProps {
   walls?: Box
   /** Kept out of the bloom (the placing ghost in the world, shardFaces.ts NO_BLOOM_BLEND). */
   noBloom?: boolean
+  /** A hit on them is soft (scene/softPick.tsx): the object has nothing solid of its own. */
+  soft?: boolean
 }
 
 /** The points at a POINT SIZE: billboards with the disc's look. */
-export function PointCores({ plain, size, opacity, glow, headlamp, clipPlanes, walls, noBloom = false }: CoreProps): JSX.Element {
+export function PointCores({ plain, size, opacity, glow, headlamp, clipPlanes, walls, noBloom = false, soft = false }: CoreProps): JSX.Element {
   const gl = useThree((s) => s.gl)
   const geometry = useMemo(() => billboardsOf(plain), [plain])
   const material = useMemo(() => {
@@ -162,7 +184,7 @@ export function PointCores({ plain, size, opacity, glow, headlamp, clipPlanes, w
     u.uMinPx.value = limits.pointMinPx
     u.uMaxPx.value = limits.pointMaxPx
   })
-  return <mesh ref={mesh} geometry={geometry} material={material} frustumCulled={false} renderOrder={DOTS_ORDER} raycast={raycast} />
+  return <mesh ref={mesh} geometry={geometry} material={material} frustumCulled={false} renderOrder={DOTS_ORDER} raycast={raycast} userData-softPick={soft} />
 }
 
 interface HaloProps {

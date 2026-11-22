@@ -287,7 +287,15 @@ const BUMP_MS = 500
 const SYNC_BUMP_MS = 2500
 /** Main-thread budget per merge slice; comfortably inside one frame. */
 const MERGE_SLICE_MS = 12
-const CACHE_CHUNK = 50_000
+/**
+ * Stops read back from the cache per IndexedDB read. A read's rows are made on
+ * this thread when its answer comes (structured clone), in one task. 50,000
+ * was the biggest read any part of the app asks for, and the owner's phone
+ * spent 229 to 1,896 ms at a time in IndexedDB answers (diag of 2026-11-22).
+ * 5,000 is a tenth of that per task, with the loop handed back between reads
+ * as before.
+ */
+export const CACHE_CHUNK = 5_000
 const COVERED_KEY = 'covered'
 const TIP_KEY = 'tip'
 /** Tail re-snapshot gates: both must pass, so the ~130 MB put stays rare. */

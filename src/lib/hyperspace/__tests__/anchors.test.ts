@@ -13,6 +13,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  CACHE_CHUNK,
   batchesOf,
   mergeCovered,
   missingRanges,
@@ -245,5 +246,15 @@ describe('stop record round trip', () => {
     expect(stopFromRecord({ ...good, merkleRoot: 'zz' })).toBeNull()
     expect(stopFromRecord({ ...good, coordApproxHex: '0x12' })).toBeNull()
     expect(stopFromRecord({ ...good, blockHash: 'short' })).toBeNull()
+  })
+})
+
+describe('the cache replay', () => {
+  // Each read's rows are made on the main thread when its answer comes, in
+  // one task; the owner's phone spent 229 to 1,896 ms at a time in IndexedDB
+  // answers (diag of 2026-11-22), and 50,000 stops was the biggest read.
+  it('reads at most 5,000 stops per IndexedDB read', () => {
+    expect(CACHE_CHUNK).toBeLessThanOrEqual(5_000)
+    expect(CACHE_CHUNK).toBeGreaterThan(0)
   })
 })

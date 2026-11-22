@@ -5,8 +5,9 @@
  * with nothing else; one sealed to a person opens with that person's NIP-44
  * decrypt. The plaintext is a list of entries in the bag's own shape, so a
  * chest holds a message, a shard, a key, or another chest, and the reader
- * that opens bags reads chest contents. The one limit is NIP-44's 65,535
- * bytes, refused in words before any key is made.
+ * that opens bags reads chest contents. The one limit is a chest's cap,
+ * 131,072 bytes (DECK-0004 §3.2), refused in words before any key is made;
+ * past 65,535 bytes NIP-44's extended length prefix carries it.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -15,7 +16,7 @@ import { bytesToHex } from '../events'
 import { regionKeyAt } from '../shardCrypto'
 import { getEventHash } from 'nostr-tools/pure'
 import {
-  NIP44_MAX_PLAINTEXT, aimedPoint, isLockPubkey, openWithSecret, openWithSigner, openerFor, parseChestPlaintext, placeOf, plaintextBytes, readContents, requiresLabel, resealWithout, sealEntries, sealedInside, sizeRefusal, revealedIn } from '../chests'
+  CHEST_MAX_PLAINTEXT, aimedPoint, isLockPubkey, openWithSecret, openWithSigner, openerFor, parseChestPlaintext, placeOf, plaintextBytes, readContents, requiresLabel, resealWithout, sealEntries, sealedInside, sizeRefusal, revealedIn } from '../chests'
 import {
   CHEST_KIND, KEY_KIND, bagTemplate, chestInnerTemplate, chestItemOf, keyInnerTemplate, keyItemOf, messageInnerTemplate, shardInnerTemplate, unbag, type BagEntry, type ChestItem, type KeyItem,
 } from '../hidden'
@@ -23,6 +24,8 @@ import { newShard, type ShardModel } from 'sno-core/shards'
 import moonBlossom from '../../tutorial/moon-blossom-v2-event.json'
 import { reachGibsons } from '../deployFit'
 import { MAX_PICTURE_URI } from '../itemPicture'
+import { v2 as nip44 } from 'nostr-tools/nip44'
+import { sealFor } from '../bagFit'
 
 /** A 1x1 PNG as a data URI: the smallest picture an item can wear. */
 const DOT = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
@@ -245,15 +248,59 @@ describe('the chest plaintext is a list of entries (spec §7.6)', () => {
   })
 })
 
-describe('the NIP-44 size limit', () => {
-  it('refuses a list larger than 65,535 bytes in words, before any key is made', () => {
-    expect(sizeRefusal(NIP44_MAX_PLAINTEXT)).toBeNull()
-    expect(sizeRefusal(NIP44_MAX_PLAINTEXT + 1)).toMatch(/Too large to seal: 65,536 of 65,535 bytes/)
-    const big = finalizeEvent({ kind: 1, created_at: 1, content: 'x'.repeat(70_000), tags: [] }, hider)
-    expect(plaintextBytes([big])).toBeGreaterThan(NIP44_MAX_PLAINTEXT)
-    expect(() => sealEntries([big], getPublicKey(generateSecretKey()))).toThrow(/Too large to seal/)
-    const small = finalizeEvent({ kind: 1, created_at: 1, content: 'x'.repeat(60_000), tags: [] }, hider)
-    expect(() => sealEntries([small], getPublicKey(generateSecretKey()))).not.toThrow()
+describe('the size limit (DECK-0004 §3.2, Size)', () => {
+  /** A list of one message whose JSON is exactly `n` UTF-8 bytes. */
+  const listOf = (n: number): ReturnType<typeof finalizeEvent>[] => {
+    const base = plaintextBytes([finalizeEvent({ kind: 1, created_at: 1, content: '', tags: [] }, hider)])
+    const list = [finalizeEvent({ kind: 1, created_at: 1, content: 'x'.repeat(n - base), tags: [] }, hider)]
+    expect(plaintextBytes(list)).toBe(n)
+    return list
+  }
+  /** The bytes NIP-44 put in front of the padded plaintext: 2, or 6 with the extended length prefix. */
+  const prefixBytes = (payload: string, n: number): number => Buffer.from(payload, 'base64').length - 1 - 32 - 32 - nip44.utils.calcPaddedLen(n)
+
+  it('the cap is 131,072 bytes, and a list larger than it is refused in words, before any key is made', () => {
+    expect(CHEST_MAX_PLAINTEXT).toBe(131_072)
+    expect(sizeRefusal(CHEST_MAX_PLAINTEXT)).toBeNull()
+    expect(sizeRefusal(CHEST_MAX_PLAINTEXT + 1)).toMatch(/Too large to seal: 131,073 of 131,072 bytes/)
+    expect(() => sealEntries(listOf(CHEST_MAX_PLAINTEXT + 1), getPublicKey(generateSecretKey()))).toThrow(/Too large to seal/)
+  })
+
+  it('a chest past 65,535 bytes seals with the extended length prefix and opens with its item, round trip', () => {
+    const lock = forge('Big Key')
+    const list = listOf(80_000)
+    const { item } = chest('Big chest', lock.itemPubkey, list)
+    expect(prefixBytes(item.payload, 80_000)).toBe(6)
+    const back = openWithSecret(item, lock.secretHex)
+    expect(JSON.stringify(back)).toBe(JSON.stringify(wire(list)))
+    expect(readContents(back)[0].event.content).toHaveLength(list[0].content.length)
+    expect(() => openWithSecret(item, forge('other').secretHex)).toThrow()
+  })
+
+  it('a chest at the cap opens with its item and with a person’s local signer, round trip', async () => {
+    const list = listOf(CHEST_MAX_PLAINTEXT)
+    const lock = forge('Cap Key')
+    const { item } = chest('Full chest', lock.itemPubkey, list)
+    expect(prefixBytes(item.payload, CHEST_MAX_PLAINTEXT)).toBe(6)
+    expect(item.payload).toHaveLength(174_860)
+    expect(JSON.stringify(openWithSecret(item, lock.secretHex))).toBe(JSON.stringify(wire(list)))
+    const { localSigner } = await signers()
+    const me = localSigner(generateSecretKey())
+    const gift = chest('For you', me.pubkey, list).item
+    expect(JSON.stringify(await openWithSigner(gift, me.nip44Decrypt!))).toBe(JSON.stringify(wire(list)))
+  })
+
+  it('a chest at the cap, with its longest name and label, fits a sealed entry of its own under the bag cap', () => {
+    const { event } = chest('n'.repeat(64), forge('k').itemPubkey, listOf(CHEST_MAX_PLAINTEXT), 'r'.repeat(64))
+    const sealed = sealFor(wire(event), hiderPk, '0'.repeat(32), 'wss://relay.test', new Set())
+    expect(sealed?.form).toBe('sealed')
+  })
+
+  it('a chest of 65,535 bytes or less seals with the two-byte prefix, exactly as before', () => {
+    const lock = forge('Small Key')
+    const { item } = chest('Small chest', lock.itemPubkey, listOf(65_535))
+    expect(prefixBytes(item.payload, 65_535)).toBe(2)
+    expect(openWithSecret(item, lock.secretHex)).toHaveLength(1)
   })
 
   it('counts UTF-8 bytes, as NIP-44 does, not characters', () => {

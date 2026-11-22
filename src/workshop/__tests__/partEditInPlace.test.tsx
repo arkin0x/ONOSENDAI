@@ -255,6 +255,32 @@ describe('what a reviewer tried', () => {
     expect(Object.keys(byId(W().currentId!)!.objects ?? {})).toEqual([a])
   })
 
+  it('a public object\'s copy brings what its author carries, keyed under you, and never a key someone wrote under your name', async () => {
+    const theirs = `33331:${THEM}:water`
+    const forged = `33331:${me()}:mine`
+    const pond = placing('Pond', 'pond-src', [['a', theirs], ['a', forged]], { objects: { [theirs]: toPayload(tri('Water', 'w')), [forged]: toPayload(tri('Forged', 'f')) } as ShardModel['objects'] })
+    useWorkshop.setState({ shards: [placing('Plaza', 'plaza', [['a', `33331:${THEM}:pond`, 'wss://relay.test']])], currentId: 'plaza' })
+    await W().enterPart(0, async () => toPayload(pond))
+    const copy = byId(W().currentId!)!
+    const keys = Object.keys(copy.objects ?? {})
+    expect(keys).toHaveLength(1)
+    expect(keys[0].startsWith(`33331:${me()}:`)).toBe(true)
+    expect(keys).not.toContain(forged)
+    expect((copy.objects as Record<string, { name: string }>)[keys[0]].name).toBe('Water')
+    expect(copy.refs![0]).toEqual(['a', keys[0]])
+  })
+
+  it('a table entry\'s copy takes from the parent the entries only it placed', async () => {
+    const a = `33331:${me()}:a`
+    const b = `33331:${me()}:b`
+    const objects = { [a]: toPayload(tri('A', 'a')), [b]: toPayload(placing('B', 'b', [['a', a]])) } as ShardModel['objects']
+    useWorkshop.setState({ shards: [placing('Pond', 'pond', [['a', b]], { objects })], currentId: 'pond' })
+    await W().enterPart(0)
+    editHere()
+    expect(byId('pond')!.objects).toBeUndefined()
+    expect(Object.keys(byId(W().currentId!)!.objects ?? {})).toEqual([a])
+  })
+
   it('a copy renamed and nothing else counts as changed: BACK keeps it and points the parent at it', async () => {
     useWorkshop.setState({ shards: [placing('Plaza', 'plaza', [['a', `33331:${THEM}:statue`]])], currentId: 'plaza' })
     await W().enterPart(0, async () => toPayload(tri('Statue', 'statue')))

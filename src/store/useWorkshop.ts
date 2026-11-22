@@ -1046,8 +1046,16 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     if (p.fromTable && table && !refs.some((r) => r[0] === 'a' && r[1] === p.address)) {
       const placedByEntry = Object.entries(table).some(([k, v]) => k !== p.address && addressesIn(v).includes(p.address))
       if (!placedByEntry) {
-        const { [p.address]: _gone, ...kept } = table
-        void _gone
+        // With it go the entries only it placed: what nothing left reaches is carried to every finder and drawn by none.
+        const reach = new Set<string>()
+        const queue = refs.filter((r) => r[0] === 'a').map((r) => r[1])
+        while (queue.length) {
+          const k = queue.shift()!
+          if (reach.has(k) || k === p.address || !Object.prototype.hasOwnProperty.call(table, k)) continue
+          reach.add(k)
+          queue.push(...addressesIn(table[k]))
+        }
+        const kept = Object.fromEntries(Object.entries(table).filter(([k]) => reach.has(k)))
         const { objects: _all, ...rest } = next
         void _all
         next = Object.keys(kept).length ? { ...rest, objects: kept as ShardModel['objects'] } : rest
@@ -2223,8 +2231,14 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const stack = get().backStack
       const top = stack[stack.length - 1]
       if (!top) return
-      // Another shard came onto the bench some other way: there is no level to go back up.
-      if (get().currentId !== top.child) { set({ backStack: [] }); return }
+      // Another shard came onto the bench some other way: there is no level to go
+      // back up, and every level is left as picking a shard leaves it.
+      if (get().currentId !== top.child) {
+        const left = leaveAll(get().currentId)
+        if (left) save(left)
+        set({ ...(left ? { shards: left } : {}), backStack: [] })
+        return
+      }
       const list = get().shards.slice()
       const frame = settle(list, top, null)
       // The shard to go back to was deleted meanwhile: the way in ends here, on what is shown.

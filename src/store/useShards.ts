@@ -120,15 +120,15 @@ import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
-import { bagSizeRefusal, signedBytes } from '../lib/bagSize'
+import { BAG_SAFE_BYTES, bagSizeRefusal, signedBytes } from '../lib/bagSize'
 import { addsEntries, bagBytes, heldBy, planUnderCap, referenceFor, sealFor, withReferences, type FitCandidate } from '../lib/bagFit'
 import { ROOM_BAG_SETTINGS, inRoom, innermostRoomAt, newDoorSecret, roomDoorAt, roomEntries, roomKey, roomLookupId, roomOf, type OwnDoor } from '../lib/doors'
 import { commitDoorSecret, doorSecret, keepDoorSecret } from './doorSecrets'
 import { entriesIn, isListed, noteStored, onHiddenChange, reloadLocalView, saveRows, UNCLAIMED } from './hiddenStorage'
 import { builtInLook, builtInLookTags, doorHeightOf, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedWrapper, setSealedLookFetch, wireLook, wireOpenLook, type LookName, type LookPose } from '../lib/looks'
 import { openSealedLookPayload, sealLookTags, sealedLookAddresses, sealedLookLimit } from '../lib/sealedLooks'
-import { dropPiece, forgetPieceKeys, notePieceKey, primePiece, notePieceKeys, pieceAddresses, pieceWasOpened, setLocalPieces } from '../lib/pieceKeys'
-import { openOnePiece, pieceRefusal, planPieces, planPiecesNow, sealedPiecesOf, type PlannedPiece } from '../lib/pieces'
+import { dropPiece, forgetPieceKeys, notePieceKey, primePiece, notePieceKeys, pieceAddresses, setLocalPieces } from '../lib/pieceKeys'
+import { carryPiecesInline, openOnePiece, pieceRefusal, planPieces, planPiecesNow, sealedPiecesOf, type PlannedPiece } from '../lib/pieces'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -390,6 +390,29 @@ function workshopPiece(address: string, me: string, ledger: Ledger): Record<stri
   // workshop's LINK and COPY marks show (lib/partForm.ts sealedAsPiece).
   if (!s || !sealedAsPiece(s, ledger, me)) return undefined
   return toPayload(withAuthoredConstrain(s)) as unknown as Record<string, unknown>
+}
+
+/**
+ * A shard as a chest carries it: the pieces it places from your workshop inside
+ * it, in its objects table (lib/pieces.ts carriedInline), sealed with the chest.
+ * What the composer measures and what PUT IN CHEST and SEAL write.
+ */
+export function chestModelOf(model: ShardModel, me: string | null | undefined): ShardModel {
+  if (!me) return model
+  const ledger = loadLedger()
+  return carryPiecesInline(model, me, (address) => workshopPiece(address, me, ledger))
+}
+
+/**
+ * Why a shard cannot go in a chest as it carries its pieces, or null: the
+ * format refuses it, or, carried inline, it is too large for one event (a
+ * split build exists because its whole was too big for one).
+ */
+export function chestShardRefusal(carried: ShardModel, template: EventTemplate): string | null {
+  const refusal = shardRefusal(carried)
+  if (refusal) return refusal
+  const bytes = signedBytes(template)
+  return bytes > BAG_SAFE_BYTES ? `${carried.name} is too big to carry inside a chest with its parts (${bytes.toLocaleString('en-US')} of ${BAG_SAFE_BYTES.toLocaleString('en-US')} bytes). Hide it on its own instead.` : null
 }
 
 /** A piece of a split build signed here and not sent yet (a row's pieceObjects), by its address. */
@@ -1076,7 +1099,7 @@ function keptLineage(d: Pick<MyDeployment, 'inner' | 'ref' | 'lineage'>): { line
 /** Why an EDIT stopped: the shard it moves is no longer among your deployments here. */
 export const EDIT_GONE = 'That shard is no longer among what this device hid, so there is nothing to move.'
 /** A move of a split build whose piece no relay answered for: it stays where it is (lib/pieces.ts). */
-export const PIECE_NOT_FETCHED = "A piece of this shard could not be fetched from your relays, so it was not moved. Try again when a relay answers."
+export const PIECE_NOT_FETCHED = "Part of this shard could not be found on your relays, so it was not moved. Try again when a relay answers. If you deleted something it places, place it again first."
 /**
  * Your rows after a scan claimed `claimed` among them: of an item carried
  * inline that a scan read in more than one version (its hider moved it,
@@ -3279,9 +3302,12 @@ export const useShards = create<ShardsState>((set, get) => {
         }
         const model = useWorkshop.getState().shards.find((s) => s.id === c.shardId)
         if (!model) throw new Error('A model in this chest is no longer in your workshop.')
-        const refusal = shardRefusal(model)
+        // A split build's pieces from your workshop go inside it, in its table: the chest seals them with it (lib/pieces.ts carriedInline).
+        const carried = chestModelOf(model, owner)
+        const template = shardInnerTemplate(carried, at, plane, createdAt, creditOf(model))
+        const refusal = chestShardRefusal(carried, template)
         if (refusal) throw new Error(refusal)
-        signed.push(await signAsOwner(shardInnerTemplate(model, at, plane, createdAt, creditOf(model))))
+        signed.push(await signAsOwner(template))
       } else if (c.kind === 'audio') {
         // A rumor, as in a bag (DECK-0007 §3): the chest's signature vouches for it.
         signed.push(rumorOf(audioInnerTemplate(c.audio, at, plane, createdAt), cs.identity.pubkey))
@@ -3639,7 +3665,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const guarded = (t: EventTemplate): Promise<NostrEvent> => { if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED); return cs.signEvent(t) }
       const plan = await planPieces(r.shard, me, async (address) => {
         const got = await openOnePiece(address, src.keyHex, fetchHiddenObject)
-        if (got === 'missing' && (r.pieces ? r.pieces.includes(address) : pieceWasOpened(address))) throw new Error(PIECE_NOT_FETCHED)
+        if (got === 'missing' && (!r.pieces || r.pieces.includes(address))) throw new Error(PIECE_NOT_FETCHED)
         return typeof got === 'string' ? undefined : got.payload
       }, placementId, false)
       if (plan.pieces.length === 0) return r
@@ -5071,6 +5097,16 @@ export const useShards = create<ShardsState>((set, get) => {
             pieceAddrs = plan.pieces.map((p) => p.address)
           }
         }
+        // PUT IN CHEST: its pieces go inside it, in its table, sealed with the chest (lib/pieces.ts carriedInline).
+        if (intoChest && !was && !object && cs.identity.pubkey) {
+          const carried = chestModelOf(shard, cs.identity.pubkey)
+          if (carried !== shard) {
+            shard = carried
+            innerTemplate = shardInnerTemplate(shard, at, plane, createdAt, credit)
+            const tooBig = chestShardRefusal(shard, innerTemplate)
+            if (tooBig) { set({ deployStatus: 'error', deployError: tooBig }); return }
+          }
+        }
         // Moved, it names the pieces it named (sealed again below when the key changes).
         if (was?.pieces) pieceAddrs = [...was.pieces]
       } else if (pending.type === 'key') {
@@ -5280,7 +5316,10 @@ export const useShards = create<ShardsState>((set, get) => {
           set({ deployNote: 'Opening its pieces' })
           const plan = await planPieces(shard, owner, async (address) => {
             const got = await openOnePiece(address, from.keyHex, fetchHiddenObject)
-            if (got === 'missing' && (from.pieces ? from.pieces.includes(address) : pieceWasOpened(address))) throw new Error(PIECE_NOT_FETCHED)
+            // A piece no relay answers for stops the move, whatever the row knows: carried
+            // as it is, it would never open under the new key (owner, 2026-11-22).
+            // An address the row knows is no piece (a live link) never stops it; a row learned from the relays knows none.
+            if (got === 'missing' && (!from.pieces || from.pieces.includes(address))) throw new Error(PIECE_NOT_FETCHED)
             return typeof got === 'string' ? undefined : got.payload
           }, placementId, false)
           if (plan.pieces.length > 0) {

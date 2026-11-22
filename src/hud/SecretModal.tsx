@@ -22,7 +22,7 @@
  * actions every item has.
  */
 
-import { takeIntoKeeping, you } from '../lib/carried'
+import { fetchRef } from '../lib/parts'
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Copy, CopyPlus, GitFork, Move3d, PackagePlus, Pencil, Rotate3d, Target, TvMinimal } from 'lucide-react'
 import type { FeedObject } from 'sno-core/feed'
@@ -221,7 +221,7 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
   const words = coin || nft ? textWithoutToken(textWithoutNftLinks(item.text)) : item.text ?? ''
   // A shard copies into your workshop as a model; a message copies its text.
   const copy = (): void => {
-    if (item.type === 'shard' && item.shard) useWorkshop.getState().importShard(takeIntoKeeping(item.shard, you()))
+    if (item.type === 'shard' && item.shard) void useWorkshop.getState().takeShard(item.shard, fetchRef)
     else if (words) void navigator.clipboard?.writeText(words)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1400)

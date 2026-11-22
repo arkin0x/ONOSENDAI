@@ -49,7 +49,7 @@ const MOVED: Record<'shard' | 'avatar', string[]> = {
     // parts (#543), whose LEAVE THEM OUT publishes too: so publish(shard)
     // itself is written twice in the SHARD sheet, and the markers are the
     // button's press and the ask.
-    'onClick={() => { if (carriesSealedParts(shard)) setPublishAsk(shard.id); else void usePublished.getState().publish(shard) }}',
+    'onClick={() => { if (carriesSealedParts(shard)) setPublishAsk(shard.id); else if (cameSealed(shard)) setSealedAsk(shard.id); else void usePublished.getState().publish(shard) }}',
     '{publishAsk === shard.id && (',
     'onClick={() => setRetractAsk(shard.id)}',
     "{retractAsk === shard.id && (",

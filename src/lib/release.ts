@@ -29,14 +29,25 @@
  * The gate is state, not a setting, and is never persisted. A reload with
  * LIVE remembered starts shut for the same reason the flip does: nothing
  * leaves this device except as the consequence of an action taken here, on
- * purpose, while LIVE.
+ * purpose, while LIVE. A move signed while LIVE whose send never landed was
+ * such an action: after a reload it opens the gate again by itself, behind
+ * the publisher's look at the relays (publisher.ts headReleases; owner,
+ * 2026-11-22). A move made LOCAL never does.
  *
  * What the gate deliberately does not touch is order. The publisher still
  * drains oldest first, so every prefix the relay holds is itself a valid
  * chain; the gate only decides whether it drains at all.
  */
 
+import { create } from 'zustand'
 import type { PublishStatus } from '../store/useCyberspace'
+
+/**
+ * The release gate as the publisher last set it (publisher.ts), for the HUD:
+ * the CHAIN chip says "n KEPT HERE: PUBLISH" while LIVE with it shut and moves
+ * unsent (ChainExplorer chainChipState). Written only when it changes.
+ */
+export const useReleaseGate = create<{ open: boolean }>(() => ({ open: false }))
 
 /** The three things about the store the gate rule reads. */
 export interface ChainFacts {
@@ -65,6 +76,18 @@ export interface ChainFacts {
    * unchanged.
    */
   who?: string
+  /**
+   * The head is an action this page just signed, arriving as the head for
+   * the first time (useCyberspace takeFreshHead). A head that is new and
+   * unsent but came from storage (the saved chain read on a load, or after a
+   * switch back to an identity, moves another tab of this browser signed, a
+   * move of this page's own read back after a switch) is no action taken
+   * here, so it never opens the gate:
+   * moves kept while LOCAL go out on this device's next action, or on PUBLISH
+   * (owner, 2026-11-21, after his phone sent 458 kept moves on its own).
+   * Absent reads as signed here.
+   */
+  headSignedHere?: boolean
 }
 
 /** Read the facts out of the store, or out of anything shaped like it. */
@@ -74,8 +97,11 @@ export function chainFacts(s: {
   published: Record<string, PublishStatus>
   publishRequest?: number
   identity?: { pubkey: string }
-}): ChainFacts {
-  return { live: s.live, headId: s.prevEventId, headSent: s.published[s.prevEventId] === 'ok', release: s.publishRequest, who: s.identity?.pubkey }
+}, signedHere?: (id: string) => boolean): ChainFacts {
+  return {
+    live: s.live, headId: s.prevEventId, headSent: s.published[s.prevEventId] === 'ok', release: s.publishRequest, who: s.identity?.pubkey,
+    ...(signedHere ? { headSignedHere: signedHere(s.prevEventId) } : {}),
+  }
 }
 
 /**
@@ -85,6 +111,8 @@ export function chainFacts(s: {
  * |---|---|
  * | anything, ending LOCAL | shut |
  * | a switch to another identity | shut: its kept moves wait for its own next action |
+ * | LIVE, a new head read from storage (a load, a switch back, another tab's save) | unchanged: not an action taken here |
+ * | LIVE, a head read from storage that was signed while LIVE and never landed (a blip, then a reload) | open: it was meant to go out (publisher.ts headReleases) |
  * | LOCAL to LIVE | shut: the flip publishes nothing |
  * | LIVE, a new head this device signed | open: and the backlog goes with it |
  * | LIVE, a head adopted from the relay | unchanged: not an action of ours |
@@ -100,7 +128,7 @@ export function gateAfter(open: boolean, prev: ChainFacts, next: ChainFacts): bo
   if (!next.live) return false
   if (!prev.live) return false
   if (prev.who !== undefined && next.who !== undefined && prev.who !== next.who) return false
-  if (next.headId !== prev.headId && !next.headSent) return true
+  if (next.headId !== prev.headId && !next.headSent && next.headSignedHere !== false) return true
   if ((next.release ?? 0) !== (prev.release ?? 0)) return true
   return open
 }

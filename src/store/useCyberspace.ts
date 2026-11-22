@@ -121,6 +121,7 @@ import {
   buildChain,
   chainHead,
   extendChain,
+  namedIds,
   firstBreak,
   openBracket,
   hopTemplate,
@@ -207,15 +208,19 @@ import { useSecrets } from './useSecrets'
 import { useToast } from './useToast'
 import { useChainUi } from './useChainUi'
 import type { SelfCrypto } from '../lib/muteList'
+import { forgetUnsent, unsentOf } from '../lib/unsent'
 import { kvGet, kvSet } from '../lib/kvStore'
 
 /**
  * The explored chain, parsed once per events change rather than on every
  * read. Every explorer selector goes through this.
  */
-let actionsFor: { events: NostrEvent[]; actions: ActionEvent[] } | null = null
+let actionsFor: { events: NostrEvent[]; actions: ActionEvent[]; named: Set<string> | null } | null = null
 function parsedChain(events: NostrEvent[]): ActionEvent[] {
-  if (!actionsFor || actionsFor.events !== events) actionsFor = { events, actions: appendedTo(actionsFor, events) ?? buildChain(events) }
+  if (!actionsFor || actionsFor.events !== events) {
+    const grown = appendedTo(actionsFor, events)
+    actionsFor = grown ?? { events, actions: buildChain(events), named: null }
+  }
   return actionsFor.actions
 }
 
@@ -224,10 +229,21 @@ function parsedChain(events: NostrEvent[]): ActionEvent[] {
  * and one more (an action signed here, an event the feed brought): only the
  * new one is read (lib/events.ts extendChain). Null otherwise.
  */
-function appendedTo(memo: { events: NostrEvent[]; actions: ActionEvent[] } | null, events: NostrEvent[]): ActionEvent[] | null {
+function appendedTo(memo: { events: NostrEvent[]; actions: ActionEvent[]; named: Set<string> | null } | null, events: NostrEvent[]): { events: NostrEvent[]; actions: ActionEvent[]; named: Set<string> } | null {
   if (!memo || events.length !== memo.events.length + 1) return null
   for (let i = 0; i < memo.events.length; i++) if (events[i] !== memo.events[i]) return null
-  return extendChain(memo.actions, memo.events, events[events.length - 1])
+  // The ids the chain's e tags name, gathered once after a full parse and then
+  // grown by each event added: whether the new one is already named is one
+  // lookup (extendChain), not a pass over every tag of the chain.
+  // Gathered only if extendChain gets past the refusals that need no tags.
+  const named = (): Set<string> => (memo.named ??= namedIds(memo.events))
+  const ev = events[events.length - 1]
+  const actions = extendChain(memo.actions, memo.events, ev, named)
+  if (!actions) return null
+  // Handed on to the memo that replaces this one; nothing else holds it.
+  const set = named()
+  memo.named = null
+  return { events, actions, named: namedIds([ev], set) }
 }
 
 /**
@@ -2338,7 +2354,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     const own = await signer.signEvent(template)
     verifiedSigs.add(`${own.id}:${own.sig}`)
     signedHere(own)
-    if (own.kind === ACTION_KIND) signedThisPage.add(own.id)
+    if (own.kind === ACTION_KIND) noteSigned(own)
     return own
   }
   // A wake skipped for an AUTH's answer, and this is not an AUTH: drop the
@@ -2387,7 +2403,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     if (late) pendingAuthSigns--
   }
   const answer = checkedAnswer(signed, signer)
-  if (answer.kind === ACTION_KIND) signedThisPage.add(answer.id)
+  if (answer.kind === ACTION_KIND) noteSigned(answer)
   return answer
 }
 
@@ -2403,6 +2419,111 @@ const signedThisPage = new Set<string>()
 /** Whether this page signed the chain action `id` (signedThisPage). */
 export function signedOnThisPage(id: string): boolean {
   return signedThisPage.has(id)
+}
+
+/**
+ * Chain actions this page signed that have not yet become the head. What
+ * opens the release gate is the action being taken, once: the same move read
+ * back from storage later (a switch away and back, LIVE flipped on after it
+ * was made LOCAL) is not taken again (lib/release.ts; review, 2026-11-21).
+ */
+const freshSigned = new Set<string>()
+
+/**
+ * Whether `id`, just become the head, is an action this page signed and has
+ * not counted before; counted now, so a second time says no. The publisher
+ * asks on every change of head, LIVE or LOCAL (publisher.ts).
+ */
+export function takeFreshHead(id: string): boolean {
+  return freshSigned.delete(id)
+}
+
+/**
+ * Record `id` as a chain action this page just signed, as signEvent does.
+ * For a test whose fixture event stands for a move taken here: only that
+ * opens the release gate (lib/release.ts).
+ */
+export function noteSignedOnThisPage(id: string): void {
+  signedThisPage.add(id)
+  freshSigned.add(id)
+}
+
+/**
+ * A chain action this page just signed: recorded as signed here, as an action
+ * not yet counted, and, while LIVE, as meant to go out. LIVE as it is when the
+ * signature comes back, not when the move was pressed: a flip during a slow
+ * remote signer's wait labels it by the newer setting, and a flip to LOCAL
+ * clears the label anyway (setLive).
+ */
+function noteSigned(ev: NostrEvent): void {
+  noteSignedOnThisPage(ev.id)
+  if (useCyberspace.getState().live) noteOutbound(ev.pubkey, ev.id)
+}
+
+/**
+ * Chain actions signed while LIVE, per identity, kept across reloads
+ * (localStorage OUTBOUND_KEY + ':' + pubkey; a few ids, read before anything
+ * else): moves meant to go out. One whose send never landed (a network blip,
+ * then a reload) goes out again once the publisher has looked at the relays,
+ * with no new action. Only a move made LOCAL waits for an action or PUBLISH
+ * (owner, 2026-11-22: the worry was LOCAL moves sneaking out, not losing LIVE
+ * moves to a blip). Pruned of what the relays already hold whenever one is
+ * added; capped.
+ */
+const OUTBOUND_KEY = 'onosendai:outbound'
+const OUTBOUND_MAX = 2000
+const outbound = new Map<string, Set<string>>()
+
+/**
+ * This tab's view of `pubkey`'s outbound moves: what the record held when
+ * this tab first read it (on load, or on the switch to the identity), plus
+ * what this tab signed since. Another tab's later LIVE moves are its own to
+ * finish, not this tab's to release (the gate's "another tab's save" row).
+ */
+function outboundOf(pubkey: string): Set<string> {
+  let set = outbound.get(pubkey)
+  if (set) return set
+  set = new Set()
+  try {
+    const raw = localStorage.getItem(`${OUTBOUND_KEY}:${pubkey}`)
+    const ids: unknown = raw ? JSON.parse(raw) : []
+    if (Array.isArray(ids)) for (const id of ids) if (typeof id === 'string') set.add(id)
+  } catch { /* unreadable: nothing known to be meant to go out */ }
+  outbound.set(pubkey, set)
+  return set
+}
+
+function noteOutbound(pubkey: string, id: string): void {
+  const set = outboundOf(pubkey)
+  set.add(id)
+  // The record is shared with other tabs: what they added stays in it.
+  let stored = new Set<string>()
+  try {
+    const ids: unknown = JSON.parse(localStorage.getItem(`${OUTBOUND_KEY}:${pubkey}`) ?? '[]')
+    if (Array.isArray(ids)) stored = new Set(ids.filter((x): x is string => typeof x === 'string'))
+  } catch { /* unreadable: started again */ }
+  stored.add(id)
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey === pubkey) for (const known of stored) if (s.published[known] === 'ok') { stored.delete(known); set.delete(known) }
+  while (stored.size > OUTBOUND_MAX) stored.delete(stored.values().next().value as string)
+  try { localStorage.setItem(`${OUTBOUND_KEY}:${pubkey}`, JSON.stringify([...stored])) } catch { /* private mode: this page still knows */ }
+}
+
+/**
+ * LIVE switched off for `pubkey`: nothing it signed is meant to go out any
+ * more. A move whose send failed, then kept on purpose by the flip to LOCAL,
+ * waits for an action or PUBLISH like any LOCAL move, after a reload too.
+ * The record is the identity's, so another tab's labels go with it: its
+ * blip-retried move then waits for an action after a reload, the safe way.
+ */
+function forgetOutbound(pubkey: string): void {
+  outbound.set(pubkey, new Set())
+  try { localStorage.removeItem(`${OUTBOUND_KEY}:${pubkey}`) } catch { /* private mode */ }
+}
+
+/** Whether `id` is a chain action `pubkey` signed while LIVE, on this page or before a reload (outbound). */
+export function meantToGoOut(pubkey: string, id: string): boolean {
+  return outboundOf(pubkey).has(id)
 }
 
 /**
@@ -2776,6 +2897,8 @@ function takeInStored(pubkey: string, stored: { events: NostrEvent[]; published:
   const queued = extra.filter((e) => !onRelays.has(e.id) && now.published[e.id] === 'ok')
   const published = queued.length === 0 ? now.published : { ...now.published }
   for (const e of queued) published[e.id] = 'queued'
+  // What no relay has goes back to 'queued' here: the kept unsent list must be read again (lib/unsent.ts).
+  forgetUnsent()
   if (queued.length > 0) useCyberspace.setState({ published })
   if (now.events[0]?.pubkey === pubkey) saveChain(now.events, published, now.chain)
   return true
@@ -3910,7 +4033,7 @@ const STALE_STUCK_MESSAGE = 'One of your unsent actions is a hop in the old proo
  */
 export function retireStaleFormat(): string | null {
   const before = useCyberspace.getState()
-  const cut = staleFormatCut(before.events, (id) => before.published[id] === 'ok')
+  const cut = staleFormatCut(before.events, (id) => before.published[id] === 'ok', unsentOf(before.events, before.published))
   if (!cut) return null
   // Whatever was computing or being bought was for the chain as it stood,
   // and the head is about to change under it: stopped as a respawn stops it
@@ -4115,6 +4238,8 @@ noteInHand(pubkeyHex, saved)
 // started now, ahead of any save, so none of them writes the old stretch
 // over the whole chain IndexedDB keeps.
 hydrateChain(pubkeyHex)
+// This tab's view of what was meant to go out, read now (outboundOf).
+outboundOf(pubkeyHex)
 mark('onosendai:chain-loaded')
 
 let requestId = 0
@@ -5584,6 +5709,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // Before the save below: until IndexedDB has been read, that save must not
     // put this copy over the one kept there (hydrateChain).
     hydrateChain(signer.pubkey)
+    outbound.delete(signer.pubkey)
+    outboundOf(signer.pubkey)
     if (local) saveChain(base.events, base.published, base.chain, base.held)
     startSignatureCheck(signer.pubkey, local?.unchecked ?? [])
     // A pending cloud job of THIS identity, if there is one, picks up where it stopped,
@@ -6750,6 +6877,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   setLive: (live) => {
     if (live === get().live) return
     saveLive(get().identity.pubkey, live)
+    if (!live) forgetOutbound(get().identity.pubkey)
     // Going Local stops the publisher, and with it every retry, so an event
     // left reading 'sending' or 'failed' would be describing something that
     // is no longer happening: the panel would say RETRYING at a publisher

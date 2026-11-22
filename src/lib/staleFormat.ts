@@ -41,8 +41,11 @@ export function staleHopFormat(ev: NostrEvent): boolean {
  * The cut for a chain in hand, or null when no unsent event is in the old
  * format. `sent` says whether an event is on the relays already.
  */
-export function staleFormatCut(events: readonly NostrEvent[], sent: (id: string) => boolean): StaleFormatCut | null {
-  const at = events.findIndex((e) => !sent(e.id) && staleHopFormat(e))
+export function staleFormatCut(events: readonly NostrEvent[], sent: (id: string) => boolean, unsent?: readonly NostrEvent[]): StaleFormatCut | null {
+  // With the unsent actions in hand (lib/unsent.ts), only they are read: the first stale one of them is the first unsent stale one of the chain.
+  const first = unsent ? unsent.find((e) => staleHopFormat(e)) : undefined
+  if (unsent && !first) return null
+  const at = first ? events.indexOf(first) : events.findIndex((e) => !sent(e.id) && staleHopFormat(e))
   // A spawn is never a hop, so a cut always leaves the chain its spawn.
   if (at < 1) return null
   const removed = events.slice(at)

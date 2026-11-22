@@ -190,3 +190,20 @@ describe('an event signed here comes back from the relays without a second check
     expect(text).toMatch(/signerHome\(signer\)\n\s*signedHere\(signed\)\n\s*return signed/)
   })
 })
+
+describe('the checks counted by kind while ?diag=1 counts', () => {
+  it('counts each check by its kind and by how it was made', async () => {
+    const { countVerifies } = await import('../verifiedSigs')
+    const counter = countVerifies()
+    counter.take()
+    const ev = signed('counted')
+    verifyRelayEvent(copy(ev))
+    verifyRelayEvent(copy(ev))
+    verifyRelayEvent({ ...copy(ev), content: 'forged' })
+    const k = counter.take().get(3333)!
+    // The forged copy matched nothing kept and was checked in full: counted as a full check.
+    expect({ n: k.n, schnorr: k.schnorr, compared: k.compared, hashed: k.hashed }).toEqual({ n: 3, schnorr: 2, compared: 1, hashed: 0 })
+    expect(k.ms).toBeGreaterThanOrEqual(0)
+    expect(counter.take().size).toBe(0)
+  })
+})

@@ -33,7 +33,7 @@ vi.mock('../../lib/chains', async (importOriginal) => ({
 
 import { ACTION_KIND, type NostrEvent } from '../../lib/events'
 import { startPublisher } from '../../lib/publisher'
-import { useCyberspace } from '../useCyberspace'
+import { noteSignedOnThisPage, useCyberspace } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
 
 const S = useCyberspace.getState
@@ -132,6 +132,7 @@ describe('unpublished moves against another device\'s published ones', () => {
     useCyberspace.setState({ live: true })
     await idle()
     // An action taken while LIVE opens the gate with two events waiting.
+    noteSignedOnThisPage(m2.id)
     useCyberspace.setState({ events: [...S().events, m2], prevEventId: m2.id, published: { ...S().published, [m2.id]: 'queued' } })
     await until(() => S().chainConflict !== null)
     await idle()
@@ -146,6 +147,7 @@ describe('unpublished moves against another device\'s published ones', () => {
     relayHas.events = [spawn, h1]
     useCyberspace.setState({ live: true })
     await idle()
+    noteSignedOnThisPage(m2.id)
     useCyberspace.setState({ events: [...S().events, m2], prevEventId: m2.id, published: { ...S().published, [m2.id]: 'queued' } })
     await until(() => sent.length === 2)
     expect(sent).toEqual([m1.id, m2.id])
@@ -159,6 +161,7 @@ describe('unpublished moves against another device\'s published ones', () => {
     relayHas.events = [spawn, h1, hop(0x34, h1.id, spawn.created_at + 25)]
     useCyberspace.setState({ live: true })
     await idle()
+    noteSignedOnThisPage(m2.id)
     useCyberspace.setState({ events: [...S().events, m2], prevEventId: m2.id, published: { ...S().published, [m2.id]: 'queued' } })
     await idle()
     // No relay answered the look: nothing went out, and no choice was raised

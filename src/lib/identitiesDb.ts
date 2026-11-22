@@ -163,7 +163,10 @@ export function heldWay(row: HeldIdentity): HeldWay | null {
   if (nsecOf(row.nsec, row.pubkey)) return 'generated'
   if (typeof row.ncryptsec === 'string' && row.ncryptsec.startsWith('ncryptsec1')) return 'password'
   if (row.kind === 'nip07') return 'extension'
-  if (row.kind === 'nip46' && row.bunker?.bunkerUri) return 'bunker'
+  // A bunker session is a way back whatever the row's last kind: a load locked
+  // as 'gone' (a local stand-in) wrote kind 'local' over a bunker identity's
+  // row, and its session, still there, was offered nowhere (2026-11-22).
+  if (row.bunker?.bunkerUri) return 'bunker'
   if (row.kind === 'nip46') return 'pair'
   return null
 }
@@ -248,8 +251,8 @@ export function recordHeld(next: Partial<HeldIdentity> & { pubkey: string } | nu
 /**
  * LOG OUT of a remote signer: its session (the bunker URI and this device's
  * client key for it) leaves the row, after every write asked before it, and
- * the row stays with everything else it holds. A row that is not a remote
- * signer's is left as it is. Resolves true once committed (or nothing to
+ * the row stays with everything else it holds. A row with no session is left
+ * as it is. Resolves true once committed (or nothing to
  * take), false when the store could not be written. Never rejects.
  */
 export function forgetHeldSession(pubkey: string): Promise<boolean> {
@@ -263,7 +266,8 @@ export function forgetHeldSession(pubkey: string): Promise<boolean> {
         const got = os.get(pubkey)
         got.onsuccess = () => {
           const row = got.result as HeldIdentity | undefined
-          if (!row || row.kind !== 'nip46' || !row.bunker) return
+          // Whatever the row's kind: heldWay offers a session as a way back whatever the kind.
+          if (!row || !row.bunker) return
           const { bunker: _session, ...kept } = row
           os.put(kept)
         }

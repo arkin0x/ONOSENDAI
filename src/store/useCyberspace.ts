@@ -8019,6 +8019,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       if (!row?.ncryptsec?.startsWith('ncryptsec1') && !generatedKeyOf(row)) return LOGOUT_UNKEPT
     }
     const session = get().signerSession
+    // Locked as 'gone', the identity is a local stand-in, yet its row may still hold
+    // a bunker session, which the login list offers (identitiesDb heldWay): LOG OUT
+    // takes it too, so an identity logged out of is not offered back.
+    const wasGone = keyLocked?.mode === 'gone'
     // Read before the switch overwrites the one pref slot: the relays its sockets are to.
     const saved = loadSignerPref()
     const bunkerUri = outgoing.bunkerUri ?? (saved?.pubkey === leaving ? saved.bunkerUri : undefined)
@@ -8039,7 +8043,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       void forgetHeldSession(leaving)
       dropSignerSockets(bunkerRelaysOf({ kind: 'nip46', bunkerUri }))
       forgetActivity(session)
-    }
+    } else if (wasGone) void forgetHeldSession(leaving)
     try { await outgoing.close?.() } catch { /* closed already */ }
     return null
   },

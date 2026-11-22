@@ -177,6 +177,8 @@ describe('the label', () => {
     expect(aheadLabel(17)).toBe(' 17 moves ahead of your chain. Fluid WALK pauses at 21.')
     // The real count, past 20 too.
     expect(aheadLabel(23)).toBe(' 23 moves ahead of your chain. Fluid WALK pauses at 21.')
+    expect(aheadLabel(23, true, false)).toBe(' 23 moves ahead of your chain. Fluid WALK is off.')
+    expect(aheadLabel(23, false, false)).toBe(' 23 moves ahead of your chain. The fluid pause is off.')
   })
 })
 
@@ -439,7 +441,7 @@ describe('the CHAIN chip in WALK', () => {
       const cls = String(chipOf(m.all()).props.className).split(' ')
       expect(litOf(chipOf(m.all()))).toBe(20)
       expect(cls.includes('is-slow') || cls.includes('is-limit')).toBe(false)
-      expect(String(chipOf(m.all()).props['aria-label'])).toContain('22 moves ahead of your chain. The fluid pause is off.')
+      expect(String(chipOf(m.all()).props['aria-label'])).toContain('22 moves ahead of your chain. Fluid WALK is off.')
       await m.unmount()
     } finally { useFluidWalk.setState({ on: true }) }
   })

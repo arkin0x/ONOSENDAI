@@ -155,11 +155,13 @@ export function tickClass(i: number, bar: AheadBar, track: Pick<AheadTrack, 'ros
 /**
  * The words the chip's label gains while anything is ahead; '' with nothing
  * ahead. The real count, past 20 too. With the sync limit off in Settings
- * (`limits` false, store/walkLimits.ts) there is no pause to name.
+ * (`limits` false, store/walkLimits.ts) or Fluid WALK switched off (`fluid`
+ * false) there is no pause to name, and it says which.
  */
-export function aheadLabel(ahead: number, limits = true): string {
+export function aheadLabel(ahead: number, limits = true, fluid = true): string {
   const n = Number.isFinite(ahead) ? Math.max(0, Math.floor(ahead)) : 0
-  return n === 0 ? '' : ` ${n} move${n === 1 ? '' : 's'} ahead of your chain. ${limits ? `Fluid WALK pauses at ${FLUID_PAUSE_AT}.` : 'The fluid pause is off.'}`
+  const why = !limits ? 'The fluid pause is off.' : !fluid ? 'Fluid WALK is off.' : `Fluid WALK pauses at ${FLUID_PAUSE_AT}.`
+  return n === 0 ? '' : ` ${n} move${n === 1 ? '' : 's'} ahead of your chain. ${why}`
 }
 
 /** What the chip draws for the walk being ahead. */
@@ -222,7 +224,7 @@ export function useChainAhead(own: boolean, total: number): ChainAhead {
 
   const drawn = own && (bar.on || shown.current)
   const cls = drawn ? ` has-ahead${bar.on ? ' is-ahead' : ''}${bar.slow ? ' is-slow' : ''}${bar.limit ? ' is-limit' : ''}` : ''
-  return { drawn, bar, track, cls, label: aheadLabel(events, limits) }
+  return { drawn, bar, track, cls, label: aheadLabel(events, limitOn, fluidChosen) }
 }
 
 /** The CHAIN chip's button: everything on it that the count changes, in a component of its own. */

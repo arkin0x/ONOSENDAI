@@ -207,6 +207,7 @@ import { useSecrets } from './useSecrets'
 import { useToast } from './useToast'
 import { useChainUi } from './useChainUi'
 import type { SelfCrypto } from '../lib/muteList'
+import { forgetUnsent, unsentOf } from '../lib/unsent'
 import { kvGet, kvSet } from '../lib/kvStore'
 
 /**
@@ -2790,6 +2791,8 @@ function takeInStored(pubkey: string, stored: { events: NostrEvent[]; published:
   const queued = extra.filter((e) => !onRelays.has(e.id) && now.published[e.id] === 'ok')
   const published = queued.length === 0 ? now.published : { ...now.published }
   for (const e of queued) published[e.id] = 'queued'
+  // What no relay has goes back to 'queued' here: the kept unsent list must be read again (lib/unsent.ts).
+  forgetUnsent()
   if (queued.length > 0) useCyberspace.setState({ published })
   if (now.events[0]?.pubkey === pubkey) saveChain(now.events, published, now.chain)
   return true
@@ -3923,7 +3926,7 @@ const STALE_STUCK_MESSAGE = 'One of your unsent actions is a hop in the old proo
  */
 export function retireStaleFormat(): string | null {
   const before = useCyberspace.getState()
-  const cut = staleFormatCut(before.events, (id) => before.published[id] === 'ok')
+  const cut = staleFormatCut(before.events, (id) => before.published[id] === 'ok', unsentOf(before.events, before.published))
   if (!cut) return null
   // Whatever was computing or being bought was for the chain as it stood,
   // and the head is about to change under it: stopped as a respawn stops it

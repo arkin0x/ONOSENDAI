@@ -19,6 +19,7 @@
  * The decision is lib/chainHold.ts chainStatusOf; this file only draws it.
  */
 
+import { unsentOf } from '../lib/unsent'
 import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react'
 import { ConfirmModal } from './ConfirmModal'
 import { connected } from '../lib/relay'
@@ -98,7 +99,8 @@ export function useChainStatus(): ChainStatus | null {
   const canonicalLate = useCyberspace((s) => s.canonicalLate)
   const { online, relayUp } = useConnectivity()
   return useMemo(() => {
-    const waiting = events.filter((e) => published[e.id] !== 'ok').length
+    // The backlog, kept as the chain grows (lib/unsent.ts), not counted over the whole chain.
+    const waiting = unsentOf(events, published).length
     return chainStatusOf({ live, held, conflict, waiting, online, relayUp, canonicalLate })
   }, [live, held, conflict, events, published, online, relayUp, canonicalLate])
 }

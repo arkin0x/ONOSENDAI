@@ -946,8 +946,9 @@ body {
  * full size, where shrinking the type to keep them abreast would not have.
  *
  * This is the overlap rule the layout is built on, so it is derived rather than
- * picked: 352px in, plus the block, plus a margin, has to clear half the
- * viewport less the compass's own half width.
+ * picked: 352px in (the stack beside the open menu, its furthest in), plus
+ * the block, plus a margin, has to clear half the viewport less the
+ * compass's own half width.
  */
 @media (min-width: 1660px) {
   .bits__grid {
@@ -2589,7 +2590,7 @@ select.avatars__input option:checked {
  */
 .deploybar {
   position: fixed;
-  right: var(--controls-right);
+  right: calc(var(--controls-right) + var(--hud-shift-l) + var(--hud-shift-r));
   z-index: 101;
   display: flex;
   flex-direction: column;
@@ -2900,14 +2901,14 @@ select.avatars__input option:checked {
  * from the right edge and is as wide as what it says, no wider: pinned to
  * both edges it stretched across the whole bottom with a field of nothing to
  * the right of the button. The cap keeps it clear of the menu button's
- * corner on the left (--menu-left and --menu-size, 352px and 46px in on a
- * desktop).
+ * corner on the left (--menu-left and --menu-size), and of the open menu's
+ * columns on a desktop (the --hud-shift terms).
  */
 .spectate {
   position: fixed;
   right: var(--controls-right);
   bottom: 14px;
-  max-width: calc(100vw - var(--controls-right) - var(--menu-left) - var(--menu-size) - 20px);
+  max-width: calc(100vw - var(--controls-right) - var(--menu-left) - var(--menu-size) - 20px - var(--hud-shift-l) - var(--hud-shift-r));
   z-index: 101;
   display: flex;
   align-items: center;
@@ -4752,7 +4753,7 @@ select.avatars__input option:checked {
    (review of #592). */
 @media (max-height: 520px) and (min-width: 641px) {
   .app:has(.flyorbs) .chatdock {
-    left: calc(var(--menu-left) + 3 * var(--menu-size) + 2 * var(--routeov-gap) + 16px);
+    left: calc(var(--menu-left) + 3 * var(--menu-size) + 2 * var(--routeov-gap) + 16px + var(--hud-mid));
   }
 }
 /* A phone upright: the chat spans the width from 80px up, which is where the
@@ -5556,7 +5557,7 @@ select.avatars__input option:checked {
 }
 .routeov,
 .deploybar--pad {
-  right: calc(var(--controls-right) + var(--controls-width) + var(--routeov-gap));
+  right: calc(var(--controls-right) + var(--controls-width) + var(--routeov-gap) + var(--hud-shift-l) + var(--hud-shift-r));
 }
 .routeov--cloud { border-color: rgba(47, 129, 247, 0.6); }
 .routeov--blocked { border-color: rgba(255, 59, 107, 0.6); }
@@ -6232,59 +6233,54 @@ select.avatars__input option:checked {
 
 /* ---------- Controls on desktop ----------
  *
- * The cluster and the hamburger both sit in screen corners, which on a phone is
- * empty space and on a desktop is where the HUD columns live: 320px of panels on
- * the left and 300px on the right, both able to run the full height. So on a
- * wide screen they move inboard, into the gap between the columns, rather than
- * underneath them.
+ * The cluster, the hamburger, the instrument stack and the compass all sit
+ * in the screen's corners, on a desktop or a tablet held sideways as on a
+ * phone, where a thumb can reach them (owner, 2026-11-22: "the controls on
+ * the left and right actually be adjacent to the edges of the screen on
+ * wider devices"). They used to stand 332px and 352px in on every wide
+ * screen, clear of the menu's columns even with the menu shut, which on a
+ * tablet left them a hand's width from either edge.
+ *
+ * The open menu's columns (320px of panels on the left, 300px on the right)
+ * do cover those corners, so while it is open everything slides inboard to
+ * stand a gap inside them. See "The HUD's edges and the open menu" at the
+ * end of this file: the slide is a `translate`, measured from the columns.
  */
 @media (min-width: 1101px) {
   /* The pad, the commit block and the route overlay all read these. */
   :root {
-    --controls-right: 332px;
-    --menu-left: 352px;
-    --menu-bottom: 14px;
+    --controls-right: var(--hud-edge-r);
+    --menu-left: var(--hud-edge-l);
+    --menu-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
     --menu-size: 46px;
   }
 
   .touchhint {
-    right: 332px;
+    right: var(--controls-right);
   }
 
-  /* The instrument stack, for the same reason as the hamburger: flush left
-   * on a desktop is underneath 320px of panels, so it moves to the scene's
-   * left edge, 352px in. It stays at the top. It used to follow the compass
-   * to the bottom and sit above the hamburger, which put the one readout you
-   * drive by in the corner you look at least, behind the pad's row of
-   * buttons on a short window.
-   * The compass is top-right on every width now (the chat took the bottom
-   * centre). Flush right on a desktop is underneath the 300px panel column,
-   * so it moves to the scene's right edge, 332px in, like the pad, at its
-   * full 120px; and the view menu hangs off it, directly beneath. */
+  /* The instrument stack stays at the top, at the scene's left edge, and
+   * the compass at the top right (the chat took the bottom centre), at its
+   * full 120px on a desktop; the view menu hangs off it, directly beneath. */
   :root {
-    --instruments-left: 352px;
-    --compass-right: 332px;
+    --instruments-left: var(--hud-edge-l);
+    --compass-right: var(--hud-edge-r);
     --compass-size: 120px;
   }
 
   .viewmenu {
     top: 140px;
-    right: 332px;
+    right: var(--compass-right);
   }
 
-  /* The chat sits between the hamburger (352px in, 46px wide) and the pad
-   * column (332px in from the right, 122px wide), never under either. The
-   * chip centres on the scene, which is 10px right of the viewport's centre
-   * with 320px of panels on the left and 300px on the right.
+  /* The chat sits between the hamburger (46px wide) and the pad column
+   * (122px wide), never under either: 26px past the one and 16px short of
+   * the other. The chip centres on the scene.
    * `.app` because the base `.chatdock` rule comes later in this file and
    * its left and right won on source order, so the dock sat under both. */
   .app .chatdock {
-    left: 424px;
-    right: 470px;
-  }
-
-  .chatdock__chip {
-    left: calc(50% + 10px);
+    left: calc(var(--menu-left) + var(--menu-size) + 26px + var(--hud-mid));
+    right: calc(var(--controls-right) + var(--controls-width) + 16px + var(--hud-mid));
   }
 }
 
@@ -7025,7 +7021,7 @@ select.avatars__input option:checked {
   /* Stops short of the 3D compass, top right (the stack's left edge and
      the compass reserve, .instruments): a long VIEWING label ran under it
      and covered its tap target (smoke test, 2026-10-16). */
-  max-width: calc(100vw - var(--instruments-left) - var(--compass-reserve));
+  max-width: calc(100vw - var(--instruments-left) - var(--compass-reserve) - var(--hud-shift-l) - var(--hud-shift-r));
 }
 
 .hyperbar__glyph {
@@ -8095,8 +8091,8 @@ select.avatars__input option:checked {
 
 @media (min-width: 1101px) {
   .hosaka-pulse {
-    left: 352px;
-    bottom: 70px; /* the button's 14px + 46px, and a 10px gap */
+    left: var(--menu-left);
+    bottom: calc(var(--menu-bottom) + 56px); /* the button's 46px, and a 10px gap */
     width: 46px; /* the desktop button's width */
   }
 }
@@ -8842,9 +8838,6 @@ select.avatars__input option:checked {
   backdrop-filter: blur(8px);
   box-shadow: 0 0 16px rgba(255, 216, 77, 0.18);
   animation: starname-in 160ms ease-out both;
-}
-@media (min-width: 1101px) {
-  .starname { left: calc(50% + 10px); }
 }
 .starname__label {
   display: inline-flex;
@@ -10151,7 +10144,7 @@ select.avatars__input option:checked {
 .hyperbar.buildbar,
 .regionchip {
   margin-left: env(safe-area-inset-left, 0px);
-  width: calc(100vw - var(--instruments-left) - var(--compass-reserve) - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  width: calc(100vw - var(--instruments-left) - var(--compass-reserve) - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - var(--hud-shift-l) - var(--hud-shift-r));
   max-width: none;
 }
 .hyperbar.buildbar {
@@ -11463,7 +11456,7 @@ a.feed__act { text-decoration: none; }
    controls' column, which JUMP, DOWN and the LOOK ball now share. */
 @media (min-width: 641px) {
   .app:has(.touchpad--mode-walk) .chatdock {
-    left: calc(var(--walkpad-left) + var(--controls-width) + var(--routeov-gap));
+    left: calc(var(--walkpad-left) + var(--controls-width) + var(--routeov-gap) + var(--hud-mid));
   }
 }
 .touchpad__key--gravity {
@@ -11706,13 +11699,13 @@ a.feed__act { text-decoration: none; }
    the fly buttons' column, as it starts past theirs (review of #592): on a
    desktop or a tablet, on a phone upright, and on a phone on its side. */
 @media (min-width: 641px) {
-  .app:has(.scanorbs) .chatdock { left: calc(var(--menu-left) + var(--scanorbs-w) + 16px); }
+  .app:has(.scanorbs) .chatdock { left: calc(var(--menu-left) + var(--scanorbs-w) + 16px + var(--hud-mid)); }
 }
 @media (max-width: 640px) and (min-height: 521px) {
   .app:has(.scanorbs) .chatdock { left: calc(var(--menu-left) + var(--scanorbs-w) + var(--routeov-gap)); }
 }
 @media (max-height: 520px) and (min-width: 641px) {
-  .app:has(.scanorbs) .chatdock { left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap) + var(--scanorbs-w) + 16px); }
+  .app:has(.scanorbs) .chatdock { left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap) + var(--scanorbs-w) + 16px + var(--hud-mid)); }
 }
 
 /* ---------- LOSING SYNC ----------
@@ -12847,3 +12840,99 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .logout .logout__npub { font-size: 9px; letter-spacing: 0.08em; color: var(--accent); }
 .logout .logout__note { color: rgba(200, 245, 255, 0.75); }
 .logout .logout__note--warn { color: var(--warn); }
+
+/* ---------- The HUD's edges and the open menu ----------
+ *
+ * On a desktop or a tablet held sideways (from 1101px) every control stands
+ * at the screen's edge with a 16px margin, past any safe-area inset, where a
+ * thumb reaches it (owner, 2026-11-22: "the controls on the left and right
+ * actually be adjacent to the edges of the screen on wider devices ... if
+ * the menu is opened, the controls go inward so they aren't covered by the
+ * menu"). That is the movement pad in every mode, the commit block, JUMP and
+ * DOWN, the LOOK ball, the menu button, the instrument stack's chips, the
+ * compass and its menu, and the chat.
+ *
+ * The open menu's columns cover both edges, so while it is open the HUD
+ * moves inboard to stand 16px inside them. hooks/useMenuInset.ts measures
+ * the columns (their inner edges, in viewport pixels) into --hud-cover-l
+ * and --hud-cover-r while the menu is open beside the scene, and clears
+ * them as it closes; the shifts below come from those numbers, never from
+ * a column width written down here.
+ *
+ * The move is a `translate`, transitioned, so it is composited and nothing
+ * is laid out again while it runs: each control keeps its edge position and
+ * slides by its side's shift. The `translate` property composes with any
+ * `transform` a control already has (the chat chip's centring, the menu
+ * button's press). What spans the two sides (the chat dock, the route
+ * overlay and deploy bar, the bars in the instrument stack) moves the same
+ * way and gives up the width the columns take (the --hud-shift terms in
+ * their own rules). On a phone the menu covers the whole scene instead, the
+ * shifts stay 0, and nothing here moves.
+ */
+:root {
+  --hud-edge-l: calc(16px + env(safe-area-inset-left, 0px));
+  --hud-edge-r: calc(16px + env(safe-area-inset-right, 0px));
+  --hud-shift-l: 0px;
+  --hud-shift-r: 0px;
+  /* The chat dock's half-shares: how far its centre moves, and how much
+     width each side gives up. */
+  --hud-mid: calc((var(--hud-shift-l) + var(--hud-shift-r)) / 2);
+  --hud-skew: calc((var(--hud-shift-l) - var(--hud-shift-r)) / 2);
+  --hud-slide: translate 240ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@media (min-width: 1101px) {
+  :root {
+    /* 16px inside the column, the gap the columns keep from the screen. */
+    --hud-shift-l: max(0px, calc(var(--hud-cover-l, 0px) + 16px - var(--hud-edge-l)));
+    --hud-shift-r: max(0px, calc(var(--hud-cover-r, 0px) + 16px - var(--hud-edge-r)));
+  }
+}
+.instruments,
+.hamburger-menu,
+.hosaka-pulse,
+.flyorbs,
+.touchpad--mode-walk,
+.routeov,
+.deploybar {
+  translate: var(--hud-shift-l) 0;
+}
+.touchpad:not(.touchpad--mode-walk),
+.touchops,
+.walkside,
+.orbsquare.walklook,
+.compass-3d,
+.viewmenu,
+.touchhint,
+.spectate {
+  translate: calc(-1 * var(--hud-shift-r)) 0;
+}
+.chatdock,
+.chatdock__chip,
+.starname {
+  translate: var(--hud-skew) 0;
+}
+/* The chips inside the star and GOAL group ride with the group. */
+.goalgroup > .chatdock__chip { translate: none; }
+.instruments,
+.hosaka-pulse,
+.flyorbs,
+.routeov,
+.deploybar,
+.touchops,
+.orbsquare.walklook,
+.compass-3d,
+.viewmenu,
+.touchhint,
+.spectate,
+.chatdock,
+.chatdock__chip,
+.starname {
+  transition: var(--hud-slide);
+}
+/* These already ease something of their own; the slide joins it. */
+.hamburger-menu { transition: background 0.2s ease, transform 0.2s ease, var(--hud-slide); }
+.touchpad,
+.walkside { transition: bottom 160ms ease, var(--hud-slide); }
+@media (prefers-reduced-motion: reduce) {
+  :root { --hud-slide: translate 0s; }
+}

@@ -127,7 +127,7 @@ import { entriesIn, isListed, noteStored, onHiddenChange, reloadLocalView, saveR
 import { builtInLook, builtInLookTags, doorHeightOf, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedWrapper, setSealedLookFetch, wireLook, wireOpenLook, type LookName, type LookPose } from '../lib/looks'
 import { openSealedLookPayload, sealLookTags, sealedLookAddresses, sealedLookLimit } from '../lib/sealedLooks'
 import { dropPiece, forgetPieceKeys, notePieceKey, primePiece, notePieceKeys, pieceAddresses, pieceWasOpened, setLocalPieces } from '../lib/pieceKeys'
-import { openOnePiece, pieceRefusal, planPieces, planPiecesNow, pieceShape, sealedPiecesOf, signerRefusal, type PlannedPiece } from '../lib/pieces'
+import { openOnePiece, pieceRefusal, planPieces, planPiecesNow, sealedPiecesOf, type PlannedPiece } from '../lib/pieces'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -5057,8 +5057,9 @@ export const useShards = create<ShardsState>((set, get) => {
             const remote = cs.signerKind === 'nip46'
             shard = plan.parent
             innerTemplate = shardInnerTemplate(shard, at, plane, createdAt, credit)
-            const parentShape = wantsReference(shard) ? pieceShape(JSON.stringify(toPayload(withAuthoredConstrain(shard))), placementId()) : innerTemplate
-            const tooBig = plan.pieces.map((p) => pieceRefusal(p, remote)).find((r) => r !== null) ?? (remote ? signerRefusal(parentShape) : null)
+            // Each piece is held to the limit: splitting is the way under it. The
+            // parent is asked like any request (TRY ANYWAY past it, #861).
+            const tooBig = plan.pieces.map((p) => pieceRefusal(p, remote)).find((r) => r !== null) ?? null
             if (tooBig) {
               set({ deployStatus: 'error', deployError: tooBig })
               return

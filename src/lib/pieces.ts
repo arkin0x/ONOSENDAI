@@ -37,7 +37,7 @@ import { attributed } from './client'
 import type { EventTemplate, NostrEvent } from './events'
 import { OBJECT_KIND, OBJECT_PREVIEW, REGION_KEY_DERIVATION } from './hidden'
 import { ALGO } from './shardCrypto'
-import { NIP44_MAX_PLAINTEXT_BYTES, nip46PlaintextBytes, signerRequestTooBigMessage } from './signerRequestSize'
+import { NIP44_MAX_PLAINTEXT_BYTES, nip46PlaintextBytes } from './signerRequestSize'
 import { withNoBroadcast } from './noBroadcast'
 import { isSealedObject, openPiece, pieceAddresses } from './pieceKeys'
 
@@ -170,13 +170,6 @@ const REQUEST_ID = 'xxxxxxxxxxxx-99999'
 /** The NIP-44 plaintext a remote signer needs to sign this template (lib/signerRequestSize.ts), as the store sends it: with the client tag and the tutorial's tag. */
 export function signerBytes(template: EventTemplate): number {
   return nip46PlaintextBytes('sign_event', [JSON.stringify(attributed(withNoBroadcast(template)))], REQUEST_ID)
-}
-
-/** The words when a template is too big for a remote signer, or null. */
-export function signerRefusal(template: EventTemplate): string | null {
-  const t = attributed(withNoBroadcast(template))
-  const bytes = signerBytes(template)
-  return bytes > NIP44_MAX_PLAINTEXT_BYTES ? signerRequestTooBigMessage('sign_event', [JSON.stringify(t)], bytes) : null
 }
 
 /**

@@ -9,8 +9,8 @@
  * asking a signer that had moved to a tablet, and nothing on screen said so).
  *
  * A request counts as asked once nostr-tools has it; one the size guard
- * (signerRequestSize.ts) holds back, or asks about first, is not counted
- * until it goes. An answer is anything the signer sent back for a request, a
+ * (signerRequestSize.ts) refuses, past what the signer relay carries, is
+ * never counted. An answer is anything the signer sent back for a request, a
  * refusal included: a signer that says no is still there. A request that
  * failed on the way (no relay took it) is no answer.
  */
@@ -32,20 +32,15 @@ export interface SignerActivity {
    */
   stuckAt: number | null
   /**
-   * This signer answered a request bigger than some signer apps can read
-   * (signerRequestSize.ts): it handles big messages, so it is not warned
-   * about them again in this session.
-   */
-  readsBig: boolean
-  /**
-   * When a signature waiting on such a big request, sent anyway, ran out of
-   * time (ms): what the "may not handle messages this big" chip keys on,
-   * until a big request is answered or the chip is put away.
+   * When a signature waiting on a request past 65,535 bytes
+   * (signerRequestSize.ts) ran out of time (ms): what the "may not handle
+   * messages this big" chip keys on, until a big request is answered or the
+   * chip is put away.
    */
   bigSilentAt: number | null
 }
 
-const EMPTY: SignerActivity = { askedAt: null, answeredAt: null, waitingSince: null, stuckAt: null, readsBig: false, bigSilentAt: null }
+const EMPTY: SignerActivity = { askedAt: null, answeredAt: null, waitingSince: null, stuckAt: null, bigSilentAt: null }
 
 interface ActivityState {
   bySession: Record<string, SignerActivity>
@@ -114,7 +109,7 @@ const tracked = new WeakSet<object>()
  * Watch every request `bunker` sends, as `session`'s. Every NIP-46 call in
  * nostr-tools (connect, get_public_key, sign_event, nip44_*) goes through
  * sendRequest, so this sees them all. Call it before guardRequestSize, so a
- * request the guard holds back is never counted. Idempotent.
+ * request the guard refuses is never counted. Idempotent.
  */
 export function trackActivity<T extends Requester>(bunker: T, session: string): T {
   if (tracked.has(bunker)) return bunker
@@ -143,12 +138,13 @@ export function noteSignerStuck(session: string | null | undefined): void {
   update(session, (a) => ({ ...a, stuckAt: Date.now(), bigSilentAt: null }))
 }
 
-/** `session`'s signer answered a big request: it reads big messages, and is not warned about them again. */
-export function noteReadsBig(session: string): void {
-  update(session, (a) => ({ ...a, readsBig: true, bigSilentAt: null }))
+/** `session`'s signer answered a request past 65,535 bytes: it reads big messages, so the big-message chip goes. */
+export function noteBigAnswered(session: string): void {
+  if (activityOf(session).bigSilentAt === null) return
+  update(session, (a) => ({ ...a, bigSilentAt: null }))
 }
 
-/** A signature waiting on a big request, sent anyway, ran out of time with `session`'s signer. */
+/** A signature waiting on a request past 65,535 bytes ran out of time with `session`'s signer. */
 export function noteBigSilent(session: string | null | undefined): void {
   if (!session) return
   update(session, (a) => ({ ...a, bigSilentAt: Date.now(), stuckAt: null }))

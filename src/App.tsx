@@ -45,7 +45,7 @@ import { parseDemoRoute } from './lib/demoRoute'
 import { startWorkshopRoute } from './lib/workshopRoute'
 import { restoreAfterUnfinishedTour, useDemo } from './store/useDemo'
 import { ToastChip } from './hud/ToastChip'
-import { BigRequestQuestion, SignerStuckChip, SignerUiHost } from './hud/SignerControls'
+import { SignerStuckChip, SignerUiHost } from './hud/SignerControls'
 import { TutorialToast } from './hud/TutorialToast'
 import { watchTutorialToast } from './tutorial/toast'
 import { StarNickname } from './hud/StarNickname'
@@ -93,6 +93,7 @@ import { useEscape, useModalUp } from './hooks/useEscape'
 import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useMenuOpen } from './hooks/useMenuOpen'
+import { armMenuSlide } from './hooks/useMenuInset'
 import { useTargets } from './hooks/useTargets'
 import { startCalibration } from './lib/calibration'
 import { startPublisher } from './lib/publisher'
@@ -233,6 +234,9 @@ export default function App(): JSX.Element {
   // the hamburger on both, open or closed is kept across a refresh, and the
   // default above is only for a first visit (hooks/useMenuOpen.ts).
   const [panelsOpen, setPanelsOpen] = useMenuOpen(!isMobile)
+  // The HUD slides inside the menu's columns as it opens and closes on a
+  // wide screen, but not as the page loads with it open (hooks/useMenuInset).
+  useEffect(armMenuSlide, [])
   const showPanels = panelsOpen && !spectating
 
   // Reading a hidden thing owns the screen: the top-aligned modal sits where
@@ -490,10 +494,6 @@ export default function App(): JSX.Element {
       <DeployBar pad={showPad && !offerUp && !modalUp} />
       {/* One boundary for the record and its neighbors: a crash in one modal
           shows its error where the modal was, and the scene stays up. */}
-      {/* Outside the modals' boundary: every remote signature waits on its answer, so a crash beside it must not hide it. */}
-      <CrashNote where="the signer question">
-        <BigRequestQuestion />
-      </CrashNote>
       <CrashNote where="a modal" closesCard>
         <StashModals />
         {/* LOG OUT's confirm and PAIR AGAIN's QR, from the Identity panel or the chip. */}

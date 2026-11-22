@@ -76,14 +76,14 @@ describe('the dock rules', () => {
     expect(dock).toContain('left: var(--menu-left)')
     expect(dock).toContain('bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap))')
     expect(dock).toContain('max-height: 35dvh')
-    expect(rule('.routeov,\n.deploybar--pad')).toContain('right: calc(var(--controls-right) + var(--controls-width) + var(--routeov-gap))')
+    expect(rule('.routeov,\n.deploybar--pad')).toContain('right: calc(var(--controls-right) + var(--controls-width) + var(--routeov-gap) + var(--hud-shift-l) + var(--hud-shift-r))')
     expect(CSS).toContain('.app:has(.hosaka-pulse) .routeov,\n.app:has(.hosaka-pulse) .deploybar {')
   })
 
   it('leaves no top placement or old height cap on the bar', () => {
     const base = rule('.deploybar')
     expect(base).not.toMatch(/\btop:/)
-    expect(base).toContain('right: var(--controls-right)')
+    expect(base).toContain('right: calc(var(--controls-right) + var(--hud-shift-l) + var(--hud-shift-r))')
     expect(CSS).not.toMatch(/\.deploybar \{\s*left: 332px/)
     expect(CSS).not.toMatch(/\.deploybar \{\s*max-height: 30vh/)
   })

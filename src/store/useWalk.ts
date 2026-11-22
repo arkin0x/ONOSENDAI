@@ -78,13 +78,35 @@
  * | the fall | nothing: an animation on this device at WALK_GRAVITY, with the geometry the walls knew when it began |
  * | (A) it lands on a floor that holds you | one hop, from where it left off to the landing |
  * | (B) a press moves you in mid-air, the way you face as on the ground (a diagonal included) | one hop to that mid-air point; the fall goes on from there |
- * | (C) it reaches the last gibson a hop can afford | one hop there, and you hover |
+ * | (C) it reaches the last gibson a hop can afford | one hop there, and you hover (Hard Mode Gravity only: see below) |
  * | (D) gravity goes off mid-fall | one hop to where you are, and you float |
  * | Up (Space, R, the pad's JUMP) standing | a jump of 5 (JUMP_HEIGHT): back where it left, nothing; anywhere else, as a fall |
  * | (F) a fresh JUMP press in the air: falling, after a jump, or in a bounce's arc | a double jump of 3 (DOUBLE_JUMP_HEIGHT) from where you are, never lowering the arc, once until the next landing (a bounce's included): nothing of its own, the arc just goes on; where it comes down is published as any fall's landing |
  * | Down, or a held Up off a floor | nothing: no flying |
  * | (E) a landing on a face with `bounce` (EXPERIMENTAL, lib/walkBounce.ts) | the landing's hop, only when it is somewhere new: one hop straight from the landing before it, however you steered in the air, while that hop is affordable (else the steer points, as (B)); the launch is the next arc of the same fall, so bouncing in place makes nothing. Down just before the landing absorbs it: it lands as (A) |
  * | (E) a step up onto a fixed-height bounce pad, or any arrival onto a springboard (a level walk onto a flush pad included) | the walk segment closes there, a normal hop, and the launch is a jump from it: bouncing back onto the pad makes nothing more. A "reflect" pad does nothing on arrival, springboard or not: it fell from nowhere. Down just before absorbs it |
+ *
+ * NOTHING TO CATCH YOU (arkinox, 2026-11-22: "when you have gravity on, and
+ * you make a move where you would fall until you reached an LCA you couldn't
+ * cross, let's automatically turn gravity off so you don't fall forever";
+ * and "you should be able to jump across a gap without gravity turning off.
+ * it should only turn off when you're definitely about to fall forever"). A
+ * fall that would never land, (C) with nothing straight below it before a
+ * grid boundary no hop from here can afford, turns gravity off, but only at
+ * the first moment no input left could save you ("we don't want to turn off
+ * gravity if the user jumping or double jumping would save them"): the
+ * double jump if it is not spent, and steering in the air, best case
+ * (walkGravity canStillLand), can no longer bring you over any wall's box
+ * while you are still above it. So a jump across a gap, or a fall past a
+ * ledge a double jump can still reach, keeps gravity; a step off into the
+ * void with nothing in reach turns it off at once, and the step stays where
+ * it put you. It is asked as the fall goes (tickFall, every RESCUE_MS, and
+ * again after every move in the air), and a fall it gives up on ends where it
+ * is, as (D), with the GRAVITY OFF chip to say why. Gravity stays off until
+ * you switch it on. Hard Mode Gravity (a Settings switch, off
+ * by default, kept on this device) keeps today's fall to the invisible floor.
+ * The search for that floor (walkGravity fallReach, 85 asks of the budget) is
+ * kept per height and region (fallReachAt), so a walk along it asks once.
  *
  * The hops a fall makes are queued only when it resolves (A, C or D) or
  * bounces somewhere new (E), so none is proved or published while you are
@@ -119,8 +141,8 @@ import { MAX_COMPUTE_HEIGHT, checkWalkLanes, dropWalkLanes, samePosition, setWal
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { standing, walkStep, type WalkStep } from './walkStep'
 import { planWalkMove, walkHeading, type Stepper, type WalkHeading } from '../lib/walkSlide'
-import { anyBounce, floorPad, stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
-import { DOUBLE_JUMP_SPEED, JUMP_HEIGHT, JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, launchSpeed, loadGravity, reachedHeight, saveGravity } from './walkGravity'
+import { anyBounce, floorPad, stepLimit, takeWallWait, wallBoxes, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
+import { DOUBLE_JUMP_SPEED, JUMP_HEIGHT, JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, fallReach, jumpRise, launchSpeed, loadGravity, loadHardGravity, nothingCatches, canStillLand, reachedHeight, saveGravity, saveHardGravity, type FallLimit, type RescueBox } from './walkGravity'
 import { launchHeight } from '../lib/walkBounce'
 import { walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
 import { heldNow, holdReleaseAll } from './walkHold'
@@ -262,6 +284,12 @@ export interface WalkState {
   from: WalkFrom
   /** GRAVITY on or off. Off mid-fall ends the fall where it is (one hop there). */
   setGravity: (on: boolean) => void
+  /**
+   * Hard Mode Gravity, kept on this device, off by default (arkinox,
+   * 2026-11-22): on, gravity never turns itself off over nothing (gravityOffOverVoid).
+   */
+  hardGravity: boolean
+  setHardGravity: (on: boolean) => void
   /** Turn WALK on. Only at your own head; a VIEW in progress ends first. */
   enter: () => void
   /** Stop the walk and go back to HOP. The pad's way out, back to the mode WALK came from, is padMode `leaveWalk`. */
@@ -298,6 +326,7 @@ export const useWalk = create<WalkState>((set, get) => ({
   handed: 0,
   behind: 0,
   gravity: loadGravity(),
+  hardGravity: loadHardGravity(),
   falling: false,
   from: 'hop',
 
@@ -311,6 +340,12 @@ export const useWalk = create<WalkState>((set, get) => ({
     if (!on) { if (fall) endFall(reachedPoint(fall, nowMs())); return }
     refreshDown()
     fallIfAirborne()
+  },
+
+  setHardGravity: (on) => {
+    if (get().hardGravity === on) return
+    saveHardGravity(on)
+    set({ hardGravity: on })
   },
 
   enter: () => {
@@ -661,6 +696,12 @@ interface Fall {
   launch: Position | null
   /** The double jump (F) is spent: once per time in the air, back with every landing, a bounce's included. */
   doubled: boolean
+  /** Where it comes to rest was asked while walls under it were still on their way: no rescue is given up on until it is asked again. */
+  unsure: boolean
+  /** The walls' boxes from the anchor (rescueBoxes), for the anchor and walls they were measured from; null until asked, or with walls on their way. */
+  rescue: { from: Position; items: WallItem[]; boxes: RescueBox[] } | null
+  /** When the rescue was last asked (ms): every RESCUE_MS at most, unless the anchor moved. */
+  rescuedAt: number
 }
 
 /** Keep a fall's numbers in step with its bigints. */
@@ -714,6 +755,113 @@ function affordIn(plane: number): (from: Position, to: Position) => boolean {
   return (from, to) => segmentAffordable(from, to, plane)
 }
 
+/**
+ * fallReach (store/walkGravity.ts), kept: the search for the last gibson a
+ * fall from here can afford is 85 asks of the segment budget, and with
+ * nothing below it was asked again on every crossing of a walk under
+ * gravity. Its answer depends only on the place along `g` (a straight hop
+ * changes one axis), the plane, and the budget (the calibration and the hop
+ * ceiling), so it is kept by those: a walk along one height in one region
+ * asks once. A new calibration or ceiling forgets them all.
+ */
+const reachKept = new Map<string, bigint>()
+let reachKeptFor: { ms: unknown; hop: number } = { ms: undefined, hop: Number.NaN }
+/** How many answers are kept before they are all forgotten: each is a few dozen bytes. */
+const REACH_KEPT_MAX = 512
+
+function fallReachAt(from: Position, plane: number, g: AxisDirection): bigint {
+  const ms = useCalibration.getState().cantorMsByHeight
+  const hop = recommendedHopHeight()
+  if (reachKeptFor.ms !== ms || reachKeptFor.hop !== hop) {
+    reachKept.clear()
+    reachKeptFor = { ms, hop }
+  }
+  const key = `${plane}:${g.axis}${g.dir}:${from[g.axis]}`
+  let reach = reachKept.get(key)
+  if (reach === undefined) {
+    reach = fallReach(from, affordIn(plane), g)
+    if (reachKept.size >= REACH_KEPT_MAX) reachKept.clear()
+    reachKept.set(key, reach)
+  }
+  return reach
+}
+
+/** Where a fall from `at` along `g` comes to rest (walkGravity fallLimit), with its reach kept (fallReachAt). */
+function limitAt(at: Position, items: readonly WallItem[], plane: number, g: AxisDirection): FallLimit {
+  return fallLimit(at, items, affordIn(plane), g, fallReachAt(at, plane, g))
+}
+
+/** Calm, and long enough to read: why gravity went off. */
+export const GRAVITY_OFF_VOID = { label: 'GRAVITY OFF', meta: 'nothing below to catch you' } as const
+
+/**
+ * A move whose fall would never land (walkGravity nothingCatches): unless
+ * Hard Mode Gravity is on, gravity goes off, kept on this device as Z would
+ * keep it, and the GRAVITY OFF chip says why. It never comes back on by
+ * itself. The caller ends a fall in the air where it is, as (D). True when
+ * gravity went off.
+ */
+function gravityOffOverVoid(): boolean {
+  const walk = useWalk.getState()
+  if (walk.hardGravity || !walk.gravity) return false
+  saveGravity(false)
+  useWalk.setState({ gravity: false })
+  useToast.getState().show({ ...GRAVITY_OFF_VOID, mark: 'walk', ms: BRIEF_TOAST_MS * 2 })
+  return true
+}
+
+/** How often, in ms, a fall with nothing below asks again whether any input could still land it (tickFall). */
+export const RESCUE_MS = 50
+
+/**
+ * The walls' boxes as the rescue check reads them (walkGravity RescueBox):
+ * from the column and height of `at`, across and along gravity `g`. Null
+ * while a wall is still on its way: nothing is given up on until it stands.
+ */
+function rescueBoxes(at: Position, items: readonly WallItem[], g: AxisDirection): RescueBox[] | null {
+  const { boxes, pending } = wallBoxes(items)
+  if (pending) return null
+  const across = (['x', 'y', 'z'] as const).filter((a) => a !== g.axis)
+  const h0 = heightOf(at, g)
+  return boxes.map(({ lo, hi }) => {
+    let d = 0n
+    for (const a of across) {
+      const gap = at[a] < lo[a] ? lo[a] - at[a] : at[a] > hi[a] ? at[a] - hi[a] : 0n
+      if (gap > d) d = gap
+    }
+    const a = heightOf(lo, g)
+    const b = heightOf(hi, g)
+    return { d: Number(d), top: Number((a > b ? a : b) - h0) }
+  })
+}
+
+/**
+ * Whether any input left could still land a walker at `at` (height `h` above
+ * it, moving up at `v`, the double jump in hand when `canDouble`) on a wall
+ * among `items` before `bottom` (walkGravity canStillLand). True while a wall
+ * is on its way.
+ */
+function rescuable(at: Position, items: readonly WallItem[], g: AxisDirection, h: number, v: number, canDouble: boolean, bottom: bigint): boolean {
+  const boxes = rescueBoxes(at, items, g)
+  return boxes === null || canStillLand(h, v, canDouble, Number(bottom), boxes)
+}
+
+/**
+ * tickFall's question, for a fall with nothing below it: true when no input
+ * left could land it (canStillLand), from where the arc is now (`r` above h0,
+ * `t` s in). The boxes are measured once per anchor and walls, so a frame
+ * that asks does arithmetic only.
+ */
+function lostInAir(f: Fall, now: number, r: number, t: number): boolean {
+  f.rescuedAt = now
+  if (!f.rescue || f.rescue.from !== f.anchor || f.rescue.items !== f.items) {
+    const boxes = rescueBoxes(f.anchor, f.items, f.down)
+    if (!boxes) { f.rescue = null; return false }
+    f.rescue = { from: f.anchor, items: f.items, boxes }
+  }
+  return !canStillLand(r - f.base, arcSpeed(f.v0, t), !f.doubled, f.bottomN - f.base, f.rescue.boxes)
+}
+
 /** The fall in the air, for tests and the DEV handle: read only. */
 export function fallState(): Readonly<Fall> | null {
   return fall
@@ -727,7 +875,7 @@ function beginFall(from: Position, v0: number, top: bigint, bottom: bigint, land
   clearSettle()
   const hadOpen = useWalk.getState().open !== null
   if (hadOpen) closeOpen()
-  fall = { down: g, anchor: { ...from }, waypoints: [], h0: heightOf(from, g), t0: nowMs(), v0, top, bottom, lands, peak: arcPeak(v0, Number(top)), topN: 0, bottomN: 0, base: 0, topSince: 0, air: null, items, plane, launch: null, doubled: false }
+  fall = { down: g, anchor: { ...from }, waypoints: [], h0: heightOf(from, g), t0: nowMs(), v0, top, bottom, lands, peak: arcPeak(v0, Number(top)), topN: 0, bottomN: 0, base: 0, topSince: 0, air: null, items, plane, launch: null, doubled: false, unsure: false, rescue: null, rescuedAt: Number.NEGATIVE_INFINITY }
   syncFall(fall)
   walkFall.active = true
   walkFall.offset = 0
@@ -747,12 +895,15 @@ function fallIfAirborne(): void {
   const g = down
   takeWallWait()
   const stands = standing(from, items, true, g)
-  const limit = stands ? null : fallLimit(from, items, affordIn(cs.plane), g)
+  const limit = stands ? null : limitAt(from, items, cs.plane, g)
   // A floor on its way: no fall through it; asked again once it is built.
   if (waitedForWalls(fallIfAirborne)) return
   if (stands || !limit) return
   // Hovering already: over a floor no hop from here can afford to reach.
   if (limit.drop === 0n) return
+  // Nothing below to catch you, and nothing a double jump or steering could
+  // reach either: gravity off, and you stay where the step put you.
+  if (nothingCatches(limit) && !walk.hardGravity && !rescuable(from, items, g, 0, 0, true, -limit.drop) && gravityOffOverVoid()) return
   beginFall(from, 0, 0n, -limit.drop, limit.lands, items, cs.plane, g)
 }
 
@@ -768,7 +919,7 @@ function jump(from: Position): void {
   const afford = affordIn(cs.plane)
   const { rise, by, unseen } = jumpRise(from, items, afford, JUMP_HEIGHT, g)
   if (rise === 0n) { if (by) wallChip({ item: by, unseen }); return }
-  const limit = fallLimit(from, items, afford, g)
+  const limit = limitAt(from, items, cs.plane, g)
   if (waitedForWalls(() => jump(from))) return
   beginFall(from, JUMP_SPEED, rise, -limit.drop, limit.lands, items, cs.plane, g)
 }
@@ -800,7 +951,7 @@ function padLaunch(at: Position, rose: boolean, items: WallItem[]): void {
   if (takeWallWait() || h === 0) return
   const afford = affordIn(cs.plane)
   const { rise } = jumpRise(at, items, afford, h, g)
-  const limit = fallLimit(at, items, afford, g)
+  const limit = limitAt(at, items, cs.plane, g)
   if (takeWallWait() || rise === 0n) return
   beginFall(at, launchSpeed(h), rise, -limit.drop, limit.lands, items, cs.plane, g)
   if (fall) fall.launch = { ...at }
@@ -859,6 +1010,12 @@ export function tickFall(now: number = nowMs()): boolean {
   meetCeiling(f, now)
   const t = Math.max(0, (now - f.t0) / 1000)
   const r = Math.min(arcHeight(f.v0, t), f.topN)
+  // Nothing below to catch it, and no input left could land it anywhere: it
+  // would fall forever, so gravity goes off here (D).
+  if (!f.lands && !f.unsure && now - f.rescuedAt >= RESCUE_MS && !useWalk.getState().hardGravity && lostInAir(f, now, r, t) && gravityOffOverVoid()) {
+    endFall(reachedPoint(f, now))
+    return true
+  }
   if (t > 0 && arcSpeed(f.v0, t) <= 0 && r <= f.bottomN) {
     // (E) on a floor that bounces: the fall goes on, launched.
     if (f.lands && bounceOff(f, now)) return true
@@ -911,7 +1068,7 @@ function bounceOff(f: Fall, now: number): boolean {
   if (takeWallWait() || h === 0) return false
   const afford = affordIn(f.plane)
   const { rise } = jumpRise(final, items, afford, h, g)
-  const limit = fallLimit(final, items, afford, g)
+  const limit = limitAt(final, items, f.plane, g)
   if (takeWallWait() || rise === 0n) return false
   upInAirAt = null
   downInAirAt = null
@@ -934,6 +1091,8 @@ function bounceOff(f: Fall, now: number): boolean {
   f.items = items
   f.launch = final
   f.doubled = false
+  f.unsure = false
+  f.rescuedAt = Number.NEGATIVE_INFINITY
   syncFall(f)
   walkFall.offset = Math.min(arcHeight(v0, Math.max(0, (now - t0) / 1000)), f.topN) - f.base
   // In place the cursor is already here: a bounce in place touches no store.
@@ -1007,7 +1166,9 @@ function airStep(f: Fall, heading: WalkHeading, fluid: boolean): FluidCross {
   const p = { ...move.to }
   const afford = affordIn(f.plane)
   const rel = heightOf(p, g) - f.h0
-  const limit = fallLimit(p, f.items, afford, g)
+  const limit = limitAt(p, f.items, f.plane, g)
+  // A floor below still on its way is no void: the fall is not judged on it (tickFall).
+  const floorComing = takeWallWait()
   const { r, rising } = arcAt(f, now)
   if (rising) {
     // What is left of the rise, under any ceiling over the new column.
@@ -1024,6 +1185,8 @@ function airStep(f: Fall, heading: WalkHeading, fluid: boolean): FluidCross {
   }
   f.bottom = rel - limit.drop
   f.lands = limit.lands
+  f.unsure = floorComing
+  f.rescuedAt = Number.NEGATIVE_INFINITY
   const air = f.air
   const grows = fluid
     ? air !== null && air.cells !== undefined && f.waypoints.length > 0 && onLine(air.from, air.cells, p, FLUID_LINE_SLACK, g.axis) && segmentAffordable(air.from, p, f.plane)
@@ -1096,6 +1259,7 @@ function airJump(f: Fall, now: number): boolean {
   f.peak = arcPeak(v0, Number(rise))
   f.topSince = (now - t0) / 1000
   f.doubled = true
+  f.rescuedAt = Number.NEGATIVE_INFINITY
   syncFall(f)
   walkFall.offset = Math.min(arcHeight(v0, f.topSince), f.topN) - f.base
   return true
@@ -1182,7 +1346,7 @@ function turnGravity(): void {
   const at = reachedPoint(f, now)
   const g = down
   takeWallWait()
-  const limit = fallLimit(at, f.items, affordIn(f.plane), g)
+  const limit = limitAt(at, f.items, f.plane, g)
   // The walls along the new down that are still on their way: asked again once built.
   const waits = waitedForWalls(fallIfAirborne)
   // Where the path bends: a hop of its own when the fall resolves.
@@ -1192,6 +1356,8 @@ function turnGravity(): void {
   upInAirAt = null
   downInAirAt = null
   if (waits) { endFall(at); return }
+  // Nothing along the new down to catch you: gravity off, and the fall ends at the bend, as (D).
+  if (nothingCatches(limit) && !rescuable(at, f.items, g, 0, 0, !f.doubled, -limit.drop) && gravityOffOverVoid()) { endFall(at); return }
   if (limit.drop === 0n) { endFall(at, !limit.lands); return }
   f.h0 = heightOf(at, g)
   f.t0 = now
@@ -1201,6 +1367,8 @@ function turnGravity(): void {
   f.lands = limit.lands
   f.peak = 0
   f.topSince = 0
+  f.unsure = false
+  f.rescuedAt = Number.NEGATIVE_INFINITY
   syncFall(f)
   walkFall.offset = 0
   eyeAlong(g)

@@ -52,6 +52,10 @@ interface ViewRow {
 /** The sync limit's line: what it does, both halves of it, and the risk of turning it off (arkinox, 2026-11-18). */
 export const WALK_LIMITS_HINT = 'WALK slows and stops far ahead of your chain. Off, moves not yet on your chain can be lost if something interrupts it.'
 
+/** Hard Mode Gravity's row, in the owner's words (arkinox, 2026-11-22): his dash parts the title from its line. */
+export const HARD_GRAVITY_TITLE = 'Hard Mode Gravity'
+export const HARD_GRAVITY_HINT = 'Gravity will not turn off if there is nothing to catch your fall.'
+
 export function ViewPanel(): JSX.Element {
   const dots = useLayers((s) => s.dots)
   const boxes = useLayers((s) => s.boxes)
@@ -62,6 +66,7 @@ export function ViewPanel(): JSX.Element {
   const glow = useLayers((s) => s.glow)
   const walkLimits = useLayers((s) => s.walkLimits)
   const gravity = useWalk((s) => s.gravity)
+  const hardGravity = useWalk((s) => s.hardGravity)
   const fluidWalk = useFluidWalk((s) => s.on)
   const showTrail = useCyberspace((s) => s.showTrail)
   const showSecrets = useCyberspace((s) => s.showSecrets)
@@ -117,6 +122,16 @@ export function ViewPanel(): JSX.Element {
       hint: 'Fall, land and jump.',
       on: gravity,
       set: (v) => useWalk.getState().setGravity(v),
+    },
+    // Hard Mode Gravity (store/useWalk.ts gravityOffOverVoid; arkinox,
+    // 2026-11-22), off by default: off, a move with nothing below to catch
+    // you turns gravity off; on, you fall to the invisible floor, as before.
+    {
+      id: 'view-walk-gravity-hard',
+      title: HARD_GRAVITY_TITLE,
+      hint: HARD_GRAVITY_HINT,
+      on: hardGravity,
+      set: (v) => useWalk.getState().setHardGravity(v),
     },
     // Fluid WALK (store/walkFluid.ts, store/fluidSwitch.ts): the walk keys
     // speed you up instead of stepping, and moves still land on whole

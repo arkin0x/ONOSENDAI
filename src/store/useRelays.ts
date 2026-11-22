@@ -3,8 +3,8 @@
  *
  * The canonical relay (DEFAULT_RELAY) is the default for everyone and is
  * always present: it is where the shared world lives, so it cannot be removed.
- * On top of it you add your own, and everything the client does — publishing
- * movement and hidden content, discovering it, reading other chains — fans
+ * On top of it you add your own, and everything the client does (publishing
+ * movement and hidden content, discovering it, reading other chains) fans
  * out across the whole set. Persisted locally, so your relays survive a
  * reload. The former canonical relay (READ_FALLBACK_RELAY) is read from, and
  * never written to, while it is retired.

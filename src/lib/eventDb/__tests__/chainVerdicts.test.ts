@@ -10,9 +10,9 @@ import { IDBFactory } from 'fake-indexeddb'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
-import { CHAIN_RULES_REVISION, hopTemplate, positionHex, spawnTemplate, type NostrEvent } from '../../events'
+import { CHAIN_RULES_REVISION, buildChain, hopTemplate, parseAction, positionHex, rulesHeld, spawnTemplate, type NostrEvent } from '../../events'
 import { closeEventDb, withEventDb } from '../connection'
-import { commitChain, migrateChain, type ChainCommit } from '../chainRows'
+import { commitChain, migrateChain, readChain, type ChainCommit } from '../chainRows'
 import { markChainVerdicts, verdictOf } from '../chainVerdicts'
 import { getRows } from '../store'
 
@@ -221,5 +221,58 @@ describe('chain verdicts', () => {
 
   it('no chain: nothing to say', async () => {
     expect(await mark()).toEqual({ verdict: null, written: 0 })
+  })
+})
+
+describe('a read of the rows says which hold under the running rules (readChain `ruled`)', () => {
+  it('names the rows valid under this epoch and revision, and none before the verdict or under another', async () => {
+    const chain = chainOf(5)
+    await seed(chain)
+    expect((await withEventDb((db) => readChain(db, pk)))!.ruled).toEqual([])
+    await mark()
+    expect((await withEventDb((db) => readChain(db, pk)))!.ruled).toEqual(chain.map((e) => e.id))
+    // A verdict reached under an older epoch reads as not checked.
+    closeEventDb()
+    ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory()
+    await seed(chain)
+    await mark(1)
+    expect((await withEventDb((db) => readChain(db, pk)))!.ruled).toEqual([])
+  })
+
+  it('a broken row and every row after it are not named', async () => {
+    const chain = chainOf(3)
+    // Off its own c: the hop starts somewhere the chain is not.
+    chain.push(hop(3, chain[0].id, chain[2].id, 0n, 1))
+    chain.push(hop(4, chain[0].id, chain[3].id))
+    await seed(chain)
+    await mark()
+    expect((await withEventDb((db) => readChain(db, pk)))!.ruled).toEqual(chain.slice(0, 3).map((e) => e.id))
+  })
+})
+
+describe('the mp form, checked once (lib/events.ts mpFormHeld, rulesHeld)', () => {
+  const withMp = (k: number, mp: string): NostrEvent => finalizeEvent(hopTemplate({
+    createdAt: 1_000 + k, genesisId: 'a'.repeat(64), previousId: 'b'.repeat(64), prevCoordHex: pk, to: at(k), plane: home.plane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp,
+  }), sk) as NostrEvent
+
+  it('a malformed mp is refused however often it is read, and a tag changed after the check is checked again', () => {
+    // The template refuses a malformed mp, so one is put in by hand (no signature is read here).
+    const bad = withMp(1, 'ab')
+    bad.tags = bad.tags.map((t) => (t[0] === 'mp' ? ['mp', 'zz'] : t))
+    expect(parseAction(bad)).toBeNull()
+    expect(parseAction(bad)).toBeNull()
+    const ev = withMp(2, 'ab'.repeat(4096))
+    expect(parseAction(ev)?.type).toBe('hop')
+    expect(parseAction(ev)?.type).toBe('hop')
+    const mpAt = ev.tags.findIndex((t) => t[0] === 'mp')
+    ev.tags[mpAt] = ['mp', 'AB']
+    expect(parseAction(ev)).toBeNull()
+  })
+
+  it('rows held by their verdict are taken as they are, and build the same chain', () => {
+    const chain = chainOf(4)
+    const before = buildChain(chain, pk)
+    rulesHeld(chain)
+    expect(buildChain(chain, pk)).toEqual(before)
   })
 })

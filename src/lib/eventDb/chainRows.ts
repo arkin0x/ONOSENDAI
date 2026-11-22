@@ -19,7 +19,8 @@ import { getEventHash, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
 import { request } from '../idb'
 import type { NostrEvent } from '../events'
 import { carried, countRow, inTransaction } from './store'
-import type { ChainVerdict } from './chainVerdicts'
+import { verdictOf, type ChainVerdict } from './chainVerdicts'
+import { CHAIN_RULES_EPOCH } from '../chainRulesEpoch'
 import { BUDGET_KEY, CHAINS, EMPTY_BUDGET, EVENTS, META, PARTED, eventOf, nip01Rank, rowOf, type BudgetTotals, type EventRow, type Nip01Flag } from './schema'
 
 /** The small record of one identity's chain. */
@@ -175,6 +176,12 @@ export interface ChainRead {
   published: string[]
   /** Ids whose NIP-01 check is on the row. */
   checked: string[]
+  /**
+   * Ids whose structural verdict under the running rules is valid on the row
+   * (chainVerdicts.ts verdictOf): read as such without parsing their form
+   * again (lib/events.ts rulesHeld). Absent from an older worker's answer.
+   */
+  ruled?: string[]
   stats: Record<string, unknown>
   held: boolean
   savedAt: number
@@ -193,11 +200,13 @@ export async function readChain(db: IDBDatabase, pubkey: string): Promise<ChainR
   }
   const published: string[] = []
   const checked: string[] = []
+  const ruled: string[] = []
   for (const r of rows) {
     if (r.acked === 1) published.push(r.id)
     if (r.nip01 === 1) checked.push(r.id)
+    if (verdictOf(r, CHAIN_RULES_EPOCH) === 1) ruled.push(r.id)
   }
-  return { events: rows.map(eventOf), published, checked, stats: record.stats, held: record.held, savedAt: record.savedAt, generation: record.generation, headId: record.headId }
+  return { events: rows.map(eventOf), published, checked, ruled, stats: record.stats, held: record.held, savedAt: record.savedAt, generation: record.generation, headId: record.headId }
 }
 
 /** A branch of this device set aside: never written over, read by nothing that reads the chain. */

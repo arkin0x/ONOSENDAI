@@ -168,6 +168,8 @@ export const usePublished = create<PublishedState>((set, get) => ({
       const ledger = noteSent(get().ledger, shard.id, fingerprint(template.content), signed.pubkey, signed.created_at, signed.id)
       saveLedger(ledger)
       set({ ledger })
+      // Gone public, it is stored for good, even if it is taken back (a look copy, useWorkshop keepCopy).
+      useWorkshop.getState().keepCopy(shard.id)
       // Every object placing this one draws the new version on its next fetch.
       forgetRef(['a', objectAddress(signed.pubkey, shard.id)])
       // An item wearing it is drawn as the new version too (lib/itemModel.ts).

@@ -8,7 +8,10 @@
  *  - on: both;
  *  - off, while audio is being placed in BUILD: both, so the new sound goes
  *    in among the ones already there;
- *  - off: every sound still plays (HiddenAudio never reads the switch).
+ *  - off: every sound still plays (HiddenAudio never reads the switch);
+ *  - off, while one sound's card is open or a VIEW of it lasts: that sound
+ *    alone, box and rings, gone again when the card closes or the look ends
+ *    (arkinox, 2026-11-22: so VIEW lands on something you can see).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -61,7 +64,7 @@ import { useCyberspace } from '../../store/useCyberspace'
 import { useLayers } from '../../store/useLayers'
 import { useShards } from '../../store/useShards'
 import { WorldMessages } from '../WorldMessages'
-import { AudioSpheres, spatialAudioShown } from '../AudioSpheres'
+import { AudioSpheres, NO_SPOT, spatialAudioShown, spotlit } from '../AudioSpheres'
 import { HiddenAudio } from '../HiddenAudio'
 
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
@@ -69,13 +72,16 @@ const HERE = { x: 1n << 40n, y: 1n << 40n, z: 1n << 40n }
 const hex = (c: string): string => c.repeat(64)
 
 /** A found sound right here, AUTOPLAY on, a loop with a 2-gibson full-volume sphere in a 16-gibson region. */
-function sound(): Record<string, unknown> {
+function sound(id = '7', at = HERE): Record<string, unknown> {
   return {
-    eventId: hex('7'), inner: { id: hex('7'), pubkey: hex('a'), tags: [], kind: 1, created_at: 5, content: '' }, keyHex: hex('b'), bagId: hex('c'), lookupId: hex('d'),
-    author: hex('a'), at: HERE, plane: 0, height: 4, createdAt: 5, type: 'audio',
-    audio: { title: 'Rain Loop', url: 'http://127.0.0.1/a.mp3', mime: 'audio/mpeg', autoplay: true, loop: true, fade: 2 },
+    eventId: hex(id), inner: { id: hex(id), pubkey: hex('a'), tags: [], kind: 1, created_at: 5, content: '' }, keyHex: hex('b'), bagId: hex('c'), lookupId: hex('d'),
+    author: hex('a'), at, plane: 0, height: 4, createdAt: 5, type: 'audio',
+    audio: { title: `Rain Loop ${id}`, url: 'http://127.0.0.1/a.mp3', mime: 'audio/mpeg', autoplay: true, loop: true, fade: 2 },
   }
 }
+
+/** A second sound three gibsons along, in view: never the one looked at below. */
+const NEXT_DOOR = { x: HERE.x + 3n, y: HERE.y, z: HERE.z }
 
 const of = (m: Mounted, type: string): Host[] => m.all().filter((h) => h.type === type)
 /** The sound's box: AudioMark's tap target, which only it mounts here. */
@@ -97,8 +103,19 @@ beforeEach(() => {
 
 afterEach(() => {
   useLayers.setState({ spatialAudio: false })
-  useShards.setState({ pending: null } as never)
+  useShards.setState({ pending: null, selectedSecret: null } as never)
+  useCyberspace.setState({ focus: null })
 })
+
+/** Two sounds in view: this one and NEXT_DOOR's. */
+function twoSounds(): void {
+  const a = sound('7')
+  const b = sound('8', NEXT_DOOR)
+  useShards.setState({ discovered: { [a.eventId as string]: a, [b.eventId as string]: b } } as never)
+}
+
+/** The tap targets' places: which boxes are drawn. */
+const boxAt = (m: Mounted): unknown[] => of(m, 'taptarget').map((h) => h.props.at)
 
 describe('Spatial Audio', () => {
   it('starts off, and off hides both the sound\'s box and its rings', async () => {
@@ -161,5 +178,58 @@ describe('Spatial Audio', () => {
     expect(ears.started).toEqual([hex('7')])
     await m.unmount()
     vi.restoreAllMocks()
+  })
+
+  it('off, shows the one sound whose card is open, and only that one, until the card closes', async () => {
+    twoSounds()
+    const m = await world()
+    expect([boxes(m), rings(m)]).toEqual([0, 0])
+    useShards.getState().selectSecret(hex('7'))
+    await settled()
+    expect([boxes(m), rings(m)]).toEqual([1, 4])
+    const only = boxAt(m)
+    useShards.getState().selectSecret(hex('8'))
+    await settled()
+    expect([boxes(m), rings(m)]).toEqual([1, 4])
+    expect(boxAt(m)).not.toEqual(only)
+    useShards.getState().selectSecret(null)
+    await settled()
+    expect([boxes(m), rings(m)]).toEqual([0, 0])
+    await m.unmount()
+  })
+
+  it('off, shows the one sound a VIEW went to while the view lasts, as it is driven about, and not after RETURN', async () => {
+    twoSounds()
+    const m = await world()
+    // VIEW from the card or from Nearby SOUNDS: the card closes, the look begins (SecretModal goTo, NearbyLootModal view).
+    useShards.getState().selectSecret(null)
+    useCyberspace.getState().viewAt(HERE, 0, 'RAIN LOOP 7', 0, { item: true })
+    await settled()
+    expect([boxes(m), rings(m)]).toEqual([1, 4])
+    const viewed = boxAt(m)
+    // The view driven a step, onto the other sound's cell: it is still a look at the first one (the place VIEW went to, CyberFocus named).
+    const f = useCyberspace.getState().focus!
+    useCyberspace.setState({ focus: { ...f, position: NEXT_DOOR }, anchor: HERE })
+    await settled()
+    expect([boxes(m), rings(m)]).toEqual([1, 4])
+    expect(boxAt(m)).toEqual(viewed)
+    // RETURN ends it; the scene put back over the sounds to see that both are gone.
+    useCyberspace.getState().clearFocus()
+    useCyberspace.setState({ anchor: HERE, anchorPlane: 0, scaleExp: 0 })
+    await settled()
+    expect([boxes(m), rings(m)]).toEqual([0, 0])
+    await m.unmount()
+  })
+
+  it('a look at a place that is not a sound, or not on the sound\'s plane, shows none', async () => {
+    const m = await world()
+    useCyberspace.getState().viewAt(NEXT_DOOR, 0, 'SOMEWHERE', 0, { item: true })
+    useCyberspace.setState({ anchor: HERE })
+    await settled()
+    expect([boxes(m), rings(m)]).toEqual([0, 0])
+    await m.unmount()
+    expect(spotlit({ key: 'x', at: HERE, plane: 0 }, { key: null, at: HERE, plane: 1 })).toBe(false)
+    expect(spotlit({ key: 'x', at: HERE, plane: 0 }, { key: null, at: { ...HERE }, plane: 0 })).toBe(true)
+    expect(spotlit({ key: 'x', at: HERE, plane: 0 }, NO_SPOT)).toBe(false)
   })
 })

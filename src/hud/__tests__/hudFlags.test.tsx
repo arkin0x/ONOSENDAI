@@ -7,7 +7,7 @@
  * run. Without them nothing changes. The flags stay on through reloads of the
  * tab until `=0`, as ?diag=1 does.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type Host } from '../../test/elementRoot'
 
 vi.hoisted(() => {
@@ -57,7 +57,13 @@ function aheadInWalk(): void {
 
 const OFF: HudFlags = { nochip: false, nosyncwarn: false }
 
+// The LOSING SYNC warning is parked since 2026-11-22 (store/walkLimits.ts
+// SYNC_SLOWDOWN_ON): switched back on here, so its flag stays tested.
+const seam = globalThis as { __ONOSENDAI_SYNC_SLOWDOWN__?: boolean }
+beforeEach(() => { seam.__ONOSENDAI_SYNC_SLOWDOWN__ = true })
+
 afterEach(() => {
+  delete seam.__ONOSENDAI_SYNC_SLOWDOWN__
   setHudFlagsForTest(null)
   vi.mocked(useAheadSelect).mockClear()
   vi.mocked(useBuilder).mockClear()
@@ -124,6 +130,20 @@ describe('without either', () => {
     expect(classes(warn)).toContain('is-on')
     expect(useAheadSelect).toHaveBeenCalled()
     await warn.unmount()
+  })
+})
+
+describe('the warning parked', () => {
+  it('is not mounted, whatever the flags, and its hooks do not run', async () => {
+    delete seam.__ONOSENDAI_SYNC_SLOWDOWN__
+    for (const flags of [OFF, { ...OFF, nochip: true }]) {
+      setHudFlagsForTest(flags)
+      aheadInWalk()
+      const m = await mount(<SyncWarning />)
+      expect(m.all()).toEqual([])
+      expect(useAheadSelect).not.toHaveBeenCalled()
+      await m.unmount()
+    }
   })
 })
 

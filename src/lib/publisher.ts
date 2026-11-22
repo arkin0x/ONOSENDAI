@@ -37,7 +37,7 @@ import { noteChainHolders } from './chainHolders'
 import { chainLanded, onReleased } from './chainStore'
 import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend, useReleaseGate } from './release'
-import { newestEventOnRelays, noteStaleFormatStuck, retireStaleFormat, signedOnThisPage, takeFreshHead, useCyberspace } from '../store/useCyberspace'
+import { meantToGoOut, newestEventOnRelays, noteStaleFormatStuck, retireStaleFormat, signedOnThisPage, takeFreshHead, useCyberspace } from '../store/useCyberspace'
 import { staleHopFormat } from './staleFormat'
 import { movementBlocked, useVersionGate } from './versionGate'
 
@@ -473,9 +473,35 @@ async function reconcileOnce(pubkey: string): Promise<void> {
 }
 
 /** Idempotent. Subscribes once for the life of the page. */
+/**
+ * Whether the head that just arrived releases the chain, as an action taken
+ * here would: a move this page just signed, counted once (takeFreshHead,
+ * asked first on every change of head, LIVE or LOCAL, so it is spent on its
+ * first arrival); or a move signed while LIVE whose send never landed,
+ * read back after a reload or a switch back (meantToGoOut): it picks up
+ * where it stopped, after the look at the relays every move from storage
+ * gets (pump). A move made LOCAL is neither, and waits for an action here
+ * or PUBLISH.
+ */
+function headReleases(s: ReturnType<typeof useCyberspace.getState>): boolean {
+  if (takeFreshHead(s.prevEventId)) return true
+  return s.published[s.prevEventId] !== 'ok' && meantToGoOut(s.identity.pubkey, s.prevEventId)
+}
+
 export function startPublisher(): void {
   if (started) return
   started = true
+  // The chain already in hand at start (a reload that read it from
+  // localStorage before the publisher listened): a LIVE head that never
+  // landed goes on as if it had just arrived.
+  {
+    const s = useCyberspace.getState()
+    if (s.live && s.prevEventId && headReleases(s)) {
+      released = true
+      if (useReleaseGate.getState().open !== released) useReleaseGate.setState({ open: released })
+      queueMicrotask(() => { if (maySend(useCyberspace.getState(), released)) void pump() })
+    }
+  }
   // Actions held back until a commit or the relays answered are free: the drain goes on, behind the same gate.
   onReleased(() => { if (maySend(useCyberspace.getState(), released)) void pump() })
   // What a reload left waiting for the canonical relay is asked for again.
@@ -486,11 +512,8 @@ export function startPublisher(): void {
     if (s.identity.pubkey !== prev.identity.pubkey) { restorePending(); backlogChecked = null; lastFailed = false }
     // Every change is offered to the gate first, because the thing that opens
     // it, a new head signed here, arrives as an ordinary store update.
-    // A head this page signed opens it once: the head's first arrival, LIVE
-    // or LOCAL, counts it (takeFreshHead), and the same move read back later
-    // from storage does not.
-    const fresh = s.prevEventId !== prev.prevEventId && takeFreshHead(s.prevEventId)
-    released = gateAfter(released, chainFacts(prev), chainFacts(s, () => fresh))
+    const releases = s.prevEventId !== prev.prevEventId && headReleases(s)
+    released = gateAfter(released, chainFacts(prev), chainFacts(s, () => releases))
     if (useReleaseGate.getState().open !== released) useReleaseGate.setState({ open: released })
     if (s.live === prev.live && s.events === prev.events && s.held === prev.held && s.publishRequest === prev.publishRequest && s.chainConflict === prev.chainConflict) return
     if (!s.live) backlogChecked = null

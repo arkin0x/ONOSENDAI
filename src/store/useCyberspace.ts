@@ -2325,7 +2325,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     const own = await signer.signEvent(template)
     verifiedSigs.add(`${own.id}:${own.sig}`)
     signedHere(own)
-    if (own.kind === ACTION_KIND) { signedThisPage.add(own.id); freshSigned.add(own.id) }
+    if (own.kind === ACTION_KIND) noteSigned(own)
     return own
   }
   // A wake skipped for an AUTH's answer, and this is not an AUTH: drop the
@@ -2374,7 +2374,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     if (late) pendingAuthSigns--
   }
   const answer = checkedAnswer(signed, signer)
-  if (answer.kind === ACTION_KIND) { signedThisPage.add(answer.id); freshSigned.add(answer.id) }
+  if (answer.kind === ACTION_KIND) noteSigned(answer)
   return answer
 }
 
@@ -2417,6 +2417,53 @@ export function takeFreshHead(id: string): boolean {
 export function noteSignedOnThisPage(id: string): void {
   signedThisPage.add(id)
   freshSigned.add(id)
+}
+
+/** A chain action this page just signed: recorded as signed here, as an action not yet counted, and, while LIVE, as meant to go out. */
+function noteSigned(ev: NostrEvent): void {
+  noteSignedOnThisPage(ev.id)
+  if (useCyberspace.getState().live) noteOutbound(ev.pubkey, ev.id)
+}
+
+/**
+ * Chain actions signed while LIVE, per identity, kept across reloads
+ * (localStorage OUTBOUND_KEY + ':' + pubkey; a few ids, read before anything
+ * else): moves meant to go out. One whose send never landed (a network blip,
+ * then a reload) goes out again once the publisher has looked at the relays,
+ * with no new action. Only a move made LOCAL waits for an action or PUBLISH
+ * (owner, 2026-11-22: the worry was LOCAL moves sneaking out, not losing LIVE
+ * moves to a blip). Pruned of what the relays already hold whenever one is
+ * added; capped.
+ */
+const OUTBOUND_KEY = 'onosendai:outbound'
+const OUTBOUND_MAX = 2000
+const outbound = new Map<string, Set<string>>()
+
+function outboundOf(pubkey: string): Set<string> {
+  let set = outbound.get(pubkey)
+  if (set) return set
+  set = new Set()
+  try {
+    const raw = localStorage.getItem(`${OUTBOUND_KEY}:${pubkey}`)
+    const ids: unknown = raw ? JSON.parse(raw) : []
+    if (Array.isArray(ids)) for (const id of ids) if (typeof id === 'string') set.add(id)
+  } catch { /* unreadable: nothing known to be meant to go out */ }
+  outbound.set(pubkey, set)
+  return set
+}
+
+function noteOutbound(pubkey: string, id: string): void {
+  const set = outboundOf(pubkey)
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey === pubkey) for (const known of set) if (s.published[known] === 'ok') set.delete(known)
+  set.add(id)
+  while (set.size > OUTBOUND_MAX) set.delete(set.values().next().value as string)
+  try { localStorage.setItem(`${OUTBOUND_KEY}:${pubkey}`, JSON.stringify([...set])) } catch { /* private mode: this page still knows */ }
+}
+
+/** Whether `id` is a chain action `pubkey` signed while LIVE, on this page or before a reload (outbound). */
+export function meantToGoOut(pubkey: string, id: string): boolean {
+  return outboundOf(pubkey).has(id)
 }
 
 /**

@@ -59,10 +59,13 @@ vi.mock('../chains', async (importOriginal) => ({
 // becomes the head.
 const storage = vi.hoisted(() => new Set<string>())
 const fresh = vi.hoisted(() => new Set<string>())
+// Moves signed while LIVE (useCyberspace meantToGoOut), as a test says.
+const outbound = vi.hoisted(() => new Set<string>())
 vi.mock('../../store/useCyberspace', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../store/useCyberspace')>()),
   signedOnThisPage: (id: string) => !storage.has(id),
   takeFreshHead: (id: string) => fresh.delete(id),
+  meantToGoOut: (_pk: string, id: string) => outbound.has(id),
 }))
 
 // A retry needs window.setTimeout; nothing here fails, but a stub costs one
@@ -123,6 +126,7 @@ describe('the publisher and the release gate', () => {
     sent.length = 0
     storage.clear()
     fresh.clear()
+    outbound.clear()
   })
 
   it('sends nothing when the switch goes Live with a backlog waiting', async () => {
@@ -230,6 +234,36 @@ describe('the publisher and the release gate', () => {
       expect(sent).toEqual([])
     } finally {
       useCyberspace.setState({ live: false, identity: me })
+      await idle()
+    }
+  })
+
+  it('LIVE, a move signed while LIVE whose send never landed, read back after a reload, goes out again by itself after the look (owner, 2026-11-22)', async () => {
+    setChain(['r0'], { [ev('r0').id]: 'ok' })
+    useCyberspace.setState({ live: true })
+    await idle()
+    // A LOCAL move kept behind it, and the LIVE move on top that hit a blip.
+    for (const id of ['r1', 'r2']) storage.add(ev(id).id)
+    outbound.add(ev('r2').id)
+    setChain(['r0', 'r1', 'r2'], { [ev('r0').id]: 'ok' })
+    await until(() => sent.length === 2)
+    expect(sent).toEqual([ev('r1').id, ev('r2').id])
+  })
+
+  it('the same with the relays silent: nothing goes out until they answer', async () => {
+    canonical.answers = false
+    try {
+      setChain(['s0'], { [ev('s0').id]: 'ok' })
+      useCyberspace.setState({ live: true })
+      await idle()
+      storage.add(ev('s1').id)
+      outbound.add(ev('s1').id)
+      setChain(['s0', 's1'], { [ev('s0').id]: 'ok' })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(sent).toEqual([])
+    } finally {
+      canonical.answers = true
+      useCyberspace.setState({ live: false })
       await idle()
     }
   })

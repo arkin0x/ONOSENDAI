@@ -53,7 +53,7 @@ vi.mock('../../lib/workers', async (orig) => ({
 }))
 vi.mock('../../lib/hyperspace/enter', async (orig) => ({ ...(await orig() as object), computeEnterProof: () => '0'.repeat(64) }))
 
-import { CHAIN_SYNC_MESSAGE, CHAIN_SYNC_WAIT_MS, HEAD_UNCONFIRMED_MESSAGE, loadLive, signedOnThisPage, takeFreshHead, useCyberspace } from '../useCyberspace'
+import { CHAIN_SYNC_MESSAGE, CHAIN_SYNC_WAIT_MS, HEAD_UNCONFIRMED_MESSAGE, loadLive, meantToGoOut, signedOnThisPage, takeFreshHead, useCyberspace } from '../useCyberspace'
 import { chainChipState } from '../../hud/ChainExplorer'
 import { actionEvent } from '../../lib/__tests__/chainFixtures'
 import { placeSpawn } from '../fixtures/placeSpawn'
@@ -195,6 +195,21 @@ describe('a move signed here is recorded, through the real signer', () => {
     expect(takeFreshHead(signed.id)).toBe(true)
     expect(takeFreshHead(signed.id)).toBe(false)
     expect(signedOnThisPage(signed.id)).toBe(true)
+  })
+})
+
+describe('moves signed while LIVE are remembered as meant to go out, across a reload', () => {
+  it('a chain action signed while LIVE is recorded under the identity, kept in storage; one signed while LOCAL is not', async () => {
+    const me = S().identity.pubkey
+    const t = (n: number) => ({ kind: 3333, created_at: Math.floor(Date.now() / 1000) + n, content: '', tags: [['A', 'wave']] })
+    useCyberspace.setState({ live: true })
+    const live = await S().signEvent(t(1))
+    useCyberspace.setState({ live: false })
+    const local = await S().signEvent(t(2))
+    useCyberspace.setState({ live: true })
+    expect(meantToGoOut(me, live.id)).toBe(true)
+    expect(meantToGoOut(me, local.id)).toBe(false)
+    expect(JSON.parse(localStorage.getItem(`onosendai:outbound:${me}`) ?? '[]')).toContain(live.id)
   })
 })
 

@@ -19,9 +19,10 @@
  * Run in a real R3F root (test/r3fRoot.ts): real three objects, frames and
  * camera, so the size is measured in the world, as drawn.
  */
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createElement } from 'react'
-import { Box3, Vector3, type Camera, type LineSegments, type Material, type Mesh, type Object3D, type PerspectiveCamera } from 'three'
+import { createElement, useRef } from 'react'
+import { Box3, Matrix4, ShaderLib, Vector3, Vector4, type Camera, type LineSegments, type Material, type Mesh, type Object3D, type PerspectiveCamera } from 'three'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 
@@ -31,10 +32,10 @@ vi.mock('@react-three/drei', async () => {
   return { Text: forwardRef((_props, ref) => h('group', { name: 'text', ref })) }
 })
 
-import { NoteItem, noteBoxSide, NOTE_BOX_GIBSONS, NOTE_DEPTH_PULL } from '../WorldMessages'
+import { NoteItem, noteBoxSide, patchNoteDepthPull, NOTE_BOX_GIBSONS, NOTE_DEPTH_PULL } from '../WorldMessages'
 import { ShardMesh } from '../ShardMesh'
+import { TapTarget } from '../TapTarget'
 import { useCyberspace } from '../../store/useCyberspace'
-import { labelLiftPx, projScaleOf } from '../../lib/markerSize'
 
 ;(globalThis as { window?: unknown }).window ??= globalThis
 
@@ -72,6 +73,18 @@ function worldEdge(edges: LineSegments): number {
   return size.x
 }
 
+/** The box's eight corners on screen, CSS pixels (y down), from its drawn geometry. */
+function screenCorners(edges: LineSegments, camera: Camera, size: { width: number; height: number }): Array<[number, number]> {
+  edges.updateWorldMatrix(true, false)
+  const b = new Box3().setFromObject(edges)
+  const out: Array<[number, number]> = []
+  for (let i = 0; i < 8; i++) {
+    const v = new Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera)
+    out.push([((v.x + 1) / 2) * size.width, ((1 - v.y) / 2) * size.height])
+  }
+  return out
+}
+
 async function placeCamera(root: R3fRoot, at: [number, number, number]): Promise<Camera> {
   const camera = root.state().camera
   camera.position.set(...at)
@@ -97,11 +110,11 @@ describe('a message’s box', () => {
       const edges = boxEdges(r.state().scene)
       const widths: number[] = []
       for (const eye of [[0, 0, 3], [4, 3, 12], [0, 20, 60], [-50, 10, 150]] as Array<[number, number, number]>) {
-        const camera = await placeCamera(r, eye) as PerspectiveCamera
+        const camera = await placeCamera(r, eye)
         expect(worldEdge(edges)).toBeCloseTo(noteBoxSide(scaleExp), 6)
-        // Its size on screen is the world's: a gibson over the distance.
-        const depth = camera.position.length()
-        widths.push(projScaleOf(r.state().size.height, camera.fov) * noteBoxSide(scaleExp) / depth)
+        // Its size on screen, from its drawn corners: the old box was 24 px wherever the camera stood.
+        const xs = screenCorners(edges, camera, r.state().size).map((c) => c[0])
+        widths.push(Math.max(...xs) - Math.min(...xs))
       }
       // Nearer is larger on screen, farther is smaller.
       for (let i = 1; i < widths.length; i++) expect(widths[i]).toBeLessThan(widths[i - 1])
@@ -137,33 +150,52 @@ describe('a message’s box', () => {
     r = await r3fRoot()
     await r.render(createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }))
     const m = boxEdges(r.state().scene).material as Material & { onBeforeCompile: (s: { vertexShader: string }) => void; customProgramCacheKey: () => string }
-    const shader = { vertexShader: '#include <common>\nvoid main() {\n#include <project_vertex>\n}' }
+    // Three's own shader for a line material (ShaderLib.basic): the anchor is there, once.
+    const shader = { vertexShader: ShaderLib.basic.vertexShader }
     m.onBeforeCompile(shader as never)
-    // After three's own projection, the view-space point scaled toward the eye: the same x and y on screen, a nearer depth.
-    expect(shader.vertexShader).toMatch(/#include <project_vertex>\s*gl_Position = projectionMatrix \* vec4\( mvPosition\.xyz \* \( 1\.0 - [0-9.e-]+ \), mvPosition\.w \);/)
-    expect(m.customProgramCacheKey()).toContain('note-depth-pull')
-    expect(NOTE_DEPTH_PULL).toBeGreaterThan(0)
-    expect(NOTE_DEPTH_PULL).toBeLessThanOrEqual(0.002)
+    expect(shader.vertexShader).toMatch(/#include <project_vertex>\ngl_Position = projectionMatrix \* vec4\( mvPosition\.xyz \* \( 1\.0 - 0\.00100000 \), mvPosition\.w \);/)
+    expect(m.customProgramCacheKey()).toBe('note-depth-pull-0.00100000')
+    // A shader without the anchor is left alone.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const odd = { vertexShader: 'void main() {}' }
+    expect(patchNoteDepthPull(odd)).toBe(false)
+    expect(odd.vertexShader).toBe('void main() {}')
+    warn.mockRestore()
+    // What the line does, in numbers: the same place on screen, a nearer depth.
+    const camera = r.state().camera as PerspectiveCamera
+    camera.position.set(1, 2, 9); camera.lookAt(0, 0, 0); camera.updateMatrixWorld()
+    for (const p of [[0.5, -0.5, 0.5], [-0.5, -0.5, -0.5], [0.5, 0.5, -0.5]] as Array<[number, number, number]>) {
+      const mv = new Vector4(...p, 1).applyMatrix4(new Matrix4().copy(camera.matrixWorldInverse))
+      const plain = mv.clone().applyMatrix4(camera.projectionMatrix)
+      const pulled = new Vector4(mv.x * (1 - NOTE_DEPTH_PULL), mv.y * (1 - NOTE_DEPTH_PULL), mv.z * (1 - NOTE_DEPTH_PULL), mv.w).applyMatrix4(camera.projectionMatrix)
+      expect(pulled.x / pulled.w).toBeCloseTo(plain.x / plain.w, 9)
+      expect(pulled.y / pulled.w).toBeCloseTo(plain.y / plain.w, 9)
+      expect(pulled.z / pulled.w).toBeLessThan(plain.z / plain.w)
+    }
   })
 
-  it('carries the name under the box, clear of it at any size on screen', async () => {
+  it('carries the name under the box, clear of its lowest corner on screen near or far', async () => {
     useCyberspace.setState({ scaleExp: 0 })
     r = await r3fRoot()
     await r.render(createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }))
     const scene = r.state().scene
-    for (const eye of [[0, 0, 2.5], [0, 0, 8], [0, 0, 40]] as Array<[number, number, number]>) {
-      const camera = await placeCamera(r, eye) as PerspectiveCamera
-      // The label: the group holding the stand-in text, inside its facing and lifting groups.
+    const size = r.state().size
+    const edges = boxEdges(scene)
+    // From the next gibson (1.5 away) out to far off, straight on and from above.
+    for (const eye of [[0, 0, 1.5], [0, 0, 2.5], [0, 1.2, 1.4], [0, 0, 8], [3, 4, 20], [0, 0, 40]] as Array<[number, number, number]>) {
+      const camera = await placeCamera(r, eye)
       let text: Object3D | undefined
       scene.traverse((o) => { if (o.name === 'text') text = o })
       const inner = text!.parent!
-      const label = inner.parent!.parent!
-      const unitPx = label.scale.x * projScaleOf(r.state().size.height, camera.fov) / eye[2]
-      const dropPx = -inner.position.y * unitPx
-      // Below the box's reach on screen (its half diagonal), plus a gap.
-      const want = labelLiftPx(noteBoxSide(0), 0, eye[2], projScaleOf(r.state().size.height, camera.fov), unitPx)
       expect(inner.position.y).toBeLessThan(0)
-      expect(dropPx).toBeCloseTo(want, 6)
+      // The name's centre on screen, and half its height: one local unit of the label is one of its pixels.
+      const at = inner.getWorldPosition(new Vector3()).project(camera)
+      const nameY = ((1 - at.y) / 2) * size.height
+      const label = inner.parent!.parent!
+      const depth = camera.position.distanceTo(label.getWorldPosition(new Vector3()))
+      const unitPx = (label.scale.x * size.height) / (2 * Math.tan(((camera as PerspectiveCamera).fov * Math.PI) / 360) * depth)
+      const lowest = Math.max(...screenCorners(edges, camera, size).map((c) => c[1]))
+      expect(nameY - unitPx / 2).toBeGreaterThanOrEqual(lowest)
     }
   })
 
@@ -180,6 +212,56 @@ describe('a message’s box', () => {
     await placeCamera(r, [0, 0, 200])
     await r.tap(400 + 15, 400)
     expect(tapped).toHaveBeenCalledTimes(2)
+  })
+})
+
+/** A solid in front of the box with its own measured tap target, as a shard or a chest has. */
+function Blocker({ onTap }: { onTap: () => void }): JSX.Element {
+  const drawn = useRef<Mesh>(null)
+  return createElement('group', { position: [0, 0, 1.2] },
+    createElement('mesh', { ref: drawn }, createElement('boxGeometry', { args: [0.5, 0.5, 0.1] }), createElement('meshBasicMaterial')),
+    createElement(TapTarget, { measure: drawn, onTap }),
+  )
+}
+
+describe('a large box among other things to tap', () => {
+  it('up close, a thing standing in front of the box takes a tap on it; the box takes a tap beside it', async () => {
+    useCyberspace.setState({ scaleExp: 0 })
+    const message = vi.fn()
+    const chest = vi.fn()
+    r = await r3fRoot()
+    await r.render(createElement('group', null,
+      createElement(NoteItem, { w: NOTE, birth: undefined, onTap: message }),
+      createElement(Blocker, { onTap: chest }),
+    ))
+    await placeCamera(r, [0, 0, 3])
+    await r.tap(400, 400)
+    expect(chest).toHaveBeenCalledTimes(1)
+    expect(message).not.toHaveBeenCalled()
+    // Beside the chest (about 120 px either side of the middle here) and on the box (about 170 px): the box.
+    await r.tap(400 + 150, 400 - 150)
+    expect(message).toHaveBeenCalledTimes(1)
+    expect(chest).toHaveBeenCalledTimes(1)
+  })
+
+  it('far off, held to a fingertip, the box still wins over a shard’s box, as a coin does', async () => {
+    useCyberspace.setState({ scaleExp: 0 })
+    const message = vi.fn()
+    const chest = vi.fn()
+    r = await r3fRoot()
+    await r.render(createElement('group', null,
+      createElement(NoteItem, { w: NOTE, birth: undefined, onTap: message }),
+      createElement(Blocker, { onTap: chest }),
+    ))
+    await placeCamera(r, [0, 0, 120])
+    await r.tap(400, 400)
+    expect(message).toHaveBeenCalledTimes(1)
+    expect(chest).not.toHaveBeenCalled()
+  })
+
+  it('a message being moved stays its one-gibson box, faint (WorldMessages `moving`)', () => {
+    const source = readFileSync(new URL('../WorldMessages.tsx', import.meta.url), 'utf8')
+    expect(source).toMatch(/w\.type === 'message' && !w\.coin\s*\? <WorldMark key=\{w\.key\} kind="note" at=\{w\.centre\} side=\{noteBoxSide\(scaleExp\)\} opacity=\{MOVING_OPACITY\} \/>/)
   })
 })
 

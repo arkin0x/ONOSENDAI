@@ -269,10 +269,16 @@ export function tapRaycast(view: () => TapView, spec: { current: TapSpec }, out:
       m.parent.localToWorld(centre)
       const perPx = 1 / pxPerUnit(fov, screen.height, cam.position.distanceTo(centre))
       if (at) m.position.set(at[0], at[1], at[2]); else m.position.set(0, 0, 0)
-      m.scale.setScalar(Math.max(px * perPx, side ?? 0))
-      // A mark (a message or a coin) is a deliberate, fixed-size target, and
-      // wins over a shard's box when a tap passes through both.
-      m.userData.tapPriority = 'mark'
+      const finger = px * perPx
+      m.scale.setScalar(Math.max(finger, side ?? 0))
+      // A mark (a message or a coin) held to a fingertip is a deliberate,
+      // fixed-size target, and wins over a shard's box when a tap passes
+      // through both. A message's box larger than that (`side`) is a thing in
+      // the place like the rest, and takes a tap only where it is the nearest
+      // thing hit: as large as the view up close, it would otherwise take
+      // every tap meant for a chest, a shard or a person in front of it.
+      if (finger >= (side ?? 0)) m.userData.tapPriority = 'mark'
+      else delete m.userData.tapPriority
       m.updateWorldMatrix(false, false)
       return true
     }

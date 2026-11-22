@@ -124,9 +124,11 @@ const NOTE_GEOMETRY_EDGE = 0.72
  * ("why is this message box being partially hidden? It's being occluded by
  * something invisible").
  *
- * Far off it is small on screen, as anything in the world is: at 2^0 on a
- * phone it is about 9 pixels across 40 gibsons away (half that at 2^1). Its tap target never
- * gets smaller than a fingertip (TAP_PX), and its name stays readable.
+ * Far off it is small on screen, as anything in the world is: on a phone
+ * 812 pixels tall it is about 20 pixels across 40 scene units away (40
+ * gibsons at 2^0, 80 at 2^1), and about 4 pixels at the far edge of what is
+ * drawn (REACH, 192 units). Its tap target never gets smaller than a
+ * fingertip (TAP_PX), and its name stays readable.
  */
 export const NOTE_BOX_GIBSONS = 1
 
@@ -143,20 +145,37 @@ export function noteBoxSide(scaleExp: number): number {
  * moved along its own sight line (its view-space position scaled toward the
  * eye), so where it lands on screen is exactly where it was; only its depth
  * comes nearer, by a thousandth of the distance, which is far more than the
- * depth buffer's step at any distance the box is drawn at and far less than
- * anything one could see in front of it.
+ * 24-bit depth buffer's step at any distance the box is drawn at (near plane
+ * 0.05) and far less than anything one could see in front of it.
  */
 export const NOTE_DEPTH_PULL = 0.001
 
-/** The box's edge material's patch: three's projection, then the point pulled toward the eye (NOTE_DEPTH_PULL). */
+let pullWarned = false
+
+/**
+ * Pulls a line material's vertices toward the eye (NOTE_DEPTH_PULL): three's
+ * projection, then the same point scaled along its sight line. False, with
+ * one warning, when three's shader lacks the include it is anchored on; the
+ * edges are then drawn as before.
+ */
+export function patchNoteDepthPull(shader: { vertexShader: string }): boolean {
+  const anchor = '#include <project_vertex>'
+  if (shader.vertexShader.split(anchor).length !== 2) {
+    if (!pullWarned) console.warn('[noteBox] three\'s shader is not the one expected; message box edges are not pulled toward the camera')
+    pullWarned = true
+    return false
+  }
+  shader.vertexShader = shader.vertexShader.replace(anchor, `${anchor}\ngl_Position = projectionMatrix * vec4( mvPosition.xyz * ( 1.0 - ${PULL_GLSL} ), mvPosition.w );`)
+  return true
+}
+
+/** NOTE_DEPTH_PULL as a GLSL float, written in full. */
+const PULL_GLSL = NOTE_DEPTH_PULL.toPrecision(6)
+
+/** The box's edge material's patch (patchNoteDepthPull), one program for every box. */
 const NOTE_EDGE_DEPTH = {
-  onBeforeCompile: (shader: { vertexShader: string }) => {
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <project_vertex>',
-      `#include <project_vertex>\ngl_Position = projectionMatrix * vec4( mvPosition.xyz * ( 1.0 - ${NOTE_DEPTH_PULL.toFixed(4)} ), mvPosition.w );`,
-    )
-  },
-  customProgramCacheKey: () => 'note-depth-pull-1',
+  onBeforeCompile: (shader: { vertexShader: string }) => { patchNoteDepthPull(shader) },
+  customProgramCacheKey: () => `note-depth-pull-${PULL_GLSL}`,
 } as const
 /** The ₿ on a coin, in CSS pixels. */
 const COIN_PX = 31
@@ -317,7 +336,10 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     <>
       {placed.map((w) => {
         const open = (): void => useShards.getState().selectSecret(w.key)
-        if (w.key === moving) return <PlacedBox key={w.key} at={w.centre} opacity={MOVING_OPACITY} />
+        // Being moved, a message keeps its one-gibson box, faint; anything else its PlacedBox.
+        if (w.key === moving) return w.type === 'message' && !w.coin
+          ? <WorldMark key={w.key} kind="note" at={w.centre} side={noteBoxSide(scaleExp)} opacity={MOVING_OPACITY} />
+          : <PlacedBox key={w.key} at={w.centre} opacity={MOVING_OPACITY} />
         if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
         if (w.type === 'audio') return <AudioMark key={w.key} title={w.text} at={w.centre} onTap={open} />
@@ -734,11 +756,13 @@ function WorldMark({ kind, at, opacity = 1, side }: { kind: MarkKind; at: [numbe
     [kind],
   )
   useEffect(() => () => geometry.dispose(), [geometry])
+  // A cube of `side` in the world: its geometry's edge scaled up to it. Only the note's cube is sized so.
+  const world = side !== undefined && kind === 'note' ? side / NOTE_GEOMETRY_EDGE : undefined
 
   useFrame((state) => {
     const g = group.current
     // A size in the world is set once, below, not read from the camera.
-    if (!g || side !== undefined) return
+    if (!g || world !== undefined) return
     const cam = state.camera as PerspectiveCamera
     const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
     const depth = cam.position.distanceTo(g.position)
@@ -756,8 +780,6 @@ function WorldMark({ kind, at, opacity = 1, side }: { kind: MarkKind; at: [numbe
   }, LABEL_PRIORITY)
 
   const look = MARK_LOOK[kind]
-  // A cube of `side` in the world: its geometry's edge scaled up to it. Only the note's cube is sized so.
-  const world = side !== undefined && kind === 'note' ? side / NOTE_GEOMETRY_EDGE : undefined
   return (
     <group key={kind} ref={group} position={at} scale={world}>
       <lineSegments geometry={geometry} frustumCulled={false}>

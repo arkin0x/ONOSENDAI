@@ -177,7 +177,9 @@ export function WorldLabel({
     const near = recede && recede !== 'mark' ? mark : 1
     // Lifted clear of its marker: one local unit is `unitPx` pixels.
     if (inner.current && clear) {
-      const lift = labelLiftPx(clear.trueSide, clear.minPx * mark, depth, projScale, unitPx) / unitPx
+      // Below, it is measured where the marker comes nearest the eye (its near face), so a box up close never runs into it.
+      const at = clear.below ? Math.max(depth - clear.trueSide / 2, depth * 0.05) : depth
+      const lift = labelLiftPx(clear.trueSide, clear.minPx * mark, at, projScale, unitPx) / unitPx
       inner.current.position.y = (clear.below ? -lift : lift) + (offsetPx[1] / px) * near
     } else if (inner.current && recede) {
       // Every frame while it recedes: back at full size the prop is never

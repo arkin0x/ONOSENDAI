@@ -10157,9 +10157,42 @@ select.avatars__input option:checked {
   .ui-switch, .ui-switch__thumb, .ui-checkbox { transition: none; }
 }
 
-/* VIEW: what the scene draws, one switch to a row (hud/ViewPanel.tsx). The
-   last row's own margin would double the panel's bottom padding. */
-.panel--view .ui-field:last-child { margin-bottom: 2px; }
+/* SETTINGS: one switch to a row, in five groups (hud/ViewPanel.tsx; arkinox,
+   2026-11-22: "group the settings ... with subheadings and HRs"). A group's
+   subheading is white over the scene, the size of the panel's own title and
+   tracked wider than the rows, after a small chamfered cyan tick (top-left and
+   bottom-right corners cut, as the item thumbnails are). Between groups a
+   hairline fades out to the right. Every size here is fixed: a hint that
+   changes (Fluid WALK paused, Sync hidden list's note) moves nothing above it. */
+.view__subhead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 2px 0 0;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 8px rgba(0, 229, 255, 0.35);
+}
+.view__subhead::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  clip-path: polygon(30% 0, 100% 0, 100% 70%, 70% 100%, 0 100%, 0 30%);
+}
+.view__rule {
+  height: 1px;
+  margin: 2px 0 12px;
+  border: 0;
+  background: linear-gradient(90deg, rgba(0, 229, 255, 0.4), rgba(0, 229, 255, 0.1) 65%, transparent);
+}
+/* The last row of a group sits close to the rule under it. */
+.view__group > .ui-field:last-child { margin-bottom: 10px; }
 
 /* The h of hX keeps its case under the field label's capitals. */
 .view__hx { text-transform: none; }

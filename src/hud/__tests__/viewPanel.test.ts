@@ -5,11 +5,13 @@
  * chain trail toggle, not buttons. Each on its own row, each with a title and
  * short subtitle in gray", then moved together into a View panel).
  *
- * Eleven Field rows with a Switch each: Terrain dots, hX boxes, Hide avatar in
- * WALK, Look sphere in WALK, Gravity in WALK, Hard Mode Gravity, Chain trail, Region keys,
- * Headlamp, Spatial Audio, Glow and Sync hidden list. Each
- * drives the flag its old control drove and is remembered
- * the same way. The old controls are gone: no chips under Movement proof, no
+ * Fourteen Field rows with a Switch each, in five groups under subheadings
+ * with a rule between them (arkinox, 2026-11-22): Protocol visualization
+ * (Chain trail, Terrain dots, hX boxes, Region keys, Spatial Audio), Movement
+ * (Gravity in WALK, Hard Mode Gravity, Fluid WALK, Optimize chain), Interface
+ * (Look sphere in WALK), Effects (Headlamp, Glow, Hide avatar in WALK) and
+ * Sync (Sync hidden list). Each drives the flag its old control drove and is
+ * remembered the same way. The old controls are gone: no chips under Movement proof, no
  * trail switch in Proof chain, no checkbox in the Region keys list.
  */
 
@@ -47,7 +49,8 @@ vi.mock('zustand', async (importOriginal) => {
   return { ...real, create: (init?: Parameters<typeof real.create>[0]) => (init === undefined ? live : live(init)) }
 })
 
-import { FLUID_PAUSED_HINT, ViewPanel, WALK_LIMITS_HINT } from '../ViewPanel'
+import { FLUID_PAUSED_HINT, SETTINGS_GROUPS, ViewPanel, WALK_LIMITS_HINT, WALK_LIMITS_TITLE } from '../ViewPanel'
+import { WALK_LIMITS_ROW } from '../settingsLink'
 import { ProofPanel } from '../ProofPanel'
 import { ChainPanel } from '../ChainPanel'
 import { SecretsModal } from '../SecretsModal'
@@ -98,7 +101,7 @@ const ROWS: Array<[string, string, string]> = [
   ['view-walk-gravity', 'Gravity in WALK', 'Fall, land and jump.'],
   ['view-walk-gravity-hard', 'Hard Mode Gravity', 'Gravity will not turn off if there is nothing to catch your fall.'],
   ['view-walk-fluid', 'Fluid WALK', 'Hold to glide. Moves still land on whole gibsons.'],
-  ['view-walk-limits', 'Pause fluid walk when your chain falls behind', WALK_LIMITS_HINT],
+  ['view-walk-limits', 'Optimize chain', WALK_LIMITS_HINT],
   ['view-chain-trail', 'Chain trail', 'The red line of your movement history.'],
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
   ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
@@ -106,6 +109,22 @@ const ROWS: Array<[string, string, string]> = [
   ['view-glow', 'Glow', 'Light and fog that objects cast.'],
   ['view-hides-sync', 'Sync hidden list', 'Your hidden things on every device signed in as you.'],
 ]
+
+/** The owner's groups (arkinox, 2026-11-22; Hide avatar moved to Effects the same day): [subheading, switch ids in order]. */
+const GROUPS: Array<[string, string[]]> = [
+  ['Protocol visualization', ['view-chain-trail', 'view-terrain-dots', 'view-hx-boxes', 'view-region-keys', 'view-spatial-audio']],
+  ['Movement', ['view-walk-gravity', 'view-walk-gravity-hard', 'view-walk-fluid', 'view-walk-limits']],
+  ['Interface', ['view-walk-look']],
+  ['Effects', ['view-headlamp', 'view-glow', 'view-walk-avatar']],
+  ['Sync', ['view-hides-sync']],
+]
+
+/** ROWS above in the panel's order since the grouping: group by group, row by row. */
+const IN_ORDER: Array<[string, string, string]> = GROUPS.flatMap(([, ids]) => ids).map((id) => {
+  const row = ROWS.find(([rid]) => rid === id)
+  if (!row) throw new Error(`no row ${id}`)
+  return row
+})
 
 describe('the Settings panel', () => {
   it('is a panel titled Settings with fourteen switches, one to a row, each a title and a gray subtitle, in order', () => {
@@ -116,7 +135,7 @@ describe('the Settings panel', () => {
     expect(html.match(/class="ui-field"/g)).toHaveLength(ROWS.length)
     expect(html.match(/role="switch"/g)).toHaveLength(ROWS.length)
     let at = 0
-    for (const [id, title, hint] of ROWS) {
+    for (const [id, title, hint] of IN_ORDER) {
       const label = `<label class="ui-field__text" for="${id}"><span class="ui-field__label">${title}</span><span class="ui-field__hint">${hint.replace("'", '&#x27;')}</span></label>`
       const where = html.indexOf(label)
       expect(where, id).toBeGreaterThan(at)
@@ -309,6 +328,70 @@ describe('the Settings panel', () => {
       expect(pick(flags()), id).toEqual({ ...all, [flag]: false })
       viewSwitch(id).props.onCheckedChange(true)
     }
+  })
+})
+
+describe('the Settings groups (arkinox, 2026-11-22: "group the settings ... with subheadings and HRs")', () => {
+  it('five subheadings in the owner\'s order, each with its rows in order', () => {
+    expect(SETTINGS_GROUPS.map((g) => [g.title, [...g.rows]])).toEqual(GROUPS)
+    const html = view()
+    const titles = [...html.matchAll(/<h3 class="view__subhead" id="view-group-[a-z]+">([^<]+)<\/h3>/g)].map((m) => m[1])
+    expect(titles).toEqual(GROUPS.map(([t]) => t))
+    // Each row's switch sits after its own subheading and before the next one.
+    const at = (s: string): number => html.indexOf(s)
+    GROUPS.forEach(([title, ids], i) => {
+      const from = at(`>${title}</h3>`)
+      const to = i + 1 < GROUPS.length ? at(`>${GROUPS[i + 1][0]}</h3>`) : html.length
+      let last = from
+      for (const id of ids) {
+        const where = at(`id="${id}"`)
+        expect(where, `${id} under ${title}`).toBeGreaterThan(last)
+        expect(where, `${id} under ${title}`).toBeLessThan(to)
+        last = where
+      }
+    })
+  })
+
+  it('a thin rule between groups, none before the first or after the last', () => {
+    const html = view()
+    expect(html.match(/<hr class="view__rule"\/>/g)).toHaveLength(GROUPS.length - 1)
+    expect(html.indexOf('<hr')).toBeGreaterThan(html.indexOf('>Protocol visualization</h3>'))
+    expect(html.lastIndexOf('<hr')).toBeLessThan(html.indexOf('>Sync</h3>'))
+  })
+
+  it('each group is labeled by its subheading for a screen reader', () => {
+    const html = view()
+    for (const g of SETTINGS_GROUPS) {
+      expect(html).toContain(`<div class="view__group" role="group" aria-labelledby="view-group-${g.id}"><h3 class="view__subhead" id="view-group-${g.id}">${g.title}</h3>`)
+    }
+  })
+
+  it('loses no setting: every row is in exactly one group, and every switch in the panel is in one', () => {
+    const grouped = SETTINGS_GROUPS.flatMap((g) => g.rows)
+    expect(new Set(grouped).size).toBe(grouped.length)
+    expect([...grouped].sort()).toEqual(ROWS.map(([id]) => id).sort())
+    const switches = [...view().matchAll(/<button[^>]*role="switch"[^>]*id="([^"]+)"|<button[^>]*id="([^"]+)"[^>]*role="switch"/g)].map((m) => m[1] ?? m[2])
+    expect(switches).toEqual(IN_ORDER.map(([id]) => id))
+  })
+
+  it('no dash in a subheading', () => {
+    for (const g of SETTINGS_GROUPS) expect(g.title).not.toMatch(/[\u2013\u2014-]/)
+  })
+
+  it('Optimize chain is the sync limit row renamed: same switch id, same store flag, the default on, kept on this device', () => {
+    expect(WALK_LIMITS_TITLE).toBe('Optimize chain')
+    expect(WALK_LIMITS_HINT).toBe('Pauses fluid walk when your chain falls behind. Walking without fluid makes fewer new chain events, so your chain catches up.')
+    expect(WALK_LIMITS_ROW).toBe('view-walk-limits')
+    const html = view()
+    expect(html).not.toContain('Pause fluid walk when your chain falls behind</span>')
+    expect(html).toContain(`<label class="ui-field__text" for="${WALK_LIMITS_ROW}"><span class="ui-field__label">Optimize chain</span>`)
+    expect(useLayers.getState().walkLimits).toBe(true)
+    expect(switchTag(html, WALK_LIMITS_ROW)).toContain('aria-checked="true"')
+    viewSwitch(WALK_LIMITS_ROW).props.onCheckedChange(false)
+    expect(useLayers.getState().walkLimits).toBe(false)
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ walkLimits: false })
+    viewSwitch(WALK_LIMITS_ROW).props.onCheckedChange(true)
+    expect(useLayers.getState().walkLimits).toBe(true)
   })
 })
 

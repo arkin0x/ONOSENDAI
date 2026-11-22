@@ -1,7 +1,7 @@
 /**
  * walkLimits.ts: whether WALK's sync limit is on (store/useLayers.ts
- * walkLimits, the Settings row "Pause fluid walk when your chain falls
- * behind"), and the parked slowdown and LOSING SYNC warning.
+ * walkLimits, the Settings row Optimize chain, once "Pause fluid walk when
+ * your chain falls behind"), and the parked slowdown and LOSING SYNC warning.
  *
  * Since 2026-11-22 (arkinox: "lets turn off the slowdown and LOSING SYNC
  * features for now and just see how this iteration feels") the one limit is

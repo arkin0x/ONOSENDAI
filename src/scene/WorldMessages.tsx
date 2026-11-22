@@ -8,7 +8,7 @@
  * NOTE_BOX_GIBSONS). Its words are labels, sized on screen like every other
  * world label so they stay readable, and fade out far off, the credit line
  * first (fadeShare). A key that wears no model of its own is the same
- * one-gibson cube, its name under it (owner, 2026-11-22; keyBoxSide). The
+ * one-gibson cube, its name over it (owner, 2026-11-22; keyBoxSide). The
  * other marks (a coin, a key's cube while its model loads, Cyberspace
  * TV's finds) are still sized on screen, and past the headlamp's reach
  * recede with depth to a floor (lib/markerSize.ts recedeShare), so a chest
@@ -370,7 +370,9 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
             {draw === 'item'
               ? <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} side={side} onTap={open} />
               : <HeldItemMark id={w.key} own={draw === 'own'} at={w.centre} wears={w.wears} region={w.region} axes={axes} appear={play} />}
-            {draw !== 'item' && play && <ItemVanish id={w.key} label={{ text: w.text, color: NOTE, sub: author(w), subColor: ACCENT }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={{ trueSide: placedBoxSide(scaleExp), minPx: 0 }} />}
+            {/* TAKE on a key with no model: its one-gibson cube fades out (MARK_FADE_MS), and its name, over where the cube stood, with the rest. */}
+            {draw !== 'item' && play && side !== undefined && <WorldMark kind="note" at={w.centre} side={side} fadeOut={play.at} />}
+            {draw !== 'item' && play && <ItemVanish id={w.key} label={{ text: w.text, color: NOTE, sub: author(w), subColor: ACCENT }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { trueSide: side, minPx: 0, nearFace: true }} />}
             {/* A fingertip over the mark at any distance, and over a one-gibson
                 cube the whole cube once it is larger (TapTarget `side`). A
                 held key keeps its fingertip: its box is the half one. */}
@@ -426,7 +428,7 @@ const NO_MOTION: readonly ItemAnimation[] = []
  *
  * Given a `side` (a key with no model in the scene: keyBoxSide), the cube is
  * that size in the world, one gibson, as a message's box is, and its name
- * hangs just under it rather than through it. Without one (Cyberspace TV's
+ * stands just above it rather than through it. Without one (Cyberspace TV's
  * finds, a key whose model has not come) the cube is sized on screen.
  */
 export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null, axes, side, onTap }: {
@@ -446,7 +448,7 @@ export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null,
   const model = useItemModel(wears?.model)
   // A model's faces would hide a label at its middle, so its label stands
   // just above its box instead (ItemModelMark `label`). The cube's is
-  // drawn through, as before, or hung just under a one-gibson cube (`side`).
+  // drawn through, as before, or stands just above a one-gibson cube (`side`).
   const label = { text, color: NOTE, sub, subColor: ACCENT }
   if (model && axes && itemMarkShape(model, axes) === 'model') {
     return <ItemModelMark id={id ?? text} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} minPx={NOTE_EDGE_PX} opacity={opacity} onTap={onTap} label={FLOATING_NAME.item ? label : undefined} />
@@ -454,7 +456,7 @@ export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null,
   return (
     <>
       <WorldMark kind="note" at={at} opacity={opacity} side={side} />
-      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} clear={side === undefined ? undefined : { trueSide: side, minPx: 0, below: true }} recede="name" />}
+      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} clear={side === undefined ? undefined : { trueSide: side, minPx: 0, nearFace: true }} recede="name" />}
     </>
   )
 }
@@ -496,7 +498,7 @@ export function HeldItemMark({ id, own, at, wears, region = null, axes, appear }
 const FLOURISH_HOLD_MS = 2600
 
 /**
- * A message in the world: the cube and the hider's name under it, and nothing
+ * A message in the world: the cube and the hider's name over it, and nothing
  * else; the words are one tap away in the item modal (arkinox, 2026-10-10,
  * decision B: the full-text billboards piled up on each other and over
  * everything near them, and were unreadable at distance anyway). A message
@@ -504,9 +506,11 @@ const FLOURISH_HOLD_MS = 2600
  * (DecodingLabel), hold for a moment, then give way to the cube and the name.
  * The name is the profile's where one is known, "you" for your own.
  *
- * The box is one gibson (NOTE_BOX_GIBSONS), so the name sits just under it,
- * clear of its reach on screen at any distance (WorldLabel `clear`, below),
- * and the tap target covers the box once it is larger than a fingertip.
+ * The box is one gibson (NOTE_BOX_GIBSONS), so the name stands just above
+ * it, clear of its reach on screen at any distance (WorldLabel `clear`,
+ * `nearFace`): above and not under, so the ground a box rests on never hides
+ * it (follow-up to #887), and the tap target covers the box once it is
+ * larger than a fingertip.
  */
 export function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; mine: boolean; author: string; centre: [number, number, number] }; birth: number | undefined; onTap: () => void }): JSX.Element {
   const profile = useProfile(w.author || null)
@@ -524,7 +528,7 @@ export function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; 
       <WorldMark kind="note" at={w.centre} side={side} />
       {flourish && birth !== undefined
         ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={birth} at={w.centre} />
-        : <WorldLabel text={name} color={ACCENT} at={w.centre} align="center" px={10} clear={{ trueSide: side, minPx: 0, below: true }} recede="credit" />}
+        : <WorldLabel text={name} color={ACCENT} at={w.centre} align="center" px={10} clear={{ trueSide: side, minPx: 0, nearFace: true }} recede="credit" />}
       {/* A fingertip over the box at any distance, and the whole box once it is larger (TapTarget `side`). */}
       <TapTarget px={TAP_PX} side={side} at={w.centre} onTap={onTap} />
     </group>
@@ -775,6 +779,18 @@ export function PlacedBox({ at, opacity = 1, appear, size }: { at: [number, numb
   )
 }
 
+/**
+ * How long a model-less key's one-gibson cube takes to fade out under TAKE,
+ * ms: quick, so the half box it leaves fades in where it stood (PlacedBox
+ * `appear`) rather than the whole gibson vanishing in one frame.
+ */
+export const MARK_FADE_MS = 200
+
+/** What is left of a mark `elapsed` ms into its fade: 1 down to 0 over MARK_FADE_MS. */
+export function markFadeLeft(elapsed: number): number {
+  return Math.min(1, Math.max(0, 1 - elapsed / MARK_FADE_MS))
+}
+
 /** The line color and opacity of each mark. A spent coin is steel and faint. */
 const MARK_LOOK: Record<MarkKind, { color: string; opacity: number }> = {
   coin: { color: BITCOIN, opacity: 0.9 },
@@ -792,8 +808,16 @@ const MARK_LOOK: Record<MarkKind, { color: string; opacity: number }> = {
  * units, at any distance, and its edges are pulled a hair toward the camera
  * (NOTE_EDGE_DEPTH). A message's box is (noteBoxSide), and a model-less key's (keyBoxSide).
  */
-function WorldMark({ kind, at, opacity = 1, side }: { kind: MarkKind; at: [number, number, number]; opacity?: number; side?: number }): JSX.Element {
+function WorldMark({ kind, at, opacity = 1, side, fadeOut }: {
+  kind: MarkKind
+  at: [number, number, number]
+  opacity?: number
+  side?: number
+  /** From this moment (performance.now()), fading out over MARK_FADE_MS and then gone: a model-less key's cube under TAKE. */
+  fadeOut?: number
+}): JSX.Element {
   const group = useRef<Group>(null)
+  const edges = useRef<LineSegments>(null)
   const geometry = useMemo(
     () => new EdgesGeometry(kind === 'note' ? new BoxGeometry(NOTE_GEOMETRY_EDGE, NOTE_GEOMETRY_EDGE, NOTE_GEOMETRY_EDGE) : new OctahedronGeometry(0.5)),
     [kind],
@@ -802,8 +826,14 @@ function WorldMark({ kind, at, opacity = 1, side }: { kind: MarkKind; at: [numbe
   // A cube of `side` in the world: its geometry's edge scaled up to it. Only the note's cube is sized so.
   const world = side !== undefined && kind === 'note' ? side / NOTE_GEOMETRY_EDGE : undefined
 
+  const look = MARK_LOOK[kind]
   useFrame((state) => {
     const g = group.current
+    if (fadeOut !== undefined && edges.current) {
+      const left = markFadeLeft(performance.now() - fadeOut)
+      ;(edges.current.material as Material).opacity = look.opacity * opacity * left
+      edges.current.visible = left > 0
+    }
     // A size in the world is set once, below, not read from the camera.
     if (!g || world !== undefined) return
     const cam = state.camera as PerspectiveCamera
@@ -822,11 +852,12 @@ function WorldMark({ kind, at, opacity = 1, side }: { kind: MarkKind; at: [numbe
     }
   }, LABEL_PRIORITY)
 
-  const look = MARK_LOOK[kind]
+  // Fading, its first frame is drawn as far into the fade as it already is.
+  const start = fadeOut === undefined ? 1 : markFadeLeft(performance.now() - fadeOut)
   return (
     <group key={kind} ref={group} position={at} scale={world}>
-      <lineSegments geometry={geometry} frustumCulled={false}>
-        <lineBasicMaterial color={look.color} toneMapped={false} transparent opacity={look.opacity * opacity} depthWrite={false} {...(world !== undefined ? NOTE_EDGE_DEPTH : {})} />
+      <lineSegments ref={edges} geometry={geometry} frustumCulled={false} visible={start > 0}>
+        <lineBasicMaterial color={look.color} toneMapped={false} transparent opacity={look.opacity * opacity * start} depthWrite={false} {...(world !== undefined ? NOTE_EDGE_DEPTH : {})} />
       </lineSegments>
     </group>
   )

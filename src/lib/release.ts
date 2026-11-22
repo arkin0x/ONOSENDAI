@@ -29,7 +29,10 @@
  * The gate is state, not a setting, and is never persisted. A reload with
  * LIVE remembered starts shut for the same reason the flip does: nothing
  * leaves this device except as the consequence of an action taken here, on
- * purpose, while LIVE.
+ * purpose, while LIVE. A move signed while LIVE whose send never landed was
+ * such an action: after a reload it opens the gate again by itself, behind
+ * the publisher's look at the relays (publisher.ts headReleases; owner,
+ * 2026-11-22). A move made LOCAL never does.
  *
  * What the gate deliberately does not touch is order. The publisher still
  * drains oldest first, so every prefix the relay holds is itself a valid
@@ -109,6 +112,7 @@ export function chainFacts(s: {
  * | anything, ending LOCAL | shut |
  * | a switch to another identity | shut: its kept moves wait for its own next action |
  * | LIVE, a new head read from storage (a load, a switch back, another tab's save) | unchanged: not an action taken here |
+ * | LIVE, a head read from storage that was signed while LIVE and never landed (a blip, then a reload) | open: it was meant to go out (publisher.ts headReleases) |
  * | LOCAL to LIVE | shut: the flip publishes nothing |
  * | LIVE, a new head this device signed | open: and the backlog goes with it |
  * | LIVE, a head adopted from the relay | unchanged: not an action of ours |

@@ -18,6 +18,7 @@
  * | unreachable | the tablet reloads with the relay silent; it says so and signs nothing |
  * | gap458, gap600 | the tablet reloads after 458, then 600, moves made elsewhere: more than one page of the relay's answer (CAP) |
  * | kept | moves kept on the phone while LOCAL wait, after a reload on LIVE, for a move there; the chip says so; that move sends them all |
+ * | blip | a move signed while LIVE whose send was lost goes out after a reload, with no action |
  * | drain | the owner's case: moves signed while LOCAL, published one at a time later, the tablet reloading partway; it gets them all without another reload |
  *
  *   node scripts/chain-sync-two-device.mjs http://localhost:5287 /path/to/out
@@ -39,7 +40,7 @@ const nsec = nip19.nsecEncode(sk)
 // ---- the relay ----
 const store = []
 const subs = new Set()
-const relay = { silent: new Set(), reqs: {} }
+const relay = { silent: new Set(), reqs: {}, dropEvents: new Set() }
 function answer(filters) {
   // The union of the filters, newest first, capped as a whole (nostrdb).
   const hit = store.filter((e) => filters.some((f) => matchFilter(f, e)))
@@ -71,6 +72,8 @@ async function device(name) {
         const s = { ws, id, filters, name }; mine.set(id, s); subs.add(s)
       } else if (m[0] === 'CLOSE') { const s = mine.get(m[1]); if (s) { subs.delete(s); mine.delete(m[1]) } }
       else if (m[0] === 'EVENT') {
+        // A network blip on publish: the event never reaches the relay, and no OK comes back.
+        if (relay.dropEvents.has(name)) return
         const ev = m[1]
         if (!store.some((e) => e.id === ev.id)) store.push(ev)
         ws.send(JSON.stringify(['OK', ev.id, true, '']))
@@ -207,6 +210,29 @@ if (want('kept')) {
   const mine = store.filter((e) => e.pubkey === pk && e.kind === 3333)
   const prevs = mine.map((e) => e.tags.find((t) => t[0] === 'e' && t[3] === 'previous')?.[1]).filter(Boolean)
   ok('kept: moves kept while LOCAL stay on the phone after a reload on LIVE until a move there, which sends them all', quiet && /KEPT HERE/.test(chip) && store.length === before + 3 && target.head === relayHead() && new Set(prevs).size === prevs.length, `quiet ${quiet}, chip "${chip}", relay +${store.length - before}`)
+}
+
+if (want('blip')) {
+  // A move signed while LIVE whose send never landed (the relay took nothing),
+  // then a reload with the relay back: it goes out by itself, after the
+  // publisher's look, with no new action (owner, 2026-11-22).
+  if (!(await phone.page.evaluate(() => window.__store.getState().live))) await phone.page.evaluate(() => window.__store.getState().setLive(true))
+  const before = store.length
+  relay.dropEvents.add('phone')
+  const n0 = (await phone.state()).n
+  await phone.page.evaluate(() => { const s = window.__store.getState(); s.moveCursor({ axis: 'z', dir: 1 }); void s.commit() })
+  await until(phone, (s) => s.n > n0 && s.status !== 'computing', 120_000)
+  const signed = (await phone.state()).head
+  await sleep(15_000)
+  const lost = store.length === before
+  relay.dropEvents.delete('phone')
+  await phone.close()
+  await phone.open()
+  const t = await until(phone, () => store.some((e) => e.id === signed), 90_000)
+  const chip = await phone.page.evaluate(() => [...document.querySelectorAll('.explorer__toggle')].map((e) => e.textContent).join(' | '))
+  const mine = store.filter((e) => e.pubkey === pk && e.kind === 3333)
+  const prevs = mine.map((e) => e.tags.find((t) => t[0] === 'e' && t[3] === 'previous')?.[1]).filter(Boolean)
+  ok('blip: a LIVE move whose send was lost goes out after a reload with no action', lost && t !== null && new Set(prevs).size === prevs.length, `lost first ${lost}, landed ${t} ms after reload, chip "${chip}"`)
 }
 
 /**

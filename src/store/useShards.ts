@@ -4196,7 +4196,8 @@ export const useShards = create<ShardsState>((set, get) => {
     // A new deploy starts at the shard's own size, so the last deploy's choice
     // never carries silently into this one. Placing the same thing again is
     // `placedLast`'s, which carries everything on purpose.
-    startDeployShard: (shardId, from) => set({
+    // A look copy (useWorkshop untouchedLookCopy) put to use here is stored now: the deploy reads it back by id.
+    startDeployShard: (shardId, from) => { useWorkshop.getState().keepCopy(shardId); set({
       pending: { type: 'shard', shardId, ...(from ? { from } : {}) },
       deployLink: false,
       deployHeightAuto: true,
@@ -4215,7 +4216,7 @@ export const useShards = create<ShardsState>((set, get) => {
       deployBagFrom: null,
       deployStatus: 'idle',
       deployError: null,
-    }),
+    }) },
     // A move starts exactly as the shard stands: its height (held, not
     // fitted, so the shard stays in its bag and keeps its comments unless
     // you change it), its size, its pose and its bag's riddle, with the hint

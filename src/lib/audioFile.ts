@@ -14,7 +14,7 @@
  * after DOWNLOAD (or the other way round) fetches nothing twice.
  */
 
-import { IDLE_TIMEOUT_MS, TransferTimeout, normalizeServer, sha256Hex, spanWords, uploadBlob, watched, type Sign } from './blossom'
+import { IDLE_TIMEOUT_MS, TransferTimeout, normalizeServer, sha256Hex, sha256HexAsync, spanWords, uploadBlob, watched, type Sign } from './blossom'
 import { decryptAudioFile, encryptAudioFile, fetchableUrl, MAX_AUDIO_BYTES, type AudioItem } from './audioItem'
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
@@ -188,10 +188,13 @@ export function openAudio(a: Pick<AudioItem, 'url' | 'hash' | 'originalHash' | '
       // file's own size).
       return readCapped(res, a.size ? Math.min(a.size + 16, MAX_CIPHER_BYTES) : MAX_CIPHER_BYTES, () => alive())
     }).catch((err: unknown) => { throw err instanceof TransferTimeout ? new AudioFetchError(err.message) : err })
-    if (sha256Hex(cipher) !== a.hash) throw new AudioFetchError('The server sent other bytes than the ones hidden here.')
+    // Both hashes by the browser's digest, off the page's thread: in script they
+    // held it 320 to 358 ms for a file heard while walking (owner's phone diag,
+    // 2026-11-22). The decryption is the browser's already.
+    if (await sha256HexAsync(cipher) !== a.hash) throw new AudioFetchError('The server sent other bytes than the ones hidden here.')
     const plain = await decryptAudioFile(cipher, a.keyHex, a.nonceHex)
     if (!plain) throw new AudioFetchError('The file does not open with the key hidden here.')
-    if (a.originalHash && sha256Hex(plain) !== a.originalHash) throw new AudioFetchError('The file opened, but it is not the one hidden here.')
+    if (a.originalHash && await sha256HexAsync(plain) !== a.originalHash) throw new AudioFetchError('The file opened, but it is not the one hidden here.')
     return new Blob([plain as BlobPart], { type: a.mime })
   })()
   const entry = { file: p, bytes: a.size || 0 }

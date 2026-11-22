@@ -533,7 +533,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
           </div>
         </>
       ) : adding === 'shard' ? (
-        <ShardChoice byRecent={byRecent} onPick={(shardId) => add({ kind: 'shard', shardId })} onCancel={() => setAdding(null)} />
+        <ShardChoice byRecent={byRecent} onPick={(shardId) => { useWorkshop.getState().keepCopy(shardId); add({ kind: 'shard', shardId }) }} onCancel={() => setAdding(null)} />
       ) : adding === 'item' ? (
         <div className="compose__row">
           <button className="chest__act" onClick={() => setAdding('mine')} title="The same item, every setting kept: only items you made">FROM MY ITEMS</button>

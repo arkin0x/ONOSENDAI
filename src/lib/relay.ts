@@ -1266,6 +1266,17 @@ interface AskOptions {
   /** While events keep coming, wait at least this long after each, up to `capAt` (ReadOptions.stream). */
   quietMs?: number
   capAt?: number
+  /**
+   * Events another relay of the same question already sent, checked, by id
+   * (queryRelays). One this relay sends again is taken from here, neither
+   * parsed nor checked again: the same bags came from all 8 of the owner's
+   * relays on every region scan, each parsed and checked (phone diag of
+   * 2026-11-22). Same id, same content; the copy kept is one that passed.
+   * A relay then counts as sending an event once it names its id, not once
+   * its own copy passed: so not for a read that decides which relays hold
+   * what (ReadOptions `perRelay`, `written`).
+   */
+  shared?: Map<string, NostrEvent>
 }
 
 /**
@@ -1300,11 +1311,18 @@ const NO_ANSWER = 'no answer in time'
  * object): the moves and edits of this version never reach that relay, so
  * its answer alone could pass for the relays' word on a version it never got.
  */
-export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?: { quietMs: number; capMs: number }; graceMs?: number; written?: boolean }
+/**
+ * `perRelay`: each relay's answer is only what that relay sent whole and
+ * passed, never a copy another relay of the question sent (AskOptions
+ * `shared`): for a read that decides which relays hold something (the chain's
+ * self-check, its holders, the canonical relay's copy). Also so for
+ * `written` reads and where the checks are deferred.
+ */
+export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?: { quietMs: number; capMs: number }; graceMs?: number; written?: boolean; perRelay?: boolean }
 
 /** `filter` may be several: one REQ, one EOSE, the union of their matches (NIP-01). */
 async function askOne(url: string, filter: Filter | Filter[], deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
-  const { answerMs, onSent, stop, onEvent, deferChecks, quietMs, capAt } = opts
+  const { answerMs, onSent, stop, onEvent, deferChecks, quietMs, capAt, shared } = opts
   const remaining = (): number => Math.max(0, deadline - Date.now())
   const late = (events: NostrEvent[] = []): RelayAnswer => ({ url, outcome: 'unreachable', reason: NO_ANSWER, events })
   if (stop?.aborted) return late()
@@ -1369,13 +1387,23 @@ async function askOne(url: string, filter: Filter | Filter[], deadline: number, 
       // False once this subscription is closed to sign in and ask again: its close is not the answer.
       let current = true
       try {
+        // One event, kept for this relay's answer: it landed here, or another relay of the question had it checked already.
+        const take = (e: NostrEvent): void => {
+          if (settled || events.has(e.id)) return
+          events.set(e.id, e)
+          stretch()
+          onEvent?.(e)
+        }
         sub = relay.subscribe(Array.isArray(filter) ? filter : [filter], {
+          // nostr-tools reads the id before parsing: one another relay of
+          // this question sent and that passed is taken from `shared` here
+          // (receivedEvent) and not parsed or checked again.
           ...(deferChecks ? { alreadyHaveEvent: deferCheck } : {}),
+          ...(shared && !deferChecks ? { alreadyHaveEvent: (id: string) => shared.has(id), receivedEvent: (_r: unknown, id: string) => { const had = shared.get(id); if (had) take(had) } } : {}),
           onevent: (e) => {
-            if (settled || events.has(e.id)) return
-            events.set(e.id, e as NostrEvent)
-            stretch()
-            onEvent?.(e as NostrEvent)
+            // Checked as it landed (the pool's verifyEvent): the others may take it.
+            shared?.set(e.id, e as NostrEvent)
+            take(e as NostrEvent)
           },
           oneose: () => {
             // A challenge this read was not signed in with, and nothing sent:
@@ -1456,8 +1484,12 @@ async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_
   // more, then end as no answer in time with what they sent. Ended early, none hung.
   const early = new AbortController()
   const pinned = PINNED_RELAYS.map((r) => normalizeURL(r))
+  // What one relay sent and passed, for the others to take without parsing it
+  // again. Not where the asker checks the signatures afterwards (deferChecks):
+  // nothing has passed yet when it lands.
+  const shared = new Map<string, NostrEvent>()
   const answers = await Promise.all(urls.map((url): Promise<RelayAnswer> => asked.includes(url)
-    ? askOne(url, filter, deadline, { deferChecks: opts.deferChecks, stop: early.signal, ...(opts.stream ? { quietMs: opts.stream.quietMs, capAt: Date.now() + opts.stream.capMs } : {}) }).then((a) => {
+    ? askOne(url, filter, deadline, { deferChecks: opts.deferChecks, shared: opts.deferChecks || opts.written || opts.perRelay ? undefined : shared, stop: early.signal, ...(opts.stream ? { quietMs: opts.stream.quietMs, capAt: Date.now() + opts.stream.capMs } : {}) }).then((a) => {
       if (opts.graceMs !== undefined && a.outcome === 'answered' && pinned.includes(url)) setTimeout(() => early.abort(), opts.graceMs)
       opts.onAnswer?.(a)
       return a
@@ -1507,8 +1539,8 @@ export function queryEach(filter: Filter, maxWait = MAX_WAIT_MS, opts: ReadOptio
  * own. For a read that must hear from one particular relay, such as the
  * canonical relay confirming a chain's head before a move is signed.
  */
-export function queryEachAt(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS): Promise<RelayAnswer[]> {
-  return queryRelays(relays, filter, maxWait)
+export function queryEachAt(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, opts: ReadOptions = {}): Promise<RelayAnswer[]> {
+  return queryRelays(relays, filter, maxWait, opts)
 }
 
 /**

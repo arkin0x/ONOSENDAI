@@ -43,8 +43,9 @@ function base(v: bigint, h: number): bigint {
  * same bags came back over and over (arkinox, 2026-11-21: WALK stutters on
  * his phone; his capture shows 200 questions and 5 to 7 MB in every 5 s).
  * Now a scan asks only about the cubes it has not had an answer for in
- * this long; one you stay in is asked again after it, for what was hidden
- * there meanwhile.
+ * this long, whether you stayed in them or stepped out and back (forgetStale);
+ * one you stay in is asked again after it, for what was hidden there
+ * meanwhile.
  */
 export const ANSWER_FRESH_MS = 60_000
 
@@ -56,6 +57,11 @@ export function regionsToAsk(lookupIds: Iterable<string>, answered: ReadonlyMap<
     if (at === undefined || now - at >= ANSWER_FRESH_MS) out.push(id)
   }
   return out
+}
+
+/** Let go of the answers older than ANSWER_FRESH_MS: they would be asked again anyway, and the map stays as small as the regions walked through lately. */
+export function forgetStale(answered: Map<string, number>, now: number): void {
+  for (const [id, at] of answered) if (now - at >= ANSWER_FRESH_MS) answered.delete(id)
 }
 
 /** A signature of which regions the current anchor sits in, all heights. */
@@ -267,7 +273,11 @@ export function useDiscovery(): void {
       // relays, or another identity, has had no answer yet.
       const relays = `${useCyberspace.getState().identity?.pubkey ?? ''}|${relaySet().join(',')}`
       if (answered.current.relays !== relays) answered.current = { relays, at: new Map() }
-      for (const k of [...answered.current.at.keys()]) if (!keys.has(k)) answered.current.at.delete(k)
+      // A region left keeps its answer until it goes stale, as one stayed in
+      // does: walking to and fro across a cube's side asked the relays again
+      // at every crossing, and every relay sent the same bags back (owner's
+      // phone diag, 2026-11-22). Only stale answers are let go.
+      forgetStale(answered.current.at, Date.now())
       const asking = regionsToAsk(keys.keys(), answered.current.at, Date.now())
       if (asking.length === 0) {
         if (id === reqId.current) useShards.getState().setScanning(false)

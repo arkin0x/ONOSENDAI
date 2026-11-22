@@ -117,6 +117,31 @@ describe('the scan while walking', () => {
     expect(all.filter((id) => Number(id.split(':')[0]) >= 6)).toHaveLength(7)
   })
 
+  it('walking to and fro across a cube\'s side asks about each cube once, not at every crossing (owner\'s phone diag, 2026-11-22)', async () => {
+    render()
+    await vi.waitFor(() => { expect(asked).toHaveLength(1) })
+    for (let i = 0; i < 6; i++) await step(i % 2 === 0 ? 1n : -1n)
+    const all = asked.flat()
+    expect(new Set(all).size).toBe(all.length)
+  })
+
+  it('a cube left and entered again after ANSWER_FRESH_MS is asked again', async () => {
+    const now = vi.spyOn(Date, 'now')
+    let t = 2_000_000
+    now.mockImplementation(() => t)
+    try {
+      render()
+      await vi.waitFor(() => { expect(asked).toHaveLength(1) })
+      await step(1n)
+      const n0 = asked.flat().length
+      t += ANSWER_FRESH_MS
+      await step(-1n)
+      expect(asked.flat().length).toBeGreaterThan(n0)
+    } finally {
+      now.mockRestore()
+    }
+  })
+
   it('asks again about a cube you stay in once ANSWER_FRESH_MS has passed', async () => {
     const now = vi.spyOn(Date, 'now')
     let t = 1_000_000

@@ -16,7 +16,7 @@ import { bytesToHex } from '../events'
 import { regionKeyAt } from '../shardCrypto'
 import { getEventHash } from 'nostr-tools/pure'
 import {
-  CHEST_MAX_PLAINTEXT, aimedPoint, isLockPubkey, openWithSecret, openWithSigner, openerFor, parseChestPlaintext, placeOf, plaintextBytes, readContents, requiresLabel, resealWithout, sealEntries, sealedInside, sizeRefusal, revealedIn } from '../chests'
+  CHEST_MAX_PLAINTEXT, usesExtendedLength, aimedPoint, isLockPubkey, openWithSecret, openWithSigner, openerFor, parseChestPlaintext, placeOf, plaintextBytes, readContents, requiresLabel, resealWithout, sealEntries, sealedInside, sizeRefusal, revealedIn } from '../chests'
 import {
   CHEST_KIND, KEY_KIND, bagTemplate, chestInnerTemplate, chestItemOf, keyInnerTemplate, keyItemOf, messageInnerTemplate, shardInnerTemplate, unbag, type BagEntry, type ChestItem, type KeyItem,
 } from '../hidden'
@@ -271,6 +271,9 @@ describe('the size limit (DECK-0004 §3.2, Size)', () => {
     const list = listOf(80_000)
     const { item } = chest('Big chest', lock.itemPubkey, list)
     expect(prefixBytes(item.payload, 80_000)).toBe(6)
+    // Two zero bytes, then the length as four big-endian bytes.
+    expect(bytesToHex(nip44.utils.pad(JSON.stringify(list)).subarray(0, 6))).toBe('000000013880')
+    expect(usesExtendedLength(item.payload)).toBe(true)
     const back = openWithSecret(item, lock.secretHex)
     expect(JSON.stringify(back)).toBe(JSON.stringify(wire(list)))
     expect(readContents(back)[0].event.content).toHaveLength(list[0].content.length)
@@ -300,6 +303,7 @@ describe('the size limit (DECK-0004 §3.2, Size)', () => {
     const lock = forge('Small Key')
     const { item } = chest('Small chest', lock.itemPubkey, listOf(65_535))
     expect(prefixBytes(item.payload, 65_535)).toBe(2)
+    expect(usesExtendedLength(item.payload)).toBe(false)
     expect(openWithSecret(item, lock.secretHex)).toHaveLength(1)
   })
 

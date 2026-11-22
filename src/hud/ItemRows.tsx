@@ -30,7 +30,7 @@ import { createPortal } from 'react-dom'
 import { useProfile } from '../hooks/useProfile'
 import { isGuideAuthor } from '../tutorial/guideBags'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
-import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry, type Opener } from '../lib/chests'
+import { BIG_CHEST_SIGNER_WORDS, chestSealer, openWithSecret, usesExtendedLength, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry, type Opener } from '../lib/chests'
 import { positionOf, useShards } from '../store/useShards'
 import { BagUnreadable, hiddenLabel, itemLineage, keyItemOf, type ChestItem, type Hidden } from '../lib/hidden'
 import { ItemThumb } from './ItemThumb'
@@ -363,7 +363,8 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
     } catch (err) {
       // Refused again: OPEN stays, and the card does not ask by itself.
       refuseRead(me, id, chest.lockPubkey)
-      setStatus(err instanceof Error ? err.message : String(err))
+      // A signer's raw error on a big chest names a payload length; say what it means instead.
+      setStatus(opener.by === 'self' && usesExtendedLength(chest.payload) ? BIG_CHEST_SIGNER_WORDS : err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }

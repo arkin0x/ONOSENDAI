@@ -68,6 +68,33 @@ export function templateBytes(templates: EventTemplate[], pubkey: string): numbe
  */
 export const CHEST_MAX_PLAINTEXT = 131_072
 
+/** NIP-44's payload for 65,535 bytes of plaintext, the most its two-byte length prefix carries, in base64 characters. */
+const TWO_BYTE_PAYLOAD_CHARS = 87_472
+
+/**
+ * Whether a chest with this sealed payload carries its looks sealed, each as
+ * its own hidden object (lib/sealedLooks.ts sealAll): past 65,535 bytes of
+ * contents. A chest at the cap leaves about 3,900 bytes of its event for
+ * tags, less than a look in its tag may be, and DECK-0004 §3.2 (Size) asks a
+ * writer to seal the look of a chest near the cap whatever its size.
+ */
+export function sealsLooksFor(payload: string): boolean {
+  return usesExtendedLength(payload)
+}
+
+/** Whether a chest's sealed payload carries NIP-44's extended length prefix: its contents passed 65,535 bytes. */
+export function usesExtendedLength(payload: string): boolean {
+  return payload.length > TWO_BYTE_PAYLOAD_CHARS
+}
+
+/**
+ * What OPEN says when a person's own signer fails on a chest past 65,535
+ * bytes. A signer with an older NIP-44 cannot read the extended length
+ * prefix, and its error names a payload length; the chest is unreadable
+ * through that signer, not broken (DECK-0004 §3.2, Older readers).
+ */
+export const BIG_CHEST_SIGNER_WORDS = 'Your signer could not open this chest. It is a big one, over 64 KB, and some signers cannot read that much.'
+
 /** How many UTF-8 bytes a chest's list of entries is as NIP-44 will see it. */
 export function plaintextBytes(entries: BagEntry[]): number {
   return new TextEncoder().encode(JSON.stringify(entries)).length

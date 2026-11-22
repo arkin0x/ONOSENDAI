@@ -684,3 +684,54 @@ describe('bulk import over IndexedDB', () => {
     expect(vi.mocked(publishMany)).not.toHaveBeenCalled()
   })
 })
+
+describe('the read after the first frame (boot.tsx, 2026-11-22)', () => {
+  it('reads a library bigger than a page whole, in order, a page at a time', async () => {
+    const list = Array.from({ length: 97 }, (_, i) => bigShard(`piece ${i}`, 2, i))
+    seedLocal(list)
+    await boot()
+    const { openWorkshopDb, readAll, READ_PAGE } = await import('../../lib/workshopDb')
+    // A malformed row in the middle is counted, not the library.
+    await rawPut([{ id: 'zz-broken', seq: 5 }])
+    const d = await openWorkshopDb()
+    const pages: number[] = []
+    try {
+      const { records: rows, malformed } = await readAll(d, (page) => pages.push(page.length))
+      expect(rows.map((r) => r.id)).toEqual(list.map((s) => s.id))
+      expect(malformed).toBe(1)
+      expect(pages.length).toBe(Math.ceil(98 / READ_PAGE))
+      expect(pages.reduce((a, b) => a + b, 0)).toBe(97)
+    } finally { d.close() }
+    const again = await boot()
+    expect(again.ws.useWorkshop.getState().shards.map((s) => s.id)).toEqual(list.map((s) => s.id))
+  })
+
+  it('OPEN WORKSHOP while the library is still reading opens on it once read, and makes no new model', async () => {
+    const list = [bigShard('older', 2, 1), { ...bigShard('newest', 2, 2), updatedAt: 1_800_000_000_000 }]
+    seedLocal(list)
+    await boot()
+    lastTab?.st.closeForTests()
+    const t = await openTab()
+    lastTab = t
+    const reading = t.ws.hydrateWorkshop()
+    expect(t.st.workshopReading()).not.toBeNull()
+    t.ws.useWorkshop.getState().openWorkshop()
+    // Not on an empty list: nothing opens, and nothing is made, until the read lands.
+    expect(t.ws.useWorkshop.getState().open).toBe(false)
+    expect(t.ws.useWorkshop.getState().shards).toEqual([])
+    await reading
+    await new Promise((r) => setTimeout(r, 0))
+    const s = t.ws.useWorkshop.getState()
+    expect(t.st.workshopReading()).toBeNull()
+    expect(s.open).toBe(true)
+    expect(s.shards.map((m) => m.id)).toEqual(list.map((m) => m.id))
+    expect(s.currentId).toBe(list[1].id)
+  })
+
+  it('a store never loaded (a test, or a page before its read starts) opens at once, as before', async () => {
+    const t = await openTab()
+    expect(t.st.workshopReading()).toBeNull()
+    t.ws.useWorkshop.getState().openWorkshop()
+    expect(t.ws.useWorkshop.getState().open).toBe(true)
+  })
+})

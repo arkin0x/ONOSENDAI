@@ -648,12 +648,23 @@ async function rescue(d: IDBDatabase, raw: string, meta: MigratedMeta): Promise<
 }
 
 /**
- * Decide where the library is, and load it. Called once at startup, before
- * the app draws (main.tsx); a second call returns the first one's answer.
+ * Decide where the library is, and load it. Called once at startup, after the
+ * app's first frame (boot.tsx; before it on /workshop); a second call returns
+ * the first one's answer.
  */
 export function hydrateWorkshop(): Promise<ShardStorage> {
   if (!hydrating) hydrating = mode === 'pending' ? decide() : Promise.resolve(mode)
   return hydrating
+}
+
+/**
+ * The load while it is reading: started and not yet decided. Null before it
+ * starts (a test that never loads) and once it has decided. OPEN WORKSHOP
+ * waits on it (useWorkshop openWorkshop), so a tap in the moment after the
+ * first frame never opens an empty library or makes a new model in it.
+ */
+export function workshopReading(): Promise<ShardStorage> | null {
+  return hydrating && mode === 'pending' ? hydrating : null
 }
 
 async function decide(): Promise<ShardStorage> {
@@ -711,14 +722,16 @@ async function decideNow(): Promise<ShardStorage> {
     // The database this tab's list comes from: a later reopen is checked against it.
     gen = typeof meta.gen === 'string' ? meta.gen : ''
     if (!movedFlag()) flagMoved()
-    const { records, malformed } = await readAll(d)
+    // Each page parsed as it lands (lib/workshopDb.ts readAll), so a big library is many short tasks, not one long one.
+    const parsedAs = new Map<ShardRecord, ShardModel | null>()
+    const { records, malformed } = await readAll(d, (page) => { for (const r of page) parsedAs.set(r, parseRecord(r)) })
     const stored: ShardModel[] = []
     skipped = malformed
     seqs.clear()
     nextSeq = 0
     for (const r of records) {
       nextSeq = Math.max(nextSeq, r.seq + 1)
-      const m = parseRecord(r)
+      const m = parsedAs.has(r) ? parsedAs.get(r)! : parseRecord(r)
       // One record that does not read is one shard skipped, and left in the database as it is.
       if (!m) { skipped++; continue }
       seqs.set(r.id, r.seq)

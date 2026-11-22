@@ -68,7 +68,7 @@ import { cornerAverage, weld } from '../lib/weld'
 import { subdivide, subdivideNotice } from '../lib/subdivide'
 import { withCredit, type Credit } from 'sno-core/feed'
 import { newestFirst } from '../lib/shardFolders'
-import { attach, initialShards, persist, saveNow as saveStored } from './workshopStorage'
+import { attach, initialShards, persist, saveNow as saveStored, workshopReading } from './workshopStorage'
 
 export { hydrateWorkshop, storageMode } from './workshopStorage'
 
@@ -1305,6 +1305,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     backStack: [],
 
     openWorkshop: (id, panel) => {
+      // The library still reading (it starts after the first frame, boot.tsx): open once it has, never on an empty list.
+      const reading = workshopReading()
+      if (reading) { void reading.then(() => { if (!workshopReading()) get().openWorkshop(id, panel) }); return }
       const left = leaveAll(id ?? get().currentId)
       if (left) { set({ shards: left }); save(left) }
       if (get().backStack.length) set({ backStack: [] })

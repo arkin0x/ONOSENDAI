@@ -12,6 +12,8 @@ import { chainReadyToDraw } from './store/useCyberspace'
 import { hydrateHidden } from './store/hiddenStorage'
 import { wireLocalObjects } from './store/localObjects'
 import { diagWanted } from './lib/diagGate'
+import { markBoot } from './lib/bootMarks'
+import { isWorkshopPath } from './lib/workshopRoute'
 import { hudFlags } from './lib/hudFlags'
 import { applyTutorialFlag, applyTutorialRoute, landedPath, noteLanding } from './tutorial/gate'
 import { takeArrivalMode } from './store/arrivalMode'
@@ -37,32 +39,64 @@ startAnalytics({ prod: import.meta.env.PROD, broadcast: isBroadcast, landed: lan
 wireLocalObjects()
 
 /**
- * The workshop's shards are read from IndexedDB before the app draws
- * (store/workshopStorage.ts), so everything that reads the list finds it
- * whole, as it did when the list was in localStorage. A database that does
- * not answer cannot hold the page: past this, the app draws anyway and the
- * list fills in when the read lands, with any change made meanwhile kept.
+ * What the first draw waits for, and what it does not (arkinox, 2026-11-22:
+ * "its like 8 seconds til something is painted besides a black screen").
+ * index.html has painted the wordmark long before this runs; the first render
+ * takes its place.
+ *
+ * Waited for, because the world draws them: the saved chain (store/useCyberspace.ts
+ * chainReadyToDraw: nothing is drawn as the chain until the chain is here) and
+ * the record of what you hid, with its door secrets and closed doors
+ * (store/hiddenStorage.ts), so no door or hide of yours is drawn wrong first.
+ *
+ * Not waited for: the workshop's shards (store/workshopStorage.ts). Only the
+ * workshop, the bench and a hide being placed read them, all after a tap, and
+ * OPEN WORKSHOP waits for the read (useWorkshop openWorkshop). Its read starts
+ * after the first frame, so its pages neither hold the first render nor sit in
+ * front of the chain's read in the browser's database queue. Until it lands,
+ * changes are kept and written once it has (workshopStorage `pending`). On
+ * /workshop (lib/workshopRoute.ts), which opens it at once, it is waited for
+ * as before.
+ *
+ * A database that does not answer cannot hold the page: past HYDRATE_WAIT_MS
+ * the app draws anyway, and each store fills in when its read lands, with any
+ * change made meanwhile kept.
  */
 const HYDRATE_WAIT_MS = 10_000
+/** The workshop's read starts at the first frame, or after this when no frame comes (a tab loaded hidden draws none). */
+const WORKSHOP_AFTER_MS = 1_500
+
+let workshopRead: Promise<unknown> | null = null
+function readWorkshop(): Promise<unknown> {
+  return workshopRead ??= hydrateWorkshop().finally(() => markBoot('workshop'))
+}
 
 let drawn = false
 function draw(): void {
   if (drawn) return
   drawn = true
+  markBoot('draw')
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       {/* The stream never goes black: it stands by and reloads (hud/TvStandby, lib/tv/standby). */}
       {isBroadcast() ? <TvStandby><App /></TvStandby> : <App />}
     </React.StrictMode>,
   )
+  // The frame after the first render is the one on screen; then the workshop.
+  requestAnimationFrame(() => requestAnimationFrame(() => { markBoot('painted'); void readWorkshop() }))
+  setTimeout(() => void readWorkshop(), WORKSHOP_AFTER_MS)
 }
 /** How long the app waits for the capture's chunk before drawing without it. */
 const DIAG_WAIT_MS = 3_000
 
 function boot(): void {
+  markBoot('app')
   setTimeout(draw, HYDRATE_WAIT_MS)
-  // The chain likewise, when it is read from its rows (store/useCyberspace.ts chainReadyToDraw).
-  void Promise.allSettled([hydrateWorkshop(), hydrateHidden(), chainReadyToDraw()]).then(draw, draw)
+  void Promise.allSettled([
+    hydrateHidden().finally(() => markBoot('hidden')),
+    chainReadyToDraw().finally(() => markBoot('chain')),
+    ...(isWorkshopPath(location.pathname) ? [readWorkshop()] : []),
+  ]).then(draw, draw)
 }
 
 /**

@@ -40,6 +40,50 @@ function routeCards(): Plugin {
 }
 
 /**
+ * The app's chunk (src/boot.tsx), fetched and compiled while main.tsx waits on
+ * IndexedDB, instead of only after. main.tsx imports it dynamically, once the
+ * records that moved out of localStorage are read (lib/kvStore.ts), and Vite
+ * asks for a dynamic import's files only when the import runs: on a phone
+ * after a deploy that put the download of the whole app behind the database.
+ * A modulepreload link fetches and compiles a module without running it, so
+ * nothing in it reads a record early. Its CSS is preloaded too, without
+ * crossorigin, as Vite's own loader asks for it (a mismatch fetches it twice).
+ */
+function bootPreload(): Plugin {
+  return {
+    name: 'onosendai-boot-preload',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html, ctx) {
+        const bundle = ctx.bundle
+        if (!bundle) return html
+        const chunks = Object.values(bundle).filter((c) => c.type === 'chunk')
+        const isBoot = (id: string | null | undefined): boolean => /[\\/]src[\\/]boot\.tsx(\?.*)?$/.test(id ?? '')
+        const boot = chunks.find((c) => c.type === 'chunk' && (isBoot(c.facadeModuleId) || (c.isDynamicEntry && c.moduleIds.some(isBoot))))
+        if (!boot || boot.type !== 'chunk') throw new Error(`bootPreload: no chunk for src/boot.tsx in the bundle (${chunks.map((c) => c.fileName + ':' + (c.type === 'chunk' ? c.facadeModuleId : '')).join(', ').slice(0, 600)})`)
+        const js = new Set<string>()
+        const css = new Set<string>()
+        const walk = (fileName: string): void => {
+          if (js.has(fileName)) return
+          const c = bundle[fileName]
+          if (!c || c.type !== 'chunk') return
+          js.add(fileName)
+          for (const f of c.viteMetadata?.importedCss ?? []) css.add(f)
+          for (const f of c.imports) walk(f)
+        }
+        walk(boot.fileName)
+        const has = (f: string): boolean => html.includes(`/${f}"`)
+        return [
+          ...[...js].filter((f) => !has(f)).map((f) => ({ tag: 'link', attrs: { rel: 'modulepreload', crossorigin: true, href: `/${f}` }, injectTo: 'head' as const })),
+          ...[...css].filter((f) => !has(f)).map((f) => ({ tag: 'link', attrs: { rel: 'preload', as: 'style', href: `/${f}` }, injectTo: 'head' as const })),
+        ]
+      },
+    },
+  }
+}
+
+/**
  * The composer's WebGL2 check, answered without a throwaway context.
  * @react-three/postprocessing's EffectComposer asks three-stdlib's
  * isWebGL2Available() whether it may multisample, and that creates a canvas
@@ -115,7 +159,7 @@ const BUILD = process.env.VITEST ? 'test' : buildId()
 const APP_VERSION = simpleVersion((JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: string }).version) ?? ''
 
 export default defineConfig(async () => ({
-  plugins: [react(), routeCards(), composerKnowsWebGL2(), versionFile(BUILD), v1HopListGuard()],
+  plugins: [react(), routeCards(), composerKnowsWebGL2(), versionFile(BUILD), v1HopListGuard(), bootPreload()],
   define: {
     // The same id version.json names, so a tab can tell a newer deploy from its own.
     __ONOSENDAI_BUILD__: JSON.stringify(BUILD),

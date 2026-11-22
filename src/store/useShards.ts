@@ -127,7 +127,7 @@ import { entriesIn, isListed, noteStored, onHiddenChange, reloadLocalView, saveR
 import { builtInLook, builtInLookTags, doorHeightOf, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedWrapper, setSealedLookFetch, wireLook, wireOpenLook, type LookName, type LookPose } from '../lib/looks'
 import { openSealedLookPayload, sealLookTags, sealedLookAddresses, sealedLookLimit } from '../lib/sealedLooks'
 import { forgetPieceKeys, notePieceKey, notePieceKeys, pieceAddresses, setLocalPieces } from '../lib/pieceKeys'
-import { openOnePiece, pieceRefusal, planPieces, pieceShape, sealedPiecesOf, signerRefusal, type PlannedPiece } from '../lib/pieces'
+import { openOnePiece, pieceRefusal, planPieces, planPiecesNow, pieceShape, sealedPiecesOf, signerRefusal, type PlannedPiece } from '../lib/pieces'
 import { localObject } from './localObjects'
 import { primeRef, forgetRef } from '../lib/parts'
 import { useCeremony } from './useCeremony'
@@ -5020,7 +5020,7 @@ export const useShards = create<ShardsState>((set, get) => {
         // in words, and nothing is signed. A move keeps its pieces (below).
         if (!was && !object && !intoChest && cs.identity.pubkey) {
           const me = cs.identity.pubkey
-          const plan = await planPieces(shard, me, (address) => {
+          const plan = planPiecesNow(shard, me, (address) => {
             const a = parseAddress(address)
             const payload = a ? localObject(a) : undefined
             return payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : undefined

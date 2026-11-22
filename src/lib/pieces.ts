@@ -89,20 +89,21 @@ function ownTable(payload: Payload, owner: string): Payload {
 /**
  * The pieces `parent` places, found by `lookup` and planned for sealing:
  * breadth first from the parent's refs, to MAX_PART_DEPTH. `lookup` gives the
- * payload at an address (a workshop piece's, or for a move one opened with its
- * old key), or undefined when that address is not a piece to seal. `noHint`
- * keeps refs with a relay hint out (live links, for a hide from the workshop).
- * An address the root's table holds is drawn from there and is never a piece,
- * nor one a piece's own table holds for it. Each piece gets `newD()`; every
- * ref naming it, in the parent and in the pieces, is rewritten.
+ * payload at an address (a workshop piece's), or undefined when that address
+ * is not a piece to seal. `noHint` keeps refs with a relay hint out (live
+ * links, for a hide from the workshop). An address the root's table holds is
+ * drawn from there and is never a piece, nor one a piece's own table holds for
+ * it. Each piece gets `newD()`; every ref naming it, in the parent and in the
+ * pieces, is rewritten. Synchronous, so a hide plans before it awaits anything
+ * (one hide at a time: a second press must find it working).
  */
-export async function planPieces(
+export function planPiecesNow(
   parent: ShardModel,
   owner: string,
-  lookup: (address: string) => Promise<Payload | undefined> | Payload | undefined,
+  lookup: (address: string) => Payload | undefined,
   newD: () => string,
   noHint = true,
-): Promise<PiecePlan> {
+): PiecePlan {
   const names = new Map<string, string>()
   const found: Array<{ from: string; d: string; payload: Payload }> = []
   let level: Array<{ refs: unknown; table: unknown }> = [{ refs: parent.refs, table: parent.objects }]
@@ -113,7 +114,7 @@ export async function planPieces(
       for (const r of holder.refs) {
         const address = pieceRef(r, owner, noHint)
         if (!address || names.has(address) || hasKey(parent.objects, address) || hasKey(holder.table, address)) continue
-        const got = await lookup(address)
+        const got = lookup(address)
         if (!got || typeof got !== 'object' || Array.isArray(got)) continue
         const payload = ownTable(got, owner)
         const d = newD()
@@ -130,6 +131,32 @@ export async function planPieces(
     return { from, address: names.get(from)!, d, payload: JSON.stringify(written), name: typeof payload.name === 'string' ? payload.name : 'piece' }
   })
   return { parent: { ...parent, refs: renamed(parent.refs ?? [], names) as Ref[] }, pieces }
+}
+
+/**
+ * planPiecesNow with a lookup that waits (a move opens each piece with its old
+ * key, from the relays): each pass asks for the addresses the one before could
+ * not answer yet, one depth further each time, until nothing new is asked.
+ */
+export async function planPieces(
+  parent: ShardModel,
+  owner: string,
+  lookup: (address: string) => Promise<Payload | undefined> | Payload | undefined,
+  newD: () => string,
+  noHint = true,
+): Promise<PiecePlan> {
+  const known = new Map<string, Payload | undefined>()
+  for (let pass = 0; pass <= MAX_PART_DEPTH; pass++) {
+    const asked: string[] = []
+    const plan = planPiecesNow(parent, owner, (a) => {
+      if (known.has(a)) return known.get(a)
+      asked.push(a)
+      return undefined
+    }, newD, noHint)
+    if (asked.length === 0) return plan
+    for (const a of asked) known.set(a, await lookup(a))
+  }
+  return planPiecesNow(parent, owner, (a) => known.get(a), newD, noHint)
 }
 
 /** A piece's hidden object as lib/hidden.ts objectTemplateOf writes it, around a stand-in ciphertext of exactly the length its payload seals to. */

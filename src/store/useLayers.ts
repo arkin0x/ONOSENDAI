@@ -24,12 +24,13 @@
  *
  * One more is kept here as a device setting, though it is not a layer:
  * walkLimits, WALK's sync limit (arkinox, 2026-11-18: "maybe sync loss
- * warning should be a setting"). On, as always, fluid WALK slows from 15
- * events ahead of your chain, stops at 20, and the LOSING SYNC warning shows
- * (lib/fluidWalk.ts syncSpeedFactor, hud/SyncWarning.tsx). Off, none of the
- * three: the walk runs as far ahead as you like, at the risk of losing what
- * has not reached your chain if something interrupts it. It changes how far
- * the walk may run ahead, never a proof, an event or the chain's rules.
+ * warning should be a setting"), the Settings row "Pause fluid walk when
+ * your chain falls behind" since 2026-11-22. On, the default, fluid WALK
+ * switches itself off 21 events ahead of your chain and back on at 15
+ * (store/fluidSwitch.ts fluidPauseCheck); the slowdown and the LOSING SYNC
+ * warning it also turned on are parked (store/walkLimits.ts
+ * SYNC_SLOWDOWN_ON). Off, fluid WALK runs as far ahead as you like. It
+ * changes how the walk moves, never a proof, an event or the chain's rules.
  *
  * Kept in localStorage so the choice survives a reload on this device. Every
  * read and write is guarded: with storage blocked (private mode, an odd

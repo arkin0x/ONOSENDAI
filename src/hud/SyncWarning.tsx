@@ -1,6 +1,12 @@
 /**
  * SyncWarning.tsx: WALK has run too far ahead of its proofs.
  *
+ * PARKED since 2026-11-22 (arkinox: "lets turn off the slowdown and LOSING
+ * SYNC features for now and just see how this iteration feels"): with
+ * store/walkLimits.ts SYNC_SLOWDOWN_ON false, nothing here is mounted, the
+ * line under it included. The fluid pause (hud/FluidPauseNotice.tsx) is the
+ * one word about it now. Everything below is how it works switched back on.
+ *
  * WALK shows every step the moment it is pressed and proves them behind you
  * (store/useWalk.ts). A few events ahead is a walk keeping up; past
  * FLUID_EASE_FROM (14) fluid WALK slows down, and this fades in with the
@@ -41,7 +47,7 @@ import { create } from 'zustand'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
 import { useAheadSelect } from '../store/walkAhead'
-import { walkWarnOpacity } from '../store/walkLimits'
+import { syncSlowdownOn, walkWarnOpacity } from '../store/walkLimits'
 import { WALK_LIMITS_ROW, openSettingAt } from './settingsLink'
 import { hudFlags } from '../lib/hudFlags'
 
@@ -55,9 +61,9 @@ export const useSyncWarnAside = create<{ aside: boolean }>(() => ({ aside: false
 /** At least this shown before the line takes a tap or the keyboard: a faint box is not a place to tap. */
 export const SYNCWARN_TAP_FROM = 0.5
 
-/** The warning; not mounted at all with ?nosyncwarn=1 (lib/hudFlags.ts), so none of its hooks run. */
+/** The warning; not mounted at all while parked (store/walkLimits.ts syncSlowdownOn) or with ?nosyncwarn=1 (lib/hudFlags.ts), so none of its hooks run. */
 export function SyncWarning(): JSX.Element | null {
-  return hudFlags().nosyncwarn ? null : <SyncWarningBox />
+  return !syncSlowdownOn() || hudFlags().nosyncwarn ? null : <SyncWarningBox />
 }
 
 function SyncWarningBox(): JSX.Element {

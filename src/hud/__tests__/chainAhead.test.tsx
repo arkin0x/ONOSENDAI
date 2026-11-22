@@ -1,7 +1,8 @@
 /**
  * chainAhead.test.tsx: the CHAIN chip's ahead bar (hud/ChainAhead.tsx;
  * arkinox, 2026-11-17): what it shows at each count, that it goes by the
- * slowdown's own number and thresholds, that the chip is untouched with
+ * fluid pause's own number and thresholds (arkinox, 2026-11-22: amber from
+ * 15, where a paused fluid WALK comes back on, red from 21, where it pauses), that the chip is untouched with
  * nothing ahead and the bar lingers about a second after catching up, and
  * that the stylesheet keeps it out of the layout and still under reduced
  * motion. The real boxes are measured in a browser by
@@ -29,7 +30,7 @@ vi.mock('../../hooks/useSocial', () => ({ useActionComments: () => ({ comments: 
 
 import { ChainExplorer } from '../ChainExplorer'
 import { AHEAD_LINGER_MS, AHEAD_TICKS, AHEAD_TRACK_START, aheadBar, aheadLabel, aheadStep, tickClass, type AheadTrack } from '../ChainAhead'
-import { FLUID_EASE_FROM, FLUID_HOLD_AT, syncSpeedFactor, syncWarnOpacity } from '../../lib/fluidWalk'
+import { FLUID_EASE_FROM, FLUID_HOLD_AT, FLUID_PAUSE_AT, FLUID_RESUME_AT, syncSpeedFactor, syncWarnOpacity } from '../../lib/fluidWalk'
 import { useChainUi } from '../../store/useChainUi'
 import { useCyberspace } from '../../store/useCyberspace'
 import { SYNC_WARN_AT, useWalk, type WalkSegment } from '../../store/useWalk'
@@ -39,14 +40,15 @@ import { eventsAhead } from '../../store/walkAhead'
 ;(globalThis as { window?: unknown }).window ??= globalThis
 ;(globalThis as { document?: unknown }).document ??= { visibilityState: 'visible', addEventListener: () => undefined, removeEventListener: () => undefined }
 
-const COUNTS = [0, 1, 5, 14, 15, 17, 20]
+const COUNTS = [0, 1, 5, 14, 15, 17, 20, 21]
 const still = { rose: false, goneTop: 0 }
 const classes = (n: number, track: Pick<AheadTrack, 'rose' | 'goneTop'> = still): string[] => Array.from({ length: AHEAD_TICKS }, (_, k) => tickClass(k + 1, aheadBar(n), track))
 const has = (cls: string, name: string): boolean => cls.split(' ').includes(name)
 const count = (all: string[], name: string): number => all.filter((c) => has(c, name)).length
 
 describe('the bar at each count', () => {
-  it('has one tick per event up to where the walk stops', () => {
+  it('has one tick per event, to one short of the fluid pause', () => {
+    expect(AHEAD_TICKS).toBe(FLUID_PAUSE_AT - 1)
     expect(AHEAD_TICKS).toBe(FLUID_HOLD_AT)
     expect(AHEAD_TICKS).toBe(20)
   })
@@ -54,9 +56,9 @@ describe('the bar at each count', () => {
   it('lights that many ticks from the left, the newest the head', () => {
     for (const n of COUNTS) {
       const all = classes(n)
-      expect([n, count(all, 'is-lit')]).toEqual([n, n])
-      expect([n, all.findIndex((c) => has(c, 'is-lit') === false)]).toEqual([n, n === 20 ? -1 : n])
-      expect([n, all.findIndex((c) => has(c, 'is-head')) + 1]).toEqual([n, n])
+      expect([n, count(all, 'is-lit')]).toEqual([n, Math.min(n, 20)])
+      expect([n, all.findIndex((c) => has(c, 'is-lit') === false)]).toEqual([n, n >= 20 ? -1 : n])
+      expect([n, all.findIndex((c) => has(c, 'is-head')) + 1]).toEqual([n, Math.min(n, 20)])
       expect(count(all, 'is-head')).toBe(n === 0 ? 0 : 1)
     }
   })
@@ -67,23 +69,23 @@ describe('the bar at each count', () => {
       expect(all.map((c) => has(c, 'is-z'))).toEqual(Array.from({ length: 20 }, (_, k) => k + 1 >= 15))
       expect(all.findIndex((c) => has(c, 'is-z1')) + 1).toBe(15)
       // Hollow amber outlines are the slowing slots not yet reached.
-      expect([n, all.filter((c) => has(c, 'is-z') && !has(c, 'is-lit')).length]).toEqual([n, Math.min(6, 20 - n)])
+      expect([n, all.filter((c) => has(c, 'is-z') && !has(c, 'is-lit')).length]).toEqual([n, Math.max(0, Math.min(6, 20 - n))])
     }
   })
 
-  it('is off at 0, plain to 14, slowing from 15, at the limit at 20', () => {
+  it('is off at 0, plain to 14, amber from 15, red at the fluid pause, 21', () => {
     const state = (n: number): string => { const b = aheadBar(n); return `${b.on ? 'on' : 'off'}${b.slow ? ' slow' : ''}${b.limit ? ' limit' : ''}` }
-    expect(COUNTS.map(state)).toEqual(['off', 'on', 'on', 'on', 'on slow', 'on slow', 'on slow limit'])
+    expect(COUNTS.map(state)).toEqual(['off', 'on', 'on', 'on', 'on slow', 'on slow', 'on slow', 'on slow limit'])
   })
 
   it('closes the brackets in from 15 to 20', () => {
-    expect(COUNTS.map((n) => aheadBar(n).close)).toEqual([0, 0, 0, 0, 0, 0.4, 1])
+    expect(COUNTS.map((n) => aheadBar(n).close)).toEqual([0, 0, 0, 0, 0, 0.4, 1, 1])
     expect(aheadBar(19).close).toBeCloseTo(0.8, 6)
   })
 
-  it('stays full, never past its ticks, when a fall queues beyond the stop', () => {
+  it('stays full, never past its ticks, however far past 20 the count goes', () => {
     for (const n of [21, 26, 400]) {
-      expect(aheadBar(n)).toEqual(aheadBar(20))
+      expect(aheadBar(n)).toEqual({ ...aheadBar(20), limit: true })
       expect(count(classes(n), 'is-lit')).toBe(20)
       expect(classes(n).findIndex((c) => has(c, 'is-head')) + 1).toBe(20)
     }
@@ -93,15 +95,16 @@ describe('the bar at each count', () => {
   })
 })
 
-describe('the same number and thresholds as the slowdown and the warning', () => {
-  it('turns amber exactly where the walk slows and the warning shows, red where the walk stops', () => {
+describe('the same number and thresholds as the fluid pause (and the parked slowdown and warning)', () => {
+  it('turns amber where a paused fluid WALK comes back on, red where it pauses; amber is where the parked slowdown and warning start', () => {
     expect(SYNC_WARN_AT).toBe(FLUID_EASE_FROM + 1)
+    expect(SYNC_WARN_AT).toBe(FLUID_RESUME_AT)
     for (let n = 0; n <= 30; n++) {
       const b = aheadBar(n)
+      expect([n, b.slow]).toEqual([n, n >= FLUID_RESUME_AT])
       expect([n, b.slow]).toEqual([n, syncSpeedFactor(n) < 1])
       expect([n, b.slow]).toEqual([n, syncWarnOpacity(n) > 0])
-      expect([n, b.limit]).toEqual([n, syncSpeedFactor(n) === 0])
-      expect([n, b.limit]).toEqual([n, syncWarnOpacity(n) === 1])
+      expect([n, b.limit]).toEqual([n, n >= FLUID_PAUSE_AT])
     }
   })
 })
@@ -164,12 +167,12 @@ describe('what a change plays', () => {
 })
 
 describe('the label', () => {
-  it('gains the count, and says where the walk stops', () => {
+  it('gains the count, and says where fluid WALK pauses', () => {
     expect(aheadLabel(0)).toBe('')
-    expect(aheadLabel(1)).toBe(' 1 move ahead of your chain. The walk stops at 20.')
-    expect(aheadLabel(17)).toBe(' 17 moves ahead of your chain. The walk stops at 20.')
-    // The real count, past the stop too.
-    expect(aheadLabel(23)).toBe(' 23 moves ahead of your chain. The walk stops at 20.')
+    expect(aheadLabel(1)).toBe(' 1 move ahead of your chain. Fluid WALK pauses at 21.')
+    expect(aheadLabel(17)).toBe(' 17 moves ahead of your chain. Fluid WALK pauses at 21.')
+    // The real count, past 20 too.
+    expect(aheadLabel(23)).toBe(' 23 moves ahead of your chain. Fluid WALK pauses at 21.')
   })
 })
 
@@ -232,8 +235,8 @@ function markup(h: Host | string): string {
   return `<${h.type}${attrs.join('')}>${h.children.map(markup).join('')}</${h.type}>`
 }
 
-/** Today's chip, to the character: what the page holds with nothing ahead. */
-const PLAIN = '<div class="explorer"><button class="chip explorer__toggle" aria-label="Show chain explorer" aria-pressed="false">CHAIN 3/3</button></div>'
+/** Today's chip, to the character: what the page holds with nothing ahead (in the chip's row, which the fluid pause's word sits beside). */
+const PLAIN = '<div class="explorer"><div class="explorer__chiprow"><button class="chip explorer__toggle" aria-label="Show chain explorer" aria-pressed="false">CHAIN 3/3</button></div></div>'
 
 describe('the CHAIN chip in WALK', () => {
   it('with nothing ahead is exactly the chip it always was', async () => {
@@ -254,7 +257,7 @@ describe('the CHAIN chip in WALK', () => {
     await m.unmount()
   })
 
-  it('shows the count at 1, 5, 14, 15, 17 and 20, and the words never change', async () => {
+  it('shows the count at 1, 5, 14, 15, 17, 20 and 21, and the words never change', async () => {
     chainOf(3)
     walkAt(0)
     const m = await mount(<ChainExplorer />)
@@ -263,12 +266,12 @@ describe('the CHAIN chip in WALK', () => {
       await settled()
       const chip = chipOf(m.all())
       const cls = String(chip.props.className).split(' ')
-      expect([n, litOf(chip)]).toEqual([n, n])
+      expect([n, litOf(chip)]).toEqual([n, Math.min(n, 20)])
       expect(kids(chip, 'aheadbar')[0].children.length).toBe(20)
       expect([n, cls.includes('has-ahead'), cls.includes('is-ahead')]).toEqual([n, true, true])
       expect([n, cls.includes('is-slow')]).toEqual([n, n >= 15])
-      expect([n, cls.includes('is-limit')]).toEqual([n, n >= 20])
-      expect(chip.props['aria-label']).toBe(`Show chain explorer. ${n} move${n === 1 ? '' : 's'} ahead of your chain. The walk stops at 20.`)
+      expect([n, cls.includes('is-limit')]).toEqual([n, n >= 21])
+      expect(chip.props['aria-label']).toBe(`Show chain explorer. ${n} move${n === 1 ? '' : 's'} ahead of your chain. Fluid WALK pauses at 21.`)
       expect(m.says('CHAIN 3/3')).toBe(true)
       // The marks are decoration: a reader gets the label.
       expect(kids(chip, 'aheadbar')[0].props['aria-hidden']).toBe('true')
@@ -277,7 +280,7 @@ describe('the CHAIN chip in WALK', () => {
     await m.unmount()
   })
 
-  it('moves the brackets in as the walk slows', async () => {
+  it('moves the brackets in from 15 to 20', async () => {
     chainOf(3)
     walkAt(15)
     const m = await mount(<ChainExplorer />)
@@ -293,13 +296,13 @@ describe('the CHAIN chip in WALK', () => {
     await m.unmount()
   })
 
-  it('reads the number the slowdown reads: the queue, the open segment, a count past the stop', async () => {
+  it('reads the number the fluid pause reads: the queue, the open segment, a count past 20', async () => {
     chainOf(3)
     walkAt(6)
     const m = await mount(<ChainExplorer />)
     expect(eventsAhead()).toBe(6)
     expect(litOf(chipOf(m.all()))).toBe(eventsAhead())
-    // The segment still being walked is one more, for the slowdown and the bar alike.
+    // The segment still being walked is one more, for the fluid pause and the bar alike.
     useWalk.setState({ open: {} as WalkSegment })
     await settled()
     expect(eventsAhead()).toBe(7)
@@ -308,12 +311,12 @@ describe('the CHAIN chip in WALK', () => {
     useWalk.setState({ behind: 19 })
     await settled()
     expect(eventsAhead()).toBe(20)
-    expect(syncSpeedFactor(eventsAhead())).toBe(0)
-    expect(String(chipOf(m.all()).props.className)).toContain('is-limit')
-    // Past the stop (a fall from 19): full, red, and the label has the real count.
+    expect(String(chipOf(m.all()).props.className)).not.toContain('is-limit')
+    // At the pause: full, red, and the label has the real count.
     useWalk.setState({ behind: 20 })
     await settled()
     expect(eventsAhead()).toBe(21)
+    expect(String(chipOf(m.all()).props.className)).toContain('is-limit')
     expect(litOf(chipOf(m.all()))).toBe(20)
     expect(String(chipOf(m.all()).props['aria-label'])).toContain(' 21 moves ahead')
     await m.unmount()
@@ -432,7 +435,7 @@ describe('the CHAIN chip in WALK', () => {
     expect(String(chip.props.className)).toBe('chip explorer__toggle explorer__toggle--dropped has-ahead is-ahead')
     expect(m.says('2 ACTIONS DROPPED')).toBe(true)
     expect(litOf(chip)).toBe(5)
-    expect(chip.props['aria-label']).toBe('2 actions from this device were dropped. Tap to read why. 5 moves ahead of your chain. The walk stops at 20.')
+    expect(chip.props['aria-label']).toBe('2 actions from this device were dropped. Tap to read why. 5 moves ahead of your chain. Fluid WALK pauses at 21.')
     await m.unmount()
   })
 })

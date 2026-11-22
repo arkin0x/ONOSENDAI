@@ -9,7 +9,8 @@
  * | Part | What happens |
  * |---|---|
  * | input | what is held (store/walkHold.ts heldNow), or a tap's short nudge, is the way to go: forward and the sides along the way you face, laid flat across gravity; with gravity off, JUMP and DOWN push up and down |
- * | speed | it picks up toward FLUID_MAX_SPEED, and slows to a stop when let go; the cap eases from 15 events ahead of the chain (store/walkAhead.ts eventsAhead, lib/fluidWalk.ts syncSpeedFactor) and stops at 20, holding at the edge of the gibson until the chain catches up |
+ * | speed | it picks up toward FLUID_MAX_SPEED, and slows to a stop when let go; the parked slowdown (store/walkLimits.ts SYNC_SLOWDOWN_ON, off since 2026-11-22) would ease the cap from 15 events ahead of the chain (store/walkAhead.ts eventsAhead, lib/fluidWalk.ts syncSpeedFactor) |
+ * | the fluid pause | 21 events ahead of the chain fluid WALK switches itself off and the walk goes on as the step WALK; at 15 or fewer it comes back on (store/fluidSwitch.ts fluidPauseCheck, checked here whenever the count can change) |
  * | the anchor | when the smooth position passes half a step from its gibson's middle, the walk takes one legal step there (store/useWalk.ts fluidCross): a straight step, or a diagonal near a corner; the step goes to the chain as a press's would, so the chain only ever sees whole gibsons |
  * | walls | a step a wall holds keeps the smooth position in its gibson, FLUID_WALL_REACH from the middle at most (and FLUID_FACE_GAP short of a nearer face), and stops its speed that way only: the rest goes on, which is sliding along the wall |
  * | floors, stairs, gravity | the step does what a press does (stair step-up and step-down, the fall off a ledge, the bounce pads); the anchor's change of height is eased into the eye, and the ground (below) stands the drawn walker on the surface itself; jumps, double jumps and falls are the walk's own arcs (store/useWalk.ts), unchanged |
@@ -31,10 +32,11 @@ import { walkFacing, walkFall, walkFallUp, walkGlide, walkRise } from '../lib/wa
 import { WORLD_DOWN, heightOf, raised, upOf } from '../lib/walkDown'
 import { useCyberspace } from './useCyberspace'
 import { fluidCross, fallState, setWalkerMoving, useWalk, walkDown } from './useWalk'
-import { fluidNudge, fluidOn, useFluidWalk } from './fluidSwitch'
+import { clearFluidPause, fluidNudge, fluidOn, fluidPauseCheck, useFluidWalk } from './fluidSwitch'
 import { heldNow } from './walkHold'
-import { eventsAhead } from './walkAhead'
-import { walkSpeedFactor } from './walkLimits'
+import { aheadOfState, eventsAhead } from './walkAhead'
+import { walkLimitsOn, walkSpeedFactor } from './walkLimits'
+import { useLayers } from './useLayers'
 import { walkInputOpen } from './walkInput'
 import { REST_FLOOR, faceDistance, groundUnder, restDrop, wallItemsAt, type WallItem } from './walkWalls'
 import { STEP_DOWN_MAX, STEP_UP_MAX } from './walkStep'
@@ -195,6 +197,9 @@ export function tickFluid(now: number = performance.now()): boolean {
   const cs = useCyberspace.getState()
   const dt = st.last === null ? 0 : Math.min(MAX_DT, Math.max(0, (now - st.last) / 1000))
   st.last = now
+  // The fluid pause, every frame too: a fall's mid-air hops are module
+  // state, which no store change reports.
+  fluidPauseCheck(eventsAhead(), walkLimitsOn(), now)
   if (!fluidWalking()) {
     // Just left (leaving WALK, the switch, a VIEW taking the head): the
     // smooth position glides onto wherever the anchor is now.
@@ -239,7 +244,8 @@ export function tickFluid(now: number = performance.now()): boolean {
   }
   const wish = wishNow(now, gravity, g)
   const level = gravity ? LEVEL[g.axis] : AXES
-  for (let left = dt; left > 1e-9; left -= SUB_DT) substep(Math.min(SUB_DT, left), now, wish, gravity, g, level, length)
+  // A crossing that pauses fluid (FLUID_PAUSE_AT) ends the frame's walking there: the next frame glides onto the anchor.
+  for (let left = dt; left > 1e-9 && fluidOn(); left -= SUB_DT) substep(Math.min(SUB_DT, left), now, wish, gravity, g, level, length)
   if (dt === 0) substep(0, now, wish, gravity, g, level, length)
   decay(dt)
   st.wasFalling = fallState() !== null
@@ -527,10 +533,10 @@ const LEVEL: Record<AxisName, readonly AxisName[]> = { x: ['y', 'z'], y: ['x', '
 /** One step of the walk's motion, `dt` seconds: the speed, the smooth position, what holds it, and the crossings due. */
 function substep(dt: number, now: number, wish: Vec, gravity: boolean, g: AxisDirection, level: readonly AxisName[], length: bigint): void {
   const falling = fallState() !== null
-  // Events ahead of the chain (store/walkAhead.ts): the speed eases from
-  // FLUID_EASE_FROM and stops at FLUID_HOLD_AT, so neither a settle nor a
-  // landing can carry the queue past it, unless the sync limit is off in
-  // Settings (store/walkLimits.ts).
+  // Events ahead of the chain (store/walkAhead.ts): with the parked
+  // slowdown on (store/walkLimits.ts SYNC_SLOWDOWN_ON) the speed eases from
+  // FLUID_EASE_FROM to its slowest at FLUID_HOLD_AT; off (as now), and with
+  // the sync limit off in Settings, it is 1.
   const factor = walkSpeedFactor(eventsAhead())
   const max = FLUID_MAX_SPEED * factor
   if (falling) accelerate(st.v, wish, max, FLUID_AIR_ACCEL, FLUID_AIR_DECEL, dt)
@@ -586,8 +592,12 @@ function substep(dt: number, now: number, wish: Vec, gravity: boolean, g: AxisDi
     const due = dueCrossing(st.frac, st.v, level)
     if (!due) break
     const { main, side } = due
-    // Stopped (FLUID_HOLD_AT events ahead): no new gibson until the chain catches up.
+    // Stopped: no new gibson. The slowdown never stops now (its slowest is
+    // FLUID_SLOWEST, and the fluid pause at FLUID_PAUSE_AT took the stop's
+    // place), so this holds only if a factor of 0 ever comes back.
     if (factor === 0) { holdEdges(); break }
+    // Fluid paused itself on the last crossing (FLUID_PAUSE_AT): no more.
+    if (!fluidOn()) break
     const known = st.held.get(key(main.axis, main.dir))
     if (known && now - known.at < recheck) { holdAt(main, known.limit, known.at, known.edge); continue }
     const res = fluidCross(main, side, edgeSafe(main.axis))
@@ -698,12 +708,22 @@ function same(a: Position, b: Position): boolean {
   return a.x === b.x && a.y === b.y && a.z === b.z
 }
 
-// The switch turned while walking: the open segment closes (a step WALK
-// press would grow it by heading, a fluid crossing by line, and the two
-// must not share one), and the smooth position glides onto its anchor.
+// The switch turned while walking, by hand or by the fluid pause: the open
+// segment closes (a step WALK press would grow it by heading, a fluid
+// crossing by line, and the two must not share one), and the smooth
+// position glides onto its anchor.
 useFluidWalk.subscribe((s, prev) => {
-  if (s.on !== prev.on && useCyberspace.getState().walking) useWalk.getState().settle()
+  if ((s.on && !s.paused) !== (prev.on && !prev.paused) && useCyberspace.getState().walking) useWalk.getState().settle()
 })
+
+// The fluid pause (store/fluidSwitch.ts fluidPauseCheck) goes by the events
+// ahead: asked whenever the walk's store changes (a move made, a proof
+// landed, the queue dropped), whenever the sync limit is switched, and every
+// frame in tickFluid. An identity switch forgets a pause: the walk stops
+// with it, and the next identity's walk starts from the saved choice.
+useWalk.subscribe((s) => { fluidPauseCheck(aheadOfState(s), walkLimitsOn()) })
+useLayers.subscribe((s, prev) => { if (s.walkLimits !== prev.walkLimits) fluidPauseCheck(eventsAhead(), s.walkLimits) })
+useCyberspace.subscribe((s, prev) => { if (s.identity.pubkey !== prev.identity.pubkey) clearFluidPause() })
 
 // DEV window handle, the house pattern: fluid WALK's state for the headless recording.
 if (import.meta.env.DEV && typeof window !== 'undefined') {

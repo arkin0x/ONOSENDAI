@@ -38,7 +38,7 @@ import type { AxisDirection, AxisName, Position } from './space'
  * step WALK's held key, one step every store/walkHold.ts WALK_HOLD_MS).
  * Measured with phone proof times (300 ms a proof, more for a long hop), a
  * walk that goes straight, turns or zigzags stays well under FLUID_EASE_FROM
- * events ahead, so the slowdown never comes into a normal walk
+ * events ahead, so neither the fluid pause nor the parked slowdown comes into a normal walk
  * (store/__tests__/walkFluid.test.ts, the speed tests). A running jump keeps its speed in the air, so it goes 37.5%
  * further too: about 9.7 gibsons on the flat, from 7.
  */
@@ -103,44 +103,60 @@ export const FLUID_EDGE_REACH = 0.45
 export const FLUID_LINE_SLACK = 0.75
 
 /**
- * Queue honesty: how the walking speed eases as the walk runs ahead of the
- * chain (arkinox, 2026-11-17: "start slowdown when the user is 15 events
- * ahead and stop at 20"). It counts the events ahead (store/walkAhead.ts
- * eventsAhead): the moves made here not yet proven onto your chain, that
- * is the segments queued for proof, the one still open, and a fall's
- * mid-air hops and landing (the relay send after a proof lands is not
- * counted). Up to FLUID_EASE_FROM ahead it is full speed; from one more it
- * slows in a straight line, to a stop at
- * FLUID_HOLD_AT, where no new gibson is entered at all until the chain
- * catches up. The LOSING SYNC warning fades in with the same slowdown
- * (syncWarnOpacity): hidden at FLUID_EASE_FROM, fully shown at
- * FLUID_HOLD_AT. The smooth position is never more than about 0.75 of a
- * step from its anchor (the diagonal zone at a corner), so it can never run
- * ahead of what is queued: only the queue can, and that is what this caps.
+ * Queue honesty: how fluid WALK keeps from running too far ahead of the
+ * chain. It counts the events ahead (store/walkAhead.ts eventsAhead): the
+ * moves made here not yet proven onto your chain, that is the segments
+ * queued for proof, the one still open, and a fall's mid-air hops and
+ * landing (the relay send after a proof lands is not counted). The smooth
+ * position is never more than about 0.75 of a step from its anchor (the
+ * diagonal zone at a corner), so it can never run ahead of what is queued:
+ * only the queue can, and that is what this caps.
+ *
+ * The fluid pause (arkinox, 2026-11-22: "on the 21st action ahead, we could
+ * automatically switch off fluid walk mode (and always turn it back on (if
+ * it was on before) when the chain queue drops to 15 or lower"): at
+ * FLUID_PAUSE_AT events ahead fluid WALK switches itself off and the walk
+ * goes on as the step WALK, which makes fewer, longer, straighter moves
+ * (one segment per 8-way heading), so the queue drains; at FLUID_RESUME_AT
+ * or fewer it comes back on (store/fluidSwitch.ts fluidPauseCheck). The gap
+ * between the two keeps it from flapping.
+ *
+ * The slowdown and the LOSING SYNC warning (arkinox, 2026-11-17: "start
+ * slowdown when the user is 15 events ahead and stop at 20") are parked
+ * since 2026-11-22 (arkinox: "lets turn off the slowdown and LOSING SYNC
+ * features for now and just see how this iteration feels"), behind
+ * store/walkLimits.ts SYNC_SLOWDOWN_ON. Switched back on, they are:
  *
  * | Events ahead | Speed | LOSING SYNC |
  * |---|---|---|
  * | 14 or fewer | full | hidden |
  * | 15 to 19 | 5/6 down to 1/6 | 1/6 up to 5/6 |
- * | 20 or more | stopped | fully shown |
+ * | 20 | 1/6, the slowest (no longer a stop: the fluid pause at 21 took its place) | fully shown |
  *
  * It was full speed to 5, a quarter less for each one more, held at 9, and
- * the warning on at 10 closed segments (2026-11-14 to 16).
+ * the warning on at 10 closed segments (2026-11-14 to 16); stopped at 20
+ * from 2026-11-17 to 22.
  */
 export const FLUID_EASE_FROM = 14
-/** See FLUID_EASE_FROM: the walk stops here, and the LOSING SYNC warning is fully shown. */
+/** See FLUID_EASE_FROM: the slowdown reaches its slowest here, and the LOSING SYNC warning is fully shown. */
 export const FLUID_HOLD_AT = 20
+/** See FLUID_EASE_FROM: this many events ahead, fluid WALK pauses itself, and the walk goes on as the step WALK. */
+export const FLUID_PAUSE_AT = 21
+/** See FLUID_EASE_FROM: this many events ahead or fewer, a paused fluid WALK comes back on. */
+export const FLUID_RESUME_AT = 15
 
-/** The share of the walking speed allowed `ahead` events ahead: 1 up to FLUID_EASE_FROM, falling in a straight line to 0 at FLUID_HOLD_AT. */
+/** The slowest the slowdown goes, at FLUID_HOLD_AT and past: the share it allowed one before (1/6), so the walk can still reach FLUID_PAUSE_AT. */
+export const FLUID_SLOWEST = 1 / (FLUID_HOLD_AT - FLUID_EASE_FROM)
+
+/** The share of the walking speed allowed `ahead` events ahead: 1 up to FLUID_EASE_FROM, falling in a straight line to FLUID_SLOWEST at FLUID_HOLD_AT - 1, and FLUID_SLOWEST from there on. */
 export function syncSpeedFactor(ahead: number): number {
   if (ahead <= FLUID_EASE_FROM) return 1
-  if (ahead >= FLUID_HOLD_AT) return 0
-  return (FLUID_HOLD_AT - ahead) / (FLUID_HOLD_AT - FLUID_EASE_FROM)
+  return Math.max(FLUID_SLOWEST, (FLUID_HOLD_AT - ahead) / (FLUID_HOLD_AT - FLUID_EASE_FROM))
 }
 
-/** How shown the LOSING SYNC warning is `ahead` events ahead, 0 to 1: the slowdown's amount, 0 at FLUID_EASE_FROM, 1 at FLUID_HOLD_AT. */
+/** How shown the LOSING SYNC warning is `ahead` events ahead, 0 to 1: 0 at FLUID_EASE_FROM, rising in a straight line to 1 at FLUID_HOLD_AT. */
 export function syncWarnOpacity(ahead: number): number {
-  return 1 - syncSpeedFactor(ahead)
+  return Math.max(0, Math.min(1, (ahead - FLUID_EASE_FROM) / (FLUID_HOLD_AT - FLUID_EASE_FROM)))
 }
 
 /** Three plain numbers by cyberspace axis. */

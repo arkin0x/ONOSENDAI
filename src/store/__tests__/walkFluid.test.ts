@@ -10,8 +10,12 @@
  * - a wall at an angle is slid along, and the anchor never enters it;
  * - a ramp is walked up standing on it, a step at a time;
  * - crossing N gibsons makes N legal steps, in order, proved as a chain;
- * - the speed eases from 15 events ahead and stops at 20, and the LOSING SYNC
- *   warning fades in with it (arkinox, 2026-11-17);
+ * - fluid WALK pauses itself 21 events ahead and comes back on at 15 if it
+ *   was on, a switch by hand wins, the sync limit off means no pause, the
+ *   pause is never saved, and it does not flap (arkinox, 2026-11-22); the
+ *   slowdown and LOSING SYNC warning are parked behind one flag, and
+ *   switched back on they slow from 15 to their slowest at 20, never a stop
+ *   (arkinox, 2026-11-17 and 22);
  * - on a slow device (frames further apart than WALK_SETTLE_MS) a straight
  *   walk is still one segment, and with late proofs the walker never goes
  *   back (walk-snapback investigation, 2026-11-17);
@@ -57,13 +61,14 @@ import { useShards, type WorldItem } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 import { clearWalls, stepLimit, wallItemsAt, wallsBuilt } from '../walkWalls'
 import { standing } from '../walkStep'
-import { fluidState, resetFluid, tickFluid } from '../walkFluid'
-import { useFluidWalk, fluidFromUrl } from '../fluidSwitch'
+import { fluidState, fluidWalking, resetFluid, tickFluid } from '../walkFluid'
+import { FLUID_KEY, fluidOn, loadFluid, useFluidWalk, fluidFromUrl } from '../fluidSwitch'
+import { SYNC_SLOWDOWN_ON, syncSlowdownOn, walkSpeedFactor, walkWarnOpacity } from '../walkLimits'
 import { DOUBLE_JUMP_HEIGHT, JUMP_HEIGHT } from '../walkGravity'
 import { walkFacing, walkFall, walkGlide } from '../../lib/walkEye'
 import { useCalibration } from '../../lib/calibration'
 import { withConstrain, type Constrain } from '../../lib/walkConstrain'
-import { FLUID_ACCEL, FLUID_EASE_FROM, FLUID_HOLD_AT, FLUID_MAX_SPEED, FLUID_NUDGE_STEPS, FLUID_WALL_REACH, len, onLine, syncSpeedFactor, syncWarnOpacity } from '../../lib/fluidWalk'
+import { FLUID_ACCEL, FLUID_EASE_FROM, FLUID_HOLD_AT, FLUID_PAUSE_AT, FLUID_RESUME_AT, FLUID_SLOWEST, FLUID_MAX_SPEED, FLUID_NUDGE_STEPS, FLUID_WALL_REACH, len, onLine, syncSpeedFactor, syncWarnOpacity } from '../../lib/fluidWalk'
 import { eventsAhead } from '../walkAhead'
 import { useLayers } from '../useLayers'
 import { canonicalQuaternion, type Position, type ViewAxes } from '../../lib/space'
@@ -168,7 +173,7 @@ beforeEach(async () => {
   walkKeysReleased()
   useWalk.getState().exit()
   useWalk.getState().setGravity(false)
-  useFluidWalk.setState({ on: true })
+  useFluidWalk.setState({ on: true, paused: false, resumedAt: 0 })
   useShards.setState({ worldItems: worldItemsOriginal })
   useWorkshop.setState({ open: false })
   clearWalls()
@@ -330,6 +335,11 @@ describe('speed (arkinox, 2026-11-18: "my walk speed seems slow ... maybe faster
    * measured on that phone: the most events it got ahead.
    */
   async function aheadWithProofs(proofMs: (req: (typeof posted)[number]) => number, drive: (ms: number) => void): Promise<number> {
+    return (await walkWithProofs(proofMs, drive)).most
+  }
+
+  /** aheadWithProofs, and how many events the walk made in its 8 s: those landed on the chain and those still ahead. */
+  async function walkWithProofs(proofMs: (req: (typeof posted)[number]) => number, drive: (ms: number) => void): Promise<{ most: number; made: number }> {
     useCalibration.setState({ cantorMsByHeight: PHONE })
     world(start, [boxes('Floor', 'all', [[[-200, -1, -200], [200, 0, 200]]]), [0, -1, 0]])
     walk(true)
@@ -356,7 +366,7 @@ describe('speed (arkinox, 2026-11-18: "my walk speed seems slow ... maybe faster
       most = Math.max(most, eventsAhead())
     }
     up('KeyW')
-    return most
+    return { most, made: landed + eventsAhead() }
   }
 
   it('with phone proof times (300 ms a move, more for a long hop), a walk that goes straight, turns, zigzags or keeps jumping stays well under the slowdown', async () => {
@@ -383,6 +393,52 @@ describe('speed (arkinox, 2026-11-18: "my walk speed seems slow ... maybe faster
       face(0)
     }
   })
+
+  it('the step WALK makes fewer events a minute than fluid WALK on a walk that turns (arkinox, 2026-11-22: "you publish less actions when fluid-walk is off because you take more linear paths"), so the fluid pause drains the queue', async () => {
+    let jumps = -1
+    const walks: Array<[string, (ms: number) => void]> = [
+      ['straight on', () => {}],
+      ['a slow curve, 30 degrees a second', (ms) => face((ms / 1000) * 30)],
+      ['turning 120 degrees a second', (ms) => face((ms / 1000) * 120)],
+      ['a wobble, 20 degrees each way every 0.6 s', (ms) => face(Math.floor(ms / 600) % 2 ? 20 : -20)],
+      ['zigzag, 45 degrees each way every 0.4 s', (ms) => face(Math.floor(ms / 400) % 2 ? 45 : -45)],
+      ['a running jump every 1.2 s', (ms) => { const k = Math.floor(ms / 1200); if (k !== jumps) { jumps = k; down('Space'); up('Space') } }],
+    ]
+    const rows: string[] = []
+    let fluidTotal = 0
+    let stepTotal = 0
+    for (const [name, drive] of walks) {
+      const perMinute: Record<'fluid' | 'step', number> = { fluid: 0, step: 0 }
+      for (const mode of ['fluid', 'step'] as const) {
+        useFluidWalk.setState({ on: mode === 'fluid', paused: false })
+        jumps = -1
+        const { made } = await walkWithProofs((req) => phoneProofMs(req, 300), drive)
+        perMinute[mode] = made * (60 / 8)
+        walkKeysReleased()
+        useWalk.getState().exit()
+        posted.length = 0
+        await useCyberspace.getState().respawn()
+        useCyberspace.getState().cancel()
+        start = { ...useCyberspace.getState().position }
+        resetFluid()
+        face(0)
+      }
+      rows.push(`${name}: fluid ${perMinute.fluid}/min, step ${perMinute.step}/min`)
+      fluidTotal += perMinute.fluid
+      stepTotal += perMinute.step
+      // A walk that bends: the step WALK snaps to 8 headings and makes no more events than fluid's lines.
+      // A walk that bends gently, the way a queue builds without sharp
+      // turns: the step WALK snaps to 8 headings and makes far fewer events.
+      if (name.startsWith('a slow curve') || name.startsWith('a wobble')) expect(perMinute.step, name).toBeLessThan(perMinute.fluid / 2)
+    }
+    useFluidWalk.setState({ on: true, paused: false })
+    console.log(`events a minute, phone proof times (300 ms a move):\n${rows.join('\n')}\ntotal: fluid ${fluidTotal}, step ${stepTotal}`)
+    // Measured (2026-11-22), events a minute fluid / step: straight 7.5 / 7.5,
+    // slow curve 105 / 45, turning 120 a second 150 / 165, wobble 127.5 / 7.5,
+    // zigzag 165 / 157.5, running jumps 150 / 135; total 705 / 517.5. Sharp
+    // turns are a corner in both, so about even there.
+    expect(stepTotal).toBeLessThan(fluidTotal * 0.85)
+  }, 60000)
 })
 
 describe('jumps keep their heights', () => {
@@ -546,137 +602,261 @@ describe('anchoring the chain', () => {
 })
 
 describe('the queue stays honest', () => {
-  it('full speed to 14 events ahead, slower from 15 to 19, stopped from 20 (arkinox, 2026-11-17)', () => {
-    expect(FLUID_EASE_FROM).toBe(14)
-    expect(FLUID_HOLD_AT).toBe(20)
-    for (let n = 0; n <= 14; n++) expect(syncSpeedFactor(n)).toBe(1)
-    let last = 1
-    for (let n = 15; n <= 19; n++) {
-      const f = syncSpeedFactor(n)
-      expect(f).toBeGreaterThan(0)
-      expect(f).toBeLessThan(last)
-      // A straight line from 14 (full) to 20 (stopped).
-      expect(f).toBeCloseTo((20 - n) / 6, 9)
-      last = f
+  /** Turn the parked slowdown and warning (store/walkLimits.ts SYNC_SLOWDOWN_ON) on for `body`. */
+  async function withSlowdown(body: () => void | Promise<void>): Promise<void> {
+    const g = globalThis as { __ONOSENDAI_SYNC_SLOWDOWN__?: boolean }
+    g.__ONOSENDAI_SYNC_SLOWDOWN__ = true
+    try { await body() } finally { delete g.__ONOSENDAI_SYNC_SLOWDOWN__ }
+  }
+
+  /**
+   * Hold the events ahead at `n` while walking (the open segment is one of
+   * them): set after the timers, so a settle never shows the walk a short
+   * queue.
+   */
+  const at = (n: number, ms: number): void => {
+    for (let t = 0; t < ms; t += 16) {
+      clock += 16
+      vi.advanceTimersByTime(16)
+      useWalk.setState({ behind: Math.max(0, n - (useWalk.getState().open ? 1 : 0)) })
+      expect(eventsAhead()).toBe(n)
+      tickFluid(clock)
+      tickFall(clock)
     }
-    expect(syncSpeedFactor(17)).toBeCloseTo(0.5, 9)
-    expect(syncSpeedFactor(20)).toBe(0)
-    expect(syncSpeedFactor(31)).toBe(0)
+  }
+  const speed = (): number => len(fluidState().v)
+
+  it('the slowdown and LOSING SYNC warning are parked behind one flag, off (arkinox, 2026-11-22: "lets turn off the slowdown and LOSING SYNC features for now")', () => {
+    expect(SYNC_SLOWDOWN_ON).toBe(false)
+    expect(syncSlowdownOn()).toBe(false)
+    for (const n of [0, 14, 15, 17, 20, 21, 40]) {
+      expect(walkSpeedFactor(n, true), `${n}`).toBe(1)
+      expect(walkWarnOpacity(n, true), `${n}`).toBe(0)
+    }
   })
 
-  it('the LOSING SYNC warning fades in with the slowdown: 0 at 14, 0.5 at 17, 1 at 20', () => {
-    expect(syncWarnOpacity(0)).toBe(0)
-    expect(syncWarnOpacity(14)).toBe(0)
-    expect(syncWarnOpacity(15)).toBeCloseTo(1 / 6, 9)
-    expect(syncWarnOpacity(17)).toBeCloseTo(0.5, 9)
-    expect(syncWarnOpacity(19)).toBeCloseTo(5 / 6, 9)
-    expect(syncWarnOpacity(20)).toBe(1)
-    expect(syncWarnOpacity(40)).toBe(1)
-    expect(SYNC_WARN_AT).toBe(15)
-  })
-
-  it('a held walk: no slowdown at 14 ahead, partial at 15 to 19, stopped at 20, and walks on as the count falls', () => {
+  it('a held walk keeps full speed from 15 to 20 ahead: no slowdown, no stop', () => {
     walk()
     down('KeyW')
-    // Hold the events ahead at `n` while walking (the open segment is one of
-    // them): set after the timers, so a settle never shows the walk a short queue.
-    const at = (n: number, ms: number): void => {
-      for (let t = 0; t < ms; t += 16) {
-        clock += 16
-        vi.advanceTimersByTime(16)
-        useWalk.setState({ behind: n - (useWalk.getState().open ? 1 : 0) })
-        expect(eventsAhead()).toBe(n)
-        tickFluid(clock)
-        tickFall(clock)
-      }
-    }
-    const speed = (): number => len(fluidState().v)
-    at(14, 1000)
-    expect(speed()).toBeCloseTo(FLUID_MAX_SPEED, 6)
-    for (let n = 15; n <= 19; n++) {
+    for (const n of [14, 15, 17, 19, 20]) {
+      const before = rel(start)
       at(n, 600)
-      expect(speed()).toBeCloseTo(FLUID_MAX_SPEED * (20 - n) / 6, 6)
+      expect(speed(), `${n} ahead`).toBeCloseTo(FLUID_MAX_SPEED, 6)
+      expect(rel(start), `${n} ahead`).not.toEqual(before)
     }
-    at(20, 600)
-    expect(speed()).toBe(0)
-    const stopped = rel(start)
-    at(20, 1000)
-    expect(rel(start)).toEqual(stopped)
-    // The count falls: it picks up again, a little, then all the way.
-    at(18, 600)
-    expect(speed()).toBeCloseTo(FLUID_MAX_SPEED / 3, 6)
-    expect(rel(start)).not.toEqual(stopped)
-    at(14, 600)
-    expect(speed()).toBeCloseTo(FLUID_MAX_SPEED, 6)
     up('KeyW')
     useWalk.setState({ behind: 0 })
   })
 
-  it('with the sync limit off in Settings: full speed at 15, 20 and 40 ahead, never stopped (arkinox, 2026-11-18)', () => {
-    useLayers.getState().setLayer('walkLimits', false)
-    try {
+  it('parked, the slowdown is as it was from 15 to 19, and slowest (never stopped) at 20 and past, so the walk can reach the pause at 21', async () => {
+    expect(FLUID_EASE_FROM).toBe(14)
+    expect(FLUID_HOLD_AT).toBe(20)
+    for (let n = 0; n <= 14; n++) expect(syncSpeedFactor(n)).toBe(1)
+    for (let n = 15; n <= 19; n++) expect(syncSpeedFactor(n)).toBeCloseTo((20 - n) / 6, 9)
+    expect(FLUID_SLOWEST).toBeCloseTo(1 / 6, 9)
+    expect(syncSpeedFactor(20)).toBeCloseTo(1 / 6, 9)
+    expect(syncSpeedFactor(31)).toBeCloseTo(1 / 6, 9)
+    // The warning: 0 at 14, half at 17, full at 20.
+    expect(syncWarnOpacity(14)).toBe(0)
+    expect(syncWarnOpacity(15)).toBeCloseTo(1 / 6, 9)
+    expect(syncWarnOpacity(17)).toBeCloseTo(0.5, 9)
+    expect(syncWarnOpacity(20)).toBe(1)
+    expect(syncWarnOpacity(40)).toBe(1)
+    expect(SYNC_WARN_AT).toBe(15)
+    await withSlowdown(() => {
+      expect(walkSpeedFactor(17, true)).toBeCloseTo(0.5, 9)
+      expect(walkSpeedFactor(17, false)).toBe(1)
+      expect(walkWarnOpacity(20, true)).toBe(1)
       walk()
       down('KeyW')
-      const at = (n: number, ms: number): void => {
-        for (let t = 0; t < ms; t += 16) {
-          clock += 16
-          vi.advanceTimersByTime(16)
-          useWalk.setState({ behind: n - (useWalk.getState().open ? 1 : 0) })
-          tickFluid(clock)
-          tickFall(clock)
-        }
-      }
-      for (const n of [15, 20, 40]) {
-        const before = rel(start)
+      at(14, 1000)
+      expect(speed()).toBeCloseTo(FLUID_MAX_SPEED, 6)
+      for (let n = 15; n <= 19; n++) {
         at(n, 600)
-        expect(len(fluidState().v), `${n} ahead`).toBeCloseTo(FLUID_MAX_SPEED, 6)
-        expect(rel(start), `${n} ahead`).not.toEqual(before)
+        expect(speed()).toBeCloseTo(FLUID_MAX_SPEED * (20 - n) / 6, 6)
       }
+      const was = rel(start)
+      at(20, 1500)
+      expect(speed()).toBeCloseTo(FLUID_MAX_SPEED / 6, 6)
+      expect(rel(start)).not.toEqual(was)
       up('KeyW')
       useWalk.setState({ behind: 0 })
-    } finally {
-      useLayers.getState().setLayer('walkLimits', true)
+    })
+  })
+})
+
+describe('the fluid pause (arkinox, 2026-11-22: "on the 21st action ahead ... automatically switch off fluid walk mode")', () => {
+  const at = (n: number, ms = 48): void => {
+    for (let t = 0; t < ms; t += 16) {
+      clock += 16
+      vi.advanceTimersByTime(16)
+      useWalk.setState({ behind: Math.max(0, n - (useWalk.getState().open ? 1 : 0)) })
+      tickFluid(clock)
+      tickFall(clock)
     }
+  }
+  const sw = () => useFluidWalk.getState()
+
+  afterEach(() => {
+    useLayers.getState().setLayer('walkLimits', true)
+    useFluidWalk.setState({ paused: false, resumedAt: 0 })
   })
 
-  it('a zigzag faster than the proofs stops at the gibson edge 20 events ahead, never past; it walks on once they land', async () => {
+  it('pauses at 21, not before, and the walk goes on as the step WALK; it comes back on at 15, not before', () => {
+    expect(FLUID_PAUSE_AT).toBe(21)
+    expect(FLUID_RESUME_AT).toBe(15)
+    walk()
+    down('KeyW')
+    at(20, 600)
+    expect(fluidOn()).toBe(true)
+    expect(fluidWalking()).toBe(true)
+    at(21)
+    expect(sw().paused).toBe(true)
+    expect(sw().on).toBe(true)
+    expect(fluidOn()).toBe(false)
+    expect(fluidWalking()).toBe(false)
+    // The held key presses now, every WALK_HOLD_MS, as the step WALK did: still walking.
+    const was = rel(start)
+    at(25, 1000)
+    expect(rel(start)).not.toEqual(was)
+    expect(fluidOn()).toBe(false)
+    for (const n of [20, 18, 16]) { at(n); expect(sw().paused, `${n}`).toBe(true) }
+    at(15)
+    expect(sw().paused).toBe(false)
+    expect(fluidOn()).toBe(true)
+    expect(sw().resumedAt).toBeGreaterThan(0)
+    expect(fluidWalking()).toBe(true)
+    up('KeyW')
+    useWalk.setState({ behind: 0 })
+  })
+
+  it('a fluid WALK switched off by hand stays off: nothing pauses, nothing turns it on', () => {
+    useFluidWalk.getState().set(false)
+    walk()
+    at(25)
+    expect(sw().paused).toBe(false)
+    at(3)
+    expect(sw().on).toBe(false)
+    expect(sw().resumedAt).toBe(0)
+    expect(fluidOn()).toBe(false)
+  })
+
+  it('a switch by hand while paused ends the pause and cancels the return', () => {
+    walk()
+    at(22)
+    expect(sw().paused).toBe(true)
+    // Off by hand: off it stays, all the way down.
+    useFluidWalk.getState().set(false)
+    expect(sw().paused).toBe(false)
+    at(15)
+    at(0)
+    expect(sw().on).toBe(false)
+    expect(sw().resumedAt).toBe(0)
+    expect(fluidOn()).toBe(false)
+    // On by hand while paused (18 ahead): on at once; nothing more happens at 15.
+    useFluidWalk.getState().set(true)
+    at(22)
+    expect(sw().paused).toBe(true)
+    at(18)
+    useFluidWalk.getState().set(true)
+    expect(sw().paused).toBe(false)
+    expect(fluidOn()).toBe(true)
+    at(15)
+    expect(sw().resumedAt).toBe(0)
+  })
+
+  it('with the sync limit off in Settings, nothing pauses at 21 or 40, and turning it off while paused brings fluid back at once', () => {
+    walk()
+    down('KeyW')
+    useLayers.getState().setLayer('walkLimits', false)
+    for (const n of [21, 40]) {
+      at(n, 600)
+      expect(sw().paused, `${n}`).toBe(false)
+      expect(fluidWalking(), `${n}`).toBe(true)
+      expect(len(fluidState().v), `${n}`).toBeCloseTo(FLUID_MAX_SPEED, 6)
+    }
+    useLayers.getState().setLayer('walkLimits', true)
+    at(40)
+    expect(sw().paused).toBe(true)
+    useLayers.getState().setLayer('walkLimits', false)
+    expect(sw().paused).toBe(false)
+    expect(fluidOn()).toBe(true)
+    up('KeyW')
+    useWalk.setState({ behind: 0 })
+  })
+
+  it('the pause is never saved: your choice stays "on" on this device, a reload starts fluid, and another identity starts from your choice', () => {
+    useFluidWalk.getState().set(true)
+    expect(localStorage.getItem(FLUID_KEY)).toBe('on')
+    walk()
+    at(21)
+    expect(sw().paused).toBe(true)
+    expect(localStorage.getItem(FLUID_KEY)).toBe('on')
+    // A reload while paused reads your choice, not the pause.
+    expect(loadFluid()).toBe(true)
+    // An identity switch while paused: the pause goes with the walk, and no "back on" notice.
+    const me = useCyberspace.getState().identity
+    useCyberspace.setState({ identity: { pubkey: 'ab'.repeat(32), npub: 'npub1other' } })
+    try {
+      expect(sw().paused).toBe(false)
+      expect(sw().resumedAt).toBe(0)
+      expect(sw().on).toBe(true)
+      expect(fluidOn()).toBe(true)
+      expect(localStorage.getItem(FLUID_KEY)).toBe('on')
+    } finally {
+      useCyberspace.setState({ identity: me })
+    }
+    // Off by hand is saved as always.
+    useFluidWalk.getState().set(false)
+    expect(localStorage.getItem(FLUID_KEY)).toBe('off')
+    expect(loadFluid()).toBe(false)
+  })
+
+  it('no flapping: a count that swings between 16 and 21 pauses once and comes back once, at 15', () => {
+    walk()
+    let changes = 0
+    const off = useFluidWalk.subscribe((s, prev) => { if (s.paused !== prev.paused) changes++ })
+    try {
+      for (const n of [19, 20, 21, 20, 21, 19, 16, 21, 17, 20, 16]) at(n, 16)
+      expect(changes).toBe(1)
+      expect(sw().paused).toBe(true)
+      at(15, 16)
+      expect(changes).toBe(2)
+      for (const n of [16, 18, 20, 16, 19, 20]) at(n, 16)
+      expect(changes).toBe(2)
+      expect(fluidOn()).toBe(true)
+    } finally { off() }
+  })
+
+  it('a zigzag faster than the proofs: fluid pauses at 21 and the walk goes on stepping; once they land fluid is back on', async () => {
     walk()
     down('KeyW')
     let most = 0
-    let still = 0
-    let stillest = 0
-    let last = rel(start)
-    // Turn 90 degrees every 0.7 s: a new segment at every turn, and no proof
-    // ever lands. At 19 ahead (a sixth of the speed) a 0.7 s leg is about a
-    // gibson, and a staircase of single steps is one line, one segment (the
-    // walk is only slowed there, which is right; it reached 20 only because
-    // the stillness timer closed a segment at every slow crossing): the legs
-    // then grow to 2.8 s, so each turn is a corner again.
+    let pausedAt: V3 | null = null
     let leg = 0
     let facing = 0
     face(0)
-    for (let t = 0; t < 45000; t += 16) {
+    // Turn 90 degrees every 0.7 s: a new segment at every turn, and no proof ever lands.
+    for (let t = 0; t < 30000 && !sw().paused; t += 16) {
       leg += 16
-      if (leg >= (t < 12000 ? 704 : 2816)) { leg = 0; facing = facing === 0 ? 90 : 0; face(facing) }
+      if (leg >= 704) { leg = 0; facing = facing === 0 ? 90 : 0; face(facing) }
       frame(16)
       most = Math.max(most, eventsAhead())
-      const c = rel(start)
-      if (c[0] === last[0] && c[2] === last[2]) still += 16
-      else still = 0
-      stillest = Math.max(stillest, still)
-      last = c
       expect(Math.abs(fluidState().frac.x)).toBeLessThanOrEqual(0.75)
       expect(Math.abs(fluidState().frac.z)).toBeLessThanOrEqual(0.75)
     }
-    expect(most).toBe(FLUID_HOLD_AT)
-    // Held a good while with the key down.
-    expect(stillest).toBeGreaterThan(2000)
-    const heldAt = rel(start)
-    // The proofs land: it walks on.
+    expect(sw().paused).toBe(true)
+    expect(most).toBe(FLUID_PAUSE_AT)
+    pausedAt = rel(start)
+    // Paused, the held key steps on.
+    frames(1500)
+    expect(rel(start)).not.toEqual(pausedAt)
+    expect(fluidWalking()).toBe(false)
+    // The proofs land: back to fluid.
     await landAll()
-    face(0)
-    frames(1000)
-    expect(rel(start)).not.toEqual(heldAt)
+    expect(eventsAhead()).toBeLessThanOrEqual(FLUID_RESUME_AT)
+    expect(sw().paused).toBe(false)
+    expect(fluidOn()).toBe(true)
     up('KeyW')
   })
 })

@@ -12,9 +12,27 @@
  * FLUID_WALK_DEFAULT is ON for the preview of this change, so the owner can
  * try it at once; flip it before merging if the step WALK should stay the
  * default. Off, WALK is the step WALK exactly as it was: every press a step.
+ *
+ * The fluid pause (arkinox, 2026-11-22; lib/fluidWalk.ts FLUID_PAUSE_AT):
+ * `on` is your choice and is the only thing saved; `paused` is the walk
+ * switching fluid off for you while your chain catches up, for this visit
+ * only, never saved, so a reload, another tab or another identity always
+ * starts from your choice. fluidOn() is the two together.
+ *
+ * | Events ahead (store/walkAhead.ts) | With the sync limit on (store/walkLimits.ts) |
+ * |---|---|
+ * | FLUID_PAUSE_AT (21) or more, fluid on | paused: the walk goes on as the step WALK |
+ * | FLUID_RESUME_AT (15) or fewer, paused | fluid back on |
+ * | in between | stays as it is: no flapping |
+ * | the sync limit turned off while paused | fluid back on at once |
+ *
+ * A switch by hand (set) always wins and ends the pause: turned off, fluid
+ * stays off and nothing turns it back on; turned on, it is on now (and
+ * pauses again only if the chain is still FLUID_PAUSE_AT behind).
  */
 
 import { create } from 'zustand'
+import { FLUID_PAUSE_AT, FLUID_RESUME_AT } from '../lib/fluidWalk'
 
 /** Fluid WALK when nothing says otherwise. ON for the preview: flip it here before merging to keep the step WALK the default. */
 export const FLUID_WALK_DEFAULT = true
@@ -57,22 +75,53 @@ export function loadFluid(): boolean {
 }
 
 interface FluidSwitch {
+  /** Your choice, kept on this device. */
   on: boolean
-  /** Switch it, kept on this device. */
+  /** Fluid switched off for you while your chain catches up (fluidPauseCheck): this visit only, never saved. */
+  paused: boolean
+  /** When fluid last came back on by itself (performance.now ms), for the brief notice; 0 for never or after a switch by hand. */
+  resumedAt: number
+  /** Switch it by hand, kept on this device: ends any pause, and nothing turns it back for you. */
   set: (on: boolean) => void
 }
 
 export const useFluidWalk = create<FluidSwitch>((set) => ({
   on: loadFluid(),
+  paused: false,
+  resumedAt: 0,
   set: (on) => {
     try { localStorage.setItem(FLUID_KEY, on ? 'on' : 'off') } catch { /* storage blocked: kept for this visit */ }
-    set({ on })
+    set({ on, paused: false, resumedAt: 0 })
   },
 }))
 
-/** Whether WALK is fluid now. */
+/** Whether WALK is fluid now: switched on, and not paused for the chain. */
 export function fluidOn(): boolean {
-  return useFluidWalk.getState().on
+  const s = useFluidWalk.getState()
+  return s.on && !s.paused
+}
+
+/** How long the "back on" notice shows after fluid comes back on by itself, in ms. */
+export const FLUID_RESUME_NOTICE_MS = 2500
+
+/**
+ * The fluid pause, for `ahead` events ahead with the sync limit `limits`
+ * (see the table above). Called whenever the count can change
+ * (store/walkFluid.ts). Writes the store only when the pause starts or ends,
+ * so a count that changes nothing renders nothing.
+ */
+export function fluidPauseCheck(ahead: number, limits: boolean, now: number = performance.now()): void {
+  const s = useFluidWalk.getState()
+  if (s.paused) {
+    if (!limits || ahead <= FLUID_RESUME_AT) useFluidWalk.setState({ paused: false, resumedAt: now })
+    return
+  }
+  if (limits && s.on && ahead >= FLUID_PAUSE_AT) useFluidWalk.setState({ paused: true, resumedAt: 0 })
+}
+
+/** Forget a pause without the notice (an identity switch: the next walk starts from your choice). */
+export function clearFluidPause(): void {
+  if (useFluidWalk.getState().paused || useFluidWalk.getState().resumedAt !== 0) useFluidWalk.setState({ paused: false, resumedAt: 0 })
 }
 
 /** A tap's push (FLUID_NUDGE_MS): the direction it pushes, until `until` (ms). */

@@ -34,8 +34,10 @@ describe('labelled tasks', () => {
 
   it('reads answered one after another are timed one at a time: no window overlaps the next', async () => {
     const db = await openDatabase('onosendai:test-overlap', 1, [['things', 'key']])
-    await request(db.transaction('things', 'readwrite').objectStore('things').put({ key: 'a' }))
     const tasks = countTasks()
+    await request(db.transaction('things', 'readwrite').objectStore('things').put({ key: 'a' }))
+    // The put's own measurement ends at the next task.
+    await nextTask()
     tasks.take()
     const t0 = performance.now()
     const os = db.transaction('things', 'readonly').objectStore('things')

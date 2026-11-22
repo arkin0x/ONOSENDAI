@@ -6,7 +6,7 @@
  *
  * The walker is drawn where the rig draws it (scene/Scene.tsx Rig): its
  * anchor gibson, plus walkGlide steps, plus a fall's offset. The camera is
- * the avatar's eye above that, pulled in by eyeReach as the rig asks it.
+ * the avatar's eye above that, placed among the walls by eyePlace as the rig asks it.
  *
  * - a continuous walk up and down a ramp, and over a half-gibson ledge,
  *   never draws the feet or the eye below the surface, at 60 and 30 fps and
@@ -55,7 +55,7 @@ import { useCyberspace } from '../useCyberspace'
 import { tickFall, useWalk } from '../useWalk'
 import { useShards, type WorldItem } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
-import { REST_FLOOR, clearWalls, eyeReach, restDrop, wallItemsAt, wallsBuilt } from '../walkWalls'
+import { REST_FLOOR, clearWalls, eyePlace, eyeReach, restDrop, wallItemsAt, wallsBuilt } from '../walkWalls'
 import { MARKER_LIFT, markerEdges } from '../../scene/avatarMarker'
 import { MARKER_EYE } from '../../lib/avatarEye'
 import { groundFluid, resetFluid, tickFluid } from '../walkFluid'
@@ -163,19 +163,17 @@ const EYE: V3 = [0, 1.33, 0]
 /** The near plane's room the rig keeps (scene/walkEyeRig.ts EYE_ROOM), in gibsons at 2^0. */
 const ROOM = 0.15
 
-/** How much of the eye the rig takes this frame (eyeReach, as scene/walkEyeRig.ts asks it). */
-function eyeShare(p: V3): number {
+/**
+ * Where the camera is, in gibsons from `start`: the eye over the drawn walker,
+ * lowered by a stair's rise and then placed among the walls, as the rig does
+ * it (scene/walkEyeRig.ts: walkRise, then eyePlace).
+ */
+function camera(p: V3): V3 {
   const cs = useCyberspace.getState()
   const lead: V3 = [p[0] - Number(cs.cursor.x - start.x), p[1] - Number(cs.cursor.y - start.y), p[2] - Number(cs.cursor.z - start.z)]
-  return eyeReach(cs.cursor, lead, EYE, ROOM, wallItemsAt(cs.plane, cs.cursor), { axis: 'y', dir: 1 }, undefined, walkGlide.exact ? 2 : false)
-}
-
-/** Where the camera is, in gibsons from `start`: the eye over the drawn walker, pulled in as the rig pulls it, lowered by a stair's rise as the rig lowers it (Scene.tsx, walkRise). */
-function camera(p: V3): V3 {
-  const share = eyeShare(p)
-  const above = EYE[1] * share
-  const lower = walkRise.offset < 0 ? Math.max(walkRise.offset, -Math.max(0, above - ROOM)) : 0
-  return [p[0] + EYE[0] * share, p[1] + above + lower, p[2] + EYE[2] * share]
+  const lower = walkRise.offset < 0 ? Math.max(walkRise.offset, -Math.max(0, EYE[1] - ROOM)) : 0
+  const e = eyePlace(cs.cursor, lead, [EYE[0], EYE[1] + lower, EYE[2]], ROOM, wallItemsAt(cs.plane, cs.cursor), { axis: 'y', dir: 1 }, undefined, walkGlide.exact ? 2 : false)
+  return [p[0] + e[0], p[1] + e[1], p[2] + e[2]]
 }
 
 const key = (code: string) => ({ code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, preventDefault: () => {} })

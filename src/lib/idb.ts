@@ -127,6 +127,10 @@ export async function getRangePaged<T>(
     await onChunk(rows)
     if (rows.length < chunkSize) return
     from = keyOf(rows[rows.length - 1])
+    // A page that ended on the top key: there is nothing after it, and the
+    // range (top, top] it would ask next is refused (DataError), which ended
+    // a replay early whenever a stretch held an exact multiple of the page.
+    if (upper !== null && indexedDB.cmp(from, upper) >= 0) return
     open = true
   }
 }

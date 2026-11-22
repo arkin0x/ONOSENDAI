@@ -46,7 +46,7 @@ import {
   commit, databaseExists, fingerprint, localEntries, mergeLocal, newGen, noteReconciled, restoreInto, openWorkshopDb, readAll, readMigrated, readSome, verifyAndMark,
   type MigratedMeta, type ShardRecord,
 } from '../lib/workshopDb'
-import { kvGet, kvSet } from '../lib/kvStore'
+import { kvCopiesOf, kvGet, kvSet } from '../lib/kvStore'
 
 /** The list as every build before this one kept it, and the backup from now on. */
 export const LOCAL_KEY = 'onosendai:shards'
@@ -78,6 +78,21 @@ const FULL = 'Workshop storage is full. Your latest changes are only in this tab
 const UNAVAILABLE = 'Your shards\' storage could not be opened, so saving is off for now and this is the copy kept in the older storage. Reload to try again.'
 const MOVED_ELSEWHERE = 'Your shards moved to new storage in another tab. Reload this tab to keep saving.'
 const LOST = 'This browser cleared the storage your shards were in. The copy kept before they moved is back; a tab still open with newer work puts it back when it next saves.'
+const LOADING = 'Your shards are still loading. Nothing is saved until they have.'
+const LOADING_REASON = 'Your shards are still loading'
+const TORN = 'Your saved shard list could not be read, so saving is off to keep it exactly as it is.'
+const NOT_LOADED = 'Your shards did not load: their storage is not answering. They are not gone. Nothing is saved until they load. Close every other ONOSENDAI tab and window, then reload. RECOVER SHARDS in MENU looks for every copy.'
+const READABLE_NOW = 'Your shards can be read now. Reload to see them and keep saving.'
+
+/**
+ * The load's own clock (arkinox, 2026-11-22: "no shards show anymore" after
+ * a stuck import). The app draws at HYDRATE_WAIT_MS whatever this read is
+ * doing; past `slowMs` the workshop says the shards are still loading, and
+ * past `giveUpMs` a read that has not finished is given up for this session:
+ * the workshop says so, saves nothing, and never shows an unfinished read as
+ * an empty library. In one object so a test can shorten it.
+ */
+export const loadTiming = { slowMs: 4_000, giveUpMs: 25_000 }
 
 let host: StorageHost | null = null
 let mode: ShardStorage = 'pending'
@@ -414,19 +429,34 @@ function listen(): void {
       const data = ev.data as { put?: unknown; del?: unknown; moved?: unknown } | null
       if (data?.moved === true) { movedElsewhere(); return }
       const ids = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
-      if (mode === 'pending') {
-        for (const id of ids(data?.put)) heard.put.add(id)
-        for (const id of ids(data?.del)) heard.del.add(id)
+      // Still loading, or hidden: read in later. A hidden tab may be frozen
+      // by the browser in the middle of a read, and a read left open holds
+      // the shards' store: the tab that wrote could not commit again until
+      // this one woke (arkinox, 2026-11-22, an import that stopped after four
+      // shards on his tablet). It reads them once it is shown.
+      if (mode === 'pending' || hiddenNow()) {
+        // The latest word on an id wins: a delete and then a put of one id (the same kit imported again) is a put.
+        for (const id of ids(data?.del)) { heard.del.add(id); heard.put.delete(id) }
+        for (const id of ids(data?.put)) { heard.put.add(id); heard.del.delete(id) }
         return
       }
       void refresh(ids(data?.put), ids(data?.del))
     }
   } catch { channel = null }
+  try {
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { if (!hiddenNow() && mode !== 'pending') replayHeard() })
+  } catch { /* no document */ }
+}
+
+function hiddenNow(): boolean {
+  try { return typeof document !== 'undefined' && document.visibilityState === 'hidden' } catch { return false }
 }
 
 /** What other tabs committed while this one loaded. */
 function replayHeard(): void {
   if (!heard.put.size && !heard.del.size) return
+  // Shown again later: read then (listen).
+  if (hiddenNow()) return
   const put = [...heard.put]
   const del = [...heard.del]
   heard.put.clear()
@@ -490,6 +520,8 @@ function withPending(stored: ShardModel[]): ShardModel[] {
 
 function become(next: ShardStorage, list: ShardModel[]): void {
   mode = next
+  // "Still loading" was said; it is decided now (a line that follows says why, if anything is wrong).
+  if (failure === LOADING_REASON) report(null, null)
   handed = new Map(list.map((s) => [s.id, s]))
   host?.replace(list)
   decided()
@@ -497,12 +529,24 @@ function become(next: ShardStorage, list: ShardModel[]): void {
 
 /** No database this session. */
 function withoutDatabase(why: unknown, moved: boolean): ShardStorage {
+  // Decided already (the load was given up on, loadTiming): a late failure changes nothing.
+  if (mode !== 'pending') return mode
   if (moved) {
     // The library is in the database and the database is out of reach: show
     // the copy from before the move rather than an empty workshop, and save
     // nothing over anything.
     console.warn(`[workshop] IndexedDB unavailable after the move, saving is off this session: ${describe(why)}`)
     become('unavailable', withPending(loadLocal()))
+    report(offline.message, offline.reason)
+    return mode
+  }
+  // A list there that cannot be read is never taken for an empty library:
+  // writing the next change would put a list over it. Nothing is saved.
+  const raw = readLocalRaw()
+  if (raw !== null && localEntries(raw) === null) {
+    console.warn(`[workshop] the localStorage list cannot be read, so saving is off this session: ${describe(why)}`)
+    offline = { message: TORN, reason: 'Your saved shard list could not be read' }
+    become('unavailable', withPending([]))
     report(offline.message, offline.reason)
     return mode
   }
@@ -572,6 +616,29 @@ export function hydrateWorkshop(): Promise<ShardStorage> {
 
 async function decide(): Promise<ShardStorage> {
   listen()
+  // Still pending at slowMs: said. Still pending at giveUpMs: given up for
+  // this session (unavailable), with the backup shown as before and nothing
+  // saved; a read that lands after that changes nothing but the line.
+  const slow = setTimeout(() => { if (mode === 'pending') report(LOADING, LOADING_REASON) }, loadTiming.slowMs)
+  let giveUp: ReturnType<typeof setTimeout> | undefined
+  // The answer at give-up, while the read itself may never finish.
+  const gaveUp = new Promise<ShardStorage>((resolve) => {
+    giveUp = setTimeout(() => {
+      if (mode !== 'pending') return
+      console.warn('[workshop] the load did not finish in time: saving is off this session')
+      offline = { message: NOT_LOADED, reason: 'Your shards have not loaded' }
+      resolve(withoutDatabase(new Error('the read did not finish in time'), true))
+    }, loadTiming.giveUpMs)
+  })
+  try {
+    return await Promise.race([decideNow(), gaveUp])
+  } finally {
+    clearTimeout(slow)
+    clearTimeout(giveUp)
+  }
+}
+
+async function decideNow(): Promise<ShardStorage> {
   let d: IDBDatabase
   try { d = await database() } catch (e) {
     // Moved, as far as anything can tell: then localStorage is only the
@@ -616,6 +683,9 @@ async function decide(): Promise<ShardStorage> {
       stored.push(m)
     }
     if (skipped) console.warn(`[workshop] ${skipped} stored shard(s) could not be read and were left as they are`)
+    // Given up on while reading (loadTiming): this session shows what it
+    // showed and saves nothing; a reload reads it.
+    if (mode !== 'pending') { if (mode === 'unavailable') { offline = { message: READABLE_NOW, reason: 'Reload to keep saving' }; report(offline.message, offline.reason) } return mode }
     become('indexeddb', withPending(stored))
     replayHeard()
     if (pending.size) void flush()
@@ -624,6 +694,91 @@ async function decide(): Promise<ShardStorage> {
     return withoutDatabase(e, moved || movedFlag())
   }
 }
+
+/** What RECOVER SHARDS found: copies looked at, shards put back or brought up to date, and whether a reload is needed to see them. */
+export type Recovery = { ok: true; copies: number; restored: number; reload: boolean } | { ok: false; error: string }
+
+/** How long RECOVER SHARDS waits on storage before it says it is not answering. */
+export const RECOVER_WAIT_MS = 20_000
+
+function within<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(what)), ms)
+    p.then((v) => { clearTimeout(t); resolve(v) }, (e: unknown) => { clearTimeout(t); reject(e) })
+  })
+}
+
+/**
+ * RECOVER SHARDS (arkinox, 2026-11-22): look in every place a copy of the
+ * shard list is kept and put back the work the library lacks. The places:
+ * the list a load reads (the kv database's copy of the backup, else
+ * localStorage's), and every copy the kv database holds of it (the record,
+ * one still pending its check, each one set aside).
+ *
+ * Only work done since the move comes back: a shard the database does not
+ * hold comes back only when its copy was changed after the move was marked
+ * (the move carried everything older, so an older one missing here was
+ * deleted here, whether or not its delete left a tombstone); a shard it
+ * holds is replaced only by a newer copy, through mergeLocal, which also
+ * keeps every delete with a tombstone. Nothing is ever deleted or made
+ * older, and the copies read from are left as they are.
+ *
+ * Refused while the load is still reading, and on a database that holds no
+ * mark (the move never verified there: the load's own move decides that).
+ * A tab whose load did not finish merges into the database and is told to
+ * reload: what it shows is not the library.
+ */
+export async function recoverShards(): Promise<Recovery> {
+  if (typeof indexedDB === 'undefined') return { ok: false, error: 'This browser has no storage to recover from.' }
+  if (mode === 'pending') return { ok: false, error: 'Your shards are still loading. Try again once they have.' }
+  // On localStorage the library never moved: the list there is the library, and the database is left to the move.
+  if (mode === 'local') return { ok: true, copies: 0, restored: 0, reload: false }
+  const texts: string[] = []
+  const raw = readLocalRaw()
+  if (raw) texts.push(raw)
+  try { texts.push(...await kvCopiesOf(LOCAL_KEY)) } catch (e) { console.warn(`[workshop] recover: the kv copies could not be read: ${describe(e)}`) }
+  const live = mode === 'indexeddb'
+  // Never make the database here: one that is not there holds nothing to recover into, and the load's move makes it.
+  if (!live && (await databaseExists()) === false) return { ok: false, error: 'Your shards never finished moving to this storage. Reload, and the move runs again.' }
+  let d: IDBDatabase
+  try {
+    d = live ? await within(database(), RECOVER_WAIT_MS, 'did not open') : await openWorkshopDb()
+  } catch (e) {
+    console.warn(`[workshop] recover: the database did not open: ${describe(e)}`)
+    return { ok: false, error: SILENT_RECOVER }
+  }
+  try {
+    const mark = await within(readMigrated(d), RECOVER_WAIT_MS, 'did not answer')
+    if (!mark) return { ok: false, error: 'Your shards never finished moving to this storage. Reload, and the move runs again.' }
+    const held = new Set((await within(readAll(d), RECOVER_WAIT_MS, 'did not answer')).records.map((r) => r.id))
+    const restored = new Set<string>()
+    let copies = 0
+    for (const text of texts) {
+      const entries = localEntries(text)
+      if (!entries || entries.length === 0) continue
+      copies++
+      // A shard missing here comes back only as work done since the move.
+      const wanted = entries.filter((e) => held.has(e.id) || e.updatedAt > mark.at)
+      if (!wanted.length) continue
+      const { written } = await within(mergeLocal(d, wanted, true), RECOVER_WAIT_MS, 'did not answer')
+      for (const id of written) { restored.add(id); held.add(id) }
+    }
+    if (!live || !host) return { ok: true, copies, restored: restored.size, reload: true }
+    // This tab's list takes what the database has and it lacks, or holds older.
+    const have = new Set(host.shards().map((s) => s.id))
+    const update = new Set([...[...held].filter((id) => !have.has(id)), ...restored])
+    if (update.size) await refresh([...update], [])
+    announce([...restored], [])
+    return { ok: true, copies, restored: update.size, reload: false }
+  } catch (e) {
+    console.warn(`[workshop] recover failed: ${describe(e)}`)
+    return { ok: false, error: SILENT_RECOVER }
+  } finally {
+    if (!live) { try { d.close() } catch { /* closed */ } }
+  }
+}
+
+const SILENT_RECOVER = 'Your shards\' storage is not answering. Close every other ONOSENDAI tab and window, then try again.'
 
 /** Tests only: this module as a tab that has been closed (its connection shut, nothing more written). */
 export function closeForTests(): void {

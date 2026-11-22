@@ -318,6 +318,43 @@ export async function kvSuperseded(): Promise<Array<{ key: string; value: string
   return await request(db.transaction(SUPERSEDED, 'readonly').objectStore(SUPERSEDED).getAll()) as Array<{ key: string; value: string; at: number; why: string }>
 }
 
+/**
+ * Every copy of a record this database holds, for recovery by hand (the
+ * workshop's RECOVER SHARDS, store/workshopStorage.ts recoverShards): the
+ * record, a copy still `pending` its check, and each copy set aside, in that
+ * order. Read straight from the database, whatever mode this page is in, so
+ * a page that started blind still finds them. Rejects when the database does
+ * not open or answer within `waitMs`.
+ */
+export async function kvCopiesOf(key: string, waitMs = REOPEN_WAIT_MS): Promise<string[]> {
+  if (typeof indexedDB === 'undefined') return []
+  const own = db === null
+  let d: IDBDatabase
+  if (db) d = db
+  else {
+    const opening = openKv()
+    try { d = await withTimeout(opening, waitMs) } catch (e) {
+      // A connection that opens after the wait is closed, never left to block an upgrade.
+      opening.then((late) => late.close(), () => undefined)
+      throw e
+    }
+  }
+  try {
+    const read = async (): Promise<string[]> => {
+      const tx = d.transaction([ENTRIES, SUPERSEDED], 'readonly')
+      const row = await request(tx.objectStore(ENTRIES).get(key)) as { value?: unknown } | undefined
+      const aside = await request(tx.objectStore(SUPERSEDED).getAll()) as Array<{ key?: unknown; value?: unknown }>
+      const out: string[] = []
+      if (typeof row?.value === 'string') out.push(row.value)
+      for (const r of aside) if (r?.key === key && typeof r.value === 'string') out.push(r.value)
+      return out
+    }
+    return await withTimeout(read(), waitMs)
+  } finally {
+    if (own) { try { d.close() } catch { /* closed */ } }
+  }
+}
+
 /** Mark that records have left localStorage (MOVED_MARK). True once it is there. */
 function markMoved(): boolean {
   const s = ls()
@@ -552,9 +589,24 @@ function listen(): void {
     channel = new BroadcastChannel(CHANNEL)
     channel.onmessage = (e: MessageEvent<{ keys?: unknown }>) => {
       const keys = Array.isArray(e.data?.keys) ? e.data.keys.filter((k): k is string => typeof k === 'string') : []
+      // Not while hidden: a hidden tab may be frozen mid-read, and its open
+      // read would hold the records from the tab writing them. Read once shown.
+      if (hiddenTab()) { for (const k of keys) heardWhileHidden.add(k); return }
       void heard(keys)
     }
+    document.addEventListener('visibilitychange', () => {
+      if (hiddenTab() || heardWhileHidden.size === 0) return
+      const keys = [...heardWhileHidden]
+      heardWhileHidden.clear()
+      void heard(keys)
+    })
   } catch { /* no channel: other tabs read it at their next load */ }
+}
+
+/** Records other tabs wrote while this one was hidden. */
+const heardWhileHidden = new Set<string>()
+function hiddenTab(): boolean {
+  try { return typeof document !== 'undefined' && document.visibilityState === 'hidden' } catch { return false }
 }
 
 /** Another tab wrote these records: read them again, and tell this tab's listeners as localStorage would have. */

@@ -29,8 +29,8 @@
  *
  * One more is kept here as a device setting, though it is not a layer:
  * walkLimits, WALK's sync limit (arkinox, 2026-11-18: "maybe sync loss
- * warning should be a setting"), the Settings row "Pause fluid walk when
- * your chain falls behind" since 2026-11-22. On, the default, fluid WALK
+ * warning should be a setting"), the Settings row Optimize chain (named
+ * "Pause fluid walk when your chain falls behind" earlier on 2026-11-22). On, the default, fluid WALK
  * switches itself off 21 events ahead of your chain and back on at 15
  * (store/fluidSwitch.ts fluidPauseCheck); the slowdown and the LOSING SYNC
  * warning it also turned on are parked (store/walkLimits.ts

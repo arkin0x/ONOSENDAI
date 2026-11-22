@@ -4841,6 +4841,26 @@ select.avatars__input option:checked {
   color: var(--accent);
   border-color: var(--accent);
 }
+/* The chain chip about your own chain's state (ChainExplorer chainChipState):
+   checking with the relays breathes in the accent; not checked and LOCAL with
+   moves kept are amber outlines, since both are a reason to look before
+   moving. Only colour and opacity change, so the chip keeps its size. */
+.explorer__toggle--syncing {
+  color: var(--accent);
+  border-color: var(--accent);
+  animation: explorer-syncing 1.6s ease-in-out infinite;
+}
+@keyframes explorer-syncing {
+  50% { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .explorer__toggle--syncing { animation: none; }
+}
+.explorer__toggle--unchecked,
+.explorer__toggle--local {
+  color: var(--warn);
+  border-color: var(--warn);
+}
 
 .benchpaste__away {
   position: fixed;

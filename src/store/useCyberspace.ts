@@ -121,6 +121,7 @@ import {
   buildChain,
   chainHead,
   extendChain,
+  namedIds,
   firstBreak,
   openBracket,
   hopTemplate,
@@ -207,15 +208,19 @@ import { useSecrets } from './useSecrets'
 import { useToast } from './useToast'
 import { useChainUi } from './useChainUi'
 import type { SelfCrypto } from '../lib/muteList'
+import { forgetUnsent, unsentOf } from '../lib/unsent'
 import { kvGet, kvSet } from '../lib/kvStore'
 
 /**
  * The explored chain, parsed once per events change rather than on every
  * read. Every explorer selector goes through this.
  */
-let actionsFor: { events: NostrEvent[]; actions: ActionEvent[] } | null = null
+let actionsFor: { events: NostrEvent[]; actions: ActionEvent[]; named: Set<string> | null } | null = null
 function parsedChain(events: NostrEvent[]): ActionEvent[] {
-  if (!actionsFor || actionsFor.events !== events) actionsFor = { events, actions: appendedTo(actionsFor, events) ?? buildChain(events) }
+  if (!actionsFor || actionsFor.events !== events) {
+    const grown = appendedTo(actionsFor, events)
+    actionsFor = grown ?? { events, actions: buildChain(events), named: null }
+  }
   return actionsFor.actions
 }
 
@@ -224,10 +229,21 @@ function parsedChain(events: NostrEvent[]): ActionEvent[] {
  * and one more (an action signed here, an event the feed brought): only the
  * new one is read (lib/events.ts extendChain). Null otherwise.
  */
-function appendedTo(memo: { events: NostrEvent[]; actions: ActionEvent[] } | null, events: NostrEvent[]): ActionEvent[] | null {
+function appendedTo(memo: { events: NostrEvent[]; actions: ActionEvent[]; named: Set<string> | null } | null, events: NostrEvent[]): { events: NostrEvent[]; actions: ActionEvent[]; named: Set<string> } | null {
   if (!memo || events.length !== memo.events.length + 1) return null
   for (let i = 0; i < memo.events.length; i++) if (events[i] !== memo.events[i]) return null
-  return extendChain(memo.actions, memo.events, events[events.length - 1])
+  // The ids the chain's e tags name, gathered once after a full parse and then
+  // grown by each event added: whether the new one is already named is one
+  // lookup (extendChain), not a pass over every tag of the chain.
+  // Gathered only if extendChain gets past the refusals that need no tags.
+  const named = (): Set<string> => (memo.named ??= namedIds(memo.events))
+  const ev = events[events.length - 1]
+  const actions = extendChain(memo.actions, memo.events, ev, named)
+  if (!actions) return null
+  // Handed on to the memo that replaces this one; nothing else holds it.
+  const set = named()
+  memo.named = null
+  return { events, actions, named: namedIds([ev], set) }
 }
 
 /**
@@ -816,6 +832,15 @@ export interface CyberspaceState {
    * back while the answer is `unknown`.
    */
   selfCheck: SelfCheck
+  /**
+   * The self-check of this page for `pubkey`, as the HUD shows it and a move
+   * waits on it (lib/selfSync.ts): `checking` while it is out (CHECKING YOUR
+   * CHAIN, and a move waits for it before its own look: confirmHead),
+   * `done` once the relays answered, `unreachable` when they could not
+   * (moves are still asked for at each signature, and refused while no
+   * relay answers). Null before selfSync has asked anything.
+   */
+  chainSync: { pubkey: string; status: 'checking' | 'done' | 'unreachable' } | null
   /**
    * The chain is HELD: it was started by a first move the relays could not
    * vouch for, so it stays on this device whatever LIVE says (arkinox,
@@ -1446,6 +1471,8 @@ function chainKeyFor(pubkey: string): string {
 export const VIEW_FOCUS_LABEL = 'VIEW'
 
 const LIVE_KEY = 'onosendai:live'
+/** Set once the device's old LIVE setting has been made the identity in use's own (loadLive). */
+const LIVE_MOVED_KEY = 'onosendai:live-moved'
 const MOVE_MODE_KEY = 'onosendai:moveMode'
 const SHOW_SECRETS_KEY = 'onosendai:showSecrets'
 
@@ -2042,16 +2069,39 @@ function unresolvedTarget(pubkey: string, name: string | null): TrackedTarget {
   return { pubkey, npub: nip19.npubEncode(pubkey), name, position: spawn.position, plane: spawn.plane, lastActive: null, status: 'resolving' }
 }
 
-function loadLive(): boolean {
+/**
+ * LIVE or LOCAL, per identity (owner, 2026-11-21: after LOG OUT and PAIR
+ * AGAIN his phone was LOCAL without his knowing, and kept about 460 moves to
+ * itself). The switch used to be one setting for the device, so a new key
+ * inherited LOCAL from the previous identity's tutorial, and a return to
+ * an identity inherited whatever the last one had chosen. Now each identity
+ * keeps its own (LIVE_KEY + ':' + pubkey). An identity with none of its own
+ * is LIVE, except the one that is in use when this build first loads, which
+ * keeps the device's old setting (`legacy`): the switch does not change under
+ * the person's hand on an upgrade.
+ */
+export function loadLive(pubkey: string, legacy = false): boolean {
   try {
-    const raw = localStorage.getItem(LIVE_KEY)
+    // Once, on the first load of a build that keeps it per identity: the
+    // device's old setting becomes the identity in use's own, and the old
+    // record is never read again. Read on every load instead, it handed a
+    // new key LOCAL again after a reload, and an identity left before its
+    // setting was saved came back LIVE and published what it kept (review,
+    // 2026-11-21).
+    if (legacy && localStorage.getItem(LIVE_MOVED_KEY) === null) {
+      const raw = localStorage.getItem(LIVE_KEY)
+      if (raw !== null && localStorage.getItem(`${LIVE_KEY}:${pubkey}`) === null) localStorage.setItem(`${LIVE_KEY}:${pubkey}`, raw)
+      localStorage.setItem(LIVE_MOVED_KEY, '1')
+    }
+    const own = localStorage.getItem(`${LIVE_KEY}:${pubkey}`)
     // Live is the default: the chain is meant to be seen.
-    return raw === null ? true : raw === '1'
+    return own === null ? true : own === '1'
   } catch { return true }
 }
 
-function saveLive(live: boolean): void {
-  try { localStorage.setItem(LIVE_KEY, live ? '1' : '0') } catch { /* private mode */ }
+function saveLive(pubkey: string, live: boolean): void {
+  // The device-wide record too, which an older build in another tab reads.
+  try { localStorage.setItem(`${LIVE_KEY}:${pubkey}`, live ? '1' : '0'); localStorage.setItem(LIVE_KEY, live ? '1' : '0') } catch { /* private mode */ }
 }
 
 /** Seconds now, never earlier than the chain head, so the chain reads forward. */
@@ -2291,6 +2341,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     const own = await signer.signEvent(template)
     verifiedSigs.add(`${own.id}:${own.sig}`)
     signedHere(own)
+    if (own.kind === ACTION_KIND) noteSigned(own)
     return own
   }
   // A wake skipped for an AUTH's answer, and this is not an AUTH: drop the
@@ -2338,7 +2389,128 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     pendingSigns--
     if (late) pendingAuthSigns--
   }
-  return checkedAnswer(signed, signer)
+  const answer = checkedAnswer(signed, signer)
+  if (answer.kind === ACTION_KIND) noteSigned(answer)
+  return answer
+}
+
+/**
+ * Chain actions this page signed. Anything else waiting to go out came from
+ * storage (a reload, an identity switched back to, another tab's save), was
+ * signed before this page could look at the relays, and gets the
+ * publisher's look first however few there are (publisher.ts preflight;
+ * review of the per-identity LIVE switch, 2026-11-21).
+ */
+const signedThisPage = new Set<string>()
+
+/** Whether this page signed the chain action `id` (signedThisPage). */
+export function signedOnThisPage(id: string): boolean {
+  return signedThisPage.has(id)
+}
+
+/**
+ * Chain actions this page signed that have not yet become the head. What
+ * opens the release gate is the action being taken, once: the same move read
+ * back from storage later (a switch away and back, LIVE flipped on after it
+ * was made LOCAL) is not taken again (lib/release.ts; review, 2026-11-21).
+ */
+const freshSigned = new Set<string>()
+
+/**
+ * Whether `id`, just become the head, is an action this page signed and has
+ * not counted before; counted now, so a second time says no. The publisher
+ * asks on every change of head, LIVE or LOCAL (publisher.ts).
+ */
+export function takeFreshHead(id: string): boolean {
+  return freshSigned.delete(id)
+}
+
+/**
+ * Record `id` as a chain action this page just signed, as signEvent does.
+ * For a test whose fixture event stands for a move taken here: only that
+ * opens the release gate (lib/release.ts).
+ */
+export function noteSignedOnThisPage(id: string): void {
+  signedThisPage.add(id)
+  freshSigned.add(id)
+}
+
+/**
+ * A chain action this page just signed: recorded as signed here, as an action
+ * not yet counted, and, while LIVE, as meant to go out. LIVE as it is when the
+ * signature comes back, not when the move was pressed: a flip during a slow
+ * remote signer's wait labels it by the newer setting, and a flip to LOCAL
+ * clears the label anyway (setLive).
+ */
+function noteSigned(ev: NostrEvent): void {
+  noteSignedOnThisPage(ev.id)
+  if (useCyberspace.getState().live) noteOutbound(ev.pubkey, ev.id)
+}
+
+/**
+ * Chain actions signed while LIVE, per identity, kept across reloads
+ * (localStorage OUTBOUND_KEY + ':' + pubkey; a few ids, read before anything
+ * else): moves meant to go out. One whose send never landed (a network blip,
+ * then a reload) goes out again once the publisher has looked at the relays,
+ * with no new action. Only a move made LOCAL waits for an action or PUBLISH
+ * (owner, 2026-11-22: the worry was LOCAL moves sneaking out, not losing LIVE
+ * moves to a blip). Pruned of what the relays already hold whenever one is
+ * added; capped.
+ */
+const OUTBOUND_KEY = 'onosendai:outbound'
+const OUTBOUND_MAX = 2000
+const outbound = new Map<string, Set<string>>()
+
+/**
+ * This tab's view of `pubkey`'s outbound moves: what the record held when
+ * this tab first read it (on load, or on the switch to the identity), plus
+ * what this tab signed since. Another tab's later LIVE moves are its own to
+ * finish, not this tab's to release (the gate's "another tab's save" row).
+ */
+function outboundOf(pubkey: string): Set<string> {
+  let set = outbound.get(pubkey)
+  if (set) return set
+  set = new Set()
+  try {
+    const raw = localStorage.getItem(`${OUTBOUND_KEY}:${pubkey}`)
+    const ids: unknown = raw ? JSON.parse(raw) : []
+    if (Array.isArray(ids)) for (const id of ids) if (typeof id === 'string') set.add(id)
+  } catch { /* unreadable: nothing known to be meant to go out */ }
+  outbound.set(pubkey, set)
+  return set
+}
+
+function noteOutbound(pubkey: string, id: string): void {
+  const set = outboundOf(pubkey)
+  set.add(id)
+  // The record is shared with other tabs: what they added stays in it.
+  let stored = new Set<string>()
+  try {
+    const ids: unknown = JSON.parse(localStorage.getItem(`${OUTBOUND_KEY}:${pubkey}`) ?? '[]')
+    if (Array.isArray(ids)) stored = new Set(ids.filter((x): x is string => typeof x === 'string'))
+  } catch { /* unreadable: started again */ }
+  stored.add(id)
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey === pubkey) for (const known of stored) if (s.published[known] === 'ok') { stored.delete(known); set.delete(known) }
+  while (stored.size > OUTBOUND_MAX) stored.delete(stored.values().next().value as string)
+  try { localStorage.setItem(`${OUTBOUND_KEY}:${pubkey}`, JSON.stringify([...stored])) } catch { /* private mode: this page still knows */ }
+}
+
+/**
+ * LIVE switched off for `pubkey`: nothing it signed is meant to go out any
+ * more. A move whose send failed, then kept on purpose by the flip to LOCAL,
+ * waits for an action or PUBLISH like any LOCAL move, after a reload too.
+ * The record is the identity's, so another tab's labels go with it: its
+ * blip-retried move then waits for an action after a reload, the safe way.
+ */
+function forgetOutbound(pubkey: string): void {
+  outbound.set(pubkey, new Set())
+  try { localStorage.removeItem(`${OUTBOUND_KEY}:${pubkey}`) } catch { /* private mode */ }
+}
+
+/** Whether `id` is a chain action `pubkey` signed while LIVE, on this page or before a reload (outbound). */
+export function meantToGoOut(pubkey: string, id: string): boolean {
+  return outboundOf(pubkey).has(id)
 }
 
 /**
@@ -2712,6 +2884,8 @@ function takeInStored(pubkey: string, stored: { events: NostrEvent[]; published:
   const queued = extra.filter((e) => !onRelays.has(e.id) && now.published[e.id] === 'ok')
   const published = queued.length === 0 ? now.published : { ...now.published }
   for (const e of queued) published[e.id] = 'queued'
+  // What no relay has goes back to 'queued' here: the kept unsent list must be read again (lib/unsent.ts).
+  forgetUnsent()
   if (queued.length > 0) useCyberspace.setState({ published })
   if (now.events[0]?.pubkey === pubkey) saveChain(now.events, published, now.chain)
   return true
@@ -2919,6 +3093,16 @@ let chainEpoch = 0
 async function confirmHead(retrying: () => void): Promise<string | null | typeof STALE_CONFIRMATION> {
   const pubkey = useCyberspace.getState().identity.pubkey
   const epoch = chainEpoch
+  // The page's own look at the relays is still out (CHECKING YOUR CHAIN):
+  // this move waits for it, so it starts from what it brings rather than
+  // racing it, and then checks here and asks the relays as always below.
+  // First, so another tab's move made during the wait is still read.
+  // Only when it is out: an await with nothing to wait for would put the
+  // saved-chain check's own word on the panel a tick late.
+  if (chainSyncOut(pubkey)) {
+    await chainSyncSettled(pubkey)
+    if (chainEpoch !== epoch) return STALE_CONFIRMATION
+  }
   const here = await headCheckedHere()
   if (here) return here
   // No confirmation is reused, however recent (arkinox, 2026-10-08): another
@@ -2938,6 +3122,9 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
     if (useCyberspace.getState().identity.pubkey !== pubkey) return HEAD_UNCONFIRMED_MESSAGE
     if (got) {
       relaysConfirmed.add(pubkey)
+      // The relays answered: CHAIN NOT CHECKED no longer says what is so.
+      const sync = useCyberspace.getState().chainSync
+      if (sync?.pubkey === pubkey && sync.status === 'unreachable') useCyberspace.setState({ chainSync: { pubkey, status: 'done' } })
       foldNow(got)
       // The relays answered for the head: what the spare key brought back may go (a fork against them stops the drain itself).
       vouch(pubkey)
@@ -2947,6 +3134,43 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
   }
   // Only the relays this chain lives on: another relay's refusal is not this move's (review of #570).
   return signerWaiting(chainHolders(pubkey)) ? HEAD_UNCONFIRMED_SIGNER_MESSAGE : HEAD_UNCONFIRMED_MESSAGE
+}
+
+/** Said while a move waits for the page's first look at the relays (chainSyncSettled). */
+export const CHAIN_SYNC_MESSAGE = 'Checking your chain on the relays.'
+/**
+ * The longest a move waits for the page's own look at the relays. That look
+ * pages through as much of the chain as is new, and a relay that hangs costs
+ * it seconds per question; after this the move asks for itself
+ * (confirmHead), which refuses rather than signs when no relay answers.
+ */
+export const CHAIN_SYNC_WAIT_MS = 15_000
+
+/**
+ * Resolves once the self-check of this page for `pubkey` is no longer out
+ * (store chainSync, lib/selfSync.ts), or CHAIN_SYNC_WAIT_MS passed, or the
+ * identity changed. While it waits, a panel with nothing else to say, or
+ * only CHECKING_RELAYS_MESSAGE, says CHAIN_SYNC_MESSAGE.
+ */
+/** Whether the page's own look at the relays for `pubkey` is out now (store chainSync). */
+function chainSyncOut(pubkey: string): boolean {
+  const s = useCyberspace.getState()
+  return s.identity.pubkey === pubkey && s.chainSync?.pubkey === pubkey && s.chainSync.status === 'checking'
+}
+
+async function chainSyncSettled(pubkey: string): Promise<void> {
+  const out = (): boolean => chainSyncOut(pubkey)
+  if (!out()) return
+  const said = useCyberspace.getState().proof
+  const speak = said.message === null || said.message === CHECKING_RELAYS_MESSAGE
+  if (speak) useCyberspace.setState({ proof: { ...said, message: CHAIN_SYNC_MESSAGE } })
+  await new Promise<void>((resolve) => {
+    let stop = (): void => {}
+    const timer = setTimeout(() => { stop(); resolve() }, CHAIN_SYNC_WAIT_MS)
+    stop = useCyberspace.subscribe(() => { if (!out()) { clearTimeout(timer); stop(); resolve() } })
+  })
+  const now = useCyberspace.getState().proof
+  if (speak && now.message === CHAIN_SYNC_MESSAGE) useCyberspace.setState({ proof: { ...now, message: said.message } })
 }
 
 /**
@@ -3795,7 +4019,7 @@ const STALE_STUCK_MESSAGE = 'One of your unsent actions is a hop in the old proo
  */
 export function retireStaleFormat(): string | null {
   const before = useCyberspace.getState()
-  const cut = staleFormatCut(before.events, (id) => before.published[id] === 'ok')
+  const cut = staleFormatCut(before.events, (id) => before.published[id] === 'ok', unsentOf(before.events, before.published))
   if (!cut) return null
   // Whatever was computing or being bought was for the chain as it stood,
   // and the head is about to change under it: stopped as a respawn stops it
@@ -4000,6 +4224,8 @@ noteInHand(pubkeyHex, saved)
 // started now, ahead of any save, so none of them writes the old stretch
 // over the whole chain IndexedDB keeps.
 hydrateChain(pubkeyHex)
+// This tab's view of what was meant to go out, read now (outboundOf).
+outboundOf(pubkeyHex)
 mark('onosendai:chain-loaded')
 
 let requestId = 0
@@ -5453,8 +5679,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // A new identity, a new question: the old one's answer and its prompt
       // say nothing about this one (selfSync.ts asks again on the switch).
       selfCheck: { pubkey: signer.pubkey, status: 'checking' },
+      chainSync: null,
       chainConflict: null,
       forkNotice: null,
+      // LIVE or LOCAL is the identity's own: a new one is LIVE, never LOCAL
+      // because the last one was (loadLive).
+      live: loadLive(signer.pubkey),
     })
     // CHAIN HELD for a store that stopped answering is about the identity it was
     // said for: it goes with it, and comes back with it while still so.
@@ -5463,6 +5693,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // Before the save below: until IndexedDB has been read, that save must not
     // put this copy over the one kept there (hydrateChain).
     hydrateChain(signer.pubkey)
+    outbound.delete(signer.pubkey)
+    outboundOf(signer.pubkey)
     if (local) saveChain(base.events, base.published, base.chain, base.held)
     startSignatureCheck(signer.pubkey, local?.unchecked ?? [])
     // A pending cloud job of THIS identity, if there is one, picks up where it stopped,
@@ -6096,9 +6328,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   proof: IDLE_PROOF,
   publishError: null,
   canonicalLate: 0,
-  live: loadLive(),
+  live: loadLive(pubkeyHex, true),
   forkNotice: null,
   selfCheck: { pubkey: pubkeyHex, status: 'checking' },
+  chainSync: null,
   chainConflict: null,
   publishRequest: 0,
   signerKind: currentSigner.kind,
@@ -6621,7 +6854,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   setLive: (live) => {
     if (live === get().live) return
-    saveLive(live)
+    saveLive(get().identity.pubkey, live)
+    if (!live) forgetOutbound(get().identity.pubkey)
     // Going Local stops the publisher, and with it every retry, so an event
     // left reading 'sending' or 'failed' would be describing something that
     // is no longer happening: the panel would say RETRYING at a publisher

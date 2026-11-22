@@ -37,6 +37,23 @@ describe('the release gate', () => {
     expect(gateAfter(false, facts(true, 'a'), facts(true, 'b', true))).toBe(false)
   })
 
+  it('shuts on a switch to another identity, LIVE to LIVE, so what that one kept goes out only on its own next action', () => {
+    const x = { live: true, headId: 'a', headSent: true, who: 'x' }
+    const z = { live: true, headId: 'b', headSent: false, who: 'z' }
+    expect(gateAfter(true, x, z)).toBe(false)
+    expect(gateAfter(false, x, z)).toBe(false)
+    // Its next action, on the same identity, opens it as ever.
+    expect(gateAfter(false, z, { ...z, headId: 'c' })).toBe(true)
+  })
+
+  it('a new unsent head that was not signed here (read from storage on a load or a switch back) does not open it; one signed here does', () => {
+    const before = { live: true, headId: 'a', headSent: true, headSignedHere: true }
+    const stored = { live: true, headId: 'kept', headSent: false, headSignedHere: false }
+    expect(gateAfter(false, before, stored)).toBe(false)
+    expect(gateAfter(false, stored, { live: true, headId: 'mine', headSent: false, headSignedHere: true })).toBe(true)
+    expect(gateAfter(false, stored, { ...stored, release: 1 })).toBe(true)
+  })
+
   it('reads its facts off the store shape', () => {
     expect(chainFacts({ live: true, prevEventId: 'b', published: { a: 'ok', b: 'queued' } }))
       .toEqual({ live: true, headId: 'b', headSent: false })

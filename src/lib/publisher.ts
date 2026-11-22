@@ -36,8 +36,8 @@ import { confirmChainEvents } from './chains'
 import { noteChainHolders } from './chainHolders'
 import { chainLanded, onReleased } from './chainStore'
 import type { NostrEvent } from './events'
-import { chainFacts, gateAfter, maySend } from './release'
-import { newestEventOnRelays, noteStaleFormatStuck, retireStaleFormat, useCyberspace } from '../store/useCyberspace'
+import { chainFacts, gateAfter, maySend, useReleaseGate } from './release'
+import { meantToGoOut, newestEventOnRelays, noteStaleFormatStuck, retireStaleFormat, signedOnThisPage, takeFreshHead, useCyberspace } from '../store/useCyberspace'
 import { staleHopFormat } from './staleFormat'
 import { movementBlocked, useVersionGate } from './versionGate'
 
@@ -49,12 +49,25 @@ let started = false
 let inFlight = false
 /** The release gate (release.ts). Shut until an action is taken while Live. */
 let released = false
-let retryHandle: number | null = null
+let retryHandle: ReturnType<typeof setTimeout> | null = null
 let backoff = RETRY_MS
-/** The relays were looked at for this backlog already; reset when it drains, fails, or LIVE goes off. */
-let backlogChecked = false
+/**
+ * Whose backlog the relays were looked at for already, or null; reset when
+ * it drains, fails, or LIVE goes off. Keyed by identity: a look at one
+ * identity's backlog says nothing about the next one's, switched to while
+ * the first was draining (review, 2026-11-21).
+ */
+let backlogChecked: string | null = null
 /** The last send failed, so the next one starts a fresh look at the relays. */
 let lastFailed = false
+/**
+ * The gate was opened by a move meant to go out rather than by an action just
+ * taken (headReleases): the next send waits for a look at the relays, however
+ * few are waiting and whoever signed them. A blip-retried move may have been
+ * signed on this page, before a switch away and back, and another device may
+ * have moved since (review, 2026-11-22).
+ */
+let lookOwed = false
 
 /**
  * Look at the relays once before sending a backlog: more than one event
@@ -91,7 +104,7 @@ async function preflight(): Promise<boolean> {
 /** Try again after the current backoff, doubling it for the time after. */
 function retryLater(): void {
   if (retryHandle !== null) return
-  retryHandle = window.setTimeout(() => {
+  retryHandle = setTimeout(() => {
     retryHandle = null
     backoff = Math.min(backoff * 2, RETRY_MAX_MS)
     void pump()
@@ -104,20 +117,28 @@ async function pump(): Promise<void> {
   if (movementBlocked()) return
   let s = useCyberspace.getState()
   if (!maySend(s, released)) return
-  if (!s.events.some((e) => s.published[e.id] !== 'ok')) { backlogChecked = false; return }
+  if (!s.events.some((e) => s.published[e.id] !== 'ok')) { backlogChecked = null; return }
 
-  const waiting = s.events.filter((e) => s.published[e.id] !== 'ok').length
-  if (!backlogChecked && (waiting > 1 || lastFailed)) {
+  const unsent = s.events.filter((e) => s.published[e.id] !== 'ok')
+  // One waiting move is sent without a look only when this page signed it,
+  // right after its own head check. One that came from storage (a reload, an
+  // identity switched back to) was signed before anything here asked the
+  // relays, and another device may have moved since.
+  const who = s.identity.pubkey
+  if (lookOwed || (backlogChecked !== who && (unsent.length > 1 || lastFailed || unsent.some((e) => !signedOnThisPage(e.id))))) {
     inFlight = true
     const answered = await preflight()
     inFlight = false
     s = useCyberspace.getState()
+    // A switch while it looked: the look was for the identity left.
+    if (s.identity.pubkey !== who) { void pump(); return }
     if (!maySend(s, released) || movementBlocked()) return
     if (!answered) { retryLater(); return }
-    backlogChecked = true
+    backlogChecked = who
+    lookOwed = false
   }
   const next = s.events.find((e) => s.published[e.id] !== 'ok')
-  if (!next) { backlogChecked = false; return }
+  if (!next) { backlogChecked = null; return }
   // Never a hop in the old proof format (hop proof version 2): the store
   // cuts it away as it lands, and this is the last place it could slip out.
   // Cut here too, and the drain goes on from the chain that is left.
@@ -164,7 +185,7 @@ async function pump(): Promise<void> {
 
   now.setPublishStatus(next.id, 'failed', result.reason)
   lastFailed = true
-  backlogChecked = false
+  backlogChecked = null
   if (!maySend(now, released)) return
   retryLater()
 }
@@ -461,9 +482,37 @@ async function reconcileOnce(pubkey: string): Promise<void> {
 }
 
 /** Idempotent. Subscribes once for the life of the page. */
+/**
+ * Whether the head that just arrived releases the chain, as an action taken
+ * here would: a move this page just signed, counted once (takeFreshHead,
+ * asked first on every change of head, LIVE or LOCAL, so it is spent on its
+ * first arrival); or a move signed while LIVE whose send never landed,
+ * read back after a reload or a switch back (meantToGoOut): it picks up
+ * where it stopped, after the look at the relays every move from storage
+ * gets (pump). A move made LOCAL is neither, and waits for an action here
+ * or PUBLISH.
+ */
+function headReleases(s: ReturnType<typeof useCyberspace.getState>): boolean {
+  if (takeFreshHead(s.prevEventId)) return true
+  if (s.published[s.prevEventId] === 'ok' || !meantToGoOut(s.identity.pubkey, s.prevEventId)) return false
+  if (s.live) lookOwed = true
+  return true
+}
+
 export function startPublisher(): void {
   if (started) return
   started = true
+  // The chain already in hand at start (a reload that read it from
+  // localStorage before the publisher listened): a LIVE head that never
+  // landed goes on as if it had just arrived.
+  {
+    const s = useCyberspace.getState()
+    if (s.live && s.prevEventId && headReleases(s)) {
+      released = true
+      if (useReleaseGate.getState().open !== released) useReleaseGate.setState({ open: released })
+      queueMicrotask(() => { if (maySend(useCyberspace.getState(), released)) void pump() })
+    }
+  }
   // Actions held back until a commit or the relays answered are free: the drain goes on, behind the same gate.
   onReleased(() => { if (maySend(useCyberspace.getState(), released)) void pump() })
   // What a reload left waiting for the canonical relay is asked for again.
@@ -471,12 +520,14 @@ export function startPublisher(): void {
 
   useCyberspace.subscribe((s, prev) => {
     // Another identity: its own set, and its own count on the strip.
-    if (s.identity.pubkey !== prev.identity.pubkey) restorePending()
+    if (s.identity.pubkey !== prev.identity.pubkey) { restorePending(); backlogChecked = null; lastFailed = false }
     // Every change is offered to the gate first, because the thing that opens
     // it, a new head signed here, arrives as an ordinary store update.
-    released = gateAfter(released, chainFacts(prev), chainFacts(s))
+    const releases = s.prevEventId !== prev.prevEventId && headReleases(s)
+    released = gateAfter(released, chainFacts(prev), chainFacts(s, () => releases))
+    if (useReleaseGate.getState().open !== released) useReleaseGate.setState({ open: released })
     if (s.live === prev.live && s.events === prev.events && s.held === prev.held && s.publishRequest === prev.publishRequest && s.chainConflict === prev.chainConflict) return
-    if (!s.live) backlogChecked = false
+    if (!s.live) backlogChecked = null
     if (!maySend(s, released)) {
       // Local, Live with the gate still shut, or a held chain: stop retrying.
       // An in-flight send is allowed to finish.

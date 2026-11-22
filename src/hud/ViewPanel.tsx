@@ -23,8 +23,8 @@
  * Chain sync limit of 2026-11-18, relabeled 2026-11-22) is the one row that
  * changes what WALK does far ahead of your chain: on, fluid WALK switches
  * itself off 21 moves ahead and back on at 15 (store/fluidSwitch.ts); off, it
- * never does. While fluid is paused, the Fluid WALK row reads off and says
- * why. The slowdown and the LOSING SYNC warning it also turned on are parked
+ * never does. While fluid is paused, the Fluid WALK row keeps your choice
+ * and says it is paused. The slowdown and the LOSING SYNC warning it also turned on are parked
  * (store/walkLimits.ts SYNC_SLOWDOWN_ON).
  *
  * One row reaches the relay: Sync hidden list, your list of hidden things
@@ -72,7 +72,7 @@ export function ViewPanel(): JSX.Element {
   const glow = useLayers((s) => s.glow)
   const walkLimits = useLayers((s) => s.walkLimits)
   const gravity = useWalk((s) => s.gravity)
-  const fluidWalk = useFluidWalk((s) => s.on && !s.paused)
+  const fluidWalk = useFluidWalk((s) => s.on)
   const fluidPaused = useFluidWalk((s) => s.on && s.paused)
   const showTrail = useCyberspace((s) => s.showTrail)
   const showSecrets = useCyberspace((s) => s.showSecrets)
@@ -133,7 +133,8 @@ export function ViewPanel(): JSX.Element {
     // speed you up instead of stepping, and moves still land on whole
     // gibsons. Off is the step WALK exactly as it was. ?fluidwalk=1 or 0
     // sets it for one visit. Paused for the chain (store/fluidSwitch.ts), it
-    // reads off and says so; a tap is a switch by hand, which ends the pause.
+    // shows your choice (on) and says it is paused; a tap is a switch by
+    // hand to off, which ends the pause and cancels the return.
     {
       id: 'view-walk-fluid',
       title: 'Fluid WALK',
@@ -232,8 +233,8 @@ export function ViewPanel(): JSX.Element {
         for you when you get 21 moves ahead of your chain, and back on once
         you are 15 or fewer ahead, if you had it on. You keep walking the
         whole time: without fluid, WALK takes straighter paths, so it makes
-        fewer moves and your chain catches up. Turning Fluid WALK on or off
-        yourself while it is paused ends the pause. Turned off, Fluid WALK
+        fewer moves and your chain catches up. Turning Fluid WALK off
+        yourself while it is paused keeps it off. Turned off, Fluid WALK
         never pauses, and the CHAIN chip still shows how far ahead you are.
         If your chain falls far behind and something interrupts it, like
         closing the tab or losing connection, moves that have not reached

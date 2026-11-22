@@ -25,7 +25,7 @@
  * clipped corners, without the dependency.
  */
 
-import { useEffect, useLayoutEffect, useReducer, useRef } from 'react'
+import { memo, useEffect, useLayoutEffect, useReducer, useRef } from 'react'
 import { FLUID_RESUME_NOTICE_MS, useFluidWalk } from '../store/fluidSwitch'
 import { useCyberspace } from '../store/useCyberspace'
 
@@ -43,8 +43,8 @@ export function fluidNotice(s: { paused: boolean; resumedAt: number }, walking: 
 /** How long the words stay on the page fading out after they are done, in ms: the stylesheet's fade (320 ms) and a little over. */
 export const FLUID_NOTICE_FADE_MS = 400
 
-/** The notice, beside the CHAIN chip. `own`: the chip shows your own chain at its head, the one the walk is on. Nothing on the page while it has nothing to say. */
-export function FluidPauseNotice({ own }: { own: boolean }): JSX.Element | null {
+/** The notice, beside the CHAIN chip. `own`: the chip shows your own chain at its head, the one the walk is on. Nothing on the page while it has nothing to say. Memoized, so a render of the chain explorer for its own reasons leaves it alone. */
+export const FluidPauseNotice = memo(function FluidPauseNotice({ own }: { own: boolean }): JSX.Element | null {
   const paused = useFluidWalk((s) => s.paused)
   const resumedAt = useFluidWalk((s) => s.resumedAt)
   const walking = useCyberspace((s) => s.walking)
@@ -73,4 +73,4 @@ export function FluidPauseNotice({ own }: { own: boolean }): JSX.Element | null 
       {shown === 'paused' ? FLUID_PAUSED_TEXT : FLUID_RESUMED_TEXT}
     </span>
   )
-}
+})

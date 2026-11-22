@@ -28,7 +28,9 @@
  *
  * A switch by hand (set) always wins and ends the pause: turned off, fluid
  * stays off and nothing turns it back on; turned on, it is on now (and
- * pauses again only if the chain is still FLUID_PAUSE_AT behind).
+ * pauses again only if the chain is still FLUID_PAUSE_AT behind). While
+ * paused, the Settings switch shows your choice (on) with a line saying it
+ * is paused, so a tap there is the switch off.
  */
 
 import { create } from 'zustand'
@@ -108,12 +110,14 @@ export const FLUID_RESUME_NOTICE_MS = 2500
  * The fluid pause, for `ahead` events ahead with the sync limit `limits`
  * (see the table above). Called whenever the count can change
  * (store/walkFluid.ts). Writes the store only when the pause starts or ends,
- * so a count that changes nothing renders nothing.
+ * so a count that changes nothing renders nothing. `walking`: the pause ends
+ * in front of you, so it says "back on"; out of WALK (the queue dropped by
+ * leaving WALK or a STOP) it ends quietly.
  */
-export function fluidPauseCheck(ahead: number, limits: boolean, now: number = performance.now()): void {
+export function fluidPauseCheck(ahead: number, limits: boolean, now: number = performance.now(), walking = true): void {
   const s = useFluidWalk.getState()
   if (s.paused) {
-    if (!limits || ahead <= FLUID_RESUME_AT) useFluidWalk.setState({ paused: false, resumedAt: now })
+    if (!limits || ahead <= FLUID_RESUME_AT) useFluidWalk.setState({ paused: false, resumedAt: walking ? now : 0 })
     return
   }
   if (limits && s.on && ahead >= FLUID_PAUSE_AT) useFluidWalk.setState({ paused: true, resumedAt: 0 })

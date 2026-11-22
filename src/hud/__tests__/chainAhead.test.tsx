@@ -35,6 +35,10 @@ import { useChainUi } from '../../store/useChainUi'
 import { useCyberspace } from '../../store/useCyberspace'
 import { SYNC_WARN_AT, useWalk, type WalkSegment } from '../../store/useWalk'
 import { eventsAhead } from '../../store/walkAhead'
+import { useFluidWalk } from '../../store/fluidSwitch'
+
+// Fluid WALK chosen, as the app has it by default: the bar shows the fluid pause's marks (with it off, the bar only counts).
+useFluidWalk.setState({ on: true })
 
 // The chip's own effects use the window's timers and watch the page's visibility.
 ;(globalThis as { window?: unknown }).window ??= globalThis
@@ -424,6 +428,20 @@ describe('the CHAIN chip in WALK', () => {
     expect(marked(theirs.all())).toBe(false)
     expect(String(chipOf(theirs.all()).props['aria-label'])).not.toContain('ahead')
     await theirs.unmount()
+  })
+
+  it('with Fluid WALK switched off by hand, nothing pauses: the bar only counts, never red, and the label says so', async () => {
+    chainOf(3)
+    useFluidWalk.setState({ on: false })
+    try {
+      walkAt(22)
+      const m = await mount(<ChainExplorer />)
+      const cls = String(chipOf(m.all()).props.className).split(' ')
+      expect(litOf(chipOf(m.all()))).toBe(20)
+      expect(cls.includes('is-slow') || cls.includes('is-limit')).toBe(false)
+      expect(String(chipOf(m.all()).props['aria-label'])).toContain('22 moves ahead of your chain. The fluid pause is off.')
+      await m.unmount()
+    } finally { useFluidWalk.setState({ on: true }) }
   })
 
   it('stays on the chip when a fold from another device changes its face', async () => {

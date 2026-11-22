@@ -730,6 +730,16 @@ describe('the fluid pause (arkinox, 2026-11-22: "on the 21st action ahead ... au
     useWalk.setState({ behind: 0 })
   })
 
+  it('leaving WALK while paused ends the pause quietly: no "back on" for a resume nobody saw', () => {
+    walk()
+    at(22)
+    expect(sw().paused).toBe(true)
+    useWalk.getState().exit()
+    expect(sw().paused).toBe(false)
+    expect(sw().resumedAt).toBe(0)
+    expect(sw().on).toBe(true)
+  })
+
   it('a fluid WALK switched off by hand stays off: nothing pauses, nothing turns it on', () => {
     useFluidWalk.getState().set(false)
     walk()

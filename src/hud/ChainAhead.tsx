@@ -22,7 +22,7 @@
  * | Ahead | Look |
  * |---|---|
  * | 0 | The chip as it always was. The bar fades out about a second after you catch up and is then taken off the page. |
- * | 1 to 14 | That many ticks lit cyan from the left, the newest white. The last six slots are hollow amber outlines, set a little apart: the slowing stretch, in sight before you reach it. |
+ * | 1 to 14 | That many ticks lit cyan from the left, the newest white. The last six slots are hollow amber outlines, set a little apart: the stretch before the fluid pause, in sight before you reach it. |
  * | 15 to 20 | The amber slots fill. Amber corner brackets appear outside the chip and close in, onto the corners at 20. |
  * | 21 and past | Fluid WALK is paused: every tick red, the brackets red, the chip's border red, and the bar breathes slowly. The bar stays full however far past 20 the count goes. |
  *
@@ -58,6 +58,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { SYNC_WARN_AT } from '../store/useWalk'
 import { useAheadSelect } from '../store/walkAhead'
 import { useLayers } from '../store/useLayers'
+import { useFluidWalk } from '../store/fluidSwitch'
 
 /** One tick per event, to one short of the fluid pause. */
 export const AHEAD_TICKS = FLUID_HOLD_AT
@@ -91,9 +92,9 @@ export interface AheadBar {
 
 /**
  * The bar for `ahead` events ahead (store/walkAhead.ts): the fluid pause's
- * own thresholds, never its own. With the sync limit off in Settings
- * (`limits` false, store/walkLimits.ts) fluid WALK never pauses, so the bar
- * only counts: no amber, brackets or red.
+ * own thresholds, never its own. With the sync limit off in Settings or
+ * Fluid WALK switched off (`limits` false, store/walkLimits.ts) nothing
+ * pauses, so the bar only counts: no amber, brackets or red.
  */
 export function aheadBar(ahead: number, limits = true): AheadBar {
   const real = Number.isFinite(ahead) ? Math.max(0, Math.floor(ahead)) : 0
@@ -189,7 +190,11 @@ export function useChainAhead(own: boolean, total: number): ChainAhead {
   const walking = useCyberspace((s) => s.walking)
   const active = own && walking
   const events = useAheadSelect((n) => (active ? n : 0))
-  const limits = useLayers((s) => s.walkLimits)
+  // The pause's marks (amber, brackets, red) and its words only when it can
+  // happen: the sync limit on and Fluid WALK chosen. Otherwise the bar counts.
+  const limitOn = useLayers((s) => s.walkLimits)
+  const fluidChosen = useFluidWalk((s) => s.on)
+  const limits = limitOn && fluidChosen
   const bar = aheadBar(events, limits)
 
   // The track: what the last change to the count played. Derived from the

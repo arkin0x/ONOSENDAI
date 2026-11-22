@@ -15,7 +15,7 @@
  * opacity"): red, WARNING: LOSING SYNC, and how far behind the proof chain
  * is. Its opacity is lib/fluidWalk.ts syncWarnOpacity of the events ahead
  * (store/walkAhead.ts): 0 at 14 or fewer, 0.5 at 17, 1 from 20, where the
- * walk stops. It eases between counts (styles.css), and the same rule holds
+ * slowdown is at its slowest. It eases between counts (styles.css), and the same rule holds
  * with fluid WALK off. It was all or nothing at 10 closed segments
  * (2026-11-14).
  *

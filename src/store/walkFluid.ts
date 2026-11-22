@@ -199,7 +199,7 @@ export function tickFluid(now: number = performance.now()): boolean {
   st.last = now
   // The fluid pause, every frame too: a fall's mid-air hops are module
   // state, which no store change reports.
-  fluidPauseCheck(eventsAhead(), walkLimitsOn(), now)
+  fluidPauseCheck(eventsAhead(), walkLimitsOn(), now, cs.walking)
   if (!fluidWalking()) {
     // Just left (leaving WALK, the switch, a VIEW taking the head): the
     // smooth position glides onto wherever the anchor is now.
@@ -721,9 +721,14 @@ useFluidWalk.subscribe((s, prev) => {
 // landed, the queue dropped), whenever the sync limit is switched, and every
 // frame in tickFluid. An identity switch forgets a pause: the walk stops
 // with it, and the next identity's walk starts from the saved choice.
-useWalk.subscribe((s) => { fluidPauseCheck(aheadOfState(s), walkLimitsOn()) })
-useLayers.subscribe((s, prev) => { if (s.walkLimits !== prev.walkLimits) fluidPauseCheck(eventsAhead(), s.walkLimits) })
-useCyberspace.subscribe((s, prev) => { if (s.identity.pubkey !== prev.identity.pubkey) clearFluidPause() })
+useWalk.subscribe((s) => { fluidPauseCheck(aheadOfState(s), walkLimitsOn(), performance.now(), useCyberspace.getState().walking) })
+useLayers.subscribe((s, prev) => { if (s.walkLimits !== prev.walkLimits) fluidPauseCheck(eventsAhead(), s.walkLimits, performance.now(), useCyberspace.getState().walking) })
+useCyberspace.subscribe((s, prev) => {
+  if (s.identity.pubkey !== prev.identity.pubkey) clearFluidPause()
+  // Into or out of WALK: a "back on" from the walk before is not this walk's
+  // (leaving WALK drops the queue, which ends a pause before WALK is off).
+  else if (s.walking !== prev.walking && useFluidWalk.getState().resumedAt !== 0) useFluidWalk.setState({ resumedAt: 0 })
+})
 
 // DEV window handle, the house pattern: fluid WALK's state for the headless recording.
 if (import.meta.env.DEV && typeof window !== 'undefined') {

@@ -80,7 +80,7 @@ function placed(had: EventRow | undefined, r: ChainRowIn, pubkey: string, n: num
   let row: EventRow
   if (!had) row = fresh
   else if (JSON.stringify(eventOf(had)) === JSON.stringify(eventOf(r.event as EventRow))) row = { ...had, nip01: nip01Rank(r.nip01) > nip01Rank(had.nip01) ? r.nip01 : had.nip01 }
-  else if (nip01Rank(r.nip01) >= nip01Rank(had.nip01)) row = { ...fresh, ...carried(had), nip01: r.nip01 }
+  else if (nip01Rank(r.nip01) >= nip01Rank(had.nip01)) row = { ...fresh, ...carried(had, false), nip01: r.nip01 }
   else row = had
   row = { ...row, pin: 1 }
   if (r.acked) row.acked = 1

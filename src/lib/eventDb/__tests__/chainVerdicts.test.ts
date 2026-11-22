@@ -14,7 +14,7 @@ import { CHAIN_RULES_REVISION, buildChain, hopTemplate, parseAction, positionHex
 import { closeEventDb, withEventDb } from '../connection'
 import { commitChain, migrateChain, readChain, type ChainCommit } from '../chainRows'
 import { markChainVerdicts, verdictOf } from '../chainVerdicts'
-import { getRows } from '../store'
+import { getRows, ingest } from '../store'
 
 const sk = generateSecretKey()
 const pk = getPublicKey(sk)
@@ -271,8 +271,30 @@ describe('the mp form, checked once (lib/events.ts mpFormHeld, rulesHeld)', () =
 
   it('rows held by their verdict are taken as they are, and build the same chain', () => {
     const chain = chainOf(4)
-    const before = buildChain(chain, pk)
+    const before = buildChain(chain.map((e) => ({ ...e })), pk)
     rulesHeld(chain)
-    expect(buildChain(chain, pk)).toEqual(before)
+    // Not one mp is read again for a held row.
+    const test = RegExp.prototype.test
+    let mpReads = 0
+    RegExp.prototype.test = function (this: RegExp, s: string) { if (this.source === '^[0-9a-f]+$') mpReads++; return test.call(this, s) }
+    try { expect(buildChain(chain, pk)).toEqual(before) } finally { RegExp.prototype.test = test }
+    expect(mpReads).toBe(0)
+  })
+
+  it('a row whose bytes change under its id loses its verdict, and is not read as held', async () => {
+    const chain = chainOf(3)
+    await seed(chain)
+    await mark()
+    expect((await withEventDb((db) => readChain(db, pk)))!.ruled).toContain(chain[2].id)
+    // A copy of the same id with other bytes (damaged, or never checked) takes the row's place.
+    const other = { ...chain[2], content: 'not what was judged' }
+    await withEventDb((db) => ingest(db, [{ event: other, nip01: 1 }]))
+    const row = (await rowsOf([chain[2]]))[0]
+    expect(row.content).toBe(other.content)
+    expect(verdictOf(row, 2)).toBe(0)
+    expect((await withEventDb((db) => readChain(db, pk)))!.ruled).not.toContain(chain[2].id)
+    // The same bytes coming back checked keep their verdict.
+    await withEventDb((db) => ingest(db, [{ event: chain[1], nip01: 1 }]))
+    expect(verdictOf((await rowsOf([chain[1]]))[0], 2)).toBe(1)
   })
 })

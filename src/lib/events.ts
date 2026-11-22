@@ -730,17 +730,6 @@ function marked(ev: NostrEvent, marker: string): string | undefined {
 }
 
 /**
- * Read a kind:3333 event as a recognized action, or refuse it.
- *
- * Strict about shape and silent about everything else: a malformed event is
- * dropped rather than thrown, because relays return whatever they were given
- * and one bad event must not take down a chain. Proofs are not checked here;
- * that is a verifier's job, and this client is a viewer. An action this
- * client does not recognize is refused here too, because on its own it says
- * nothing about where anyone is (spec §8.9); buildChain still follows the
- * links through it (actionLink).
- */
-/**
  * A hop's `mp` already known to be lowercase hex, per event object, as the very
  * string that was checked (arkinox, 2026-11-22: "its like 8 seconds til
  * something is painted"). A v2 hop's `mp` is 8,192 characters, so on a long
@@ -751,9 +740,14 @@ function marked(ev: NostrEvent, marker: string): string | undefined {
  * already valid (lib/eventDb/chainRows.ts readChain `ruled`, rulesHeld): a
  * malformed `mp` breaks its action, so such a row cannot carry one. Kept by
  * the string itself, so a tag changed after the check is checked again.
+ *
+ * A verdict carries this rule from build to build: a change to what a
+ * well-formed `mp` is must raise CHAIN_RULES_REVISION, or rows judged under
+ * the old rule would pass the new one unchecked.
  */
 const mpChecked = new WeakMap<NostrEvent, string>()
 
+/** Whether `ev`'s `mp` is lowercase hex: once per event and string (above). */
 function mpFormHeld(ev: NostrEvent, mp: string): boolean {
   if (mpChecked.get(ev) === mp) return true
   if (!/^[0-9a-f]+$/.test(mp)) return false
@@ -774,6 +768,17 @@ export function rulesHeld(events: readonly NostrEvent[]): void {
   }
 }
 
+/**
+ * Read a kind:3333 event as a recognized action, or refuse it.
+ *
+ * Strict about shape and silent about everything else: a malformed event is
+ * dropped rather than thrown, because relays return whatever they were given
+ * and one bad event must not take down a chain. Proofs are not checked here;
+ * that is a verifier's job, and this client is a viewer. An action this
+ * client does not recognize is refused here too, because on its own it says
+ * nothing about where anyone is (spec §8.9); buildChain still follows the
+ * links through it (actionLink).
+ */
 export function parseAction(ev: NostrEvent): ActionEvent | null {
   if (ev.kind !== ACTION_KIND) return null
   const type = tag(ev, 'A')

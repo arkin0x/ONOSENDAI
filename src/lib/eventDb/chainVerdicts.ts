@@ -92,7 +92,9 @@ export async function markChainVerdicts(db: IDBDatabase, pubkey: string, epoch: 
         // id; it never reads the signature, whose check is the NIP-01 flag's.
         // So a row back under the same id holds the same verdict, unless its
         // place moved: then it is left for the next run, which the record,
-        // not written for a head that moved, asks for.
+        // not written for a head that moved, asks for. Other bytes under the
+        // same id never keep it (store.ts carried): a valid verdict lets a
+        // load skip the form check (lib/events.ts rulesHeld).
         if (!row || row.chainN !== seen.chainN || row.chainOf !== seen.chainOf || JSON.stringify(eventOf(row)) !== JSON.stringify(eventOf(seen))) continue
         const { breakAt: _old, ...rest } = row
         void _old

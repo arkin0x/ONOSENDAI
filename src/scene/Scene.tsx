@@ -42,7 +42,7 @@ import { upOf } from '../lib/walkDown'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
 import { setWalkFacing, walkBody, walkEye, walkFacing, walkFall, walkFallUp, walkGlide, walkRise } from '../lib/walkEye'
-import { EYE_ROOM, WalkEyeRig } from './walkEyeRig'
+import { WalkEyeRig } from './walkEyeRig'
 import { useAvatars } from '../store/useAvatars'
 import { tryEyeFor } from '../store/tryEye'
 import { clearWalkLook, lookRadPerPx, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
@@ -595,8 +595,6 @@ function LensShift(): null {
  * direction to turn about.
  */
 const WALK_EYE = 0.001
-/** The camera's trail below a stair's rise this frame (walkRise), render cells: added to the camera and its target alike. */
-const riseVec = new Vector3()
 /** Scratch for the eye's line of sight, so the frame loop allocates nothing. */
 const walkDir = new Vector3()
 /**
@@ -1241,24 +1239,18 @@ function Rig(): JSX.Element {
         up: upOf(walkDown()),
         walls: s.walking,
         stand: s.walking && walkGlide.exact ? Number(STEP_UP_MAX) * 2 ** s.scaleExp : undefined,
+        // Fluid WALK up a stair: the feet are on the step, the camera trails
+        // them up (lib/walkEye.ts walkRise), never nearer their height than
+        // the near plane's room, and kept out of the step in front. The
+        // camera and what it looks at move together (the target, below), so
+        // the way you look is unchanged.
+        rise: walkRise.offset < 0 ? { offset: walkRise.offset, axis: walkRise.up.axis, dir: walkRise.up.dir } : undefined,
         now: performance.now(),
       }, eyeVec)
       eyeShift.current.copy(eyeVec).multiplyScalar(eyeMix.current)
       // The body's turn for Avatar.tsx, from the same heading: your heading, never the look up or down.
       walkBody.copy(eyeRig.body)
       c.object.position.copy(smooth.current).add(eyeShift.current).addScaledVector(along.normalize(), d)
-      // Fluid WALK up a stair: the feet are on the step, the camera trails
-      // them up (lib/walkEye.ts walkRise), never nearer their height than
-      // the near plane's room. The camera and what it looks at move
-      // together (the target, below), so the way you look is unchanged.
-      riseVec.set(0, 0, 0)
-      if (walkRise.offset < 0) {
-        const r = renderUp(s.view, walkRise.up.axis, walkRise.up.dir)
-        const above = eyeShift.current.x * r[0] + eyeShift.current.y * r[1] + eyeShift.current.z * r[2]
-        const lower = Math.max(walkRise.offset / 2 ** s.scaleExp, -Math.max(0, above - EYE_ROOM))
-        riseVec.set(r[0] * lower, r[1] * lower, r[2] * lower)
-        c.object.position.add(riseVec)
-      }
       c.minDistance = Math.min(ORBIT_MIN_DISTANCE, d * 0.5)
       locked.current = true
       if (t >= 1 && !s.walking) { eye.current = null; c.minDistance = ORBIT_MIN_DISTANCE; eyeMix.current = 0; eyeShift.current.set(0, 0, 0) }
@@ -1266,7 +1258,6 @@ function Rig(): JSX.Element {
     walkEye.copy(smooth.current)
 
     c.target.copy(smooth.current).add(eyeShift.current)
-    if (eye.current) c.target.add(riseVec)
     // The tour's camera for this step, once, as a pinch would leave it: at
     // its distance, from its side when it has one (cyberspace x, y, z put
     // into the view's render axes, as Earth is placed), else along the line

@@ -209,7 +209,7 @@ import { useToast } from './useToast'
 import { useChainUi } from './useChainUi'
 import type { SelfCrypto } from '../lib/muteList'
 import { forgetUnsent, unsentOf } from '../lib/unsent'
-import { freshenOwnWatch, ownWatchState } from '../lib/ownWatch'
+import { freshenOwnWatch, ownWatchState, unexplainedMoves } from '../lib/ownWatch'
 import { kvGet, kvSet } from '../lib/kvStore'
 
 /**
@@ -3118,32 +3118,35 @@ export const STALE_CONFIRMATION: unique symbol = Symbol('stale confirmation')
 let chainEpoch = 0
 
 /**
- * Whether the standing subscription on each relay (lib/ownWatch.ts) shows the
- * head in hand is the newest: at least one relay is current (its subscription
- * open, caught up to its EOSE since it last opened, its socket heard from
- * within LIVE_MS), and no relay, current or not, has delivered a move of this
- * identity that is not in the chain in hand. A relay that is not current
- * holds nothing up and vouches for nothing. Any current relay will do; the
- * canonical relay is watched first and is one of them whenever it is current.
- * No relay current, or the page's first look not answered, means no: the
- * move then asks the relays, and holds without an answer, as before.
+ * What the standing subscription on each relay (lib/ownWatch.ts) says of the
+ * head in hand, read with no question to any relay (owner's ruling of
+ * 2026-11-22):
+ *
+ * | Answer | When |
+ * |---|---|
+ * | 'holds' | a pinned relay (on every device's list, the canonical relay first) is current: its subscription open, caught up to its EOSE since it last opened, its socket heard from lately; and every move any relay delivered, current or not, is in the chain in hand |
+ * | 'quiet' | all else holds, but no pinned relay is current: after a pause, one round trip for a frame may make one so (freshenOwnWatch) |
+ * | 'ask' | anything else: a move delivered that is not in hand (another device's, to catch up first), the page's first look not answered, a held chain or a conflict, no watch |
+ *
+ * A relay only this device lists vouches for nothing: other devices may never
+ * publish there. Anything but 'holds' sends the move to the relays as before,
+ * which holds it without an answer.
  */
-export function standingHeadHolds(pubkey: string): boolean {
+export function standingHead(pubkey: string): 'holds' | 'quiet' | 'ask' {
   const relays = ownWatchState(pubkey)
-  if (!relays || !relays.some((r) => r.current)) return false
+  if (!relays) return 'ask'
   const s = useCyberspace.getState()
-  if (s.identity.pubkey !== pubkey || s.held || s.chainConflict) return false
+  if (s.identity.pubkey !== pubkey || s.held || s.chainConflict) return 'ask'
   // The page's first look at the chain (CHECKING YOUR CHAIN) has answered:
   // until then, or while it could not, the move asks the relays itself.
-  if (s.chainSync?.pubkey !== pubkey || s.chainSync.status !== 'done') return false
-  for (const r of relays) {
-    const ev = r.newest
-    if (!ev) continue
-    let inHand = false
-    for (let i = s.events.length - 1; i >= 0; i--) if (s.events[i].id === ev.id) { inHand = true; break }
-    if (!inHand) return false
+  if (s.chainSync?.pubkey !== pubkey || s.chainSync.status !== 'done') return 'ask'
+  const events = s.events
+  const inHand = (id: string): boolean => {
+    for (let i = events.length - 1; i >= 0; i--) if (events[i].id === id) return true
+    return false
   }
-  return true
+  if (unexplainedMoves(pubkey, inHand) !== 0) return 'ask'
+  return relays.some((r) => r.current && r.pinned) ? 'holds' : 'quiet'
 }
 
 async function confirmHead(retrying: () => void): Promise<string | null | typeof STALE_CONFIRMATION> {
@@ -3166,12 +3169,14 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
   // none of them delivered one this chain does not hold, there is nothing
   // newer, without asking again. Otherwise (no relay current, a move not in
   // hand, a catch-up out) the relays are asked as below.
-  // After a pause every relay may be quiet: one round trip for a frame from each (no events), then read.
-  if (!standingHeadHolds(pubkey) && ownWatchState(pubkey)?.some((r) => !r.current)) {
+  // After a pause the pinned relays may only be quiet: one round trip for a frame from each (no events), then read.
+  let standing = standingHead(pubkey)
+  if (standing === 'quiet') {
     await freshenOwnWatch(pubkey)
     if (chainEpoch !== epoch) return STALE_CONFIRMATION
+    standing = standingHead(pubkey)
   }
-  if (standingHeadHolds(pubkey)) {
+  if (standing === 'holds') {
     relaysConfirmed.add(pubkey)
     vouch(pubkey)
     if (rowsWiped.has(pubkey)) void recoverWiped(pubkey)

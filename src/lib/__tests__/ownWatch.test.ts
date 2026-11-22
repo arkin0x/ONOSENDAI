@@ -7,21 +7,22 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { EOSE_WAIT_MS, FRESHEN_WAIT_MS, LIVE_MS, STALL_MS, freshenOwnWatch, ownWatchDeps, ownWatchState, startOwnWatch, stopOwnWatch } from '../ownWatch'
+import { DROP_AFTER_MS, EOSE_WAIT_MS, FRESHEN_WAIT_MS, LIVE_MS, STALL_MS, freshenOwnWatch, ownWatchDeps, unexplainedMoves, ownWatchState, startOwnWatch, stopOwnWatch } from '../ownWatch'
 import type { NostrEvent } from '../events'
 
 type H = Parameters<typeof ownWatchDeps.subscribeOne>[2]
-const net = { subs: [] as Array<{ url: string; filter: Record<string, unknown>; h: H; closed: boolean }>, age: new Map<string, number>(), owed: new Map<string, number>(), dropped: [] as string[], failed: new Set<string>() }
+const net = { subs: [] as Array<{ url: string; filter: Record<string, unknown>; filters: Array<Record<string, unknown>>; h: H; closed: boolean }>, age: new Map<string, number>(), owed: new Map<string, number>(), dropped: [] as string[], failed: new Set<string>() }
 
 const PK = 'ab'.repeat(32)
 const A = 'wss://a.example/', B = 'wss://b.example/'
 const ev = (n: number, pubkey = PK): NostrEvent => ({ id: n.toString(16).padStart(64, '0'), pubkey, created_at: n, kind: 3333, tags: [], content: '', sig: '' })
 
 function install(): void {
-  ownWatchDeps.subscribeOne = (url, filter, h) => { const s = { url, filter: filter as Record<string, unknown>, h, closed: false }; net.subs.push(s); return { close: () => { s.closed = true } } }
+  ownWatchDeps.subscribeOne = (url, filter, h) => { const fs = (Array.isArray(filter) ? filter : [filter]) as Array<Record<string, unknown>>; const s = { url, filter: fs[0], filters: fs, h, closed: false }; net.subs.push(s); return { close: () => { s.closed = true } } }
   ownWatchDeps.frameAge = (url) => net.age.get(url) ?? 0
   ownWatchDeps.unansweredFor = (url) => net.owed.get(url) ?? 0
   ownWatchDeps.relays = () => [A, B]
+  ownWatchDeps.pinned = () => [A]
   ownWatchDeps.signInFailed = (url) => net.failed.has(url)
   ownWatchDeps.drop = (url) => { net.dropped.push(url) }
 }
@@ -31,21 +32,42 @@ const state = (url: string) => ownWatchState(PK)!.find((r) => r.url === url)!
 afterEach(() => { stopOwnWatch(); net.subs.length = 0; net.age.clear(); net.owed.clear(); net.dropped.length = 0; net.failed.clear(); vi.useRealTimers() })
 
 describe('the standing watch', () => {
-  it("one subscription per relay, for this identity's moves; current only after its EOSE", () => {
+  it("one subscription per relay, for this identity's moves; current only after its EOSE; every move delivered is held until found in hand", () => {
     install()
     const seen: string[] = []
     startOwnWatch(PK, (e) => seen.push((e as { id: string }).id))
     expect(net.subs.filter((s) => s.filter.authors)).toHaveLength(2)
     expect(state(A).current).toBe(false)
+    expect(state(A).pinned).toBe(true)
+    expect(state(B).pinned).toBe(false)
     own(A).h.onevent(ev(5))
     own(A).h.oneose()
     expect(state(A).current).toBe(true)
-    expect(state(A).newest?.created_at).toBe(5)
     expect(state(B).current).toBe(false)
     // Another identity's event is not this watch's.
     own(A).h.onevent(ev(9, 'cd'.repeat(32)))
-    expect(state(A).newest?.created_at).toBe(5)
     expect(seen).toEqual([ev(5).id])
+    // A lower id in the same second, live from another relay, still counts (no newest-wins on a tie).
+    own(B).h.onevent({ ...ev(5), id: '0'.repeat(63) + '1' })
+    expect(unexplainedMoves(PK, (id) => id === ev(5).id)).toBe(1)
+    expect(unexplainedMoves(PK, () => true)).toBe(0)
+  })
+
+  it('a (re)subscription asks from the second of the newest move on the relays, inclusive, beside the newest one: a move of another device in the same second is never lost to the limit', () => {
+    vi.useFakeTimers()
+    install()
+    let since: number | undefined = 1000
+    startOwnWatch(PK, () => {}, () => {}, () => since)
+    expect(own(A).filters).toEqual([{ kinds: [3333], authors: [PK], limit: 1 }, { kinds: [3333], authors: [PK], since: 1000 }])
+    own(A).h.oneose()
+    since = 1234
+    own(A).h.onclose('socket gone')
+    vi.advanceTimersByTime(1_100)
+    expect(own(A).filters[1]).toEqual({ kinds: [3333], authors: [PK], since: 1234 })
+    since = undefined
+    stopOwnWatch()
+    startOwnWatch(PK, () => {}, () => {}, () => since)
+    expect(own(A).filters).toEqual([{ kinds: [3333], authors: [PK], limit: 1 }])
   })
 
   it('a socket that has gone quiet past LIVE_MS is not current, and is again once it is heard from', () => {
@@ -98,8 +120,9 @@ describe('the standing watch', () => {
     expect(state(B).current).toBe(true)
   })
 
-  it('after a pause, a quiet relay is asked for a frame (no events, not the chain) and is current once it answers', async () => {
+  it('after a pause, a quiet pinned relay is asked for a frame (no events, not the chain) and is current once it answers', async () => {
     install()
+    ownWatchDeps.pinned = () => [A, B]
     startOwnWatch(PK, () => {})
     own(A).h.oneose()
     own(B).h.oneose()
@@ -132,7 +155,13 @@ describe('the standing watch', () => {
     await vi.advanceTimersByTimeAsync(200)
     await done
     expect(state(A).current).toBe(false)
-    // Its socket is dropped, so the watch reopens over a fresh one.
+    // A slow link is only not current, never dropped.
+    expect(net.dropped).toEqual([])
+    // One that has owed an answer for DROP_AFTER_MS has stalled: dropped, so the watch reopens over a fresh socket.
+    net.owed.set(A, DROP_AFTER_MS)
+    const again = freshenOwnWatch(PK)
+    await vi.advanceTimersByTimeAsync(FRESHEN_WAIT_MS + 10)
+    await again
     expect(net.dropped).toEqual([A])
   })
 

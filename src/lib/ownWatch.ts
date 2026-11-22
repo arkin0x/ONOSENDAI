@@ -10,7 +10,7 @@
  * |---|---|
  * | the subscription | open, or reopening after a close (with a backoff) |
  * | caught up | its first EOSE since it last opened: until then it is not current |
- * | the newest own move it delivered | what the head check compares with the chain in hand |
+ * | every own move it delivered | the head check finds each in the chain in hand, once; one that is not there is a move from elsewhere |
  * | liveness | the socket's last frame (relay.ts frameAge) and how long it has owed one (unansweredFor): one silent past LIVE_MS, or asked something and silent past STALL_MS, is not current; before a move, quiet relays are asked for a frame (freshenOwnWatch) |
  *
  * A relay is current when its subscription is open, has reached its EOSE
@@ -25,6 +25,7 @@ import type { Filter } from 'nostr-tools/filter'
 import { normalizeURL } from 'nostr-tools/utils'
 import { CYBERSPACE_RELAY, dropRelays, frameAge, relaySet, signInFailed, subscribeOne, unansweredFor } from './relay'
 import { HELD_BACKOFF_MS } from './liveSub'
+import { PINNED_RELAYS } from '../store/useRelays'
 import type { NostrEvent } from './events'
 
 /**
@@ -36,6 +37,13 @@ import type { NostrEvent } from './events'
 export const LIVE_MS = 3_000
 /** A relay whose socket was asked something (a REQ, an EVENT) and has sent nothing back for this long is not current. */
 export const STALL_MS = 2_000
+/**
+ * A socket that has owed an answer this long is dropped, so the watch reopens
+ * over a fresh one. Long: a drop ends everything on that socket (sends
+ * waiting on an OK, other feeds) and asks for a new AUTH; a slow link is only
+ * not current, never dropped.
+ */
+export const DROP_AFTER_MS = 8_000
 /** A subscription with no EOSE after this long is asked again. */
 export const EOSE_WAIT_MS = 10_000
 /** The longest freshen waits for a quiet relay to answer its probe. */
@@ -51,8 +59,6 @@ interface RelayWatch {
   /** Open since `openedAt`, and its first EOSE since then has come. */
   open: boolean
   eosed: boolean
-  /** The newest own move this relay delivered, by created_at, then id. */
-  newest: NostrEvent | null
   attempts: number
   timer: ReturnType<typeof setTimeout> | null
   eoseTimer: ReturnType<typeof setTimeout> | null
@@ -60,6 +66,12 @@ interface RelayWatch {
 
 interface Watch {
   pubkey: string
+  /** The second of the newest move the relays already hold, when known: a (re)subscription asks from it, inclusive. */
+  since: () => number | undefined
+  /** Every own move any relay delivered that the head check has not yet found in the chain in hand. */
+  pending: Map<string, NostrEvent>
+  /** More were delivered than `pending` keeps: nothing is vouched for until the watch is restarted. */
+  overflow: boolean
   onEvent: (ev: NostrEvent, url: string) => void
   onEose: () => void
   relays: Map<string, RelayWatch>
@@ -70,20 +82,35 @@ interface Watch {
 let watch: Watch | null = null
 
 /** Injected for tests: how a relay is subscribed to, its socket's age, and the relays to watch. */
-export const ownWatchDeps = { subscribeOne, frameAge, unansweredFor, signInFailed, drop: (url: string): void => dropRelays([url]), relays: (): string[] => [CYBERSPACE_RELAY, ...relaySet()] }
+export const ownWatchDeps = { subscribeOne, frameAge, unansweredFor, signInFailed, drop: (url: string): void => dropRelays([url]), relays: (): string[] => [CYBERSPACE_RELAY, ...relaySet()], pinned: (): readonly string[] => PINNED_RELAYS }
 
-const filterFor = (pubkey: string): Filter => ({ kinds: [3333], authors: [pubkey], limit: 1 })
+/** Moves kept in `pending` at most; past it, the head check takes the slow path until a fold clears them. */
+const PENDING_MAX = 2048
 
-const newer = (a: NostrEvent, b: NostrEvent | null): boolean => b === null || a.created_at > b.created_at || (a.created_at === b.created_at && a.id > b.id)
+/**
+ * What a (re)subscription asks for. `limit: 1` alone: the relay's newest
+ * stored move, then every move it stores from then on whatever its
+ * created_at (a move another device signed while LOCAL and publishes now).
+ * With the second of the newest move already on the relays, also every
+ * stored move from that second on, inclusive: a move of another device in the
+ * same second as the head (nextCreatedAt allows it) can lose the one `limit`
+ * slot to the head itself, and would never be delivered. Every move that
+ * could extend or fork the head is dated at or after it, so none is missed.
+ */
+function filtersFor(pubkey: string, since: number | undefined): Filter[] {
+  const base = { kinds: [3333], authors: [pubkey] }
+  return since === undefined ? [{ ...base, limit: 1 }] : [{ ...base, limit: 1 }, { ...base, since }]
+}
 
 function openRelay(w: Watch, r: RelayWatch): void {
   if (w.stopped || r.sub) return
   r.open = true
   r.eosed = false
-  const sub = ownWatchDeps.subscribeOne(r.url, filterFor(w.pubkey), {
+  const sub = ownWatchDeps.subscribeOne(r.url, filtersFor(w.pubkey, w.since()), {
     onevent: (ev) => {
       if (w.stopped || ev.pubkey !== w.pubkey) return
-      if (newer(ev, r.newest)) r.newest = ev
+      if (w.pending.size < PENDING_MAX) w.pending.set(ev.id, ev)
+      else w.overflow = true
       w.onEvent(ev, r.url)
     },
     oneose: () => {
@@ -104,7 +131,7 @@ function openRelay(w: Watch, r: RelayWatch): void {
     r.eoseTimer = null
     if (w.stopped || r.sub !== sub || r.eosed) return
     try { sub.close() } catch { /* closed */ }
-    if (ownWatchDeps.unansweredFor(r.url) >= STALL_MS) ownWatchDeps.drop(r.url)
+    if (ownWatchDeps.unansweredFor(r.url) >= DROP_AFTER_MS) ownWatchDeps.drop(r.url)
     ended(w, r)
   }, EOSE_WAIT_MS)
 }
@@ -129,7 +156,7 @@ function reconcile(w: Watch): void {
   const want = new Set(ownWatchDeps.relays().map((u) => normalizeURL(u)))
   for (const url of want) {
     if (w.relays.has(url)) continue
-    const r: RelayWatch = { url, sub: null, open: false, eosed: false, newest: null, attempts: 0, timer: null, eoseTimer: null }
+    const r: RelayWatch = { url, sub: null, open: false, eosed: false, attempts: 0, timer: null, eoseTimer: null }
     w.relays.set(url, r)
     openRelay(w, r)
   }
@@ -176,9 +203,9 @@ function tick(w: Watch): void {
  * long as it is not stopped. Events go to `onEvent` (with the relay that
  * delivered them); each relay's EOSE to `onEose`. Returns the stopper.
  */
-export function startOwnWatch(pubkey: string, onEvent: (ev: NostrEvent, url: string) => void, onEose: () => void = () => {}): () => void {
+export function startOwnWatch(pubkey: string, onEvent: (ev: NostrEvent, url: string) => void, onEose: () => void = () => {}, since: () => number | undefined = () => undefined): () => void {
   stopOwnWatch()
-  const w: Watch = { pubkey, onEvent, onEose, relays: new Map(), tick: null, stopped: false }
+  const w: Watch = { pubkey, since, pending: new Map(), overflow: false, onEvent, onEose, relays: new Map(), tick: null, stopped: false }
   watch = w
   reconcile(w)
   w.tick = setInterval(() => tick(w), TICK_MS)
@@ -199,18 +226,33 @@ function isCurrent(r: RelayWatch): boolean {
   return r.open && r.eosed && ownWatchDeps.frameAge(r.url) <= LIVE_MS && ownWatchDeps.unansweredFor(r.url) <= STALL_MS
 }
 
-/** What the head check reads, per relay: whether it is current, and the newest own move it delivered. */
-export interface RelayHead { url: string; current: boolean; newest: NostrEvent | null }
+/** What the head check reads, per relay: whether it is current, and whether it is pinned (on every device's relay list). */
+export interface RelayHead { url: string; current: boolean; pinned: boolean }
 
 /** For `pubkey`, each relay watched and where it stands; null when nothing watches that identity. */
 export function ownWatchState(pubkey: string): RelayHead[] | null {
   const w = watch
   if (!w || w.stopped || w.pubkey !== pubkey) return null
-  return [...w.relays.values()].map((r) => ({ url: r.url, current: isCurrent(r), newest: r.newest }))
+  const pinned = new Set(ownWatchDeps.pinned().map((u) => normalizeURL(u)))
+  return [...w.relays.values()].map((r) => ({ url: r.url, current: isCurrent(r), pinned: pinned.has(r.url) }))
 }
 
 /**
- * When no relay is current but some are caught up and only quiet (a pause in
+ * How many moves the relays delivered that are not in the chain in hand,
+ * after taking out those that now are (`inHand`). Each delivered move is
+ * looked for until it is found once, so the check costs nothing per
+ * signature in the steady walk. Null when nothing watches `pubkey`;
+ * Infinity after more were delivered than are kept.
+ */
+export function unexplainedMoves(pubkey: string, inHand: (id: string) => boolean): number | null {
+  const w = watch
+  if (!w || w.stopped || w.pubkey !== pubkey) return null
+  for (const id of w.pending.keys()) if (inHand(id)) w.pending.delete(id)
+  return w.overflow ? Infinity : w.pending.size
+}
+
+/**
+ * When no pinned relay is current but some are caught up and only quiet (a pause in
  * the walk), ask each of those for a frame and wait for the first answer, up
  * to FRESHEN_WAIT_MS: one round trip that carries no events, not a question
  * about the chain. A relay that stalled answers nothing and stays not current.
@@ -219,7 +261,9 @@ export function ownWatchState(pubkey: string): RelayHead[] | null {
 export async function freshenOwnWatch(pubkey: string): Promise<void> {
   const w = watch
   if (!w || w.stopped || w.pubkey !== pubkey) return
-  const all = [...w.relays.values()]
+  // Only the pinned relays vouch (useCyberspace standingHead), so only they are asked.
+  const pinned = new Set(ownWatchDeps.pinned().map((u) => normalizeURL(u)))
+  const all = [...w.relays.values()].filter((r) => pinned.has(r.url))
   if (all.some(isCurrent)) return
   const quiet = all.filter((r) => r.open && r.eosed)
   if (quiet.length === 0) return
@@ -229,7 +273,7 @@ export async function freshenOwnWatch(pubkey: string): Promise<void> {
       void probe(r, FRESHEN_WAIT_MS).then(() => {
         // Asked and silent: the socket has stalled. Dropped, so the watch
         // reopens over a fresh one and catches up to its EOSE before it counts.
-        if (!isCurrent(r) && ownWatchDeps.unansweredFor(r.url) >= STALL_MS) ownWatchDeps.drop(r.url)
+        if (!isCurrent(r) && ownWatchDeps.unansweredFor(r.url) >= DROP_AFTER_MS) ownWatchDeps.drop(r.url)
         if (isCurrent(r) || --left === 0) resolve()
       })
     }

@@ -304,6 +304,8 @@ function resync(pubkey: string): void {
     // A relay's subscription reaching EOSE is the relay talking again; if the
     // check could not get through before, it may now.
     () => ifCurrent(recheckIfUnknown),
+    // A (re)subscription also asks from the second of the newest move on the relays, inclusive.
+    () => { const s = useCyberspace.getState(); return s.identity.pubkey === pubkey ? newestOnRelays(s.events, s.published) : undefined },
   )
   void check(pubkey)
 }

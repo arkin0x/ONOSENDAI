@@ -30,7 +30,7 @@ vi.mock('../relay', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../relay')>()),
   subscribe: (f: Filter) => { net.filters.push(f); return () => {} },
   // The standing subscription on each relay (lib/ownWatch.ts).
-  subscribeOne: (_url: string, f: Filter) => { net.filters.push(f); return { close: () => {} } },
+  subscribeOne: (_url: string, f: Filter | Filter[]) => { net.filters.push(...(Array.isArray(f) ? f : [f])); return { close: () => {} } },
 }))
 vi.mock('../ownWatch', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../ownWatch')>()

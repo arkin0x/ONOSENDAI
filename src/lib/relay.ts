@@ -211,7 +211,9 @@ class Pool extends AbstractSimplePool {
     if (relay) { countPings(relay); guardAuth(relay); guardSend(relay) }
     try {
       const ready = await pending
-      stampFrames(norm, ready)
+      // The app's own pool only: the signer's pool (getSignerPool) has sockets
+      // to the same URLs, and their frames say nothing of the app's socket.
+      if (this.tracksHung) stampFrames(norm, ready)
       return ready
     } catch (err) {
       if (/timed out/.test(String(err))) {
@@ -236,10 +238,13 @@ let pool: AbstractSimplePool | null = null
 const lastFrame = new Map<string, number>()
 /** The socket each relay's stamp belongs to: an old socket's late close does not wipe a new one's. */
 const framedSocket = new Map<string, WebSocket>()
+/** Sockets already wrapped: never twice, whatever the map says. */
+const wrapped = new WeakSet<object>()
 
 function stampFrames(url: string, relay: unknown): void {
   const ws = (relay as { ws?: WebSocket } | undefined)?.ws
-  if (!ws || framedSocket.get(url) === ws || typeof ws.addEventListener !== 'function') return
+  if (!ws || wrapped.has(ws) || typeof ws.addEventListener !== 'function') return
+  wrapped.add(ws)
   framedSocket.set(url, ws)
   lastFrame.set(url, Date.now())
   unanswered.delete(url)
@@ -1187,11 +1192,13 @@ export type FirstResult = PublishResult & { all: Promise<PublishResult> }
 export function publishFirst(event: NostrEvent): Promise<FirstResult> {
   return new Promise((resolve) => {
     let answered = false
-    const all = publishMany(relaySet(), event, (url) => {
+    // Never rejects: a throw is a failure every relay shares, said as one.
+    let all: Promise<PublishResult> = Promise.resolve({ ok: false, reason: 'not sent' })
+    all = publishMany(relaySet(), event, (url) => {
       if (answered) return
       answered = true
       resolve({ ok: true, accepted: [url], all })
-    })
+    }).catch((err: unknown) => ({ ok: false as const, reason: String((err as Error)?.message ?? err) }))
     void all.then((r) => { if (!answered) { answered = true; resolve({ ...r, all }) } })
   })
 }
@@ -1542,13 +1549,13 @@ export function authForRead(url: string): Promise<void> {
  * deadline of ours (NOSTR_TOOLS_EOSE_MS), so "finished" always means the relay
  * said so.
  */
-export function subscribeOne(url: string, filter: Filter, handlers: { onevent: (ev: NostrEvent) => void; oneose: () => void; onclose: (reason?: string) => void }): { close: () => void } {
+export function subscribeOne(url: string, filter: Filter | Filter[], handlers: { onevent: (ev: NostrEvent) => void; oneose: () => void; onclose: (reason?: string) => void }): { close: () => void } {
   let closed = false
   let sub: OpenSub | null = null
   let authTried = false
   const open = (relay: AbstractRelay): void => {
     if (closed) return
-    sub = relay.subscribe([filter], {
+    sub = relay.subscribe(Array.isArray(filter) ? filter : [filter], {
       onevent: (e) => { if (!closed) handlers.onevent(e as NostrEvent) },
       oneose: () => { if (!closed) handlers.oneose() },
       onclose: (reason) => {

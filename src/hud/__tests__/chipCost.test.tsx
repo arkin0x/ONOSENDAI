@@ -19,7 +19,7 @@
  * twice.
  */
 import { readFileSync } from 'node:fs'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, settled, type Host } from '../../test/elementRoot'
 
 vi.hoisted(() => {
@@ -162,7 +162,10 @@ describe('the CHAIN chip renders for the count, and only for it', () => {
   })
 })
 
-describe('the LOSING SYNC warning renders only while it shows', () => {
+describe('the LOSING SYNC warning renders only while it shows (parked since 2026-11-22; switched back on here)', () => {
+  beforeEach(() => { (globalThis as { __ONOSENDAI_SYNC_SLOWDOWN__?: boolean }).__ONOSENDAI_SYNC_SLOWDOWN__ = true })
+  afterEach(() => { delete (globalThis as { __ONOSENDAI_SYNC_SLOWDOWN__?: boolean }).__ONOSENDAI_SYNC_SLOWDOWN__ })
+
   it('renders nothing under 15, once per count from 15, and sets no state while rendering', async () => {
     walkAt(0)
     const m = await mount(<SyncWarning />)

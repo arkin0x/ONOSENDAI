@@ -18,6 +18,10 @@
  *   signature ran out of time with a remote signer: LOG OUT or PAIR AGAIN from
  *   there, without opening the menu.
  *
+ * - A signer silent on a request past 65,535 bytes (lib/signerRequestSize.ts)
+ *   raises its own chip, which offers a key on this device instead of
+ *   pairing again: the signer may only not handle messages that big.
+ *
  * The confirm and PAIR AGAIN's QR are opened through useSignerUi and drawn by
  * SignerUiHost, so the chip (menu closed) and the panel open the same ones.
  */
@@ -41,26 +45,38 @@ interface SignerUi {
   pairFor: string | null
   /** The not-answering chip was put away for the stall that raised it (its stuckAt). */
   stuckDismissed: number | null
+  /** The login is open, to sign in with a key on this device (the big-request chip). */
+  loginOpen: boolean
+  /** The "may not handle messages this big" chip was put away for the silence that raised it (its bigSilentAt). */
+  bigDismissed: number | null
   openLogout: () => void
   openPair: (pubkey: string) => void
+  openLogin: () => void
   close: () => void
   dismissStuck: (at: number) => void
+  dismissBig: (at: number) => void
 }
 
 export const useSignerUi = create<SignerUi>((set) => ({
   logoutOpen: false,
   pairFor: null,
   stuckDismissed: null,
-  openLogout: () => set({ logoutOpen: true, pairFor: null }),
-  openPair: (pubkey) => set({ pairFor: pubkey, logoutOpen: false }),
-  close: () => set({ logoutOpen: false, pairFor: null }),
+  loginOpen: false,
+  bigDismissed: null,
+  openLogout: () => set({ logoutOpen: true, pairFor: null, loginOpen: false }),
+  openPair: (pubkey) => set({ pairFor: pubkey, logoutOpen: false, loginOpen: false }),
+  openLogin: () => set({ loginOpen: true, logoutOpen: false, pairFor: null }),
+  close: () => set({ logoutOpen: false, pairFor: null, loginOpen: false }),
   dismissStuck: (at) => set({ stuckDismissed: at }),
+  dismissBig: (at) => set({ bigDismissed: at }),
 }))
 
 /** What the LOG OUT confirm says first, as the owner asked for it. */
 export const LOGOUT_WORDS = 'Log out of this signer on this device. Your data stays here; log in again to pick up where you left off.'
 /** A remote signer's line: how to come back. */
 export const LOGOUT_PAIR_WORDS = 'This device stops asking your signer. To come back, open the login and tap PAIR AGAIN.'
+/** The chip's line once a request past 65,535 bytes got no answer. */
+export const BIG_SILENT_WORDS = 'It may not handle messages this big. Make it smaller, or use a key on this device.'
 /** A key this device does not keep: LOG OUT would lose it, so it waits until the key is kept or backed up. */
 export const LOGOUT_UNKEPT_WORDS = LOGOUT_UNKEPT
 
@@ -156,8 +172,27 @@ export function SignerStuckChip(): JSX.Element | null {
   const session = useCyberspace((s) => s.signerSession)
   const pubkey = useCyberspace((s) => s.identity.pubkey)
   const stuckAt = useSignerActivity((s) => (session ? s.bySession[session]?.stuckAt ?? null : null))
+  const bigSilentAt = useSignerActivity((s) => (session ? s.bySession[session]?.bigSilentAt ?? null : null))
   const dismissed = useSignerUi((s) => s.stuckDismissed)
-  if (kind !== 'nip46' || stuckAt === null || dismissed === stuckAt) return null
+  const bigDismissed = useSignerUi((s) => s.bigDismissed)
+  if (kind !== 'nip46') return null
+  // Silent on a request past 65,535 bytes: the size, not the pairing, may be the reason.
+  if (bigSilentAt !== null && bigDismissed !== bigSilentAt) {
+    return (
+      <div className="hyperbar hyperbar--toast hyperbar--buildtoast hyperbar--signertoast signer-stuck" role="alert">
+        <Unplug className="toast__build toast__signer" size={16} strokeWidth={2.25} aria-hidden />
+        <span className="hyperbar__text">
+          <span className="hyperbar__label">YOUR SIGNER DID NOT ANSWER</span>
+          <span className="hyperbar__meta">{BIG_SILENT_WORDS}</span>
+        </span>
+        <span className="signer-stuck__acts">
+          <button className="hyperbar__end signer-stuck__act" onClick={() => useSignerUi.getState().openLogin()}>USE A KEY HERE</button>
+        </span>
+        <ModalClose className="signer-stuck__close" label="Put away" onClose={() => useSignerUi.getState().dismissBig(bigSilentAt)} />
+      </div>
+    )
+  }
+  if (stuckAt === null || dismissed === stuckAt) return null
   return (
     <div className="hyperbar hyperbar--toast hyperbar--buildtoast hyperbar--signertoast signer-stuck" role="alert">
       <Unplug className="toast__build toast__signer" size={16} strokeWidth={2.25} aria-hidden />
@@ -235,11 +270,14 @@ function LogoutConfirm(): JSX.Element {
   )
 }
 
-/** Draws the LOG OUT confirm and PAIR AGAIN's QR wherever they were opened from. */
+/** Draws the LOG OUT confirm, PAIR AGAIN's QR and the login wherever they were opened from. */
 export function SignerUiHost(): JSX.Element | null {
   const logoutOpen = useSignerUi((s) => s.logoutOpen)
   const pairFor = useSignerUi((s) => s.pairFor)
-  if (logoutOpen) return <LogoutConfirm />
-  if (pairFor) return <LoginModal pairFor={pairFor} onClose={() => useSignerUi.getState().close()} />
-  return null
+  const loginOpen = useSignerUi((s) => s.loginOpen)
+  let panel: JSX.Element | null = null
+  if (logoutOpen) panel = <LogoutConfirm />
+  else if (pairFor) panel = <LoginModal pairFor={pairFor} onClose={() => useSignerUi.getState().close()} />
+  else if (loginOpen) panel = <LoginModal onClose={() => useSignerUi.getState().close()} />
+  return panel
 }

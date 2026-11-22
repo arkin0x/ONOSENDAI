@@ -119,6 +119,11 @@ function announce(): void {
 }
 
 let watching = false
+/** Another tab changed the tree while this one was hidden: read it once shown. */
+let rereadWhenShown = false
+function folderTabHidden(): boolean {
+  try { return typeof document !== 'undefined' && document.visibilityState === 'hidden' } catch { return false }
+}
 
 export const useShardFolders = create<ShardFoldersState>((set, get) => {
   /** Read the stored tree and show it. */
@@ -189,10 +194,26 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
         if (typeof BroadcastChannel !== 'undefined') {
           try {
             channel = new BroadcastChannel(CHANNEL)
-            // Any tab's change, of any build: read the stored tree again.
-            channel.onmessage = () => { if (get().storage === 'indexeddb') void reread() }
+            // Any tab's change, of any build: read the stored tree again. Not
+            // while hidden: a hidden tab may be frozen mid-read, and its open
+            // read would hold the folders' store from the tab writing it; it
+            // reads once shown (store/workshopStorage.ts listen, 2026-11-22).
+            channel.onmessage = () => {
+              if (get().storage !== 'indexeddb') return
+              if (folderTabHidden()) { rereadWhenShown = true; return }
+              void reread()
+            }
           } catch { channel = null }
         }
+        try {
+          if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', () => {
+              if (folderTabHidden() || !rereadWhenShown) return
+              rereadWhenShown = false
+              if (get().storage === 'indexeddb') void reread()
+            })
+          }
+        } catch { /* no document */ }
       }
       await reread()
     },

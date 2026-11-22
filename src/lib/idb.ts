@@ -16,9 +16,9 @@
  * loop so the UI stays alive during a cold cache load.
  */
 
-/** Every database here keeps its meta records in a store of this name, keyed by `key`. */
 import { countingTasks, idbLabel, timeRestOfTask } from './taskStats'
 
+/** Every database here keeps its meta records in a store of this name, keyed by `key`. */
 export const META_STORE = 'meta'
 
 export function request<T>(req: IDBRequest<T>): Promise<T> {

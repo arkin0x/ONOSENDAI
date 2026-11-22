@@ -32,6 +32,22 @@ describe('labelled tasks', () => {
     db.close()
   })
 
+  it('reads answered one after another are timed one at a time: no window overlaps the next', async () => {
+    const db = await openDatabase('onosendai:test-overlap', 1, [['things', 'key']])
+    await request(db.transaction('things', 'readwrite').objectStore('things').put({ key: 'a' }))
+    const tasks = countTasks()
+    tasks.take()
+    const t0 = performance.now()
+    const os = db.transaction('things', 'readonly').objectStore('things')
+    await Promise.all(Array.from({ length: 6 }, () => request(os.get('a'))))
+    await nextTask()
+    const elapsed = performance.now() - t0
+    const got = tasks.take().get('idb:onosendai:test-overlap.things')!
+    expect(got.n).toBe(6)
+    expect(got.ms).toBeLessThanOrEqual(elapsed + 1)
+    db.close()
+  })
+
   it('a yield is told by what yielded', async () => {
     const tasks = countTasks()
     tasks.take()

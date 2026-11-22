@@ -423,6 +423,7 @@ describe('a remote signer\'s answer and the landing (owner, 2026-11-21: "smooth 
     expect(at).toBeGreaterThan(0)
     const after = text.slice(at, at + 1_200)
     expect(after).toMatch(/if \(currentSigner\.kind !== 'local'\) await yieldTask\('land'\)\n\s*if \(!live\(\)\) return/)
-    expect(after.indexOf('yieldTask()')).toBeLessThan(after.indexOf('localHopFailures('))
+    expect(after.indexOf("yieldTask('land')")).toBeGreaterThan(0)
+    expect(after.indexOf("yieldTask('land')")).toBeLessThan(after.indexOf('localHopFailures('))
   })
 })

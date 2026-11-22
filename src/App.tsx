@@ -45,7 +45,7 @@ import { parseDemoRoute } from './lib/demoRoute'
 import { startWorkshopRoute } from './lib/workshopRoute'
 import { restoreAfterUnfinishedTour, useDemo } from './store/useDemo'
 import { ToastChip } from './hud/ToastChip'
-import { BigRequestQuestion, SignerStuckChip, SignerUiHost } from './hud/SignerControls'
+import { SignerStuckChip, SignerUiHost } from './hud/SignerControls'
 import { TutorialToast } from './hud/TutorialToast'
 import { watchTutorialToast } from './tutorial/toast'
 import { StarNickname } from './hud/StarNickname'
@@ -490,10 +490,6 @@ export default function App(): JSX.Element {
       <DeployBar pad={showPad && !offerUp && !modalUp} />
       {/* One boundary for the record and its neighbors: a crash in one modal
           shows its error where the modal was, and the scene stays up. */}
-      {/* Outside the modals' boundary: every remote signature waits on its answer, so a crash beside it must not hide it. */}
-      <CrashNote where="the signer question">
-        <BigRequestQuestion />
-      </CrashNote>
       <CrashNote where="a modal" closesCard>
         <StashModals />
         {/* LOG OUT's confirm and PAIR AGAIN's QR, from the Identity panel or the chip. */}

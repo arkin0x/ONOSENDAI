@@ -1,7 +1,7 @@
 /**
- * bigSignerRequest.test.ts - a remote signer request past 65,535 bytes is a
- * question, not a refusal (arkinox, 2026-11-22: "We're assuming it can't
- * sign any more than that limit, but what if we're wrong?").
+ * bigSignerRequest.test.ts - a remote signer request past 65,535 bytes simply
+ * goes (arkinox, 2026-11-22: "We're assuming it can't sign any more than that
+ * limit, but what if we're wrong?"; Amber's NIP-44 reads the extended length).
  *
  * Through the store, as the app runs it, with the in-memory bunker of
  * logout.test.ts: a real nostr-tools BunkerSigner, every request a real
@@ -101,19 +101,17 @@ const shard = (n: number, d = 'big-shard'): EventTemplate => ({ kind: 33331, cre
 type Store = typeof import('../useCyberspace')
 type Activity = typeof import('../../lib/signerActivity')
 type Within = typeof import('../../lib/signWithin')
-type Size = typeof import('../../lib/signerRequestSize')
 const tabs: unknown[] = []
 /** A page load: the store and its modules imported afresh over the same storage. */
-async function reload(): Promise<{ S: Store['useCyberspace']; activity: Activity; within: Within; size: Size }> {
+async function reload(): Promise<{ S: Store['useCyberspace']; activity: Activity; within: Within }> {
   vi.resetModules()
   const store = await import('../useCyberspace')
   const activity = await import('../../lib/signerActivity')
   const within = await import('../../lib/signWithin')
-  const size = await import('../../lib/signerRequestSize')
   await store.savedChainLoaded()
   await store.heldIdentitiesSeeded
   tabs.push(store)
-  return { S: store.useCyberspace, activity, within, size }
+  return { S: store.useCyberspace, activity, within }
 }
 afterAll(() => { tabs.length = 0 })
 
@@ -150,87 +148,40 @@ async function pairedDevice(): Promise<{ user: string; session: string; loaded: 
   return { user, session: getPublicKey(client), loaded }
 }
 
-/** Let what was scheduled run: a question open, a request out. */
+/** Let what was scheduled run: a request out. */
 const settle = (ms = 20) => new Promise((r) => setTimeout(r, ms))
 
 describe('a big request to a remote signer, through the store', () => {
-  it('shows the question; TRY ANYWAY sends it and the signer signs it', async () => {
-    const { user, session, loaded: { S, activity, size } } = await pairedDevice()
+  it('goes with no question, and the signer signs it', async () => {
+    const { user, loaded: { S } } = await pairedDevice()
     const asked = bus.requests
-    const signing = S.getState().signEvent(shard(72_000))
-    await settle()
-    const q = size.useBigRequestQuestion.getState().question
-    expect(q).not.toBeNull()
-    expect(q!.words).toMatch(/^This is bigger than some signer apps can read \(about 65 KB, this needs 7\d KB\)\. TRY ANYWAY, or make the shard smaller\.$/)
-    // Nothing went while the question was open.
-    expect(bus.requests).toBe(asked)
-
-    // TRY ANYWAY (the modal itself: hud/__tests__/bigRequestQuestion.test.tsx).
-    q!.answer(true)
-    const signed = await signing
+    const signed = await S.getState().signEvent(shard(72_000))
     expect(signed.pubkey).toBe(user)
     expect(signed.content).toHaveLength(72_000)
     expect(bus.requests).toBe(asked + 1)
-    expect(activity.activityOf(session).readsBig).toBe(true)
+    // Bigger still, well past 65,535 and under the relay cap: the same.
+    expect((await S.getState().signEvent(shard(200_000, 'two'))).content).toHaveLength(200_000)
   }, 30_000)
 
-  it('the session remembers the signer answered one, and stops asking', async () => {
-    const { user, session, loaded: { S, activity, size } } = await pairedDevice()
-    const first = S.getState().signEvent(shard(72_000, 'one'))
-    await settle()
-    size.useBigRequestQuestion.getState().question!.answer(true)
-    await first
-    expect(activity.activityOf(session).readsBig).toBe(true)
-    // Another big one, even bigger: no question, it simply goes.
-    const second = S.getState().signEvent(shard(150_000, 'two'))
-    await settle()
-    expect(size.useBigRequestQuestion.getState().question).toBeNull()
-    expect((await second).pubkey).toBe(user)
-  }, 30_000)
-
-  it("DON'T SEND sends nothing and says what to do", async () => {
-    const { session, loaded: { S, activity, size, within } } = await pairedDevice()
-    const asked = bus.requests
-    const failing = S.getState().signEvent(shard(72_000)).then(() => null, (e: unknown) => e)
-    await settle()
-    size.useBigRequestQuestion.getState().question!.answer(false)
-    const err = await failing
-    expect(bus.requests).toBe(asked)
-    expect(within.signingFailed(err, 'nip46')).toMatch(/^Not sent: this is bigger than some signer apps can read \(about 65 KB, this needs 7\d KB\)\. Make the shard smaller, or sign in with a key on this device\.$/)
-    expect(activity.activityOf(session).readsBig).toBe(false)
-    // Not a stalled signer: no chip.
-    expect(activity.activityOf(session).stuckAt).toBeNull()
-  }, 30_000)
-
-  it('a timeout after TRY ANYWAY says plainly the signer may not handle messages this big, and offers a key on this device', async () => {
-    const { session, loaded: { S, activity, size, within } } = await pairedDevice()
+  it('a timeout on it says plainly the signer may not handle messages this big, and offers a key on this device', async () => {
+    const { session, loaded: { S, activity, within } } = await pairedDevice()
     bus.alive = false
     vi.useFakeTimers({ shouldAdvanceTime: true })
     let failure: unknown = null
-    let asks = 0
-    const unwatch = size.useBigRequestQuestion.subscribe((s, before) => { if (s.question && !before.question) asks++ })
     try {
-      const signing = S.getState().signEvent(shard(72_000)).catch((err: unknown) => { failure = err })
-      await vi.advanceTimersByTimeAsync(50)
-      // The clock waits while the person reads: far past a signature's patience, nothing has failed.
-      await vi.advanceTimersByTimeAsync(40_000)
-      expect(failure).toBeNull()
       const asked = bus.requests
-      size.useBigRequestQuestion.getState().question!.answer(true)
-      // One wait, then one more over fresh sockets (the store's retry), not asked about again.
+      const signing = S.getState().signEvent(shard(72_000)).catch((err: unknown) => { failure = err })
+      // One wait, then one more over fresh sockets (the store's retry).
       await vi.advanceTimersByTimeAsync(31_000)
       await signing
       expect(bus.requests).toBe(asked + 2)
     } finally {
-      unwatch()
       vi.useRealTimers()
     }
-    expect(asks).toBe(1)
     expect(failure).not.toBeNull()
     expect(within.signingFailed(failure, 'nip46')).toBe('Your signer did not answer. It may not handle messages this big. Make the shard smaller, or sign in with a key on this device.')
     const seen = activity.activityOf(session)
     expect(seen.bigSilentAt).not.toBeNull()
-    expect(seen.readsBig).toBe(false)
     // Not the pair-again chip: the signer may be fine with smaller messages.
     expect(seen.stuckAt).toBeNull()
 
@@ -242,32 +193,16 @@ describe('a big request to a remote signer, through the store', () => {
       expect(chip.says('LOG OUT and pair again.')).toBe(false)
       await chip.press('USE A KEY HERE')
       expect(ui.useSignerUi.getState().loginOpen).toBe(true)
+      ui.useSignerUi.getState().close()
+      // The signer answering a big request after all puts it away.
+      bus.alive = true
+      await S.getState().signEvent(shard(72_000, 'again'))
+      expect(activity.activityOf(session).bigSilentAt).toBeNull()
+      await settle(5)
+      expect(chip.says('YOUR SIGNER DID NOT ANSWER')).toBe(false)
     } finally {
       ui.useSignerUi.getState().close()
       await chip.unmount()
-    }
-  }, 60_000)
-
-  it('a question nobody answers counts as DON\'T SEND after five minutes, and lets the clocks go', async () => {
-    const { loaded: { S, size } } = await pairedDevice()
-    vi.useFakeTimers({ shouldAdvanceTime: true })
-    let failure: unknown = null
-    try {
-      const asked = bus.requests
-      const signing = S.getState().signEvent(shard(72_000)).catch((err: unknown) => { failure = err })
-      await vi.advanceTimersByTimeAsync(50)
-      expect(size.useBigRequestQuestion.getState().question).not.toBeNull()
-      await vi.advanceTimersByTimeAsync(size.QUESTION_PATIENCE_MS)
-      await signing
-      expect(size.useBigRequestQuestion.getState().question).toBeNull()
-      expect((failure as { reason?: unknown }).reason).toBe('declined')
-      expect(bus.requests).toBe(asked)
-      // A small signature after it runs on its own clock again, and is signed.
-      const small = S.getState().signEvent(shard(100, 'small'))
-      await vi.advanceTimersByTimeAsync(100)
-      expect((await small).content).toHaveLength(100)
-    } finally {
-      vi.useRealTimers()
     }
   }, 60_000)
 
@@ -299,29 +234,23 @@ describe('a big request to a remote signer, through the store', () => {
     expect(activity.activityOf(session).bigSilentAt).toBeNull()
   }, 60_000)
 
-  it('past the signer relay cap it is refused at once, never asked about', async () => {
-    const { loaded: { S, size } } = await pairedDevice()
+  it('past the signer relay cap it is refused at once, and nothing is sent', async () => {
+    const { loaded: { S } } = await pairedDevice()
     const asked = bus.requests
     const err = await S.getState().signEvent(shard(400_000)).then(() => null, (e: unknown) => e)
-    expect(size.useBigRequestQuestion.getState().question).toBeNull()
     expect(bus.requests).toBe(asked)
-    expect((err as { reason?: unknown }).reason).toBe('relay')
+    expect((err as Error).name).toBe('SignerRequestTooBig')
   }, 30_000)
 })
 
 describe('a key on this device', () => {
-  it('signs a big shard at once and is never asked about it', async () => {
+  it('signs a big shard at once, far past 65,535 and the relay cap alike', async () => {
     await wipe()
-    const { S, size } = await reload()
+    const { S } = await reload()
     expect(S.getState().signerKind).toBe('local')
-    let asks = 0
-    const unwatch = size.useBigRequestQuestion.subscribe((s) => { if (s.question) asks++ })
-    try {
-      const signed = await S.getState().signEvent(shard(200_000))
-      expect(signed.content).toHaveLength(200_000)
-    } finally {
-      unwatch()
-    }
-    expect(asks).toBe(0)
+    const asked = bus.requests
+    const signed = await S.getState().signEvent(shard(600_000))
+    expect(signed.content).toHaveLength(600_000)
+    expect(bus.requests).toBe(asked)
   }, 30_000)
 })

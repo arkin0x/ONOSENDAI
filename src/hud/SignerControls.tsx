@@ -18,10 +18,9 @@
  *   signature ran out of time with a remote signer: LOG OUT or PAIR AGAIN from
  *   there, without opening the menu.
  *
- * - The big-request question (lib/signerRequestSize.ts): a request bigger
- *   than some signer apps can read waits for TRY ANYWAY, and a signer that
- *   then stays silent raises its own chip, which offers a key on this device
- *   instead of pairing again.
+ * - A signer silent on a request past 65,535 bytes (lib/signerRequestSize.ts)
+ *   raises its own chip, which offers a key on this device instead of
+ *   pairing again: the signer may only not handle messages that big.
  *
  * The confirm and PAIR AGAIN's QR are opened through useSignerUi and drawn by
  * SignerUiHost, so the chip (menu closed) and the panel open the same ones.
@@ -33,7 +32,6 @@ import { nip19 } from 'nostr-tools'
 import { LogOut, QrCode, Radio, Unplug } from 'lucide-react'
 import { LOGOUT_UNKEPT, useCyberspace } from '../store/useCyberspace'
 import { activityOf, agoWords, signerHealth, useSignerActivity, type SignerActivity } from '../lib/signerActivity'
-import { useBigRequestQuestion } from '../lib/signerRequestSize'
 import { listHeld } from '../lib/identitiesDb'
 import { ConfirmModal } from './ConfirmModal'
 import { LoginModal } from './LoginModal'
@@ -77,7 +75,7 @@ export const useSignerUi = create<SignerUi>((set) => ({
 export const LOGOUT_WORDS = 'Log out of this signer on this device. Your data stays here; log in again to pick up where you left off.'
 /** A remote signer's line: how to come back. */
 export const LOGOUT_PAIR_WORDS = 'This device stops asking your signer. To come back, open the login and tap PAIR AGAIN.'
-/** The chip's line once a big request sent anyway got no answer. */
+/** The chip's line once a request past 65,535 bytes got no answer. */
 export const BIG_SILENT_WORDS = 'It may not handle messages this big. Make it smaller, or use a key on this device.'
 /** A key this device does not keep: LOG OUT would lose it, so it waits until the key is kept or backed up. */
 export const LOGOUT_UNKEPT_WORDS = LOGOUT_UNKEPT
@@ -178,7 +176,7 @@ export function SignerStuckChip(): JSX.Element | null {
   const dismissed = useSignerUi((s) => s.stuckDismissed)
   const bigDismissed = useSignerUi((s) => s.bigDismissed)
   if (kind !== 'nip46') return null
-  // Silent on a big request it was sent anyway: the size, not the pairing, is the likely reason.
+  // Silent on a request past 65,535 bytes: the size, not the pairing, may be the reason.
   if (bigSilentAt !== null && bigDismissed !== bigSilentAt) {
     return (
       <div className="hyperbar hyperbar--toast hyperbar--buildtoast hyperbar--signertoast signer-stuck" role="alert">
@@ -272,28 +270,7 @@ function LogoutConfirm(): JSX.Element {
   )
 }
 
-/**
- * The question before a big request goes to a remote signer
- * (lib/signerRequestSize.ts): TRY ANYWAY sends it; anything else, the ✕ and
- * a tap outside included, sends nothing.
- */
-export function BigRequestQuestion(): JSX.Element | null {
-  const question = useBigRequestQuestion((s) => s.question)
-  if (!question) return null
-  return (
-    <ConfirmModal
-      title="Big request"
-      danger={false}
-      body={<p>{question.words}</p>}
-      confirmLabel="TRY ANYWAY"
-      cancelLabel="DON'T SEND"
-      onConfirm={() => question.answer(true)}
-      onCancel={() => question.answer(false)}
-    />
-  )
-}
-
-/** Draws the LOG OUT confirm, PAIR AGAIN's QR and the login wherever they were opened from. (The big-request question is drawn by App, outside the modals' crash boundary.) */
+/** Draws the LOG OUT confirm, PAIR AGAIN's QR and the login wherever they were opened from. */
 export function SignerUiHost(): JSX.Element | null {
   const logoutOpen = useSignerUi((s) => s.logoutOpen)
   const pairFor = useSignerUi((s) => s.pairFor)

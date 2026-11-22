@@ -2408,7 +2408,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     // A signature this device needed (not a relay's AUTH, which is asked
     // again by itself) ran out of time with a remote signer, over fresh
     // sockets too: the chip offering LOG OUT and PAIR AGAIN comes up. Unless
-    // it was waiting on a big request sent anyway (signerRequestSize.ts): the
+    // it was waiting on a request past 65,535 bytes (signerRequestSize.ts): the
     // signer may only not handle messages that big, and its chip says so.
     else if (!late && signer.kind === 'nip46' && lostInTransit(err)) {
       if (bigSilence(err) !== null) noteBigSilent(signer.session)

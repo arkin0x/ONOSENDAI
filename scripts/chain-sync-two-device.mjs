@@ -192,6 +192,31 @@ if (want('standing')) {
   await tablet.close()
 }
 
+if (want('stall')) {
+  // The tablet's socket stalls: open, but nothing comes back from the relay
+  // and nothing it sends is answered. The phone moves on meanwhile. A move
+  // pressed on the tablet after that must not be signed on the old head.
+  if (!tablet.page) await tablet.open()
+  await until(tablet, (s) => s.head === relayHead() && s.sync?.status === 'done', 30_000)
+  relay.silent.add('tablet')
+  await move(phone)
+  const target = relayHead()
+  const before = new Set(store.map((e) => e.id))
+  // The tablet sends something (its move's proof takes a moment), and the
+  // stalled socket owes it an answer; it drops out of "current" then.
+  await tablet.page.evaluate(() => { const s = window.__store.getState(); s.moveCursor({ axis: 'z', dir: 1 }); void s.commit() })
+  const msgs = new Set()
+  await until(tablet, (s) => { msgs.add(s.msg); return s.msg === "Can't confirm your latest move. Try again." }, 60_000)
+  const st = await tablet.state()
+  const signedStale = st.head !== target && st.n > 0 && !before.has(st.head) && (await tablet.page.evaluate((h) => { const s = window.__store.getState(); const e = s.events.find((x) => x.id === h); return e?.tags.find((t) => t[0] === 'e' && t[3] === 'previous')?.[1] ?? null }, st.head)) !== target
+  relay.silent.delete('tablet')
+  // Back: the relay's moves are taken in and nothing was signed on the old head.
+  const back = await until(tablet, (s) => s.head === target || store.some((e) => e.id === s.head && !before.has(e.id)), 90_000)
+  const st2 = await tablet.state()
+  ok('stall: a silently stalled socket is not trusted; nothing is signed on the stale head; once the relay talks again the tablet catches up by itself', !signedStale && back !== null, `messages ${JSON.stringify([...msgs])}, back in step ${back} ms, tablet ${JSON.stringify({ n: st2.n, head: st2.head?.slice(0, 8), status: st2.status, msg: st2.msg, conflict: st2.conflict })} relay ${target?.slice(0, 8)}`)
+  await tablet.close()
+}
+
 if (want('press')) {
   for (let i = 0; i < 2; i++) await move(phone)
   const target = relayHead()
@@ -341,31 +366,6 @@ if (want('unreachable')) {
   const chipText = [...seen].join(' / ')
   ok('unreachable: nothing signed on an unconfirmed head, the move is refused in words, CHECKING is said (chip or panel), then the chip says NOT CHECKED', store.length === before && t !== null && (/CHECKING YOUR CHAIN/.test(chipText) || msgs.has('Checking your chain on the relays.')) && /CHAIN NOT CHECKED/.test(chipText), `${t} ms; messages ${JSON.stringify([...msgs])}; sync ${JSON.stringify(s.sync?.status)}; chips ${chipText}`)
   relay.silent.delete('tablet')
-  await tablet.close()
-}
-
-if (want('stall')) {
-  // The tablet's socket stalls: open, but nothing comes back from the relay
-  // and nothing it sends is answered. The phone moves on meanwhile. A move
-  // pressed on the tablet after that must not be signed on the old head.
-  if (!tablet.page) await tablet.open()
-  await until(tablet, (s) => s.head === relayHead() && s.sync?.status === 'done', 30_000)
-  relay.silent.add('tablet')
-  await move(phone)
-  const target = relayHead()
-  const before = new Set(store.map((e) => e.id))
-  // The tablet sends something (its move's proof takes a moment), and the
-  // stalled socket owes it an answer; it drops out of "current" then.
-  await tablet.page.evaluate(() => { const s = window.__store.getState(); s.moveCursor({ axis: 'z', dir: 1 }); void s.commit() })
-  const msgs = new Set()
-  await until(tablet, (s) => { msgs.add(s.msg); return s.msg === "Can't confirm your latest move. Try again." }, 60_000)
-  const st = await tablet.state()
-  const signedStale = st.head !== target && st.n > 0 && !before.has(st.head) && (await tablet.page.evaluate((h) => { const s = window.__store.getState(); const e = s.events.find((x) => x.id === h); return e?.tags.find((t) => t[0] === 'e' && t[3] === 'previous')?.[1] ?? null }, st.head)) !== target
-  relay.silent.delete('tablet')
-  // Back: the relay's moves are taken in and nothing was signed on the old head.
-  const back = await until(tablet, (s) => s.head === target || store.some((e) => e.id === s.head && !before.has(e.id)), 90_000)
-  const st2 = await tablet.state()
-  ok('stall: a silently stalled socket is not trusted; nothing is signed on the stale head; once the relay talks again the tablet catches up by itself', !signedStale && back !== null, `messages ${JSON.stringify([...msgs])}, back in step ${back} ms, tablet ${JSON.stringify({ n: st2.n, head: st2.head?.slice(0, 8), status: st2.status, msg: st2.msg, conflict: st2.conflict })} relay ${target?.slice(0, 8)}`)
   await tablet.close()
 }
 

@@ -422,7 +422,7 @@ describe('a remote signer\'s answer and the landing (owner, 2026-11-21: "smooth 
     const at = text.indexOf('event = await get().signEvent(lane.template!)')
     expect(at).toBeGreaterThan(0)
     const after = text.slice(at, at + 1_200)
-    expect(after).toMatch(/if \(currentSigner\.kind !== 'local'\) await yieldTask\(\)\n\s*if \(!live\(\)\) return/)
+    expect(after).toMatch(/if \(currentSigner\.kind !== 'local'\) await yieldTask\('land'\)\n\s*if \(!live\(\)\) return/)
     expect(after.indexOf('yieldTask()')).toBeLessThan(after.indexOf('localHopFailures('))
   })
 })

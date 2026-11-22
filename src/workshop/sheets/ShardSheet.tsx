@@ -11,6 +11,8 @@ import { formatCellSize } from 'sno-core/scale'
 import { ConfirmModal } from '../../hud/ConfirmModal'
 import { carriesSealedParts } from '../../lib/carried'
 import { STATE_HELP, STATE_LABEL, STATE_TAG, publishState, shardFingerprint } from '../../lib/published'
+import { shardForm } from '../../lib/partForm'
+import { PartFormBadge } from '../PartFormBadge'
 import { bounceChip } from '../../lib/walkBounce'
 import { CONSTRAINS, CONSTRAIN_TIPS, authoredConstrainOf, withAuthoredConstrain } from '../../lib/walkConstrain'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -63,6 +65,8 @@ export function ShardBody(): JSX.Element | null {
         <div className="workshop__row">
           <span className="workshop__label">SHARD FEED</span>
           <span className={`tag ${STATE_TAG[pubState]}`} title={STATE_HELP[pubState]}>{STATE_LABEL[pubState]}</span>
+          {/* What it is when another shard places it: the bench's corner mark, the same component (lib/partForm.ts). */}
+          <PartFormBadge form={shardForm(shard, ledger, me)} size="inline" />
           <span className="workshop__gap" />
         </div>
         <div className="workshop__list-row">

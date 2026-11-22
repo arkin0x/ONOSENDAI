@@ -72,7 +72,7 @@ export function BenchShard({ onFace, onPart }: {
         {...benchShardLook(look)}
         still={!look && !previewing}
         onFaceClick={tool === 'paint' || (tool === 'select' && selectKind === 'faces') ? onFace : undefined}
-        onPartClick={tool === 'select' || tool === 'face' || tool === 'paint' ? onPart : undefined}
+        onPartClick={tool === 'select' || tool === 'face' || tool === 'paint' || tool === 'view' ? onPart : undefined}
         selectedParts={look ? undefined : partSel}
       />
     </DotScale.Provider>

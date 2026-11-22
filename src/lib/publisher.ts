@@ -60,6 +60,14 @@ let backoff = RETRY_MS
 let backlogChecked: string | null = null
 /** The last send failed, so the next one starts a fresh look at the relays. */
 let lastFailed = false
+/**
+ * The gate was opened by a move meant to go out rather than by an action just
+ * taken (headReleases): the next send waits for a look at the relays, however
+ * few are waiting and whoever signed them. A blip-retried move may have been
+ * signed on this page, before a switch away and back, and another device may
+ * have moved since (review, 2026-11-22).
+ */
+let lookOwed = false
 
 /**
  * Look at the relays once before sending a backlog: more than one event
@@ -117,7 +125,7 @@ async function pump(): Promise<void> {
   // identity switched back to) was signed before anything here asked the
   // relays, and another device may have moved since.
   const who = s.identity.pubkey
-  if (backlogChecked !== who && (unsent.length > 1 || lastFailed || unsent.some((e) => !signedOnThisPage(e.id)))) {
+  if (lookOwed || (backlogChecked !== who && (unsent.length > 1 || lastFailed || unsent.some((e) => !signedOnThisPage(e.id))))) {
     inFlight = true
     const answered = await preflight()
     inFlight = false
@@ -127,6 +135,7 @@ async function pump(): Promise<void> {
     if (!maySend(s, released) || movementBlocked()) return
     if (!answered) { retryLater(); return }
     backlogChecked = who
+    lookOwed = false
   }
   const next = s.events.find((e) => s.published[e.id] !== 'ok')
   if (!next) { backlogChecked = null; return }
@@ -485,7 +494,9 @@ async function reconcileOnce(pubkey: string): Promise<void> {
  */
 function headReleases(s: ReturnType<typeof useCyberspace.getState>): boolean {
   if (takeFreshHead(s.prevEventId)) return true
-  return s.published[s.prevEventId] !== 'ok' && meantToGoOut(s.identity.pubkey, s.prevEventId)
+  if (s.published[s.prevEventId] === 'ok' || !meantToGoOut(s.identity.pubkey, s.prevEventId)) return false
+  if (s.live) lookOwed = true
+  return true
 }
 
 export function startPublisher(): void {

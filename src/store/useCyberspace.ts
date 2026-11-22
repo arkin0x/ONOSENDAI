@@ -2419,7 +2419,13 @@ export function noteSignedOnThisPage(id: string): void {
   freshSigned.add(id)
 }
 
-/** A chain action this page just signed: recorded as signed here, as an action not yet counted, and, while LIVE, as meant to go out. */
+/**
+ * A chain action this page just signed: recorded as signed here, as an action
+ * not yet counted, and, while LIVE, as meant to go out. LIVE as it is when the
+ * signature comes back, not when the move was pressed: a flip during a slow
+ * remote signer's wait labels it by the newer setting, and a flip to LOCAL
+ * clears the label anyway (setLive).
+ */
 function noteSigned(ev: NostrEvent): void {
   noteSignedOnThisPage(ev.id)
   if (useCyberspace.getState().live) noteOutbound(ev.pubkey, ev.id)
@@ -2439,6 +2445,12 @@ const OUTBOUND_KEY = 'onosendai:outbound'
 const OUTBOUND_MAX = 2000
 const outbound = new Map<string, Set<string>>()
 
+/**
+ * This tab's view of `pubkey`'s outbound moves: what the record held when
+ * this tab first read it (on load, or on the switch to the identity), plus
+ * what this tab signed since. Another tab's later LIVE moves are its own to
+ * finish, not this tab's to release (the gate's "another tab's save" row).
+ */
 function outboundOf(pubkey: string): Set<string> {
   let set = outbound.get(pubkey)
   if (set) return set
@@ -2454,11 +2466,28 @@ function outboundOf(pubkey: string): Set<string> {
 
 function noteOutbound(pubkey: string, id: string): void {
   const set = outboundOf(pubkey)
-  const s = useCyberspace.getState()
-  if (s.identity.pubkey === pubkey) for (const known of set) if (s.published[known] === 'ok') set.delete(known)
   set.add(id)
-  while (set.size > OUTBOUND_MAX) set.delete(set.values().next().value as string)
-  try { localStorage.setItem(`${OUTBOUND_KEY}:${pubkey}`, JSON.stringify([...set])) } catch { /* private mode: this page still knows */ }
+  // The record is shared with other tabs: what they added stays in it.
+  let stored = new Set<string>()
+  try {
+    const ids: unknown = JSON.parse(localStorage.getItem(`${OUTBOUND_KEY}:${pubkey}`) ?? '[]')
+    if (Array.isArray(ids)) stored = new Set(ids.filter((x): x is string => typeof x === 'string'))
+  } catch { /* unreadable: started again */ }
+  stored.add(id)
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey === pubkey) for (const known of stored) if (s.published[known] === 'ok') { stored.delete(known); set.delete(known) }
+  while (stored.size > OUTBOUND_MAX) stored.delete(stored.values().next().value as string)
+  try { localStorage.setItem(`${OUTBOUND_KEY}:${pubkey}`, JSON.stringify([...stored])) } catch { /* private mode: this page still knows */ }
+}
+
+/**
+ * LIVE switched off for `pubkey`: nothing it signed is meant to go out any
+ * more. A move whose send failed, then kept on purpose by the flip to LOCAL,
+ * waits for an action or PUBLISH like any LOCAL move, after a reload too.
+ */
+function forgetOutbound(pubkey: string): void {
+  outbound.set(pubkey, new Set())
+  try { localStorage.removeItem(`${OUTBOUND_KEY}:${pubkey}`) } catch { /* private mode */ }
 }
 
 /** Whether `id` is a chain action `pubkey` signed while LIVE, on this page or before a reload (outbound). */
@@ -4175,6 +4204,8 @@ noteInHand(pubkeyHex, saved)
 // started now, ahead of any save, so none of them writes the old stretch
 // over the whole chain IndexedDB keeps.
 hydrateChain(pubkeyHex)
+// This tab's view of what was meant to go out, read now (outboundOf).
+outboundOf(pubkeyHex)
 mark('onosendai:chain-loaded')
 
 let requestId = 0
@@ -5642,6 +5673,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // Before the save below: until IndexedDB has been read, that save must not
     // put this copy over the one kept there (hydrateChain).
     hydrateChain(signer.pubkey)
+    outbound.delete(signer.pubkey)
+    outboundOf(signer.pubkey)
     if (local) saveChain(base.events, base.published, base.chain, base.held)
     startSignatureCheck(signer.pubkey, local?.unchecked ?? [])
     // A pending cloud job of THIS identity, if there is one, picks up where it stopped,
@@ -6802,6 +6835,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   setLive: (live) => {
     if (live === get().live) return
     saveLive(get().identity.pubkey, live)
+    if (!live) forgetOutbound(get().identity.pubkey)
     // Going Local stops the publisher, and with it every retry, so an event
     // left reading 'sending' or 'failed' would be describing something that
     // is no longer happening: the panel would say RETRYING at a publisher

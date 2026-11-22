@@ -44,12 +44,12 @@ vi.mock('../chainStore', async (importOriginal) => ({
 
 // The look at the relays before a backlog finds nothing here: no relay.
 // `canonical.answers` says whether the canonical relay answers it.
-const canonical = vi.hoisted(() => ({ answers: true }))
+const canonical = vi.hoisted(() => ({ answers: true, asked: 0 }))
 vi.mock('../chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../chains')>()),
   fetchChainEvents: () => Promise.resolve([]),
   askChainEvents: async () => [{ url: (await import('../../store/useRelays')).DEFAULT_RELAY, outcome: 'answered' as const, events: [] }],
-  confirmChainEvents: () => Promise.resolve(canonical.answers ? [] : null),
+  confirmChainEvents: () => { canonical.asked++; return Promise.resolve(canonical.answers ? [] : null) },
 }))
 
 // What this page signed (useCyberspace signedOnThisPage, takeFreshHead): every
@@ -258,12 +258,36 @@ describe('the publisher and the release gate', () => {
       await idle()
       storage.add(ev('s1').id)
       outbound.add(ev('s1').id)
+      canonical.asked = 0
       setChain(['s0', 's1'], { [ev('s0').id]: 'ok' })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(sent).toEqual([])
+      // It was released, and held back only by the look that got no answer.
+      expect(canonical.asked).toBeGreaterThan(0)
+    } finally {
+      canonical.answers = true
+      useCyberspace.setState({ live: false })
+      await idle()
+    }
+  })
+
+  it('a LIVE move this page signed, whose send failed, read back after a switch away and back, still gets the look first: no answer, nothing sent (review, 2026-11-22)', async () => {
+    const me = useCyberspace.getState().identity
+    canonical.answers = false
+    try {
+      setChain(['v0'], { [ev('v0').id]: 'ok' })
+      useCyberspace.setState({ live: true })
+      await idle()
+      // Signed on this page while LIVE (not from storage), meant to go out, never landed.
+      outbound.add(ev('v1').id)
+      useCyberspace.setState({ identity: { pubkey: 'd'.repeat(64), npub: 'npub-x' } })
+      useCyberspace.setState({ identity: me, events: [], prevEventId: '', published: {} })
+      setChain(['v0', 'v1'], { [ev('v0').id]: 'ok' })
       await new Promise((resolve) => setTimeout(resolve, 50))
       expect(sent).toEqual([])
     } finally {
       canonical.answers = true
-      useCyberspace.setState({ live: false })
+      useCyberspace.setState({ live: false, identity: me })
       await idle()
     }
   })

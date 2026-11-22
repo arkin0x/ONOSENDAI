@@ -211,6 +211,17 @@ describe('moves signed while LIVE are remembered as meant to go out, across a re
     expect(meantToGoOut(me, local.id)).toBe(false)
     expect(JSON.parse(localStorage.getItem(`onosendai:outbound:${me}`) ?? '[]')).toContain(live.id)
   })
+
+  it('a flip to LOCAL clears it: a failed LIVE move then kept on purpose waits like any LOCAL move, after a reload too', async () => {
+    const me = S().identity.pubkey
+    useCyberspace.setState({ live: true })
+    const live = await S().signEvent({ kind: 3333, created_at: Math.floor(Date.now() / 1000) + 3, content: '', tags: [['A', 'wave']] })
+    expect(meantToGoOut(me, live.id)).toBe(true)
+    S().setLive(false)
+    expect(meantToGoOut(me, live.id)).toBe(false)
+    expect(localStorage.getItem(`onosendai:outbound:${me}`)).toBeNull()
+    S().setLive(true)
+  })
 })
 
 describe('the CHAIN chip', () => {

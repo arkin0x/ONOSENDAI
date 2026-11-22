@@ -12,6 +12,7 @@
  * A record from before this, whole under SNAPSHOT_KEY, is still read.
  */
 
+import { countingTasks, idbLabel, timeRestOfTask } from '../taskStats'
 import { META_STORE } from '../idb'
 import type { IndexSnapshot } from './compactIndex'
 
@@ -78,7 +79,13 @@ export function writeSnapshotRecord(database: IDBDatabase, record: SnapshotRecor
 function got(os: IDBObjectStore, key: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const q = os.get(key)
-    q.onsuccess = () => resolve((q.result as { value?: unknown } | undefined)?.value)
+    q.onsuccess = () => {
+      // The biggest read in the app (the stop columns), told apart in a
+      // diagnostics capture (lib/taskStats.ts). Usually read in a worker,
+      // where nothing is counted: this counts the main-thread fallback.
+      if (countingTasks()) timeRestOfTask(`${idbLabel(q)}.snapshot`)
+      resolve((q.result as { value?: unknown } | undefined)?.value)
+    }
     q.onerror = () => reject(q.error)
   })
 }

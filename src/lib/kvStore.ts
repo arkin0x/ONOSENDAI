@@ -329,7 +329,16 @@ export async function kvSuperseded(): Promise<Array<{ key: string; value: string
 export async function kvCopiesOf(key: string, waitMs = REOPEN_WAIT_MS): Promise<string[]> {
   if (typeof indexedDB === 'undefined') return []
   const own = db === null
-  const d = db ?? await withTimeout(openKv(), waitMs)
+  let d: IDBDatabase
+  if (db) d = db
+  else {
+    const opening = openKv()
+    try { d = await withTimeout(opening, waitMs) } catch (e) {
+      // A connection that opens after the wait is closed, never left to block an upgrade.
+      opening.then((late) => late.close(), () => undefined)
+      throw e
+    }
+  }
   try {
     const read = async (): Promise<string[]> => {
       const tx = d.transaction([ENTRIES, SUPERSEDED], 'readonly')

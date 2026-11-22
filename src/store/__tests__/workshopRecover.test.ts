@@ -136,6 +136,38 @@ describe('a load that does not finish', () => {
     expect(again.ws.useWorkshop.getState().storageError).toBeNull()
   }, 30_000)
 
+  it('a read that lands after the give-up installs nothing and saves nothing: it says to reload', async () => {
+    const list = [shard('piece-a', 1), shard('piece-b', 2)]
+    await library(list)
+    vi.doMock('../../lib/workshopDb', async (orig) => {
+      const real = await orig<typeof import('../../lib/workshopDb')>()
+      return { ...real, readAll: async (d: IDBDatabase) => { await new Promise((r) => setTimeout(r, 400)); return real.readAll(d) } }
+    })
+    const t = await openTab()
+    // A change before the give-up, and one after it.
+    t.ws.useWorkshop.getState().addShard(newShard('made while loading'), 'made while loading')
+    expect(await t.ws.hydrateWorkshop()).toBe('unavailable')
+    t.ws.useWorkshop.getState().addShard(newShard('made after'), 'made after')
+    await vi.waitFor(() => expect(t.ws.useWorkshop.getState().storageError).toMatch(/can be read now.*Reload/), { timeout: 3000 })
+    expect(t.st.storageMode()).toBe('unavailable')
+    expect(await t.ws.useWorkshop.getState().saveNow()).toBe(false)
+    t.st.closeForTests()
+    vi.doUnmock('../../lib/workshopDb')
+    expect((await records()).map((r) => r.id).sort()).toEqual(list.map((s) => s.id).sort())
+  })
+
+  it('RECOVER SHARDS waits for a load still reading', async () => {
+    await library([shard('piece-a', 1)])
+    vi.doMock('../../lib/workshopDb', async (orig) => {
+      const real = await orig<typeof import('../../lib/workshopDb')>()
+      return { ...real, readAll: async (d: IDBDatabase) => { await new Promise((r) => setTimeout(r, 100)); return real.readAll(d) } }
+    })
+    const t = await openTab()
+    const loading = t.ws.hydrateWorkshop()
+    expect(await t.st.recoverShards()).toEqual({ ok: false, error: expect.stringMatching(/still loading/) })
+    expect(await loading).toBe('indexeddb')
+  })
+
   it('a load that is only slow clears its line once it lands', async () => {
     const list = [shard('piece-a', 1)]
     await library(list)
@@ -161,7 +193,7 @@ describe('a list that cannot be read', () => {
     }))
     const t = await openTab()
     expect(await t.ws.hydrateWorkshop()).toBe('unavailable')
-    expect(t.ws.useWorkshop.getState().storageError).toMatch(/did not load/)
+    expect(t.ws.useWorkshop.getState().storageError).toMatch(/could not be read/)
     t.ws.useWorkshop.getState().addShard(newShard('made meanwhile'), 'made meanwhile')
     expect(await t.ws.useWorkshop.getState().saveNow()).toBe(false)
     expect(mem.get(LOCAL_KEY)).toBe(torn)
@@ -178,9 +210,12 @@ describe('RECOVER SHARDS', () => {
     t.ws.useWorkshop.getState().remove(gone.id)
     expect(await t.ws.useWorkshop.getState().saveNow()).toBe(true)
     // Copies kept elsewhere: an older build's localStorage list, and the kv backup with a copy set aside beside it.
-    const extraLocal = shard('piece-only-in-local', 4, 2000)
+    // Work done since the move, kept only in an older copy; and a shard deleted long before it, which left no tombstone.
+    const later = Date.now() + 60_000
+    const extraLocal = shard('piece-only-in-local', 4, later)
+    const longGone = shard('piece-deleted-before-the-move', 6, 1500)
     mem.set(LOCAL_KEY, JSON.stringify([a1, gone, extraLocal]))
-    const extraKv = shard('piece-only-in-kv', 5, 2000)
+    const extraKv = shard('piece-only-in-kv', 5, later)
     const { openDatabase } = await import('../../lib/idb')
     const kv = await openDatabase('onosendai:kv', 1, [['entries', 'key']], (tx) => {
       if (!tx.db.objectStoreNames.contains('superseded')) tx.db.createObjectStore('superseded', { autoIncrement: true })
@@ -188,7 +223,7 @@ describe('RECOVER SHARDS', () => {
     await new Promise<void>((resolve, reject) => {
       const tx = kv.transaction(['entries', 'superseded'], 'readwrite')
       tx.objectStore('entries').put({ key: LOCAL_KEY, value: JSON.stringify([a1, b]), seen: 'x', at: 1 })
-      tx.objectStore('superseded').add({ key: LOCAL_KEY, value: JSON.stringify([extraKv]), at: 2, why: 'test' })
+      tx.objectStore('superseded').add({ key: LOCAL_KEY, value: JSON.stringify([extraKv, longGone]), at: 2, why: 'test' })
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
@@ -210,7 +245,7 @@ describe('RECOVER SHARDS', () => {
   it('in a tab whose load did not finish, merges into the database and asks for a reload', async () => {
     const list = [shard('piece-a', 1), shard('piece-b', 2)]
     await library(list)
-    const extra = shard('piece-extra', 3)
+    const extra = shard('piece-extra', 3, Date.now() + 60_000)
     vi.doMock('../../lib/workshopDb', async (orig) => ({
       ...(await orig<typeof import('../../lib/workshopDb')>()),
       readAll: (() => {
@@ -275,7 +310,8 @@ describe('a tab killed in the middle of a write', () => {
       const realPut = IDBObjectStore.prototype.put
       let puts = 0
       const spy = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['put']>) {
-        if (this.name === 'shards' && puts++ === killAt) throw new DOMException('killed', 'UnknownError')
+        // From that record on, every write fails, the retry's too: the commit never lands.
+        if (this.name === 'shards' && puts++ >= killAt) throw new DOMException('killed', 'UnknownError')
         return realPut.apply(this, args)
       })
       for (const s of fresh) void t.ws.useWorkshop.getState().replaceShard(s.id, s)
@@ -289,8 +325,9 @@ describe('a tab killed in the middle of a write', () => {
         const got = shards.find((s) => s.id === old[i].id)!
         expect([old[i].vertices.length, fresh[i].vertices.length]).toContain(got.vertices.length)
       }
-      // Whatever saveNow said is what the next load finds: saved means every new version is there.
-      if (saved) for (const f of fresh) expect(shards.find((s) => s.id === f.id)!.vertices.length).toBe(f.vertices.length)
+      // One transaction: every new version or none, and saveNow said which.
+      expect(saved).toBe(killAt === N)
+      for (let i = 0; i < N; i++) expect(shards.find((s) => s.id === old[i].id)!.vertices.length).toBe((saved ? fresh : old)[i].vertices.length)
     }
   })
 })

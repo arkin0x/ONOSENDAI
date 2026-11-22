@@ -53,7 +53,7 @@ vi.mock('../../lib/workers', async (orig) => ({
 }))
 vi.mock('../../lib/hyperspace/enter', async (orig) => ({ ...(await orig() as object), computeEnterProof: () => '0'.repeat(64) }))
 
-import { CHAIN_SYNC_MESSAGE, CHAIN_SYNC_WAIT_MS, HEAD_UNCONFIRMED_MESSAGE, loadLive, useCyberspace } from '../useCyberspace'
+import { CHAIN_SYNC_MESSAGE, CHAIN_SYNC_WAIT_MS, HEAD_UNCONFIRMED_MESSAGE, loadLive, meantToGoOut, signedOnThisPage, takeFreshHead, useCyberspace } from '../useCyberspace'
 import { chainChipState } from '../../hud/ChainExplorer'
 import { actionEvent } from '../../lib/__tests__/chainFixtures'
 import { placeSpawn } from '../fixtures/placeSpawn'
@@ -187,6 +187,43 @@ describe('LIVE or LOCAL is per identity', () => {
   })
 })
 
+describe('a move signed here is recorded, through the real signer', () => {
+  it('signEvent records a chain action as signed on this page, and as an action taken once', async () => {
+    const t = { kind: 3333, created_at: Math.floor(Date.now() / 1000), content: '', tags: [['A', 'wave']] }
+    const signed = await S().signEvent(t)
+    expect(signedOnThisPage(signed.id)).toBe(true)
+    expect(takeFreshHead(signed.id)).toBe(true)
+    expect(takeFreshHead(signed.id)).toBe(false)
+    expect(signedOnThisPage(signed.id)).toBe(true)
+  })
+})
+
+describe('moves signed while LIVE are remembered as meant to go out, across a reload', () => {
+  it('a chain action signed while LIVE is recorded under the identity, kept in storage; one signed while LOCAL is not', async () => {
+    const me = S().identity.pubkey
+    const t = (n: number) => ({ kind: 3333, created_at: Math.floor(Date.now() / 1000) + n, content: '', tags: [['A', 'wave']] })
+    useCyberspace.setState({ live: true })
+    const live = await S().signEvent(t(1))
+    useCyberspace.setState({ live: false })
+    const local = await S().signEvent(t(2))
+    useCyberspace.setState({ live: true })
+    expect(meantToGoOut(me, live.id)).toBe(true)
+    expect(meantToGoOut(me, local.id)).toBe(false)
+    expect(JSON.parse(localStorage.getItem(`onosendai:outbound:${me}`) ?? '[]')).toContain(live.id)
+  })
+
+  it('a flip to LOCAL clears it: a failed LIVE move then kept on purpose waits like any LOCAL move, after a reload too', async () => {
+    const me = S().identity.pubkey
+    useCyberspace.setState({ live: true })
+    const live = await S().signEvent({ kind: 3333, created_at: Math.floor(Date.now() / 1000) + 3, content: '', tags: [['A', 'wave']] })
+    expect(meantToGoOut(me, live.id)).toBe(true)
+    S().setLive(false)
+    expect(meantToGoOut(me, live.id)).toBe(false)
+    expect(localStorage.getItem(`onosendai:outbound:${me}`)).toBeNull()
+    S().setLive(true)
+  })
+})
+
 describe('the CHAIN chip', () => {
   const base = () => ({ identity: S().identity, events: S().events, published: Object.fromEntries(S().events.map((e) => [e.id, 'ok' as const])), live: true, held: false, chainConflict: null, chainSync: null })
   it('says CHECKING while the first look is out, NOT CHECKED when the relays were silent, nothing once done', () => {
@@ -202,7 +239,10 @@ describe('the CHAIN chip', () => {
     const kept = { ...b.published }
     for (const e of b.events.slice(-1)) delete kept[e.id]
     expect(chainChipState({ ...b, live: false, published: kept })).toBe('local:1')
-    expect(chainChipState({ ...b, live: true, published: kept })).toBe('')
+    // LIVE with the release gate open: unsent moves are on their way, and the chip says nothing of them...
+    expect(chainChipState({ ...b, live: true, published: kept }, true)).toBe('')
+    // ...with it shut (LOCAL moves before the flip, a chain read back), they wait for an action or PUBLISH, and the chip says so.
+    expect(chainChipState({ ...b, live: true, published: kept }, false)).toBe('kept:1')
     expect(chainChipState({ ...b, live: false })).toBe('')
   })
   it('leaves a held chain and a pending choice to the strip under the switch', () => {

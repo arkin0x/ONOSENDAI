@@ -143,7 +143,7 @@ import { decideSelfCheck } from '../chainHold'
 import { chainHolders, noteChainHolders } from '../chainHolders'
 import { askChainEvents, confirmChainEvents, fetchChainEvents } from '../chains'
 import { hopTemplate, spawnTemplate, type NostrEvent } from '../events'
-import { CYBERSPACE_RELAY, dropRelays, publishMany, queryEachAt, queryEachSettled, retryFailedAuth } from '../relay'
+import { CYBERSPACE_RELAY, dropRelays, forgetRelayGates, noteRelayGates, publishMany, queryEachAt, queryEachSettled, retryFailedAuth } from '../relay'
 import { AUTH_STALLED } from '../relayOutcome'
 import { SIGN_PATIENCE_MS } from '../signWithin'
 import { signerHeld } from '../authOpen'
@@ -175,6 +175,13 @@ function aChain(): { pubkey: string; spawn: NostrEvent; hop1: NostrEvent; hop2: 
 }
 
 const release = (): void => { for (const go of net.signer.waiting.splice(0)) go() }
+/**
+ * A relay that gates reads by answering an unknown reader with an empty EOSE
+ * (emptyUntilAuthed), and known here to gate (relay.ts noteRelayGates): a
+ * relay that challenges and says nothing of needing it is not signed in to
+ * (authChurn.test.ts), and its empty answer is believed.
+ */
+const gate = (url: string): void => { net.rules.emptyUntilAuthed.add(url); noteRelayGates(url) }
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -184,7 +191,8 @@ beforeEach(() => {
   net.events.length = 0
   net.rules.hold.clear()
   net.rules.emptyUntilAuthed.clear()
-  net.rules.emptyUntilAuthed.add(CANON)
+  forgetRelayGates()
+  gate(CANON)
   net.rules.challengesLate.clear()
   net.rules.challengeAfterMs.clear()
   net.rules.eoseMs.clear()
@@ -289,7 +297,7 @@ describe('the self-check while the signer has not answered: a wrong answer forks
   it('a chain fetch is as on v2: another player\'s chain on the canonical relay comes back whole, whatever your signer did elsewhere (P3, P3b)', async () => {
     const gated = 'wss://mine3.example/'
     const open = 'wss://open3.challenger.example/'
-    net.rules.emptyUntilAuthed.add(gated)
+    gate(gated)
     net.rules.openChallenger.add(open)
     useRelays.getState().add(gated)
     useRelays.getState().add(open)
@@ -319,7 +327,7 @@ describe('head confirmation and a chain holder behind the signer: as on v2, a si
   async function holderBehindSigner(url: string): Promise<{ confirming: () => Promise<NostrEvent[] | null>; c: ReturnType<typeof aChain> }> {
     await within(1000, publishMany([CANON], anEvent()))
     const c = aChain()
-    net.rules.emptyUntilAuthed.add(url)
+    gate(url)
     useRelays.getState().add(url)
     noteChainHolders(c.pubkey, [url])
     net.rules.hold.set(CANON, [c.spawn, c.hop1])
@@ -368,7 +376,7 @@ describe('a publish to a dead relay and a gated one', () => {
     const dead = 'wss://dead.example/'
     const gated = 'wss://gated.example/'
     net.rules.refuse.add(dead)
-    net.rules.emptyUntilAuthed.add(gated)
+    gate(gated)
     net.signer.mode = 'stall'
     const publishing = publishMany([dead, gated], anEvent())
     const result = await within(2 * AUTH_WAIT + 200, publishing)
@@ -415,10 +423,11 @@ describe('a relay that challenges late', () => {
     expect(net.signer.prompts).toBe(0)
   })
 
-  it('a challenge that lands while a read is out is answered, and the read asked again, instead of believing its empty EOSE', async () => {
+  it('at a relay known to gate, a challenge that lands while a read is out is answered, and the read asked again, instead of believing its empty EOSE', async () => {
     const late = 'wss://late.eose.example/'
     const event = anEvent()
     net.rules.challengeAfterMs.set(late, 420)
+    noteRelayGates(late)
     net.rules.eoseMs.set(late, 200)
     net.rules.hold.set(late, [event as never])
     const answers = await within(1500, queryEachAt([late], { kinds: [3333] }))
@@ -429,9 +438,10 @@ describe('a relay that challenges late', () => {
 
   it('remembers no challenge per socket: a new socket to the same relay is looked at again', async () => {
     const late = 'wss://late.socket.example/'
+    noteRelayGates(late)
     await within(1000, publishMany([late], anEvent()))
     dropRelays([late])
-    net.rules.emptyUntilAuthed.add(late)
+    gate(late)
     await within(1000, queryEachAt([late], FILTER))
     expect(net.signer.prompts).toBe(1)
   })
@@ -440,7 +450,7 @@ describe('a relay that challenges late', () => {
 describe('the relay is not to blame for the signer', () => {
   it('two reads with a stalled signer do not mark it hung: it is still asked, and takes the event when the signer lands', async () => {
     const mine = 'wss://mine.blameless.example/'
-    net.rules.emptyUntilAuthed.add(mine)
+    gate(mine)
     net.signer.mode = 'stall'
     for (let i = 0; i < 2; i++) {
       const read = await within(AUTH_WAIT + 100, queryEachAt([mine], FILTER))
@@ -516,7 +526,7 @@ describe('a canonical relay that does not gate, and another relay that does', ()
   it('answers unknown over the real pool while a relay known to hold this chain waits on the signer, and none for one that never held it', async () => {
     const mine = 'wss://mine.mixed.example/'
     const c = aChain()
-    net.rules.emptyUntilAuthed.add(mine)
+    gate(mine)
     net.rules.emptyUntilAuthed.delete(CANON)
     useRelays.getState().add(mine)
     net.rules.hold.set(mine, [c.spawn, c.hop1])
@@ -531,7 +541,7 @@ describe('a canonical relay that does not gate, and another relay that does', ()
 describe('review of #570 (2026-11-04): each as on v2, or safer for the canonical relay', () => {
   it('P1: a new identity, with a gated relay of its own that never held its chain and whose AUTH the signer turned down, says none', async () => {
     const mine = 'wss://mine.example/'
-    net.rules.emptyUntilAuthed.add(mine)
+    gate(mine)
     useRelays.getState().add(mine)
     net.signer.rejectFor.add('wss://mine.example')
     const c = aChain()
@@ -542,7 +552,7 @@ describe('review of #570 (2026-11-04): each as on v2, or safer for the canonical
   it('P1, a holder: unknown, and CHECK AGAIN asks the signer again for that relay, and then reads it', async () => {
     const mine = 'wss://mine.holder.example/'
     const c = aChain()
-    net.rules.emptyUntilAuthed.add(mine)
+    gate(mine)
     useRelays.getState().add(mine)
     noteChainHolders(c.pubkey, [mine])
     net.rules.hold.set(mine, [c.spawn, c.hop1])
@@ -571,7 +581,7 @@ describe('review of #570 (2026-11-04): each as on v2, or safer for the canonical
 
   it('a relay that turned its AUTH down itself (not the signer) answers as on v2: its empty EOSE is its answer', async () => {
     const own = 'wss://relay.refuses.example/'
-    net.rules.emptyUntilAuthed.add(own)
+    gate(own)
     net.rules.refuseFirstAuth.add(own)
     const [answer] = (await within(3000, queryEachAt([own], FILTER))).value ?? []
     expect(answer).toMatchObject({ outcome: 'answered' })
@@ -590,7 +600,7 @@ describe('review of #570 (2026-11-04): each as on v2, or safer for the canonical
     await within(1000, publishMany([CANON], anEvent()))
     const holder = 'wss://holder.p4.example/'
     const c = aChain()
-    net.rules.emptyUntilAuthed.add(holder)
+    gate(holder)
     useRelays.getState().add(holder)
     noteChainHolders(c.pubkey, [holder])
     net.rules.hold.set(CANON, [c.spawn, c.hop1])
@@ -611,7 +621,7 @@ describe('review of #570 (2026-11-04): each as on v2, or safer for the canonical
       await within(4000, publishMany([CANON], anEvent()))
       const holder = `wss://bunker${ms}.holder.example/`
       const c = aChain()
-      net.rules.emptyUntilAuthed.add(holder)
+      gate(holder)
       useRelays.getState().add(holder)
       noteChainHolders(c.pubkey, [holder])
       net.rules.hold.set(CANON, [c.spawn, c.hop1])
@@ -657,6 +667,8 @@ describe('review of #570 (2026-11-04): each as on v2, or safer for the canonical
   it('a publish that timed out on its socket says so, even on a relay the signer turned down before', async () => {
     const x = 'wss://open.swallow.example/'
     net.rules.openChallenger.add(x)
+    // Known to gate, so its challenge is signed (and the signer turns it down).
+    noteRelayGates(x)
     net.rules.swallowFirstEvent.add(x)
     net.signer.rejectFor.add('wss://open.swallow.example')
     await within(1000, queryEachAt([x], FILTER))
@@ -668,7 +680,7 @@ describe('review of #570 (2026-11-04): each as on v2, or safer for the canonical
   it('a relay the signer holds up does not keep the others from being asked again over fresh sockets, as on v2', async () => {
     const held = 'wss://held.first.example/'
     const other = 'wss://other.swallow.example/'
-    net.rules.emptyUntilAuthed.add(held)
+    gate(held)
     net.rules.swallowFirstEvent.add(other)
     net.signer.rejectFor.add('wss://held.first.example')
     const result = await within(40_000, publishMany([held, other], anEvent()))

@@ -7,7 +7,7 @@
  * region's page on the relay, and ADD RELAY, which adds its address to your
  * relays exactly as the Relays panel's ADD does. Once it is in your relays the
  * line says JOINED. A speakeasy asks for NIP-42 AUTH, which the relay layer
- * answers for every relay in the set (lib/relay.ts automaticallyAuth).
+ * answers up front for a speakeasy's address (lib/relay.ts relayGates).
  *
  * The relay admits you by where it places you, not by your head: the last
  * point of your chain its verifier accepts (lib/relayPlacement.ts). Where the

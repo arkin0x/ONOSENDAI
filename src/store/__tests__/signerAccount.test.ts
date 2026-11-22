@@ -145,7 +145,8 @@ describe('a remote signer on another account is refused', () => {
 
   it('refuses a relay\'s NIP-42 AUTH signed by another account, so the relay is never told this visit is someone else', async () => {
     const { S, getPool } = await boot()
-    const url = 'wss://relay.example'
+    // The old relay: it gates reads, so the pool signs its challenge as it comes (relay.ts relayGates).
+    const url = 'wss://cyberspace.nostr1.com'
     const sign = authSignerOf(getPool(), url)
     const ok = await sign(authTemplate(url))
     expect(ok.pubkey).toBe(S().identity.pubkey)

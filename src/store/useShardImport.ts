@@ -438,6 +438,8 @@ export const useShardImport = create<ShardImportState>((set, get) => {
     const pause = (ms: number): Promise<void> => Promise.race([sleep(ms), stopped])
     let inHand: string | null = null
     let sent = 0
+    /** When STOP's grace runs out: the saves and the folders' filing share it. */
+    let graceEnd: number | null = null
     /** When a save last settled, for what counts as storage gone silent. */
     let lastProgress = 0
     /** Rows added whose save has not committed yet, each with what settles it. */
@@ -474,7 +476,9 @@ export const useShardImport = create<ShardImportState>((set, get) => {
     const waitSaves = async (all: boolean): Promise<'ok' | 'silent' | 'stopped'> => {
       while (unsaved.size > 0 && (all || unsaved.size >= UNSAVED_MAX)) {
         if (halted()) {
-          await Promise.race([Promise.all([...unsaved.values()].map((u) => u.settled)), sleep(timing.stopGraceMs)])
+          // One grace for everything STOP waits on (graceEnd, set at the first wait after STOP).
+          graceEnd ??= Date.now() + timing.stopGraceMs
+          await Promise.race([Promise.all([...unsaved.values()].map((u) => u.settled)), sleep(Math.max(0, graceEnd - Date.now()))])
           return unsaved.size ? 'stopped' : 'ok'
         }
         // Silent: nothing settled for saveStallMs (a slow disk still settling one batch after another is not silent).
@@ -498,6 +502,8 @@ export const useShardImport = create<ShardImportState>((set, get) => {
         const waited = await waitSaves(false)
         if (g !== generation) return
         if (waited === 'silent') { set({ stall: STORAGE_SILENT }); break }
+        // A breath every SLICE_MS of work, whatever the rows do: the list paints and STOP is heard.
+        if (performance.now() - sliceFrom >= SLICE_MS) { await sleep(0); sliceFrom = performance.now(); if (g !== generation) return }
         if (halted() || refusedSave) break
         const r = row(key)
         if (!r || !r.picked || r.read !== 'ok' || !r.shard || r.run === 'done' || r.run === 'skipped') continue
@@ -544,14 +550,9 @@ export const useShardImport = create<ShardImportState>((set, get) => {
           }
           patch(key, { shardId: id, outcome: action.act === 'new' ? (action.copyName ? 'copy' : 'new') : action.act })
           const settled = track(key, saved, !publish)
-          // PUBLISH off: on to the next shard while this one is written; a
-          // breath every SLICE_MS of work, so the list paints and STOP is
-          // heard without a repaint for every shard.
-          if (!publish) {
-            inHand = null
-            if (performance.now() - sliceFrom >= SLICE_MS) { await sleep(0); sliceFrom = performance.now(); if (g !== generation) return }
-            continue
-          }
+          // PUBLISH off: on to the next shard while this one is written (the
+          // loop's top lets the page paint every SLICE_MS, not every shard).
+          if (!publish) { inHand = null; continue }
           // Nothing goes out that a reload would lose here: saved means committed (store/workshopStorage.ts).
           const ok = await Promise.race([settled, stopped.then(() => null), sleep(timing.saveStallMs).then(() => undefined)])
           if (g !== generation) return
@@ -598,7 +599,7 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       // The folders' filing, saved before DONE shows; never waited on past a few seconds, nor past STOP's grace.
       try {
         const flush = folderApi()?.flush
-        if (flush) await Promise.race([flush().catch(() => undefined), sleep(halted() ? timing.stopGraceMs : 5000)])
+        if (flush) await Promise.race([flush().catch(() => undefined), sleep(halted() ? Math.max(0, (graceEnd ??= Date.now() + timing.stopGraceMs) - Date.now()) : 5000)])
       } catch { /* the filing is the folders store's to report */ }
       if (g === generation) {
         if (sent > 0) refreshFeed()

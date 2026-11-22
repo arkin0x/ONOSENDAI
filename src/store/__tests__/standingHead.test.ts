@@ -8,6 +8,7 @@
  * | a pinned relay current, every move delivered in hand | yes |
  * | a relay delivered a move not in hand (another device's) | no: the relays are asked, which catches up first |
  * | only relays this device alone lists are current | no |
+ * | only the read-only old relay is current (useRelays READ_FALLBACK_RELAY: watched, never pinned) | no |
  * | no relay current (dead, AUTH-held, reconnected and not caught up, socket silent) | no: the relays are asked, and the move holds without an answer |
  * | the page's first look (CHECKING YOUR CHAIN) not answered | no |
  */
@@ -49,13 +50,20 @@ describe('the head check from the standing subscriptions', () => {
     expect(holds(PK)).toBe(true)
   })
 
-  it('a dead or AUTH-held canonical relay does not hold it up while the other pinned relay is current', () => {
-    watch.relays = [{ url: CANON, current: false, pinned: true }, { url: SECOND, current: true, pinned: true }]
-    expect(holds(PK)).toBe(true)
+  it('the read-only old relay current, the canonical relay dead or AUTH-held: not signed from the watch, since the old relay vouches for nothing', () => {
+    watch.relays = [{ url: CANON, current: false, pinned: true }, { url: SECOND, current: true, pinned: false }]
+    expect(holds(PK)).toBe(false)
+    expect(standingHead(PK)).toBe('quiet')
+  })
+
+  it('a move only the old relay delivered (a client of before the switch) still sends the move to the relays first', () => {
+    watch.relays = [{ url: CANON, current: true, pinned: true }, { url: SECOND, current: true, pinned: false }]
+    watch.delivered = [ev(3).id, ev(4).id]
+    expect(standingHead(PK)).toBe('ask')
   })
 
   it('a relay only this device lists vouches for nothing: with no pinned relay current, the move is not signed from the watch', () => {
-    watch.relays = [{ url: CANON, current: false, pinned: true }, { url: SECOND, current: false, pinned: true }, { url: OTHER, current: true, pinned: false }]
+    watch.relays = [{ url: CANON, current: false, pinned: true }, { url: SECOND, current: false, pinned: false }, { url: OTHER, current: true, pinned: false }]
     expect(standingHead(PK)).toBe('quiet')
   })
 
@@ -72,7 +80,7 @@ describe('the head check from the standing subscriptions', () => {
   })
 
   it('no relay current (all silent, or reconnected and not caught up), or no watch: never signs blind', () => {
-    watch.relays = [{ url: CANON, current: false, pinned: true }, { url: SECOND, current: false, pinned: true }]
+    watch.relays = [{ url: CANON, current: false, pinned: true }, { url: SECOND, current: false, pinned: false }]
     expect(holds(PK)).toBe(false)
     watch.relays = null
     expect(standingHead(PK)).toBe('ask')

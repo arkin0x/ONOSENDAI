@@ -39,7 +39,7 @@
  */
 
 import { askChainEvents, fetchChainEvents } from './chains'
-import { reopenOwnWatch, retryWaitingOwnWatch, startOwnWatch } from './ownWatch'
+import { outsideChain, reopenOwnWatch, retryWaitingOwnWatch, startOwnWatch } from './ownWatch'
 import { decideSelfCheck } from './chainHold'
 import { onCanonicalSignIn, onResume, retryFailedAuth } from './relay'
 import { chainHolders } from './chainHolders'
@@ -48,7 +48,7 @@ import { actionLink, newestSpawn, type NostrEvent } from './events'
 import type { RelayAnswer } from './relayOutcome'
 import { requeueForCanonical } from './publisher'
 import { normalizeURL } from 'nostr-tools/utils'
-import { DEFAULT_RELAY } from '../store/useRelays'
+import { DEFAULT_RELAY, READ_FALLBACK_RELAY } from '../store/useRelays'
 import { newestOnRelays, signedOnThisPage, useCyberspace } from '../store/useCyberspace'
 
 let close: (() => void) | null = null
@@ -99,7 +99,7 @@ async function check(pubkey: string): Promise<void> {
   try {
     const answers = await askChainEvents(pubkey, knownGenesis(pubkey), knownEvents(pubkey))
     if (useCyberspace.getState().identity.pubkey !== pubkey) return
-    const verdict = decideSelfCheck(answers, DEFAULT_RELAY, online(), chainHolders(pubkey))
+    const verdict = decideSelfCheck(answers, DEFAULT_RELAY, online(), checkHolders(pubkey))
     useCyberspace.getState().applySelfCheck(pubkey, verdict)
     setSync(pubkey, verdict.status === 'unknown' ? 'unreachable' : 'done')
     requeueMissingOnCanonical(pubkey, answers)
@@ -247,6 +247,18 @@ function requeueMissingOnCanonical(pubkey: string, answers: RelayAnswer[]): void
   if (missing.length > 0) requeueForCanonical(missing)
 }
 
+/**
+ * The relays whose AUTH held up by the signer leaves the self-check saying
+ * nothing (chainHold decideSelfCheck): the chain's holders, and the read-only
+ * old relay (useRelays READ_FALLBACK_RELAY) too. It never holds up a move
+ * (chainHolders), but a chain that lives only there (a client that publishes
+ * only to it) must not be read as "none" while it cannot be read, or the
+ * first move would start a live new chain over it.
+ */
+export function checkHolders(pubkey: string): Set<string> {
+  return new Set([...chainHolders(pubkey), normalizeURL(READ_FALLBACK_RELAY)])
+}
+
 /** Ask again, but only when the last answer for the current identity was "nobody could say". */
 export function recheckIfUnknown(): void {
   const s = useCyberspace.getState()
@@ -261,7 +273,7 @@ export function recheckNow(): void {
   // signed in, and the prompt the panel speaks of is really shown. No other
   // relay is asked: the check does not wait on it.
   const pubkey = useCyberspace.getState().identity.pubkey
-  const holders = chainHolders(pubkey)
+  const holders = checkHolders(pubkey)
   for (const url of [...signerHeld]) if (holders.has(url)) retryFailedAuth(url)
   void check(pubkey)
 }
@@ -306,12 +318,14 @@ function resync(pubkey: string): void {
     () => ifCurrent(recheckIfUnknown),
     // A (re)subscription also asks from the second of the newest move on the relays, inclusive.
     () => { const s = useCyberspace.getState(); return s.identity.pubkey === pubkey ? newestOnRelays(s.events, s.published) : undefined },
-    // This page's own moves, and moves in hand, are never another device's.
-    (id) => {
-      if (signedOnThisPage(id)) return true
-      const events = useCyberspace.getState().events
-      for (let i = events.length - 1; i >= 0; i--) if (events[i].id === id) return true
-      return false
+    // This page's own moves, and moves in hand, are never another device's;
+    // nor is an older chain's move, which cannot touch this one (ownWatch outsideChain).
+    (ev) => {
+      if (signedOnThisPage(ev.id)) return true
+      const s = useCyberspace.getState()
+      const events = s.events
+      for (let i = events.length - 1; i >= 0; i--) if (events[i].id === ev.id) return true
+      return outsideChain(ev, s.genesisId, events.find((e) => e.id === s.genesisId)?.created_at)
     },
   )
   void check(pubkey)

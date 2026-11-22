@@ -32,6 +32,8 @@ vi.mock('../relay', async (importOriginal) => {
   return {
     ...actual,
     relaySet: () => [actual.CYBERSPACE_RELAY, net.user],
+    // The read set too: these cases are about the configured relays (the read-only old relay: relayHang.test.ts).
+    readRelaySet: () => [actual.CYBERSPACE_RELAY, net.user],
     dropRelays: (relays: string[]) => { net.log.push(`drop ${relays.join(',')}`) },
     authPending: (url: string) => net.authing.has(url),
     // The startup self-check's question (askChainEvents), answered the same way.

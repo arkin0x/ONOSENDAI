@@ -13,6 +13,8 @@ vi.mock('../relay', () => ({
   }),
   relaySet: () => ['wss://mine.test', 'wss://also-mine.test'],
 }))
+// Where reads go: the user's relays, then the read-only old relay (useRelays READ_FALLBACK_RELAY).
+vi.mock('../../store/useRelays', () => ({ readRelays: () => ['wss://mine.test', 'wss://also-mine.test', 'wss://cyberspace.nostr1.com'] }))
 
 import { REFERENCE_BATCH, REFERENCES_KEPT_BYTES, forgetReferences, referencesKept, resolveReference } from '../references'
 
@@ -21,11 +23,16 @@ beforeEach(() => { asked.length = 0; filters.length = 0; held.length = 0; forget
 describe('resolveReference', () => {
   it('ignores a hint that is not one of the user relays', async () => {
     await resolveReference(['e', '1'.repeat(64), 'wss://tracker.example', ''])
-    expect(asked).toEqual([['wss://mine.test', 'wss://also-mine.test']])
+    expect(asked).toEqual([['wss://mine.test', 'wss://also-mine.test', 'wss://cyberspace.nostr1.com']])
   })
   it('asks a hint first when it is one of the user relays', async () => {
     await resolveReference(['e', '2'.repeat(64), 'wss://also-mine.test', ''])
-    expect(asked).toEqual([['wss://also-mine.test', 'wss://mine.test']])
+    expect(asked).toEqual([['wss://also-mine.test', 'wss://mine.test', 'wss://cyberspace.nostr1.com']])
+  })
+
+  it('asks the read-only old relay first when the hint names it (an entry sealed there before stage 1)', async () => {
+    await resolveReference(['e', '3'.repeat(64), 'wss://cyberspace.nostr1.com', ''])
+    expect(asked).toEqual([['wss://cyberspace.nostr1.com', 'wss://mine.test', 'wss://also-mine.test']])
   })
   it('remembers an answer, including a miss, for a minute', async () => {
     const ref = ['e', '3'.repeat(64), '', '']

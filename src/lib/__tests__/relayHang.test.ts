@@ -101,7 +101,7 @@ vi.mock('../../store/useCyberspace', () => ({
 }))
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
-import { SECOND_RELAY, useRelays } from '../../store/useRelays'
+import { READ_FALLBACK_RELAY, useRelays } from '../../store/useRelays'
 import { decideSelfCheck } from '../chainHold'
 import { askChainEvents, confirmChainEvents, fetchChainEvents, HEAD_CONFIRM_MS } from '../chains'
 import { noteChainHolders } from '../chainHolders'
@@ -109,7 +109,8 @@ import { hopTemplate, spawnTemplate, type NostrEvent } from '../events'
 import { connectRelay, CYBERSPACE_RELAY, dropRelays, publishMany, queryAny, queryEachAt, subscribeOne, watchConnectivity } from '../relay'
 
 const CANON = `${CYBERSPACE_RELAY}/`
-const SECOND = `${SECOND_RELAY}/`
+/** The old relay, read only while it is retired (useRelays READ_FALLBACK_RELAY): asked, never written to. */
+const SECOND = `${READ_FALLBACK_RELAY}/`
 const MINE = 'wss://mine.example/'
 const FILTER = { kinds: [0], limit: 1 }
 /** The 5 s connect limit, and room for what follows it on a fake clock. */
@@ -303,7 +304,7 @@ describe('the canonical relay', () => {
 
   it('may take 6 s to connect: a publish lands, and head confirmation passes rather than refusing', async () => {
     dropRelays([CANON])
-    // The pinned former canonical relay down: a relay that connects first arms
+    // The read-only old relay down: a relay that connects first arms
     // the confirmation's deadline from its REQ (verification of #236, finding
     // 6), so this is the canonical relay alone, as the question is about it.
     net.rules.neverOpen.add(SECOND)
@@ -389,20 +390,32 @@ describe('a relay that opens and then says nothing', () => {
   })
 })
 
-describe('the canonical relay slow to connect (6 s) with the pinned former one up (review of #606)', () => {
-  afterEach(() => { net.rules.connectMs.delete(CANON); net.rules.hold.delete(SECOND); net.rules.hold.delete(CANON); dropRelays([CANON, SECOND]) })
+describe('the canonical relay slow to connect (6 s) with the read-only old relay up (review of #606; stage 1 of its retirement)', () => {
+  afterEach(() => { net.rules.connectMs.delete(CANON); net.rules.hold.delete(SECOND); net.rules.hold.delete(CANON); net.rules.hold.delete(MINE); useRelays.getState().reset(); dropRelays([CANON, SECOND, MINE]) })
 
-  it('passes, degraded, on the former canonical relay\'s answer when it holds the anchor', async () => {
+  it('never passes on the old relay\'s answer, even holding the anchor: no move of this version reaches it, so it cannot know of a newer one', async () => {
     dropRelays([CANON, SECOND])
     const c = aChain()
     net.rules.connectMs.set(CANON, 6000)
     net.rules.hold.set(SECOND, [c.spawn, c.hop1])
     const got = await within(6500, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }))
     expect(got.settled).toBe(true)
+    expect(got.value).toBeNull()
+  })
+
+  it('still passes, degraded, on a relay of the player\'s own that holds the anchor (it is published to)', async () => {
+    useRelays.getState().add(MINE)
+    dropRelays([CANON, SECOND, MINE])
+    const c = aChain()
+    net.rules.connectMs.set(CANON, 6000)
+    net.rules.hold.set(SECOND, [c.spawn, c.hop1])
+    net.rules.hold.set(MINE, [c.spawn, c.hop1])
+    const got = await within(6500, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }))
+    expect(got.settled).toBe(true)
     expect(got.value).not.toBeNull()
   })
 
-  it('refuses when the former canonical relay answers without the anchor: its silence says nothing about a newer move', async () => {
+  it('refuses when the old relay answers without the anchor: its silence says nothing about a newer move', async () => {
     dropRelays([CANON, SECOND])
     const c = aChain()
     net.rules.connectMs.set(CANON, 6000)
@@ -411,7 +424,7 @@ describe('the canonical relay slow to connect (6 s) with the pinned former one u
     expect(got.value).toBeNull()
   })
 
-  it('finds a newer move only the former canonical relay holds, and hands it back', async () => {
+  it('finds a newer move only the old relay holds, and hands it back (a client of before the switch may publish only there)', async () => {
     dropRelays([CANON, SECOND])
     const c = aChain()
     net.rules.connectMs.set(CANON, 6000)

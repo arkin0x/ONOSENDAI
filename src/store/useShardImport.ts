@@ -300,7 +300,7 @@ const CHECK_CHUNK = 100
 async function publishedAt(me: string, ids: readonly string[]): Promise<Set<string> | null> {
   const found = new Set<string>()
   for (let i = 0; i < ids.length; i += CHECK_CHUNK) {
-    const answers = await queryEach({ kinds: [SNO_KIND], authors: [me], '#d': ids.slice(i, i + CHECK_CHUNK) })
+    const answers = await queryEach({ kinds: [SNO_KIND], authors: [me], '#d': ids.slice(i, i + CHECK_CHUNK) }, undefined, { written: true })
     if (!answers.some((a) => a.outcome === 'answered')) return null
     for (const a of answers) for (const ev of a.events) {
       if (ev.pubkey !== me || ev.kind !== SNO_KIND) continue

@@ -52,7 +52,7 @@ import { spawnTemplate } from '../../lib/events'
 const BAGS = 105
 const SIGN_IN_FAILED = 'Could not sign in to relay.onosendai.tech.'
 const NOTHING = 'Nothing hidden on the relay yet.'
-const BACKUP_SIGN_IN_FAILED = 'Could not sign in to backup cyberspace.nostr1.com.'
+const BACKUP_SIGN_IN_FAILED = 'Could not sign in to the old relay cyberspace.nostr1.com.'
 
 interface Visit {
   net: AuthGatedNet

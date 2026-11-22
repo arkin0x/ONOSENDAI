@@ -3,11 +3,11 @@
  *
  * The canonical relay (DEFAULT_RELAY) is the default for everyone and is
  * always present: it is where the shared world lives, so it cannot be removed.
- * The former canonical relay (SECOND_RELAY) is pinned after it while the
- * 2026-11-05 switch settles. On top of them you
- * add your own, and everything the client does — publishing movement and
- * hidden content, discovering it, reading other chains — fans out across the
- * whole set. Persisted locally, so your relays survive a reload.
+ * On top of it you add your own, and everything the client does (publishing
+ * movement and hidden content, discovering it, reading other chains) fans
+ * out across the whole set. Persisted locally, so your relays survive a
+ * reload. The former canonical relay (READ_FALLBACK_RELAY) is read from, and
+ * never written to, while it is retired.
  */
 
 import { normalizeURL } from 'nostr-tools/utils'
@@ -29,18 +29,40 @@ import { create } from 'zustand'
 export const DEFAULT_RELAY = 'wss://relay.onosendai.tech'
 
 /**
- * The former canonical relay, pinned second for about two weeks after the
- * switch (the owner, 2026-11-05): every action still reaches people and
- * clients that read only it, and a chain whose newest moves reached only it
- * (before the history catch-up) is still found. It also counts as holding
- * every chain (chainHolders.ts). It gates reads with NIP-42 AUTH and refuses
- * events over about 262 KB. Ending the window is deleting this constant and
- * its uses; nothing saved names it, because the pinned relays are never saved.
+ * The former canonical relay, wss://cyberspace.nostr1.com, read only while it
+ * is retired (the owner, 2026-11-22: "it's time to deprecate cyberspace.nostr1").
+ *
+ * Stage 1 of its retirement: it is not in the relay list, so nothing is
+ * published there by default (an item published there before keeps its own
+ * saved relays, so taking it down still reaches it), except your own
+ * movement events (relay.ts mirrorToOldRelay), copied there and never trusted, so
+ * a device of yours still on a build of before stage 1, which trusts it,
+ * never signs on a head you already moved past; it is not pinned, so it
+ * never vouches for a head (ownWatch, standingHead); it never counts as
+ * holding a chain (chainHolders), so no move waits for it; and in the
+ * question before a move, its answer alone never passes the move (chains.ts
+ * confirmChainEvents), since the moves of this version never reach it. It is
+ * still read, beside the relay list (relay.ts readRelaySet), so whatever is
+ * only there (a client of before the 2026-11-05 switch, the Bitcoin anchors
+ * until their publisher sends them to the canonical relay as well) is still
+ * seen, and a move of yours that only it holds still stops the next one.
+ *
+ * It gates reads with NIP-42 AUTH. Stage 2, reading it no longer, is deleting
+ * this constant and its uses; nothing saved names it.
  */
-export const SECOND_RELAY = 'wss://cyberspace.nostr1.com'
+export const READ_FALLBACK_RELAY = 'wss://cyberspace.nostr1.com'
 
-/** The relays every list starts with, in order, and that cannot be removed. */
-export const PINNED_RELAYS: readonly string[] = [DEFAULT_RELAY, SECOND_RELAY]
+/** The relays every list starts with, in order, and that cannot be removed: the canonical relay alone. */
+export const PINNED_RELAYS: readonly string[] = [DEFAULT_RELAY]
+
+/** Whether a relay URL is the read-only former canonical relay, however it is written. */
+export function isReadFallbackRelay(url: string): boolean {
+  try {
+    return normalizeURL(url.trim()) === normalizeURL(READ_FALLBACK_RELAY)
+  } catch {
+    return false
+  }
+}
 
 /**
  * Hosts this client never dials, whichever list names them: a saved relay
@@ -133,9 +155,15 @@ export const useRelays = create<RelaysState>((set, get) => ({
   reset: () => { set({ relays: [...PINNED_RELAYS] }); save([...PINNED_RELAYS]) },
 }))
 
-/** The current relay set, for the non-React relay helpers. */
+/** The current relay set, for the non-React relay helpers: where everything is published. */
 export function currentRelays(): string[] {
   return useRelays.getState().relays
+}
+
+/** Where reads go: the current relay set, then the read-only old relay (READ_FALLBACK_RELAY) unless the set names it. Never a place to publish to. */
+export function readRelays(): string[] {
+  const relays = currentRelays()
+  return relays.some(isReadFallbackRelay) ? relays : [...relays, READ_FALLBACK_RELAY]
 }
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {

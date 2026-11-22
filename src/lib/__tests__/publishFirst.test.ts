@@ -27,6 +27,12 @@ const net = vi.hoisted(() => {
     okMs: new Map<string, number>(),
     /** Each relay refuses every EVENT. */
     refuseAll: false,
+    /** The read-only old relay (useRelays READ_FALLBACK_RELAY): a move is copied there on the side. */
+    OLD: 'wss://cyberspace.nostr1.com/',
+    /** These relays refuse every EVENT. */
+    refuse: new Set<string>(),
+    /** Every relay an EVENT was sent to. */
+    sentTo: [] as string[],
   }
   class FakeSocket {
     static readonly CONNECTING = 0
@@ -47,10 +53,11 @@ const net = vi.hoisted(() => {
       const msg = JSON.parse(raw) as unknown[]
       if (msg[0] === 'REQ') { setTimeout(() => this.onmessage?.({ data: JSON.stringify(['EOSE', msg[1]]) }), 1); return }
       if (msg[0] !== 'EVENT') return
+      state.sentTo.push(this.url)
       const ms = state.okMs.get(this.url)
       if (ms === undefined) return
       const id = (msg[1] as { id: string }).id
-      setTimeout(() => { if (this.readyState === 1) this.onmessage?.({ data: JSON.stringify(['OK', id, !state.refuseAll, state.refuseAll ? 'blocked: no' : '']) }) }, ms)
+      setTimeout(() => { if (this.readyState === 1) { const no = state.refuseAll || state.refuse.has(this.url); this.onmessage?.({ data: JSON.stringify(['OK', id, !no, no ? 'blocked: no' : '']) }) } }, ms)
     }
     close(): void {
       if (this.readyState === 3) return
@@ -96,6 +103,26 @@ describe('publishFirst', () => {
     const r = await publishFirst(anEvent())
     const all = await r.all
     expect(all.ok && [...(all.accepted ?? [])].sort()).toEqual([net.CANON, net.DEAD, net.SLOW].sort())
+  }, 30_000)
+
+  it('a move only the old relay took is a failure: its copy on the side is never part of the answer (review of stage 1)', async () => {
+    net.sentTo.length = 0
+    for (const u of [net.CANON, net.SLOW, net.DEAD]) { net.okMs.set(u, 20); net.refuse.add(u) }
+    net.okMs.set(net.OLD, 1)
+    const r = await publishFirst(anEvent())
+    for (const u of [net.CANON, net.SLOW, net.DEAD]) net.refuse.delete(u)
+    net.okMs.delete(net.OLD)
+    expect(r.ok).toBe(false)
+    expect((await r.all).ok).toBe(false)
+    expect(net.sentTo).toContain(net.OLD)
+  }, 30_000)
+
+  it('only a move is copied to the old relay; nothing else goes there', async () => {
+    net.sentTo.length = 0
+    for (const u of [net.CANON, net.SLOW, net.DEAD]) net.okMs.set(u, 5)
+    const bag = finalizeEvent({ kind: 33330, created_at: 1_790_000_000 + n++, tags: [['d', 'x']], content: '' }, sk) as unknown as NostrEvent
+    await (await publishFirst(bag)).all
+    expect(net.sentTo).not.toContain(net.OLD)
   }, 30_000)
 
   it('with every relay refusing it, the answer is a failure, as publish gives', async () => {

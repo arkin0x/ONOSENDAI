@@ -9,7 +9,7 @@
  * for real and records the bar filling and moves landing.
  *
  * The counts are set on the dev build's walk store (window.__walk, DEV
- * only): the same number the slowdown and the LOSING SYNC warning read.
+ * only): the same number the fluid pause reads (store/fluidSwitch.ts).
  *
  * Never on the wire: LOCAL before anything (the run aborts otherwise), every
  * origin but localhost refused, and every WebSocket answered by an empty
@@ -36,7 +36,7 @@ const [url, out] = process.argv.slice(2)
 if (!url || !out) { console.log('usage: chain-ahead-probe.mjs <url> <out dir>'); process.exit(2) }
 fs.mkdirSync(out, { recursive: true })
 
-const COUNTS = [0, 1, 5, 14, 15, 17, 20, 26]
+const COUNTS = [0, 1, 5, 14, 15, 17, 20, 21, 26]
 /** Phone screenshots at this pixel ratio (layout is in CSS pixels either way). */
 const dpr = Number(process.env.DPR ?? 2)
 const fails = []
@@ -146,7 +146,7 @@ const read = (page) => page.evaluate(() => {
   const box = (el) => { const r = el.getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map((v) => Math.round(v * 100) / 100).join(' ') }
   const chip = [...document.querySelectorAll('.explorer__toggle')].find((el) => /CHAIN/.test(el.textContent))
   if (!chip) throw new Error('no CHAIN chip on the page')
-  const stack = [...document.querySelectorAll('.instruments *')].filter((el) => !el.closest('.aheadbar, .aheadbrk') && !el.classList.contains('aheadtxt') && !el.classList.contains('aheadglint'))
+  const stack = [...document.querySelectorAll('.instruments *')].filter((el) => !el.closest('.aheadbar, .aheadbrk, .fluidnote') && !el.classList.contains('aheadtxt') && !el.classList.contains('aheadglint'))
   const bar = chip.querySelector('.aheadbar')
   const brk = chip.querySelector('.aheadbrk')
   const ticks = bar ? [...bar.children] : []
@@ -171,7 +171,7 @@ const read = (page) => page.evaluate(() => {
     tickAnimations: ticks.map((t) => getComputedStyle(t).animationName).filter((a) => a !== 'none').length,
     brkOpacity: brk ? Number(getComputedStyle(brk).opacity) : 0,
     brkGap: brk ? brk.style.getPropertyValue('--ahead-gap') : '',
-    warn: Number(getComputedStyle(document.querySelector('.syncwarn')).opacity),
+    warn: (document.querySelector('.syncwarn') ? Number(getComputedStyle(document.querySelector('.syncwarn')).opacity) : 0),
     scrollW: document.documentElement.scrollWidth,
   }
 })
@@ -224,12 +224,14 @@ async function layout(name, options, pad = 0) {
     check(s.drawn && s.ticks === 20 && s.lit === want && s.head === want, `${name} at ${n}: ${want} of 20 ticks lit, the newest the head (${s.lit}, head ${s.head})`)
     check(s.hollow === Math.min(6, 20 - want), `${name} at ${n}: ${Math.min(6, 20 - want)} hollow amber slots left (${s.hollow})`)
     // Breathing at the limit: between 0.62 and 1, never out.
-    check(n >= 20 ? s.barOpacity >= 0.6 : s.barOpacity === 1, `${name} at ${n}: the bar is shown (opacity ${s.barOpacity})`)
+    check(n >= 21 ? s.barOpacity >= 0.6 : s.barOpacity === 1, `${name} at ${n}: the bar is shown (opacity ${s.barOpacity})`)
     check((s.brkOpacity === 1) === (n >= 15), `${name} at ${n}: brackets ${n >= 15 ? 'shown' : 'hidden'} (gap ${s.brkGap})`)
-    check((s.border === 'rgb(255, 35, 35)') === (n >= 20), `${name} at ${n}: border ${n >= 20 ? 'the warning red' : 'not red'} (${s.border})`)
-    check(/ahead-breathe/.test(s.barAnimation) === (n >= 20), `${name} at ${n}: ${n >= 20 ? 'breathing' : 'not breathing'}`)
-    check((s.warn > 0) === (n >= 15) && (s.warn === 1) === (n >= 20), `${name} at ${n}: LOSING SYNC at ${Math.round(s.warn * 100)}%`)
-    check(s.label.includes(`${n} move${n === 1 ? '' : 's'} ahead of your chain. The walk stops at 20.`), `${name} at ${n}: the label carries the count (${s.label})`)
+    // Red at the fluid pause, 21 (arkinox, 2026-11-22).
+    check((s.border === 'rgb(255, 35, 35)') === (n >= 21), `${name} at ${n}: border ${n >= 21 ? 'the warning red' : 'not red'} (${s.border})`)
+    check(/ahead-breathe/.test(s.barAnimation) === (n >= 21), `${name} at ${n}: ${n >= 21 ? 'breathing' : 'not breathing'}`)
+    // The LOSING SYNC warning is parked (store/walkLimits.ts SYNC_SLOWDOWN_ON).
+    check(s.warn === 0, `${name} at ${n}: LOSING SYNC parked, not shown (${Math.round(s.warn * 100)}%)`)
+    check(s.label.includes(`${n} move${n === 1 ? '' : 's'} ahead of your chain. Fluid WALK pauses at 21.`), `${name} at ${n}: the label carries the count (${s.label})`)
     check(s.tickWidth >= 1.4, `${name} at ${n}: ticks ${s.tickWidth}px wide in a ${s.barBox.split(' ')[2]}px bar`)
     await clip(`${name}-${String(n).padStart(2, '0')}.png`)
     if (name !== 'desktop' && [5, 17, 20].includes(n)) await page.screenshot({ path: `${out}/${name}-full-${n}.png` })
@@ -272,11 +274,11 @@ async function reduced() {
   const { ctx, page } = await open({ viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
   await ahead(page, 0, 3000)
   const base = await read(page)
-  for (const n of [5, 17, 20]) {
+  for (const n of [5, 17, 21]) {
     await ahead(page, n)
     const s = await read(page)
     check(s.barAnimation === 'none' && s.tickAnimations === 0, `reduced motion at ${n}: no animation on the bar or its ticks (${s.barAnimation})`)
-    check(s.lit === n && s.barOpacity === 1 && (s.brkOpacity === 1) === (n >= 15) && (s.border === 'rgb(255, 35, 35)') === (n >= 20), `reduced motion at ${n}: the state still shows (${s.lit} lit, brackets ${s.brkOpacity}, border ${s.border})`)
+    check(s.lit === Math.min(n, 20) && s.barOpacity === 1 && (s.brkOpacity === 1) === (n >= 15) && (s.border === 'rgb(255, 35, 35)') === (n >= 21), `reduced motion at ${n}: the state still shows (${s.lit} lit, brackets ${s.brkOpacity}, border ${s.border})`)
     check(s.chip === base.chip, `reduced motion at ${n}: the chip's box is unchanged`)
   }
   // A real move landing: the total still changes, with no glint animation.
@@ -317,7 +319,7 @@ async function walk() {
       limit: !!chip?.classList.contains('is-limit'),
       box: r ? [r.left, r.top, r.width, r.height].map((v) => Math.round(v * 100) / 100).join(' ') : '',
       total: window.__store.getState().events.length,
-      warn: Number(getComputedStyle(document.querySelector('.syncwarn')).opacity),
+      warn: (document.querySelector('.syncwarn') ? Number(getComputedStyle(document.querySelector('.syncwarn')).opacity) : 0),
     }
   })
   const turn = async (i) => {

@@ -47,7 +47,7 @@ vi.mock('zustand', async (importOriginal) => {
   return { ...real, create: (init?: Parameters<typeof real.create>[0]) => (init === undefined ? live : live(init)) }
 })
 
-import { ViewPanel, WALK_LIMITS_HINT } from '../ViewPanel'
+import { FLUID_PAUSED_HINT, ViewPanel, WALK_LIMITS_HINT } from '../ViewPanel'
 import { ProofPanel } from '../ProofPanel'
 import { ChainPanel } from '../ChainPanel'
 import { SecretsModal } from '../SecretsModal'
@@ -98,7 +98,7 @@ const ROWS: Array<[string, string, string]> = [
   ['view-walk-gravity', 'Gravity in WALK', 'Fall, land and jump.'],
   ['view-walk-gravity-hard', 'Hard Mode Gravity', 'Gravity will not turn off if there is nothing to catch your fall.'],
   ['view-walk-fluid', 'Fluid WALK', 'Hold to glide. Moves still land on whole gibsons.'],
-  ['view-walk-limits', 'Chain sync limit', WALK_LIMITS_HINT],
+  ['view-walk-limits', 'Pause fluid walk when your chain falls behind', WALK_LIMITS_HINT],
   ['view-chain-trail', 'Chain trail', 'The red line of your movement history.'],
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
   ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
@@ -216,6 +216,20 @@ describe('the Settings panel', () => {
     viewSwitch('view-walk-fluid').props.onCheckedChange(false)
     expect(useFluidWalk.getState().on).toBe(false)
     expect(localStorage.getItem(FLUID_KEY)).toBe('off')
+  })
+
+  it('Fluid WALK paused for the chain keeps your choice on the switch and says it is paused; a tap turns it off, ends the pause and keeps it off (arkinox, 2026-11-22)', () => {
+    useFluidWalk.setState({ on: true, paused: true, resumedAt: 0 })
+    const html = view()
+    expect(switchTag(html, 'view-walk-fluid')).toContain('aria-checked="true"')
+    expect(html).toContain(`<span class="ui-field__hint">${FLUID_PAUSED_HINT}</span>`)
+    expect(FLUID_PAUSED_HINT).not.toMatch(/\u2014/)
+    viewSwitch('view-walk-fluid').props.onCheckedChange(false)
+    expect(useFluidWalk.getState()).toMatchObject({ on: false, paused: false, resumedAt: 0 })
+    expect(localStorage.getItem(FLUID_KEY)).toBe('off')
+    const after = view()
+    expect(switchTag(after, 'view-walk-fluid')).toContain('aria-checked="false"')
+    expect(after).not.toContain(FLUID_PAUSED_HINT)
   })
 
   it('Gravity in WALK starts off and drives the walk, remembered on this device', () => {

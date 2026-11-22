@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { DROP_AFTER_MS, EOSE_WAIT_MS, FRESHEN_WAIT_MS, LIVE_MS, STALL_MS, freshenOwnWatch, ownWatchDeps, unexplainedMoves, ownWatchState, startOwnWatch, stopOwnWatch } from '../ownWatch'
+import { forgetOwnWatchMoves, DROP_AFTER_MS, EOSE_WAIT_MS, FRESHEN_WAIT_MS, LIVE_MS, STALL_MS, freshenOwnWatch, ownWatchDeps, unexplainedMoves, ownWatchState, startOwnWatch, stopOwnWatch } from '../ownWatch'
 import type { NostrEvent } from '../events'
 
 type H = Parameters<typeof ownWatchDeps.subscribeOne>[2]
@@ -179,6 +179,35 @@ describe('the standing watch', () => {
     expect(opened).toHaveLength(2)
     expect(opened[0].closed).toBe(true)
     net.owed.set(A, 0)
+    own(A).h.oneose()
+    expect(state(A).current).toBe(true)
+  })
+
+  it('a move this page signed, or one in hand, is never held: an old chain\'s last echo after a respawn does not turn the check off', () => {
+    install()
+    const mine = new Set([ev(7).id])
+    startOwnWatch(PK, () => {}, () => {}, () => undefined, (id) => mine.has(id))
+    own(A).h.oneose()
+    own(A).h.onevent(ev(7))
+    expect(unexplainedMoves(PK, () => false)).toBe(0)
+    own(A).h.onevent(ev(8))
+    expect(unexplainedMoves(PK, () => false)).toBe(1)
+    forgetOwnWatchMoves()
+    expect(unexplainedMoves(PK, () => false)).toBe(0)
+  })
+
+  it('more moves than are kept: they are let go, and every relay is asked again and is not current until its EOSE', async () => {
+    vi.useFakeTimers()
+    install()
+    startOwnWatch(PK, () => {})
+    own(A).h.oneose()
+    own(B).h.oneose()
+    for (let i = 1; i <= 2049; i++) own(A).h.onevent(ev(i))
+    expect(state(A).current).toBe(false)
+    expect(state(B).current).toBe(false)
+    expect(unexplainedMoves(PK, () => false)).toBe(0)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(net.subs.filter((s) => s.url === A && s.filter.authors)).toHaveLength(2)
     own(A).h.oneose()
     expect(state(A).current).toBe(true)
   })

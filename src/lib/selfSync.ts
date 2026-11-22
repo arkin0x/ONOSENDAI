@@ -49,7 +49,7 @@ import type { RelayAnswer } from './relayOutcome'
 import { requeueForCanonical } from './publisher'
 import { normalizeURL } from 'nostr-tools/utils'
 import { DEFAULT_RELAY } from '../store/useRelays'
-import { newestOnRelays, useCyberspace } from '../store/useCyberspace'
+import { newestOnRelays, signedOnThisPage, useCyberspace } from '../store/useCyberspace'
 
 let close: (() => void) | null = null
 let started = false
@@ -306,6 +306,13 @@ function resync(pubkey: string): void {
     () => ifCurrent(recheckIfUnknown),
     // A (re)subscription also asks from the second of the newest move on the relays, inclusive.
     () => { const s = useCyberspace.getState(); return s.identity.pubkey === pubkey ? newestOnRelays(s.events, s.published) : undefined },
+    // This page's own moves, and moves in hand, are never another device's.
+    (id) => {
+      if (signedOnThisPage(id)) return true
+      const events = useCyberspace.getState().events
+      for (let i = events.length - 1; i >= 0; i--) if (events[i].id === id) return true
+      return false
+    },
   )
   void check(pubkey)
 }

@@ -70,8 +70,8 @@ interface Watch {
   since: () => number | undefined
   /** Every own move any relay delivered that the head check has not yet found in the chain in hand. */
   pending: Map<string, NostrEvent>
-  /** More were delivered than `pending` keeps: nothing is vouched for until the watch is restarted. */
-  overflow: boolean
+  /** Whether a delivered move is this page's own or already in hand (never held). */
+  known: (id: string) => boolean
   onEvent: (ev: NostrEvent, url: string) => void
   onEose: () => void
   relays: Map<string, RelayWatch>
@@ -84,7 +84,7 @@ let watch: Watch | null = null
 /** Injected for tests: how a relay is subscribed to, its socket's age, and the relays to watch. */
 export const ownWatchDeps = { subscribeOne, frameAge, unansweredFor, signInFailed, drop: (url: string): void => dropRelays([url]), relays: (): string[] => [CYBERSPACE_RELAY, ...relaySet()], pinned: (): readonly string[] => PINNED_RELAYS }
 
-/** Moves kept in `pending` at most; past it, the head check takes the slow path until a fold clears them. */
+/** Moves kept in `pending` at most; past it, they are let go and the relays asked again (overflowed). */
 const PENDING_MAX = 2048
 
 /**
@@ -109,8 +109,13 @@ function openRelay(w: Watch, r: RelayWatch): void {
   const sub = ownWatchDeps.subscribeOne(r.url, filtersFor(w.pubkey, w.since()), {
     onevent: (ev) => {
       if (w.stopped || ev.pubkey !== w.pubkey) return
-      if (w.pending.size < PENDING_MAX) w.pending.set(ev.id, ev)
-      else w.overflow = true
+      // A move this page signed, or one already in hand, cannot be another
+      // device's: never held (the echo of every move of ours, and the echo of
+      // an old chain's last move landing after a respawn).
+      if (!w.pending.has(ev.id) && !w.known(ev.id)) {
+        if (w.pending.size < PENDING_MAX) w.pending.set(ev.id, ev)
+        else overflowed(w)
+      }
       w.onEvent(ev, r.url)
     },
     oneose: () => {
@@ -134,6 +139,19 @@ function openRelay(w: Watch, r: RelayWatch): void {
     if (ownWatchDeps.unansweredFor(r.url) >= DROP_AFTER_MS) ownWatchDeps.drop(r.url)
     ended(w, r)
   }, EOSE_WAIT_MS)
+}
+
+/**
+ * More moves arrived than are kept (a long backlog published elsewhere): what
+ * is held is let go and every relay is asked again, from the second of the
+ * newest move on the relays. Each is not current until its EOSE, so nothing
+ * is vouched for meanwhile, and what it hands back that is not in hand by
+ * then is held again. A move dated before that second cannot fork the head.
+ */
+function overflowed(w: Watch): void {
+  w.pending.clear()
+  setTimeout(() => { if (watch === w && !w.stopped) reopenOwnWatch() }, 0)
+  for (const r of w.relays.values()) r.eosed = false
 }
 
 /** The relay's subscription ended: not current until it has opened again and caught up to its EOSE. */
@@ -203,9 +221,15 @@ function tick(w: Watch): void {
  * long as it is not stopped. Events go to `onEvent` (with the relay that
  * delivered them); each relay's EOSE to `onEose`. Returns the stopper.
  */
-export function startOwnWatch(pubkey: string, onEvent: (ev: NostrEvent, url: string) => void, onEose: () => void = () => {}, since: () => number | undefined = () => undefined): () => void {
+export function startOwnWatch(
+  pubkey: string,
+  onEvent: (ev: NostrEvent, url: string) => void,
+  onEose: () => void = () => {},
+  since: () => number | undefined = () => undefined,
+  known: (id: string) => boolean = () => false,
+): () => void {
   stopOwnWatch()
-  const w: Watch = { pubkey, since, pending: new Map(), overflow: false, onEvent, onEose, relays: new Map(), tick: null, stopped: false }
+  const w: Watch = { pubkey, since, known, pending: new Map(), onEvent, onEose, relays: new Map(), tick: null, stopped: false }
   watch = w
   reconcile(w)
   w.tick = setInterval(() => tick(w), TICK_MS)
@@ -241,14 +265,18 @@ export function ownWatchState(pubkey: string): RelayHead[] | null {
  * How many moves the relays delivered that are not in the chain in hand,
  * after taking out those that now are (`inHand`). Each delivered move is
  * looked for until it is found once, so the check costs nothing per
- * signature in the steady walk. Null when nothing watches `pubkey`;
- * Infinity after more were delivered than are kept.
+ * signature in the steady walk. Null when nothing watches `pubkey`.
  */
 export function unexplainedMoves(pubkey: string, inHand: (id: string) => boolean): number | null {
   const w = watch
   if (!w || w.stopped || w.pubkey !== pubkey) return null
   for (const id of w.pending.keys()) if (inHand(id)) w.pending.delete(id)
-  return w.overflow ? Infinity : w.pending.size
+  return w.pending.size
+}
+
+/** Let go of every move held (a respawn: the chain they were measured against is gone). */
+export function forgetOwnWatchMoves(): void {
+  watch?.pending.clear()
 }
 
 /**

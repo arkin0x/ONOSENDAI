@@ -209,7 +209,7 @@ import { useToast } from './useToast'
 import { useChainUi } from './useChainUi'
 import type { SelfCrypto } from '../lib/muteList'
 import { forgetUnsent, unsentOf } from '../lib/unsent'
-import { freshenOwnWatch, ownWatchState, unexplainedMoves } from '../lib/ownWatch'
+import { forgetOwnWatchMoves, freshenOwnWatch, ownWatchState, unexplainedMoves } from '../lib/ownWatch'
 import { kvGet, kvSet } from '../lib/kvStore'
 
 /**
@@ -7033,6 +7033,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // or on a look at the relays, ends without a word (STALE_CONFIRMATION).
     sigCheck = null
     chainEpoch++
+    // Moves the standing watch held were measured against the chain that is gone.
+    forgetOwnWatchMoves()
     set({
       ...fresh,
       // A choice between two versions of the old chain is about a chain

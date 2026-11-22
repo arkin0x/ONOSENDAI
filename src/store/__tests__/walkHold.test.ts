@@ -112,6 +112,7 @@ beforeEach(async () => {
   walkKeysReleased()
   useWalk.getState().exit()
   useWalk.getState().setGravity(false)
+  useWalk.getState().setHardGravity(false)
   // Open space: nothing to stand on or bump into.
   useShards.setState({ worldItems: () => [] })
   clearWalls()
@@ -418,6 +419,8 @@ describe('every hold is let go when no release can come (review of #651)', () =>
 
 describe('in the air, the way you face', () => {
   it('under GRAVITY a press mid-fall at 45 degrees is a diagonal, and the same way again grows one hop', () => {
+    // Over nothing at all: Hard Mode Gravity keeps the fall (walkGravityVoid.test.ts).
+    useWalk.getState().setHardGravity(true)
     useWalk.getState().setGravity(true)
     walk()
     face(45)
@@ -433,6 +436,8 @@ describe('in the air, the way you face', () => {
   })
 
   it('a held key walks in the air too, every beat', () => {
+    // Over nothing at all: Hard Mode Gravity keeps the fall (walkGravityVoid.test.ts).
+    useWalk.getState().setHardGravity(true)
     useWalk.getState().setGravity(true)
     walk()
     face(0)

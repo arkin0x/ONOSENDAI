@@ -148,6 +148,18 @@ export function affordableAlongY(from: Position, dir: 1 | -1, max: bigint, affor
 /** The whole axis, from any point: the most a fall could ever go. */
 const AXIS_SPAN = 1n << 85n
 
+/**
+ * How far a fall from `from` along `down` may go before the next gibson
+ * would cost a hop more than `affordable` allows: the last gibson above a
+ * big grid boundary it cannot cross. It is a binary search over the whole
+ * axis, 85 asks of the segment budget, and it depends only on `from`'s place
+ * along `down` (a straight hop changes one axis), so the walk keeps it per
+ * height and region (store/useWalk.ts fallReachAt).
+ */
+export function fallReach(from: Position, affordable: (from: Position, to: Position) => boolean, down: AxisDirection = WORLD_DOWN): bigint {
+  return affordableAlong(from, down, AXIS_SPAN, affordable)
+}
+
 /** Where a fall from a point comes to rest. */
 export interface FallLimit {
   /** Whole gibsons down to it. */
@@ -165,10 +177,10 @@ export interface FallLimit {
  * from `from` can afford, in which case the last gibson it can. A floor no
  * item has is not there, so it is fallen through. A floor in the plane of
  * `from` with open space above it holds you (store/walkWalls.ts stepLimit,
- * `stand`): drop 0. Below is along `down`.
+ * `stand`): drop 0. Below is along `down`. `reach` is fallReach's answer
+ * when the caller already has it.
  */
-export function fallLimit(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean, down: AxisDirection = WORLD_DOWN): FallLimit {
-  const reach = affordableAlong(from, down, AXIS_SPAN, affordable)
+export function fallLimit(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean, down: AxisDirection = WORLD_DOWN, reach: bigint = fallReach(from, affordable, down)): FallLimit {
   // With nothing affordable below, still asked one gibson down: standing there is landed.
   const floor = stepLimit(from, down.axis, down.dir, reach > 0n ? reach : 1n, items, down)
   if (floor.by !== null && floor.reach <= reach) return { drop: floor.reach, lands: true, by: floor.by }
@@ -209,4 +221,128 @@ export function loadGravity(): boolean {
 
 export function saveGravity(on: boolean): void {
   try { localStorage.setItem(GRAVITY_KEY, on ? 'on' : 'off') } catch { /* storage blocked: kept for this visit */ }
+}
+
+/**
+ * How fast, in steps per second across gravity (a step is 2^zoom gibsons,
+ * lib/space.ts stepFor), a walker can best steer in the air, for the rescue
+ * check (canStillLand): above both walks' top speeds
+ * (fluid WALK's FLUID_MAX_SPEED, 12.5, which a running jump keeps; the step
+ * WALK's held key, one step every 110 ms, about 9.1), with room for quick
+ * taps and for a diagonal, so a platform any real input could reach is
+ * always counted as reachable.
+ */
+export const AIR_REACH_SPEED = 20
+
+/** How many points along the arc canStillLand tries the double jump at, beside the best one worked out. */
+const DOUBLE_TRIES = 24
+
+/** The later time (s from now) an arc at height `h` moving up at `v` is at height `y` on its way down; null when it never gets that high. */
+function downThrough(h: number, v: number, y: number): number | null {
+  const d = v * v + 2 * WALK_GRAVITY * (h - y)
+  if (d < 0) return null
+  const t = (v + Math.sqrt(d)) / WALK_GRAVITY
+  // Already under it, and going down: that was in the past.
+  return t < 0 ? null : t
+}
+
+/**
+ * The latest time, in seconds from now, at which an arc at height `h` moving
+ * up at `v` gibsons/s can still be at height `y` or above, best case: with
+ * the double jump (DOUBLE_JUMP_SPEED, set and never lowering the arc, as
+ * store/useWalk.ts airJump does it) when `canDouble`, pressed at the best
+ * moment. Null when no arc it can make reaches `y`. Ceilings are left out:
+ * best case.
+ */
+export function latestAt(h: number, v: number, y: number, canDouble: boolean): number | null {
+  let best = downThrough(h, v, y)
+  if (!canDouble) return best
+  const g = WALK_GRAVITY
+  const vd = DOUBLE_JUMP_SPEED
+  // A press at time s: the arc goes on from h(s) at max(v(s), vd).
+  const tryAt = (s: number): void => {
+    if (!(s >= 0)) return
+    const hs = h + v * s - (g * s * s) / 2
+    const t = downThrough(hs, Math.max(v - g * s, vd), y)
+    if (t !== null && (best === null || s + t > best)) best = s + t
+  }
+  // Pressed later than where the arc is DOUBLE_JUMP_HEIGHT under y, it can never get back up to y.
+  const last = downThrough(h, v, y - (vd * vd) / (2 * g))
+  if (last === null) return best
+  for (let i = 0; i <= DOUBLE_TRIES; i++) tryAt((last * i) / DOUBLE_TRIES)
+  // The best press on the way down is where the arc's height is (v^2 + 2 g h + 2 g y - vd^2) / 4g (its energy).
+  const hBest = (v * v + 2 * g * h + 2 * g * y - vd * vd) / (4 * g)
+  const sBest = downThrough(h, v, hBest)
+  if (sBest !== null) tryAt(sBest)
+  tryAt(Math.max(0, v / g))
+  return best
+}
+
+/**
+ * One wall's box as the rescue check sees it: `d`, the most whole gibsons
+ * across gravity between the walker's column and the box (0 over it), and
+ * `lo` and `top`, how high its bottom and its top are above the walker's
+ * anchor (whole gibsons, up against gravity; the box is a gibson bigger than
+ * the wall all round).
+ */
+export interface RescueBox { d: number; lo: number; top: number }
+
+/**
+ * Whether any input left could still put the walker on a wall (arkinox,
+ * 2026-11-22: "we don't want to turn off gravity if the user jumping or
+ * double jumping would save them"): from height `h` (above the anchor)
+ * moving up at `v`, with the double jump still to use when `canDouble`,
+ * steering at AIR_REACH_SPEED steps of `step` gibsons a second, could it be
+ * over some box in `boxes` while still at or above a height in it, before it
+ * falls past it, never under `bottom`, the boundary no hop can cross.
+ *
+ * What is straight under you is fallLimit's, exactly; this is about walls
+ * off to the side. Best case throughout, so it says no only when nothing
+ * could land you: any height in a box may be a floor (a platform's floor
+ * under a pillar on it, the bottom stair of a flight), no ceiling is in the
+ * way, the box is taken as wide as its widest, and steering is faster than
+ * either walk goes. The cost of that: beside a deep wall, gravity goes off
+ * only once you are under its bottom.
+ */
+export function canStillLand(h: number, v: number, canDouble: boolean, bottom: number, boxes: readonly RescueBox[], step = 1): boolean {
+  for (let i = 0; i < boxes.length; i++) {
+    const b = boxes[i]
+    // A box whose top is under the boundary: never reached.
+    if (b.top < bottom) continue
+    const t = latestAt(h, v, Math.max(b.lo, bottom), canDouble)
+    if (t !== null && (t * AIR_REACH_SPEED + 1) * step >= b.d) return true
+  }
+  return false
+}
+
+/**
+ * Whether a fall that comes to rest at `limit` never lands: nothing below
+ * catches it before a grid boundary no hop from here can afford, so it
+ * would fall to that invisible floor and hover there (C). Unless Hard Mode
+ * Gravity is on, the walk turns gravity off once no input left could land
+ * it anywhere else either (canStillLand; store/useWalk.ts gravityOffOverVoid;
+ * arkinox, 2026-11-22).
+ */
+export function nothingCatches(limit: FallLimit): boolean {
+  return !limit.lands
+}
+
+// ---------------------------------------------------------------------------
+// Hard Mode Gravity, per device (arkinox, 2026-11-22: "lets make an opt-in
+// off-by-default setting called 'Hard Mode Gravity'"). Off, a move that would
+// fall with nothing to catch it turns gravity off; on, it falls, as before.
+
+export const HARD_GRAVITY_KEY = 'onosendai:walkGravityHard'
+
+/** The stored choice: off unless it was explicitly switched on here. */
+export function loadHardGravity(): boolean {
+  try {
+    return localStorage.getItem(HARD_GRAVITY_KEY) === 'on'
+  } catch {
+    return false
+  }
+}
+
+export function saveHardGravity(on: boolean): void {
+  try { localStorage.setItem(HARD_GRAVITY_KEY, on ? 'on' : 'off') } catch { /* storage blocked: kept for this visit */ }
 }

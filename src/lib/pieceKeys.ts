@@ -98,6 +98,16 @@ export function pieceKeysFor(address: string): string[] {
 const opened = new Set<string>()
 const forgetListeners = new Set<(addresses: readonly string[]) => void>()
 
+/** Note a piece opened here another way (sealed on this device, and its payload put in fetchRef's cache): dropped with the rest on a change of identity. */
+export function markPieceOpened(address: string): void {
+  opened.add(address)
+}
+
+/** Whether a piece at this address was opened, or sealed, on this device since the last change of identity: a sealed piece, not a live link. */
+export function pieceWasOpened(address: string): boolean {
+  return opened.has(address)
+}
+
 /** Hear which opened pieces to drop when every key is forgotten (lib/parts.ts drops them from its cache). */
 export function onPiecesForgotten(listener: (addresses: readonly string[]) => void): () => void {
   forgetListeners.add(listener)

@@ -49,7 +49,7 @@ import { newShard, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { HIDDEN_KIND, OBJECT_KIND, bagEntries, isReference, unbag, type Hidden } from '../../lib/hidden'
 import { forgetReferences, resolveReference } from '../../lib/references'
 import { forgetRef, resolvePartsShared } from '../../lib/parts'
-import { forgetPieceKeys, notePieceKeys } from '../../lib/pieceKeys'
+import { forgetPieceKeys, notePieceKeys, pieceKeysFor, pieceWasOpened } from '../../lib/pieceKeys'
 import { largestRemotePiece, signerBytes } from '../../lib/pieces'
 import { NIP44_MAX_PLAINTEXT_BYTES } from '../../lib/signerRequestSize'
 import { withAuthoredConstrain } from '../../lib/walkConstrain'
@@ -59,7 +59,7 @@ import { bytesToHex, hexToBytes, type NostrEvent } from '../../lib/events'
 import type { Position } from '../../lib/space'
 import { useBuilder } from '../useBuilder'
 import { useCyberspace } from '../useCyberspace'
-import { useShards } from '../useShards'
+import { forgetSealedState, useShards } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 
 const S = () => useShards.getState()
@@ -320,6 +320,33 @@ describe('moving and deleting a split build', () => {
 })
 
 describe('a split build hidden while LOCAL', () => {
+  it('moved inside its bag before BROADCAST, it keeps its unsent pieces, and BROADCAST still sends them first', async () => {
+    useCyberspace.setState({ live: false })
+    await hide(parentOf([ref(NORTH), ref(SOUTH)]), [piece('North half', 3000, NORTH), piece('South half', 3000, SOUTH)])
+    const first = splitRow()
+    await move(first.eventId, at(2n))
+    expect(S().deployError).toBeNull()
+    const moved = splitRow()
+    expect(moved.eventId).not.toBe(first.eventId)
+    expect(moved.pieces).toEqual(first.pieces)
+    expect(moved.pieceObjects?.map((o) => o.id)).toEqual(first.pieceObjects?.map((o) => o.id))
+    expect(sent()).toEqual([])
+    expect(await S().broadcast(moved.lookupId)).toBe(true)
+    const kinds = sent().map((e) => e.kind)
+    expect(sent().filter((e) => e.kind === OBJECT_KIND).map(addressOf).sort()).toEqual([...moved.pieces!].sort())
+    expect(kinds.lastIndexOf(OBJECT_KIND)).toBeLessThan(kinds.indexOf(HIDDEN_KIND))
+  })
+
+  it('a change of identity forgets every key, and every piece sealed or opened here', async () => {
+    await hide(parentOf([ref(NORTH)]), [piece('North half', 3000, NORTH)])
+    const row = splitRow()
+    expect(pieceWasOpened(row.pieces![0])).toBe(true)
+    expect(pieceKeysFor(row.pieces![0])).toEqual([row.keyHex])
+    forgetSealedState()
+    expect(pieceWasOpened(row.pieces![0])).toBe(false)
+    expect(pieceKeysFor(row.pieces![0])).toEqual([])
+  })
+
   it('keeps its pieces here, draws them, and BROADCAST sends them before the bag', async () => {
     useCyberspace.setState({ live: false })
     await hide(parentOf([ref(NORTH), ref(SOUTH)]), [piece('North half', 3000, NORTH), piece('South half', 3000, SOUTH)])

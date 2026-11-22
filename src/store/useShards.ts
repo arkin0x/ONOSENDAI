@@ -126,7 +126,7 @@ import { commitDoorSecret, doorSecret, keepDoorSecret } from './doorSecrets'
 import { entriesIn, isListed, noteStored, onHiddenChange, reloadLocalView, saveRows, UNCLAIMED } from './hiddenStorage'
 import { builtInLook, builtInLookTags, doorHeightOf, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedWrapper, setSealedLookFetch, wireLook, wireOpenLook, type LookName, type LookPose } from '../lib/looks'
 import { openSealedLookPayload, sealLookTags, sealedLookAddresses, sealedLookLimit } from '../lib/sealedLooks'
-import { forgetPieceKeys, notePieceKey, notePieceKeys, pieceAddresses, setLocalPieces } from '../lib/pieceKeys'
+import { forgetPieceKeys, markPieceOpened, notePieceKey, notePieceKeys, pieceAddresses, pieceWasOpened, setLocalPieces } from '../lib/pieceKeys'
 import { openOnePiece, pieceRefusal, planPieces, planPiecesNow, pieceShape, sealedPiecesOf, signerRefusal, type PlannedPiece } from '../lib/pieces'
 import { localObject } from './localObjects'
 import { primeRef, forgetRef } from '../lib/parts'
@@ -2296,7 +2296,12 @@ export function forgetSealedState(): void {
   // The keys a split build's pieces open with were this identity's bags' keys.
   forgetPieceKeys()
   notedPieces = new WeakSet()
+  // The finds held now are the last identity's until the scan clears them: their keys are not noted again.
+  try { stalePieceFinds = useShards.getState().discovered } catch { stalePieceFinds = null }
 }
+
+/** The finds of the identity signed out, until they are replaced: never noted for the one signed in. */
+let stalePieceFinds: Record<string, Hidden> | null = null
 
 /** Rows and finds whose pieces' keys are noted already (notePiecesOf): a list changes often, its items seldom. */
 let notedPieces = new WeakSet<object>()
@@ -2313,6 +2318,8 @@ function notePiecesOf(s: Pick<ShardsState, 'mine' | 'discovered'>): void {
     notedPieces.add(d)
     if (d.shard && d.keyHex) notePieceKeys(d.shard, d.inner?.pubkey, d.keyHex)
   }
+  if (s.discovered === stalePieceFinds) return
+  stalePieceFinds = null
   for (const h of Object.values(s.discovered)) {
     if (notedPieces.has(h)) continue
     notedPieces.add(h)
@@ -2464,6 +2471,14 @@ export const useShards = create<ShardsState>((set, get) => {
     const found = await sealedPiecesOf(item.shard, owner, item.keyHex, fetchHiddenObject).catch(() => null)
     if (!found) return
     const named = new Set(rowsOf(owner).filter((d) => d.eventId !== item.eventId).flatMap((d) => [...(d.pieces ?? []), ...(d.shard ? pieceAddresses(d.shard, owner) : [])]))
+    // What a named piece places is named too, at any depth (a row learned from the relays lists only its top).
+    for (let grew = true; grew;) {
+      grew = false
+      for (const p of found.pieces) {
+        if (!named.has(p.address)) continue
+        for (const a of pieceAddresses(p.payload, owner)) if (!named.has(a)) { named.add(a); grew = true }
+      }
+    }
     for (const p of found.pieces) {
       if (named.has(p.address)) continue
       if (cyber().identity.pubkey !== owner) return
@@ -3601,11 +3616,13 @@ export const useShards = create<ShardsState>((set, get) => {
     const pieces: StagedMove['pieces'] = []
     const resealPieces = async (r: MyDeployment): Promise<MyDeployment> => {
       if (r.type !== 'shard' || !r.shard || r.inner.pubkey !== me || src.keyHex.toLowerCase() === bytesToHex(to.key)) return r
+      // A LIVE LINK names a public object: nothing of it is sealed.
+      if (r.ref && !r.inner.tags.some((t) => t[0] === 'encrypted')) return r
       if (pieceAddresses(r.shard, me).length === 0) return r
       const guarded = (t: EventTemplate): Promise<NostrEvent> => { if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED); return cs.signEvent(t) }
       const plan = await planPieces(r.shard, me, async (address) => {
         const got = await openOnePiece(address, src.keyHex, fetchHiddenObject)
-        if (got === 'missing' && r.pieces?.includes(address)) throw new Error(PIECE_NOT_FETCHED)
+        if (got === 'missing' && (r.pieces ? r.pieces.includes(address) : pieceWasOpened(address))) throw new Error(PIECE_NOT_FETCHED)
         return typeof got === 'string' ? undefined : got.payload
       }, placementId, false)
       if (plan.pieces.length === 0) return r
@@ -3614,6 +3631,7 @@ export const useShards = create<ShardsState>((set, get) => {
       for (const p of plan.pieces) {
         notePieceKey(p.address, bytesToHex(to.key))
         primeRef(['a', p.address], JSON.parse(p.payload) as unknown)
+        markPieceOpened(p.address)
       }
       for (const next of signed) pieces.push({ next })
       lookDropped.push(...plan.pieces.map((p) => p.from))
@@ -5248,7 +5266,7 @@ export const useShards = create<ShardsState>((set, get) => {
           set({ deployNote: 'Opening its pieces' })
           const plan = await planPieces(shard, owner, async (address) => {
             const got = await openOnePiece(address, from.keyHex, fetchHiddenObject)
-            if (got === 'missing' && from.pieces?.includes(address)) throw new Error(PIECE_NOT_FETCHED)
+            if (got === 'missing' && (from.pieces ? from.pieces.includes(address) : pieceWasOpened(address))) throw new Error(PIECE_NOT_FETCHED)
             return typeof got === 'string' ? undefined : got.payload
           }, placementId, false)
           if (plan.pieces.length > 0) {
@@ -5259,8 +5277,9 @@ export const useShards = create<ShardsState>((set, get) => {
           }
         }
         // Each piece is signed before anything goes out, so a signer that
-        // refuses one leaves nothing published; then each goes out before the
-        // bag that names its parent, as a shard hidden by reference does.
+        // refuses one leaves nothing published; each goes out once the bag is
+        // known to hold the parent (below), before the parent and its bag.
+        let piecesToSend: NostrEvent[] = []
         if (pieces.length > 0) {
           set({ deployNote: pieces.length === 1 ? 'Sealing its piece' : `Sealing its ${pieces.length} pieces` })
           const keyHex = bytesToHex(rk.key)
@@ -5270,16 +5289,16 @@ export const useShards = create<ShardsState>((set, get) => {
           for (const p of pieces) {
             notePieceKey(p.address, keyHex)
             primeRef(['a', p.address], JSON.parse(p.payload) as unknown)
+            markPieceOpened(p.address)
           }
-          if (live) {
-            for (const ev of signed) {
-              still()
-              if (!(await republish(ev))) throw new Error('No relay took a piece of this shard. Nothing was hidden.')
-              pieceSent.push(ev)
-            }
-          }
+          piecesToSend = live ? signed : []
           pieceObjects = live ? [] : signed
           set({ deployNote: 'Sealing and publishing' })
+        } else if (was?.pieceObjects?.length) {
+          // Moved inside its bag while its pieces were never sent (hidden while
+          // LOCAL): they go with it, kept here while LOCAL, sent now when LIVE.
+          piecesToSend = live ? was.pieceObjects : []
+          pieceObjects = live ? [] : [...was.pieceObjects]
         }
         // The bag as it stands, read before anything is signed: whether this
         // goes inline or by reference depends on what it already holds.
@@ -5368,6 +5387,13 @@ export const useShards = create<ShardsState>((set, get) => {
           ref = referenceTo(inner, at, plane, hint)
           forgetReference(ref)
           return sealed
+        }
+        // The pieces go out now: the bag holds the parent (checked above), and
+        // nothing names them yet. A hide that fails from here takes them back.
+        for (const ev of piecesToSend) {
+          still()
+          if (!(await republish(ev))) throw new Error('No relay took a piece of this shard. Nothing was hidden.')
+          if (!was?.pieceObjects?.some((o) => o.id === ev.id)) pieceSent.push(ev)
         }
         if (link && object) {
           // LIVE LINK: the bag names the author's own object, signed by them;

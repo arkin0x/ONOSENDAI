@@ -48,7 +48,7 @@
  * Clear All ... get rid of it").
  */
 
-import { takeIntoKeeping, you } from '../lib/carried'
+import { fetchRef } from '../lib/parts'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { create } from 'zustand'
 import { ConfirmModal } from './ConfirmModal'
@@ -445,7 +445,8 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
     if (!item.shard || moved) return
     actions.close()
     // Its carried parts keyed under you, so your copy keeps them when you hide it (R15).
-    useWorkshop.getState().importShard(takeIntoKeeping(item.shard, you()))
+    // A split build's sealed pieces come too, each a shard of yours (useWorkshop takeShard).
+    void useWorkshop.getState().takeShard(item.shard, fetchRef)
     setMoved(true)
     // Held by the store, not this row: the row leaves the list even when the menu closes first.
     window.setTimeout(() => useInventory.getState().clearTaken([item.id]), MOVED_NOTICE_MS)

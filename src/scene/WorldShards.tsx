@@ -245,8 +245,14 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
     // mine and discovered are what worldShards reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted, keep])
+  // Past the reach, only what is mounted already stays: nothing new is built
+  // where it cannot be seen (review: new shards out to the kept reach would
+  // be built hidden, and the edge where shards are built and taken down
+  // would only move outwards).
+  const mounted = useRef<ReadonlySet<string>>(new Set())
   // A move keeps each shard's cut and GPU buffers: only its place changes (steadied).
-  const placed = useSteadied(useMemo(() => keptWithin(fresh, reach, KEEP_HIDDEN_MAX), [fresh, reach]))
+  const placed = useSteadied(useMemo(() => keptWithin(fresh, reach, KEEP_HIDDEN_MAX, mounted.current), [fresh, reach]))
+  useEffect(() => { mounted.current = new Set(placed.map((w) => w.key)) }, [placed])
 
   if (placed.length === 0) return null
 
@@ -273,28 +279,42 @@ export const KEEP_MS = 300_000
 /** The most shards kept hidden past the reach, nearest first: the GPU memory they hold is bounded. */
 export const KEEP_HIDDEN_MAX = 400
 
-/** The reach to keep shards mounted to: the largest one this went out to within KEEP_MS, never less than `reach`. */
-export function keptReach(was: { reach: number; at: number } | null, reach: number, now: number): { reach: number; at: number } {
-  if (!was || reach >= was.reach || now - was.at > KEEP_MS) return { reach, at: now }
-  return was
+/**
+ * The reach to keep shards mounted to: the largest one this went out to, held
+ * for KEEP_MS from the moment the reach first fell below it (`since`), never
+ * less than `reach`. From the fall, not from the last render: the scene does
+ * not render while you sit still, and five idle minutes in an orbit would
+ * otherwise let it go at WALK's first render.
+ */
+export interface KeptReach { reach: number; since: number | null }
+export function keptReach(was: KeptReach | null, reach: number, now: number): KeptReach {
+  if (!was || reach >= was.reach) return { reach, since: null }
+  if (was.since === null) return { reach: was.reach, since: now }
+  return now - was.since > KEEP_MS ? { reach, since: null } : was
 }
 
 function useKeptReach(reach: number): number {
-  const kept = useRef<{ reach: number; at: number } | null>(null)
+  const kept = useRef<KeptReach | null>(null)
   kept.current = keptReach(kept.current, reach, Date.now())
   return kept.current.reach
 }
 
-/** Every shard within `reach`, and up to `max` more past it, nearest first. */
-export function keptWithin(placed: PlacedShardDraw[], reach: number, max: number): PlacedShardDraw[] {
+/**
+ * Every shard within `reach`, and up to `max` more past it, nearest first,
+ * of those already mounted (`mounted`, by key). A shard past the reach keeps
+ * its place in the scene's budget (meshBudget, nearest first): it is further
+ * than every shard on show, so it is served after them.
+ */
+export function keptWithin(placed: PlacedShardDraw[], reach: number, max: number, mounted: ReadonlySet<string>): PlacedShardDraw[] {
   const near: PlacedShardDraw[] = []
   const far: Array<{ w: PlacedShardDraw; d: number }> = []
   for (const w of placed) {
     const d = Math.hypot(...w.centre)
     if (d <= reach) near.push(w)
-    else far.push({ w, d })
+    else if (mounted.has(w.key)) far.push({ w, d })
   }
-  if (far.length === 0) return placed
+  if (far.length === 0 && near.length === placed.length) return placed
+  if (far.length === 0) return near
   if (far.length > max) far.sort((a, b) => a.d - b.d).length = max
   const keep = new Set<PlacedShardDraw>(near)
   for (const f of far) keep.add(f.w)

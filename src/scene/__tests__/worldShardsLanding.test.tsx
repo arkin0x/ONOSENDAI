@@ -143,9 +143,13 @@ describe('past the reach: hidden, not taken down (owner\'s phone diag, 2026-11-2
     }
     const m = await mount(createElement(World))
     expect(group(m).props.visible).toBe(true)
+    const taps = rendered.tap
     set(true)
     await settled()
     expect(group(m).props.visible).toBe(false)
+    // No tap target while hidden: what renders inside is only the mesh's own update.
+    expect(m.all().some((h) => h.type === 'taptarget')).toBe(false)
+    expect(rendered.tap).toBe(taps)
     set(false)
     await settled()
     expect(group(m).props.visible).toBe(true)
@@ -155,21 +159,27 @@ describe('past the reach: hidden, not taken down (owner\'s phone diag, 2026-11-2
     await m.unmount()
   })
 
-  it('keeps the largest reach it went out to for KEEP_MS, then follows the reach again', () => {
+  it('keeps the largest reach it went out to for KEEP_MS from the moment the reach fell, then follows the reach again', () => {
     let k = keptReach(null, 1536, 0)
-    k = keptReach(k, 384, 1_000)
+    // Five idle minutes in the orbit: nothing falls, nothing is counted.
+    k = keptReach(k, 1536, KEEP_MS * 2)
+    k = keptReach(k, 384, KEEP_MS * 2 + 1)
     expect(k.reach).toBe(1536)
-    k = keptReach(k, 384, KEEP_MS + 1)
+    k = keptReach(k, 384, KEEP_MS * 3)
+    expect(k.reach).toBe(1536)
+    k = keptReach(k, 384, KEEP_MS * 3 + 2)
     expect(k.reach).toBe(384)
-    k = keptReach(k, 6144, KEEP_MS + 2)
+    k = keptReach(k, 6144, KEEP_MS * 3 + 3)
     expect(k.reach).toBe(6144)
   })
 
-  it('keeps every shard within the reach and the nearest few past it', () => {
+  it('keeps every shard within the reach and the nearest few already mounted past it, and mounts nothing new past it', () => {
     const near = at(cube('a'), 10)
     const far = [500, 900, 700].map((x, i) => at(cube(`f${i}`), x))
-    const kept = keptWithin([near, ...far], 384, 2)
-    expect(kept.map((w) => w.centre[0])).toEqual([10, 500, 700])
-    expect(keptWithin([near], 384, 0)).toEqual([near])
+    const mountedAll = new Set([near, ...far].map((w) => w.key))
+    expect(keptWithin([near, ...far], 384, 2, mountedAll).map((w) => w.centre[0])).toEqual([10, 500, 700])
+    // Not mounted before: not built where it cannot be seen.
+    expect(keptWithin([near, ...far], 384, 2, new Set([near.key, far[1].key])).map((w) => w.centre[0])).toEqual([10, 900])
+    expect(keptWithin([near], 384, 0, new Set())).toEqual([near])
   })
 })

@@ -6,10 +6,13 @@
  *
  * WALK shows every step the moment it is pressed and proves them behind
  * you. The count here is the events ahead (store/walkAhead.ts), the one
- * number fluid WALK's slowdown and the LOSING SYNC warning go by, so the
- * three always agree: the bar turns amber where the walk starts to slow
- * and the warning starts to show, and red where the walk stops and the
- * warning is fully shown. Moves already proved and waiting for the relay
+ * number the fluid pause goes by (store/fluidSwitch.ts fluidPauseCheck;
+ * arkinox, 2026-11-22), so the two always agree: the bar turns amber from
+ * 15, where a paused fluid WALK comes back on, and red at 21, where fluid
+ * WALK pauses. Since 2026-11-22 it is the one picture of how far ahead you
+ * are: the slowdown and the LOSING SYNC warning are parked
+ * (store/walkLimits.ts SYNC_SLOWDOWN_ON), and switched back on they go by
+ * the same thresholds. Moves already proved and waiting for the relay
  * (LOCAL, a held chain) are not counted: that is the strip under the
  * LIVE/LOCAL switch.
  *
@@ -19,9 +22,9 @@
  * | Ahead | Look |
  * |---|---|
  * | 0 | The chip as it always was. The bar fades out about a second after you catch up and is then taken off the page. |
- * | 1 to 14 | That many ticks lit cyan from the left, the newest white. The last six slots are hollow amber outlines, set a little apart: the slowing stretch, in sight before you reach it. |
- * | 15 to 19 | The amber slots fill. Amber corner brackets appear outside the chip and close in. |
- * | 20 and past | Every tick red (the warning's red), the brackets on the corners and red, the chip's border red, and the bar breathes slowly. A fall can queue past 20; the bar stays full. |
+ * | 1 to 14 | That many ticks lit cyan from the left, the newest white. The last six slots are hollow amber outlines, set a little apart: the stretch before the fluid pause, in sight before you reach it. |
+ * | 15 to 20 | The amber slots fill. Amber corner brackets appear outside the chip and close in, onto the corners at 20. |
+ * | 21 and past | Fluid WALK is paused: every tick red, the brackets red, the chip's border red, and the bar breathes slowly. The bar stays full however far past 20 the count goes. |
  *
  * A new move's tick lights white and tall, then settles. A move landing on
  * your chain folds the end tick away while the CHAIN total glints white.
@@ -50,13 +53,14 @@
  */
 
 import { memo, useLayoutEffect, useMemo, useReducer, useRef, type ButtonHTMLAttributes, type CSSProperties } from 'react'
-import { FLUID_HOLD_AT } from '../lib/fluidWalk'
+import { FLUID_HOLD_AT, FLUID_PAUSE_AT } from '../lib/fluidWalk'
 import { useCyberspace } from '../store/useCyberspace'
 import { SYNC_WARN_AT } from '../store/useWalk'
 import { useAheadSelect } from '../store/walkAhead'
 import { useLayers } from '../store/useLayers'
+import { useFluidWalk } from '../store/fluidSwitch'
 
-/** One tick per event, to where the walk stops. */
+/** One tick per event, to one short of the fluid pause. */
 export const AHEAD_TICKS = FLUID_HOLD_AT
 
 /**
@@ -76,27 +80,28 @@ export interface AheadBar {
   n: number
   /** Anything is ahead. */
   on: boolean
-  /** The walk is slowing: the amber stretch, the brackets. */
+  /** Near the fluid pause (15 to 20, where a paused fluid WALK comes back on): the amber stretch, the brackets. */
   slow: boolean
-  /** The walk is stopped: red. */
+  /** At the fluid pause (21 and past): red. */
   limit: boolean
-  /** How far the brackets have closed in, 0 where they appear to 1 at the stop. */
+  /** How far the brackets have closed in, 0 where they appear to 1 at 20. */
   close: number
-  /** The slowing stretch is drawn (the hollow amber slots): the sync limit is on. */
+  /** The amber stretch is drawn (the hollow amber slots): the sync limit is on. */
   zone: boolean
 }
 
 /**
- * The bar for `ahead` events ahead (store/walkAhead.ts): the slowdown's own
- * thresholds, never its own. With the sync limit off in Settings (`limits`
- * false, store/walkLimits.ts) the walk neither slows nor stops, so the bar
- * only counts: no amber, brackets or red.
+ * The bar for `ahead` events ahead (store/walkAhead.ts): the fluid pause's
+ * own thresholds, never its own. With the sync limit off in Settings or
+ * Fluid WALK switched off (`limits` false, store/walkLimits.ts) nothing
+ * pauses, so the bar only counts: no amber, brackets or red.
  */
 export function aheadBar(ahead: number, limits = true): AheadBar {
-  const n = Number.isFinite(ahead) ? Math.max(0, Math.min(AHEAD_TICKS, Math.floor(ahead))) : 0
+  const real = Number.isFinite(ahead) ? Math.max(0, Math.floor(ahead)) : 0
+  const n = Math.min(AHEAD_TICKS, real)
   if (!limits) return { n, on: n > 0, slow: false, limit: false, close: 0, zone: false }
   const close = Math.max(0, Math.min(1, (n - SYNC_WARN_AT) / (FLUID_HOLD_AT - SYNC_WARN_AT)))
-  return { n, on: n > 0, slow: n >= SYNC_WARN_AT, limit: n >= FLUID_HOLD_AT, close, zone: true }
+  return { n, on: n > 0, slow: n >= SYNC_WARN_AT, limit: real >= FLUID_PAUSE_AT, close, zone: true }
 }
 
 /** What the last change to the count was, so the stylesheet can play it. */
@@ -149,12 +154,14 @@ export function tickClass(i: number, bar: AheadBar, track: Pick<AheadTrack, 'ros
 
 /**
  * The words the chip's label gains while anything is ahead; '' with nothing
- * ahead. The real count, past the stop too. With the sync limit off in
- * Settings (`limits` false, store/walkLimits.ts) there is no stop to name.
+ * ahead. The real count, past 20 too. With the sync limit off in Settings
+ * (`limits` false, store/walkLimits.ts) or Fluid WALK switched off (`fluid`
+ * false) there is no pause to name, and it says which.
  */
-export function aheadLabel(ahead: number, limits = true): string {
+export function aheadLabel(ahead: number, limits = true, fluid = true): string {
   const n = Number.isFinite(ahead) ? Math.max(0, Math.floor(ahead)) : 0
-  return n === 0 ? '' : ` ${n} move${n === 1 ? '' : 's'} ahead of your chain. ${limits ? `The walk stops at ${FLUID_HOLD_AT}.` : 'The sync limit is off.'}`
+  const why = !limits ? 'The fluid pause is off.' : !fluid ? 'Fluid WALK is off.' : `Fluid WALK pauses at ${FLUID_PAUSE_AT}.`
+  return n === 0 ? '' : ` ${n} move${n === 1 ? '' : 's'} ahead of your chain. ${why}`
 }
 
 /** What the chip draws for the walk being ahead. */
@@ -185,7 +192,11 @@ export function useChainAhead(own: boolean, total: number): ChainAhead {
   const walking = useCyberspace((s) => s.walking)
   const active = own && walking
   const events = useAheadSelect((n) => (active ? n : 0))
-  const limits = useLayers((s) => s.walkLimits)
+  // The pause's marks (amber, brackets, red) and its words only when it can
+  // happen: the sync limit on and Fluid WALK chosen. Otherwise the bar counts.
+  const limitOn = useLayers((s) => s.walkLimits)
+  const fluidChosen = useFluidWalk((s) => s.on)
+  const limits = limitOn && fluidChosen
   const bar = aheadBar(events, limits)
 
   // The track: what the last change to the count played. Derived from the
@@ -213,7 +224,7 @@ export function useChainAhead(own: boolean, total: number): ChainAhead {
 
   const drawn = own && (bar.on || shown.current)
   const cls = drawn ? ` has-ahead${bar.on ? ' is-ahead' : ''}${bar.slow ? ' is-slow' : ''}${bar.limit ? ' is-limit' : ''}` : ''
-  return { drawn, bar, track, cls, label: aheadLabel(events, limits) }
+  return { drawn, bar, track, cls, label: aheadLabel(events, limitOn, fluidChosen) }
 }
 
 /** The CHAIN chip's button: everything on it that the count changes, in a component of its own. */

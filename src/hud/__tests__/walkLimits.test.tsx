@@ -1,17 +1,22 @@
 /**
  * walkLimits.test.tsx - WALK's sync limit as a setting (arkinox, 2026-11-18:
  * "maybe sync loss warning should be a setting ... maybe below the red chain
- * sync warning box it can say 'turn off this warning in settings'").
+ * sync warning box it can say 'turn off this warning in settings'"), the
+ * fluid pause's switch since 2026-11-22 ("Pause fluid walk when your chain
+ * falls behind").
  *
- * - on by default, exactly as before: the slowdown from 15, the stop at 20,
- *   the LOSING SYNC warning;
- * - off: no slowdown, no stop, no warning, and the CHAIN chip still counts;
+ * - on by default; the slowdown and the LOSING SYNC warning are parked
+ *   (store/walkLimits.ts SYNC_SLOWDOWN_ON): nothing slows, nothing warns,
+ *   and the warning and its line are not on the page;
+ * - switched back on (the test seam), the slowdown from 15 and the warning
+ *   work as before, with no stop at 20;
+ * - off: no slowdown, no warning, and the CHAIN chip still counts;
  * - the choice is kept in the existing settings store (store/useLayers.ts)
  *   across a reload;
  * - the line under the warning opens the menu at that switch, unfolding
  *   Settings, and moves nothing on the page when it appears.
  *
- * The walk itself at 20 ahead with the limit off is walkFluid.test.ts.
+ * The fluid pause itself, and the walk with the limit off, are walkFluid.test.ts.
  */
 import { readFileSync } from 'node:fs'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -32,15 +37,22 @@ const menu = vi.hoisted(() => ({ opened: [] as boolean[] }))
 vi.mock('../../hooks/useMenuOpen', async (orig) => ({ ...(await orig() as object), setMenuOpen: (open: boolean) => { menu.opened.push(open) } }))
 
 import { SYNCWARN_TAP_FROM, SyncWarning, useSyncWarnAside } from '../SyncWarning'
-import { WALK_LIMITS_HINT } from '../ViewPanel'
+import { WALK_LIMITS_HINT, WALK_LIMITS_TITLE } from '../ViewPanel'
 import { WALK_LIMITS_ROW, openSettingAt } from '../settingsLink'
 import { aheadBar, aheadLabel, tickClass } from '../ChainAhead'
 import { DEFAULT_LAYERS, LAYERS_KEY, loadLayers, useLayers } from '../../store/useLayers'
 import { usePanelLayout } from '../../store/usePanelLayout'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useWalk } from '../../store/useWalk'
-import { walkSpeedFactor, walkWarnOpacity } from '../../store/walkLimits'
-import { FLUID_EASE_FROM, FLUID_HOLD_AT, syncSpeedFactor, syncWarnOpacity } from '../../lib/fluidWalk'
+import { SYNC_SLOWDOWN_ON, walkSpeedFactor, walkWarnOpacity } from '../../store/walkLimits'
+import { FLUID_EASE_FROM, FLUID_HOLD_AT, FLUID_PAUSE_AT, syncSpeedFactor, syncWarnOpacity } from '../../lib/fluidWalk'
+
+/** The parked slowdown and warning (store/walkLimits.ts SYNC_SLOWDOWN_ON) switched on or back to the flag. */
+const slowdown = (on: boolean | null): void => {
+  const g = globalThis as { __ONOSENDAI_SYNC_SLOWDOWN__?: boolean }
+  if (on === null) delete g.__ONOSENDAI_SYNC_SLOWDOWN__
+  else g.__ONOSENDAI_SYNC_SLOWDOWN__ = on
+}
 
 /** The page as the warning's line looks it up: the one switch it opens at, scrolled to and focused, drawn after `missing` more looks (the menu still opening). */
 const row = { scrolled: 0, focused: 0, missing: 0 }
@@ -76,22 +88,37 @@ afterEach(() => {
 })
 
 describe('the setting', () => {
-  it('is on by default, as WALK always was: the speed and the warning go by the slowdown', () => {
+  it('is on by default; the slowdown and the warning are parked, so nothing slows or warns', () => {
     expect(DEFAULT_LAYERS.walkLimits).toBe(true)
     expect(useLayers.getState().walkLimits).toBe(true)
+    expect(SYNC_SLOWDOWN_ON).toBe(false)
     for (const n of [0, FLUID_EASE_FROM, 15, 17, 19, FLUID_HOLD_AT, 30]) {
-      expect(walkSpeedFactor(n)).toBe(syncSpeedFactor(n))
-      expect(walkWarnOpacity(n)).toBe(syncWarnOpacity(n))
-    }
-    expect(walkSpeedFactor(FLUID_HOLD_AT)).toBe(0)
-  })
-
-  it('off: full speed and no warning however far ahead', () => {
-    useLayers.getState().setLayer('walkLimits', false)
-    for (const n of [0, 15, 19, FLUID_HOLD_AT, 40, 200]) {
       expect(walkSpeedFactor(n)).toBe(1)
       expect(walkWarnOpacity(n)).toBe(0)
     }
+  })
+
+  it('switched back on, the speed and the warning go by the slowdown, with no stop at 20', () => {
+    slowdown(true)
+    try {
+      for (const n of [0, FLUID_EASE_FROM, 15, 17, 19, FLUID_HOLD_AT, 30]) {
+        expect(walkSpeedFactor(n)).toBe(syncSpeedFactor(n))
+        expect(walkWarnOpacity(n)).toBe(syncWarnOpacity(n))
+      }
+      expect(walkSpeedFactor(FLUID_HOLD_AT)).toBeGreaterThan(0)
+    } finally { slowdown(null) }
+  })
+
+  it('off: full speed and no warning however far ahead, the slowdown switched back on or not', () => {
+    useLayers.getState().setLayer('walkLimits', false)
+    for (const on of [false, true]) {
+      slowdown(on)
+      for (const n of [0, 15, 19, FLUID_HOLD_AT, 40, 200]) {
+        expect(walkSpeedFactor(n)).toBe(1)
+        expect(walkWarnOpacity(n)).toBe(0)
+      }
+    }
+    slowdown(null)
   })
 
   it('is kept across a reload, in the settings store that already holds the other switches', () => {
@@ -108,19 +135,21 @@ describe('the setting', () => {
     expect(loadLayers()).toMatchObject({ dots: false, walkLimits: true })
   })
 
-  it('says what it does and the risk, with no em dash; the menu explanation has the risk in full', () => {
-    expect(WALK_LIMITS_HINT).toContain('slows and stops')
-    expect(WALK_LIMITS_HINT).toContain('can be lost')
+  it('is named for what it does now, says it plainly, with no em dash; the menu explanation has the risk in full', () => {
+    expect(WALK_LIMITS_TITLE).toBe('Pause fluid walk when your chain falls behind')
+    expect(WALK_LIMITS_HINT).toBe('Fluid WALK turns off 21 moves ahead of your chain and comes back on at 15.')
     const panelSource = readFileSync(new URL('../ViewPanel.tsx', import.meta.url), 'utf8').replace(/\s+/g, ' ')
     expect(panelSource).toContain('If your chain falls far behind and something interrupts it, like closing the tab or losing connection, moves that have not reached your chain can be lost.')
-    expect(WALK_LIMITS_HINT).not.toMatch(/\u2014/)
+    expect(panelSource).not.toContain('Chain sync limit keeps')
+    for (const words of [WALK_LIMITS_TITLE, WALK_LIMITS_HINT, panelSource]) expect(words).not.toMatch(/\u2014/)
   })
 
-  it('off, the CHAIN chip still counts how far ahead, with no slowing stretch, brackets, red or stop', () => {
-    expect(aheadLabel(22)).toBe(' 22 moves ahead of your chain. The walk stops at 20.')
-    expect(aheadLabel(22, false)).toBe(' 22 moves ahead of your chain. The sync limit is off.')
+  it('off, the CHAIN chip still counts how far ahead, with no amber stretch, brackets or red', () => {
+    expect(aheadLabel(22)).toBe(' 22 moves ahead of your chain. Fluid WALK pauses at 21.')
+    expect(aheadLabel(22, false)).toBe(' 22 moves ahead of your chain. The fluid pause is off.')
     expect(aheadLabel(0, false)).toBe('')
-    expect(aheadBar(20)).toMatchObject({ n: 20, slow: true, limit: true, close: 1, zone: true })
+    expect(aheadBar(20)).toMatchObject({ n: 20, slow: true, limit: false, close: 1, zone: true })
+    expect(aheadBar(FLUID_PAUSE_AT)).toMatchObject({ n: 20, slow: true, limit: true, close: 1, zone: true })
     for (const n of [5, 15, 20, 40]) {
       const bar = aheadBar(n, false)
       expect(bar, String(n)).toMatchObject({ n: Math.min(n, 20), on: true, slow: false, limit: false, close: 0, zone: false })
@@ -131,7 +160,23 @@ describe('the setting', () => {
   })
 })
 
-describe('the LOSING SYNC warning', () => {
+describe('the LOSING SYNC warning, parked', () => {
+  it('is not on the page at all, nor its line, however far ahead', async () => {
+    useCyberspace.setState({ walking: true })
+    for (const n of [15, FLUID_HOLD_AT, 40]) {
+      useWalk.setState({ open: null, behind: n })
+      const m = await mount(<SyncWarning />)
+      expect(m.all().filter((h) => String(h.props.className ?? '').includes('syncwarn'))).toHaveLength(0)
+      expect(m.buttons('Turn off this warning in settings')).toHaveLength(0)
+      await m.unmount()
+    }
+  })
+})
+
+describe('the LOSING SYNC warning, switched back on', () => {
+  beforeEach(() => slowdown(true))
+  afterEach(() => slowdown(null))
+
   /** Walking, `n` events ahead (the open segment is one of them). */
   const ahead = (n: number): void => {
     useCyberspace.setState({ walking: true })

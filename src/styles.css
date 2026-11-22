@@ -5963,11 +5963,67 @@ select.avatars__input option:checked {
   border-color: rgba(200, 245, 255, 0.18);
 }
 
+/* ---------- Fluid pause: the word beside the CHAIN chip ----------
+ *
+ * hud/FluidPauseNotice.tsx (arkinox, 2026-11-22): "Fluid paused while your
+ * chain catches up" while fluid WALK is paused for the chain, "Fluid back
+ * on" briefly once it is not. The chip's row is the chip's own size; the
+ * word is absolutely placed beside it and takes no pointer events, so
+ * nothing moves when it shows. It fades in (an animation as it is put on
+ * the page) and out (a transition before it is taken off) by opacity alone. White words with a dark edge over the scene, on a thin tag with the
+ * house chamfer (top left and bottom right cut): the line is the tag's
+ * background, the fill a layer inset by a pixel under the same cut.
+ */
+.explorer__chiprow {
+  position: relative;
+  display: flex;
+}
+.fluidnote {
+  --fluidnote-line: rgba(255, 176, 32, 0.75);
+  --fluidnote-cut: 6px;
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  isolation: isolate;
+  width: max-content;
+  /* On a phone the words wrap before they reach the 3D compass in the top right corner. */
+  max-width: calc(100vw - 100% - var(--instruments-left) - 8px - var(--compass-reserve));
+  padding: 3px 9px 3px 10px;
+  font-family: 'Monaspace Krypton', var(--mono);
+  font-size: 10px;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+  color: #fff;
+  text-shadow: 0 0 1px #000, 0 0 2px rgba(0, 0, 0, 0.95), 0 1px 3px rgba(0, 0, 0, 0.9);
+  background: var(--fluidnote-line);
+  clip-path: polygon(var(--fluidnote-cut) 0, 100% 0, 100% calc(100% - var(--fluidnote-cut)), calc(100% - var(--fluidnote-cut)) 100%, 0 100%, 0 var(--fluidnote-cut));
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+.fluidnote::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  background: linear-gradient(90deg, rgba(40, 26, 4, 0.92), rgba(6, 14, 22, 0.86));
+  clip-path: polygon(calc(var(--fluidnote-cut) - 0.6px) 0, 100% 0, 100% calc(100% - var(--fluidnote-cut) + 0.6px), calc(100% - var(--fluidnote-cut) + 0.6px) 100%, 0 100%, 0 calc(var(--fluidnote-cut) - 0.6px));
+}
+.fluidnote.is-resumed { --fluidnote-line: rgba(0, 229, 255, 0.7); }
+.fluidnote.is-resumed::before { background: linear-gradient(90deg, rgba(0, 40, 48, 0.92), rgba(6, 14, 22, 0.86)); }
+.fluidnote.is-on { opacity: 1; animation: fluidnote-in 320ms ease; }
+@keyframes fluidnote-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .fluidnote { transition: none; }
+  .fluidnote.is-on { animation: none; }
+}
+
 /* ---------- Chain chip: how far ahead ----------
  *
  * WALK's events ahead of your chain, on the CHAIN chip (hud/ChainAhead.tsx):
  * twenty slanted ticks in the chip's bottom padding, one per event up to
- * where the walk stops. Everything here is absolutely positioned inside the
+ * one short of the fluid pause. Everything here is absolutely positioned inside the
  * button or just outside it and takes no pointer events, so the chip keeps
  * its size and the chips under it keep their place in every state. Nothing
  * of it is on the page with nothing ahead.
@@ -5976,8 +6032,8 @@ select.avatars__input option:checked {
  * |---|---|
  * | has-ahead | the marks are on the page: ahead, or fading out after catching up |
  * | is-ahead | one event ahead or more: the bar shows |
- * | is-slow | the walk is slowing (15 to 19): amber, the corner brackets |
- * | is-limit | the walk is stopped (20): the warning's red, a slow breathe |
+ * | is-slow | near the fluid pause (15 to 20): amber, the corner brackets |
+ * | is-limit | fluid WALK is paused (21 and past): red, a slow breathe |
  *
  * Cheap to run (arkinox, 2026-11-21: "I like the visual, but I don't want
  * to sacrifice the performance"): every motion here is transform or

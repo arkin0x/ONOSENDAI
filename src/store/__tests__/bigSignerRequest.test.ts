@@ -248,6 +248,40 @@ describe('a big request to a remote signer, through the store', () => {
     }
   }, 60_000)
 
+  it('a question nobody answers counts as DON\'T SEND after five minutes, and lets the clocks go', async () => {
+    const { loaded: { S, size } } = await pairedDevice()
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    let failure: unknown = null
+    try {
+      const asked = bus.requests
+      const signing = S.getState().signEvent(shard(72_000)).catch((err: unknown) => { failure = err })
+      await vi.advanceTimersByTimeAsync(50)
+      expect(size.useBigRequestQuestion.getState().question).not.toBeNull()
+      await vi.advanceTimersByTimeAsync(size.QUESTION_PATIENCE_MS)
+      await signing
+      expect(size.useBigRequestQuestion.getState().question).toBeNull()
+      expect((failure as { reason?: unknown }).reason).toBe('declined')
+      expect(bus.requests).toBe(asked)
+      // A small signature after it runs on its own clock again, and is signed.
+      const small = S.getState().signEvent(shard(100, 'small'))
+      await vi.advanceTimersByTimeAsync(100)
+      expect((await small).content).toHaveLength(100)
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 60_000)
+
+  it('the latest silence is the chip shown: an ordinary stall after a big one says pair again', async () => {
+    const { session, loaded: { activity } } = await pairedDevice()
+    activity.noteBigSilent(session)
+    expect(activity.activityOf(session).bigSilentAt).not.toBeNull()
+    activity.noteSignerStuck(session)
+    expect(activity.activityOf(session).bigSilentAt).toBeNull()
+    expect(activity.activityOf(session).stuckAt).not.toBeNull()
+    activity.noteBigSilent(session)
+    expect(activity.activityOf(session).stuckAt).toBeNull()
+  }, 30_000)
+
   it('an ordinary silence still says LOG OUT and pair again', async () => {
     const { session, loaded: { S, activity, within } } = await pairedDevice()
     bus.alive = false

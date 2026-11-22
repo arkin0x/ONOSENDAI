@@ -139,7 +139,8 @@ export function trackActivity<T extends Requester>(bunker: T, session: string): 
 /** A signature this device needed ran out of time with `session`'s signer. */
 export function noteSignerStuck(session: string | null | undefined): void {
   if (!session) return
-  update(session, (a) => ({ ...a, stuckAt: Date.now() }))
+  // The latest silence is the one said: an ordinary one puts away the big-message chip.
+  update(session, (a) => ({ ...a, stuckAt: Date.now(), bigSilentAt: null }))
 }
 
 /** `session`'s signer answered a big request: it reads big messages, and is not warned about them again. */
@@ -150,7 +151,7 @@ export function noteReadsBig(session: string): void {
 /** A signature waiting on a big request, sent anyway, ran out of time with `session`'s signer. */
 export function noteBigSilent(session: string | null | undefined): void {
   if (!session) return
-  update(session, (a) => ({ ...a, bigSilentAt: Date.now() }))
+  update(session, (a) => ({ ...a, bigSilentAt: Date.now(), stuckAt: null }))
 }
 
 /** Forget a session: LOG OUT, or a test starting afresh. */

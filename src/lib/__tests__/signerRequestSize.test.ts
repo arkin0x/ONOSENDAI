@@ -146,6 +146,28 @@ describe('a remote signer request past 65,535 bytes (arkinox, 2026-11-22: "what 
   })
 })
 
+describe('a timeout and a big request', () => {
+  it('is said to be about the size only for the signer session the big request went to', async () => {
+    const { signWithin, noteBigAsk, bigSilence } = await import('../signWithin')
+    const never = () => new Promise<never>(() => {})
+    const settledA = noteBigAsk('session-a', 'the shard')
+    try {
+      // A big request to session A went out before this began: not this signature's.
+      await new Promise((r) => setTimeout(r, 5))
+      const late = await signWithin({ signEvent: never, session: 'session-a' }, { kind: 1, created_at: 1, tags: [], content: '' }, 30).catch((e: unknown) => e)
+      expect(bigSilence(late)).toBeNull()
+      const sigA = signWithin({ signEvent: never, session: 'session-a' }, { kind: 1, created_at: 1, tags: [], content: '' }, 30).catch((e: unknown) => e)
+      const sigB = signWithin({ signEvent: never, session: 'session-b' }, { kind: 1, created_at: 1, tags: [], content: '' }, 30).catch((e: unknown) => e)
+      const settledA2 = noteBigAsk('session-a', 'the shard')
+      expect(bigSilence(await sigA)).toBe('the shard')
+      expect(bigSilence(await sigB)).toBeNull()
+      settledA2()
+    } finally {
+      settledA()
+    }
+  })
+})
+
 describe('the hard caps, unchanged', () => {
   it('a request past what the signer relay carries in one kind 24133 event (512 KB) is refused at once, never asked about', async () => {
     const { signer, published } = await sessionSigner()

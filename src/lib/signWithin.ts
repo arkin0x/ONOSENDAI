@@ -140,20 +140,26 @@ export function askAgain(): void {
  * signature that runs out of time with one of these sent after it began
  * says so (SignerTimeout.big). Forgotten after LATE_PATIENCE_MS.
  */
-const bigAsks = new Set<{ at: number; noun: string }>()
+const bigAsks = new Set<{ at: number; session: string; noun: string }>()
 
-/** A big request went out (TRY ANYWAY). Returns its end: answered, or failed on the way. */
-export function noteBigAsk(noun: string): () => void {
-  const now = Date.now()
+function pruneBigAsks(now: number): void {
   for (const a of bigAsks) if (now - a.at > LATE_PATIENCE_MS) bigAsks.delete(a)
-  const ask = { at: now, noun }
+}
+
+/** A big request went out to `session`'s signer (TRY ANYWAY). Returns its end: answered, or failed on the way. */
+export function noteBigAsk(session: string, noun: string): () => void {
+  const now = Date.now()
+  pruneBigAsks(now)
+  const ask = { at: now, session, noun }
   bigAsks.add(ask)
   return () => { bigAsks.delete(ask) }
 }
 
-/** What to make smaller, if a big request sent at or after `since` is still unanswered. */
-function bigAskSince(since: number): string | null {
-  for (const a of bigAsks) if (a.at >= since) return a.noun
+/** What to make smaller, if a big request to `session`'s signer sent at or after `since` is still unanswered. */
+function bigAskSince(since: number, session: string | undefined): string | null {
+  if (!session) return null
+  pruneBigAsks(Date.now())
+  for (const a of bigAsks) if (a.session === session && a.at >= since) return a.noun
   return null
 }
 
@@ -186,7 +192,7 @@ export function holdSignClocks(): () => void {
  * timeout. A move never takes one (its caller has moved on); a relay's AUTH
  * does, since signing in late beats not signing in (relay.ts authSign).
  */
-export async function signWithin(signer: { signEvent: (template: EventTemplate) => Promise<NostrEvent> }, template: EventTemplate, ms: number = SIGN_PATIENCE_MS, late?: (signed: NostrEvent) => void): Promise<NostrEvent> {
+export async function signWithin(signer: { signEvent: (template: EventTemplate) => Promise<NostrEvent>; session?: string }, template: EventTemplate, ms: number = SIGN_PATIENCE_MS, late?: (signed: NostrEvent) => void): Promise<NostrEvent> {
   const startedAt = Date.now()
   // Asked before the timer is set: a signer that throws at once leaves no timer behind.
   const signing = signer.signEvent(template)
@@ -198,7 +204,7 @@ export async function signWithin(signer: { signEvent: (template: EventTemplate) 
     fire = () => {
       timedOut = true
       if (late) waitingLate = awaitLate()
-      reject(new SignerTimeout(bigAskSince(startedAt)))
+      reject(new SignerTimeout(bigAskSince(startedAt, signer.session)))
     }
   })
   // Not armed while the person is being asked whether to send it at all (holdSignClocks).

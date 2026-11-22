@@ -293,7 +293,7 @@ export function BigRequestQuestion(): JSX.Element | null {
   )
 }
 
-/** Draws the LOG OUT confirm, PAIR AGAIN's QR, the login and the big-request question wherever they were opened from. */
+/** Draws the LOG OUT confirm, PAIR AGAIN's QR and the login wherever they were opened from. (The big-request question is drawn by App, outside the modals' crash boundary.) */
 export function SignerUiHost(): JSX.Element | null {
   const logoutOpen = useSignerUi((s) => s.logoutOpen)
   const pairFor = useSignerUi((s) => s.pairFor)
@@ -302,5 +302,5 @@ export function SignerUiHost(): JSX.Element | null {
   if (logoutOpen) panel = <LogoutConfirm />
   else if (pairFor) panel = <LoginModal pairFor={pairFor} onClose={() => useSignerUi.getState().close()} />
   else if (loginOpen) panel = <LoginModal onClose={() => useSignerUi.getState().close()} />
-  return <>{panel}<BigRequestQuestion /></>
+  return panel
 }

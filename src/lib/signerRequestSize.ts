@@ -178,8 +178,19 @@ export interface BigRequestQuestion {
 /** The big-request question, drawn by SignerControls.tsx; null when none is open. */
 export const useBigRequestQuestion = create<{ question: BigRequestQuestion | null }>(() => ({ question: null }))
 
-/** The question open now, if any: a second big request waits on its answer instead of asking again. */
+/**
+ * The question open now, if any. A second big request made while it is open
+ * (another session's included) waits on its answer and takes it, instead of
+ * stacking a second question: the person chose for big requests just now.
+ */
 let openQuestion: Promise<boolean> | null = null
+
+/**
+ * How long a question waits before it counts as DON'T SEND. Every remote
+ * signature's clock is held while it is open, so one never answered (its
+ * modal never drawn, say) must not hold them for good.
+ */
+export const QUESTION_PATIENCE_MS = 5 * 60_000
 
 /**
  * Ask the person whether to send a big request. Every signature's clock is
@@ -191,22 +202,18 @@ function askTryAnyway(session: string, method: string, params: readonly string[]
   const release = holdSignClocks()
   const asked = new Promise<boolean>((resolve) => {
     let answered = false
+    const answer = (go: boolean): void => {
+      if (answered) return
+      answered = true
+      clearTimeout(backstop)
+      openQuestion = null
+      useBigRequestQuestion.setState({ question: null })
+      release()
+      resolve(go)
+    }
+    const backstop = setTimeout(() => answer(false), QUESTION_PATIENCE_MS)
     useBigRequestQuestion.setState({
-      question: {
-        session,
-        method,
-        noun: requestNoun(method, params),
-        bytes,
-        words: signerRequestBigWords(method, params, bytes),
-        answer: (go) => {
-          if (answered) return
-          answered = true
-          openQuestion = null
-          useBigRequestQuestion.setState({ question: null })
-          release()
-          resolve(go)
-        },
-      },
+      question: { session, method, noun: requestNoun(method, params), bytes, words: signerRequestBigWords(method, params, bytes), answer },
     })
   })
   openQuestion = asked
@@ -215,8 +222,8 @@ function askTryAnyway(session: string, method: string, params: readonly string[]
 
 /**
  * Requests the person already chose TRY ANYWAY for, by their session,
- * method and params, for a short while: the store asks a silent signer once more over
- * fresh sockets (useCyberspace signEvent), and that same request is not
+ * method and params, for a short while: the store asks a silent signer once
+ * more over fresh sockets (useCyberspace signEvent), and that same request is not
  * asked about twice.
  */
 const triedAnyway = new Map<string, number>()
@@ -270,7 +277,7 @@ export function guardRequestSize<T extends Requester>(bunker: T, session: string
       if (!(await askTryAnyway(session, method, params, bytes))) throw new SignerRequestTooBig(method, params, bytes, 'declined')
       triedAnyway.set(key, Date.now())
     }
-    const settled = noteBigAsk(requestNoun(method, params))
+    const settled = noteBigAsk(session, requestNoun(method, params))
     try {
       const result = await send(method, params)
       noteReadsBig(session)

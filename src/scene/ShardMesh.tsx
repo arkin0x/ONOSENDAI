@@ -833,8 +833,14 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom 
 /** How strong the bench's dots for an object no one can see are drawn: faint, but there. */
 export const BENCH_FAINT_OPACITY = 0.35
 
-/** The material of an invisible hit copy (never drawn: it only lets a ray find the faces). */
-const HIT_MATERIAL = new MeshBasicMaterial()
+/**
+ * The material of the copy of an unseen object (opacity 0, or POINTS at size
+ * 0) that only answers taps and picks. The copy is never drawn (visible
+ * false; three and R3F raycast it anyway), and should it ever be, it writes
+ * neither colour nor depth: an invisible wall stops a walker and hides
+ * nothing (owner's ruling on 0% with constrain).
+ */
+const HIT_MATERIAL = new MeshBasicMaterial({ colorWrite: false, depthWrite: false })
 
 /** A unit cube's twelve edges, centred on the origin: the placeholder (§1.10). */
 export const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))

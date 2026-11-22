@@ -11,6 +11,7 @@
 
 import { hiddenDecided, ONLY_SAID_KEY, putSecretResult, secretRecord, SECRETS_KEY, storageMode, troubleOf, type SaveResult, type SaveTrouble } from './hiddenStorage'
 import { useToast } from './useToast'
+import { useCyberspace } from './useCyberspace'
 
 /** In local mode only (store/hiddenStorage.ts): the database has no such limit. The oldest fall off past it. */
 const SECRETS_MAX = 2000
@@ -75,12 +76,18 @@ export const SECRET_NOT_SENT: Record<SaveTrouble, string> = {
 const localTrouble = (): Promise<SaveTrouble> => troubleOf(new DOMException('localStorage is full', 'QuotaExceededError'), 'local')
 
 /** Say a secret was not kept, once known: a write that was only slow and then landed says nothing. */
-async function saidNotKept(r: SaveResult | Promise<SaveTrouble>): Promise<void> {
+async function saidNotKept(r: SaveResult | Promise<SaveTrouble>, me: string): Promise<void> {
   let trouble: SaveTrouble
   if (r instanceof Promise) trouble = await r
   else {
     trouble = r.trouble ?? 'refused'
-    if (r.late) { const late = await r.late; if (late === null) return; trouble = late }
+    if (r.late) {
+      const late = await r.late
+      if (late === null) return
+      // Up to a minute later: not over another identity's screen.
+      if (useCyberspace.getState().identity.pubkey !== me) return
+      trouble = late
+    }
   }
   useToast.getState().show({ label: 'SECRET NOT SAVED', meta: SECRET_NOT_KEPT[trouble], mark: 'build' })
 }
@@ -113,10 +120,10 @@ function record(me: string, doorId: string, secretHex: string, how?: { onlySaid:
  * commitDoorSecret.
  */
 export function keepDoorSecret(me: string, doorId: string, secretHex: string, how?: { onlySaid: true }): void {
-  if (storageMode() === 'local') { if (!keepLocally(me, doorId, secretHex, how)) void saidNotKept(localTrouble()); return }
+  if (storageMode() === 'local') { if (!keepLocally(me, doorId, secretHex, how)) void saidNotKept(localTrouble(), me); return }
   void hiddenDecided().then(() => {
-    if (storageMode() === 'local') { if (!keepLocally(me, doorId, secretHex, how)) void saidNotKept(localTrouble()); return }
-    return putSecretResult(record(me, doorId, secretHex, how)).then((r) => { if (!r.ok) void saidNotKept(r) })
+    if (storageMode() === 'local') { if (!keepLocally(me, doorId, secretHex, how)) void saidNotKept(localTrouble(), me); return }
+    return putSecretResult(record(me, doorId, secretHex, how)).then((r) => { if (!r.ok) void saidNotKept(r, me) })
   })
 }
 

@@ -137,7 +137,7 @@ describe('the setting', () => {
 
   it('is named for what it does now, says it plainly, with no em dash; the menu explanation has the risk in full', () => {
     expect(WALK_LIMITS_TITLE).toBe('Optimize chain')
-    expect(WALK_LIMITS_HINT).toBe('Pauses fluid walk when your chain falls behind. Step walking makes fewer new chain events, so your chain catches up.')
+    expect(WALK_LIMITS_HINT).toBe('Pauses fluid walk when your chain falls behind. Walking without fluid makes fewer new chain events, so your chain catches up.')
     const panelSource = readFileSync(new URL('../ViewPanel.tsx', import.meta.url), 'utf8').replace(/\s+/g, ' ')
     expect(panelSource).toContain('If your chain falls far behind and something interrupts it, like closing the tab or losing connection, moves that have not reached your chain can be lost.')
     expect(panelSource).not.toContain('Chain sync limit keeps')

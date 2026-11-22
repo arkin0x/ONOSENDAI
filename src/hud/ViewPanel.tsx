@@ -66,7 +66,7 @@ interface ViewRow {
 export const WALK_LIMITS_TITLE = 'Optimize chain'
 
 /** The sync limit's line: what it does and why ("explain that this reduces new chain events to help your chain catch up"). */
-export const WALK_LIMITS_HINT = 'Pauses fluid walk when your chain falls behind. Step walking makes fewer new chain events, so your chain catches up.'
+export const WALK_LIMITS_HINT = 'Pauses fluid walk when your chain falls behind. Walking without fluid makes fewer new chain events, so your chain catches up.'
 
 /** The Fluid WALK row's line while it is paused for the chain. */
 export const FLUID_PAUSED_HINT = 'Paused while your chain catches up.'
@@ -82,7 +82,8 @@ export const HARD_GRAVITY_HINT = 'Gravity will not turn off if there is nothing 
 /**
  * The panel's groups, in order, each a subheading and its rows' switch ids in
  * order (arkinox, 2026-11-22; Hide avatar moved from Movement to Effects the
- * same day). Every row in the panel is in exactly one group.
+ * same day). Every row in the panel is in exactly one group; a row added to
+ * the panel but to no group shows under Other at the end, never nowhere.
  */
 export const SETTINGS_GROUPS: ReadonlyArray<{ id: string; title: string; rows: readonly string[] }> = [
   { id: 'protocol', title: 'Protocol visualization', rows: ['view-chain-trail', 'view-terrain-dots', 'view-hx-boxes', 'view-region-keys', 'view-spatial-audio'] },
@@ -252,13 +253,16 @@ export function ViewPanel(): JSX.Element {
   ]
 
   const byId = new Map(rows.map((r) => [r.id, r]))
+  const grouped = new Set(SETTINGS_GROUPS.flatMap((g) => g.rows))
+  const ungrouped = rows.filter((r) => !grouped.has(r.id)).map((r) => r.id)
+  const groups = ungrouped.length ? [...SETTINGS_GROUPS, { id: 'other', title: 'Other', rows: ungrouped }] : SETTINGS_GROUPS
 
   return (
     <section className="panel panel--view">
       <header className="panel__head">
         <h2>Settings</h2>
       </header>
-      {SETTINGS_GROUPS.map((g, i) => (
+      {groups.map((g, i) => (
         <Fragment key={g.id}>
           {i > 0 && <hr className="view__rule" />}
           <div className="view__group" role="group" aria-labelledby={`view-group-${g.id}`}>
@@ -302,9 +306,9 @@ export function ViewPanel(): JSX.Element {
         how far ahead you are. If your chain falls far behind and something
         interrupts it, like closing the tab or losing connection, moves that
         have not reached your chain can be lost.
-        Interface: Look sphere in WALK puts a ball in the bottom right while
+        In Interface, Look sphere in WALK puts a ball in the bottom right while
         you walk: drag it to look around, as a drag on the scene does.
-        Effects: Headlamp lights shards from your view, as a flashlight would:
+        In Effects, Headlamp lights shards from your view, as a flashlight would:
         a face turned away from you, or far off, is darker, so shapes of one
         color show their depth; off, every face is exactly its own color.
         Glow draws the light or fog some objects cast around their points;
@@ -312,7 +316,7 @@ export function ViewPanel(): JSX.Element {
         on the object you are making. Hide avatar in WALK takes your own
         avatar out of the way while you walk in first person, where the
         camera sits inside it.
-        Sync: Sync hidden list is the one switch here that reaches the relay.
+        In Sync, Sync hidden list is the one switch here that reaches the relay.
         Your list of hidden things is saved to the relay, encrypted so only
         you can read it. Any device signed in as you shows the same list and
         can open what is in it. Nothing is saved while you are LOCAL. If your

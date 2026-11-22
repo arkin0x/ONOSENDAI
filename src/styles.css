@@ -10159,8 +10159,8 @@ select.avatars__input option:checked {
 
 /* SETTINGS: one switch to a row, in five groups (hud/ViewPanel.tsx; arkinox,
    2026-11-22: "group the settings ... with subheadings and HRs"). A group's
-   subheading is white over the scene, small and widely tracked like the
-   panel's own title, after a small chamfered cyan tick (top-left and
+   subheading is white over the scene, the size of the panel's own title and
+   tracked wider than the rows, after a small chamfered cyan tick (top-left and
    bottom-right corners cut, as the item thumbnails are). Between groups a
    hairline fades out to the right. Every size here is fixed: a hint that
    changes (Fluid WALK paused, Sync hidden list's note) moves nothing above it. */
@@ -10169,7 +10169,7 @@ select.avatars__input option:checked {
   align-items: center;
   gap: 7px;
   margin: 2px 0 0;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 600;
   line-height: 14px;
   letter-spacing: 0.24em;

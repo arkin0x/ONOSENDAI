@@ -380,7 +380,7 @@ describe('the Settings groups (arkinox, 2026-11-22: "group the settings ... with
 
   it('Optimize chain is the sync limit row renamed: same switch id, same store flag, the default on, kept on this device', () => {
     expect(WALK_LIMITS_TITLE).toBe('Optimize chain')
-    expect(WALK_LIMITS_HINT).toBe('Pauses fluid walk when your chain falls behind. Step walking makes fewer new chain events, so your chain catches up.')
+    expect(WALK_LIMITS_HINT).toBe('Pauses fluid walk when your chain falls behind. Walking without fluid makes fewer new chain events, so your chain catches up.')
     expect(WALK_LIMITS_ROW).toBe('view-walk-limits')
     const html = view()
     expect(html).not.toContain('Pause fluid walk when your chain falls behind</span>')

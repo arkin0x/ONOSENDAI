@@ -738,6 +738,8 @@ export async function recoverShards(): Promise<Recovery> {
   if (raw) texts.push(raw)
   try { texts.push(...await kvCopiesOf(LOCAL_KEY)) } catch (e) { console.warn(`[workshop] recover: the kv copies could not be read: ${describe(e)}`) }
   const live = mode === 'indexeddb'
+  // Never make the database here: one that is not there holds nothing to recover into, and the load's move makes it.
+  if (!live && (await databaseExists()) === false) return { ok: false, error: 'Your shards never finished moving to this storage. Reload, and the move runs again.' }
   let d: IDBDatabase
   try {
     d = live ? await within(database(), RECOVER_WAIT_MS, 'did not open') : await openWorkshopDb()

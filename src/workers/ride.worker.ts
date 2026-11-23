@@ -55,7 +55,8 @@ export type RideWorkerRequest = RideChunkRequest | CalibrateRequest | RideGrindR
 
 export type RideChunkResponse =
   | { type: 'leaf'; id: number; height: number; leafHex: string }
-  | { type: 'calibrated'; id: number; elapsedMs: number; pairs: number }
+  /** work: the sample's work in mean pairings (exactRideWork). */
+  | { type: 'calibrated'; id: number; elapsedMs: number; work: number }
   | { type: 'ready'; id: number }
   /** One attempt; gHex is G when this nonce meets the price, else null. */
   | { type: 'attempt'; id: number; nonce: number; gHex: string | null }
@@ -87,8 +88,8 @@ self.onmessage = (event: MessageEvent<RideWorkerRequest>) => {
   if (event.data.type === 'calibrate') {
     const { id } = event.data
     try {
-      const { elapsedMs, pairs } = timeCalibrationSample()
-      const response: RideChunkResponse = { type: 'calibrated', id, elapsedMs, pairs }
+      const { elapsedMs, work } = timeCalibrationSample()
+      const response: RideChunkResponse = { type: 'calibrated', id, elapsedMs, work }
       self.postMessage(response)
     } catch (err) {
       const response: RideChunkResponse = { type: 'error', id, message: err instanceof Error ? err.message : String(err) }

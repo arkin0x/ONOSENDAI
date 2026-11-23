@@ -1914,6 +1914,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     moveSelected: (axis, delta) => {
       const { selection, partSel } = get()
       if (selection.length === 0 && partSel.length === 0) return
+      let refused = false
       edit((s) => {
         // Every selected point and placed object moves the same unit; if any
         // would leave the grid the whole move is refused, so a shape never tears.
@@ -1924,18 +1925,20 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         for (const i of chosen) {
           const p = ticksOf(vertices[i])
           p[axis] += delta
-          if (!validPoint(p, s.extent)) return null
+          if (!validPoint(p, s.extent)) { refused = true; return null }
           vertices[i] = vertexAt(p, vertices[i].c)
         }
         const parts = (s.parts ?? []).slice()
         for (const i of placed) {
           const at = [...parts[i].at] as P3
           at[axis] += delta
-          if (!validPoint(at, s.extent)) return null
+          if (!validPoint(at, s.extent)) { refused = true; return null }
           parts[i] = { ...parts[i], at }
         }
         return placed.size ? { ...s, vertices, parts } : { ...s, vertices }
       })
+      // Said, so a big BY SIZE step at the edge is not a key that does nothing.
+      if (refused) set({ notice: 'That move would carry a point or an object off the grid. GRID SIZE in GRID makes room.' })
     },
 
     rotateSelected: (turns) => {

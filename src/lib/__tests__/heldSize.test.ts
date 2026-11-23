@@ -48,6 +48,13 @@ describe('heldSize', () => {
     expect(sizeStep(null, 0, 60, true)).toBe(60)
   })
 
+  it('rounds a size up to whole snap steps, so a move never leaves the snap grid', () => {
+    // A 16-unit piece turned 45 degrees is about 22.63 units wide: 23 units on a whole-unit snap.
+    expect(sizeStep([Math.round(22.63 * T), 0, 0], 0, T, true)).toBe(23 * T)
+    expect(sizeStep([16 * T, 0, 0], 0, T, true)).toBe(16 * T)
+    expect(sizeStep([16 * T + 1, 0, 0], 0, T / 2, true)).toBe(16.5 * T)
+  })
+
   it('a placed object counts as drawn: its own geometry where it stands, and a unit cube until it is read', () => {
     w().create('s')
     const block = fromPayload({ v: 2, name: 'Block', unit: 0, mode: 'solid', vertices: [[0, 0, 0], [16, 0, 0], [0, 16, 0], [0, 0, -16]], colors: [5, 5, 5, 5], faces: [] }, 'block')!
@@ -57,8 +64,10 @@ describe('heldSize', () => {
     expect(heldSize(cur(), [], [0], resolved)).toEqual([16 * T, 16 * T, 16 * T])
     // Not read yet: a unit cube about where it stands.
     expect(heldSize(cur(), [], [0], NONE)).toEqual([T, T, T])
+    // The block runs to model -16 on Z (the payload's +Z is the model's -Z): its box says exactly that.
     const box = heldBox(cur(), [], [0], resolved)!
-    expect(box.min[2]).toBeLessThan(box.max[2])
+    expect(box.min).toEqual([0, 0, 0])
+    expect(box.max).toEqual([16 * T, 16 * T, 16 * T])
   })
 })
 
@@ -84,6 +93,17 @@ describe('BY SIZE in the workshop', () => {
     // Nothing held: the snap.
     w().selectVertex(null)
     expect(w().moveStep(0)).toBe(w().step())
+    w().setStepBySize(false)
+  })
+
+  it('a step that would carry what is held off the grid is refused, and says so', () => {
+    bigBlock()
+    w().setExtent(16)
+    w().setStepBySize(true)
+    const before = cur()
+    w().moveSelected(0, w().moveStep(0))
+    expect(cur()).toBe(before)
+    expect(w().notice).toMatch(/off the grid\. GRID SIZE in GRID makes room\./)
     w().setStepBySize(false)
   })
 

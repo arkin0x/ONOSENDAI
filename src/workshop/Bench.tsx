@@ -852,7 +852,7 @@ export function Keys(): null {
       // the bench does. Workshop registers what it clears and closes.
       if (e.code === 'KeyC') { if (!look) w.selectConnected(); return }
       // X: BY SIZE on or off (the switch on the move handles, shell/MoveHandles).
-      if (e.code === 'KeyX') { if (!look) w.setStepBySize(!w.stepBySize); return }
+      if (e.code === 'KeyX') { if (!look && !w.eyeEdit && !e.repeat) w.setStepBySize(!w.stepBySize); return }
       // B, the held bar's COLOR: the color in hand onto what is held (points, or a face's corners).
       if (e.code === 'KeyB') { if (w.selection.length && !look) w.colorSelected(w.color); return }
       // The keys run 1 to 6 along the dock, left to right (Dock.tsx DOCK).

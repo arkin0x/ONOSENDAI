@@ -34,8 +34,8 @@ export function heldBox(s: ShardModel, selection: readonly number[], partSel: re
       const b = placedBounds(bare, [{ part, ref, model: r?.model ?? null, children: r?.children ?? [] }])
       if (!b) continue
       // Render units to model ticks: Z is mirrored, so its ends swap.
-      take([b.min[0] * TICKS_PER_UNIT, b.min[1] * TICKS_PER_UNIT, -b.max[2] * TICKS_PER_UNIT])
-      take([b.max[0] * TICKS_PER_UNIT, b.max[1] * TICKS_PER_UNIT, -b.min[2] * TICKS_PER_UNIT])
+      take([b.min[0] * TICKS_PER_UNIT, b.min[1] * TICKS_PER_UNIT, 0 - b.max[2] * TICKS_PER_UNIT])
+      take([b.max[0] * TICKS_PER_UNIT, b.max[1] * TICKS_PER_UNIT, 0 - b.min[2] * TICKS_PER_UNIT])
     }
   }
   return min[0] === Infinity ? null : { min, max }
@@ -47,8 +47,13 @@ export function heldSize(s: ShardModel, selection: readonly number[], partSel: r
   return b ? [0, 1, 2].map((k) => Math.round(b.max[k] - b.min[k])) as P3 : null
 }
 
-/** One move's step on `axis`: the held size there with BY SIZE on, when it has one; the snap's step otherwise. */
+/**
+ * One move's step on `axis`: the held size there with BY SIZE on, when it has
+ * one, rounded up to whole snap steps so what moves stays on the snap's grid
+ * (a piece turned 45 degrees is 22.63 units wide) and pieces moved side by
+ * side never overlap; the snap's step otherwise.
+ */
 export function sizeStep(size: P3 | null, axis: 0 | 1 | 2, snap: number, bySize: boolean): number {
-  if (!bySize || !size) return snap
-  return size[axis] > 0 ? size[axis] : snap
+  if (!bySize || !size || size[axis] <= 0 || snap <= 0) return snap
+  return Math.ceil(size[axis] / snap - 1e-9) * snap
 }

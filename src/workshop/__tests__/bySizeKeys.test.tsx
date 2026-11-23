@@ -64,6 +64,16 @@ describe('BY SIZE keys', () => {
     expect(useWorkshop.getState().stepBySize).toBe(false)
   })
 
+  it('a held X and SET EYE leave the switch alone', () => {
+    const listenersCopy = [...listeners]
+    for (const f of listenersCopy) f({ code: 'KeyX', key: 'x', repeat: true, target: null, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, preventDefault: () => {} })
+    expect(useWorkshop.getState().stepBySize).toBe(false)
+    useWorkshop.setState({ eyeEdit: true })
+    press('KeyX')
+    expect(useWorkshop.getState().stepBySize).toBe(false)
+    useWorkshop.setState({ eyeEdit: false })
+  })
+
   it('LOOK leaves the switch alone', () => {
     useWorkshop.setState({ tool: 'view' })
     press('KeyX')

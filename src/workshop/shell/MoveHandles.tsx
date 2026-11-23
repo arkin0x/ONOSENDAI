@@ -94,10 +94,12 @@ function BySize({ hub }: { hub: React.Ref<HTMLButtonElement> }): JSX.Element {
       ref={hub}
       className={`ws__handle-hub ws__bysize${on ? ' is-on' : ''}`}
       aria-pressed={on}
-      aria-label={`By size: ${on ? 'on' : 'off'}. A move steps ${steps} grid units.`}
-      title={on ? `BY SIZE (X): each move steps by what you hold's own size, ${steps}` : `BY SIZE (X): step by what you hold's own size instead of the grid step (${steps})`}
+      aria-label={`By size. A move steps ${steps}.`}
+      title={on ? `BY SIZE (X): a move steps by the size of what you hold: ${steps}` : `BY SIZE (X): a move steps by the grid: ${steps}. On: by the size of what you hold`}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={() => { const w = useWorkshop.getState(); w.setStepBySize(!w.stepBySize) }}
+      // Enter and Space here are this switch's, not the bench's (Enter there is FILL).
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') e.nativeEvent.stopPropagation() }}
       onContextMenu={(e) => e.preventDefault()}
     >
       <span className="ws__bysize-top">
@@ -121,7 +123,7 @@ export function MoveHandles(): JSX.Element {
   const hubRef = (el: HTMLElement | null): void => { hub.current = el }
   const frame = useRef<HandleFrame | null>(null)
   // The drag in flight: which axis, where it began, the steps it has made, and the history to fold it into.
-  const drag = useRef<{ axis: 0 | 1 | 2; id: number; x: number; y: number; perUnit: [number, number]; steps: number; travel: number; past: ReturnType<typeof useWorkshop.getState>['past']; before: ReturnType<ReturnType<typeof useWorkshop.getState>['current']>; shardId: string | null; slop: number } | null>(null)
+  const drag = useRef<{ axis: 0 | 1 | 2; id: number; x: number; y: number; perUnit: [number, number]; steps: number; travel: number; past: ReturnType<typeof useWorkshop.getState>['past']; before: ReturnType<ReturnType<typeof useWorkshop.getState>['current']>; shardId: string | null; slop: number; step: number } | null>(null)
 
   useEffect(() => {
     const draw = (f: HandleFrame | null): void => {
@@ -166,7 +168,7 @@ export function MoveHandles(): JSX.Element {
     e.stopPropagation()
     try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* followed by the element anyway */ }
     const st = useWorkshop.getState()
-    drag.current = { axis, id: e.pointerId, x: e.clientX, y: e.clientY, perUnit: f.perUnit[axis], steps: 0, travel: 0, past: st.past, before: st.current(), shardId: st.currentId, slop: slopFor(e.pointerType) }
+    drag.current = { axis, id: e.pointerId, x: e.clientX, y: e.clientY, perUnit: f.perUnit[axis], steps: 0, travel: 0, past: st.past, before: st.current(), shardId: st.currentId, slop: slopFor(e.pointerType), step: stepOf(axis) }
   }
   const move = (e: React.PointerEvent<HTMLButtonElement>): void => {
     const d = drag.current
@@ -175,7 +177,8 @@ export function MoveHandles(): JSX.Element {
     const dy = e.clientY - d.y
     d.travel = Math.max(d.travel, Math.hypot(dx, dy))
     if (d.travel < d.slop) return
-    const step = stepOf(d.axis)
+    // Measured once as the drag began: the count of steps stays in one length, and a big piece is not measured again every move.
+    const step = d.step
     const steps = handleSteps(dx, dy, d.perUnit, TICKS_PER_UNIT, step)
     if (steps !== d.steps) {
       moveHeld(d.axis, (steps - d.steps) * step)
@@ -223,7 +226,7 @@ export function MoveHandles(): JSX.Element {
           onPointerCancel={up}
           onContextMenu={(e) => e.preventDefault()}
           // From the keyboard: one step, as a tap.
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); moveHeld(axis, stepOf(axis)) } }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.nativeEvent.stopPropagation(); moveHeld(axis, stepOf(axis)) } }}
         >
           <span>{label}</span>
         </button>

@@ -166,7 +166,7 @@ export function StampLibrary({ onClose }: { onClose: () => void }): JSX.Element 
   const footWords = reading ? 'Reading what it places…' : !chosen ? 'Choose a shard to see what it adds.' : projection?.why ?? undefined
 
   return (
-    <Sheet name="Choose what STAMP places" title="STAMP" sub={chosen ? chosen.name : undefined} onClose={onClose} tall className="stamplib-sheet" bodyRef={listScroll}>
+    <Sheet name="Choose what STAMP places" title="STAMP" sub={chosen ? chosen.name : undefined} onClose={onClose} tall className="stamplib-sheet">
       <div className="stamplib">
         <div className="stamplib__forms" role="radiogroup" aria-label="How it is stamped">
           {FORMS.map((f) => {
@@ -180,6 +180,8 @@ export function StampLibrary({ onClose }: { onClose: () => void }): JSX.Element 
           })}
         </div>
 
+        {/* The one part that scrolls: the two ways above it and the bar below it never move. */}
+        <div className="stamplib__scroll" ref={listScroll}>
         {(shards.length > 1 || query !== '') && <SearchField className="workshop__search" value={query} onChange={setQuery} placeholder="Search shards and folders" label="Search your shards and folders" />}
 
         <ul className="stamplib__list">
@@ -237,6 +239,8 @@ export function StampLibrary({ onClose }: { onClose: () => void }): JSX.Element 
             </div>
           </>
         )}
+
+        </div>
 
         {/* Pinned at the bottom, always the same height: the cost of the choice where the thumb is. */}
         <div className="stamplib__foot">

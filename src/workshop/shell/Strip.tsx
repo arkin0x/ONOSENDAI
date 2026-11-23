@@ -62,7 +62,8 @@ function StampOptions({ onPickObject, tiles, setTiles }: { onPickObject: () => v
     <>
       <button className="ws__stripbtn ws__shapechip is-on" onClick={() => setTiles(!tiles)} aria-haspopup="menu" aria-expanded={tiles} aria-label={`Shape: ${object ? 'OBJECT' : stampKind.toUpperCase()}. Tap for the shapes.`} title="Choose what STAMP places">
         <Icon size={16} strokeWidth={2.25} aria-hidden />
-        <span className="ws__shapechip-name">{object ? (stampObject?.name ?? 'OBJECT') : stampKind.toUpperCase()}</span>
+        {/* For an object the slot beside it names it: the chip keeps to its picture (COPY or LINK), so TURN still fits a phone. */}
+        {!object && <span className="ws__shapechip-name">{stampKind.toUpperCase()}</span>}
         <ChevronDown size={14} strokeWidth={2.25} aria-hidden />
       </button>
       {object

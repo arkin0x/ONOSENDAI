@@ -54,7 +54,7 @@ export function FullnessBar({ payload, apart = 0, next = null, words: ownWords, 
       <div className="fullbar__head">
         <span className="fullbar__label">FULL</span>
         <span className="fullbar__pct" data-testid="fullbar-pct">
-          {f.percent}%{grown && <> <span className="fullbar__to">TO</span> {grown.percent}%</>}
+          {f.percent}%{grown && grown.percent !== f.percent && <> <span className="fullbar__to">TO</span> {grown.percent}%</>}
         </span>
       </div>
       <div

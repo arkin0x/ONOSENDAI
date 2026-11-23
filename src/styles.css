@@ -13124,3 +13124,58 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.95));
 }
 .ws__topbtn--back { color: var(--accent); border-color: var(--accent); }
+
+/* BY SIZE (shell/MoveHandles.tsx; owner, 2026-11-23): the move handles' middle,
+   a chip where the held middle's dot was. 84 by 44, so its corners (47px out)
+   clear the knobs, whose edges stand 50px out (HANDLE_REACH_PX 72 less 22).
+   The top-left and bottom-right corners cut, drawn in two layers: the chip is
+   the line, its ::before the fill, so the cut corners are outlined too. Off:
+   dark, the held orange line, white words. On: the accent fill of every lit
+   chip, dark words. The same size and the same two lines either way. */
+.ws__handle-hub.ws__bysize {
+  --bysize-cut: 8px;
+  left: -42px;
+  top: -22px;
+  width: 84px;
+  height: 44px;
+  padding: 0 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  isolation: isolate;
+  font-family: inherit;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  background: rgba(255, 176, 32, 0.85);
+  border: 0;
+  border-radius: 0;
+  clip-path: polygon(var(--bysize-cut) 0, 100% 0, 100% calc(100% - var(--bysize-cut)), calc(100% - var(--bysize-cut)) 100%, 0 100%, 0 var(--bysize-cut));
+  pointer-events: auto;
+  touch-action: manipulation;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ws__handle-hub.ws__bysize::before {
+  --in-cut: calc(var(--bysize-cut) - 1.17px);
+  content: '';
+  position: absolute;
+  inset: 2px;
+  z-index: -1;
+  background: rgba(6, 14, 22, 0.88);
+  clip-path: polygon(var(--in-cut) 0, 100% 0, 100% calc(100% - var(--in-cut)), calc(100% - var(--in-cut)) 100%, 0 100%, 0 var(--in-cut));
+}
+.ws__handle-hub.ws__bysize.is-on { color: var(--ws-ink); text-shadow: none; background: var(--accent); }
+.ws__handle-hub.ws__bysize.is-on::before { background: var(--accent); }
+.ws__handle-hub.ws__bysize:focus-visible { outline: none; background: #fff; }
+.ws__bysize-top { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; white-space: nowrap; }
+.ws__bysize-top > svg { flex: none; }
+.ws__bysize-top b { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; }
+.ws__bysize-step { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.82); }
+.ws__bysize.is-on .ws__bysize-step { color: var(--ws-ink); font-weight: 700; }
+/* The printed X in the top line, not in a corner, where there is a keyboard. */
+@media (min-width: 900px) and (min-height: 521px) and (hover: hover) {
+  .ws__key.ws__bysize-key { display: inline; position: static; color: inherit; opacity: 0.7; }
+}

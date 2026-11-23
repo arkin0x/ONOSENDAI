@@ -8215,6 +8215,92 @@ select.avatars__input option:checked {
   line-height: 1.2;
 }
 
+/* How full the shard is against one hidden object (workshop/FullnessBar.tsx,
+   lib/shardFullness.ts; owner, 2026-11-23). A segmented HUD meter in the house
+   chamfer (top-left and bottom-right cut), calm cyan until close to full, amber
+   near it, red past it. The two lines of words are always there, one line each,
+   so nothing under them moves. */
+.fullbar {
+  --fb: var(--accent);
+  --fb-dim: rgba(0, 229, 255, 0.16);
+  --fb-cut: 6px;
+  --fb-in: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.fullbar--near { --fb: var(--warn); --fb-dim: rgba(255, 176, 32, 0.16); }
+.fullbar--over { --fb: var(--danger); --fb-dim: rgba(255, 59, 107, 0.18); }
+.fullbar__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--ws-label, 10px);
+  letter-spacing: 0.12em;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.fullbar__pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--fb);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.fullbar__track {
+  position: relative;
+  height: 12px;
+  /* The frame's line: the inner box below covers all but a hairline, cut corners included (as ui/Chamfer.tsx). */
+  background: color-mix(in srgb, var(--fb) 55%, transparent);
+  clip-path: polygon(var(--fb-cut) 0, 100% 0, 100% calc(100% - var(--fb-cut)), calc(100% - var(--fb-cut)) 100%, 0 100%, 0 var(--fb-cut));
+  overflow: hidden;
+}
+.fullbar__track::before {
+  --in-cut: calc(var(--fb-cut) - 0.5858px);
+  content: "";
+  position: absolute;
+  inset: 1px;
+  background: linear-gradient(var(--fb-dim), var(--fb-dim)), #04090f;
+  clip-path: polygon(var(--in-cut) 0, 100% 0, 100% calc(100% - var(--in-cut)), calc(100% - var(--in-cut)) 100%, 0 100%, 0 var(--in-cut));
+  pointer-events: none;
+}
+/* The fill runs inside the frame: its share of the inner width, so full is full. */
+.fullbar__fill {
+  position: absolute;
+  top: var(--fb-in);
+  bottom: var(--fb-in);
+  left: var(--fb-in);
+  width: calc((100% - 2 * var(--fb-in)) * var(--fb-share, 0));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--fb) 55%, transparent), var(--fb));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--fb) 60%, transparent);
+  transition: width 0.25s ease;
+}
+/* A gap every tenth: the meter's segments, inside the frame so its line stays whole. */
+.fullbar__ticks {
+  position: absolute;
+  inset: var(--fb-in);
+  background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 2px), rgba(4, 9, 15, 0.9) calc(10% - 2px) 10%);
+  pointer-events: none;
+}
+.fullbar__words {
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  line-height: 1.25;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  font-variant-numeric: tabular-nums;
+}
+.fullbar__line {
+  display: block;
+  min-height: 1.25em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fullbar__note { opacity: 0.85; }
+
 
 /* Something deployed while LOCAL, and the button that sends it. */
 .shards__note {

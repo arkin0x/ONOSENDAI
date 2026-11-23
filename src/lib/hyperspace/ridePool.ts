@@ -418,6 +418,20 @@ export async function computeRideProof(
   }
 }
 
+/** Resolves when `p` settles either way, or as soon as the signal fires. */
+function untilSettledOrAborted(p: Promise<unknown>, signal?: AbortSignal): Promise<void> {
+  if (!signal) return p.then(() => {}, () => {})
+  if (signal.aborted) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    const settle = () => {
+      signal.removeEventListener('abort', settle)
+      resolve()
+    }
+    signal.addEventListener('abort', settle)
+    p.then(settle, settle)
+  })
+}
+
 async function runRide(
   job: RideJob,
   onProgress: (p: RideProgress) => void,
@@ -430,7 +444,9 @@ async function runRide(
   if (blocks.length === 0) throw new Error('a ride passes at least one block: there is no zero-length ride')
   // A calibration still measuring finishes first (a second or two): its pool
   // and the ride's would slow each other, and its number would come out low.
-  if (calibrating) await calibrating.catch(() => {})
+  // ABORT still works while it waits, and a stuck one gives up on its own
+  // (CALIBRATE_TIMEOUT_MS).
+  if (calibrating) await untilSettledOrAborted(calibrating, signal)
   if (signal?.aborted) throw abortError()
 
   const db = await openRideDb()
@@ -719,10 +735,17 @@ export interface RideBench {
  * this pool's.
  */
 const BENCH_KEY = 'onosendai:ride-pool-bench'
+const OLD_BENCH_KEY = 'onosendai:ride-bench-ms'
+
+/** Long enough for a slow phone to load its workers and run the sample under full load. */
+const CALIBRATE_TIMEOUT_MS = 20_000
 
 function loadBenchmark(): RideBench | null {
   try {
-    const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem(BENCH_KEY)
+    if (typeof localStorage === 'undefined') return null
+    // The one-worker number is never read again; drop it so it does not sit in storage.
+    localStorage.removeItem(OLD_BENCH_KEY)
+    const raw = localStorage.getItem(BENCH_KEY)
     if (raw === null) return null
     const b = JSON.parse(raw) as Partial<RideBench> | null
     const ms = b?.msPerBlock
@@ -772,7 +795,9 @@ export function rideEstimateMs(length: number, bench: RideBench): number {
   const attemptBlocks = 2 ** GRIND_HEIGHT / expectedRidePairs(1)
   const leafWorkers = Math.min(bench.workers, Math.ceil(length / RIDE_CHUNK_SIZE))
   const grindWorkers = Math.min(bench.workers, attempts)
-  return oneWorkerMs * (length / leafWorkers + (attempts * attemptBlocks) / grindWorkers)
+  // A worker runs a whole chunk, so no ride's leaves finish before one full chunk does.
+  const leafBlocks = Math.max(length / leafWorkers, Math.min(length, RIDE_CHUNK_SIZE))
+  return oneWorkerMs * (leafBlocks + (attempts * attemptBlocks) / grindWorkers)
 }
 
 /**
@@ -788,14 +813,24 @@ function timeSamplesOnPool(width: number): Promise<Sample[]> {
     const samples: Sample[] = []
     let ready = 0
     let settled = false
+    // A worker a phone killed quietly never answers; without this the
+    // calibration, and a ride waiting on it, would wait forever.
+    const timer = setTimeout(() => done(() => reject(new Error('the ride calibration timed out'))), CALIBRATE_TIMEOUT_MS)
     const done = (fn: () => void) => {
       if (settled) return
       settled = true
+      clearTimeout(timer)
       for (const w of workers) w.terminate()
       fn()
     }
     for (let i = 0; i < width; i++) {
-      const worker = new Worker(new URL('../../workers/ride.worker.ts', import.meta.url), { type: 'module' })
+      let worker: Worker
+      try {
+        worker = new Worker(new URL('../../workers/ride.worker.ts', import.meta.url), { type: 'module' })
+      } catch (err) {
+        done(() => reject(err instanceof Error ? err : new Error(String(err))))
+        return
+      }
       workers.push(worker)
       worker.addEventListener('message', (event: MessageEvent<RideChunkResponse>) => {
         const msg = event.data
@@ -820,11 +855,16 @@ function timeSamplesOnPool(width: number): Promise<Sample[]> {
 /**
  * Measure this device's ride throughput, once per session: the 8 synthetic
  * leaves of the calibration sample on every worker of the pool at once (on
- * the main thread, as a pool of one, only where workers do not exist or
- * fail), ms per Cantor pairing summed over the workers, scaled to the §5.7
- * expected pairings of the mean block. Idempotent; concurrent and later
- * calls share the first measurement. Until it resolves, rideBenchmark() is
- * the previous session's number, if there was one.
+ * the main thread, as a pool of one, only where workers do not exist, as a
+ * ride then runs too), ms per Cantor pairing summed over the workers, scaled
+ * to the §5.7 expected pairings of the mean block. Idempotent; concurrent
+ * and later calls share the first measurement. Until it resolves,
+ * rideBenchmark() is the previous session's number, if there was one.
+ *
+ * Where workers exist but the pool fails, it rejects and a later call tries
+ * again. It never times the sample here instead: that would stall the page
+ * for a second or more and price a ride as one worker, the overestimate this
+ * calibration exists to avoid (and a ride could not run without workers).
  *
  * Never while a ride is computing: the pool would be measuring itself
  * against the ride. The stored number stands until a later call can measure.
@@ -832,24 +872,21 @@ function timeSamplesOnPool(width: number): Promise<Sample[]> {
 export function calibrate(): Promise<RideBench> {
   if (calibrating) return calibrating
   if (rideRunning) return benchmark ? Promise.resolve(benchmark) : Promise.reject(new Error('a ride is computing'))
-  calibrating = (async () => {
+  const measuring = (async () => {
     let bench: RideBench
-    const one = (): RideBench => ({ msPerBlock: poolMsPerBlock([timeCalibrationSample()]), workers: 1 })
     if (typeof Worker === 'undefined') {
-      bench = one()
+      bench = { msPerBlock: poolMsPerBlock([timeCalibrationSample()]), workers: 1 }
     } else {
       const width = poolWidth()
-      try {
-        bench = { msPerBlock: poolMsPerBlock(await timeSamplesOnPool(width)), workers: width }
-      } catch {
-        bench = one()
-      }
+      bench = { msPerBlock: poolMsPerBlock(await timeSamplesOnPool(width)), workers: width }
     }
     benchmark = bench
     storeBenchmark(bench)
     return bench
   })()
-  return calibrating
+  calibrating = measuring
+  measuring.catch(() => { if (calibrating === measuring) calibrating = null })
+  return measuring
 }
 
 /** The calibration: this session's once calibrate() resolves, else the

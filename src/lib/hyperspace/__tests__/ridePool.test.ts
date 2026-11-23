@@ -257,10 +257,13 @@ describe('the ride estimate uses the pool\'s measured throughput', () => {
   })
 
   it('a ride too short to fill the pool runs on as many workers as it has chunks', () => {
-    // 100 blocks are two chunks: two workers of eight, each at the pool's
-    // mean rate (80 ms a block). The price is four attempts, on four workers.
+    // 100 blocks are two chunks (64 and 36): two workers of eight, each at
+    // the pool's mean rate (80 ms a block), done when the 64-block chunk is.
+    // The price is four attempts, on four workers.
     const bench = { msPerBlock: 10, workers: 8 }
-    expect(rideEstimateMs(100, bench)).toBeCloseTo(80 * (100 / 2 + (4 * 2 ** 16) / expectedRidePairs(1) / 4))
+    expect(rideEstimateMs(100, bench)).toBeCloseTo(80 * (64 + (4 * 2 ** 16) / expectedRidePairs(1) / 4))
+    // 1,000 blocks are 16 chunks: all eight workers.
+    expect(rideEstimateMs(1_000, bench)).toBeCloseTo(80 * (1_000 / 8 + (32 * 2 ** 16) / expectedRidePairs(1) / 8))
     expect(rideEstimateMs(0, bench)).toBe(0)
   })
 })
@@ -277,11 +280,13 @@ describe('the stored calibration', () => {
     vi.resetModules()
   })
 
-  it('a number from the old one-worker calibration is ignored, never shown', async () => {
-    vi.stubGlobal('localStorage', storage({ 'onosendai:ride-bench-ms': '260' }))
+  it('a number from the old one-worker calibration is ignored, never shown, and dropped', async () => {
+    const ls = storage({ 'onosendai:ride-bench-ms': '260' })
+    vi.stubGlobal('localStorage', ls)
     vi.resetModules()
     const fresh = await import('../ridePool')
     expect(fresh.rideBenchmark()).toBeNull()
+    expect(ls.getItem('onosendai:ride-bench-ms')).toBeNull()
   })
 
   it('a pool measurement on this pool\'s width is read back; one from another width is not', async () => {
@@ -301,32 +306,71 @@ describe('calibrate on the pool (fake workers)', () => {
     vi.resetModules()
   })
 
-  it('starts every worker together once all have loaded, and sums their rates', async () => {
-    const posted: string[] = []
-    let loaded = 0
+  /** Fake ride workers: `readyDelay(i)` ms before worker i says it loaded; `fail` makes the sample error. */
+  function fakeWorkers(opts: { readyDelay: (i: number) => number; fail?: boolean }) {
+    const log: string[] = []
+    let made = 0
+    let terminated = 0
     class FakeWorker {
       private listeners: Array<(e: { data: unknown }) => void> = []
-      private readonly index = loaded++
+      private readonly index = made++
       addEventListener(type: string, fn: (e: { data: unknown }) => void) { if (type === 'message') this.listeners.push(fn) }
-      terminate() {}
+      terminate() { terminated++ }
+      private reply(data: unknown, ms: number) { setTimeout(() => { for (const fn of this.listeners) fn({ data }) }, ms) }
       postMessage(msg: { type: string; id: number }) {
-        posted.push(`${this.index}:${msg.type}`)
-        // Worker 0 is a big core, the rest little: 4,000 and 1,000 pairs in 100 ms.
-        const reply = msg.type === 'ready' ? { type: 'ready', id: msg.id } : { type: 'calibrated', id: msg.id, elapsedMs: 100, pairs: this.index === 0 ? 4_000 : 1_000 }
-        setTimeout(() => { for (const fn of this.listeners) fn({ data: reply }) }, 0)
+        log.push(`${this.index}:${msg.type}`)
+        if (msg.type === 'ready') {
+          setTimeout(() => {
+            log.push(`${this.index}:loaded`)
+            for (const fn of this.listeners) fn({ data: { type: 'ready', id: msg.id } })
+          }, opts.readyDelay(this.index))
+        } else if (opts.fail) {
+          this.reply({ type: 'error', id: msg.id, message: 'boom' }, 0)
+        } else {
+          // Worker 0 is a big core, the rest little: 4,000 and 1,000 pairs in 100 ms.
+          this.reply({ type: 'calibrated', id: msg.id, elapsedMs: 100, pairs: this.index === 0 ? 4_000 : 1_000 }, 0)
+        }
       }
     }
+    return { FakeWorker, log, made: () => made, terminated: () => terminated }
+  }
+
+  it('starts no worker until all have loaded, sums their rates, and ends every worker', async () => {
+    // Worker 1 loads last, well after the others.
+    const fake = fakeWorkers({ readyDelay: (i) => (i === 1 ? 30 : 0) })
     vi.stubGlobal('navigator', { hardwareConcurrency: 4 })
-    vi.stubGlobal('Worker', FakeWorker)
+    vi.stubGlobal('Worker', fake.FakeWorker)
     vi.stubGlobal('localStorage', storage({}))
     vi.resetModules()
     const fresh = await import('../ridePool')
     const bench = await fresh.calibrate()
-    // Three workers (four cores, one left for the page), all pinged before any is told to start.
-    expect(posted.slice(0, 3).every((p) => p.endsWith(':ready'))).toBe(true)
-    expect(posted.slice(3).sort()).toEqual(['0:calibrate', '1:calibrate', '2:calibrate'])
+    // Three workers (four cores, one left for the page).
+    expect(fake.made()).toBe(3)
+    const lastLoaded = fake.log.indexOf('1:loaded')
+    const firstStart = fake.log.findIndex((l) => l.endsWith(':calibrate'))
+    expect(lastLoaded).toBeGreaterThan(-1)
+    expect(firstStart).toBeGreaterThan(lastLoaded)
+    expect(fake.log.filter((l) => l.endsWith(':calibrate')).sort()).toEqual(['0:calibrate', '1:calibrate', '2:calibrate'])
     expect(bench.workers).toBe(3)
     expect(bench.msPerBlock).toBeCloseTo(expectedRidePairs(1) / (40 + 10 + 10))
     expect(fresh.rideBenchmark()).toEqual(bench)
+    expect(fake.terminated()).toBe(3)
+  })
+
+  it('a failing pool stores nothing, never falls back to one worker, and the next call measures again', async () => {
+    const failing = fakeWorkers({ readyDelay: () => 0, fail: true })
+    vi.stubGlobal('navigator', { hardwareConcurrency: 4 })
+    vi.stubGlobal('Worker', failing.FakeWorker)
+    const ls = storage({})
+    vi.stubGlobal('localStorage', ls)
+    vi.resetModules()
+    const fresh = await import('../ridePool')
+    await expect(fresh.calibrate()).rejects.toThrow('boom')
+    expect(fresh.rideBenchmark()).toBeNull()
+    expect(ls.getItem('onosendai:ride-pool-bench')).toBeNull()
+    expect(failing.terminated()).toBe(3)
+    const working = fakeWorkers({ readyDelay: () => 0 })
+    vi.stubGlobal('Worker', working.FakeWorker)
+    expect((await fresh.calibrate()).workers).toBe(3)
   })
 })

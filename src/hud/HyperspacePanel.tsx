@@ -627,9 +627,9 @@ export function HyperspacePanel(): JSX.Element {
               and resumes if interrupted. A re-roll price of about one
               thirty-second more follows the blocks, so a proof that skipped
               some cannot cheaply retry its samples. Est. time is measured on
-              this device with every worker the ride uses running at once. A
-              phone slows or pauses a tab that is hidden or behind another
-              app, so keep this tab open and in front while it rides.
+              this device, working the same way the ride does. A phone slows
+              or pauses a tab that is hidden or behind another app, so keep
+              this tab open and in front until the ride is done.
               {quote.status !== 'hidden' && (
                 <>
                   {' '}RIDE VIA HOSAKA buys the same proof from HOSAKA, computed on
